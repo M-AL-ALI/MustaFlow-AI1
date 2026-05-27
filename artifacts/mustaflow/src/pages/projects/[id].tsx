@@ -1940,6 +1940,7 @@ export default function ProjectWorkspacePage() {
         agentMode?: AgentMode;
         agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
+        idempotencyKey?: string;
       },
     ) => {
       const effectiveMode = opts?.agentMode ?? agentMode;
@@ -1958,6 +1959,7 @@ export default function ProjectWorkspacePage() {
             ...(opts?.attachments && opts.attachments.length > 0
               ? { attachments: opts.attachments }
               : {}),
+            ...(opts?.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
           },
         },
         {
@@ -2041,6 +2043,12 @@ export default function ProjectWorkspacePage() {
         }
       }
 
+      // Generate a per-send idempotency key so the server can detect duplicate
+      // POSTs caused by network blips (client timed out but server processed the
+      // request). The same key is reused for stream retries and regular fallbacks
+      // within this single logical send — a new send always gets a new key.
+      const idempotencyKey = crypto.randomUUID();
+
       lastSentPromptRef.current = content;
       setPreflightBanner(null);
       setActiveTaskId(null);
@@ -2097,7 +2105,7 @@ export default function ProjectWorkspacePage() {
         effectiveAgentIntent === "plan" ||
         effectiveAgentIntent === "build"
       ) {
-        sendRegular(content, opts);
+        sendRegular(content, { ...opts, idempotencyKey });
         return;
       }
 
@@ -2123,6 +2131,7 @@ export default function ProjectWorkspacePage() {
         planMode: effectivePlanMode,
         background: false,
         agentIdentity,
+        idempotencyKey,
         ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
         ...(opts?.attachments && opts.attachments.length > 0
           ? { attachments: opts.attachments }
@@ -2230,6 +2239,7 @@ export default function ProjectWorkspacePage() {
                     ...opts,
                     agentMode: effectiveMode,
                     planMode: effectivePlanMode,
+                    idempotencyKey,
                     ...(fallbackIntent ? { agentIntent: fallbackIntent } : {}),
                   });
                 } else if (event.type === "error") {

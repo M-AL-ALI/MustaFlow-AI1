@@ -41,6 +41,30 @@ import { fetchAttachmentAsDataUri } from "./images";
 
 const router: IRouter = Router();
 
+// ---------------------------------------------------------------------------
+// Idempotency store — in-memory dedup for retried POSTs caused by network blips
+// ---------------------------------------------------------------------------
+interface IdempotencyEntry {
+  status: "in-flight" | "done";
+  result?: unknown;
+  timestamp: number;
+}
+
+const idempotencyStore = new Map<string, IdempotencyEntry>();
+const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Prune stale entries every 10 minutes so the map doesn't grow unbounded
+const idempotencyCleanupTimer = setInterval(
+  () => {
+    const cutoff = Date.now() - IDEMPOTENCY_TTL_MS;
+    for (const [key, entry] of idempotencyStore) {
+      if (entry.timestamp < cutoff) idempotencyStore.delete(key);
+    }
+  },
+  10 * 60 * 1000,
+);
+idempotencyCleanupTimer.unref?.();
+
 async function emitPlanEvent(taskId: number, eventType: string, message: string): Promise<void> {
   try {
     await db.insert(taskEventsTable).values({ taskId, eventType, message, filePath: null });
@@ -91,8 +115,30 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     agentIntent: explicitAgentIntent,
     attachments: rawAttachments,
     origin,
+    idempotencyKey,
   } = parsed.data;
   let { content } = parsed.data;
+
+  // Idempotency dedup — if this key was already processed, return the cached result
+  if (idempotencyKey) {
+    const existing = idempotencyStore.get(idempotencyKey);
+    if (existing) {
+      if (existing.status === "done" && existing.result !== undefined) {
+        logger.info({ idempotencyKey }, "Idempotency hit: returning cached regular-message result");
+        res.json(existing.result);
+        return;
+      }
+      if (existing.status === "in-flight") {
+        res.status(409).json({
+          error:
+            "A request with this idempotency key is already in progress. Please wait and retry.",
+        });
+        return;
+      }
+    }
+    // Mark in-flight
+    idempotencyStore.set(idempotencyKey, { status: "in-flight", timestamp: Date.now() });
+  }
   const mode = agentMode as AgentMode;
   const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
   const imageAttachments = attachments.filter(
@@ -616,6 +662,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     })
     .returning();
   if (!assistantMessage) {
+    if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
     res.status(500).json({ error: "Failed to save assistant message" });
     return;
   }
@@ -629,13 +676,23 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     })
     .where(eq(projectsTable.id, project.id));
 
-  res.json(
-    SendMessageResponse.parse({
-      userMessage,
-      assistantMessage,
-      detectedIntent: resolvedIntent,
-    }),
-  );
+  const responsePayload = SendMessageResponse.parse({
+    userMessage,
+    assistantMessage,
+    detectedIntent: resolvedIntent,
+  });
+
+  // Cache the result so a retried request with the same idempotency key gets the
+  // same response without re-running the AI pipeline or deducting credits again.
+  if (idempotencyKey) {
+    idempotencyStore.set(idempotencyKey, {
+      status: "done",
+      result: responsePayload,
+      timestamp: Date.now(),
+    });
+  }
+
+  res.json(responsePayload);
 });
 
 /**
@@ -682,12 +739,52 @@ router.post(
       agentIntent: explicitAgentIntent,
       attachments: rawAttachments,
       origin: streamOrigin,
+      idempotencyKey: streamIdempotencyKey,
     } = parsed.data;
     const mode = agentMode as AgentMode;
     const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
     const imageAttachments = attachments.filter(
       (a) => a.kind === "image" && typeof a.url === "string",
     );
+
+    // Idempotency dedup for the stream endpoint — must run BEFORE credit deduction
+    // and BEFORE SSE headers so we can still return regular JSON responses here.
+    if (streamIdempotencyKey) {
+      const existing = idempotencyStore.get(streamIdempotencyKey);
+      if (existing) {
+        if (existing.status === "done" && existing.result !== undefined) {
+          // Stream was already completed — return a minimal SSE that delivers the
+          // cached done payload so the client can reconcile its UI state.
+          logger.info(
+            { idempotencyKey: streamIdempotencyKey },
+            "Idempotency hit: replaying cached stream done event",
+          );
+          const cached = existing.result as {
+            userMessageId: number;
+            assistantMessageId: number;
+            plan: Record<string, unknown>;
+          };
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Connection", "keep-alive");
+          res.setHeader("X-Accel-Buffering", "no");
+          res.flushHeaders();
+          res.write(`data: ${JSON.stringify({ type: "done", ...cached })}\n\n`);
+          res.end();
+          return;
+        }
+        if (existing.status === "in-flight") {
+          // Another request with the same key is still being processed.
+          res.status(409).json({
+            error:
+              "A request with this idempotency key is already in progress. Please wait and retry.",
+          });
+          return;
+        }
+      }
+      // Mark as in-flight before starting any async work
+      idempotencyStore.set(streamIdempotencyKey, { status: "in-flight", timestamp: Date.now() });
+    }
 
     // Gate all converse-family intents (converse, debug, refactor, review, explain) behind a
     // credit check BEFORE SSE headers are flushed so we can still return a proper HTTP 402.
@@ -705,6 +802,7 @@ router.post(
           projectId: project.id,
         });
         if ("insufficient" in deduction) {
+          if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
           res.status(402).json({
             error: "Insufficient credits. Top up in Billing to continue.",
           });
@@ -801,8 +899,11 @@ router.post(
       resolvedIntent === "review" ||
       resolvedIntent === "explain";
 
-    // Non-converse: tell client to fall back to the regular endpoint
+    // Non-converse: tell client to fall back to the regular endpoint.
+    // Clear the in-flight entry so the regular-endpoint call with the same
+    // idempotency key is not blocked by the 409 guard.
     if (!isConverseFamily) {
+      if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
       sendEvent({ type: "fallback", intent: resolvedIntent });
       res.end();
       return;
@@ -839,6 +940,7 @@ router.post(
       if (!userMessage) throw new Error("Failed to save user message");
       userMessageId = userMessage.id;
     } catch (err) {
+      if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
       sendEvent({ type: "error", message: "Failed to save message" });
       res.end();
       return;
@@ -984,6 +1086,16 @@ router.post(
         .set({ updatedAt: sql`now()`, lastTaskSummary: content.slice(0, 140), agentMode: mode })
         .where(eq(projectsTable.id, project.id));
 
+      // Cache the done payload so a retried request with the same idempotency key
+      // gets the same result without re-running the AI pipeline or deducting credits.
+      if (streamIdempotencyKey) {
+        idempotencyStore.set(streamIdempotencyKey, {
+          status: "done",
+          result: { userMessageId, assistantMessageId: assistantMessage.id, plan },
+          timestamp: Date.now(),
+        });
+      }
+
       sendEvent({
         type: "done",
         userMessageId,
@@ -993,6 +1105,10 @@ router.post(
     } catch (err) {
       // Stop keep-alive pings on any error path
       stopKeepAlive();
+
+      // Clear idempotency entry on any error/abort so retries with the same key
+      // are not permanently blocked by a stale in-flight entry.
+      if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
 
       // Client aborted mid-stream — just mark task failed, no error message to DB
       if (abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")) {

@@ -1318,7 +1318,8 @@ export const SendMessageBody = zod.object({
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
-  "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.')
+  "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
+  "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.')
 })
 
 export const SendMessageResponse = zod.object({
@@ -1404,7 +1405,8 @@ export const StreamMessageBody = zod.object({
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
-  "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.')
+  "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
+  "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.')
 })
 
 

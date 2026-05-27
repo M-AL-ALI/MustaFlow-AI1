@@ -24,4 +24,6 @@ export interface ChatMessageInput {
   attachments?: ChatAttachment[];
   /** Surface sending this message. Pass 'zero' when sending from the Zero agent panel so the message is tagged for its filtered thread view. */
   origin?: string;
+  /** Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call. */
+  idempotencyKey?: string;
 }
