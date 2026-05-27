@@ -376,13 +376,47 @@ function ReportCard({
           ))}
         </div>
       )}
-      {report.warnings.length > 0 && (
-        <div className="pt-1.5 border-t border-border">
-          <div className="font-semibold text-yellow-500 flex items-center gap-1 text-[10px]">
-            <AlertTriangle className="h-3 w-3" /> {report.warnings.length} warning(s)
-          </div>
-        </div>
-      )}
+      {report.warnings.length > 0 &&
+        (() => {
+          const DOUBLE_FAIL = "Neither the initial pass nor the retry produced any file changes";
+          const doubleFail = report.warnings.some((w) => w.includes(DOUBLE_FAIL));
+          const otherWarnings = report.warnings.filter((w) => !w.includes(DOUBLE_FAIL));
+          return (
+            <>
+              {doubleFail && (
+                <div className="pt-1.5 border-t border-amber-500/30">
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/8 px-3 py-2.5 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />I wasn't sure what to change
+                    </div>
+                    <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                      Neither my initial attempt nor a retry produced any edits. Try describing the
+                      specific change you'd like — for example, "Change the button color to blue" or
+                      "Add a contact form below the hero section".
+                    </p>
+                    {onSendMessage && (
+                      <button
+                        className="mt-0.5 text-[10px] font-medium text-amber-400 hover:text-amber-300 underline underline-offset-2 transition-colors"
+                        onClick={() =>
+                          onSendMessage("Let me describe the change more specifically: ")
+                        }
+                      >
+                        Rephrase my request
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {otherWarnings.length > 0 && (
+                <div className="pt-1.5 border-t border-border">
+                  <div className="font-semibold text-yellow-500 flex items-center gap-1 text-[10px]">
+                    <AlertTriangle className="h-3 w-3" /> {otherWarnings.length} warning(s)
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       {report.nextRecommendation && (
         <div className="pt-1.5 border-t border-border text-muted-foreground italic text-[10px]">
           {report.nextRecommendation}
