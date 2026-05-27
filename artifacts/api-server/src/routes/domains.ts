@@ -40,7 +40,7 @@ import {
   syncHostnameKVAfterPublish,
 } from "../lib/cloudflare";
 import { createLimiterForDomainVerify } from "../lib/rateLimit";
-import { publishDomainEvent } from "../lib/event-bus";
+import { publishDomainEvent, subscribeDomainProjectEvents } from "../lib/event-bus";
 import { enqueueJob, DOMAIN_REWRITE_SENTINEL } from "../lib/jobs";
 import { writeKnowledge } from "../lib/knowledge";
 import { logger } from "../lib/logger";
@@ -1957,6 +1957,104 @@ router.patch(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // In-memory sighting tracker for diagnostic panel
+// ── GET /api/projects/:id/domains/events/stream ──────────────────────────────
+// SSE stream that forwards domain events (verified, ssl_issued, error, etc.)
+// to the frontend in real time so the Publishing tab updates without polling.
+//
+// Pattern (mirrors task event stream):
+//   1. Subscribe FIRST — live events are buffered while the DB snapshot runs.
+//   2. Query current domain rows and send each as a "snapshot" event so a
+//      reconnecting client always gets the latest state immediately.
+//   3. Flush buffered live events (dedup against snapshot by domainId).
+//   4. Stream future events.
+router.get(
+  "/projects/:id/domains/events/stream",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    let streamClosed = false;
+    let replayDone = false;
+
+    const write = (payload: object): void => {
+      if (streamClosed) return;
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // ── Step 1: Subscribe FIRST so live events don't slip through ──────────
+    const liveBuffer: Parameters<Parameters<typeof subscribeDomainProjectEvents>[1]>[0][] = [];
+
+    const unsubscribe = subscribeDomainProjectEvents(projectId, (payload) => {
+      if (streamClosed) return;
+      if (!replayDone) {
+        liveBuffer.push(payload);
+        return;
+      }
+      write(payload);
+    });
+
+    // ── Step 2: Query current domain state and send as "snapshot" events ───
+    const domainRows = await db
+      .select()
+      .from(projectDomainsTable)
+      .where(eq(projectDomainsTable.projectId, projectId))
+      .orderBy(asc(projectDomainsTable.createdAt));
+
+    const snapshotedIds = new Set<number>();
+
+    for (const d of domainRows) {
+      if (streamClosed) break;
+      write({
+        type: "snapshot",
+        domain: d.hostname,
+        hostname: d.hostname,
+        domainId: d.id,
+        status: d.verificationStatus,
+        verificationStatus: d.verificationStatus,
+        sslStatus: d.sslStatus,
+        projectId,
+      });
+      snapshotedIds.add(d.id);
+    }
+
+    // ── Step 3: Flush buffered live events (skip ids already in snapshot) ──
+    replayDone = true;
+
+    for (const payload of liveBuffer) {
+      if (streamClosed) break;
+      // If the domain was included in the snapshot and this event carries no
+      // new information beyond what we already sent, skip to avoid duplicates.
+      // We still emit events for non-snapshot ids (e.g. a domain added mid-replay).
+      if (payload.domainId !== undefined && snapshotedIds.has(payload.domainId)) {
+        // Only skip pure "snapshot" duplicates — live state-change events always pass through.
+        if (payload.type === "snapshot") continue;
+      }
+      write(payload);
+    }
+
+    if (streamClosed) {
+      unsubscribe();
+      return;
+    }
+
+    req.on("close", () => {
+      streamClosed = true;
+      unsubscribe();
+    });
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Records hostnames seen by the custom-domain middleware in recent requests.
 // ─────────────────────────────────────────────────────────────────────────────
 const recentlySightedHostnames = new Map<string, number>(); // hostname → last-seen epoch ms

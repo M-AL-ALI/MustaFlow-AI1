@@ -3585,6 +3585,8 @@ export function PublishingTab({
     sslSource?: string;
     byoCertExpiresAt?: string | null;
     byoCertSubject?: string | null;
+    /** Live error reason from SSE stream — cleared on next success event */
+    liveError?: string;
   };
   type DomainsResponse = {
     domains: ProjectDomain[];
@@ -4165,6 +4167,86 @@ export function PublishingTab({
     fetchIosReadiness,
     fetchAndReadiness,
   ]);
+
+  // ── Domain SSE stream ─────────────────────────────────────────────────────
+  // Subscribe to real-time domain events (verified, ssl_issued, error) so the
+  // domain list updates inline without requiring a manual refresh.
+  useEffect(() => {
+    const es = new EventSource(`/api/projects/${projectId}/domains/events/stream`);
+
+    es.onmessage = (evt) => {
+      try {
+        const payload = JSON.parse(evt.data as string) as {
+          type: string;
+          domainId?: number;
+          domain?: string;
+          hostname?: string;
+          verificationStatus?: string;
+          sslStatus?: string;
+          error?: string;
+        };
+
+        if (payload.type === "added" || payload.type === "removed") {
+          void fetchDomains();
+          return;
+        }
+
+        // "snapshot" and status-change events update individual domain rows inline
+        setDomainsData((prev) => {
+          if (!prev) return prev;
+          const domains = prev.domains.map((d) => {
+            const matchById = payload.domainId !== undefined && d.id === payload.domainId;
+            const matchByHostname =
+              (payload.domain !== undefined && d.hostname === payload.domain) ||
+              (payload.hostname !== undefined && d.hostname === payload.hostname);
+            if (!matchById && !matchByHostname) return d;
+
+            const updates: Partial<typeof d> = {};
+
+            if (payload.type === "verified") {
+              updates.verificationStatus = "verified";
+              updates.liveError = undefined; // clear any prior error
+            } else if (payload.type === "error") {
+              if (payload.verificationStatus) {
+                updates.verificationStatus =
+                  payload.verificationStatus as typeof d.verificationStatus;
+              }
+              updates.liveError = payload.error;
+            } else if (payload.type === "snapshot" || payload.type === "updated") {
+              // Snapshot events carry the canonical status from the DB
+              if (payload.verificationStatus) {
+                updates.verificationStatus =
+                  payload.verificationStatus as typeof d.verificationStatus;
+              }
+            }
+
+            if (payload.type === "ssl_issued") {
+              updates.sslStatus = "active";
+              updates.liveError = undefined;
+            } else if (payload.sslStatus) {
+              updates.sslStatus = payload.sslStatus as typeof d.sslStatus;
+            }
+
+            return { ...d, ...updates };
+          });
+          return { ...prev, domains };
+        });
+      } catch {
+        /* ignore malformed events */
+      }
+    };
+
+    // Do NOT call es.close() on error — native EventSource auto-reconnects.
+    // Each reconnect triggers the replay-then-stream on the server, so state
+    // will sync correctly without manual intervention.
+    es.onerror = () => {
+      /* allow auto-reconnect */
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [projectId, fetchDomains]);
 
   const webChecklist = webEnv === "testing" ? WEB_TESTING_CHECKLIST : WEB_PRODUCTION_CHECKLIST;
   const webRequired = webChecklist.flatMap((s) => s.items).filter((i) => i.required);
@@ -5499,6 +5581,16 @@ export function PublishingTab({
                                   </Button>
                                 </div>
                               </div>
+
+                              {/* Live error reason from SSE stream */}
+                              {domain.liveError && (
+                                <div className="px-3 py-1.5 border-t border-destructive/30 bg-destructive/5 flex items-start gap-1.5">
+                                  <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-px" />
+                                  <p className="text-xs text-destructive leading-snug">
+                                    {domain.liveError}
+                                  </p>
+                                </div>
+                              )}
 
                               {/* DNS setup instructions (unverified domains) */}
                               {!isVerified && (

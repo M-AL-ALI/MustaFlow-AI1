@@ -18,10 +18,25 @@ export interface ContainerLogPayload {
 }
 
 export interface DomainEventPayload {
-  type: "added" | "removed" | "verified" | "updated";
+  type: "added" | "removed" | "verified" | "updated" | "ssl_issued" | "error" | "snapshot";
+  /** Hostname / bare domain string (e.g. "app.example.com") */
+  domain: string;
+  /** @deprecated use `domain` — kept for backward compat */
   hostname: string;
   projectId: number;
   domainId?: number;
+  /** Primary status field — mirrors verificationStatus */
+  status?: string;
+  sslStatus?: string;
+  verificationStatus?: string;
+  error?: string;
+}
+
+export interface SecretEventPayload {
+  projectId: number;
+  secretId: number;
+  action: "created" | "updated" | "deleted";
+  secretName: string;
 }
 
 const bus = new EventEmitter();
@@ -52,11 +67,41 @@ export function subscribeContainerLogs(
   return () => bus.off(channel, handler);
 }
 
-export function publishDomainEvent(payload: DomainEventPayload): void {
-  bus.emit("domain:change", payload);
+export function publishDomainEvent(
+  payload: Omit<DomainEventPayload, "domain"> & { domain?: string },
+): void {
+  const normalized: DomainEventPayload = {
+    ...payload,
+    domain: payload.domain ?? payload.hostname,
+    status: payload.status ?? payload.verificationStatus,
+  };
+  bus.emit(`domain:${payload.projectId}`, normalized);
+  bus.emit("domain:change", normalized);
 }
 
 export function subscribeDomainEvents(handler: (payload: DomainEventPayload) => void): () => void {
   bus.on("domain:change", handler);
   return () => bus.off("domain:change", handler);
+}
+
+export function subscribeDomainProjectEvents(
+  projectId: number,
+  handler: (payload: DomainEventPayload) => void,
+): () => void {
+  const channel = `domain:${projectId}`;
+  bus.on(channel, handler);
+  return () => bus.off(channel, handler);
+}
+
+export function publishSecretEvent(payload: SecretEventPayload): void {
+  bus.emit(`secret:${payload.projectId}`, payload);
+}
+
+export function subscribeSecretEvents(
+  projectId: number,
+  handler: (payload: SecretEventPayload) => void,
+): () => void {
+  const channel = `secret:${projectId}`;
+  bus.on(channel, handler);
+  return () => bus.off(channel, handler);
 }

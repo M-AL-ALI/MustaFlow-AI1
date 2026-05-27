@@ -51,6 +51,7 @@ import {
   getListTasksQueryKey,
   useUpdateTask,
   useRerunTaskTests,
+  type SecretEntry,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -764,6 +765,7 @@ const SECRET_MIN_ROLE_LABELS: Record<string, string> = {
 function SecretRowWithAudit({
   secret,
   projectId,
+  isFlashing = false,
 }: {
   secret: {
     id: number;
@@ -773,6 +775,7 @@ function SecretRowWithAudit({
     minRole?: string | null;
   };
   projectId: number;
+  isFlashing?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [showAudit, setShowAudit] = useState(false);
@@ -795,9 +798,16 @@ function SecretRowWithAudit({
   };
 
   return (
-    <div>
+    <div className={`transition-colors duration-500 ${isFlashing ? "bg-green-500/10" : ""}`}>
       <div className="flex items-center gap-3 p-3 text-sm min-w-0">
-        <div className="font-mono text-foreground truncate flex-1 min-w-0">{secret.name}</div>
+        <div className="font-mono text-foreground truncate flex-1 min-w-0">
+          {secret.name}
+          {isFlashing && (
+            <span className="ml-2 text-[10px] text-green-400 font-sans font-normal animate-pulse">
+              updated
+            </span>
+          )}
+        </div>
         <div className="font-mono text-muted-foreground flex items-center gap-1.5 shrink-0">
           <Lock className="h-3 w-3 shrink-0" />
           {secret.masked}
@@ -1197,6 +1207,110 @@ export function ToolsTab({
     "development",
   );
 
+  // ── Secret SSE stream ──────────────────────────────────────────────────────
+  // When a collaborator creates/updates/deletes a secret, we update the cache
+  // directly (no full refetch) and briefly highlight the affected row.
+  const [flashedSecretIds, setFlashedSecretIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    const es = new EventSource(`/api/projects/${projectId}/secrets/events/stream`);
+
+    es.onmessage = (evt) => {
+      try {
+        type SnapshotPayload = {
+          type: "snapshot";
+          projectId: number;
+          secrets: { id: number; name: string }[];
+        };
+        type ChangePayload = {
+          projectId: number;
+          secretId: number;
+          action: "created" | "updated" | "deleted";
+          secretName: string;
+        };
+
+        // "snapshot" events carry the authoritative id list; reconcile cache
+        // Discriminate on "action" field to avoid union narrowing issues
+        const raw = JSON.parse(evt.data as string) as SnapshotPayload | ChangePayload;
+        if (!("action" in raw)) {
+          const snap = raw as SnapshotPayload;
+          const key = getListSecretsQueryKey(projectId);
+          const snapIds = new Set(snap.secrets.map((s) => s.id));
+          const nameById = new Map(snap.secrets.map((s) => [s.id, s.name]));
+
+          queryClient.setQueryData<SecretEntry[]>(key, (old) => {
+            if (!old) return old;
+            const cacheIds = new Set(old.map((s) => s.id));
+
+            // Remove IDs that exist in cache but not in snapshot (missed deletes)
+            const pruned = old.filter((s) => snapIds.has(s.id));
+
+            // Update names for entries present in both
+            const updated = pruned.map((entry) =>
+              nameById.has(entry.id) ? { ...entry, name: nameById.get(entry.id) as string } : entry,
+            );
+
+            // If snapshot has IDs not in cache (missed creates), invalidate to refetch
+            const hasNewIds = snap.secrets.some((s) => !cacheIds.has(s.id));
+            if (hasNewIds) {
+              void queryClient.invalidateQueries({ queryKey: key });
+            }
+
+            return updated;
+          });
+          return;
+        }
+
+        const payload = raw as ChangePayload;
+
+        const key = getListSecretsQueryKey(projectId);
+
+        if (payload.action === "deleted") {
+          // Remove the secret from the cache immediately — no refetch needed
+          queryClient.setQueryData<SecretEntry[]>(key, (old) =>
+            old ? old.filter((s) => s.id !== payload.secretId) : old,
+          );
+        } else if (payload.action === "updated") {
+          // Patch the name in-place; invalidate in the background for other
+          // fields (masked value, environment) that the event doesn't carry
+          queryClient.setQueryData<SecretEntry[]>(key, (old) => {
+            if (!old) return old;
+            return old.map((s) =>
+              s.id === payload.secretId ? { ...s, name: payload.secretName } : s,
+            );
+          });
+          void queryClient.invalidateQueries({ queryKey: key });
+        } else {
+          // "created" — we don't have the full entry, so refetch the list
+          void queryClient.invalidateQueries({ queryKey: key });
+        }
+
+        const id = payload.secretId;
+        setFlashedSecretIds((prev) => new Set(prev).add(id));
+        setTimeout(() => {
+          setFlashedSecretIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }, 2000);
+      } catch {
+        /* ignore malformed events */
+      }
+    };
+
+    // Do NOT call es.close() on error — native EventSource auto-reconnects.
+    // Each reconnect triggers the server's replay-then-stream, so the snapshot
+    // reconciles any state missed during the disconnect.
+    es.onerror = () => {
+      /* allow auto-reconnect */
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [projectId, queryClient]);
+
   useEffect(() => {
     if (prefillSecretName) {
       setInnerTab("secrets");
@@ -1417,7 +1531,12 @@ export function ToolsTab({
                         </div>
                         <div className="divide-y divide-border">
                           {envSecrets.map((s) => (
-                            <SecretRowWithAudit key={s.id} secret={s} projectId={projectId} />
+                            <SecretRowWithAudit
+                              key={s.id}
+                              secret={s}
+                              projectId={projectId}
+                              isFlashing={flashedSecretIds.has(s.id)}
+                            />
                           ))}
                         </div>
                       </div>

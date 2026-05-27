@@ -23,7 +23,7 @@ import { encryptionService, maskValue } from "../lib/encryption";
 import { writeKnowledge } from "../lib/knowledge";
 import { restartContainerWithSecrets, execInContainer } from "../lib/container";
 import { logger } from "../lib/logger";
-import { publishTaskEvent } from "../lib/event-bus";
+import { publishTaskEvent, publishSecretEvent, subscribeSecretEvents } from "../lib/event-bus";
 
 /**
  * Load all secrets for a project as decrypted { name: value } pairs and
@@ -437,6 +437,13 @@ router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): 
     userId: req.userId,
   });
 
+  void publishSecretEvent({
+    projectId: params.data.id,
+    secretId: row.id,
+    action: "created",
+    secretName: row.name,
+  });
+
   // Restart container (if running) so the new secret is available immediately
   void triggerContainerSecretRefresh(params.data.id);
 
@@ -482,6 +489,13 @@ router.delete(
       severity: "info",
       projectId,
       userId: req.userId,
+    });
+
+    void publishSecretEvent({
+      projectId,
+      secretId,
+      action: "deleted",
+      secretName: row.name,
     });
 
     // Restart container (if running) so the removed secret is no longer available
@@ -563,6 +577,13 @@ router.patch(
       userId: req.userId,
     });
 
+    void publishSecretEvent({
+      projectId,
+      secretId,
+      action: "updated",
+      secretName: row.name,
+    });
+
     // Restart container (if running) so the updated secret value is picked up
     void triggerContainerSecretRefresh(projectId);
 
@@ -573,6 +594,90 @@ router.patch(
     }
 
     res.json(toEntry(row));
+  },
+);
+
+// ── GET /api/projects/:id/secrets/events/stream ───────────────────────────────
+// SSE stream forwarding secret create/update/delete events so collaborators
+// see live updates without polling.
+//
+// Pattern (mirrors task event stream):
+//   1. Subscribe FIRST — live events are buffered while the DB snapshot runs.
+//   2. Query current secret names (never values) and send a single "snapshot"
+//      event so reconnecting clients can sync their list immediately.
+//   3. Flush buffered live events (dedup by secretId already in the snapshot).
+//   4. Stream future events.
+router.get(
+  "/projects/:id/secrets/events/stream",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid project id" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    let streamClosed = false;
+    let replayDone = false;
+
+    const write = (payload: object): void => {
+      if (streamClosed) return;
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // ── Step 1: Subscribe FIRST so live events don't slip through ──────────
+    const liveBuffer: Parameters<Parameters<typeof subscribeSecretEvents>[1]>[0][] = [];
+
+    const unsubscribe = subscribeSecretEvents(projectId, (payload) => {
+      if (streamClosed) return;
+      if (!replayDone) {
+        liveBuffer.push(payload);
+        return;
+      }
+      write(payload);
+    });
+
+    // ── Step 2: Query current secret IDs+names (no values) as a snapshot ──
+    const secretRows = await db
+      .select({ id: secretsTable.id, name: secretsTable.name })
+      .from(secretsTable)
+      .where(eq(secretsTable.projectId, projectId));
+
+    const snapshotedIds = new Set<number>(secretRows.map((s) => s.id));
+
+    if (!streamClosed) {
+      write({
+        type: "snapshot",
+        projectId,
+        secrets: secretRows.map((s) => ({ id: s.id, name: s.name })),
+      });
+    }
+
+    // ── Step 3: Flush buffered live events ─────────────────────────────────
+    replayDone = true;
+
+    for (const payload of liveBuffer) {
+      if (streamClosed) break;
+      // Skip snapshot-redundant "created" events for ids already in the snapshot
+      if (payload.action === "created" && snapshotedIds.has(payload.secretId)) continue;
+      write(payload);
+    }
+
+    if (streamClosed) {
+      unsubscribe();
+      return;
+    }
+
+    req.on("close", () => {
+      streamClosed = true;
+      unsubscribe();
+    });
   },
 );
 
