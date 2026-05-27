@@ -859,6 +859,21 @@ router.post(
 
     const taskId = converseTask?.id ?? 0;
 
+    // Keep-alive: emit a comment frame every 15 s so proxies / load-balancers
+    // don't close the connection while the AI pipeline is running.
+    // SSE comment lines (`: …\n\n`) are ignored by EventSource parsers.
+    let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
+    const stopKeepAlive = (): void => {
+      if (keepAliveTimer !== undefined) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = undefined;
+      }
+    };
+    // Always clear the interval when the response ends (covers unexpected closes
+    // and abort paths where clearInterval hasn't been called yet).
+    res.on("close", stopKeepAlive);
+    res.on("finish", stopKeepAlive);
+
     try {
       const visionParts: ConverseImageAttachment[] = [];
       for (const att of imageAttachments) {
@@ -882,6 +897,13 @@ router.post(
             : DEVELOPER_PAIR_PROGRAMMER_PROMPT
           : undefined;
 
+      // Start keep-alive pings while waiting for the AI pipeline
+      keepAliveTimer = setInterval(() => {
+        if (!res.writableEnded) {
+          res.write(": keep-alive\n\n");
+        }
+      }, 15_000);
+
       // Stream tokens directly to the client
       const converseResult = await runConverseStreamPipeline(
         {
@@ -899,6 +921,9 @@ router.post(
           sendEvent({ type: "token", content: token });
         },
       );
+
+      // Pipeline resolved — stop keep-alive pings
+      stopKeepAlive();
 
       // Client disconnected mid-stream — discard partial result, skip DB writes
       if (abortController.signal.aborted) {
@@ -966,6 +991,9 @@ router.post(
         plan,
       });
     } catch (err) {
+      // Stop keep-alive pings on any error path
+      stopKeepAlive();
+
       // Client aborted mid-stream — just mark task failed, no error message to DB
       if (abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
         if (converseTask) {
