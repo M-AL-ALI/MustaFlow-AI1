@@ -506,15 +506,36 @@ router.post(
     // Pass the saved testScript (if any) so custom plans are used instead of AI re-generation
     const savedTestScript = task.report?.testScript ?? null;
 
-    // Kick off tests in the background
-    setImmediate(() => {
-      void runAppTestingJob(
-        params.data.id,
-        params.data.taskId,
-        project.name ?? project.kind,
-        savedTestScript,
-      ).catch((err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"));
-    });
+    // Kick off tests via the durable queue (survives server restarts); fall back
+    // to in-memory setImmediate when the queue is unavailable.
+    const { durableEnqueueRaw, isDurableQueueReady, QUEUE_APP_TESTING } =
+      await import("../lib/durable-queue");
+    const key = `testing-${params.data.taskId}`;
+    let enqueued = false;
+    if (isDurableQueueReady()) {
+      const jobId = await durableEnqueueRaw(
+        QUEUE_APP_TESTING,
+        {
+          projectId: params.data.id,
+          taskId: params.data.taskId,
+          projectDescription: project.name ?? project.kind,
+          savedTestScript: savedTestScript ?? null,
+        },
+        key,
+        { retryLimit: 2, retryDelay: 15, retryBackoff: true },
+      );
+      enqueued = jobId !== null;
+    }
+    if (!enqueued) {
+      setImmediate(() => {
+        void runAppTestingJob(
+          params.data.id,
+          params.data.taskId,
+          project.name ?? project.kind,
+          savedTestScript,
+        ).catch((err) => req.log.warn({ err, taskId: params.data.taskId }, "Rerun tests failed"));
+      });
+    }
 
     res.json({ queued: true, taskId: params.data.taskId, projectId: params.data.id });
   },

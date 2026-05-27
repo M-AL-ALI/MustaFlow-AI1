@@ -5270,9 +5270,30 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
 }
 
 export function enqueueEasJob(input: EasJobInput): void {
-  setImmediate(() => {
-    void runEasBuildJob(input);
-  });
+  void (async () => {
+    const { durableEnqueueRaw, isDurableQueueReady, QUEUE_EAS_BUILD } =
+      await import("./durable-queue");
+    if (isDurableQueueReady()) {
+      const key = `eas-${input.deploymentLogId}`;
+      const id = await durableEnqueueRaw(
+        QUEUE_EAS_BUILD,
+        input as unknown as Record<string, unknown>,
+        key,
+        { retryLimit: 1, retryDelay: 30, retryBackoff: false },
+      );
+      if (id !== null) {
+        logger.info(
+          { deploymentLogId: input.deploymentLogId, jobId: id },
+          "EAS build enqueued in durable queue",
+        );
+        return;
+      }
+    }
+    // Fallback: in-memory
+    setImmediate(() => {
+      void runEasBuildJob(input);
+    });
+  })();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5817,14 +5838,79 @@ async function writeCveNotification(
  * Non-blocking — fires and forgets in the background.
  */
 export function enqueueCveAutoProtectJob(input: CveAutoProtectInput): void {
-  setImmediate(() => {
-    void runCveAutoProtectJob(input).catch((err) => {
-      logger.error(
-        { err, findingId: input.findingId },
-        "CVE auto-protect job threw unhandled error",
+  void (async () => {
+    const { durableEnqueueRaw, isDurableQueueReady, QUEUE_CVE_AUTOPROTECT } =
+      await import("./durable-queue");
+    if (isDurableQueueReady()) {
+      // Idempotency key: findingId is the correct canonical dedup key.
+      // CveAutoProtectInput has no scan timestamp; one finding → one patch job.
+      // pg-boss deduplicates re-enqueues with the same key automatically.
+      const key = `cve-${input.findingId}`;
+      const id = await durableEnqueueRaw(
+        QUEUE_CVE_AUTOPROTECT,
+        input as unknown as Record<string, unknown>,
+        key,
+        { retryLimit: 2, retryDelay: 15, retryBackoff: true },
       );
+      if (id !== null) {
+        logger.info(
+          { findingId: input.findingId, jobId: id },
+          "CVE auto-protect enqueued in durable queue",
+        );
+        return;
+      }
+    }
+    // Fallback: in-memory
+    setImmediate(() => {
+      void runCveAutoProtectJob(input).catch((err) => {
+        logger.error(
+          { err, findingId: input.findingId },
+          "CVE auto-protect job threw unhandled error",
+        );
+      });
     });
-  });
+  })();
+}
+
+/**
+ * Register durable-queue workers for EAS builds, app testing, and CVE auto-protect.
+ * Must be called after startDurableQueue() resolves. No-ops when queue is unavailable.
+ */
+export async function registerJobWorkers(): Promise<void> {
+  const { registerWorker, QUEUE_EAS_BUILD, QUEUE_APP_TESTING, QUEUE_CVE_AUTOPROTECT } =
+    await import("./durable-queue");
+
+  await registerWorker(
+    QUEUE_EAS_BUILD,
+    async (payload) => {
+      await runEasBuildJob(payload as unknown as EasJobInput);
+    },
+    { retryLimit: 1, retryDelay: 30, retryBackoff: false },
+  );
+
+  await registerWorker(
+    QUEUE_APP_TESTING,
+    async (payload) => {
+      const { projectId, taskId, projectDescription, savedTestScript } = payload as {
+        projectId: number;
+        taskId: number;
+        projectDescription: string;
+        savedTestScript?: string | null;
+      };
+      await runAppTestingJob(projectId, taskId, projectDescription, savedTestScript);
+    },
+    { retryLimit: 2, retryDelay: 15, retryBackoff: true },
+  );
+
+  await registerWorker(
+    QUEUE_CVE_AUTOPROTECT,
+    async (payload) => {
+      await runCveAutoProtectJob(payload as unknown as CveAutoProtectInput);
+    },
+    { retryLimit: 2, retryDelay: 15, retryBackoff: true },
+  );
+
+  logger.info("Job workers registered for EAS build, app-testing, and CVE auto-protect");
 }
 
 /**

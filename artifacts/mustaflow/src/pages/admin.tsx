@@ -20,6 +20,7 @@ import {
   Sparkles,
   Inbox,
   Bug,
+  Layers,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -304,6 +305,8 @@ export default function AdminPage() {
             ?.prodErrors?.byDay ?? []
         }
       />
+
+      <JobQueueTile />
 
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
@@ -1497,6 +1500,202 @@ function AdminItem({
         </span>
         <span className="text-xs">{value}</span>
       </div>
+    </div>
+  );
+}
+
+// ── Job Queue Tile ─────────────────────────────────────────────────────────────
+
+type RecentJobEntry = {
+  id: string;
+  state: string;
+  createdon: string;
+  completedon: string | null;
+  output: unknown;
+};
+
+type JobQueueEntry = {
+  name: string;
+  label: string;
+  active: number;
+  queued: number;
+  failed: number;
+  total: number;
+  recent: RecentJobEntry[];
+};
+
+type JobQueueData = { available: boolean; queues: JobQueueEntry[] };
+
+function JobQueueTile() {
+  const [data, setData] = useState<JobQueueData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/job-queue?recentLimit=5", { credentials: "include" });
+      if (res.ok) {
+        const json = (await res.json()) as JobQueueData;
+        setData(json);
+        setLastUpdated(new Date());
+      }
+    } catch {
+      // non-fatal
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchData();
+    const interval = setInterval(() => void fetchData(), 15_000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Layers className="h-3.5 w-3.5 text-blue-400" />
+          Job Queue (pg-boss)
+        </h3>
+        <div className="flex items-center gap-2">
+          {lastUpdated && (
+            <span className="text-[10px] text-muted-foreground">
+              updated {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={() => void fetchData()}
+            className="text-muted-foreground hover:text-foreground"
+            title="Refresh"
+          >
+            <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {!data && loading && (
+        <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading…</div>
+      )}
+
+      {data && !data.available && (
+        <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+          Durable queue not available — DATABASE_URL missing or DURABLE_QUEUE_ENABLED=false.
+        </div>
+      )}
+
+      {data && data.available && (
+        <div className="divide-y divide-border">
+          {data.queues.map((q) => (
+            <div key={q.name}>
+              <button
+                onClick={() => setExpanded(expanded === q.name ? null : q.name)}
+                className="w-full px-4 py-3 flex items-center justify-between text-sm hover:bg-muted/30 transition-colors"
+              >
+                <div className="min-w-0 flex items-center gap-2">
+                  <span className="font-medium">{q.label}</span>
+                  <span className="text-xs text-muted-foreground font-mono hidden sm:inline">
+                    {q.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs tabular-nums">
+                  <span
+                    className={`flex items-center gap-1 ${q.active > 0 ? "text-blue-400 font-semibold" : "text-muted-foreground"}`}
+                  >
+                    <span
+                      className={`inline-block h-1.5 w-1.5 rounded-full ${q.active > 0 ? "bg-blue-400" : "bg-muted-foreground/30"}`}
+                    />
+                    {q.active} active
+                  </span>
+                  <span
+                    className={
+                      q.queued > 0 ? "text-amber-400 font-semibold" : "text-muted-foreground"
+                    }
+                  >
+                    {q.queued} queued
+                  </span>
+                  {q.failed > 0 && (
+                    <span className="text-destructive font-semibold">{q.failed} failed</span>
+                  )}
+                  <span className="text-muted-foreground">{q.total} total</span>
+                  <ChevronRight
+                    className={`h-3 w-3 text-muted-foreground transition-transform ${expanded === q.name ? "rotate-90" : ""}`}
+                  />
+                </div>
+              </button>
+
+              {expanded === q.name && (
+                <div className="px-4 pb-3 bg-muted/10">
+                  {q.recent.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-2">
+                      No recent pending, active, or failed jobs.
+                    </p>
+                  ) : (
+                    <table className="w-full text-xs mt-1">
+                      <thead>
+                        <tr className="text-muted-foreground border-b border-border">
+                          <th className="text-left py-1 pr-3 font-medium">ID</th>
+                          <th className="text-left py-1 pr-3 font-medium">State</th>
+                          <th className="text-left py-1 pr-3 font-medium">Created</th>
+                          <th className="text-left py-1 font-medium">Error / Output</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {q.recent.map((job) => {
+                          const errorMsg =
+                            job.state === "failed" && job.output
+                              ? typeof job.output === "object" && job.output !== null
+                                ? ((
+                                    job.output as {
+                                      message?: string;
+                                      value?: { message?: string };
+                                    }
+                                  ).value?.message ??
+                                  (job.output as { message?: string }).message ??
+                                  JSON.stringify(job.output).slice(0, 80))
+                                : String(job.output).slice(0, 80)
+                              : null;
+                          return (
+                            <tr key={job.id}>
+                              <td className="py-1.5 pr-3 font-mono text-[10px] text-muted-foreground truncate max-w-[80px]">
+                                {job.id.slice(0, 8)}…
+                              </td>
+                              <td className="py-1.5 pr-3">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                    job.state === "active"
+                                      ? "bg-blue-500/10 text-blue-400"
+                                      : job.state === "failed"
+                                        ? "bg-destructive/10 text-destructive"
+                                        : job.state === "retry"
+                                          ? "bg-amber-500/10 text-amber-400"
+                                          : "bg-muted text-muted-foreground"
+                                  }`}
+                                >
+                                  {job.state}
+                                </span>
+                              </td>
+                              <td className="py-1.5 pr-3 text-muted-foreground text-[10px]">
+                                {new Date(job.createdon).toLocaleString()}
+                              </td>
+                              <td className="py-1.5 text-muted-foreground truncate max-w-[160px]">
+                                {errorMsg ?? "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

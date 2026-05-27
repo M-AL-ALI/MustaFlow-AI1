@@ -19,7 +19,7 @@ import { startDeploymentScheduler } from "./lib/deployment-scheduler";
 import { initSentry, captureError, Sentry } from "./lib/sentry";
 import { httpRequestDuration, httpRequestsTotal } from "./lib/metrics";
 import { startDurableQueue, stopDurableQueue, registerGdprErasureWorker } from "./lib/durable-queue";
-import { runJob } from "./lib/jobs";
+import { runJob, registerJobWorkers } from "./lib/jobs";
 import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
@@ -41,9 +41,11 @@ startDeploymentScheduler();
 
 // Start durable job queue (pg-boss). No-ops when DATABASE_URL is missing or
 // DURABLE_QUEUE_ENABLED=false. Falls back to in-memory enqueueJob silently.
+// After the queue starts, register workers for EAS build, app-testing, and CVE.
 void startDurableQueue(async (payload) => {
   await runJob(payload as unknown as Parameters<typeof runJob>[0]);
-}).then(() => {
+}).then(async () => {
+  await registerJobWorkers();
   void registerGdprErasureWorker(runGdprErasure);
 });
 

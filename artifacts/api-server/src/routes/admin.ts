@@ -1066,6 +1066,40 @@ router.post("/admin/billing/refund", async (req, res): Promise<void> => {
   });
 });
 
+// ── GET /api/admin/job-queue ──────────────────────────────────────────────────
+// Returns pending, active, failed, and total counts for all registered pg-boss
+// queues, plus up to 5 recent pending/active/failed job entries per queue.
+// Returns { available: false } when the durable queue is not initialised.
+router.get("/admin/job-queue", async (req, res): Promise<void> => {
+  const { getQueueStats, isDurableQueueReady } = await import("../lib/durable-queue");
+  if (!isDurableQueueReady()) {
+    res.json({ available: false, queues: [] });
+    return;
+  }
+  const recentLimit = Math.min(Math.max(1, Number(req.query.recentLimit ?? 5)), 20);
+  const stats = await getQueueStats(recentLimit);
+  const queues = [
+    { name: "mustaflow.build", label: "Build", detail: stats.build },
+    { name: "mustaflow.refine", label: "Refine", detail: stats.refine },
+    { name: "mustaflow.eas-build", label: "EAS Build", detail: stats.easBuild },
+    { name: "mustaflow.app-testing", label: "App Testing", detail: stats.appTesting },
+    {
+      name: "mustaflow.cve-autoprotect",
+      label: "CVE Auto-protect",
+      detail: stats.cveAutoprotect,
+    },
+  ].map((q) => ({
+    name: q.name,
+    label: q.label,
+    active: q.detail?.active ?? 0,
+    queued: q.detail?.queued ?? 0,
+    failed: q.detail?.failed ?? 0,
+    total: q.detail?.total ?? 0,
+    recent: q.detail?.recent ?? [],
+  }));
+  res.json({ available: true, queues });
+});
+
 // ── GET /api/admin/billing/users — credit balance overview ────────────────────
 router.get("/admin/billing/users", async (_req, res): Promise<void> => {
   const rows = await db

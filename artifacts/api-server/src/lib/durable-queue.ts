@@ -6,10 +6,10 @@
  * exponential back-off; permanently-failed jobs land in the pg-boss DLQ.
  *
  * Architecture:
- *  - One queue per job kind: "build" and "refine".
- *  - Each job payload is a serialized JobInput (minus the AbortController).
- *  - pg-boss workers pick up jobs and call runJob() with the same semantics
- *    as the legacy in-memory enqueueJob.
+ *  - One queue per job kind: "build", "refine", "eas-build", "app-testing",
+ *    "cve-autoprotect".
+ *  - Each job payload is a serialized input struct (minus any AbortController).
+ *  - pg-boss workers pick up jobs and call the registered handler.
  *
  * Graceful degradation:
  *  - When DATABASE_URL is missing or pg-boss fails to start, enqueue falls
@@ -23,10 +23,19 @@ import { jobQueueDepth, jobsTotal } from "./metrics";
 
 export const QUEUE_BUILD = "mustaflow.build";
 export const QUEUE_REFINE = "mustaflow.refine";
+export const QUEUE_EAS_BUILD = "mustaflow.eas-build";
+export const QUEUE_APP_TESTING = "mustaflow.app-testing";
+export const QUEUE_CVE_AUTOPROTECT = "mustaflow.cve-autoprotect";
 export const QUEUE_GDPR_ERASURE = "mustaflow.gdpr-erasure";
 
 const RETRY_LIMIT = 2;
 const RETRY_DELAY_SECONDS = 30;
+
+const EAS_RETRY_LIMIT = 1;
+const EAS_RETRY_DELAY_SECONDS = 30;
+
+const SECONDARY_RETRY_LIMIT = 2;
+const SECONDARY_RETRY_DELAY_SECONDS = 15;
 
 let boss: PgBoss | null = null;
 let _ready = false;
@@ -41,8 +50,11 @@ export function isDurableQueueReady(): boolean {
 }
 
 /**
- * Start pg-boss and register workers. Called once at server startup.
+ * Start pg-boss and register the build/refine workers. Called once at server startup.
  * Idempotent — safe to call multiple times.
+ *
+ * After calling this, invoke registerWorker() for each additional job type (EAS,
+ * app-testing, CVE) so those queues also get durable workers.
  */
 export async function startDurableQueue(
   onJob: (payload: Record<string, unknown>) => Promise<void>,
@@ -118,6 +130,50 @@ export async function startDurableQueue(
 }
 
 /**
+ * Register a worker for an additional queue (e.g. eas-build, app-testing, cve-autoprotect).
+ * Must be called after startDurableQueue resolves. No-ops when the queue is not ready.
+ */
+export async function registerWorker(
+  queue: string,
+  handler: (payload: Record<string, unknown>) => Promise<void>,
+  retryConfig: { retryLimit: number; retryDelay: number; retryBackoff?: boolean } = {
+    retryLimit: SECONDARY_RETRY_LIMIT,
+    retryDelay: SECONDARY_RETRY_DELAY_SECONDS,
+    retryBackoff: true,
+  },
+): Promise<void> {
+  if (!isDurableQueueReady() || !boss) return;
+
+  try {
+    await boss.createQueue(queue, {
+      retryLimit: retryConfig.retryLimit,
+      retryDelay: retryConfig.retryDelay,
+      retryBackoff: retryConfig.retryBackoff ?? true,
+    });
+
+    await boss.work(
+      queue,
+      { batchSize: 1, pollingIntervalSeconds: 2 },
+      async (jobs: Job<Record<string, unknown>>[]) => {
+        const job = jobs[0];
+        if (!job) return;
+        try {
+          await handler(job.data);
+          logger.info({ queue, jobId: job.id }, "Durable worker job completed");
+        } catch (err) {
+          logger.error({ err, jobId: job.id, queue }, "Durable worker job failed");
+          throw err;
+        }
+      },
+    );
+
+    logger.info({ queue }, "Durable worker registered");
+  } catch (err) {
+    logger.error({ err, queue }, "Failed to register durable worker");
+  }
+}
+
+/**
  * Enqueue a job payload into the durable queue.
  * Returns the pg-boss job ID or null if the queue is unavailable.
  */
@@ -144,33 +200,126 @@ export async function durableEnqueue(
 }
 
 /**
- * Return pg-boss queue stats for the status endpoint.
+ * Enqueue a payload into any named queue with an optional idempotency key.
+ * Used for EAS builds, app-testing, and CVE auto-protect jobs.
+ * Returns the pg-boss job ID or null if the queue is unavailable.
  */
-export async function getQueueStats(): Promise<{
-  build: { active: number; queued: number; total: number } | null;
-  refine: { active: number; queued: number; total: number } | null;
-}> {
-  if (!isDurableQueueReady() || !boss) return { build: null, refine: null };
+export async function durableEnqueueRaw(
+  queue: string,
+  payload: Record<string, unknown>,
+  key?: string,
+  retryConfig: { retryLimit: number; retryDelay: number; retryBackoff?: boolean } = {
+    retryLimit: queue === QUEUE_EAS_BUILD ? EAS_RETRY_LIMIT : SECONDARY_RETRY_LIMIT,
+    retryDelay: queue === QUEUE_EAS_BUILD ? EAS_RETRY_DELAY_SECONDS : SECONDARY_RETRY_DELAY_SECONDS,
+    retryBackoff: true,
+  },
+): Promise<string | null> {
+  if (!isDurableQueueReady() || !boss) return null;
+
   try {
-    const [buildStats, refineStats] = await Promise.all([
-      boss.getQueueStats(QUEUE_BUILD),
-      boss.getQueueStats(QUEUE_REFINE),
-    ]);
-    return {
-      build: {
-        active: buildStats.activeCount,
-        queued: buildStats.queuedCount,
-        total: buildStats.totalCount,
-      },
-      refine: {
-        active: refineStats.activeCount,
-        queued: refineStats.queuedCount,
-        total: refineStats.totalCount,
-      },
-    };
-  } catch {
-    return { build: null, refine: null };
+    const id = await boss.send(queue, payload, {
+      retryLimit: retryConfig.retryLimit,
+      retryDelay: retryConfig.retryDelay,
+      retryBackoff: retryConfig.retryBackoff ?? true,
+      ...(key ? { key } : {}),
+    });
+    logger.info({ queue, jobId: id, key }, "Job enqueued in durable queue (raw)");
+    return id ?? null;
+  } catch (err) {
+    logger.error(
+      { err, queue, key },
+      "Failed to enqueue job in durable queue (raw) — will fall back",
+    );
+    return null;
   }
+}
+
+export type QueueStat = {
+  active: number;
+  queued: number;
+  failed: number;
+  total: number;
+};
+
+export type RecentJob = {
+  id: string;
+  state: string;
+  createdon: string;
+  completedon: string | null;
+  output: unknown;
+};
+
+export type QueueDetail = QueueStat & { recent: RecentJob[] };
+
+/**
+ * Return pg-boss queue stats (active/queued/failed/total) plus up to `recentLimit`
+ * recent pending, active, or failed job entries for all registered queues.
+ * Queries the pgboss.job table directly for failed counts and recent entries.
+ */
+export async function getQueueStats(recentLimit = 5): Promise<{
+  build: QueueDetail | null;
+  refine: QueueDetail | null;
+  easBuild: QueueDetail | null;
+  appTesting: QueueDetail | null;
+  cveAutoprotect: QueueDetail | null;
+}> {
+  const empty = {
+    build: null,
+    refine: null,
+    easBuild: null,
+    appTesting: null,
+    cveAutoprotect: null,
+  };
+  if (!isDurableQueueReady() || !boss) return empty;
+
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) return empty;
+
+  // Import pg pool for raw pgboss schema queries (pg-boss doesn't expose failed listing).
+  const { Pool } = await import("pg");
+  const tmpPool = new Pool({ connectionString, max: 2 });
+
+  async function safeStats(q: string): Promise<QueueDetail | null> {
+    try {
+      const [pgbossStats, recentRows, failedRow] = await Promise.all([
+        boss!.getQueueStats(q),
+        tmpPool.query<RecentJob>(
+          `SELECT id::text, state, createdon::text, completedon::text, output
+             FROM pgboss.job
+            WHERE name = $1
+              AND state IN ('created','retry','active','failed')
+            ORDER BY createdon DESC
+            LIMIT $2`,
+          [q, recentLimit],
+        ),
+        tmpPool.query<{ cnt: string }>(
+          `SELECT COUNT(*)::int AS cnt FROM pgboss.job WHERE name = $1 AND state = 'failed'`,
+          [q],
+        ),
+      ]);
+      return {
+        active: pgbossStats.activeCount,
+        queued: pgbossStats.queuedCount,
+        failed: Number(failedRow.rows[0]?.cnt ?? 0),
+        total: pgbossStats.totalCount,
+        recent: recentRows.rows,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const [build, refine, easBuild, appTesting, cveAutoprotect] = await Promise.all([
+    safeStats(QUEUE_BUILD),
+    safeStats(QUEUE_REFINE),
+    safeStats(QUEUE_EAS_BUILD),
+    safeStats(QUEUE_APP_TESTING),
+    safeStats(QUEUE_CVE_AUTOPROTECT),
+  ]);
+
+  await tmpPool.end().catch(() => undefined);
+
+  return { build, refine, easBuild, appTesting, cveAutoprotect };
 }
 
 const GDPR_ERASURE_RETRY_LIMIT = 3;
