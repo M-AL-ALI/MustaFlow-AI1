@@ -14,6 +14,15 @@
 
 import nodemailer from "nodemailer";
 import { logger } from "./logger";
+import {
+  welcomeTemplate,
+  buildFailedTemplate,
+  domainVerifiedTemplate,
+  lowCreditTemplate,
+  domainRenewalWarningTemplate,
+  orgInviteTemplate,
+  domainRenewalFailureTemplate,
+} from "./emailTemplates";
 
 function smtpEnabled(): boolean {
   return Boolean(process.env.SMTP_HOST);
@@ -50,7 +59,49 @@ export async function sendEmail(opts: {
   }
 }
 
-// ── Domain-specific email templates ──────────────────────────────────────────
+// ── Domain-specific email senders ─────────────────────────────────────────────
+
+export async function sendWelcomeEmail(opts: {
+  to: string;
+  displayName: string | null;
+  ctaUrl: string;
+}): Promise<void> {
+  const { to, ...rest } = opts;
+  const tmpl = welcomeTemplate(rest);
+  await sendEmail({ to, ...tmpl });
+}
+
+export async function sendBuildFailureEmail(opts: {
+  to: string;
+  projectName: string;
+  agentMode: string;
+  reason: string;
+  projectUrl: string;
+}): Promise<void> {
+  const { to, ...rest } = opts;
+  const tmpl = buildFailedTemplate(rest);
+  await sendEmail({ to, ...tmpl });
+}
+
+export async function sendDomainVerifiedEmail(opts: {
+  to: string;
+  hostname: string;
+  siteUrl: string;
+}): Promise<void> {
+  const { to, ...rest } = opts;
+  const tmpl = domainVerifiedTemplate(rest);
+  await sendEmail({ to, ...tmpl });
+}
+
+export async function sendLowCreditEmail(opts: {
+  to: string;
+  balance: number;
+  topUpUrl: string;
+}): Promise<void> {
+  const { to, ...rest } = opts;
+  const tmpl = lowCreditTemplate(rest);
+  await sendEmail({ to, ...tmpl });
+}
 
 export async function sendDomainRenewalWarning(opts: {
   to: string;
@@ -58,33 +109,9 @@ export async function sendDomainRenewalWarning(opts: {
   daysUntilExpiry: number;
   renewUrl: string;
 }): Promise<void> {
-  const { to, hostname, daysUntilExpiry, renewUrl } = opts;
-  const urgency =
-    daysUntilExpiry <= 7 ? "URGENT: " : daysUntilExpiry <= 30 ? "Action required: " : "";
-  const subject = `${urgency}Your domain ${hostname} expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}`;
-
-  const html = `
-<!DOCTYPE html>
-<html>
-<body style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
-  <h2 style="margin-top:0">Domain renewal reminder</h2>
-  <p>Your domain <strong>${hostname}</strong> will expire in
-     <strong>${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}</strong>.</p>
-  <p>If you'd like to keep it, renew now before it expires and becomes available to others.</p>
-  <p style="margin:24px 0">
-    <a href="${renewUrl}"
-       style="background:#6366f1;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
-      Renew ${hostname}
-    </a>
-  </p>
-  <p style="font-size:12px;color:#666">
-    If you no longer need this domain you can ignore this email.
-    Auto-renewal will happen automatically if you have a saved payment method.
-  </p>
-</body>
-</html>`;
-
-  await sendEmail({ to, subject, html, text: `${subject}\n\nRenew at: ${renewUrl}` });
+  const { to, ...rest } = opts;
+  const tmpl = domainRenewalWarningTemplate(rest);
+  await sendEmail({ to, ...tmpl });
 }
 
 export async function sendOrgInvite(opts: {
@@ -95,35 +122,9 @@ export async function sendOrgInvite(opts: {
   acceptUrl: string;
   expiresAt: Date;
 }): Promise<void> {
-  const { to, orgName, inviterName, role, acceptUrl, expiresAt } = opts;
-  const subject = `You're invited to join ${orgName} on MustaFlow`;
-  const inviter = inviterName ? inviterName : "A teammate";
-  const expiresStr = expiresAt.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  const html = `
-<!DOCTYPE html>
-<html>
-<body style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
-  <h2 style="margin-top:0">You've been invited to ${orgName}</h2>
-  <p>${inviter} invited you to join <strong>${orgName}</strong> on MustaFlow as a <strong>${role}</strong>.</p>
-  <p style="margin:24px 0">
-    <a href="${acceptUrl}"
-       style="background:#4a90e2;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
-      Accept invitation
-    </a>
-  </p>
-  <p style="font-size:13px;color:#444">Or paste this link into your browser:<br><span style="color:#666">${acceptUrl}</span></p>
-  <p style="font-size:12px;color:#666">This invitation expires on ${expiresStr}. If you didn't expect this email, you can safely ignore it.</p>
-</body>
-</html>`;
-
-  const text = `${inviter} invited you to join ${orgName} on MustaFlow as a ${role}.\n\nAccept: ${acceptUrl}\n\nExpires: ${expiresStr}`;
-
-  await sendEmail({ to, subject, html, text });
+  const { to, ...rest } = opts;
+  const tmpl = orgInviteTemplate(rest);
+  await sendEmail({ to, ...tmpl });
 }
 
 export async function sendDomainRenewalFailure(opts: {
@@ -132,33 +133,7 @@ export async function sendDomainRenewalFailure(opts: {
   reason: string;
   renewUrl: string;
 }): Promise<void> {
-  const { to, hostname, reason, renewUrl } = opts;
-  const subject = `Auto-renewal failed for ${hostname}`;
-
-  const html = `
-<!DOCTYPE html>
-<html>
-<body style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
-  <h2 style="margin-top:0;color:#dc2626">Auto-renewal failed</h2>
-  <p>We were unable to automatically renew <strong>${hostname}</strong>.</p>
-  <p><strong>Reason:</strong> ${reason}</p>
-  <p>Please renew manually before your domain expires to avoid losing it.</p>
-  <p style="margin:24px 0">
-    <a href="${renewUrl}"
-       style="background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
-      Renew ${hostname} now
-    </a>
-  </p>
-  <p style="font-size:12px;color:#666">
-    To ensure auto-renewal works in the future, update your payment method on the My Domains page.
-  </p>
-</body>
-</html>`;
-
-  await sendEmail({
-    to,
-    subject,
-    html,
-    text: `${subject}\n\nReason: ${reason}\n\nRenew at: ${renewUrl}`,
-  });
+  const { to, ...rest } = opts;
+  const tmpl = domainRenewalFailureTemplate(rest);
+  await sendEmail({ to, ...tmpl });
 }

@@ -84,6 +84,8 @@ import {
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
+import { sendBuildFailureEmail } from "./emailClient";
+import { getClerkUserById } from "./clerk-users";
 import {
   runArchitectReview,
   shouldTriggerAutoFix,
@@ -4470,6 +4472,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .catch((analyticsErr) =>
           logger.warn({ analyticsErr, taskId }, "Failed to record failed build analytics"),
         );
+
+      // Fire-and-forget build failure email to the project owner
+      if (project.ownerId) {
+        void (async () => {
+          try {
+            const clerkUser = await getClerkUserById(project.ownerId!);
+            if (clerkUser?.email) {
+              const domain = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
+              await sendBuildFailureEmail({
+                to: clerkUser.email,
+                projectName: project.name,
+                agentMode,
+                reason: message,
+                projectUrl: `https://${domain}/projects/${projectId}`,
+              });
+            }
+          } catch (emailErr) {
+            logger.warn({ emailErr, taskId, projectId }, "Build failure email failed (non-fatal)");
+          }
+        })();
+      }
 
       // Auto-write a diagnostic lesson to the Knowledge Vault
       void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);

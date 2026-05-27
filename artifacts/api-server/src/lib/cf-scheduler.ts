@@ -27,6 +27,8 @@ import {
   mapCfSslStatus,
 } from "./cloudflare";
 import { logger } from "./logger";
+import { sendDomainVerifiedEmail } from "./emailClient";
+import { getClerkUserById } from "./clerk-users";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +104,32 @@ export async function runCertStatusPoll(): Promise<void> {
               updatedAt: new Date(),
             })
             .where(eq(projectsTable.id, domain.projectId));
+        }
+
+        // Send domain verified email on first transition to "active"
+        if (domain.sslStatus !== "active" && finalStatus === "active") {
+          void (async () => {
+            try {
+              const [project] = await db
+                .select({ ownerId: projectsTable.ownerId })
+                .from(projectsTable)
+                .where(eq(projectsTable.id, domain.projectId))
+                .limit(1);
+              if (!project?.ownerId) return;
+              const clerkUser = await getClerkUserById(project.ownerId);
+              if (!clerkUser?.email) return;
+              await sendDomainVerifiedEmail({
+                to: clerkUser.email,
+                hostname: domain.hostname,
+                siteUrl: `https://${domain.hostname}`,
+              });
+            } catch (emailErr) {
+              logger.warn(
+                { emailErr, hostname: domain.hostname },
+                "Domain verified email failed (non-fatal)",
+              );
+            }
+          })();
         }
 
         updated++;

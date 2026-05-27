@@ -76,6 +76,7 @@
     "migrate-preferred-mode": "tsx ./src/migrate-preferred-mode.ts",
     "migrate-project-mode": "tsx ./src/migrate-project-mode.ts",
     "migrate-canvas-state": "tsx ./src/migrate-canvas-state.ts",
+    "migrate-low-credit-email": "tsx ./src/migrate-low-credit-email.ts",
     "migrate-command-approval": "tsx ./src/migrate-command-approval.ts",
     "migrate-message-origin": "tsx ./src/migrate-message-origin.ts",
     "backfill-message-origin": "tsx ./src/backfill-message-origin.ts",

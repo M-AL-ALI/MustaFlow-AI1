@@ -89,6 +89,23 @@ export async function findClerkUserByUsername(username: string): Promise<ClerkUs
 }
 
 /**
+ * Look up a single Clerk user by their user ID.
+ * Returns null when the user is not found, Clerk is not configured, or the call fails.
+ */
+export async function getClerkUserById(userId: string): Promise<ClerkUserSummary | null> {
+  if (!userId) return null;
+  if (!clerkConfigured()) return null;
+  try {
+    const user = await clerkClient.users.getUser(userId);
+    if (!user) return null;
+    return summarise(user);
+  } catch (err) {
+    logger.warn({ err, userId }, "Clerk user lookup by ID failed");
+    return null;
+  }
+}
+
+/**
  * Batch-resolve Clerk user IDs to display summaries. Returns a Map keyed by
  * userId. IDs that fail to resolve (deleted users, Clerk down, etc.) are
  * simply omitted from the map.

@@ -8,6 +8,9 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
+import { sendWelcomeEmail, sendLowCreditEmail } from "../lib/emailClient";
+import { getClerkUserById } from "../lib/clerk-users";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -16,10 +19,25 @@ const router: IRouter = Router();
 // owner flips CREDITS_ENFORCEMENT=true in env.
 export const CREDITS_ENFORCEMENT_ENABLED = process.env.CREDITS_ENFORCEMENT === "true";
 
+/** Low-balance threshold below which a warning email is sent. */
+const LOW_CREDIT_THRESHOLD = 15;
+/** Minimum gap between low-credit warning emails (24 hours). */
+const LOW_CREDIT_EMAIL_COOLDOWN_MS = 24 * 60 * 60_000;
+
+/** Base URL for user-facing links in emails. */
+function platformBase(): string {
+  const domain = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
+  return `https://${domain}`;
+}
+
 // Upsert user credit row, returning current balance.
-export async function getOrCreateCredits(
-  userId: string,
-): Promise<{ id: number; userId: string; balance: number; updatedAt: Date }> {
+export async function getOrCreateCredits(userId: string): Promise<{
+  id: number;
+  userId: string;
+  balance: number;
+  updatedAt: Date;
+  lastLowCreditEmailAt: Date | null;
+}> {
   const [existing] = await db
     .select()
     .from(userCreditsTable)
@@ -28,6 +46,22 @@ export async function getOrCreateCredits(
   if (existing) return existing;
 
   const [created] = await db.insert(userCreditsTable).values({ userId, balance: 100 }).returning();
+
+  // Fire-and-forget welcome email for brand-new users
+  void (async () => {
+    try {
+      const clerkUser = await getClerkUserById(userId);
+      if (clerkUser?.email) {
+        await sendWelcomeEmail({
+          to: clerkUser.email,
+          displayName: clerkUser.displayName,
+          ctaUrl: `${platformBase()}/projects`,
+        });
+      }
+    } catch (err) {
+      logger.warn({ err, userId }, "Welcome email failed (non-fatal)");
+    }
+  })();
 
   return created!;
 }
@@ -146,6 +180,34 @@ export async function deductCreditsAtomic(
     description: opts.description,
     balanceAfter: updated.balance,
   });
+
+  // Fire-and-forget low-balance warning email when balance crosses below threshold
+  if (updated.balance < LOW_CREDIT_THRESHOLD) {
+    void (async () => {
+      try {
+        const now = Date.now();
+        const lastSent = credits.lastLowCreditEmailAt?.getTime() ?? 0;
+        if (now - lastSent < LOW_CREDIT_EMAIL_COOLDOWN_MS) return; // within cooldown
+
+        const clerkUser = await getClerkUserById(userId);
+        if (!clerkUser?.email) return;
+
+        // Stamp the timestamp before sending to prevent a second concurrent send
+        await db
+          .update(userCreditsTable)
+          .set({ lastLowCreditEmailAt: new Date() })
+          .where(eq(userCreditsTable.userId, userId));
+
+        await sendLowCreditEmail({
+          to: clerkUser.email,
+          balance: updated.balance,
+          topUpUrl: `${platformBase()}/settings?tab=billing`,
+        });
+      } catch (err) {
+        logger.warn({ err, userId }, "Low-credit email failed (non-fatal)");
+      }
+    })();
+  }
 
   return { newBalance: updated.balance };
 }

@@ -6,6 +6,8 @@ export const userCreditsTable = pgTable("user_credits", {
   userId: text("user_id").notNull().unique(),
   balance: integer("balance").notNull().default(100),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Last time a low-balance warning email was sent. Used to rate-limit to once per 24 h. */
+  lastLowCreditEmailAt: timestamp("last_low_credit_email_at", { withTimezone: true }),
 });
 
 export const CREDIT_TRANSACTION_TYPES = [
