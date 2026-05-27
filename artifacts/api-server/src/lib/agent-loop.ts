@@ -1526,6 +1526,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let finalSummary = "";
   let finalWarnings: string[] = [];
   let finalized = false;
+  // Count of file-mutation tool calls (write_file / apply_patch / delete_file)
+  // across all turns. Used to enforce the refine-mode "must edit something" gate.
+  let totalMutations = 0;
 
   // Per-task skill registry: load index for the system prompt, then cache
   // already-loaded skills in this Map so a repeated load_skill is a free
@@ -1879,6 +1882,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         callName === "delete_file"
       ) {
         mutatedThisTurn = true;
+        totalMutations++;
         await safeEvent(
           input.onEvent,
           "generating_code",
@@ -2103,6 +2107,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         await safeEvent(input.onEvent, "narration", String(parsed.message ?? "").slice(0, 220));
       } else if (name === "write_file" || name === "apply_patch" || name === "delete_file") {
         mutatedThisTurn = true;
+        totalMutations++;
         await safeEvent(
           input.onEvent,
           "generating_code",
@@ -2150,6 +2155,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
 
       if (name === "finalize") {
+        // Hard gate for refine runs: the model must have written or patched at
+        // least one file before finalizing. Prevents the "Refined 0 files"
+        // failure mode where the model calls finalize immediately on a vague
+        // prompt without doing any work.
+        if (input.mode === "refine" && totalMutations === 0) {
+          const noMutMsg =
+            "BLOCKED: You have not written or modified any files yet. " +
+            "You MUST call write_file or apply_patch to make at least one concrete change before calling finalize. " +
+            "Read the existing files to understand the current state, then apply the change the user is asking for.";
+          messages[messages.length - 1] = {
+            role: "tool",
+            tool_call_id: call.id,
+            content: noMutMsg,
+          };
+          if (lastError === noMutMsg) consecutiveErrors++;
+          else consecutiveErrors = 1;
+          lastError = noMutMsg;
+          continue;
+        }
+
         // Run checks now; only terminate if required checks pass.
         await safeEvent(input.onEvent, "narration", "Verifying checks before finalizing…");
         const verifyRun = await runCheckProfile(
