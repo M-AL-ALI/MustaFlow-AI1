@@ -484,6 +484,31 @@ export function SecretsPanel({ projectId }: SecretsPanelProps) {
               />
             )}
 
+            {/* Banner: secrets that are not marked preview-safe are excluded from the container */}
+            {!isLoading &&
+              !showAdd &&
+              (() => {
+                const notSafe = (secrets as SecretEntry[]).filter(
+                  (s) =>
+                    (s.environment === "development" || s.environment === "testing") &&
+                    !s.isPreviewSafe,
+                );
+                if (notSafe.length === 0) return null;
+                return (
+                  <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-400">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      <span className="font-medium">
+                        {notSafe.length} secret{notSafe.length !== 1 ? "s" : ""} not injected into
+                        container
+                      </span>{" "}
+                      — the agent cannot access them. Enable &ldquo;Preview safe&rdquo; on each
+                      secret from the secret settings to allow injection.
+                    </span>
+                  </div>
+                );
+              })()}
+
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />

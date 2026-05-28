@@ -2714,6 +2714,34 @@ function TaskReviewCard({
   const [applyStartedAt, setApplyStartedAt] = useState<number | null>(null);
   const { dismissed: dismissedTips, dismiss: dismissTip, reset: resetTips } = useDismissedTips();
 
+  // Security gate block: parsed from the task result JSON when an apply is
+  // rejected by the SAST or npm-audit gate. Shown as a "Fix with AI" card.
+  // We also watch liveTask.result via an effect so the card appears even when
+  // the task query refetches after the mutation error callback fires.
+  type SecurityGateBlock =
+    | {
+        type: "sast_block";
+        findings: Array<{
+          file: string;
+          line?: number | null;
+          message: string;
+          detail?: string | null;
+          severity: string;
+        }>;
+        message: string;
+        fixPrompt: string;
+      }
+    | {
+        type: "npm_audit_block";
+        critical: number;
+        high: number;
+        parsed: boolean;
+        packages: Array<{ name: string; severity: string }>;
+        message: string;
+        fixPrompt: string;
+      };
+  const [securityGate, setSecurityGate] = useState<SecurityGateBlock | null>(null);
+
   // Poll task events when apply is in-flight so we can drive the progress steps.
   const { data: applyEvents = [] } = useListTaskEvents(projectId, taskId, {
     query: {
@@ -2765,10 +2793,39 @@ function TaskReviewCard({
     query: { queryKey: getListTasksQueryKey(projectId) },
   });
   const liveTask = tasks?.find((t: { id: number }) => t.id === taskId) as
-    | { stagingSnapshot?: Array<{ path: string; content: string; mimeType: string }> | null }
+    | {
+        stagingSnapshot?: Array<{ path: string; content: string; mimeType: string }> | null;
+        result?: string | null;
+        status?: string | null;
+      }
     | undefined;
   const staging = liveTask?.stagingSnapshot ?? null;
   const stagingByPath = new Map<string, string>((staging ?? []).map((f) => [f.path, f.content]));
+
+  // Parse security gate findings from the live task result whenever the task
+  // data refreshes — covers the async refetch that races the mutation onError.
+  useEffect(() => {
+    if (!applyStaging.isError || securityGate) return;
+    try {
+      const raw = liveTask?.result;
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          type?: string;
+          findings?: unknown[];
+          message?: string;
+          fixPrompt?: string;
+          critical?: number;
+          high?: number;
+          parsed?: boolean;
+        };
+        if ((parsed.type === "sast_block" || parsed.type === "npm_audit_block") && parsed.message) {
+          setSecurityGate(parsed as SecurityGateBlock);
+        }
+      }
+    } catch {
+      // not a structured block — ignore
+    }
+  }, [liveTask?.result, applyStaging.isError, securityGate]);
 
   const allChanged = [
     ...(report.filesCreated ?? []),
@@ -3229,6 +3286,36 @@ function TaskReviewCard({
                   },
                   onError: () => {
                     setApplyStartedAt(null);
+                    // Refetch the task so we can read the structured result JSON
+                    // from the failed SAST / npm-audit gate.
+                    void queryClient.invalidateQueries({
+                      queryKey: getListTasksQueryKey(projectId),
+                    });
+                    // Try to parse security gate findings from the updated task result.
+                    // The invalidation above is async; read from the current liveTask
+                    // which may already have the result if the task update raced ahead.
+                    try {
+                      const raw = liveTask?.result;
+                      if (raw) {
+                        const parsed = JSON.parse(raw) as {
+                          type?: string;
+                          findings?: unknown[];
+                          message?: string;
+                          fixPrompt?: string;
+                          critical?: number;
+                          high?: number;
+                          parsed?: boolean;
+                        };
+                        if (
+                          (parsed.type === "sast_block" || parsed.type === "npm_audit_block") &&
+                          parsed.message
+                        ) {
+                          setSecurityGate(parsed as Parameters<typeof setSecurityGate>[0]);
+                        }
+                      }
+                    } catch {
+                      // not a structured block — ignore
+                    }
                   },
                 },
               );
@@ -3269,6 +3356,62 @@ function TaskReviewCard({
           Discard
         </button>
       </div>
+
+      {/* Security gate block card — shown when SAST or npm audit rejects the apply */}
+      {securityGate && (
+        <div className="border-t border-red-900/30 bg-red-950/20 px-2.5 py-2.5 space-y-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-red-400">
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+            {securityGate.type === "sast_block"
+              ? `Security gate blocked apply — ${securityGate.findings.length} critical issue(s) found`
+              : `Security gate blocked apply — npm audit: ${securityGate.critical} critical, ${securityGate.high} high`}
+          </div>
+
+          {securityGate.type === "sast_block" && securityGate.findings.length > 0 && (
+            <ul className="space-y-1 pl-1">
+              {securityGate.findings.slice(0, 5).map((f, i) => (
+                <li key={i} className="text-[10px] text-red-300/80">
+                  <span className="font-mono text-[9px] text-red-400/70">
+                    {f.file}
+                    {f.line != null ? `:${f.line}` : ""}
+                  </span>{" "}
+                  — {f.message}
+                  {f.detail && (
+                    <span className="ml-1 text-[9px] text-muted-foreground">({f.detail})</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {securityGate.type === "npm_audit_block" && securityGate.packages.length > 0 && (
+            <ul className="space-y-1 pl-1">
+              {securityGate.packages.slice(0, 5).map((p, i) => (
+                <li key={i} className="text-[10px] text-red-300/80">
+                  <span className="font-mono text-[9px] text-red-400/70">{p.name}</span> —{" "}
+                  {p.severity}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {securityGate.type === "npm_audit_block" && !securityGate.parsed && (
+            <p className="text-[10px] text-red-300/70 italic">
+              Full vulnerability details unavailable — audit report could not be parsed.
+            </p>
+          )}
+
+          {onSendMessage && (
+            <button
+              onClick={() => onSendMessage(securityGate.fixPrompt)}
+              className="mt-0.5 flex items-center gap-1.5 h-6 px-2.5 rounded-md bg-rose-600 text-white text-[10px] font-medium hover:bg-rose-500 transition-colors"
+            >
+              <Wrench className="h-2.5 w-2.5" />
+              Fix with AI
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

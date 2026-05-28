@@ -43,6 +43,18 @@ type TaskReport = {
   nativeFeatures?: string[];
 };
 
+type AgentAuditRow = {
+  id: number;
+  taskId: number | null;
+  toolName: string;
+  argsSummary: string | null;
+  stdoutPreview: string | null;
+  exitCode: number | null;
+  ok: boolean;
+  durationMs: number;
+  calledAt: string;
+};
+
 type MobileBuildRow = {
   id: number;
   env: string;
@@ -1064,6 +1076,99 @@ function ContainerLogsPanel({ projectId }: { projectId: number }) {
 
 // ── Failed Jobs Section ────────────────────────────────────────────────────────
 // Collapsible section surfaced at the top of Build History when there are
+// ── Agent Audit Row ──────────────────────────────────────────────────────────
+// Displays a single tool-call record from the agent_tool_calls audit table.
+function AgentAuditRowItem({ row }: { row: AgentAuditRow }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const toolBadgeColor = (() => {
+    if (!row.ok) return "text-destructive border-destructive/30 bg-destructive/5";
+    if (row.toolName.startsWith("run_command") || row.toolName === "pkg_install")
+      return "text-yellow-400 border-yellow-400/30 bg-yellow-400/5";
+    if (
+      row.toolName === "write_file" ||
+      row.toolName === "apply_patch" ||
+      row.toolName === "delete_file"
+    )
+      return "text-blue-400 border-blue-400/30 bg-blue-400/5";
+    return "text-muted-foreground border-border bg-muted/30";
+  })();
+
+  return (
+    <div className="rounded border border-border bg-card overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/40 transition-colors"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+        )}
+        <span
+          className={cn(
+            "text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0",
+            toolBadgeColor,
+          )}
+        >
+          {row.toolName}
+        </span>
+        {row.exitCode !== null && (
+          <span
+            className={cn(
+              "text-[10px] font-mono shrink-0",
+              row.exitCode === 0 ? "text-green-400" : "text-destructive",
+            )}
+          >
+            exit {row.exitCode}
+          </span>
+        )}
+        <span className="text-[10px] text-muted-foreground truncate flex-1">
+          {row.argsSummary ? row.argsSummary.slice(0, 80) : "—"}
+        </span>
+        <span className="text-[10px] text-muted-foreground shrink-0 ml-auto">
+          {row.durationMs < 1000 ? `${row.durationMs}ms` : `${(row.durationMs / 1000).toFixed(1)}s`}
+        </span>
+        <span className="text-[10px] text-muted-foreground/60 shrink-0">
+          {new Date(row.calledAt).toLocaleTimeString()}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2 space-y-1.5 bg-muted/10">
+          {row.taskId && (
+            <div className="text-[10px] text-muted-foreground">
+              Task <span className="font-mono text-foreground/70">#{row.taskId}</span>
+            </div>
+          )}
+          {row.argsSummary && (
+            <div>
+              <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Args</div>
+              <pre className="text-[10px] font-mono text-foreground/80 whitespace-pre-wrap break-all bg-muted/20 rounded px-2 py-1">
+                {row.argsSummary}
+              </pre>
+            </div>
+          )}
+          {row.stdoutPreview && (
+            <div>
+              <div className="text-[10px] font-medium text-muted-foreground mb-0.5">
+                Output preview
+              </div>
+              <pre className="text-[10px] font-mono text-foreground/80 whitespace-pre-wrap break-all bg-muted/20 rounded px-2 py-1">
+                {row.stdoutPreview}
+              </pre>
+            </div>
+          )}
+          <div className="text-[10px] text-muted-foreground/60">
+            {new Date(row.calledAt).toLocaleString()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Failed Jobs section ───────────────────────────────────────────────────────
 // recently failed tasks. Shows task title, termination reason, step count,
 // timestamp, and a Retry button that pre-fills the AI chat with the original
 // prompt.
@@ -1252,6 +1357,33 @@ export function LogsTab({
 
   const isAgentic = builderMode === "agentic";
 
+  // ── Agent Audit sub-tab ──────────────────────────────────────────────────
+  const [logsView, setLogsView] = useState<"history" | "agent-audit">("history");
+  const [auditRows, setAuditRows] = useState<AgentAuditRow[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const fetchAuditLog = useCallback(async () => {
+    if (!isAgentic) return;
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/agent-audit?limit=100`);
+      if (res.ok) {
+        const data = (await res.json()) as { rows: AgentAuditRow[] };
+        setAuditRows(data.rows ?? []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [projectId, isAgentic]);
+
+  useEffect(() => {
+    if (logsView === "agent-audit") {
+      void fetchAuditLog();
+    }
+  }, [logsView, fetchAuditLog]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
       {isAgentic && <ContainerLogsPanel projectId={projectId} />}
@@ -1282,62 +1414,132 @@ export function LogsTab({
         </div>
       </div>
 
-      {/* Task + mobile build list */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {/* ── Failed Jobs section ───────────────────────────────────────────── */}
-        {(() => {
-          const failedTasks = (tasks ?? []).filter((t) => t.status === "failed").slice(0, 10);
-          if (failedTasks.length === 0) return null;
-          return (
-            <FailedJobsSection
-              tasks={failedTasks}
-              projectId={projectId}
-              onTryFix={onTryFix ?? (() => {})}
-            />
-          );
-        })()}
+      {/* Sub-tab selector — shown for agentic projects */}
+      {isAgentic && (
+        <div className="shrink-0 flex border-b border-border">
+          <button
+            type="button"
+            onClick={() => setLogsView("history")}
+            className={cn(
+              "flex-1 py-1.5 text-[11px] font-medium transition-colors border-b-2",
+              logsView === "history"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Build History
+          </button>
+          <button
+            type="button"
+            onClick={() => setLogsView("agent-audit")}
+            className={cn(
+              "flex-1 py-1.5 text-[11px] font-medium transition-colors border-b-2 flex items-center justify-center gap-1",
+              logsView === "agent-audit"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ShieldAlert className="h-3 w-3" />
+            Agent Audit
+          </button>
+        </div>
+      )}
 
-        {/* Mobile cloud builds section */}
-        {isMobile && mobileBuilds.length > 0 && (
-          <div className="space-y-2 mb-4">
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 flex items-center gap-1.5">
-              <Smartphone className="h-3 w-3" /> Cloud Builds
+      {/* Agent Audit view */}
+      {isAgentic && logsView === "agent-audit" && (
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex items-center justify-between px-4 pt-3 pb-2">
+            <span className="text-[11px] text-muted-foreground">
+              Recent tool calls by the agent loop (last 100)
+            </span>
+            <button
+              type="button"
+              onClick={() => void fetchAuditLog()}
+              disabled={auditLoading}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            >
+              <RotateCcw className={cn("h-3 w-3", auditLoading && "animate-spin")} />
+              Refresh
+            </button>
+          </div>
+          {auditLoading && auditRows.length === 0 && (
+            <div className="text-center py-16 text-muted-foreground text-sm">
+              Loading audit log…
             </div>
-            {mobileBuilds.map((b) => (
-              <MobileBuildRow
-                key={b.id}
-                build={b}
+          )}
+          {!auditLoading && auditRows.length === 0 && (
+            <div className="text-center py-16 text-muted-foreground text-sm">
+              No tool calls recorded yet. Run the agent to see audit entries.
+            </div>
+          )}
+          <div className="px-3 pb-4 space-y-1">
+            {auditRows.map((row) => (
+              <AgentAuditRowItem key={row.id} row={row} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Task + mobile build list */}
+      {(!isAgentic || logsView === "history") && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {/* ── Failed Jobs section ───────────────────────────────────────────── */}
+          {(() => {
+            const failedTasks = (tasks ?? []).filter((t) => t.status === "failed").slice(0, 10);
+            if (failedTasks.length === 0) return null;
+            return (
+              <FailedJobsSection
+                tasks={failedTasks}
                 projectId={projectId}
                 onTryFix={onTryFix ?? (() => {})}
               />
-            ))}
-            {(tasks ?? []).length > 0 && (
-              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 pt-2 flex items-center gap-1.5">
-                <Terminal className="h-3 w-3" /> AI Builder Tasks
-              </div>
-            )}
-          </div>
-        )}
+            );
+          })()}
 
-        {isLoading && (
-          <div className="text-center py-16 text-muted-foreground text-sm">Loading history...</div>
-        )}
-        {!isLoading && (!tasks || tasks.length === 0) && mobileBuilds.length === 0 && (
-          <div className="text-center py-16 text-muted-foreground text-sm">
-            No builds yet. Send a message to the AI Builder to get started.
-          </div>
-        )}
-        {(tasks ?? []).map((task) => (
-          <TaskRow
-            key={task.id}
-            task={task}
-            projectId={projectId}
-            onTryFix={onTryFix ?? (() => {})}
-            highlight={filter.taskId === task.id}
-            highlightCmd={filter.taskId === task.id ? filter.cmd : undefined}
-          />
-        ))}
-      </div>
+          {/* Mobile cloud builds section */}
+          {isMobile && mobileBuilds.length > 0 && (
+            <div className="space-y-2 mb-4">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 flex items-center gap-1.5">
+                <Smartphone className="h-3 w-3" /> Cloud Builds
+              </div>
+              {mobileBuilds.map((b) => (
+                <MobileBuildRow
+                  key={b.id}
+                  build={b}
+                  projectId={projectId}
+                  onTryFix={onTryFix ?? (() => {})}
+                />
+              ))}
+              {(tasks ?? []).length > 0 && (
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 pt-2 flex items-center gap-1.5">
+                  <Terminal className="h-3 w-3" /> AI Builder Tasks
+                </div>
+              )}
+            </div>
+          )}
+
+          {isLoading && (
+            <div className="text-center py-16 text-muted-foreground text-sm">
+              Loading history...
+            </div>
+          )}
+          {!isLoading && (!tasks || tasks.length === 0) && mobileBuilds.length === 0 && (
+            <div className="text-center py-16 text-muted-foreground text-sm">
+              No builds yet. Send a message to the AI Builder to get started.
+            </div>
+          )}
+          {(tasks ?? []).map((task) => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              projectId={projectId}
+              onTryFix={onTryFix ?? (() => {})}
+              highlight={filter.taskId === task.id}
+              highlightCmd={filter.taskId === task.id ? filter.cmd : undefined}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

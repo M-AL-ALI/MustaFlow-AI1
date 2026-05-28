@@ -1763,7 +1763,7 @@ export function QueueComposer({
                     )}
                     style={{ maxWidth: "4.5rem" }}
                   >
-                    {VOICE_LANGUAGES.map(({ code, label: _label }) => (
+                    {VOICE_LANGUAGES.map(({ code }) => (
                       <option key={code} value={code}>
                         {code === "auto" ? "Auto" : code}
                       </option>

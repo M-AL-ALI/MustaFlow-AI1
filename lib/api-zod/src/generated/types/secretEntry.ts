@@ -21,5 +21,7 @@ export interface SecretEntry {
   envWarning?: string | null;
   /** Minimum org role required to view the decrypted secret value */
   minRole?: SecretEntryMinRole;
+  /** When true, this secret is injected into the dev/test container. When false, it is excluded. */
+  isPreviewSafe?: boolean;
   createdAt: Date;
 }

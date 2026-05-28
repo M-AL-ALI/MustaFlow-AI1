@@ -6867,6 +6867,9 @@ components:
           type: string
           enum: [viewer, member, admin, owner]
           description: Minimum org role required to view the decrypted secret value
+        isPreviewSafe:
+          type: boolean
+          description: When true, this secret is injected into the dev/test container. When false, it is excluded.
         createdAt: { type: string, format: date-time }
 
     SecretAuditEntry:

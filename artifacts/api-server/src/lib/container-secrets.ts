@@ -29,8 +29,16 @@ export interface ContainerSecret {
 const DEV_ENVIRONMENTS = ["development", "testing"] as const;
 
 /**
- * Load secrets for a project that are scoped to development or testing.
- * These are the only secrets that should ever reach a dev container.
+ * Load secrets for a project that are scoped to development or testing AND
+ * satisfy both container-safety policies:
+ *
+ *  1. is_preview_safe = true — user-explicit opt-in for container injection.
+ *  2. min_role = 'viewer'   — only secrets accessible to the lowest org role
+ *     are auto-injected. Secrets gated to admin/owner must not leak to the
+ *     autonomous agent container which runs without a specific user identity.
+ *
+ * Secrets that fail either check are silently excluded (visible count shown
+ * in the Secrets panel warning banner so users can remediate).
  */
 export async function getContainerSecrets(projectId: number): Promise<ContainerSecret[]> {
   return db
@@ -44,6 +52,8 @@ export async function getContainerSecrets(projectId: number): Promise<ContainerS
       and(
         eq(secretsTable.projectId, projectId),
         inArray(secretsTable.environment, DEV_ENVIRONMENTS as unknown as string[]),
+        eq(secretsTable.isPreviewSafe, true),
+        eq(secretsTable.minRole, "viewer"),
       ),
     );
 }

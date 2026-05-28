@@ -325,6 +325,7 @@ function toEntry(row: Secret, contextEnv?: string) {
     category: row.category,
     verificationStatus: row.verificationStatus,
     minRole: (row.minRole ?? "viewer") as "viewer" | "member" | "admin" | "owner",
+    isPreviewSafe: row.isPreviewSafe ?? false,
     envWarning: envWarning ?? null,
     encryptionNote: encryptionService.isDevelopmentOnly
       ? "DEV: values stored without encryption. Do not use real production secrets."

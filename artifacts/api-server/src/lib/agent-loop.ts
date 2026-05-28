@@ -53,7 +53,7 @@ import {
   isPolicyStrictness,
   type PolicyStrictness,
 } from "./policy";
-import { db, toolAuditTable } from "@workspace/db";
+import { db, toolAuditTable, agentToolCallsTable, projectsTable } from "@workspace/db";
 import {
   listEnabledSkills,
   loadSkillContent,
@@ -177,7 +177,8 @@ export type AgentLoopReport = {
     | "repeated-error"
     | "model-stopped"
     | "aborted"
-    | "checks-failed";
+    | "checks-failed"
+    | "rate_limited";
   toolCalls: ToolCallRecord[];
   commandsRun: CommandRecord[];
   checkResults: CheckResultRecord[];
@@ -1522,6 +1523,34 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   }> = [];
   let totalTokens = 0;
 
+  // ── Per-project hourly rate limiter ──────────────────────────────────────
+  // Read the cap configured on this project (default 200). Done once at loop
+  // start so the cap is stable for the whole run. The actual count is re-
+  // queried at the top of every step so it reflects concurrent agent runs on
+  // the same project.
+  let toolCallRateCapPerHour = 200;
+  // Count of tool calls already recorded in DB for this project in the past
+  // hour BEFORE this run started. Used as a fixed offset in the intra-turn
+  // rate check so concurrent runs cannot collectively exceed the hourly cap
+  // within a single LLM turn.
+  let hourlyCountAtStart = 0;
+  try {
+    const { eq: _eq, sql: dSql } = await import("drizzle-orm");
+    const [capRow] = await db
+      .select({ toolCallRateCapPerHour: projectsTable.toolCallRateCapPerHour })
+      .from(projectsTable)
+      .where(_eq(projectsTable.id, input.projectId));
+    toolCallRateCapPerHour = capRow?.toolCallRateCapPerHour ?? 200;
+    const countRows = await db.execute(
+      dSql`SELECT count(*)::int AS cnt FROM agent_tool_calls
+           WHERE project_id = ${input.projectId}
+             AND called_at > now() - interval '1 hour'`,
+    );
+    hourlyCountAtStart = Number((countRows.rows?.[0] as Record<string, unknown>)?.cnt ?? 0);
+  } catch {
+    // non-fatal — fall back to defaults
+  }
+
   const startedAt = Date.now();
   const wallClockMs =
     typeof input.wallClockMs === "number" && Number.isFinite(input.wallClockMs)
@@ -1689,6 +1718,32 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     if (toolCalls.length >= STEP_CAP) {
       terminationReason = "step-cap";
       break;
+    }
+
+    // ── Per-project hourly rate limiter ───────────────────────────────────
+    // Count tool calls written to agent_tool_calls in the last 60 minutes for
+    // this project. This spans all concurrent agent runs so it acts as a hard
+    // project-level budget. Failure to query is non-fatal — we skip the check
+    // to avoid blocking the loop due to a transient DB error.
+    try {
+      const { sql: dSql } = await import("drizzle-orm");
+      const rows = await db.execute(
+        dSql`SELECT count(*)::int AS cnt FROM agent_tool_calls
+             WHERE project_id = ${input.projectId}
+               AND called_at > now() - interval '1 hour'`,
+      );
+      const recentCount = Number((rows.rows?.[0] as Record<string, unknown>)?.cnt ?? 0);
+      if (recentCount >= toolCallRateCapPerHour) {
+        terminationReason = "rate_limited";
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Agent paused: this project has reached its tool-call limit of ${toolCallRateCapPerHour}/hour. Try again in a little while.`,
+        );
+        break;
+      }
+    } catch {
+      // non-fatal — skip rate-limit check on query error
     }
 
     // Emit a live progress event so the frontend can show a step counter and
@@ -1887,6 +1942,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         noTruncate?: boolean;
         imageBase64?: string;
         imageMimeType?: string;
+        exitCode?: number;
       },
       durationMs: number,
     ): Promise<{ terminate: boolean; observation: string }> => {
@@ -1906,6 +1962,52 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         durationMs,
         preview: observation.slice(0, 400),
       });
+
+      // ── Agent audit write + atomic per-tool-call rate-limit check ──────────
+      // Synchronously INSERT the audit row, then immediately COUNT all rows for
+      // this project in the last hour (including the one just committed). This
+      // two-step approach is much tighter than fire-and-forget + stale baseline:
+      // each concurrent run's inserts are visible to the COUNT query once they
+      // commit, so the limit enforces correctly across concurrent agent runs.
+      // The INSERT + COUNT are two separate statements (not a CTE) so the COUNT
+      // sees the newly inserted row. Any DB error is non-fatal; we fall back to
+      // the stale hourlyCountAtStart + current-run length estimate.
+      let postInsertHourlyCount = 0;
+      try {
+        const { sql: dSql } = await import("drizzle-orm");
+        await db.insert(agentToolCallsTable).values({
+          projectId: input.projectId,
+          taskId: input.taskId ?? null,
+          toolName: callName,
+          argsSummary: JSON.stringify(redactedArgsForEvent).slice(0, 500),
+          stdoutPreview: observation.slice(0, 400),
+          exitCode: result.exitCode ?? null,
+          ok: result.ok,
+          durationMs,
+        });
+        const countRows = await db.execute(
+          dSql`SELECT count(*)::int AS n FROM agent_tool_calls
+               WHERE project_id = ${input.projectId}
+                 AND called_at > now() - interval '1 hour'`,
+        );
+        postInsertHourlyCount = Number((countRows.rows?.[0] as Record<string, unknown>)?.n ?? 0);
+      } catch {
+        // non-fatal — fall back to stale estimate so the loop is never aborted
+        // due to an audit write failure
+        postInsertHourlyCount = hourlyCountAtStart + toolCalls.length;
+      }
+
+      // ── Per-tool-call rate limit (intra-turn enforcement) ─────────────────
+      // postInsertHourlyCount is the post-commit count — it includes all rows
+      // from concurrent runs that committed before our COUNT query, making this
+      // a near-strict project-wide hard cap enforced after every individual call.
+      if (postInsertHourlyCount >= toolCallRateCapPerHour) {
+        terminationReason = "rate_limited";
+        return {
+          terminate: true,
+          observation: `Rate limit reached: ${postInsertHourlyCount} of ${toolCallRateCapPerHour} allowed tool calls used this hour. Try again later.`,
+        };
+      }
 
       // Task #743: stream a structured `tool_call` event so the chat UI can
       // render each invocation as a collapsible step with args + truncated
@@ -2013,12 +2115,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         callIdx++;
       }
 
-      // Pre-execution STEP_CAP clamp: never start more parallel calls than the
-      // remaining tool-call budget allows. Without this, a single LLM response
-      // emitting many parallel-safe calls could fire billable/network side
-      // effects past STEP_CAP before the mid-loop guard in handleToolResult
-      // observed the breach.
+      // Pre-execution budget clamps: never start more parallel calls than the
+      // remaining STEP_CAP or hourly rate-limit budget allows. Without these
+      // pre-checks a single LLM response emitting many parallel-safe calls could
+      // fire side effects past either cap before handleToolResult observes it.
       if (batch.length > 0) {
+        // 1) STEP_CAP clamp
         const remainingBudget = Math.max(0, STEP_CAP - toolCalls.length);
         if (remainingBudget === 0) {
           terminationReason = "step-cap";
@@ -2027,6 +2129,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
         if (batch.length > remainingBudget) {
           batch.length = remainingBudget;
+        }
+
+        // 2) Hourly rate-limit clamp: use the conservative estimate
+        //    (hourlyCountAtStart + tools run so far) so parallel batches cannot
+        //    collectively overshoot the cap in a single turn.
+        const estimatedHourlyUsed = hourlyCountAtStart + toolCalls.length;
+        const remainingHourlyBudget = Math.max(0, toolCallRateCapPerHour - estimatedHourlyUsed);
+        if (remainingHourlyBudget === 0) {
+          terminationReason = "rate_limited";
+          await safeEvent(
+            input.onEvent,
+            "narration",
+            `Agent paused: this project has reached its tool-call limit of ${toolCallRateCapPerHour}/hour. Try again in a little while.`,
+          );
+          stepFinalized = true;
+          break;
+        }
+        if (batch.length > remainingHourlyBudget) {
+          batch.length = remainingHourlyBudget;
         }
         const parsedBatch = batch.map((c) => parseArgs(c));
         const tBatchStart = Date.now();
@@ -2060,6 +2181,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 noTruncate: r.noTruncate,
                 imageBase64: r.imageBase64,
                 imageMimeType: r.imageMimeType,
+                exitCode: r.exitCode,
               }))
               .catch((err) => ({
                 ok: false as const,
@@ -3500,6 +3622,8 @@ function maybeChargeSenseBatch(ctx: ToolCtx): void {
 export async function executeTool(ctx: ToolCtx): Promise<{
   ok: boolean;
   observation: string;
+  /** Process exit code — populated for run_command / pkg_install / run_e2e. Null for informational tools. */
+  exitCode?: number;
   noTruncate?: boolean;
   imageBase64?: string;
   imageMimeType?: string;
@@ -3887,6 +4011,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         });
         return {
           ok: false,
+          exitCode: 126,
           observation: JSON.stringify({
             blocked: true,
             reason,
@@ -3910,6 +4035,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         });
         return {
           ok: r.exitCode === 0,
+          exitCode: r.exitCode,
           observation: `[${kind}] exit=${r.exitCode}\n${r.output}`,
         };
       }
@@ -3917,6 +4043,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       if (stack === "static-html" || stack === "mobile-cross") {
         return {
           ok: false,
+          exitCode: 1,
           observation:
             "ERROR: shell commands are not available for this stack. Use argv ['__inprocess__','<check-id>'] to run an in-process validator instead.",
         };
@@ -4113,11 +4240,16 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         stdout,
         stderr,
       });
-      if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
+      if (r.aborted) return { ok: false, exitCode: 130, observation: "ERROR: aborted by user" };
       if (r.timedOut)
-        return { ok: false, observation: `ERROR: command exceeded ${timeoutMs}ms timeout` };
+        return {
+          ok: false,
+          exitCode: 124,
+          observation: `ERROR: command exceeded ${timeoutMs}ms timeout`,
+        };
       return {
         ok,
+        exitCode,
         observation: `exit=${exitCode}\n${combined.slice(0, MAX_OBSERVATION_CHARS)}`,
       };
     }

@@ -237,6 +237,13 @@ export const projectsTable = pgTable("projects", {
   // run_command or pkg_install call and asks the user to approve or reject it.
   // Default false — fully autonomous. Users can opt in from Project Settings.
   requireCommandApproval: boolean("require_command_approval").notNull().default(false),
+  /**
+   * Per-project hard cap on agent loop tool calls per hour.
+   * When the count of agent_tool_calls rows in the last 60 minutes reaches
+   * this value, the agent loop terminates with reason "rate_limited".
+   * Default 200. Admins can raise it per-project.
+   */
+  toolCallRateCapPerHour: integer("tool_call_rate_cap_per_hour").notNull().default(200),
   // projectMode: surface that created this project.
   // 'builder'   — AI Build Mode (default, existing behaviour).
   // 'developer' — Developer Mode cloud IDE (Task #898).

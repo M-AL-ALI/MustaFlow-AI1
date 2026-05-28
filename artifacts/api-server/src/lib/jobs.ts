@@ -5340,6 +5340,220 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (project.agentMode as AgentMode) ??
     "power";
 
+  // ── SAST gate (before any files are written or synced) ─────────────────
+  // Run a static security scan on all JS/HTML files in the staging snapshot.
+  // If any critical-severity findings are detected, block the apply and surface
+  // the findings so the user can fix them before promoting to project_files.
+  {
+    const { runSastCheck } = await import("./checks/sast");
+    const sastResult = runSastCheck(builderFiles);
+    const criticalFindings = sastResult.findings.filter((f) => f.severity === "error");
+    if (sastResult.status === "fail" && criticalFindings.length > 0) {
+      const summary = criticalFindings
+        .slice(0, 5)
+        .map((f) => `  • ${f.file}:${f.line ?? "?"} — ${f.message}`)
+        .join("\n");
+      const humanMessage =
+        `Apply blocked by SAST: ${criticalFindings.length} critical security issue(s) found in staged files.\n${summary}\n` +
+        `Fix these issues in the Agent's output before applying.`;
+
+      // Store structured findings so the UI can render a "Fix with AI" card
+      const structuredResult = JSON.stringify({
+        type: "sast_block",
+        findings: criticalFindings.slice(0, 10).map((f) => ({
+          file: f.file,
+          line: f.line ?? null,
+          message: f.message,
+          detail: f.detail ?? null,
+          severity: f.severity,
+        })),
+        message: humanMessage,
+        fixPrompt: `Fix the following SAST security issues found in the staged files:\n${summary}`,
+      });
+
+      await db
+        .update(agentTasksTable)
+        .set({
+          status: "failed",
+          result: structuredResult.slice(0, 2000),
+          completedAt: new Date(),
+        })
+        .where(eq(agentTasksTable.id, taskId));
+
+      throw new Error(humanMessage);
+    }
+    if (sastResult.status === "warning" && sastResult.findings.length > 0) {
+      // Non-blocking warnings — surface in narration only
+      const warnSummary = sastResult.findings
+        .slice(0, 3)
+        .map((f) => `${f.file}:${f.line ?? "?"}: ${f.message}`)
+        .join("; ");
+      void emitEvent(taskId, "narration", `SAST warnings (non-blocking): ${warnSummary}`);
+    }
+  }
+
+  // ── npm audit gate (before writing files, uses staged package.json) ─────
+  // When the staging snapshot includes a modified package.json or
+  // package-lock.json, run npm audit in the project's container before
+  // applying to catch high/critical CVEs introduced by new dependencies.
+  {
+    const hasPackageChange = builderFiles.some(
+      (f) => f.path === "package.json" || f.path === "package-lock.json",
+    );
+    if (hasPackageChange) {
+      const [containerRow] = await db
+        .select({
+          containerId: projectsTable.containerId,
+          containerStatus: projectsTable.containerStatus,
+        })
+        .from(projectsTable)
+        .where(eq(projectsTable.id, projectId));
+
+      if (!containerRow?.containerId) {
+        // No container is running for this project — we cannot execute npm audit.
+        // Fail closed: block the apply rather than letting unvetted dependencies through.
+        const noContainerMsg =
+          "Apply blocked: package.json was changed but no container is running to execute npm audit. Start a container from the Terminal tab and retry.";
+        const noContainerResult = JSON.stringify({
+          type: "npm_audit_block",
+          critical: 0,
+          high: 0,
+          parsed: false,
+          packages: [],
+          message: noContainerMsg,
+          fixPrompt:
+            "A container must be running before package.json changes can be applied. Start the container from the Terminal tab, then retry.",
+        });
+        await db
+          .update(agentTasksTable)
+          .set({
+            status: "failed",
+            result: noContainerResult.slice(0, 2000),
+            completedAt: new Date(),
+          })
+          .where(eq(agentTasksTable.id, taskId));
+        throw new Error(noContainerMsg);
+      }
+
+      void emitEvent(taskId, "narration", "Running npm audit on staged dependencies…");
+      try {
+        const { execInContainer, startContainer, getContainerStatus, syncFilesToContainer } =
+          await import("./container");
+
+        if (containerRow.containerStatus !== "running") {
+          await startContainer(containerRow.containerId, projectId);
+          const wakeDeadline = Date.now() + 30_000;
+          while (Date.now() < wakeDeadline) {
+            const liveStatus = await getContainerStatus(containerRow.containerId);
+            if (liveStatus === "running") break;
+            await new Promise<void>((r) => setTimeout(r, 2000));
+          }
+        }
+
+        // Write only the package files to the container for the audit check
+        const pkgFiles = builderFiles.filter(
+          (f) => f.path === "package.json" || f.path === "package-lock.json",
+        );
+        await syncFilesToContainer(containerRow.containerId, projectId, pkgFiles);
+
+        const auditResult = await execInContainer(
+          containerRow.containerId,
+          ["npm", "audit", "--audit-level=high", "--json"],
+          projectId,
+        );
+        if (!auditResult.ok) {
+          // npm audit --audit-level=high exits non-zero only when vulnerabilities
+          // at or above the specified severity are found. Treat any non-zero exit
+          // as a blocking failure (fail-closed). We attempt JSON parse for a richer
+          // error message; failure to parse does NOT allow the apply to proceed.
+          let highCount: number | null = null;
+          let criticalCount: number | null = null;
+          const affectedPackages: Array<{ name: string; severity: string }> = [];
+          try {
+            const auditJson = JSON.parse(auditResult.output) as {
+              metadata?: { vulnerabilities?: { high?: number; critical?: number } };
+              vulnerabilities?: Record<
+                string,
+                { name?: string; severity?: string; isDirect?: boolean }
+              >;
+            };
+            highCount = auditJson?.metadata?.vulnerabilities?.high ?? 0;
+            criticalCount = auditJson?.metadata?.vulnerabilities?.critical ?? 0;
+            // Extract individual affected package names + severities (top 10)
+            if (auditJson?.vulnerabilities) {
+              for (const [pkgName, vuln] of Object.entries(auditJson.vulnerabilities)) {
+                const sev = vuln?.severity ?? "unknown";
+                if (sev === "high" || sev === "critical") {
+                  affectedPackages.push({ name: vuln?.name ?? pkgName, severity: sev });
+                  if (affectedPackages.length >= 10) break;
+                }
+              }
+            }
+          } catch {
+            // JSON parse failed — output is probably truncated or plain-text npm noise.
+            // Fail closed: the exit code is non-zero, so vulnerabilities were found.
+          }
+
+          const pkgList =
+            affectedPackages.length > 0
+              ? affectedPackages.map((p) => `${p.name} (${p.severity})`).join(", ")
+              : null;
+          const humanMessage =
+            highCount !== null && criticalCount !== null
+              ? `Apply blocked by npm audit: ${criticalCount} critical and ${highCount} high severity vulnerability(ies) found in staged dependencies${pkgList ? ` (${pkgList})` : ""}. Review and update the affected packages before applying.`
+              : `Apply blocked by npm audit: high/critical vulnerabilities detected in staged dependencies (could not parse full report). Review and update the affected packages before applying.`;
+
+          const fixPromptPkgPart =
+            affectedPackages.length > 0
+              ? `Affected packages: ${affectedPackages.map((p) => p.name).join(", ")}. `
+              : "";
+          const structuredResult = JSON.stringify({
+            type: "npm_audit_block",
+            critical: criticalCount ?? 0,
+            high: highCount ?? 0,
+            parsed: highCount !== null && criticalCount !== null,
+            packages: affectedPackages,
+            message: humanMessage,
+            fixPrompt:
+              highCount !== null && criticalCount !== null
+                ? `Fix the npm dependency security vulnerabilities (${criticalCount} critical, ${highCount} high) found in package.json. ${fixPromptPkgPart}Update the affected packages to patched versions and re-submit.`
+                : `Fix the high/critical npm dependency vulnerabilities in package.json. Run 'npm audit fix' and update affected packages to patched versions.`,
+          });
+
+          await db
+            .update(agentTasksTable)
+            .set({
+              status: "failed",
+              result: structuredResult.slice(0, 2000),
+              completedAt: new Date(),
+            })
+            .where(eq(agentTasksTable.id, taskId));
+          throw new Error(humanMessage);
+        }
+      } catch (npmAuditErr) {
+        // Re-throw intentional block errors from our own vulnerability check.
+        if (npmAuditErr instanceof Error && npmAuditErr.message.startsWith("Apply blocked")) {
+          throw npmAuditErr;
+        }
+        // Any other error (container unreachable, npm not installed, exec timeout, etc.)
+        // means we could NOT verify the dependency audit. Fail closed: block the apply
+        // rather than silently allow potentially unsafe dependencies through.
+        logger.warn(
+          { err: npmAuditErr, projectId, taskId },
+          "npm audit pre-check failed — blocking apply (fail-closed)",
+        );
+        const errMsg = `Apply blocked: dependency security audit could not be completed (${
+          npmAuditErr instanceof Error ? npmAuditErr.message : String(npmAuditErr)
+        }). Verify the container is running and retry.`;
+        await db
+          .update(agentTasksTable)
+          .set({ status: "failed", result: errMsg.slice(0, 500), completedAt: new Date() })
+          .where(eq(agentTasksTable.id, taskId));
+        throw new Error(errMsg);
+      }
+    }
+  }
+
   // Staging gate: project_files are NOT modified until this point. The Task Agent
   // works entirely against task.stagingSnapshot while the job is in "needs_review".
   // Quick Preview and Full App Preview both read from project_files only, so draft

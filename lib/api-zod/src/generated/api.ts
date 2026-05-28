@@ -2494,6 +2494,7 @@ export const ListSecretsResponseItem = zod.object({
   "category": zod.string().nullish(),
   "envWarning": zod.string().nullish(),
   "minRole": zod.enum(['viewer', 'member', 'admin', 'owner']).optional().describe('Minimum org role required to view the decrypted secret value'),
+  "isPreviewSafe": zod.boolean().optional().describe('When true, this secret is injected into the dev\/test container. When false, it is excluded.'),
   "createdAt": zod.coerce.date()
 })
 export const ListSecretsResponse = zod.array(ListSecretsResponseItem)
