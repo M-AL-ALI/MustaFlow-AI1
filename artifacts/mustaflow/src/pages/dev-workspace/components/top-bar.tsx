@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
+import { ThemeToggle } from "@/components/theme-toggle";
 import logoUrl from "/logo.png";
 import type { PanelId } from "./icon-rail";
 
@@ -367,6 +368,13 @@ export function TopBar({
             </Tooltip>
           ))}
         </div>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ThemeToggle className="h-7 w-7" />
+          </TooltipTrigger>
+          <TooltipContent>Toggle light / dark mode</TooltipContent>
+        </Tooltip>
 
         <div className="w-px h-5 bg-border mx-1 shrink-0" />
 
