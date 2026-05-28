@@ -1,0 +1,127 @@
+Phase 1 is finished. Before we approve Phase 2, please provide the full Phase 1 final validation report.
+
+Do not start Phase 2 yet.
+
+Please verify and report the following:
+
+1. Final affected files
+    List every file created or modified for Ora Phase 1.
+2. Final routes
+    Confirm the final public routes:
+
+* /api/public-ai/session
+* /api/public-ai/chat
+* any other Phase 1 route added
+
+Confirm they work without login and are isolated from protected Builder routes.
+
+3. Kill switch proof
+    Test PUBLIC_AI_ENABLED=false and prove Ora returns a safe disabled response or 503 without breaking the landing page.
+4. Model proof
+    Show the actual model IDs used at runtime:
+
+* premium Ora response model
+* simple FAQ model
+* classifier model
+* fallback model
+
+Also confirm:
+
+* gpt-5-nano does not produce visible visitor responses
+* gpt-5-mini is only used for simple FAQ
+* serious answers use premium model
+* fallback to claude-sonnet-4-6 works if primary fails
+* no raw model errors are exposed to visitors
+
+5. Rate limit proof
+    Confirm:
+
+* session message cap works
+* per-IP daily session cap works
+* Ora uses oraLimiter
+* Ora does not use or compete with aiBuilderLimiter
+
+6. Security boundary proof
+    Confirm public Ora routes cannot:
+
+* import project/user/secret/credit models
+* call Builder pipelines
+* access Developer Mode
+* access project files
+* access project database
+* access secrets
+* deploy or publish anything
+* create projects
+* edit code
+
+7. Refusal behavior proof
+    Test these prompts and show Ora’s response:
+
+* “Build me an app”
+* “Edit my code”
+* “Deploy my project”
+* “Open Developer Mode”
+* “Access my database”
+* “Show my project files”
+
+Ora should refuse politely and guide the visitor to sign in and continue inside the protected MustaFlow Builder.
+
+8. Multilingual proof
+    Test:
+
+* English
+* Arabic
+* Spanish
+
+Confirm Ora detects the language and replies in the same language.
+
+9. Session memory proof
+    Confirm:
+
+* conversation continues during the active session
+* refresh restores recent conversation if expected
+* session expires correctly
+* session reset is graceful
+* no anonymous chat content is permanently stored
+
+10. Logging/privacy proof
+    Confirm:
+
+* no visitor message content appears in server logs
+* no uploaded/private content is logged
+* model ID, latency, fallback status, and token budget can be logged safely without storing private messages
+
+11. UI proof
+    Show proof or screenshots for:
+
+* Ora Lens inline panel on desktop
+* Ora Lens inline panel on mobile
+* floating Ask Ora bubble on desktop
+* mobile drawer/bottom sheet behavior
+* “Talk to Ora in your language” label
+* “Continue in MustaFlow Builder” CTA behavior
+
+12. Tests run
+    List all tests run and pass/fail results:
+
+* unit tests
+* integration tests
+* route tests
+* UI/build tests
+* manual live smoke tests
+
+13. Build status
+    Confirm:
+
+* TypeScript passes
+* lint status
+* production build status
+* no unrelated regressions
+* git status/commit hash if committed
+
+14. Rollback plan
+    Explain exactly how to disable Ora quickly if needed.
+
+After this report, I will review and decide whether Phase 2 can be approved.
+
+Do not start Phase 2 until I explicitly approve it.
