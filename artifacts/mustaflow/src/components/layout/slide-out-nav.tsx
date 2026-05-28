@@ -226,16 +226,14 @@ export function SlideOutNav() {
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        {/* Header — logo + wordmark */}
+        {/* Header — logo + wordmark (decorative, not a link) */}
         <div className="px-4 py-5 shrink-0">
-          <Link href="/projects" onClick={close}>
-            <div className="flex items-center gap-3 cursor-pointer">
-              <div className="rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-2 shadow">
-                <img src={logoUrl} alt="MustaFlow AI" className="h-8 w-auto object-contain" />
-              </div>
-              <span className="text-base font-bold text-foreground">MustaFlow</span>
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-2 shadow">
+              <img src={logoUrl} alt="MustaFlow AI" className="h-8 w-auto object-contain" />
             </div>
-          </Link>
+            <span className="text-base font-bold text-foreground">MustaFlow</span>
+          </div>
         </div>
 
         {/* Action buttons */}
