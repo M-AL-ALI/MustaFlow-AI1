@@ -329,6 +329,19 @@
 }
 
 @layer utilities {
+  @keyframes logo-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+  .animate-float {
+    animation: logo-float 4s ease-in-out infinite;
+    will-change: transform;
+  }
   @keyframes agent-icon-spin {
     from {
       transform: rotate(0deg);

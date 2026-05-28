@@ -383,15 +383,16 @@ export default function HomePage() {
 
         {/* Hero Section */}
         <div className="max-w-4xl mx-auto pt-10 px-6">
-          {/* Logo treatment — compact framed mark */}
+          {/* Logo treatment — wider framed mark with dynamic glow + float */}
           <div className="flex justify-center mb-6">
-            <div className="relative">
-              <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.3)_0%,transparent_70%)] blur-2xl pointer-events-none" />
-              <div className="relative rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 p-3 shadow-xl ring-1 ring-primary/20">
+            <div className="relative group">
+              {/* Pulsing dynamic glow */}
+              <div className="absolute -inset-8 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.35)_0%,transparent_70%)] blur-3xl pointer-events-none animate-pulse" />
+              <div className="relative rounded-3xl border border-border bg-gradient-to-br from-card via-card to-primary/5 px-8 py-4 shadow-2xl ring-1 ring-primary/20 transition-transform duration-500 ease-out group-hover:scale-[1.03] animate-float">
                 <img
                   src={`${import.meta.env.BASE_URL}logo.png`}
                   alt="MustaFlow AI"
-                  className="h-16 w-16 sm:h-20 sm:w-20 object-contain"
+                  className="h-24 w-32 sm:h-28 sm:w-40 object-contain"
                 />
               </div>
             </div>
