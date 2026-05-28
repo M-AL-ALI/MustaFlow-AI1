@@ -33,7 +33,7 @@ import {
   FolderKanban,
   RefreshCw,
 } from "lucide-react";
-import { useVoiceInput, getVoiceLang } from "@/hooks/use-voice-input";
+import { useVoiceInput, useVoiceLang } from "@/hooks/use-voice-input";
 
 const EXAMPLE_PROMPTS = [
   "Mobile app proposal",
@@ -110,7 +110,7 @@ function HomeHero() {
     }, []),
   );
 
-  const voiceLang = getVoiceLang();
+  const voiceLang = useVoiceLang();
 
   function handleMicClick() {
     if (!isRecording) {

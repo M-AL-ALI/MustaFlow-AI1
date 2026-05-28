@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useSyncExternalStore } from "react";
 
 type SpeechRecognitionResultEvent = {
   resultIndex: number;
@@ -41,6 +41,18 @@ export function getVoiceLang(): string {
 export function setVoiceLang(lang: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(VOICE_LANG_KEY, lang);
+}
+
+function subscribeToVoiceLang(callback: () => void): () => void {
+  const handler = (e: StorageEvent) => {
+    if (e.key === VOICE_LANG_KEY) callback();
+  };
+  window.addEventListener("storage", handler);
+  return () => window.removeEventListener("storage", handler);
+}
+
+export function useVoiceLang(): string {
+  return useSyncExternalStore(subscribeToVoiceLang, getVoiceLang, () => "en-US");
 }
 
 export function useVoiceInput(onTranscript: (text: string) => void, lang?: string) {

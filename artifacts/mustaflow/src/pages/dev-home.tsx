@@ -36,7 +36,7 @@ import {
   FileCode2,
   Zap,
 } from "lucide-react";
-import { useVoiceInput, getVoiceLang } from "@/hooks/use-voice-input";
+import { useVoiceInput, useVoiceLang } from "@/hooks/use-voice-input";
 
 const TEMPLATE_CHIPS: Array<{
   label: string;
@@ -283,7 +283,7 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
     }, []),
   );
 
-  const voiceLang = getVoiceLang();
+  const voiceLang = useVoiceLang();
 
   function handleMicClick() {
     if (!isRecording) {
