@@ -5,8 +5,6 @@ import { AgentIcon } from "@/components/agent-icon";
 import {
   Monitor,
   LayoutDashboard,
-  Paintbrush,
-  BarChart,
   Zap,
   Database,
   MessageSquare,
@@ -34,11 +32,8 @@ import {
   Key,
   Plug,
   ShieldCheck,
-  Code2,
-  Cpu,
   Smartphone,
   Presentation,
-  Clapperboard,
   Bot,
   Lightbulb,
   Rocket,
@@ -124,22 +119,6 @@ const ROTATING_PROMPTS = [
   "A pitch deck for my startup's seed round…",
   "An automation that emails me a weekly summary…",
   "A web app for organising my recipe collection…",
-];
-
-// Quick-start chips — developer-oriented first, maker-oriented second
-
-const CHIPS = [
-  { name: "REST API", icon: Database, kind: "api" },
-  { name: "Python", icon: Code2, kind: "api" },
-  { name: "Go", icon: Cpu, kind: "api" },
-  { name: "Website", icon: Monitor, kind: "web" },
-  { name: "Dashboard", icon: LayoutDashboard, kind: "dashboard" },
-  { name: "Slide Deck", icon: Presentation, kind: "slides" },
-  { name: "Animation", icon: Clapperboard, kind: "animation" },
-  { name: "Automation", icon: Zap, kind: "automation" },
-  { name: "Design", icon: Paintbrush, kind: "design" },
-  { name: "Data Viz", icon: BarChart, kind: "dashboard" },
-  { name: "AI Chatbot", icon: MessageSquare, kind: "chatbot" },
 ];
 
 // Developer feature cards — all features already exist in the platform
@@ -403,26 +382,13 @@ export default function HomePage() {
         </header>
 
         {/* Hero Section */}
-        <div className="max-w-4xl mx-auto pt-16 px-6">
-          {/* Big logo treatment */}
-          <div className="flex justify-center mb-10">
-            <div className="relative">
-              <div className="absolute -inset-10 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.35)_0%,transparent_70%)] blur-3xl pointer-events-none" />
-              <div className="relative rounded-[2.5rem] border-2 border-border bg-gradient-to-br from-card via-card to-primary/5 p-7 shadow-2xl ring-1 ring-primary/20">
-                <img
-                  src={`${import.meta.env.BASE_URL}logo.png`}
-                  alt="MustaFlow AI"
-                  className="h-40 w-40 sm:h-48 sm:w-48 object-contain"
-                />
-              </div>
-            </div>
-          </div>
-          <div className="text-center mb-6">
-            <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-6">
+        <div className="max-w-4xl mx-auto pt-12 px-6">
+          <div className="text-center mb-5">
+            <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-5">
               <Sparkles className="h-3 w-3" />
               Code optional
             </p>
-            <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight gradient-text mb-5 leading-tight">
+            <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight gradient-text mb-4 leading-tight">
               Build. Debug. Deploy.
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
@@ -575,29 +541,8 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="flex flex-wrap justify-center gap-2 max-w-3xl mx-auto mb-6">
-            {CHIPS.map((chip) => (
-              <button
-                key={chip.name}
-                aria-label={`Build a ${chip.name}`}
-                onClick={() => {
-                  const template = `Build me a ${chip.name.toLowerCase()}`;
-                  if (!prompt.trim()) {
-                    setPrompt(template);
-                  } else {
-                    handleBuild(chip.kind);
-                  }
-                }}
-                className="group flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-card hover:bg-muted chip-hover text-sm font-medium text-foreground"
-              >
-                <chip.icon className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors duration-150" />
-                {chip.name}
-              </button>
-            ))}
-          </div>
-
           {/* Social proof */}
-          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-muted-foreground/70 mb-20">
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-muted-foreground/70 mt-10 mb-20">
             {[
               "No credit card to start",
               "Publish in seconds",
