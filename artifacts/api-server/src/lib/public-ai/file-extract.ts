@@ -39,7 +39,9 @@ async function extractPdf(buffer: Buffer): Promise<string> {
     return truncateWithNote(text);
   } catch (err) {
     if (err instanceof ExtractionError) throw err;
-    throw new ExtractionError("This PDF could not be read. It may be encrypted, scanned without OCR, or corrupted.");
+    throw new ExtractionError(
+      "This PDF could not be read. It may be encrypted, scanned without OCR, or corrupted.",
+    );
   }
 }
 
@@ -52,7 +54,9 @@ async function extractDocx(buffer: Buffer): Promise<string> {
     return truncateWithNote(text);
   } catch (err) {
     if (err instanceof ExtractionError) throw err;
-    throw new ExtractionError("This Word document could not be read. It may be corrupted or use an unsupported format.");
+    throw new ExtractionError(
+      "This Word document could not be read. It may be corrupted or use an unsupported format.",
+    );
   }
 }
 
@@ -63,7 +67,9 @@ function extractTxt(buffer: Buffer): string {
     return truncateWithNote(text);
   } catch (err) {
     if (err instanceof ExtractionError) throw err;
-    throw new ExtractionError("This text file could not be read. Please ensure it is UTF-8 encoded.");
+    throw new ExtractionError(
+      "This text file could not be read. Please ensure it is UTF-8 encoded.",
+    );
   }
 }
 

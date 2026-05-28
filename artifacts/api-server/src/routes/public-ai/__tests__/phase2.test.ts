@@ -5,7 +5,12 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import { validateFile } from "../../../lib/public-ai/file-validate";
 import { scanContent } from "../../../lib/public-ai/content-safety";
-import { storeFile, getFile, FILE_LIMIT_PER_SESSION, MAX_TEXT_CHARS_PER_FILE } from "../../../lib/public-ai/file-store";
+import {
+  storeFile,
+  getFile,
+  FILE_LIMIT_PER_SESSION,
+  MAX_TEXT_CHARS_PER_FILE,
+} from "../../../lib/public-ai/file-store";
 
 vi.mock("../../../lib/ai-providers", () => ({
   createChatCompletion: vi.fn(),
@@ -67,7 +72,11 @@ describe("validateFile — type detection", () => {
   });
 
   it("rejects .xlsx extension", () => {
-    const result = validateFile(Buffer.concat([ZIP_MAGIC, Buffer.alloc(100)]), "data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const result = validateFile(
+      Buffer.concat([ZIP_MAGIC, Buffer.alloc(100)]),
+      "data.xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.statusCode).toBe(415);
   });
@@ -79,8 +88,15 @@ describe("validateFile — type detection", () => {
   });
 
   it("rejects ZIP magic bytes renamed as .docx without DOCX structure", () => {
-    const buf = Buffer.concat([ZIP_MAGIC, Buffer.from("random zip content without word/ or Content_Types")]);
-    const result = validateFile(buf, "fake.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    const buf = Buffer.concat([
+      ZIP_MAGIC,
+      Buffer.from("random zip content without word/ or Content_Types"),
+    ]);
+    const result = validateFile(
+      buf,
+      "fake.docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.statusCode).toBe(415);
   });
@@ -198,7 +214,10 @@ describe("Route-level: upload endpoint", () => {
   it("POST /api/public-ai/upload returns 401 with no session cookie", async () => {
     const res = await request(app)
       .post("/api/public-ai/upload")
-      .attach("file", Buffer.from("hello world"), { filename: "test.txt", contentType: "text/plain" });
+      .attach("file", Buffer.from("hello world"), {
+        filename: "test.txt",
+        contentType: "text/plain",
+      });
     expect(res.status).toBe(401);
   });
 
@@ -211,32 +230,53 @@ describe("Route-level: upload endpoint", () => {
   });
 
   it("POST /api/public-ai/upload returns 415 for unsupported file type", async () => {
-    const payload = { sessionId: crypto.randomUUID(), msgCount: 0, fileCount: 0, createdAt: Date.now() };
+    const payload = {
+      sessionId: crypto.randomUUID(),
+      msgCount: 0,
+      fileCount: 0,
+      createdAt: Date.now(),
+    };
     const token = jwt.sign(payload, TEST_SECRET, { expiresIn: 1800 });
 
     const res = await request(app)
       .post("/api/public-ai/upload")
       .set("Cookie", `ora-session=${token}`)
-      .attach("file", Buffer.from("malicious content"), { filename: "virus.exe", contentType: "application/octet-stream" });
+      .attach("file", Buffer.from("malicious content"), {
+        filename: "virus.exe",
+        contentType: "application/octet-stream",
+      });
     expect(res.status).toBe(415);
     expect(res.body.error).toBeDefined();
     expect(res.body.error).not.toContain("stack");
   });
 
   it("POST /api/public-ai/upload returns 429 when file count limit reached", async () => {
-    const payload = { sessionId: crypto.randomUUID(), msgCount: 0, fileCount: 3, createdAt: Date.now() };
+    const payload = {
+      sessionId: crypto.randomUUID(),
+      msgCount: 0,
+      fileCount: 3,
+      createdAt: Date.now(),
+    };
     const token = jwt.sign(payload, TEST_SECRET, { expiresIn: 1800 });
 
     const res = await request(app)
       .post("/api/public-ai/upload")
       .set("Cookie", `ora-session=${token}`)
-      .attach("file", Buffer.from("hello world"), { filename: "test.txt", contentType: "text/plain" });
+      .attach("file", Buffer.from("hello world"), {
+        filename: "test.txt",
+        contentType: "text/plain",
+      });
     expect(res.status).toBe(429);
     expect(res.body.fileCount).toBe(3);
   });
 
   it("POST /api/public-ai/upload accepts a valid TXT and returns fileRef", async () => {
-    const payload = { sessionId: crypto.randomUUID(), msgCount: 0, fileCount: 0, createdAt: Date.now() };
+    const payload = {
+      sessionId: crypto.randomUUID(),
+      msgCount: 0,
+      fileCount: 0,
+      createdAt: Date.now(),
+    };
     const token = jwt.sign(payload, TEST_SECRET, { expiresIn: 1800 });
 
     const res = await request(app)
@@ -284,7 +324,12 @@ describe("Route-level: file-analysis endpoint", () => {
   });
 
   it("POST /api/public-ai/file-analysis returns 404 for unknown fileRef", async () => {
-    const payload = { sessionId: crypto.randomUUID(), msgCount: 0, fileCount: 0, createdAt: Date.now() };
+    const payload = {
+      sessionId: crypto.randomUUID(),
+      msgCount: 0,
+      fileCount: 0,
+      createdAt: Date.now(),
+    };
     const token = jwt.sign(payload, TEST_SECRET, { expiresIn: 1800 });
 
     const res = await request(app)
@@ -357,7 +402,9 @@ describe("Route-level: file-analysis endpoint", () => {
 
   it("POST /api/public-ai/file-analysis never exposes raw model errors", async () => {
     const { createChatCompletion } = await import("../../../lib/ai-providers");
-    vi.mocked(createChatCompletion).mockRejectedValueOnce(new Error("model internal failure XYZ path /usr/share/models/gpt5.bin"));
+    vi.mocked(createChatCompletion).mockRejectedValueOnce(
+      new Error("model internal failure XYZ path /usr/share/models/gpt5.bin"),
+    );
 
     const sessionId = crypto.randomUUID();
     const ref = storeFile({

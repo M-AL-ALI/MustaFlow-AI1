@@ -1,6 +1,15 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
 import { useLocation } from "wouter";
-import { Send, Globe, ChevronDown, Paperclip, FileText, AlertCircle, Loader2, X } from "lucide-react";
+import {
+  Send,
+  Globe,
+  ChevronDown,
+  Paperclip,
+  FileText,
+  AlertCircle,
+  Loader2,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState } from "@/hooks/use-ora-chat";
 
@@ -44,21 +53,15 @@ function FileChip({
         "flex items-center gap-2 rounded-xl border px-3 py-2 text-xs mb-2",
         uploadState === "attached" &&
           "border-[hsl(265_85%_65%/0.4)] bg-[hsl(265_85%_65%/0.08)] text-foreground",
-        uploadState === "uploading" &&
-          "border-border bg-muted/30 text-muted-foreground",
-        uploadState === "error" &&
-          "border-destructive/40 bg-destructive/10 text-destructive",
+        uploadState === "uploading" && "border-border bg-muted/30 text-muted-foreground",
+        uploadState === "error" && "border-destructive/40 bg-destructive/10 text-destructive",
       )}
     >
-      {uploadState === "uploading" && (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-      )}
+      {uploadState === "uploading" && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
       {uploadState === "attached" && (
         <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
       )}
-      {uploadState === "error" && (
-        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-      )}
+      {uploadState === "error" && <AlertCircle className="h-3.5 w-3.5 shrink-0" />}
 
       <span className="flex-1 truncate min-w-0">
         {uploadState === "uploading" && `Uploading ${filename ?? "file"}…`}
@@ -80,10 +83,20 @@ function FileChip({
 
 export function OraPanel({ chat }: OraPanelProps) {
   const {
-    messages, isLoading, error, atLimit, language, setLanguage,
-    sendMessage, clearError,
-    uploadFile, clearAttachment,
-    attachedFile, uploadState, uploadError, clearUploadError,
+    messages,
+    isLoading,
+    error,
+    atLimit,
+    language,
+    setLanguage,
+    sendMessage,
+    clearError,
+    uploadFile,
+    clearAttachment,
+    attachedFile,
+    uploadState,
+    uploadError,
+    clearUploadError,
     session,
   } = chat;
 

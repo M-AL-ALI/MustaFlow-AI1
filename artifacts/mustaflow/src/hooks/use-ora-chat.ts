@@ -283,9 +283,7 @@ export function useOraChat(): UseOraChatReturn {
         });
         setUploadState("attached");
         setSession((prev) =>
-          prev
-            ? { ...prev, fileCount: data.fileCount, fileLimit: data.fileLimit }
-            : null,
+          prev ? { ...prev, fileCount: data.fileCount, fileLimit: data.fileLimit } : null,
         );
       } catch (err: unknown) {
         const msg = (err as Error).message ?? "Upload failed. Please try again.";
@@ -353,7 +351,13 @@ export function useOraChat(): UseOraChatReturn {
         setSession((prev) =>
           prev
             ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
-            : { sessionId: "", msgCount: data.msgCount, msgLimit: data.msgLimit, fileCount: 0, fileLimit: FILE_LIMIT },
+            : {
+                sessionId: "",
+                msgCount: data.msgCount,
+                msgLimit: data.msgLimit,
+                fileCount: 0,
+                fileLimit: FILE_LIMIT,
+              },
         );
       } catch (err: unknown) {
         const status = (err as { status?: number }).status;

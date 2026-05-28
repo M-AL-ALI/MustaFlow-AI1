@@ -1,6 +1,11 @@
 import { Router } from "express";
 import multer from "multer";
-import { validateSession, incrementFileCount, setSessionCookie, FILE_LIMIT_VALUE } from "../../lib/public-ai/session";
+import {
+  validateSession,
+  incrementFileCount,
+  setSessionCookie,
+  FILE_LIMIT_VALUE,
+} from "../../lib/public-ai/session";
 import { validateFile } from "../../lib/public-ai/file-validate";
 import { extractText, ExtractionError } from "../../lib/public-ai/file-extract";
 import { scanContent } from "../../lib/public-ai/content-safety";
@@ -78,9 +83,10 @@ router.post(
     } catch (err) {
       if (err instanceof ExtractionError) {
         res.status(422).json({
-          error: err.message === "no-text"
-            ? "This file appears to be empty or contains no readable text."
-            : err.message,
+          error:
+            err.message === "no-text"
+              ? "This file appears to be empty or contains no readable text."
+              : err.message,
         });
       } else {
         res.status(422).json({
@@ -101,7 +107,8 @@ router.post(
     const sessionTotal = getTotalCharsForSession(session.sessionId);
     if (sessionTotal + extractedText.length > MAX_TOTAL_CHARS_PER_SESSION) {
       res.status(429).json({
-        error: "You have uploaded too much document content in this session. Please start a new session to continue.",
+        error:
+          "You have uploaded too much document content in this session. Please start a new session to continue.",
       });
       return;
     }

@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
-import { validateSession, incrementMessageCount, setSessionCookie, MSG_LIMIT_VALUE } from "../../lib/public-ai/session";
+import {
+  validateSession,
+  incrementMessageCount,
+  setSessionCookie,
+  MSG_LIMIT_VALUE,
+} from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 import { logger } from "../../lib/logger";
@@ -27,8 +32,7 @@ const bodySchema = z.object({
 function buildSystemPrompt(language: string | undefined): string {
   let prompt = ORA_SYSTEM_PROMPT;
   if (language && language !== "auto") {
-    prompt +=
-      `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`;
+    prompt += `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`;
   }
   return prompt;
 }
@@ -39,7 +43,11 @@ function buildSystemPrompt(language: string | undefined): string {
  * This prevents document content from overriding Ora's system prompt or safety
  * boundaries via prompt injection embedded in the file.
  */
-function buildDocumentUserBlock(filename: string, extractedText: string, userQuestion: string): string {
+function buildDocumentUserBlock(
+  filename: string,
+  extractedText: string,
+  userQuestion: string,
+): string {
   return [
     "[DOCUMENT REFERENCE — UNTRUSTED CONTENT]",
     `File: ${filename}`,
@@ -79,7 +87,8 @@ router.post("/public-ai/file-analysis", async (req, res) => {
 
   if (session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
-      error: "You have reached the message limit for this session. Start a new session to continue.",
+      error:
+        "You have reached the message limit for this session. Start a new session to continue.",
       msgCount: session.msgCount,
       msgLimit: MSG_LIMIT_VALUE,
     });
@@ -102,7 +111,11 @@ router.post("/public-ai/file-analysis", async (req, res) => {
   }
 
   const systemPrompt = buildSystemPrompt(language);
-  const documentUserBlock = buildDocumentUserBlock(fileEntry.filename, fileEntry.extractedText, message);
+  const documentUserBlock = buildDocumentUserBlock(
+    fileEntry.filename,
+    fileEntry.extractedText,
+    message,
+  );
 
   const historyMessages = messages
     .slice(-20)
@@ -153,7 +166,10 @@ router.post("/public-ai/file-analysis", async (req, res) => {
       });
       reply = result.choices[0]?.message?.content?.trim() ?? null;
     } catch (fallbackErr) {
-      logger.error({ component: "ora-file-analysis", err: fallbackErr }, "Fallback model also failed");
+      logger.error(
+        { component: "ora-file-analysis", err: fallbackErr },
+        "Fallback model also failed",
+      );
     }
   }
 

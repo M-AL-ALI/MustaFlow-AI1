@@ -8,14 +8,65 @@
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const BLOCKED_EXTENSIONS = new Set([
-  ".exe", ".sh", ".bash", ".bat", ".cmd", ".ps1", ".msi", ".dll", ".app",
-  ".js", ".ts", ".jsx", ".tsx", ".py", ".rb", ".php", ".go", ".rs", ".java",
-  ".zip", ".tar", ".gz", ".bz2", ".rar", ".7z", ".xz",
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff",
-  ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flac", ".ogg",
-  ".csv", ".xlsx", ".xls", ".ods", ".pptx", ".ppt", ".odp",
-  ".html", ".htm", ".xml", ".json", ".yaml", ".yml",
-  ".db", ".sqlite", ".sql",
+  ".exe",
+  ".sh",
+  ".bash",
+  ".bat",
+  ".cmd",
+  ".ps1",
+  ".msi",
+  ".dll",
+  ".app",
+  ".js",
+  ".ts",
+  ".jsx",
+  ".tsx",
+  ".py",
+  ".rb",
+  ".php",
+  ".go",
+  ".rs",
+  ".java",
+  ".zip",
+  ".tar",
+  ".gz",
+  ".bz2",
+  ".rar",
+  ".7z",
+  ".xz",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".bmp",
+  ".ico",
+  ".tiff",
+  ".mp3",
+  ".mp4",
+  ".wav",
+  ".avi",
+  ".mov",
+  ".mkv",
+  ".flac",
+  ".ogg",
+  ".csv",
+  ".xlsx",
+  ".xls",
+  ".ods",
+  ".pptx",
+  ".ppt",
+  ".odp",
+  ".html",
+  ".htm",
+  ".xml",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".db",
+  ".sqlite",
+  ".sql",
 ]);
 
 export type AllowedFileType = "pdf" | "docx" | "txt";
@@ -25,11 +76,13 @@ export type ValidationResult =
   | { ok: false; statusCode: 413 | 415 | 422; error: string };
 
 export function sanitizeFilename(name: string): string {
-  return name
-    .replace(/[^a-zA-Z0-9._\- ]/g, "_")
-    .replace(/\.{2,}/g, "_")
-    .slice(0, 100)
-    .trim() || "upload";
+  return (
+    name
+      .replace(/[^a-zA-Z0-9._\- ]/g, "_")
+      .replace(/\.{2,}/g, "_")
+      .slice(0, 100)
+      .trim() || "upload"
+  );
 }
 
 function getExtension(filename: string): string {
@@ -112,14 +165,16 @@ export function validateFile(
       return {
         ok: false,
         statusCode: 415,
-        error: "This file does not appear to be a valid DOCX. Please upload a genuine Word document.",
+        error:
+          "This file does not appear to be a valid DOCX. Please upload a genuine Word document.",
       };
     }
     if (!hasDocxStructure(buffer)) {
       return {
         ok: false,
         statusCode: 415,
-        error: "This ZIP file does not contain a valid Word document structure. Please upload a genuine .docx file.",
+        error:
+          "This ZIP file does not contain a valid Word document structure. Please upload a genuine .docx file.",
       };
     }
     return { ok: true, type: "docx", sanitizedName };
@@ -130,14 +185,16 @@ export function validateFile(
       return {
         ok: false,
         statusCode: 415,
-        error: "This file's content does not match a plain text file. Please upload a genuine .txt file.",
+        error:
+          "This file's content does not match a plain text file. Please upload a genuine .txt file.",
       };
     }
     if (!looksLikePlainText(buffer)) {
       return {
         ok: false,
         statusCode: 415,
-        error: "This file does not appear to contain readable text. Please upload a plain text (.txt) file.",
+        error:
+          "This file does not appear to contain readable text. Please upload a plain text (.txt) file.",
       };
     }
     return { ok: true, type: "txt", sanitizedName };
