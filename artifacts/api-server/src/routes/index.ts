@@ -86,8 +86,15 @@ import previewEnvRouter from "./preview-env";
 import clerkWebhookRouter from "./clerk-webhook";
 import brainstormRouter from "./brainstorm";
 import apiDocsRouter from "./api-docs";
+import publicAiRouter from "./public-ai/index";
 import { attachUser } from "../lib/auth";
-import { aiBuilderLimiter, publishLimiter, exportLimiter, generalLimiter } from "../lib/rateLimit";
+import {
+  aiBuilderLimiter,
+  publishLimiter,
+  exportLimiter,
+  generalLimiter,
+  oraLimiter,
+} from "../lib/rateLimit";
 
 const router: IRouter = Router();
 
@@ -117,6 +124,10 @@ router.use(apiDocsRouter); // GET /docs, GET /docs/openapi.yaml (public API refe
 router.post("/brainstorm/chat", aiBuilderLimiter);
 router.post("/brainstorm/resolve", aiBuilderLimiter);
 router.use(brainstormRouter);
+
+// ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────
+router.post("/public-ai/chat", oraLimiter);
+router.use(publicAiRouter);
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -173,6 +184,7 @@ const KNOWN_PREFIXES = [
   "/profiles",
   "/brainstorm",
   "/docs",
+  "/public-ai",
 ];
 
 router.use((req, res, next) => {

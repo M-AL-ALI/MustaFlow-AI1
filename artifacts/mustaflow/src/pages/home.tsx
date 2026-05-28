@@ -55,6 +55,9 @@ import { cn } from "@/lib/utils";
 import { DemoAnimation } from "@/components/demo-animation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Show } from "@clerk/react";
+import { OraPanel } from "@/components/ora-panel";
+import { OraBubble } from "@/components/ora-bubble";
+import { useOraChat } from "@/hooks/use-ora-chat";
 
 const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "real-estate": Building2,
@@ -202,6 +205,7 @@ export default function HomePage() {
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
+  const oraChat = useOraChat();
 
   // Rotate the placeholder example every 3.2s while the input is empty
   useEffect(() => {
@@ -557,6 +561,20 @@ export default function HomePage() {
               />
             </div>
           )}
+
+          {/* Ora — public AI assistant */}
+          <Show when="signed-out">
+            <div className="mt-10 mb-2">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="flex-1 h-px bg-border/60" />
+                <span className="text-xs text-muted-foreground/60 font-medium px-1">
+                  Have questions? Ask Ora — free, no sign-in required
+                </span>
+                <div className="flex-1 h-px bg-border/60" />
+              </div>
+              <OraPanel chat={oraChat} />
+            </div>
+          </Show>
 
           {/* Social proof */}
           <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-muted-foreground/70 mt-10 mb-20">
@@ -1055,6 +1073,11 @@ export default function HomePage() {
         onOpenChange={handleModalClose}
         initialTemplate={selectedTemplate}
       />
+
+      {/* Ora floating bubble — signed-out visitors only */}
+      <Show when="signed-out">
+        <OraBubble chat={oraChat} />
+      </Show>
     </>
   );
 }

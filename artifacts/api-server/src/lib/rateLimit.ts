@@ -186,6 +186,70 @@ export const aiBuilderLimiter = (req: Request, res: Response, next: NextFunction
 // Domain verify — configurable limiter factory (used by domains.ts)
 export const createLimiterForDomainVerify = createLimiter;
 
+// ── Ora public AI limiters ─────────────────────────────────────────────────────
+// IMPORTANT: Ora uses completely separate semaphore keys and rate limit keys
+// from the Builder (ai_sem:) so public visitor traffic never contends with
+// paying Builder users for concurrent AI slots.
+
+const ORA_MAX_CONCURRENT = 2;
+const ORA_MAX_QUEUED = 3;
+const ORA_QUEUE_TIMEOUT_MS = 45_000;
+
+export const oraLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  const ip =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+    req.socket.remoteAddress ??
+    "unknown";
+  const key = `ora_sem:${ip}`;
+
+  let entry = semaphoreStore.get(key);
+  if (!entry) {
+    entry = { active: 0, pending: [] };
+    semaphoreStore.set(key, entry);
+  }
+
+  if (entry.active < ORA_MAX_CONCURRENT) {
+    entry.active += 1;
+    res.once("finish", () => releaseSlot(key));
+    next();
+    return;
+  }
+
+  if (entry.pending.length >= ORA_MAX_QUEUED) {
+    res.status(429).json({
+      error: "Ora is busy right now. Please try again in a moment.",
+      retryAfter: 30,
+    });
+    return;
+  }
+
+  const position = entry.pending.length + 1;
+
+  const timer = setTimeout(() => {
+    const e = semaphoreStore.get(key);
+    if (e) e.pending = e.pending.filter((p) => p !== pendingEntry);
+    if (!res.headersSent) {
+      res.status(429).json({
+        error: "Ora is taking too long to respond. Please try again.",
+        retryAfter: 30,
+      });
+    }
+  }, ORA_QUEUE_TIMEOUT_MS);
+
+  // eslint-disable-next-line prefer-const
+  let pendingEntry: PendingEntry;
+  pendingEntry = { nextFn: next, res, position, timer };
+  entry.pending.push(pendingEntry);
+};
+
+// Sliding-window counter: 10 Ora session creations per IP per 24h
+export const oraSessionLimiter = createLimiter({
+  windowMs: 24 * 60 * 60_000,
+  max: 10,
+  keyPrefix: "ora_session",
+  message: "You have started too many Ora sessions today. Please try again tomorrow.",
+});
+
 // Publish/unpublish — 10 per minute per IP
 export const publishLimiter = createLimiter({
   windowMs: 60_000,

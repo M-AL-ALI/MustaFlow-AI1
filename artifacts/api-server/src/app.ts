@@ -1,5 +1,6 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
@@ -126,6 +127,7 @@ app.use("/api/webhooks/clerk", express.raw({ type: "application/json" }), rawBod
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
+app.use(cookieParser());
 
 // Resolve publishable key from the request host so the same server can serve
 // multiple Clerk custom domains. Falls back to CLERK_PUBLISHABLE_KEY.
