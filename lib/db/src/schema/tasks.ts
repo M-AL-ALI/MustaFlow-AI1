@@ -286,6 +286,25 @@ export type TaskReport = {
    * the staging review card.
    */
   allChecksPassed?: boolean | null;
+  /**
+   * Lightweight pre-review checks that run server-side on the staging snapshot
+   * before the task reaches "needs_review". Checks JSON syntax, relative import
+   * resolution, and E2E spec presence. Does not require a container.
+   */
+  preReviewChecks?: {
+    checks: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      skipped: boolean;
+      errorCount: number;
+      errors: string[];
+      durationMs: number;
+    }>;
+    allPassed: boolean;
+    anyFailed: boolean;
+    ranAt: string;
+  } | null;
 };
 
 /**

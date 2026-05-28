@@ -585,4 +585,102 @@ router.post(
   },
 );
 
+router.post(
+  "/projects/:id/tasks/:taskId/explain-change",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const taskId = Number(req.params.taskId);
+    if (!Number.isFinite(projectId) || !Number.isFinite(taskId)) {
+      res.status(400).json({ error: "Invalid params" });
+      return;
+    }
+
+    const { path, before, after } = req.body ?? {};
+    if (typeof path !== "string" || path.trim().length === 0) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    if (typeof before !== "string" || typeof after !== "string") {
+      res.status(400).json({ error: "before and after are required strings" });
+      return;
+    }
+
+    const [task] = await db
+      .select({ id: agentTasksTable.id, status: agentTasksTable.status })
+      .from(agentTasksTable)
+      .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
+      .limit(1);
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Build a concise unified diff for the prompt (cap to ~120 lines for speed).
+    const beforeLines = before.split("\n");
+    const afterLines = after.split("\n");
+    const isNew = before.trim().length === 0;
+    const isDeleted = after.trim().length === 0;
+
+    let diffPreview: string;
+    if (isNew) {
+      diffPreview = afterLines
+        .slice(0, 60)
+        .map((l) => `+ ${l}`)
+        .join("\n");
+    } else if (isDeleted) {
+      diffPreview = beforeLines
+        .slice(0, 60)
+        .map((l) => `- ${l}`)
+        .join("\n");
+    } else {
+      const added = afterLines.filter((l, i) => l !== (beforeLines[i] ?? "")).slice(0, 40);
+      const removed = beforeLines.filter((l, i) => l !== (afterLines[i] ?? "")).slice(0, 40);
+      diffPreview = [
+        ...removed.slice(0, 20).map((l) => `- ${l}`),
+        ...added.slice(0, 20).map((l) => `+ ${l}`),
+      ].join("\n");
+    }
+
+    try {
+      const { openai } = await import("@workspace/integrations-openai-ai-server");
+      // Stream the explanation so the UI can render tokens incrementally.
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5-mini",
+        max_completion_tokens: 120,
+        stream: true,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a code reviewer. Summarise the given file change in exactly ONE sentence of plain English (no jargon, no file path, no markdown). Describe what changed and, if obvious from context, why. Be specific but concise.",
+          },
+          {
+            role: "user",
+            content: `File: ${path}\n\n${diffPreview.slice(0, 3000)}`,
+          },
+        ],
+      });
+
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("X-Accel-Buffering", "no"); // disable nginx/proxy buffering
+      res.flushHeaders();
+
+      for await (const chunk of stream) {
+        const text = chunk.choices[0]?.delta?.content ?? "";
+        if (text) res.write(text);
+      }
+      res.end();
+    } catch (err) {
+      req.log.warn({ err, taskId, path }, "explain-change AI call failed");
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to generate explanation" });
+      } else {
+        res.end();
+      }
+    }
+  },
+);
+
 export default router;

@@ -1873,6 +1873,23 @@ export const ApplyTaskStagingResponse = zod.object({
 
 
 /**
+ * Streams the explanation as `text/plain` chunks (chunked transfer encoding). Callers should consume the response body as a ReadableStream rather than parsing it as JSON. The generated client hook is not suitable for this endpoint; use a native `fetch` with a streaming reader instead.
+
+ * @summary Stream a plain-English AI explanation of a staged file change
+ */
+export const ExplainTaskChangeParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const ExplainTaskChangeBody = zod.object({
+  "path": zod.string().describe('File path being changed (used for context in the prompt)'),
+  "before": zod.string().describe('File content before the change (empty string for new files)'),
+  "after": zod.string().describe('File content after the change (empty string for deleted files)')
+})
+
+
+/**
  * @summary Discard Task Agent staging snapshot — no files changed
  */
 export const DiscardTaskStagingParams = zod.object({

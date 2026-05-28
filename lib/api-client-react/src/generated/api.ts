@@ -107,6 +107,7 @@ import type {
   DryRunProjectDomainDnsChanges200,
   DryRunProjectDomainDnsChangesBody,
   DuplicateProjectResult,
+  ExplainChangeInput,
   ExportKnowledge200,
   FileBlocksResponse,
   FileSearchResult,
@@ -4845,6 +4846,82 @@ export const useApplyTaskStaging = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getApplyTaskStagingMutationOptions(options));
+    }
+
+export const getExplainTaskChangeUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/explain-change`
+}
+
+/**
+ * Streams the explanation as `text/plain` chunks (chunked transfer encoding). Callers should consume the response body as a ReadableStream rather than parsing it as JSON. The generated client hook is not suitable for this endpoint; use a native `fetch` with a streaming reader instead.
+
+ * @summary Stream a plain-English AI explanation of a staged file change
+ */
+export const explainTaskChange = async (id: number,
+    taskId: number,
+    explainChangeInput: ExplainChangeInput, options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getExplainTaskChangeUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      explainChangeInput,)
+  }
+);}
+
+
+
+
+export const getExplainTaskChangeMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof explainTaskChange>>, TError,{id: number;taskId: number;data: BodyType<ExplainChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof explainTaskChange>>, TError,{id: number;taskId: number;data: BodyType<ExplainChangeInput>}, TContext> => {
+
+const mutationKey = ['explainTaskChange'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof explainTaskChange>>, {id: number;taskId: number;data: BodyType<ExplainChangeInput>}> = (props) => {
+          const {id,taskId,data} = props ?? {};
+
+          return  explainTaskChange(id,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ExplainTaskChangeMutationResult = NonNullable<Awaited<ReturnType<typeof explainTaskChange>>>
+    export type ExplainTaskChangeMutationBody = BodyType<ExplainChangeInput>
+    export type ExplainTaskChangeMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Stream a plain-English AI explanation of a staged file change
+ */
+export const useExplainTaskChange = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof explainTaskChange>>, TError,{id: number;taskId: number;data: BodyType<ExplainChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof explainTaskChange>>,
+        TError,
+        {id: number;taskId: number;data: BodyType<ExplainChangeInput>},
+        TContext
+      > => {
+      return useMutation(getExplainTaskChangeMutationOptions(options));
     }
 
 export const getDiscardTaskStagingUrl = (id: number,

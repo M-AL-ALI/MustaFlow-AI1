@@ -1168,6 +1168,20 @@ export interface TaskEvent {
   createdAt: string;
 }
 
+export interface ExplainChangeInput {
+  /** File path being changed (used for context in the prompt) */
+  path: string;
+  /** File content before the change (empty string for new files) */
+  before: string;
+  /** File content after the change (empty string for deleted files) */
+  after: string;
+}
+
+export interface ExplainChangeResult {
+  /** One-sentence plain-English summary of what changed and why */
+  explanation: string;
+}
+
 export type AgentTaskKind = typeof AgentTaskKind[keyof typeof AgentTaskKind];
 
 

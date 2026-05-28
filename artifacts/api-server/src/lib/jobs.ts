@@ -3445,7 +3445,36 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           return;
         }
 
-        // ── 5b. All checks passed → needs_review ─────────────────────────────
+        // ── 5b. Lightweight pre-review checks ────────────────────────────────
+        // Run server-side checks (JSON syntax, relative imports, E2E spec
+        // detection) on the staging snapshot before transitioning to
+        // needs_review. Results are stored in report.preReviewChecks and
+        // surfaced as a checklist in the staging review card.
+        try {
+          const { runPreReviewChecks } = await import("./pre-review-checks");
+          const existingFiles = await db
+            .select({ path: projectFilesTable.path })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, projectId));
+          const existingPaths = new Set(existingFiles.map((f) => f.path));
+          // Removed paths must be excluded from the post-staging file set so
+          // the import-resolution check doesn't treat deleted modules as resolvable.
+          const deletedPaths = new Set(report.filesRemoved ?? []);
+          report.preReviewChecks = runPreReviewChecks(stagingData, existingPaths, deletedPaths);
+          logger.info(
+            {
+              projectId,
+              taskId,
+              allPassed: report.preReviewChecks.allPassed,
+              anyFailed: report.preReviewChecks.anyFailed,
+            },
+            "Pre-review checks complete",
+          );
+        } catch (prcErr) {
+          logger.warn({ err: prcErr, projectId, taskId }, "Pre-review checks threw (non-fatal)");
+        }
+
+        // ── 5c. All checks passed → needs_review ─────────────────────────────
         await db
           .update(agentTasksTable)
           .set({
@@ -5316,11 +5345,13 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   // Quick Preview and Full App Preview both read from project_files only, so draft
   // Task Agent changes are invisible in any preview mode until the user clicks Apply.
   // This guarantees test #10 and #11 in the preview-security test suite.
+  void emitEvent(taskId, "narration", `Syncing ${builderFiles.length} file(s) to your project…`);
   await writeFiles(projectId, builderFiles, true);
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
   // still completes and files are promoted.
+  void emitEvent(taskId, "narration", "Running database migrations…");
   const postWriteWarnings: string[] = [];
   {
     const migResult = await runPostWriteMigrationSync(projectId, taskId, builderFiles);
@@ -5335,6 +5366,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   }
 
   // Save version snapshot
+  void emitEvent(taskId, "narration", "Saving version snapshot…");
   const snapshot = await snapshotFilesForVersion(projectId);
   const planSnapshot = await loadLatestPlanSnapshot(projectId);
   const changelogEntry = `**Task Agent Apply**\n${(assistantSummary ?? "").slice(0, 180)}`;

@@ -191,6 +191,8 @@ export * from './domainVerifyResponseVerificationStatus';
 export * from './dryRunProjectDomainDnsChanges200';
 export * from './dryRunProjectDomainDnsChangesBody';
 export * from './duplicateProjectResult';
+export * from './explainChangeInput';
+export * from './explainChangeResult';
 export * from './exportKnowledge200';
 export * from './fileBlock';
 export * from './fileBlocksResponse';

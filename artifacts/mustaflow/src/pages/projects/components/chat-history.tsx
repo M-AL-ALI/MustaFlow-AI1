@@ -61,7 +61,7 @@ import {
   useRestoreCheckpoint,
 } from "@workspace/api-client-react";
 import { unifiedDiff } from "@/lib/line-diff";
-import { Download, FileBox, GitCompare, BookOpen } from "lucide-react";
+import { Download, FileBox, GitCompare, BookOpen, Minus, Info } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type TaskReport = {
@@ -209,6 +209,24 @@ type TaskReport = {
    * critical issues. Drives the "All checks passed" green banner.
    */
   allChecksPassed?: boolean | null;
+  /**
+   * Lightweight pre-review checks (JSON syntax, import resolution, E2E spec
+   * detection) run server-side before the staging snapshot reaches "needs_review".
+   */
+  preReviewChecks?: {
+    checks: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      skipped: boolean;
+      errorCount: number;
+      errors: string[];
+      durationMs: number;
+    }>;
+    allPassed: boolean;
+    anyFailed: boolean;
+    ranAt: string;
+  } | null;
 };
 
 type StructuredPlan = {
@@ -354,21 +372,31 @@ function formatBytes(n: number): string {
  */
 function StagingFileDiffRow({
   projectId,
+  taskId,
   path,
   stagingContent,
   status,
   onViewFile,
 }: {
   projectId: number;
+  taskId: number;
   path: string;
   stagingContent: string | null;
   status: "created" | "modified" | "deleted";
   onViewFile?: (path: string, line?: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [explanation, setExplanation] = useState<string | null>(null);
+  // explaining=true means we want an explanation but may still be waiting for file content.
+  const [explaining, setExplaining] = useState(false);
+  // pendingExplain=true means the streaming call should fire once currentFile is available.
+  const [pendingExplain, setPendingExplain] = useState(false);
+
+  // Fetch the file list whenever we need diff content (expanded) OR an explanation.
+  // Note: deleted files need their before-content fetched too, so we exclude only "created".
   const { data: filesList } = useListProjectFiles(projectId, {
     query: {
-      enabled: open && status !== "created",
+      enabled: (open || explaining) && status !== "created",
       queryKey: getListProjectFilesQueryKey(projectId),
     },
   });
@@ -379,7 +407,7 @@ function StagingFileDiffRow({
     isError: errorLoadingCurrent,
   } = useGetProjectFile(projectId, fileId ?? 0, {
     query: {
-      enabled: open && status !== "created" && !!fileId,
+      enabled: (open || explaining) && status !== "created" && !!fileId,
       queryKey: ["getProjectFile", projectId, fileId ?? 0] as const,
     },
   });
@@ -406,6 +434,75 @@ function StagingFileDiffRow({
       ? unifiedDiff(before, after, 2)
       : [];
 
+  // Stream the explanation from the backend, rendering tokens as they arrive.
+  const fireExplain = async (beforeContent: string) => {
+    // For deleted files: beforeContent = existing file content, after = "" (file removed).
+    // For created files: beforeContent = "", after = new content.
+    const afterContent = status === "deleted" ? "" : (stagingContent ?? "");
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/tasks/${taskId}/explain-change`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ path, before: beforeContent, after: afterContent }),
+      });
+      if (!resp.ok || !resp.body) {
+        setExplanation("Unable to generate explanation.");
+        setExplaining(false);
+        setPendingExplain(false);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let partial = "";
+      setExplanation(""); // start streaming (empty → triggers the rendering area)
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        partial += decoder.decode(value, { stream: true });
+        setExplanation(partial);
+      }
+    } catch {
+      setExplanation("Unable to generate explanation.");
+    } finally {
+      setExplaining(false);
+      setPendingExplain(false);
+    }
+  };
+
+  // When a pending explain fires after file content becomes available.
+  useEffect(() => {
+    if (!pendingExplain) return;
+    if (status === "created") {
+      // Net-new file: no before-content to wait for.
+      setPendingExplain(false);
+      void fireExplain("");
+      return;
+    }
+    if (currentFile !== undefined) {
+      // File content ready (modified or deleted — both need before-content).
+      setPendingExplain(false);
+      void fireExplain(currentFile?.content ?? "");
+    }
+    // else: still loading — effect re-runs once currentFile lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingExplain, currentFile, status]);
+
+  const handleExplain = () => {
+    if (explanation !== null || explaining) return;
+    setExplaining(true);
+    if (status === "created") {
+      // Net-new file: no before-content needed.
+      void fireExplain("");
+    } else if (currentFile !== undefined) {
+      // Before-content already in cache (works for both modified and deleted).
+      void fireExplain(currentFile?.content ?? "");
+    } else {
+      // Need to load before-content first; effect above will fire when ready.
+      setPendingExplain(true);
+    }
+  };
+
   return (
     <div className="border border-border/50 rounded overflow-hidden">
       <div className="flex items-center gap-1">
@@ -425,17 +522,36 @@ function StagingFileDiffRow({
           <GitCompare className="h-2.5 w-2.5 shrink-0" />
           <span className="truncate text-left flex-1">{path}</span>
         </button>
+        <button
+          type="button"
+          onClick={handleExplain}
+          disabled={explaining}
+          className="text-[9px] px-1.5 py-1 text-muted-foreground hover:text-primary border-l border-border/50 transition-colors flex items-center gap-0.5 shrink-0"
+          title="Explain this change"
+        >
+          {explaining ? (
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-2.5 w-2.5" />
+          )}
+        </button>
         {onViewFile && status !== "deleted" && (
           <button
             type="button"
             onClick={() => onViewFile(path)}
-            className="text-[9px] px-1.5 py-1 text-muted-foreground hover:text-foreground border border-border/50 rounded-r transition-colors"
+            className="text-[9px] px-1.5 py-1 text-muted-foreground hover:text-foreground border-l border-border/50 transition-colors"
             title="Open in Code tab"
           >
             <ExternalLink className="h-2.5 w-2.5" />
           </button>
         )}
       </div>
+      {explanation && (
+        <div className="px-2.5 py-1.5 bg-primary/5 border-t border-border/30 text-[10px] text-muted-foreground italic flex items-start gap-1.5">
+          <Sparkles className="h-2.5 w-2.5 text-primary/70 shrink-0 mt-0.5" />
+          <span>{explanation}</span>
+        </div>
+      )}
       {open && (
         <div className="bg-background/60 px-1 py-1 max-h-64 overflow-auto font-mono text-[10px] leading-snug">
           {status !== "created" && loadingCurrent ? (
@@ -2025,6 +2141,7 @@ function MessageRow({
                 report={(planPayload as { report: TaskReport }).report}
                 onViewFile={onViewFile}
                 onNavigateToSecret={onNavigateToSecret}
+                onSendMessage={onSendMessage}
               />
             ) : (
               <>
@@ -2483,6 +2600,55 @@ function QualityGateFailureCard({
   );
 }
 
+// ── What-to-look-for guidance rules (static, pattern-based) ──────────────────
+const REVIEW_RULES: Array<{
+  pattern: RegExp;
+  tip: string;
+}> = [
+  {
+    pattern: /\bsrc\/routes?\b|\broutes?\//i,
+    tip: "A new route was added — verify the path matches what the frontend calls.",
+  },
+  {
+    pattern: /\bschema\b|\bmigrat/i,
+    tip: "Schema or migration file changed — confirm the migration runs cleanly and is backwards-compatible.",
+  },
+  {
+    pattern: /\bauth\b|\bsession\b|\bjwt\b|\bpassword/i,
+    tip: "Authentication code changed — double-check that login and session handling still work end-to-end.",
+  },
+  {
+    pattern: /\benv\b|\b\.env\b|\bprocess\.env/i,
+    tip: "Environment variable usage changed — make sure all referenced vars are declared in your Secrets.",
+  },
+  {
+    pattern: /\bpackage\.json\b|\bpackage-lock\b|\byarn\.lock\b/i,
+    tip: "Package dependencies changed — a restart may be required for new packages to load.",
+  },
+  {
+    pattern: /\bapi\//i,
+    tip: "API layer changed — verify the response shape matches what the frontend expects.",
+  },
+  {
+    pattern: /\bcomponent\b|\bpages?\//i,
+    tip: "UI component changed — check the preview to make sure the layout still looks right.",
+  },
+  {
+    pattern: /\bconfig\b|\bvite\.config\b|\btsconfig\b/i,
+    tip: "Config file changed — a full rebuild may be needed for the new settings to take effect.",
+  },
+];
+
+function getWhatToLookForTips(changedFiles: string[]): string[] {
+  const tips = new Set<string>();
+  for (const file of changedFiles) {
+    for (const rule of REVIEW_RULES) {
+      if (rule.pattern.test(file)) tips.add(rule.tip);
+    }
+  }
+  return [...tips].slice(0, 4);
+}
+
 // ── Task Review Card ──────────────────────────────────────────────────────────
 function TaskReviewCard({
   projectId,
@@ -2490,12 +2656,14 @@ function TaskReviewCard({
   report,
   onViewFile,
   onNavigateToSecret,
+  onSendMessage,
 }: {
   projectId: number;
   taskId: number;
   report: TaskReport;
   onViewFile?: (path: string, line?: number) => void;
   onNavigateToSecret?: (secretName: string) => void;
+  onSendMessage?: (text: string) => void;
 }) {
   const queryClient = useQueryClient();
   const applyStaging = useApplyTaskStaging();
@@ -2503,6 +2671,55 @@ function TaskReviewCard({
   const [applied, setApplied] = useState(false);
   const [discarded, setDiscarded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [tipsOpen, setTipsOpen] = useState(false);
+  // Apply step index driven by backend narration events (not a timer).
+  const [applyStartedAt, setApplyStartedAt] = useState<number | null>(null);
+
+  // Poll task events when apply is in-flight so we can drive the progress steps.
+  const { data: applyEvents = [] } = useListTaskEvents(projectId, taskId, {
+    query: {
+      enabled: applyStaging.isPending,
+      refetchInterval: 800,
+      queryKey: getListTaskEventsQueryKey(projectId, taskId),
+    },
+  });
+
+  // Map narration messages from the backend to step indices.
+  const APPLY_STEP_PATTERNS = [
+    /syncing\s+\d+\s+file/i, // "Syncing N file(s) to your project…"
+    /running database migrations/i, // "Running database migrations…"
+    /database migrations completed/i, // "Database migrations completed successfully."
+    /saving version snapshot|saving apply/i, // snapshot step
+  ] as const;
+
+  const APPLY_STEP_LABELS = [
+    "Syncing files to your project…",
+    "Running database migrations…",
+    "Finalizing database migrations…",
+    "Saving version snapshot…",
+  ];
+
+  // Determine the furthest step that has been announced.
+  const recentEvents = (
+    applyEvents as Array<{ eventType: string; message: string; createdAt: string }>
+  ).filter(
+    (e) =>
+      e.eventType === "narration" &&
+      applyStartedAt !== null &&
+      new Date(e.createdAt).getTime() >= applyStartedAt,
+  );
+
+  let applyStepIdx = 0;
+  for (const event of recentEvents) {
+    for (let i = APPLY_STEP_PATTERNS.length - 1; i >= 0; i--) {
+      if (APPLY_STEP_PATTERNS[i].test(event.message)) {
+        applyStepIdx = Math.max(applyStepIdx, i);
+        break;
+      }
+    }
+  }
+
+  const checksBlocking = report.preReviewChecks?.anyFailed === true;
 
   // Pull the live task to access stagingSnapshot for per-file diffs (Task #531).
   const { data: tasks } = useListTasks(projectId, {
@@ -2546,7 +2763,95 @@ function TaskReviewCard({
         <span className="text-[9px] text-amber-400/60 font-medium">Staged · not applied</span>
       </div>
 
-      {/* All checks passed banner */}
+      {/* Pre-review checks — pending state while checks are still running */}
+      {!report.preReviewChecks && (
+        <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-border/40 text-[10px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          Verifying changes…
+        </div>
+      )}
+
+      {/* Pre-review checks checklist */}
+      {report.preReviewChecks && report.preReviewChecks.checks.length > 0 && (
+        <div
+          className={cn(
+            "px-2.5 py-2 border-b",
+            report.preReviewChecks.anyFailed
+              ? "border-rose-500/20 bg-rose-500/5"
+              : "border-emerald-500/20 bg-emerald-500/5",
+          )}
+        >
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <ShieldCheck
+              className={cn(
+                "h-3 w-3 shrink-0",
+                report.preReviewChecks.anyFailed ? "text-rose-400" : "text-emerald-400",
+              )}
+            />
+            <span
+              className={cn(
+                "text-[10px] font-semibold",
+                report.preReviewChecks.anyFailed ? "text-rose-400" : "text-emerald-400",
+              )}
+            >
+              {report.preReviewChecks.anyFailed
+                ? "Pre-review checks found issues"
+                : "Pre-review checks passed"}
+            </span>
+            {onSendMessage && report.preReviewChecks.anyFailed && (
+              <button
+                type="button"
+                onClick={() =>
+                  onSendMessage(
+                    "Fix the issues found in the pre-review checks: " +
+                      report
+                        .preReviewChecks!.checks.filter((c) => !c.passed && !c.skipped)
+                        .flatMap((c) => c.errors)
+                        .slice(0, 5)
+                        .join("; "),
+                  )
+                }
+                className="ml-auto flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/20 hover:bg-rose-500/25 transition-colors shrink-0"
+              >
+                <Wrench className="h-2.5 w-2.5" />
+                Fix with AI
+              </button>
+            )}
+          </div>
+          <div className="space-y-0.5 pl-4">
+            {report.preReviewChecks.checks.map((c) => (
+              <div key={c.id} className="flex items-center gap-1.5">
+                {c.skipped ? (
+                  <Minus className="h-2.5 w-2.5 text-muted-foreground/50 shrink-0" />
+                ) : c.passed ? (
+                  <Check className="h-2.5 w-2.5 text-emerald-400 shrink-0" />
+                ) : (
+                  <X className="h-2.5 w-2.5 text-rose-400 shrink-0" />
+                )}
+                <span
+                  className={cn(
+                    "text-[10px]",
+                    c.skipped
+                      ? "text-muted-foreground/50"
+                      : c.passed
+                        ? "text-emerald-400/80"
+                        : "text-rose-400",
+                  )}
+                >
+                  {c.label}
+                </span>
+                {!c.passed && !c.skipped && c.errorCount > 0 && (
+                  <span className="text-[9px] text-rose-400/70 ml-auto shrink-0">
+                    {c.errorCount} {c.errorCount === 1 ? "issue" : "issues"}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* All checks passed banner (legacy quality gate) */}
       {report.allChecksPassed && (
         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-400">
           <ShieldCheck className="h-3 w-3 shrink-0" />
@@ -2654,7 +2959,43 @@ function TaskReviewCard({
           </div>
         )}
 
-      {/* File summary — Task #531: each file is an expandable per-file diff. */}
+      {/* What to look for panel */}
+      {(() => {
+        const tips = getWhatToLookForTips(allChanged);
+        if (tips.length === 0) return null;
+        return (
+          <div className="border-t border-border/40">
+            <button
+              type="button"
+              onClick={() => setTipsOpen((v) => !v)}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {tipsOpen ? (
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              ) : (
+                <ChevronRight className="h-3 w-3 shrink-0" />
+              )}
+              <BookOpen className="h-3 w-3 shrink-0" />
+              <span className="font-medium">What to look for</span>
+              <span className="ml-auto text-[9px] text-muted-foreground/50">
+                {tips.length} tip{tips.length !== 1 ? "s" : ""}
+              </span>
+            </button>
+            {tipsOpen && (
+              <div className="px-2.5 pb-2 space-y-1">
+                {tips.map((tip, i) => (
+                  <div key={i} className="flex items-start gap-1.5">
+                    <Info className="h-2.5 w-2.5 text-primary/60 shrink-0 mt-0.5" />
+                    <span className="text-[10px] text-muted-foreground leading-relaxed">{tip}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* File summary — each file is an expandable per-file diff. */}
       <div className="px-2.5 py-2 space-y-1.5">
         {(report.filesCreated ?? []).length > 0 && (
           <div className="space-y-1">
@@ -2666,6 +3007,7 @@ function TaskReviewCard({
                 <StagingFileDiffRow
                   key={f}
                   projectId={projectId}
+                  taskId={taskId}
                   path={f}
                   stagingContent={stagingByPath.get(f) ?? ""}
                   status="created"
@@ -2685,6 +3027,7 @@ function TaskReviewCard({
                 <StagingFileDiffRow
                   key={f}
                   projectId={projectId}
+                  taskId={taskId}
                   path={f}
                   stagingContent={stagingByPath.get(f) ?? null}
                   status="modified"
@@ -2704,6 +3047,7 @@ function TaskReviewCard({
                 <StagingFileDiffRow
                   key={f}
                   projectId={projectId}
+                  taskId={taskId}
                   path={f}
                   stagingContent={null}
                   status="deleted"
@@ -2737,41 +3081,93 @@ function TaskReviewCard({
           )}
         </div>
       )}
+      {/* Apply progress indicator — driven by backend narration events */}
+      {applyStaging.isPending && (
+        <div className="px-2.5 py-2 border-t border-border/40 bg-muted/10 space-y-1">
+          {APPLY_STEP_LABELS.map((step, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              {i < applyStepIdx ? (
+                <Check className="h-2.5 w-2.5 text-emerald-400 shrink-0" />
+              ) : i === applyStepIdx ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin text-primary shrink-0" />
+              ) : (
+                <Minus className="h-2.5 w-2.5 text-muted-foreground/30 shrink-0" />
+              )}
+              <span
+                className={cn(
+                  "text-[10px]",
+                  i < applyStepIdx
+                    ? "text-emerald-400/70"
+                    : i === applyStepIdx
+                      ? "text-foreground/80"
+                      : "text-muted-foreground/40",
+                )}
+              >
+                {step}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Actions */}
       <div className="flex items-center gap-2 px-2.5 py-2 border-t border-border/40 bg-muted/20">
-        <button
-          onClick={() => {
-            applyStaging.mutate(
-              { id: projectId, taskId },
-              {
-                onSuccess: () => {
-                  setApplied(true);
-                  void queryClient.invalidateQueries({
-                    queryKey: getListMessagesQueryKey(projectId),
-                  });
-                  void queryClient.invalidateQueries({
-                    queryKey: getGetProjectQueryKey(projectId),
-                  });
-                  void queryClient.invalidateQueries({
-                    queryKey: getListProjectFilesQueryKey(projectId),
-                  });
-                  void queryClient.invalidateQueries({
-                    queryKey: getListVersionsQueryKey(projectId),
-                  });
+        {/* When checks are blocking, replace Apply with Fix with AI */}
+        {checksBlocking && !applyStaging.isPending ? (
+          <button
+            onClick={() => {
+              if (!onSendMessage || !report.preReviewChecks) return;
+              const failedErrors = report.preReviewChecks.checks
+                .filter((c) => !c.passed && !c.skipped)
+                .flatMap((c) => c.errors)
+                .slice(0, 5)
+                .join("; ");
+              onSendMessage("Fix the issues found in the pre-review checks: " + failedErrors);
+            }}
+            disabled={!onSendMessage}
+            className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-lg bg-rose-600 text-white text-[11px] font-medium hover:bg-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Wrench className="h-3 w-3" />
+            Fix with AI
+          </button>
+        ) : (
+          <button
+            onClick={() => {
+              setApplyStartedAt(Date.now());
+              applyStaging.mutate(
+                { id: projectId, taskId },
+                {
+                  onSuccess: () => {
+                    setApplied(true);
+                    void queryClient.invalidateQueries({
+                      queryKey: getListMessagesQueryKey(projectId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: getGetProjectQueryKey(projectId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: getListProjectFilesQueryKey(projectId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: getListVersionsQueryKey(projectId),
+                    });
+                  },
+                  onError: () => {
+                    setApplyStartedAt(null);
+                  },
                 },
-              },
-            );
-          }}
-          disabled={applyStaging.isPending || discardStaging.isPending}
-          className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-lg bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-        >
-          {applyStaging.isPending ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Check className="h-3 w-3" />
-          )}
-          Apply changes
-        </button>
+              );
+            }}
+            disabled={applyStaging.isPending || discardStaging.isPending}
+            className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-lg bg-primary text-primary-foreground text-[11px] font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {applyStaging.isPending ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Check className="h-3 w-3" />
+            )}
+            {applyStaging.isPending ? "Applying…" : "Apply changes"}
+          </button>
+        )}
         <button
           onClick={() => {
             discardStaging.mutate(
