@@ -62,6 +62,8 @@ The report below is grouped that way.
 
 # Part B — Developer Mode
 
+Developer Mode is the power-user surface: `/dev` home, `/dev/deployments`, `/dev/workspace/:id` (an 18-panel workspace: file tree, Monaco editor, terminal, git, secrets, database, object storage, packages, deployments, resources, preview pane, canvas, tools, integrations search), `/docs/developer-mode`, and the agentic build engine that drives all of it.
+
 ## B1. Slide-out nav replaces the old DevSidebar
 - **What:** `/dev` and `/dev/deployments` now use the same `SlideOutNav` as the AI builder.
 - **How:** Direct component swap in `dev-home.tsx` and `dev-deployments.tsx`.
@@ -78,16 +80,90 @@ The report below is grouped that way.
 - **Why:** Developers benefit just as much from guided ideation before kicking off a build.
 - **Tasks:** #1047, #1097, #1103.
 
-## B4. Agent loop transparency (built primarily for dev users)
-- **What:** Live agent step counter, mid-run **steering hints**, credit-cost confirmation before expensive runs, and a clean cancel UX. Agent trace UI showing exactly what tools the AI called in what order. Opt-in approval gate before risky shell commands.
-- **How:** Steering hints persisted across server restarts via Redis (#1071). Trace UI reads structured events from the agent loop.
-- **Why:** Developers running long task-agent loops were flying blind.
-- **Tasks:** #960, #962, #964, #990, #991, #992.
+## B4. Dev-mode chat panel — intent classifier fix
+- **What:** The chat panel inside the developer workspace (`dev-workspace/dev-chat-panel.tsx`) was routing every message through the build pipeline — including pure questions like "what does this file do?"
+- **How:** Intent classifier now routes conversational messages in dev/zero chat panels to the converse path instead of the build path.
+- **Why:** Developers asking a question shouldn't trigger a build.
 
-## B5. Developer Mode docs
-- 5 new deep-dive sections added to `/docs/developer-mode`.
+## B5. Agentic project onboarding (Task #987 — large)
+The first time a dev creates an agentic project, the UI walks them through it end to end.
+
+- **Mode selector cards** in the project-creation modal: **Simple** vs **Full-stack** (Server / Database / KeyRound / Rocket icons), with an expandable `FULLSTACK_CHECKLIST` collapsed by default.
+- **Anchored 3-step tooltip sequence** (`agentic-onboarding-tooltip.tsx`, rewritten):
+  - Uses `createPortal` so cards float above the workspace.
+  - Each step positions itself next to its real target via `getBoundingClientRect` (`data-tour="provisioning-badge"`, `data-tab="publishing"`, `data-tab="tools-files"`).
+  - Pulsing ring highlights the target, arrow points at it. Falls back to bottom-right corner if the target isn't on screen. No backdrop.
+- **Adaptive chat placeholder** for agentic projects (different default text than static projects).
+- **In-place upgrade** from `static-legacy` → `agentic`: `useUpdateProject` mutation with a loading spinner; the PATCH handler on the server detects the transition and triggers provisioning + sets `provisioningStatus = "provisioning"`.
+- **Defensive guard** at the top of `runProvisionProjectJob` — no-ops immediately when `builderMode !== "agentic"`, preventing accidental infra spin-up for static projects.
+- `builderMode` added to `CreateProjectBody` and `ProjectUpdate` schemas (OpenAPI re-generated).
+- Side fixes shipped in the same task: deduplicated `getClerkUserById`, installed the missing `svix` package for the Clerk webhook.
+
+## B6. Agentic provisioning — step-by-step UI (Task #988)
+- **New columns:** `projects.provisioning_step` (TEXT NULL) and `projects.provisioning_started_at` (TIMESTAMPTZ NULL) via `migrate-provisioning-steps`.
+- **EventBus channel:** `provisioning:step:<projectId>` emits `started` / `completed` / `failed` events with a typed `ProvisioningStepPayload`.
+- **`provisioning-progress.tsx`** (new component): expandable step-list badge — spinner for active step, green check for done, red X for failed; preserves `provisioningStep` on error so the X shows on the *correct* step.
+- **`createContainer` return type** widened from `ContainerInfo | null` to `ContainerInfo | { error: string } | null`. Raw Fly API status + body is propagated to the caller. `humanizeError(error, "fly")` maps 401/403, 429, quota, timeout, 5xx, and network errors to plain-English messages.
+- **`/provision/status`** now returns `provisioningStep` and `estimatedSecondsRemaining` so the workspace can show ETA.
+
+## B7. Agentic container reliability (Task #989)
+- **`ensureContainerAwake` now fails hard** when `/healthz` doesn't respond in 30s. Previously it returned `ok:true` and let builds start against an unresponsive process.
+- **Neon DB health gate** outer catch now returns `ok:false` instead of swallowing decrypt or lookup errors — misconfigured `ENCRYPTION_KEY` and platform DB errors are surfaced to the user.
+- **Container sync errors** routed through `mapFlyErrorToMessage`; the task event narration is plain English.
+- **"Waking…" health indicator:** when a build is in flight AND container status is `hibernated`, the workspace dot pulses amber and reads "Waking…" instead of "Hibernated".
+- **Failed Jobs section:** Retry button now calls `createTask()` directly (one-click re-enqueue) instead of just pre-filling the prompt; shows "Queuing…" spinner; falls back to prompt pre-fill on API error. `elapsedSeconds` shown alongside timestamp; `agentMode` carried on the task type.
+
+## B8. Container cold-start + Build-blocked banner
+- **Auto-retry container cold-start** in the pre-flight gate (Task #1056) — first build after hibernation no longer fails on cold cache.
+- **"Build blocked" banner** appears when a build fails on container or DB pre-flight, with a structured **suggested fix** (Task #1063).
+
+## B9. Agent loop transparency (Task #990)
+This is the single biggest dev-mode change and was previously under-described.
+
+- **`lib/steering-hints.ts`** (new): in-memory `Map` for mid-run steering hints with `setSteeringHint` / `consumeSteeringHint`.
+- **`POST /api/projects/:id/tasks/:taskId/steer`** (new route): validates the task is running and writes a hint to the store.
+- **`lib/agent-loop.ts`** emits a `loop:step` SSE event at the start of each iteration with `{ stepIndex, stepCap, wallClockElapsedMs, wallClockBudgetMs, toolName }`. It polls the steering store between iterations and injects hints as system messages so a dev can course-correct a running loop without cancelling it. Emits plain-language narration on step-cap or wall-clock termination.
+- **`agent-thinking-bubble.tsx`** in the frontend:
+  - `LoopProgressBar` redesigned: takes explicit props, accepts `liveWallClockMs` from the parent for smooth 1-second tick interpolation, renders the last tool label under the time bar.
+  - Real-time wall-clock interpolation via `setInterval(1000ms)`, reset from the SSE value on each new step event.
+  - **Cancel confirmation:** inline "Confirm cancel" / "Keep building" buttons replace the cancel button (no AlertDialog modal).
+- **Credit confirmation:** `creditConfirmedRef = useRef(false)` (stable ref, no stale closure) — pre-flight check uses `!creditConfirmedRef.current`; reset to `false` after the guard exits so the next independent build re-confirms.
+- **Steering hints persist across server restarts via Redis** (Task #1071) — a steered run survives a deploy.
+- **Real-time agent step progress** during builds (Task #960, separate landing of the same theme).
+
+## B10. Agent trace UI (Task #962)
+- **`agent-trace-panel.tsx`** (new) shows the exact sequence of tools the agent called, in order, with arguments and outcomes. Reads structured events from the agent-loop SSE stream via `routes/events.ts`.
+- **Why:** Power users debugging a build need to see what the model actually did, not just the final diff.
+
+## B11. Opt-in approval gate for risky commands (Task #964)
+- **Per-project toggle:** "Require approval for risky commands". When enabled, the agent loop pauses on `bash`, `rm -rf`, package installs, and other destructive operations and waits for the user to approve before executing.
+
+## B12. Quality gate everywhere + architect / staging review
+- **Quality gate now runs on all build paths**, not just task-agent builds — previously single-shot refines bypassed it (commit `93b16d26`).
+- **Task #991:** Fixed architect findings in the review card, route error 409 mapping, severity normalization in `quality-gate.ts` and `jobs.ts`.
+- **Task #992:** Agentic staging review — addressed every architect finding from the prior review round.
+
+## B13. Blueprint `npm install` wiring (Task #1004)
+- Blueprint installs now emit proper task events and run through the durable queue with the right safety guards — previously a flaky one-shot.
+
+## B14. AI engine reliability fixes — felt most by dev-mode users
+Even though these live in shared platform (Part C1), the symptoms hit dev users hardest because they run longer, more complex loops:
+- Agent loop `tool_choice` switched from `"auto"` to `"required"` so the model must call a tool.
+- Corrective turn injected when the model returns plain text with no tool calls in refine mode.
+- Hard enforcement: agent cannot finalize without file modifications.
+- Conversation must end with a user message (Anthropic compatibility) — bridge user message added when needed.
+- Provider-isolated circuit breakers so one provider's outage doesn't silently mask others.
+- Empty-refine retry now uses the agentic loop instead of the legacy pipeline.
+
+## B15. Admin / job queue (used by dev/admin users)
+- Admin job queue and inbox panels switched from hand-written `fetch` calls to generated OpenAPI hooks (commit `43079a34`).
+- EAS, app-testing, and CVE jobs registered with the durable pg-boss queue so they survive restarts (commit `56cac9f4`).
+
+## B16. Developer Mode docs (`/docs/developer-mode`)
+- Five new deep-dive sections added.
 - System prompt hardened.
-- Dead breadcrumb link fixed; Conclusion section added.
+- Dead breadcrumb link fixed.
+- Conclusion section added.
 
 ---
 
@@ -171,7 +247,7 @@ The report below is grouped that way.
 | Surface | Items |
 |---|---|
 | **AI Builder only (UI)** | A1 home/workspace composer, A2 brainstorm pill on home + workspace, A4 voice on home/workspace, A5 connection indicator + build-blocked banner, A6 dismissed-tip memory |
-| **Developer Mode only (UI)** | B1 slide-out nav swap, B2 composer redesign, B3 brainstorm panel on dev home with developer-mode project creation, B4 agent trace UI, agent step counter, steering hints, approval gate, B5 docs |
+| **Developer Mode only (UI + engine)** | B1 slide-out nav swap, B2 composer redesign, B3 brainstorm panel + developer-mode project creation, B4 dev-chat intent classifier, B5 agentic onboarding (mode selector + anchored tooltips + in-place upgrade), B6 provisioning step UI + humanizeError, B7 container reliability + "Waking…" + failed-jobs re-enqueue, B8 cold-start auto-retry + build-blocked banner, B9 agent loop transparency (steering hints, cancel/credit confirm, live step counter), B10 agent trace UI, B11 risky-command approval gate, B12 quality gate everywhere + architect/staging review, B13 blueprint npm install wiring, B14 AI engine reliability (felt hardest by dev users), B15 admin job queue + durable queue, B16 docs |
 | **Both surfaces (Shared)** | A3 brainstorm memory + context (panel is shared), C1 AI engine reliability, C2 streaming, C3 agentic provisioning, C4 OpenAPI coverage + /api/docs, C5 voice language sync, C6 billing safety, C7 notifications + activity + emails, C8 GDPR, C9 Knowledge Vault, C10 security/infra |
 
 ---
