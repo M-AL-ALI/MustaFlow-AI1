@@ -488,7 +488,11 @@ export default function HomePage() {
                   </button>
                 ))}
                 <div className="ml-auto text-xs text-muted-foreground pr-2 hidden sm:block">
-                  Press <kbd className="px-1.5 py-0.5 rounded border border-border bg-background text-[10px] font-mono">Enter</kbd> to build
+                  Press{" "}
+                  <kbd className="px-1.5 py-0.5 rounded border border-border bg-background text-[10px] font-mono">
+                    Enter
+                  </kbd>{" "}
+                  to build
                 </div>
               </div>
             </div>
