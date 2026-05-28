@@ -23,8 +23,7 @@ import {
   GetAgentRoutingQueryParams,
   GetAgentRoutingResponse,
 } from "@workspace/api-zod";
-import { buildInitialAssistantMessage } from "../lib/ai";
-import { resolveAgentIdentity } from "../lib/jobs";
+import { resolveAgentIdentity, enqueueJob } from "../lib/jobs";
 import {
   enqueueProvisionProjectJob,
   provisionPreviewDb,
@@ -1198,6 +1197,7 @@ export default function HomeScreen() {
         `[BRAINSTORM CONTEXT — conversation that shaped this request; use it to understand ` +
         `the user's intent, priorities, and edge cases]\n${turns}\n[END BRAINSTORM CONTEXT]`;
     }
+    // Store the user's prompt as the first chat message.
     await db.insert(chatMessagesTable).values({
       projectId: project.id,
       role: "user",
@@ -1206,14 +1206,52 @@ export default function HomeScreen() {
       planMode: false,
     });
 
-    const greeting = buildInitialAssistantMessage(project.name, initialPrompt);
-    await db.insert(chatMessagesTable).values({
-      projectId: project.id,
-      role: "assistant",
-      content: greeting,
-      agentMode: "eco",
-      planMode: false,
-    });
+    // Kick off the initial build immediately — mirrors the background-build path
+    // in POST /api/projects/:id/messages so the pipeline actually runs instead of
+    // returning a canned greeting that leaves the project permanently unbuilt.
+    // New project has no files yet → resolveAgentIdentity always returns "task".
+    const resolvedIdentity = resolveAgentIdentity(initialPrompt, false, false, false, false);
+    const [initialTask] = await db
+      .insert(agentTasksTable)
+      .values({
+        projectId: project.id,
+        title: `Build: ${initialPrompt.slice(0, 60)}`,
+        kind: "main",
+        status: "planning",
+        prompt: initialPrompt,
+        agentIdentity: resolvedIdentity,
+        runMode: "foreground",
+        taskAgentMode: "eco",
+        hasBrainstormContext,
+        brainstormTurnCount: hasBrainstormContext
+          ? (brainstormContext as Array<{ role: string; content: string }>).length
+          : null,
+      })
+      .returning();
+
+    if (initialTask) {
+      // Dispatch the build job asynchronously so the HTTP response returns
+      // immediately while the build runs in the background queue.
+      enqueueJob({
+        taskId: initialTask.id,
+        projectId: project.id,
+        kind: "build",
+        userPrompt: initialPromptWithContext,
+        agentMode: "eco",
+        agentIdentity: resolvedIdentity,
+        conversationHistory: [],
+      });
+
+      // Optimistic assistant message so the chat shows activity right away.
+      await db.insert(chatMessagesTable).values({
+        projectId: project.id,
+        role: "assistant",
+        content:
+          "On it — building your app now. This usually takes 30–60 seconds. The Preview tab will update when it's ready.",
+        agentMode: "eco",
+        planMode: false,
+      });
+    }
   }
 
   // Task #738 — kick off background provisioning for agentic projects. Only
