@@ -15,6 +15,7 @@ import {
   Settings,
   X,
   Moon,
+  Sun,
   Keyboard,
   Info,
   ChevronRight,
@@ -33,7 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { applyTheme, getStoredTheme, THEME_EVENT, type AppearanceMode } from "@/lib/theme";
 import logoUrl from "/logo.png";
 import type { PanelId } from "./icon-rail";
 
@@ -118,16 +119,35 @@ function SettingsDrawer({
     return () => document.removeEventListener("mousedown", handler);
   }, [open, onClose]);
 
-  const settingsItems = [
+  const [themeMode, setThemeMode] = useState<AppearanceMode>(() => getStoredTheme());
+  useEffect(() => {
+    const handler = () => setThemeMode(getStoredTheme());
+    window.addEventListener(THEME_EVENT, handler);
+    return () => window.removeEventListener(THEME_EVENT, handler);
+  }, []);
+  const isDark = themeMode !== "light";
+  const toggleTheme = () => {
+    const next: AppearanceMode = isDark ? "light" : "dark";
+    applyTheme(next);
+    setThemeMode(next);
+  };
+
+  const settingsItems: Array<{
+    icon: typeof Keyboard;
+    label: string;
+    description: string;
+    onClick?: () => void;
+  }> = [
     {
       icon: Keyboard,
       label: "Keyboard shortcuts",
       description: "View all shortcuts",
     },
     {
-      icon: Moon,
+      icon: isDark ? Sun : Moon,
       label: "Appearance",
-      description: "Dark mode (default)",
+      description: isDark ? "Switch to light mode" : "Switch to dark mode",
+      onClick: toggleTheme,
     },
     {
       icon: Info,
@@ -206,10 +226,13 @@ function SettingsDrawer({
             <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider px-1 mb-1">
               Workspace
             </p>
-            {settingsItems.map(({ icon: Icon, label, description }) => (
+            {settingsItems.map(({ icon: Icon, label, description, onClick }) => (
               <button
                 key={label}
-                onClick={onClose}
+                onClick={() => {
+                  onClick?.();
+                  if (!onClick) onClose();
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/60 transition-colors group"
               >
                 <div className="h-7 w-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0 group-hover:border-primary/30 transition-colors">
@@ -368,13 +391,6 @@ export function TopBar({
             </Tooltip>
           ))}
         </div>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ThemeToggle className="h-7 w-7" />
-          </TooltipTrigger>
-          <TooltipContent>Toggle light / dark mode</TooltipContent>
-        </Tooltip>
 
         <div className="w-px h-5 bg-border mx-1 shrink-0" />
 
