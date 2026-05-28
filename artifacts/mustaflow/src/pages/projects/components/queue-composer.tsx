@@ -1186,6 +1186,7 @@ export function QueueComposer({
       {showBrainstorm && (
         <BrainstormPanel
           onClose={() => setShowBrainstorm(false)}
+          projectId={projectId}
           onResolved={(prompt, messages) => {
             setRows([{ id: crypto.randomUUID(), text: prompt }]);
             if (onPromptValueChange) onPromptValueChange(prompt);

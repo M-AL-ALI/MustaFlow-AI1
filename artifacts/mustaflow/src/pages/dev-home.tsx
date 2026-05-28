@@ -442,6 +442,7 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
           <BrainstormPanel
             onClose={() => setShowDiscuss(false)}
             mode="developer"
+            storageKey="brainstorm_dev"
             onCreated={(id) => setLocation(`/dev/workspace/${id}`)}
           />
         )}
