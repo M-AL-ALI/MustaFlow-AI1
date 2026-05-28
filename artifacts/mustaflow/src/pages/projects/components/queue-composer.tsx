@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Link } from "wouter";
+import { getVoiceLang } from "@/hooks/use-voice-input";
 import {
   Rocket,
   Plus,
@@ -607,6 +609,7 @@ export function QueueComposer({
     () => getSpeechRecognitionCtor() !== null || mediaRecorderSupported,
     [mediaRecorderSupported],
   );
+  const voiceLang = getVoiceLang();
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
@@ -1542,33 +1545,45 @@ export function QueueComposer({
                 >
                   <Paintbrush2 className="h-3.5 w-3.5" />
                 </button>
-                <button
-                  type="button"
-                  onClick={startVoiceDictation}
-                  disabled={!voiceSupported}
-                  className={cn(
-                    "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
-                    isListening
-                      ? "text-red-400 bg-red-500/15 hover:bg-red-500/25 animate-pulse"
-                      : "text-muted-foreground hover:text-foreground hover:bg-background/60",
-                    !voiceSupported && "opacity-40 cursor-not-allowed",
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={startVoiceDictation}
+                    disabled={!voiceSupported}
+                    className={cn(
+                      "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
+                      isListening
+                        ? "text-red-400 bg-red-500/15 hover:bg-red-500/25 animate-pulse"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                      !voiceSupported && "opacity-40 cursor-not-allowed",
+                    )}
+                    title={
+                      !voiceSupported
+                        ? "Voice input not supported in this browser"
+                        : isListening
+                          ? "Stop dictation — review the transcript before sending"
+                          : "Dictate by voice — transcript appears here so you can edit before sending"
+                    }
+                    aria-pressed={isListening}
+                    aria-label={isListening ? "Stop voice dictation" : "Start voice dictation"}
+                  >
+                    {isListening ? (
+                      <MicOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Mic className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                  {voiceSupported && (
+                    <Link
+                      href="/settings?tab=account#voice-input"
+                      onClick={(e) => e.stopPropagation()}
+                      title={`Voice language: ${voiceLang} — click to change in Settings`}
+                      className="absolute -bottom-1.5 -right-1.5 px-1 rounded text-[9px] leading-[14px] font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-foreground transition-colors border border-border/60 z-10"
+                    >
+                      {voiceLang}
+                    </Link>
                   )}
-                  title={
-                    !voiceSupported
-                      ? "Voice input not supported in this browser"
-                      : isListening
-                        ? "Stop dictation — review the transcript before sending"
-                        : "Dictate by voice — transcript appears here so you can edit before sending"
-                  }
-                  aria-pressed={isListening}
-                  aria-label={isListening ? "Stop voice dictation" : "Start voice dictation"}
-                >
-                  {isListening ? (
-                    <MicOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Mic className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                </div>
                 <button
                   onClick={addRow}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
