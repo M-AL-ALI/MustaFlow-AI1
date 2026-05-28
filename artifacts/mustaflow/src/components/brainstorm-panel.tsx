@@ -82,11 +82,7 @@ function loadPersistedState(effectiveKey: string | null): {
   }
 }
 
-function savePersistedState(
-  effectiveKey: string,
-  messages: Message[],
-  buildIntent: boolean,
-) {
+function savePersistedState(effectiveKey: string, messages: Message[], buildIntent: boolean) {
   try {
     localStorage.setItem(effectiveKey, JSON.stringify({ messages, buildIntent }));
   } catch {

@@ -1635,7 +1635,9 @@ export const ListTasksResponseItem = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
 
@@ -1704,7 +1706,9 @@ export const CancelTaskResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 
 
@@ -1755,7 +1759,9 @@ export const ForceStartTaskResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 
 
@@ -1810,7 +1816,9 @@ export const UpdateTaskResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 
 
@@ -1876,7 +1884,9 @@ export const ApplyTaskStagingResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 
 
@@ -1944,7 +1954,9 @@ export const DiscardTaskStagingResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 
 
@@ -2016,7 +2028,9 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })
 
 
@@ -4685,7 +4699,9 @@ export const GetProjectQueueBatchResponse = zod.object({
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
   "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
-  "discardedAt": zod.coerce.date().nullish()
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
 })),
   "totalCount": zod.number(),
   "completedCount": zod.number(),

@@ -6722,6 +6722,12 @@ components:
         discardedAt:
           type: ["string", "null"]
           format: date-time
+        hasBrainstormContext:
+          type: boolean
+          description: "True when the task was created with brainstorm conversation context forwarded to the builder."
+        brainstormTurnCount:
+          type: ["integer", "null"]
+          description: "Number of brainstorm conversation turns (user + assistant messages) included as context."
 
     BackgroundJob:
       type: object

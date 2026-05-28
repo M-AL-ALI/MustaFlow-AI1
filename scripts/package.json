@@ -83,6 +83,7 @@
     "migrate-drop-conversations": "tsx ./src/migrate-drop-conversations.ts",
     "migrate-command-approval": "tsx ./src/migrate-command-approval.ts",
     "migrate-message-origin": "tsx ./src/migrate-message-origin.ts",
+    "migrate-brainstorm-context": "tsx ./src/migrate-brainstorm-context.ts",
     "backfill-message-origin": "tsx ./src/backfill-message-origin.ts",
     "migrate-reinforced-count": "tsx ./src/migrate-reinforced-count.ts",
     "migrate-stripe-events-status": "tsx ./src/migrate-stripe-events-status.ts",

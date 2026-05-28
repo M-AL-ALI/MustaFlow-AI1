@@ -1345,6 +1345,13 @@ export interface AgentTask {
   appliedAt?: string | null;
   /** @nullable */
   discardedAt?: string | null;
+  /** True when the task was created with brainstorm conversation context forwarded to the builder. */
+  hasBrainstormContext?: boolean;
+  /**
+     * Number of brainstorm conversation turns (user + assistant messages) included as context.
+     * @nullable
+     */
+  brainstormTurnCount?: number | null;
 }
 
 export type BackgroundJobStatus = typeof BackgroundJobStatus[keyof typeof BackgroundJobStatus];

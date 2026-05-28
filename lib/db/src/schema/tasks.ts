@@ -2,6 +2,7 @@ import {
   pgTable,
   serial,
   integer,
+  boolean,
   text,
   jsonb,
   timestamp,
@@ -395,6 +396,8 @@ export const agentTasksTable = pgTable(
     // Accumulated from streaming deltas in emitTokenEvent; written on task completion.
     // Null for tasks completed before Task #806 migration.
     tokenCount: integer("token_count"),
+    hasBrainstormContext: boolean("has_brainstorm_context").notNull().default(false),
+    brainstormTurnCount: integer("brainstorm_turn_count"),
   },
   (table) => [
     index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),

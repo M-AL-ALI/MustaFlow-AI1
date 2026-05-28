@@ -27,6 +27,7 @@ import {
   Activity,
   Bug,
   Box,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -219,6 +220,8 @@ function TaskRow({
     userFeedback?: string | null;
     createdAt: string;
     completedAt?: string | null;
+    hasBrainstormContext?: boolean | null;
+    brainstormTurnCount?: number | null;
   };
   projectId: number;
   onTryFix: (text: string) => void;
@@ -291,6 +294,22 @@ function TaskRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-foreground truncate">{task.title}</span>
             <StatusBadge status={task.status} />
+            {task.hasBrainstormContext && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-full shrink-0"
+                title={
+                  task.brainstormTurnCount != null
+                    ? `Brainstorm-guided — ${task.brainstormTurnCount} conversation turn${task.brainstormTurnCount !== 1 ? "s" : ""} from your brainstorm were included as context for this build`
+                    : "Brainstorm-guided — context from your brainstorm session was included for this build"
+                }
+              >
+                <Sparkles className="h-2.5 w-2.5" />
+                Brainstorm-guided
+                {task.brainstormTurnCount != null && (
+                  <span className="text-violet-400/70">· {task.brainstormTurnCount} turns</span>
+                )}
+              </span>
+            )}
             {durationSec != null && (
               <span className="text-[10px] text-muted-foreground shrink-0">{durationSec}s</span>
             )}

@@ -336,6 +336,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         status: "building",
         prompt: content,
         agentIdentity: "main",
+        hasBrainstormContext,
+        brainstormTurnCount: hasBrainstormContext
+          ? (brainstormContext as Array<{ role: string; content: string }>).length
+          : null,
       })
       .returning();
 
@@ -544,6 +548,10 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         wallClockCapMs,
         creditsReserved: reservedCredits,
         taskAgentMode: mode,
+        hasBrainstormContext,
+        brainstormTurnCount: hasBrainstormContext
+          ? (brainstormContext as Array<{ role: string; content: string }>).length
+          : null,
       })
       .returning();
     if (!task) {
@@ -905,7 +913,10 @@ router.post(
       attachments: rawAttachments,
       origin: streamOrigin,
       idempotencyKey: streamIdempotencyKey,
+      brainstormContext: streamBrainstormContext,
     } = parsed.data;
+    const streamHasBrainstormContext =
+      Array.isArray(streamBrainstormContext) && streamBrainstormContext.length > 0;
     const mode = agentMode as AgentMode;
     const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
     const imageAttachments = attachments.filter(
@@ -1127,6 +1138,10 @@ router.post(
         status: "building",
         prompt: content,
         agentIdentity: "main",
+        hasBrainstormContext: streamHasBrainstormContext,
+        brainstormTurnCount: streamHasBrainstormContext
+          ? (streamBrainstormContext as Array<{ role: string; content: string }>).length
+          : null,
       })
       .returning();
 
