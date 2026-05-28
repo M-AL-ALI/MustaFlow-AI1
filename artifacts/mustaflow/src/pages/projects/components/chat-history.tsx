@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, isValidElement } from "react";
+import { useEffect, useRef, useState, useCallback, isValidElement } from "react";
 import {
   Search,
   X,
@@ -2649,6 +2649,44 @@ function getWhatToLookForTips(changedFiles: string[]): string[] {
   return [...tips].slice(0, 4);
 }
 
+// ── Dismissed tips persistence ────────────────────────────────────────────────
+const DISMISSED_TIPS_KEY = "mustaflow_dismissed_review_tips";
+
+function useDismissedTips() {
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(DISMISSED_TIPS_KEY);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const dismiss = useCallback((tip: string) => {
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      next.add(tip);
+      try {
+        localStorage.setItem(DISMISSED_TIPS_KEY, JSON.stringify([...next]));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
+
+  const reset = useCallback(() => {
+    setDismissed(new Set());
+    try {
+      localStorage.removeItem(DISMISSED_TIPS_KEY);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  return { dismissed, dismiss, reset };
+}
+
 // ── Task Review Card ──────────────────────────────────────────────────────────
 function TaskReviewCard({
   projectId,
@@ -2674,6 +2712,7 @@ function TaskReviewCard({
   const [tipsOpen, setTipsOpen] = useState(false);
   // Apply step index driven by backend narration events (not a timer).
   const [applyStartedAt, setApplyStartedAt] = useState<number | null>(null);
+  const { dismissed: dismissedTips, dismiss: dismissTip, reset: resetTips } = useDismissedTips();
 
   // Poll task events when apply is in-flight so we can drive the progress steps.
   const { data: applyEvents = [] } = useListTaskEvents(projectId, taskId, {
@@ -2961,34 +3000,71 @@ function TaskReviewCard({
 
       {/* What to look for panel */}
       {(() => {
-        const tips = getWhatToLookForTips(allChanged);
-        if (tips.length === 0) return null;
+        const allTips = getWhatToLookForTips(allChanged);
+        const visibleTips = allTips.filter((tip) => !dismissedTips.has(tip));
+        const hasDismissed = dismissedTips.size > 0 && allTips.some((t) => dismissedTips.has(t));
+        if (allTips.length === 0) return null;
         return (
           <div className="border-t border-border/40">
-            <button
-              type="button"
-              onClick={() => setTipsOpen((v) => !v)}
-              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {tipsOpen ? (
-                <ChevronDown className="h-3 w-3 shrink-0" />
-              ) : (
-                <ChevronRight className="h-3 w-3 shrink-0" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setTipsOpen((v) => !v)}
+                className="flex items-center gap-1.5 flex-1 min-w-0 hover:text-foreground transition-colors"
+              >
+                {tipsOpen ? (
+                  <ChevronDown className="h-3 w-3 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 shrink-0" />
+                )}
+                <BookOpen className="h-3 w-3 shrink-0" />
+                <span className="font-medium">What to look for</span>
+              </button>
+              {hasDismissed && (
+                <button
+                  type="button"
+                  onClick={resetTips}
+                  className="text-[9px] text-muted-foreground/50 hover:text-primary transition-colors underline underline-offset-2 shrink-0"
+                >
+                  Reset tips
+                </button>
               )}
-              <BookOpen className="h-3 w-3 shrink-0" />
-              <span className="font-medium">What to look for</span>
-              <span className="ml-auto text-[9px] text-muted-foreground/50">
-                {tips.length} tip{tips.length !== 1 ? "s" : ""}
+              <span className="text-[9px] text-muted-foreground/50 shrink-0">
+                {visibleTips.length} tip{visibleTips.length !== 1 ? "s" : ""}
               </span>
-            </button>
+            </div>
             {tipsOpen && (
               <div className="px-2.5 pb-2 space-y-1">
-                {tips.map((tip, i) => (
-                  <div key={i} className="flex items-start gap-1.5">
-                    <Info className="h-2.5 w-2.5 text-primary/60 shrink-0 mt-0.5" />
-                    <span className="text-[10px] text-muted-foreground leading-relaxed">{tip}</span>
-                  </div>
-                ))}
+                {visibleTips.length === 0 ? (
+                  <p className="text-[10px] text-muted-foreground/50 italic">
+                    All tips dismissed.{" "}
+                    <button
+                      type="button"
+                      onClick={resetTips}
+                      className="underline underline-offset-2 hover:text-primary transition-colors"
+                    >
+                      Reset
+                    </button>{" "}
+                    to show them again.
+                  </p>
+                ) : (
+                  visibleTips.map((tip) => (
+                    <div key={tip} className="flex items-start gap-1.5 group">
+                      <Info className="h-2.5 w-2.5 text-primary/60 shrink-0 mt-0.5" />
+                      <span className="text-[10px] text-muted-foreground leading-relaxed flex-1">
+                        {tip}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => dismissTip(tip)}
+                        title="Dismiss this tip"
+                        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/40 hover:text-muted-foreground"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
