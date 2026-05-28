@@ -383,14 +383,17 @@ export default function HomePage() {
 
         {/* Hero Section */}
         <div className="max-w-4xl mx-auto pt-10 px-6">
-          {/* Logo treatment — small tight box, logo fills it and spins */}
-          <div className="flex justify-center mb-6">
-            <div className="relative rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 p-1 shadow-xl ring-1 ring-primary/20">
-              <img
-                src={`${import.meta.env.BASE_URL}logo.png`}
-                alt="MustaFlow AI"
-                className="h-28 w-40 sm:h-32 sm:w-48 object-contain logo-crisp"
-              />
+          {/* Big logo treatment */}
+          <div className="flex justify-center mb-10">
+            <div className="relative">
+              <div className="absolute -inset-10 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.35)_0%,transparent_70%)] blur-3xl pointer-events-none" />
+              <div className="relative rounded-[2.5rem] border-2 border-border bg-gradient-to-br from-card via-card to-primary/5 p-7 shadow-2xl ring-1 ring-primary/20">
+                <img
+                  src={`${import.meta.env.BASE_URL}logo.png`}
+                  alt="MustaFlow AI"
+                  className="h-40 w-40 sm:h-48 sm:w-48 object-contain"
+                />
+              </div>
             </div>
           </div>
           <div className="text-center mb-5">
