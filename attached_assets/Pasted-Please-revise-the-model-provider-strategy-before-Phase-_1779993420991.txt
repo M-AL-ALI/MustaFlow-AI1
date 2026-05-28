@@ -1,0 +1,84 @@
+Please revise the model/provider strategy before Phase 1 planning.
+
+I have a concern about using gpt-4.1-mini as the default model for Ora by MustaFlow.
+
+Do not treat this as saying every “mini” model is bad. Mini models can be useful for cost control, speed, routing, classification, and simple visitor questions. But Ora is supposed to feel like a premium, high-level public AI assistant. It should not be positioned or architected around an older/smaller mini model as the main experience.
+
+Please re-check the currently available models through our actual Replit AI/OpenAI-compatible provider stack before implementation.
+
+Important requirements:
+
+1. Do not hard-code gpt-4.1-mini as Ora’s main/default premium model unless you prove it is truly the best currently available option in our provider environment.
+2. Ora’s main public experience should use the strongest available premium model for:
+
+* complex reasoning
+* strategy analysis
+* root-cause analysis
+* dataset analysis
+* document analysis
+* business analysis
+* high-value visitor conversations
+* app idea planning
+* professional recommendations
+
+3. Use a mini or lower-cost model only for:
+
+* intent classification
+* routing
+* simple FAQ
+* short product answers
+* abuse checks
+* prompt safety checks
+* basic summarization
+* low-risk conversations
+* fallback when cost caps are reached
+
+4. Please identify the actual available model list in our environment/provider before recommending final names. The final plan should include:
+
+* premium reasoning/conversation model
+* low-cost fallback model
+* dataset/document analysis model
+* image understanding model
+* image generation/editing model
+* voice transcription model
+* voice output model
+* web search/retrieval strategy
+
+5. Please recommend an escalation strategy:
+
+* Simple visitor question → low-cost model
+* MustaFlow product FAQ → low-cost or cached answer
+* app idea planning → premium model
+* uploaded file analysis → premium model
+* Excel/CSV/data/root-cause analysis → premium model
+* image analysis → best available vision model
+* image editing/generation → dedicated image model/tool
+* voice transcription → browser-native first, API fallback if needed
+* current information/search → search/retrieval tool plus premium synthesis model if needed
+
+6. The visitor should feel Ora is premium from the first serious answer. Cost control is important, but Ora is part of MustaFlow’s first impression, so quality, trust, reasoning, and polish matter more than saving a small amount on every response.
+7. Please do not market Ora publicly as “guaranteed 10x better than every AI.” Instead, position it internally as:
+    “Designed to deliver a best-in-class public AI experience.”
+8. In the recommendation report, please show a model table like this:
+
+Capability | Recommended Model/Tool | Fallback | Reason
+
+Rows needed:
+
+* premium conversation
+* simple FAQ
+* dataset analysis
+* root-cause analysis
+* document/PDF analysis
+* Excel/CSV analysis
+* image understanding
+* image editing/generation
+* voice input
+* voice output
+* web search
+* safety/moderation
+* embeddings/retrieval if needed
+
+9. Please also include cost-control logic, but do not weaken the main Ora experience. The right design is not “always use the cheapest model.” The right design is:
+    Use the best model when the visitor’s request requires intelligence, and use cheaper models only when the task is simple or behind-the-scenes.
+10. Before coding Phase 1, provide the revised model/provider strategy and explain exactly why each model/tool was selected.

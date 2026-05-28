@@ -1,0 +1,57 @@
+Thank you. This live smoke test report is much better and gives me more confidence.
+
+I approve continuing Phase 1 only.
+
+Do not start Phase 2 planning or implementation yet.
+
+The model findings are accepted with these required Phase 1 rules:
+
+1. Use gpt-5.4 as Ora’s primary premium visible model for serious answers.
+2. Use claude-sonnet-4-6 as premium fallback when gpt-5.4 fails.
+3. Use gpt-5-mini only for simple FAQ when quality is acceptable.
+4. Use gpt-5-nano only for hidden classification/safety/routing. It must never generate the visible visitor-facing Ora answer.
+5. Set minimum token budget for gpt-5-mini and gpt-5-nano to at least 150 tokens so they do not return empty replies.
+6. If the classifier returns empty, invalid JSON, or fails, fallback should be safe:
+    * either route to premium model
+    * or use a deterministic safe default
+    * never expose raw model errors to the visitor
+7. Add logging for model ID, latency, fallback used, and token budget — but do not log user message content.
+8. Keep ORA_PREMIUM_MODEL environment-configurable so Ora can move to gpt-5.5 later if the Replit proxy supports it.
+9. Clarify that changing ORA_PREMIUM_MODEL may require app/server restart depending on how env vars are loaded. Do not promise “no redeployment or restart” unless verified.
+10. Phase 1 final validation report must include actual runtime proof for:
+
+* gpt-5.4 premium response
+* gpt-5-mini simple FAQ response
+* gpt-5-nano classifier response with valid output
+* claude-sonnet-4-6 fallback response
+* fallback behavior when primary fails
+* no raw model errors exposed to visitors
+
+Also, please keep the Phase 1 safety gates:
+
+* Public AI routes stay isolated from Builder routes
+* Public AI cannot import project/user/secret/credit models
+* Public AI cannot call Builder pipelines
+* Ora refuses build/deploy/edit/access-project requests
+* PUBLIC_AI_ENABLED=false disables Ora
+* rate limits work
+* session caps work
+* multilingual responses work in Arabic and Spanish
+* session memory works after refresh
+* no chat content is stored in DB
+* no private chat content appears in logs
+* desktop and mobile UI are validated
+
+One extra requirement:
+
+For obvious Builder/developer/deployment requests like:
+
+* “Build me an app”
+* “Edit my code”
+* “Deploy my project”
+* “Access my database”
+* “Open Developer Mode”
+
+Please handle these with a deterministic pre-check before expensive model calls when possible. That protects cost and reinforces the hard public/private boundary.
+
+Phase 1 can continue under these conditions. Phase 2 remains not approved until I review the completed Phase 1 validation report.

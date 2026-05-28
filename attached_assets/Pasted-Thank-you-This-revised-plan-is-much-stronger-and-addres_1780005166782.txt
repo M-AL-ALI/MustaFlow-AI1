@@ -1,0 +1,60 @@
+Thank you. This revised plan is much stronger and addresses most of the concerns.
+
+I approve the direction for Phase 1 only, but before calling the model inventory “verified,” please prove model availability with live runtime tests, not only by reading constants from the codebase.
+
+Important clarification:
+
+A model ID appearing in ai-providers.ts, ai.ts, agent-creative.ts, or transcribe.ts means the codebase references it. It does not automatically prove the current Replit AI Integration proxy can successfully call it in this environment.
+
+Before finalizing Phase 1 validation, please run small smoke tests for each model that Phase 1 depends on:
+
+Required Phase 1 runtime checks:
+
+* gpt-5.4 returns a successful chat response
+* gpt-5-mini returns a successful simple FAQ response
+* gpt-5-nano returns a successful classifier response
+* claude-sonnet-4-6 works if used as fallback
+* model fallback works if the primary model fails
+* Ora never exposes raw model errors to visitors
+
+For each smoke test, report:
+
+* model ID called
+* provider route used
+* success/failure
+* response latency
+* whether JSON output worked where needed
+* any error message if failed
+* fallback behavior if failed
+
+Please also clarify this table item:
+
+text-embedding-3-small shows Text = No. That is fine if you mean “not a chat/conversation model,” but it does accept text input for embeddings. Please label it clearly as “embedding only / not for chat.”
+
+Phase 1 model rule remains:
+
+* Visible serious Ora answers should use the strongest available premium model, currently gpt-5.4 unless gpt-5.5 becomes available through our proxy.
+* gpt-5-nano should not produce visible Ora answers.
+* gpt-5-nano is acceptable only for classifier/safety/background routing tasks.
+* gpt-5-mini can be used only for simple FAQ if quality testing is acceptable.
+* Any first-impression, strategy, troubleshooting, business analysis, app planning, or professional response should use premium.
+
+Also add a future upgrade note:
+
+If gpt-5.5 becomes available in our Replit AI Integration proxy, Ora’s premium model should be upgradeable by environment configuration only, without code rewrite.
+
+Please continue Phase 1 only. Do not begin Phase 2 planning or implementation.
+
+Before Phase 1 is considered complete, the final validation report must include:
+
+* live model smoke-test results
+* final model IDs actually used
+* fallback behavior proof
+* public route isolation proof
+* rate-limit proof
+* PUBLIC_AI_ENABLED=false kill-switch proof
+* multilingual proof with Arabic and Spanish
+* session memory proof after refresh
+* refusal proof for Builder/deployment/code/project access
+* UI proof on desktop and mobile
+* confirmation that no chat content is stored in DB or logs
