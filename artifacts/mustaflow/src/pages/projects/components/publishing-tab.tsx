@@ -2832,7 +2832,7 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
   const [token, setToken] = useState("");
   const [repo, setRepo] = useState("");
   const [branch, setBranch] = useState("main");
-  const [isPrivate, setIsPrivate] = useState(true);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [pushing, setPushing] = useState(false);
   const [saveToken, setSaveToken] = useState(false);
