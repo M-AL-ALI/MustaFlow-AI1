@@ -24,6 +24,38 @@ export type AgentTaskReport = {
   title?: string;
   category?: string;
 }[];
+  /**
+     * Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable "Security findings" section on the failed task row.
+     * @nullable
+     */
+  securityFindings?: {
+  kind?: 'sast' | 'npm_audit';
+  blocked?: boolean;
+  message?: string;
+  fixPrompt?: string;
+  sast?: ({
+  file?: string;
+  /** @nullable */
+  line?: number | null;
+  message?: string;
+  /** @nullable */
+  detail?: string | null;
+  severity?: 'error' | 'warning' | 'info';
+  /** @nullable */
+  remediation?: string | null;
+})[];
+  npmAudit?: {
+  critical?: number;
+  high?: number;
+  parsed?: boolean;
+  packages?: {
+  name?: string;
+  severity?: string;
+}[];
+  /** @nullable */
+  remediation?: string | null;
+};
+} | null;
   /** @nullable */
   versionId?: number | null;
   [key: string]: unknown;

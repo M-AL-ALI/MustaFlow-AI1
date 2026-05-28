@@ -1626,6 +1626,30 @@ export const ListTasksResponseItem = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -1697,6 +1721,30 @@ export const CancelTaskResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -1750,6 +1798,30 @@ export const ForceStartTaskResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -1807,6 +1879,30 @@ export const UpdateTaskResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -1875,6 +1971,30 @@ export const ApplyTaskStagingResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -1945,6 +2065,30 @@ export const DiscardTaskStagingResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -2019,6 +2163,30 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
@@ -4691,6 +4859,30 @@ export const GetProjectQueueBatchResponse = zod.object({
   "title": zod.string().optional(),
   "category": zod.string().optional()
 })).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
   "versionId": zod.number().nullish()
 }).nullish(),
   "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),

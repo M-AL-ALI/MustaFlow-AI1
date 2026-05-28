@@ -5358,24 +5358,38 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         `Fix these issues in the Agent's output before applying.`;
 
       // Store structured findings so the UI can render a "Fix with AI" card
-      const structuredResult = JSON.stringify({
-        type: "sast_block",
-        findings: criticalFindings.slice(0, 10).map((f) => ({
+      const structuredFindings: NonNullable<TaskReport["securityFindings"]> = {
+        kind: "sast",
+        blocked: true,
+        message: humanMessage,
+        fixPrompt: `Fix the following SAST security issues found in the staged files:\n${summary}`,
+        sast: criticalFindings.slice(0, 10).map((f) => ({
           file: f.file,
           line: f.line ?? null,
           message: f.message,
           detail: f.detail ?? null,
           severity: f.severity,
+          remediation: f.detail ?? null,
         })),
+      };
+      const structuredResult = JSON.stringify({
+        type: "sast_block",
+        findings: structuredFindings.sast,
         message: humanMessage,
-        fixPrompt: `Fix the following SAST security issues found in the staged files:\n${summary}`,
+        fixPrompt: structuredFindings.fixPrompt,
       });
+
+      const sastMergedReport: TaskReport = {
+        ...((report as TaskReport | null) ?? ({} as TaskReport)),
+        securityFindings: structuredFindings,
+      };
 
       await db
         .update(agentTasksTable)
         .set({
           status: "failed",
           result: structuredResult.slice(0, 2000),
+          report: sastMergedReport,
           completedAt: new Date(),
         })
         .where(eq(agentTasksTable.id, taskId));
@@ -5414,6 +5428,21 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         // Fail closed: block the apply rather than letting unvetted dependencies through.
         const noContainerMsg =
           "Apply blocked: package.json was changed but no container is running to execute npm audit. Start a container from the Terminal tab and retry.";
+        const noContainerFindings: NonNullable<TaskReport["securityFindings"]> = {
+          kind: "npm_audit",
+          blocked: true,
+          message: noContainerMsg,
+          fixPrompt:
+            "A container must be running before package.json changes can be applied. Start the container from the Terminal tab, then retry.",
+          npmAudit: {
+            critical: 0,
+            high: 0,
+            parsed: false,
+            packages: [],
+            remediation:
+              "Start the project container from the Terminal tab so the dependency audit can run, then click Apply again.",
+          },
+        };
         const noContainerResult = JSON.stringify({
           type: "npm_audit_block",
           critical: 0,
@@ -5421,14 +5450,18 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
           parsed: false,
           packages: [],
           message: noContainerMsg,
-          fixPrompt:
-            "A container must be running before package.json changes can be applied. Start the container from the Terminal tab, then retry.",
+          fixPrompt: noContainerFindings.fixPrompt,
         });
+        const noContainerReport: TaskReport = {
+          ...((report as TaskReport | null) ?? ({} as TaskReport)),
+          securityFindings: noContainerFindings,
+        };
         await db
           .update(agentTasksTable)
           .set({
             status: "failed",
             result: noContainerResult.slice(0, 2000),
+            report: noContainerReport,
             completedAt: new Date(),
           })
           .where(eq(agentTasksTable.id, taskId));
@@ -5507,6 +5540,24 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
             affectedPackages.length > 0
               ? `Affected packages: ${affectedPackages.map((p) => p.name).join(", ")}. `
               : "";
+          const fixPromptText =
+            highCount !== null && criticalCount !== null
+              ? `Fix the npm dependency security vulnerabilities (${criticalCount} critical, ${highCount} high) found in package.json. ${fixPromptPkgPart}Update the affected packages to patched versions and re-submit.`
+              : `Fix the high/critical npm dependency vulnerabilities in package.json. Run 'npm audit fix' and update affected packages to patched versions.`;
+          const auditFindings: NonNullable<TaskReport["securityFindings"]> = {
+            kind: "npm_audit",
+            blocked: true,
+            message: humanMessage,
+            fixPrompt: fixPromptText,
+            npmAudit: {
+              critical: criticalCount ?? 0,
+              high: highCount ?? 0,
+              parsed: highCount !== null && criticalCount !== null,
+              packages: affectedPackages,
+              remediation:
+                "Run `npm audit fix` locally, or upgrade the affected packages to patched versions in package.json, then retry Apply.",
+            },
+          };
           const structuredResult = JSON.stringify({
             type: "npm_audit_block",
             critical: criticalCount ?? 0,
@@ -5514,17 +5565,19 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
             parsed: highCount !== null && criticalCount !== null,
             packages: affectedPackages,
             message: humanMessage,
-            fixPrompt:
-              highCount !== null && criticalCount !== null
-                ? `Fix the npm dependency security vulnerabilities (${criticalCount} critical, ${highCount} high) found in package.json. ${fixPromptPkgPart}Update the affected packages to patched versions and re-submit.`
-                : `Fix the high/critical npm dependency vulnerabilities in package.json. Run 'npm audit fix' and update affected packages to patched versions.`,
+            fixPrompt: fixPromptText,
           });
+          const auditMergedReport: TaskReport = {
+            ...((report as TaskReport | null) ?? ({} as TaskReport)),
+            securityFindings: auditFindings,
+          };
 
           await db
             .update(agentTasksTable)
             .set({
               status: "failed",
               result: structuredResult.slice(0, 2000),
+              report: auditMergedReport,
               completedAt: new Date(),
             })
             .where(eq(agentTasksTable.id, taskId));

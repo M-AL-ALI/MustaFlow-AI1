@@ -49,6 +49,32 @@ export type TaskReport = {
     severity: "error" | "warning";
     cve?: string;
   }>;
+  /**
+   * Structured record of a SAST or npm-audit gate that blocked an Apply.
+   * Populated by applyTaskAgentStaging when the gate fails so the UI can render
+   * an expandable list of findings instead of just a plain error string.
+   */
+  securityFindings?: {
+    kind: "sast" | "npm_audit";
+    blocked: boolean;
+    message: string;
+    fixPrompt?: string;
+    sast?: Array<{
+      file: string;
+      line: number | null;
+      message: string;
+      detail?: string | null;
+      severity: "error" | "warning" | "info";
+      remediation?: string | null;
+    }>;
+    npmAudit?: {
+      critical: number;
+      high: number;
+      parsed: boolean;
+      packages: Array<{ name: string; severity: string }>;
+      remediation?: string | null;
+    };
+  } | null;
   auditReport?: {
     findings: Array<{
       category: "accessibility" | "seo" | "performance" | "security";

@@ -31,6 +31,28 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+type SecurityFindings = {
+  kind: "sast" | "npm_audit";
+  blocked: boolean;
+  message: string;
+  fixPrompt?: string;
+  sast?: Array<{
+    file: string;
+    line: number | null;
+    message: string;
+    detail?: string | null;
+    severity: "error" | "warning" | "info";
+    remediation?: string | null;
+  }>;
+  npmAudit?: {
+    critical: number;
+    high: number;
+    parsed: boolean;
+    packages: Array<{ name: string; severity: string }>;
+    remediation?: string | null;
+  };
+};
+
 type TaskReport = {
   userRequest?: string;
   filesCreated?: string[];
@@ -41,6 +63,7 @@ type TaskReport = {
   nextRecommendation?: string;
   knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
   nativeFeatures?: string[];
+  securityFindings?: SecurityFindings | null;
 };
 
 type AgentAuditRow = {
@@ -213,6 +236,159 @@ function FeedbackButtons({
   );
 }
 
+function SecurityFindingsPanel({
+  findings,
+  onTryFix,
+}: {
+  findings: SecurityFindings;
+  onTryFix: (text: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const sastList = findings.sast ?? [];
+  const npm = findings.npmAudit;
+  const totalCount =
+    findings.kind === "sast"
+      ? sastList.length
+      : (npm?.critical ?? 0) + (npm?.high ?? 0) || npm?.packages.length || 0;
+  const label =
+    findings.kind === "sast"
+      ? `${sastList.length} static-analysis ${sastList.length === 1 ? "finding" : "findings"}`
+      : npm?.parsed
+        ? `${npm.critical} critical · ${npm.high} high in dependencies`
+        : "Dependency audit blocked Apply";
+
+  return (
+    <div className="rounded-lg border border-destructive/30 bg-destructive/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-destructive/10 transition-colors"
+      >
+        <ShieldAlert className="h-3.5 w-3.5 text-destructive shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-destructive">
+            Security findings{totalCount > 0 ? ` · ${totalCount}` : ""}
+          </div>
+          <div className="text-[11px] text-destructive/80 truncate">{label}</div>
+        </div>
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 text-destructive/70 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-destructive/70 shrink-0" />
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-destructive/20 px-2.5 py-2 space-y-2">
+          <div className="text-[11px] text-foreground/90 leading-relaxed whitespace-pre-wrap">
+            {findings.message}
+          </div>
+
+          {findings.kind === "sast" && sastList.length > 0 && (
+            <ul className="space-y-1.5">
+              {sastList.map((f, i) => {
+                const sevClass =
+                  f.severity === "error"
+                    ? "bg-destructive/15 text-destructive border-destructive/30"
+                    : f.severity === "warning"
+                      ? "bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
+                      : "bg-muted text-muted-foreground border-border";
+                return (
+                  <li
+                    key={i}
+                    className="rounded-md border border-destructive/15 bg-background/40 px-2 py-1.5"
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={cn(
+                          "text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border",
+                          sevClass,
+                        )}
+                      >
+                        {f.severity}
+                      </span>
+                      <span className="font-mono text-[10px] text-foreground/90 truncate">
+                        {f.file}
+                        {f.line != null ? `:${f.line}` : ""}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-foreground mt-1">{f.message}</div>
+                    {f.remediation && (
+                      <div className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
+                        <span className="font-semibold text-foreground/80">Remediation: </span>
+                        {f.remediation}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {findings.kind === "npm_audit" && npm && (
+            <div className="space-y-1.5">
+              {npm.parsed && (
+                <div className="flex items-center gap-2 text-[11px] text-foreground/90">
+                  <span className="text-destructive font-semibold">{npm.critical} critical</span>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-yellow-400 font-semibold">{npm.high} high</span>
+                </div>
+              )}
+              {npm.packages.length > 0 && (
+                <ul className="space-y-1">
+                  {npm.packages.map((p, i) => {
+                    const sevClass =
+                      p.severity === "critical"
+                        ? "bg-destructive/15 text-destructive border-destructive/30"
+                        : p.severity === "high"
+                          ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                          : "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
+                    return (
+                      <li
+                        key={i}
+                        className="flex items-center gap-2 rounded-md border border-destructive/15 bg-background/40 px-2 py-1"
+                      >
+                        <span
+                          className={cn(
+                            "text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border",
+                            sevClass,
+                          )}
+                        >
+                          {p.severity}
+                        </span>
+                        <span className="font-mono text-[11px] text-foreground truncate">
+                          {p.name}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {npm.remediation && (
+                <div className="text-[10px] text-muted-foreground leading-relaxed">
+                  <span className="font-semibold text-foreground/80">Remediation: </span>
+                  {npm.remediation}
+                </div>
+              )}
+            </div>
+          )}
+
+          {findings.fixPrompt && (
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => onTryFix(findings.fixPrompt!)}
+                className="text-[10px] font-medium text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-2 py-1 rounded-lg transition-colors whitespace-nowrap"
+              >
+                Fix with AI
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TaskRow({
   task,
   projectId,
@@ -349,10 +525,14 @@ function TaskRow({
 
       {expanded && (
         <div className="border-t border-border px-3 pb-3 pt-2 space-y-3">
-          {task.status === "failed" && task.result && (
+          {task.status === "failed" && task.result && !report?.securityFindings && (
             <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-2.5 text-xs text-destructive/90 font-mono leading-relaxed">
               {task.result}
             </div>
+          )}
+
+          {report?.securityFindings && (
+            <SecurityFindingsPanel findings={report.securityFindings} onTryFix={onTryFix} />
           )}
 
           {suggestions.length > 0 && (
