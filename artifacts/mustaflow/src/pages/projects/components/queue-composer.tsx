@@ -8,6 +8,7 @@ import {
   Sparkles,
   Paperclip,
   Mic,
+  MicOff,
   Paintbrush2,
   Image as ImageIcon,
   Layers2,
@@ -592,6 +593,8 @@ export function QueueComposer({
   const voiceSessionIdRef = useRef<number>(0);
   const voiceBaseTextRef = useRef<string>("");
   const voiceTargetRowIdRef = useRef<string | null>(null);
+  // Whether we *intend* to be listening — survives browser-side session drops.
+  const shouldListenRef = useRef(false);
   const mediaRecorderSupported = useMemo(
     () =>
       typeof window !== "undefined" &&
@@ -777,6 +780,9 @@ export function QueueComposer({
     "\n\n[VARIANT B — Design direction: bold, rich, dark palette, vibrant accent colors, eye-catching visuals]";
 
   const stopVoiceDictation = useCallback(() => {
+    // Mark that we no longer want to be listening so auto-restart in onend
+    // knows not to restart the session.
+    shouldListenRef.current = false;
     // Invalidate any in-flight session so late callbacks are ignored.
     voiceSessionIdRef.current += 1;
     const rec = recognitionRef.current;
@@ -833,87 +839,111 @@ export function QueueComposer({
     if (!targetRow) return;
     voiceTargetRowIdRef.current = targetRow.id;
     voiceBaseTextRef.current = targetRow.text;
-    voiceSessionIdRef.current += 1;
-    const sessionId = voiceSessionIdRef.current;
+    shouldListenRef.current = true;
+    setIsListening(true);
 
-    const rec = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = navigator.language || "en-US";
-    rec.onresult = (event) => {
-      if (voiceSessionIdRef.current !== sessionId) return; // stale session
-      let finalText = "";
-      let interimText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const r = event.results[i];
-        if (!r) continue;
-        const transcript = r[0]?.transcript ?? "";
-        if (r.isFinal) finalText += transcript;
-        else interimText += transcript;
-      }
-      const base = voiceBaseTextRef.current;
-      if (finalText) {
-        voiceBaseTextRef.current = (base + (base && !base.endsWith(" ") ? " " : "") + finalText)
-          .replace(/\s+/g, " ")
-          .trimStart();
-      }
-      const combined =
-        voiceBaseTextRef.current +
-        (interimText
-          ? (voiceBaseTextRef.current && !voiceBaseTextRef.current.endsWith(" ") ? " " : "") +
-            interimText
-          : "");
-      const rowId = voiceTargetRowIdRef.current;
-      if (!rowId) return;
-      // Conditional write + mirror updateRow's side effects in one pass.
-      // If the row no longer exists (sent / cleared / removed), auto-stop.
-      let rowStillExists = false;
-      let isSingleRow = false;
-      setRows((prev) => {
-        rowStillExists = prev.some((r) => r.id === rowId);
-        isSingleRow = prev.length === 1;
-        if (!rowStillExists) return prev;
-        return prev.map((r) => (r.id === rowId ? { ...r, text: combined } : r));
-      });
-      if (!rowStillExists) {
-        stopVoiceDictation();
-        return;
-      }
-      if (isSingleRow) {
-        if (onPromptValueChange) onPromptValueChange(combined);
-        onPromptForRouting(combined);
-      }
-    };
-    rec.onerror = (e) => {
-      if (voiceSessionIdRef.current !== sessionId) return;
-      const code = e?.error ?? "";
-      if (code === "not-allowed" || code === "service-not-allowed") {
+    // Creates and starts a fresh recognition instance.  Called on first start
+    // and on every auto-restart after the browser ends the continuous session
+    // (common on Chrome/Edge after a pause in speech).
+    const launchRecognition = () => {
+      if (!shouldListenRef.current) return;
+      voiceSessionIdRef.current += 1;
+      const sessionId = voiceSessionIdRef.current;
+
+      const rec = new Ctor();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || "en-US";
+      rec.onresult = (event) => {
+        if (voiceSessionIdRef.current !== sessionId) return; // stale session
+        let finalText = "";
+        let interimText = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (!r) continue;
+          const transcript = r[0]?.transcript ?? "";
+          if (r.isFinal) finalText += transcript;
+          else interimText += transcript;
+        }
+        const base = voiceBaseTextRef.current;
+        if (finalText) {
+          voiceBaseTextRef.current = (base + (base && !base.endsWith(" ") ? " " : "") + finalText)
+            .replace(/\s+/g, " ")
+            .trimStart();
+        }
+        const combined =
+          voiceBaseTextRef.current +
+          (interimText
+            ? (voiceBaseTextRef.current && !voiceBaseTextRef.current.endsWith(" ") ? " " : "") +
+              interimText
+            : "");
+        const rowId = voiceTargetRowIdRef.current;
+        if (!rowId) return;
+        // Conditional write + mirror updateRow's side effects in one pass.
+        // If the row no longer exists (sent / cleared / removed), auto-stop.
+        let rowStillExists = false;
+        let isSingleRow = false;
+        setRows((prev) => {
+          rowStillExists = prev.some((r) => r.id === rowId);
+          isSingleRow = prev.length === 1;
+          if (!rowStillExists) return prev;
+          return prev.map((r) => (r.id === rowId ? { ...r, text: combined } : r));
+        });
+        if (!rowStillExists) {
+          stopVoiceDictation();
+          return;
+        }
+        if (isSingleRow) {
+          if (onPromptValueChange) onPromptValueChange(combined);
+          onPromptForRouting(combined);
+        }
+      };
+      rec.onerror = (e) => {
+        if (voiceSessionIdRef.current !== sessionId) return;
+        const code = e?.error ?? "";
+        if (code === "not-allowed" || code === "service-not-allowed") {
+          // Hard permission error — stop permanently.
+          shouldListenRef.current = false;
+          setVoiceError(
+            "Microphone access blocked. Allow microphone access in your browser to dictate.",
+          );
+          setIsListening(false);
+        } else if (code === "no-speech") {
+          // Silence timeout — onerror is followed by onend which will restart.
+          setVoiceError(null);
+        } else if (code) {
+          // Unknown hard error — stop permanently.
+          shouldListenRef.current = false;
+          setVoiceError(`Voice input error: ${code}`);
+          setIsListening(false);
+        }
+      };
+      rec.onend = () => {
+        if (voiceSessionIdRef.current !== sessionId) return;
+        recognitionRef.current = null;
+        if (!shouldListenRef.current) {
+          // Intentional stop — clean up.
+          voiceTargetRowIdRef.current = null;
+          setIsListening(false);
+          return;
+        }
+        // Browser dropped the continuous session (common after silence on
+        // Chrome/Edge).  Restart seamlessly so the user never has to re-click.
+        launchRecognition();
+      };
+      recognitionRef.current = rec;
+      try {
+        rec.start();
+      } catch (err) {
+        shouldListenRef.current = false;
         setVoiceError(
-          "Microphone access blocked. Allow microphone access in your browser to dictate.",
+          `Could not start voice input: ${err instanceof Error ? err.message : String(err)}`,
         );
-      } else if (code === "no-speech") {
-        setVoiceError(null);
-      } else if (code) {
-        setVoiceError(`Voice input error: ${code}`);
+        setIsListening(false);
       }
-      setIsListening(false);
     };
-    rec.onend = () => {
-      if (voiceSessionIdRef.current !== sessionId) return;
-      setIsListening(false);
-      recognitionRef.current = null;
-      voiceTargetRowIdRef.current = null;
-    };
-    recognitionRef.current = rec;
-    try {
-      rec.start();
-      setIsListening(true);
-    } catch (err) {
-      setVoiceError(
-        `Could not start voice input: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      setIsListening(false);
-    }
+
+    launchRecognition();
   }, [
     isListening,
     rows,
@@ -1533,7 +1563,11 @@ export function QueueComposer({
                   aria-pressed={isListening}
                   aria-label={isListening ? "Stop voice dictation" : "Start voice dictation"}
                 >
-                  <Mic className="h-3.5 w-3.5" />
+                  {isListening ? (
+                    <MicOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Mic className="h-3.5 w-3.5" />
+                  )}
                 </button>
                 <button
                   onClick={addRow}
