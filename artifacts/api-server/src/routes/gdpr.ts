@@ -114,9 +114,20 @@ router.get("/me/export", async (req, res): Promise<void> => {
     );
 
     // ── Account metadata ──────────────────────────────────────────────────────
+    const userPrefs = await db
+      .select({ voiceLang: userPreferencesTable.voiceLang })
+      .from(userPreferencesTable)
+      .where(eq(userPreferencesTable.userId, userId))
+      .limit(1);
+
+    const voiceLang = userPrefs[0]?.voiceLang ?? null;
+
     addJson("account.json", {
       userId,
       exportedAt: new Date().toISOString(),
+      preferences: {
+        voiceLang: voiceLang !== null ? voiceLang : "null (auto-detect)",
+      },
       note: "This archive contains all data MustaFlow AI has stored for your account.",
     });
 
