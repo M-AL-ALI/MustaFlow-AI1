@@ -2285,9 +2285,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                  WHERE project_id = ${input.projectId}
                    AND called_at > now() - interval '1 hour'`,
           );
-          postInsertHourlyCount = Number(
-            (countRows.rows?.[0] as Record<string, unknown>)?.n ?? 0,
-          );
+          postInsertHourlyCount = Number((countRows.rows?.[0] as Record<string, unknown>)?.n ?? 0);
         } catch {
           // non-fatal — fall back to stale estimate so the loop is never
           // aborted due to an audit write failure
