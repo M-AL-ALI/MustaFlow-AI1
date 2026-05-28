@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import {
   Lock,
+  LockOpen,
   Plus,
   Copy,
   Trash2,
@@ -49,8 +50,28 @@ function SecretRow({
   const [revealed, setRevealed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [togglingPreview, setTogglingPreview] = useState(false);
 
   const deleteSecret = useDeleteSecret();
+
+  const isPreviewSafe = secret.isPreviewSafe ?? false;
+  const canTogglePreview = secret.environment === "development" || secret.environment === "testing";
+
+  const handleTogglePreviewSafe = useCallback(async () => {
+    if (!canTogglePreview || togglingPreview) return;
+    setTogglingPreview(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isPreviewSafe: !isPreviewSafe }),
+        credentials: "include",
+      });
+      if (res.ok) onUpdated();
+    } finally {
+      setTogglingPreview(false);
+    }
+  }, [canTogglePreview, togglingPreview, projectId, secret.id, isPreviewSafe, onUpdated]);
 
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(secret.name).then(() => {
@@ -116,6 +137,29 @@ function SecretRow({
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          {canTogglePreview && (
+            <button
+              onClick={() => void handleTogglePreviewSafe()}
+              disabled={togglingPreview}
+              className={cn(
+                "h-6 w-6 flex items-center justify-center rounded transition-colors",
+                isPreviewSafe ? "text-green-400 hover:bg-muted" : "text-amber-400 hover:bg-muted",
+              )}
+              title={
+                isPreviewSafe
+                  ? "Preview safe — injected into container. Click to disable."
+                  : "Not preview safe — excluded from container. Click to allow injection."
+              }
+            >
+              {togglingPreview ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : isPreviewSafe ? (
+                <LockOpen className="h-3 w-3" />
+              ) : (
+                <Lock className="h-3 w-3" />
+              )}
+            </button>
+          )}
           <button
             onClick={() => setRevealed((v) => !v)}
             className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

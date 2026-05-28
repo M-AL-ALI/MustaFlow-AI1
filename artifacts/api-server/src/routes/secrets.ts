@@ -528,6 +528,7 @@ router.patch(
       category?: string;
       verificationStatus?: string;
       minRole?: string;
+      isPreviewSafe?: boolean;
     };
     const updates: Partial<{
       valueEncrypted: string;
@@ -535,6 +536,7 @@ router.patch(
       category: string;
       verificationStatus: string;
       minRole: string;
+      isPreviewSafe: boolean;
       updatedAt: ReturnType<typeof sql>;
     }> = { updatedAt: sql`now()` };
 
@@ -544,6 +546,9 @@ router.patch(
     if (body.verificationStatus) updates.verificationStatus = body.verificationStatus;
     if (body.minRole && ["viewer", "member", "admin", "owner"].includes(body.minRole)) {
       updates.minRole = body.minRole;
+    }
+    if (typeof body.isPreviewSafe === "boolean") {
+      updates.isPreviewSafe = body.isPreviewSafe;
     }
 
     const [row] = await db
