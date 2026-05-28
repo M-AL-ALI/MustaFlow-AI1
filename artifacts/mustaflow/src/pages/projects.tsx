@@ -25,6 +25,7 @@ import {
   Rocket,
   Lightbulb,
   Mic,
+  MicOff,
   Clock,
   Activity,
   Heart,
@@ -32,6 +33,7 @@ import {
   FolderKanban,
   RefreshCw,
 } from "lucide-react";
+import { useVoiceInput } from "@/hooks/use-voice-input";
 
 const EXAMPLE_PROMPTS = [
   "Mobile app proposal",
@@ -96,6 +98,24 @@ function HomeHero() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const firstName = user?.firstName ?? user?.fullName?.split(" ")[0] ?? null;
+
+  const basePromptRef = useRef("");
+  const {
+    isRecording,
+    isSupported,
+    toggle: toggleRecording,
+  } = useVoiceInput(
+    useCallback((transcript: string) => {
+      setPrompt(basePromptRef.current + transcript);
+    }, []),
+  );
+
+  function handleMicClick() {
+    if (!isRecording) {
+      basePromptRef.current = prompt ? prompt.trimEnd() + " " : "";
+    }
+    toggleRecording();
+  }
 
   const cycleExample = useCallback(() => {
     setExampleIndex((i) => (i + 1) % EXAMPLE_PROMPTS.length);
@@ -202,10 +222,24 @@ function HomeHero() {
               {/* Mic button */}
               <button
                 type="button"
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                title="Voice input"
+                onClick={isSupported ? handleMicClick : undefined}
+                className={cn(
+                  "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
+                  isRecording
+                    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
+                    : isSupported
+                      ? "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      : "text-muted-foreground/40 cursor-not-allowed",
+                )}
+                title={
+                  !isSupported
+                    ? "Voice input not supported in this browser"
+                    : isRecording
+                      ? "Stop recording"
+                      : "Voice input"
+                }
               >
-                <Mic className="h-4 w-4" />
+                {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               </button>
 
               {/* Brainstorm first */}

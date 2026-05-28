@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
   useListProjects,
@@ -24,6 +24,7 @@ import {
   Rocket,
   MessageSquare,
   Mic,
+  MicOff,
   Clock,
   Plus,
   Code2,
@@ -35,6 +36,7 @@ import {
   FileCode2,
   Zap,
 } from "lucide-react";
+import { useVoiceInput } from "@/hooks/use-voice-input";
 
 const TEMPLATE_CHIPS: Array<{
   label: string;
@@ -270,6 +272,24 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
   const [showDiscuss, setShowDiscuss] = useState(false);
   const [, setLocation] = useLocation();
 
+  const basePromptRef = useRef("");
+  const {
+    isRecording,
+    isSupported,
+    toggle: toggleRecording,
+  } = useVoiceInput(
+    useCallback((transcript: string) => {
+      setPrompt(basePromptRef.current + transcript);
+    }, []),
+  );
+
+  function handleMicClick() {
+    if (!isRecording) {
+      basePromptRef.current = prompt ? prompt.trimEnd() + " " : "";
+    }
+    toggleRecording();
+  }
+
   function handleSubmit() {
     if (!prompt.trim()) return;
     onSubmit(prompt.trim());
@@ -354,10 +374,24 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
               {/* Mic button */}
               <button
                 type="button"
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                title="Voice input"
+                onClick={isSupported ? handleMicClick : undefined}
+                className={cn(
+                  "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
+                  isRecording
+                    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
+                    : isSupported
+                      ? "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      : "text-muted-foreground/40 cursor-not-allowed",
+                )}
+                title={
+                  !isSupported
+                    ? "Voice input not supported in this browser"
+                    : isRecording
+                      ? "Stop recording"
+                      : "Voice input"
+                }
               >
-                <Mic className="h-4 w-4" />
+                {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               </button>
 
               {/* Discuss first */}
