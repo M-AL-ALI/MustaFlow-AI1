@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  Send,
+  Rocket,
   Plus,
   X,
   GripVertical,
@@ -22,6 +22,8 @@ import {
   Wrench,
   CheckSquare,
   BookOpen as BookOpenIcon,
+  Lightbulb,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
@@ -1551,28 +1553,29 @@ export function QueueComposer({
             )}
             <div className="ml-auto flex items-center gap-2">
               <div className="flex flex-col items-end gap-0.5">
-                {/* Agent / Assistant two-pill toggle */}
-                <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
-                  {(["agent", "assistant"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setChatMode(m)}
-                      title={
-                        m === "agent"
-                          ? "Agent mode — AI builds and edits your app"
-                          : "Assistant mode — developer pair programmer (1 credit per reply)"
-                      }
-                      className={cn(
-                        "px-2 py-0.5 text-[9px] uppercase font-bold rounded-md transition-colors",
-                        chatMode === m
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {m === "agent" ? "Agent" : "Assistant"}
-                    </button>
-                  ))}
-                </div>
+                {/* Discuss / Brainstorm pill toggle */}
+                <button
+                  type="button"
+                  onClick={() => setChatMode(chatMode === "agent" ? "assistant" : "agent")}
+                  title={
+                    chatMode === "agent"
+                      ? "Brainstorm first — switch to assistant mode for discussion"
+                      : "Back to building — switch to agent mode"
+                  }
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors shrink-0",
+                    chatMode === "agent"
+                      ? "border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                      : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20",
+                  )}
+                >
+                  {chatMode === "agent" ? (
+                    <Lightbulb className="h-3.5 w-3.5" />
+                  ) : (
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  )}
+                  {chatMode === "agent" ? "Brainstorm first" : "Discuss first"}
+                </button>
                 {chatMode === "agent" && (
                   <>
                     <div className="flex bg-background/60 border border-border rounded-lg p-0.5">
@@ -1669,7 +1672,7 @@ export function QueueComposer({
                   title={isMultiRow ? `Send all ${rows.length} tasks (⌘↩)` : "Send (⌘↩)"}
                   className="h-8 px-3 bg-primary rounded-xl flex items-center gap-1.5 shadow-md shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground"
                 >
-                  <Send style={{ width: 14, height: 14 }} />
+                  <Rocket style={{ width: 14, height: 14 }} />
                   {isMultiRow && <span className="text-[10px] font-bold">{rows.length}</span>}
                 </button>
               )}
