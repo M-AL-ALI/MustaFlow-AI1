@@ -576,6 +576,7 @@ export default function HomePage() {
             </div>
           </Show>
 
+
           {/* Social proof */}
           <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-muted-foreground/70 mt-10 mb-20">
             {[
