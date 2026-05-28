@@ -2392,6 +2392,42 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(`DROP TABLE IF EXISTS conversations`);
     },
   },
+
+  // ── migrate-agent-tool-calls ───────────────────────────────────────────────
+  // Per-tool-call audit log for the agentic builder loop + per-project hourly
+  // rate cap on projects. Without this table the agent-loop INSERT/COUNT in
+  // handleToolResult silently falls back to a stale estimate (try/catch) so
+  // the audit feed stays empty and the rate limiter never enforces.
+  {
+    name: "migrate-agent-tool-calls",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS agent_tool_calls (
+          id              SERIAL PRIMARY KEY,
+          project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          task_id         INTEGER,
+          tool_name       TEXT NOT NULL,
+          args_summary    TEXT,
+          stdout_preview  TEXT,
+          exit_code       INTEGER,
+          ok              BOOLEAN NOT NULL DEFAULT TRUE,
+          duration_ms     INTEGER NOT NULL DEFAULT 0,
+          called_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS agent_tool_calls_project_called_idx ON agent_tool_calls (project_id, called_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS agent_tool_calls_task_idx ON agent_tool_calls (task_id)`,
+      );
+      await client.query(
+        `ALTER TABLE projects ADD COLUMN IF NOT EXISTS tool_call_rate_cap_per_hour INTEGER NOT NULL DEFAULT 200`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

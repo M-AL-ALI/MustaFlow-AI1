@@ -2260,6 +2260,51 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         preview: observation.slice(0, 400),
       });
 
+      // ── Agent audit write + atomic rate-limit check (serial path) ──────────
+      // Mirror the parallel-path audit write in handleToolResult so SERIAL_TOOLS
+      // (run_command, pkg_install, run_e2e, finalize, etc.) also land in
+      // agent_tool_calls and contribute to the per-project hourly cap. Without
+      // this block the audit feed is incomplete and the rate limiter
+      // undercounts every command execution.
+      {
+        let postInsertHourlyCount = 0;
+        try {
+          const { sql: dSql } = await import("drizzle-orm");
+          await db.insert(agentToolCallsTable).values({
+            projectId: input.projectId,
+            taskId: input.taskId ?? null,
+            toolName: name,
+            argsSummary: JSON.stringify(redactedArgsForSerial).slice(0, 500),
+            stdoutPreview: observation.slice(0, 400),
+            exitCode: result.exitCode ?? null,
+            ok: result.ok,
+            durationMs,
+          });
+          const countRows = await db.execute(
+            dSql`SELECT count(*)::int AS n FROM agent_tool_calls
+                 WHERE project_id = ${input.projectId}
+                   AND called_at > now() - interval '1 hour'`,
+          );
+          postInsertHourlyCount = Number(
+            (countRows.rows?.[0] as Record<string, unknown>)?.n ?? 0,
+          );
+        } catch {
+          // non-fatal — fall back to stale estimate so the loop is never
+          // aborted due to an audit write failure
+          postInsertHourlyCount = hourlyCountAtStart + toolCalls.length;
+        }
+        if (postInsertHourlyCount >= toolCallRateCapPerHour) {
+          terminationReason = "rate_limited";
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: `Rate limit reached: ${postInsertHourlyCount} of ${toolCallRateCapPerHour} allowed tool calls used this hour. Try again later.`,
+          });
+          stepFinalized = true;
+          break;
+        }
+      }
+
       // Task #743: stream a structured `tool_call` event (serial path).
       if (shouldEmitToolCallEvent(name)) {
         try {
