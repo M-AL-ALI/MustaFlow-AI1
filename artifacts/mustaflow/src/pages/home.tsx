@@ -389,7 +389,7 @@ export default function HomePage() {
               <img
                 src={`${import.meta.env.BASE_URL}logo.png`}
                 alt="MustaFlow AI"
-                className="h-28 w-40 sm:h-32 sm:w-48 object-contain"
+                className="h-28 w-40 sm:h-32 sm:w-48 object-contain logo-crisp"
               />
             </div>
           </div>

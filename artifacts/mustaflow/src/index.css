@@ -329,6 +329,11 @@
 }
 
 @layer utilities {
+  .logo-crisp {
+    filter: contrast(1.15) brightness(1.12) saturate(1.1)
+      drop-shadow(0 0 1px hsl(var(--primary) / 0.5));
+    image-rendering: -webkit-optimize-contrast;
+  }
   @keyframes logo-spin {
     from {
       transform: rotate(0deg);
