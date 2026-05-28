@@ -113,11 +113,11 @@ export default function PricingPage() {
               ))}
             </ul>
 
-            <Link href={isSignedIn ? "/projects" : "/sign-up"}>
-              <Button variant="outline" className="w-full">
+            <Button asChild variant="outline" className="w-full">
+              <Link href={isSignedIn ? "/projects" : "/sign-up"}>
                 {isSignedIn ? "Go to dashboard" : "Get started free"}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
 
           {/* Core */}
@@ -246,12 +246,12 @@ export default function PricingPage() {
           <p className="text-sm text-muted-foreground">
             100 free credits on sign-up. No credit card required.
           </p>
-          <Link href={isSignedIn ? "/projects" : "/sign-up"}>
-            <Button size="lg" className="gap-2">
+          <Button asChild size="lg" className="gap-2">
+            <Link href={isSignedIn ? "/projects" : "/sign-up"}>
               {isSignedIn ? "Go to dashboard" : "Get started for free"}
               <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
     </div>

@@ -217,17 +217,18 @@ function FindingRow({ finding }: { finding: AccountSecurityFinding }) {
         </div>
       </div>
       {isOpen && (
-        <Link href={fixHref}>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-[11px] gap-1.5 shrink-0"
-            title="Open this project's Security tab with a fix prompt pre-filled in the AI builder chat"
-          >
+        <Button
+          asChild
+          size="sm"
+          variant="outline"
+          className="h-7 text-[11px] gap-1.5 shrink-0"
+          title="Open this project's Security tab with a fix prompt pre-filled in the AI builder chat"
+        >
+          <Link href={fixHref}>
             <Wrench className="h-3 w-3" />
             Fix
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       )}
     </div>
   );

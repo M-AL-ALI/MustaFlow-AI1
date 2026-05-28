@@ -240,17 +240,21 @@ export function SlideOutNav() {
 
         {/* Action buttons */}
         <div className="px-3 pb-3 shrink-0 space-y-1.5">
-          <Link href="/projects" onClick={close}>
-            <button className="w-full flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors px-3 py-2 text-sm font-medium">
-              <Plus className="h-4 w-4 shrink-0" />
-              Create something new
-            </button>
+          <Link
+            href="/projects"
+            onClick={close}
+            className="w-full flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors px-3 py-2 text-sm font-medium no-underline"
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            Create something new
           </Link>
-          <Link href="/projects?import=1" onClick={close}>
-            <button className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium">
-              <Download className="h-4 w-4 shrink-0" />
-              Import code or design
-            </button>
+          <Link
+            href="/projects?import=1"
+            onClick={close}
+            className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium no-underline"
+          >
+            <Download className="h-4 w-4 shrink-0" />
+            Import code or design
           </Link>
         </div>
 
@@ -271,25 +275,27 @@ export function SlideOutNav() {
                 location === href || (href !== "/" && location.startsWith(href + "/"));
               return (
                 <div key={href}>
-                  <Link href={href} onClick={close}>
-                    <div
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
-                        isActive
-                          ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-                          : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-                      )}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      {name}
-                    </div>
+                  <Link
+                    href={href}
+                    onClick={close}
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer no-underline",
+                      isActive
+                        ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                        : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {name}
                   </Link>
                   {name === "Projects" && (
-                    <Link href="/projects" onClick={close}>
-                      <div className="ml-7 mt-0.5 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer">
-                        <Plus className="h-3 w-3 shrink-0" />
-                        New project
-                      </div>
+                    <Link
+                      href="/projects"
+                      onClick={close}
+                      className="ml-7 mt-0.5 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer no-underline"
+                    >
+                      <Plus className="h-3 w-3 shrink-0" />
+                      New project
                     </Link>
                   )}
                 </div>

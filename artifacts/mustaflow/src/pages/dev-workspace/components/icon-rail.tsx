@@ -96,10 +96,11 @@ export function IconRail({ activePanel, onPanelToggle, onOpenSearch }: IconRailP
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <Link href="/settings">
-            <button className="flex items-center justify-center h-10 w-10 rounded-lg text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors my-0.5">
-              <Settings className="h-5 w-5" />
-            </button>
+          <Link
+            href="/settings"
+            className="flex items-center justify-center h-10 w-10 rounded-lg text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors my-0.5 no-underline"
+          >
+            <Settings className="h-5 w-5" />
           </Link>
         </TooltipTrigger>
         <TooltipContent side="right">Settings</TooltipContent>

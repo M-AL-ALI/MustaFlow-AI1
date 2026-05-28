@@ -197,11 +197,9 @@ export default function DevDeploymentsPage() {
               <p className="text-xs text-muted-foreground mb-5">
                 Create a Developer Mode project first, then deploy it from the workspace.
               </p>
-              <Link href="/dev">
-                <Button size="sm" className="gap-2">
-                  Go to home
-                </Button>
-              </Link>
+              <Button asChild size="sm" className="gap-2">
+                <Link href="/dev">Go to home</Link>
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">
@@ -314,11 +312,9 @@ export default function DevDeploymentsPage() {
                           Stop
                         </Button>
                       )}
-                      <Link href={`/dev/workspace/${project.id}`}>
-                        <Button variant="outline" size="sm" className="text-xs h-7 shrink-0">
-                          Manage
-                        </Button>
-                      </Link>
+                      <Button asChild variant="outline" size="sm" className="text-xs h-7 shrink-0">
+                        <Link href={`/dev/workspace/${project.id}`}>Manage</Link>
+                      </Button>
                     </div>
                   </div>
                 );

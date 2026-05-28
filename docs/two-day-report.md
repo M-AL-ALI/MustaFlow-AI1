@@ -90,11 +90,13 @@ Developer Mode is the power-user surface: `/dev` home, `/dev/deployments`, `/dev
 - **Tasks:** #1047, #1097, #1103.
 
 ## B4. Dev-mode chat panel — intent classifier fix
+
 - **What:** The chat panel inside the developer workspace (`dev-workspace/dev-chat-panel.tsx`) was routing every message through the build pipeline — including pure questions like "what does this file do?"
 - **How:** Intent classifier now routes conversational messages in dev/zero chat panels to the converse path instead of the build path.
 - **Why:** Developers asking a question shouldn't trigger a build.
 
 ## B5. Agentic project onboarding (Task #987 — large)
+
 The first time a dev creates an agentic project, the UI walks them through it end to end.
 
 - **Mode selector cards** in the project-creation modal: **Simple** vs **Full-stack** (Server / Database / KeyRound / Rocket icons), with an expandable `FULLSTACK_CHECKLIST` collapsed by default.
@@ -109,13 +111,15 @@ The first time a dev creates an agentic project, the UI walks them through it en
 - Side fixes shipped in the same task: deduplicated `getClerkUserById`, installed the missing `svix` package for the Clerk webhook.
 
 ## B6. Agentic provisioning — step-by-step UI (Task #988)
+
 - **New columns:** `projects.provisioning_step` (TEXT NULL) and `projects.provisioning_started_at` (TIMESTAMPTZ NULL) via `migrate-provisioning-steps`.
 - **EventBus channel:** `provisioning:step:<projectId>` emits `started` / `completed` / `failed` events with a typed `ProvisioningStepPayload`.
-- **`provisioning-progress.tsx`** (new component): expandable step-list badge — spinner for active step, green check for done, red X for failed; preserves `provisioningStep` on error so the X shows on the *correct* step.
+- **`provisioning-progress.tsx`** (new component): expandable step-list badge — spinner for active step, green check for done, red X for failed; preserves `provisioningStep` on error so the X shows on the _correct_ step.
 - **`createContainer` return type** widened from `ContainerInfo | null` to `ContainerInfo | { error: string } | null`. Raw Fly API status + body is propagated to the caller. `humanizeError(error, "fly")` maps 401/403, 429, quota, timeout, 5xx, and network errors to plain-English messages.
 - **`/provision/status`** now returns `provisioningStep` and `estimatedSecondsRemaining` so the workspace can show ETA.
 
 ## B7. Agentic container reliability (Task #989)
+
 - **`ensureContainerAwake` now fails hard** when `/healthz` doesn't respond in 30s. Previously it returned `ok:true` and let builds start against an unresponsive process.
 - **Neon DB health gate** outer catch now returns `ok:false` instead of swallowing decrypt or lookup errors — misconfigured `ENCRYPTION_KEY` and platform DB errors are surfaced to the user.
 - **Container sync errors** routed through `mapFlyErrorToMessage`; the task event narration is plain English.
@@ -123,10 +127,12 @@ The first time a dev creates an agentic project, the UI walks them through it en
 - **Failed Jobs section:** Retry button now calls `createTask()` directly (one-click re-enqueue) instead of just pre-filling the prompt; shows "Queuing…" spinner; falls back to prompt pre-fill on API error. `elapsedSeconds` shown alongside timestamp; `agentMode` carried on the task type.
 
 ## B8. Container cold-start + Build-blocked banner
+
 - **Auto-retry container cold-start** in the pre-flight gate (Task #1056) — first build after hibernation no longer fails on cold cache.
 - **"Build blocked" banner** appears when a build fails on container or DB pre-flight, with a structured **suggested fix** (Task #1063).
 
 ## B9. Agent loop transparency (Task #990)
+
 This is the single biggest dev-mode change and was previously under-described.
 
 - **`lib/steering-hints.ts`** (new): in-memory `Map` for mid-run steering hints with `setSteeringHint` / `consumeSteeringHint`.
@@ -141,22 +147,28 @@ This is the single biggest dev-mode change and was previously under-described.
 - **Real-time agent step progress** during builds (Task #960, separate landing of the same theme).
 
 ## B10. Agent trace UI (Task #962)
+
 - **`agent-trace-panel.tsx`** (new) shows the exact sequence of tools the agent called, in order, with arguments and outcomes. Reads structured events from the agent-loop SSE stream via `routes/events.ts`.
 - **Why:** Power users debugging a build need to see what the model actually did, not just the final diff.
 
 ## B11. Opt-in approval gate for risky commands (Task #964)
+
 - **Per-project toggle:** "Require approval for risky commands". When enabled, the agent loop pauses on `bash`, `rm -rf`, package installs, and other destructive operations and waits for the user to approve before executing.
 
 ## B12. Quality gate everywhere + architect / staging review
+
 - **Quality gate now runs on all build paths**, not just task-agent builds — previously single-shot refines bypassed it (commit `93b16d26`).
 - **Task #991:** Fixed architect findings in the review card, route error 409 mapping, severity normalization in `quality-gate.ts` and `jobs.ts`.
 - **Task #992:** Agentic staging review — addressed every architect finding from the prior review round.
 
 ## B13. Blueprint `npm install` wiring (Task #1004)
+
 - Blueprint installs now emit proper task events and run through the durable queue with the right safety guards — previously a flaky one-shot.
 
 ## B14. AI engine reliability fixes — felt most by dev-mode users
+
 Even though these live in shared platform (Part C1), the symptoms hit dev users hardest because they run longer, more complex loops:
+
 - Agent loop `tool_choice` switched from `"auto"` to `"required"` so the model must call a tool.
 - Corrective turn injected when the model returns plain text with no tool calls in refine mode.
 - Hard enforcement: agent cannot finalize without file modifications.
@@ -165,10 +177,12 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 - Empty-refine retry now uses the agentic loop instead of the legacy pipeline.
 
 ## B15. Admin / job queue (used by dev/admin users)
+
 - Admin job queue and inbox panels switched from hand-written `fetch` calls to generated OpenAPI hooks (commit `43079a34`).
 - EAS, app-testing, and CVE jobs registered with the durable pg-boss queue so they survive restarts (commit `56cac9f4`).
 
 ## B16. Developer Mode docs (`/docs/developer-mode`)
+
 - Five new deep-dive sections added.
 - System prompt hardened.
 - Dead breadcrumb link fixed.
@@ -263,11 +277,11 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 
 # Quick answer: which side did each change benefit?
 
-| Surface | Items |
-|---|---|
-| **AI Builder only (UI)** | A1 home/workspace composer, A2 brainstorm pill on home + workspace, A4 voice on home/workspace, A5 connection indicator + build-blocked banner, A6 dismissed-tip memory |
+| Surface                               | Items                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AI Builder only (UI)**              | A1 home/workspace composer, A2 brainstorm pill on home + workspace, A4 voice on home/workspace, A5 connection indicator + build-blocked banner, A6 dismissed-tip memory                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **Developer Mode only (UI + engine)** | B1 slide-out nav swap, B2 composer redesign, B3 brainstorm panel + developer-mode project creation, B4 dev-chat intent classifier, B5 agentic onboarding (mode selector + anchored tooltips + in-place upgrade), B6 provisioning step UI + humanizeError, B7 container reliability + "Waking…" + failed-jobs re-enqueue, B8 cold-start auto-retry + build-blocked banner, B9 agent loop transparency (steering hints, cancel/credit confirm, live step counter), B10 agent trace UI, B11 risky-command approval gate, B12 quality gate everywhere + architect/staging review, B13 blueprint npm install wiring, B14 AI engine reliability (felt hardest by dev users), B15 admin job queue + durable queue, B16 docs |
-| **Both surfaces (Shared)** | A3 brainstorm memory + context (panel is shared), C1 AI engine reliability, C2 streaming, C3 agentic provisioning, C4 OpenAPI coverage + /api/docs, C5 voice language sync, C6 billing safety, C7 notifications + activity + emails, C8 GDPR, C9 Knowledge Vault, C10 security/infra |
+| **Both surfaces (Shared)**            | A3 brainstorm memory + context (panel is shared), C1 AI engine reliability, C2 streaming, C3 agentic provisioning, C4 OpenAPI coverage + /api/docs, C5 voice language sync, C6 billing safety, C7 notifications + activity + emails, C8 GDPR, C9 Knowledge Vault, C10 security/infra                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ---
 
@@ -279,3 +293,57 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 ---
 
 The richer per-task historical detail lives in `docs/changelog.md` (578 lines) — this report is the two-day rollup.
+
+---
+
+# Verification & Fixes Appendix — 2026-05-28
+
+Full audit of the last 2 days of merges. Two batches of bugs were found and fixed; everything below is now green.
+
+## P0 — Runtime DB errors on boot (FIXED)
+
+**Symptom:** `column knowledge_entries.reinforced_count does not exist` flooding the API server logs on every boot.
+
+**Root cause:** 11 standalone migration scripts under `scripts/src/migrate-*.ts` were never registered in `artifacts/api-server/src/lib/startup-migrations.ts`. The live dev DB only worked because a human had hand-run each one in the past; a fresh clone or deploy would boot missing columns/tables.
+
+**Fix:**
+
+- Applied all 11 missing SQL migrations to the live DB in one batched transaction (canvas_state, brainstorm_context cols, gdpr erasure, low_credit_email, mobile deployment cols, preferred_mode, project_mode, provisioning_step + provisioning_started_at, stripe_processed_events status cols, credit_grants table, drop conversations table, reinforced_count).
+- Registered all 11 in `startup-migrations.ts` so future fresh DBs and deploys self-heal. Migration count went from 63 to 74 at boot.
+
+**Verified:** API server reboots cleanly, no DB errors in logs.
+
+## P1 — React hydration warnings from nested `<a>` tags (FIXED)
+
+**Symptom:** Playwright e2e flagged `validateDOMNesting(...): <a> cannot appear as a descendant of <a>` during workspace load.
+
+**Root cause:** wouter `<Link>` renders `<a>` by default. Four spots wrapped Link around a shadcn `<Button>` or raw `<button>`, producing `<a><a>` or `<a><button>` — invalid HTML.
+
+**Fix:**
+
+- `artifacts/mustaflow/src/pages/dev-workspace/components/top-bar.tsx` — Deploy button now uses `<Button asChild>` around `<Link>`; "Back to projects" link no longer wraps a raw `<button>`.
+- `artifacts/mustaflow/src/components/layout/slide-out-nav.tsx` — three nav items rewritten to put `className` directly on the `<Link>` instead of wrapping a raw `<button>`.
+
+**Verified:** code review of fixed sources; pattern documented in `.agents/memory/wouter-link-nested-anchors.md`.
+
+## False positives investigated
+
+- **Voice waveform race condition / stale closure (Task #1107):** flagged by a second-pass scan, verified false. Line 966 in `queue-composer.tsx` has the `shouldListenRef` early-return guard; `voiceTargetRowIdRef.current` correctly captures the row ID at start. Code is correct.
+
+## End-to-end smoke test result
+
+**Status: PASS.** Playwright run via the testing skill exercised: public landing (dark theme, no third-party brand references, no emojis), Clerk sign-in, dashboard redirect, AI Builder project creation, workspace load with tab bar + composer, voice dictation button graceful fallback (permission denied), `/docs/developer-mode`, `/trust`, `/gallery`, `/settings → Privacy & Data` with visible GDPR export + account deletion controls. No 500-class errors, no DB column errors, no React error boundaries triggered.
+
+## Final check status (all green)
+
+| Check         | Status | Notes                                                 |
+| ------------- | ------ | ----------------------------------------------------- |
+| typecheck     | PASS   | api-server 10.9s, mustaflow 24.4s, all packages clean |
+| lint          | PASS   | eslint --max-warnings 0                               |
+| format        | PASS   | prettier --check                                      |
+| codegen-drift | PASS   | OpenAPI → Orval + Zod no drift                        |
+| quality-gate  | PASS   | composite of lint + codegen + typecheck               |
+| cdn-versions  | PASS   | no stale CDN pins                                     |
+| e2e smoke     | PASS   | Playwright + Clerk Auth                               |
+
+## Ready to publish.

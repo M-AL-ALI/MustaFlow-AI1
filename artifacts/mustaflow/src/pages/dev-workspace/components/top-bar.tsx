@@ -165,14 +165,13 @@ function SettingsDrawer({
             <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider px-1 mb-1">
               Developer Mode
             </p>
-            <Link href="/dev">
-              <button
-                onClick={onClose}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-              >
-                <span>Back to projects</span>
-                <ChevronRight className="h-3 w-3 opacity-40" />
-              </button>
+            <Link
+              href="/dev"
+              onClick={onClose}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors no-underline"
+            >
+              <span>Back to projects</span>
+              <ChevronRight className="h-3 w-3 opacity-40" />
             </Link>
           </div>
 
@@ -414,12 +413,12 @@ export function TopBar({
                 Deploy
               </Button>
             ) : (
-              <Link href={`/projects/${projectId}`}>
-                <Button size="sm" variant="outline" className="h-7 px-3 gap-1.5 text-xs">
+              <Button asChild size="sm" variant="outline" className="h-7 px-3 gap-1.5 text-xs">
+                <Link href={`/projects/${projectId}`}>
                   <Rocket className="h-3.5 w-3.5" />
                   Deploy
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             )}
           </TooltipTrigger>
           <TooltipContent>Open deployment panel</TooltipContent>

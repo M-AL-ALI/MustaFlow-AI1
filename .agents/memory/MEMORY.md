@@ -1,3 +1,5 @@
 - [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults cap haiku at 8192 and sonnet/opus at 16000; exceeding model limits causes 400s that trip the circuit breaker.
 - [Anthropic assistant prefill rejection](anthropic-assistant-prefill.md) — Anthropic rejects calls where conversationHistory ends with role:"assistant"; need a bridge user message.
 - [AI provider circuit breaker isolation](circuit-breaker-provider-isolation.md) — each provider needs its own CircuitBreaker; shared breaker causes cross-provider outages silently masked as "Refined 0 files".
+- [Startup migrations registration](startup-migrations-registration.md) — every scripts/src/migrate-\*.ts script must also be appended to startup-migrations.ts MIGRATIONS array or fresh DBs/deploys boot missing columns.
+- [Wouter Link nested anchors](wouter-link-nested-anchors.md) — wouter Link renders `<a>` by default; wrapping a shadcn `<Button>` (also `<a>`) or raw `<button>` produces invalid nested anchors. Use Button asChild around Link, or put className directly on Link.

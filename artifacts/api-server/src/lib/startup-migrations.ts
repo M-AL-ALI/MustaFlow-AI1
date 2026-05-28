@@ -2246,6 +2246,152 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS voice_lang TEXT`);
     },
   },
+
+  // ── migrate-reinforced-count (Task #980) ─────────────────────────────────────
+  {
+    name: "migrate-reinforced-count",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS reinforced_count INTEGER NOT NULL DEFAULT 0`,
+      );
+    },
+  },
+
+  // ── migrate-canvas-state (Task #904) ─────────────────────────────────────────
+  {
+    name: "migrate-canvas-state",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE projects ADD COLUMN IF NOT EXISTS canvas_state JSONB DEFAULT '{}'`,
+      );
+    },
+  },
+
+  // ── migrate-brainstorm-context ───────────────────────────────────────────────
+  {
+    name: "migrate-brainstorm-context",
+    async run(client) {
+      await client.query(`
+        ALTER TABLE agent_tasks
+          ADD COLUMN IF NOT EXISTS has_brainstorm_context BOOLEAN NOT NULL DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS brainstorm_turn_count INTEGER
+      `);
+    },
+  },
+
+  // ── migrate-gdpr-erasure-job (Task #1002) ────────────────────────────────────
+  {
+    name: "migrate-gdpr-erasure-job",
+    async run(client) {
+      await client.query(`
+        ALTER TABLE user_preferences
+          ADD COLUMN IF NOT EXISTS erasure_job_id TEXT,
+          ADD COLUMN IF NOT EXISTS erasure_requested_at TIMESTAMPTZ
+      `);
+    },
+  },
+
+  // ── migrate-low-credit-email (Task #1003) ────────────────────────────────────
+  {
+    name: "migrate-low-credit-email",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE user_credits ADD COLUMN IF NOT EXISTS last_low_credit_email_at TIMESTAMPTZ`,
+      );
+    },
+  },
+
+  // ── migrate-mobile-deployment-columns (Task #776) ────────────────────────────
+  {
+    name: "migrate-mobile-deployment-columns",
+    async run(client) {
+      await client.query(`
+        ALTER TABLE deployment_logs
+          ADD COLUMN IF NOT EXISTS build_id text,
+          ADD COLUMN IF NOT EXISTS platform text,
+          ADD COLUMN IF NOT EXISTS download_url text,
+          ADD COLUMN IF NOT EXISTS testflight_url text
+      `);
+    },
+  },
+
+  // ── migrate-preferred-mode (Task #897) ───────────────────────────────────────
+  {
+    name: "migrate-preferred-mode",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preferred_mode TEXT`,
+      );
+      await client.query(
+        `ALTER TABLE user_preferences DROP CONSTRAINT IF EXISTS user_preferences_preferred_mode_check`,
+      );
+      await client.query(
+        `ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_preferred_mode_check CHECK (preferred_mode IN ('builder','developer'))`,
+      );
+    },
+  },
+
+  // ── migrate-project-mode (Task #898) ─────────────────────────────────────────
+  {
+    name: "migrate-project-mode",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_mode TEXT NOT NULL DEFAULT 'builder'`,
+      );
+      await client.query(
+        `ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_project_mode_check`,
+      );
+      await client.query(
+        `ALTER TABLE projects ADD CONSTRAINT projects_project_mode_check CHECK (project_mode IN ('builder','developer'))`,
+      );
+    },
+  },
+
+  // ── migrate-provisioning-steps (Task #988) ───────────────────────────────────
+  {
+    name: "migrate-provisioning-steps",
+    async run(client) {
+      await client.query(`
+        ALTER TABLE projects
+          ADD COLUMN IF NOT EXISTS provisioning_step TEXT,
+          ADD COLUMN IF NOT EXISTS provisioning_started_at TIMESTAMPTZ
+      `);
+    },
+  },
+
+  // ── migrate-stripe-events-status ─────────────────────────────────────────────
+  {
+    name: "migrate-stripe-events-status",
+    async run(client) {
+      await client.query(`
+        ALTER TABLE stripe_processed_events
+          ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'succeeded',
+          ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS succeeded_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS error_message TEXT
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS credit_grants (
+          id SERIAL PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          subscription_id TEXT NOT NULL,
+          period_start TIMESTAMPTZ NOT NULL,
+          amount INTEGER NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT credit_grants_subscription_period_unique UNIQUE (subscription_id, period_start)
+        )
+      `);
+    },
+  },
+
+  // ── migrate-drop-conversations ───────────────────────────────────────────────
+  {
+    name: "migrate-drop-conversations",
+    async run(client) {
+      await client.query(`DROP TABLE IF EXISTS conversations`);
+    },
+  },
 ];
 
 /**
