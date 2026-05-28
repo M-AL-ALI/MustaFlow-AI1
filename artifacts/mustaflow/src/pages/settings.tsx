@@ -31,7 +31,9 @@ import {
   XCircle,
   Sparkles,
   LayoutGrid,
+  Mic,
 } from "lucide-react";
+import { setVoiceLang } from "@/hooks/use-voice-input";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
@@ -393,6 +395,9 @@ function AccountTab() {
         </div>
       </div>
 
+      {/* Voice Input */}
+      <VoiceInputSection />
+
       {/* Mode */}
       <ModeSection />
     </div>
@@ -424,6 +429,105 @@ function AppearanceOption({
       <Icon className="h-5 w-5" />
       {label}
     </button>
+  );
+}
+
+const VOICE_LANGUAGES = [
+  { code: "auto", label: "Auto-detect (browser language)" },
+  { code: "en-US", label: "English (US)" },
+  { code: "en-GB", label: "English (UK)" },
+  { code: "es-ES", label: "Spanish (Spain)" },
+  { code: "es-MX", label: "Spanish (Mexico)" },
+  { code: "fr-FR", label: "French" },
+  { code: "de-DE", label: "German" },
+  { code: "pt-BR", label: "Portuguese (Brazil)" },
+  { code: "pt-PT", label: "Portuguese (Portugal)" },
+  { code: "it-IT", label: "Italian" },
+  { code: "nl-NL", label: "Dutch" },
+  { code: "pl-PL", label: "Polish" },
+  { code: "sv-SE", label: "Swedish" },
+  { code: "da-DK", label: "Danish" },
+  { code: "fi-FI", label: "Finnish" },
+  { code: "nb-NO", label: "Norwegian" },
+  { code: "ru-RU", label: "Russian" },
+  { code: "tr-TR", label: "Turkish" },
+  { code: "ar-SA", label: "Arabic" },
+  { code: "hi-IN", label: "Hindi" },
+  { code: "ja-JP", label: "Japanese" },
+  { code: "ko-KR", label: "Korean" },
+  { code: "zh-CN", label: "Chinese (Simplified)" },
+  { code: "zh-TW", label: "Chinese (Traditional)" },
+];
+
+function VoiceInputSection() {
+  const storedRaw =
+    typeof window !== "undefined" ? localStorage.getItem("mustaflow_voice_lang") : null;
+  const [selected, setSelected] = useState<string>(storedRaw ?? "auto");
+  const [saved, setSaved] = useState(false);
+
+  function handleSave() {
+    if (selected === "auto") {
+      localStorage.removeItem("mustaflow_voice_lang");
+    } else {
+      setVoiceLang(selected);
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  const effectiveLang =
+    selected === "auto"
+      ? typeof navigator !== "undefined"
+        ? navigator.language
+        : "en-US"
+      : selected;
+
+  return (
+    <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Mic className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-base font-semibold">Voice Input</h2>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Choose the language the microphone should transcribe. Picking the right language improves
+        accuracy significantly.
+      </p>
+
+      <div className="space-y-1">
+        <label htmlFor="voice-lang" className="text-sm font-medium">
+          Transcription language
+        </label>
+        <select
+          id="voice-lang"
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          {VOICE_LANGUAGES.map(({ code, label }) => (
+            <option key={code} value={code}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {selected === "auto" && (
+          <p className="text-xs text-muted-foreground">
+            Your browser reports <span className="font-mono text-foreground">{effectiveLang}</span>{" "}
+            as its primary language.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          <Save className="h-3.5 w-3.5" />
+          Save
+        </button>
+        {saved && <span className="text-sm text-green-500">Saved</span>}
+      </div>
+    </div>
   );
 }
 

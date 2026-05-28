@@ -31,7 +31,19 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-export function useVoiceInput(onTranscript: (text: string) => void) {
+const VOICE_LANG_KEY = "mustaflow_voice_lang";
+
+export function getVoiceLang(): string {
+  if (typeof window === "undefined") return "en-US";
+  return localStorage.getItem(VOICE_LANG_KEY) ?? navigator.language ?? "en-US";
+}
+
+export function setVoiceLang(lang: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(VOICE_LANG_KEY, lang);
+}
+
+export function useVoiceInput(onTranscript: (text: string) => void, lang?: string) {
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
@@ -66,7 +78,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = lang ?? getVoiceLang();
 
     let finalBuffer = "";
 
@@ -105,7 +117,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [stop, onTranscript]);
+  }, [stop, onTranscript, lang]);
 
   return { isRecording, isSupported, toggle };
 }
