@@ -483,7 +483,7 @@ function VoiceInputSection() {
       : selected;
 
   return (
-    <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+    <div id="voice-input" className="border border-border rounded-xl bg-card p-6 space-y-4">
       <div className="flex items-center gap-2 mb-2">
         <Mic className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-base font-semibold">Voice Input</h2>

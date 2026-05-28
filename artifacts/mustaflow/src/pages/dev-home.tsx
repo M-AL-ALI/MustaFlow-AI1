@@ -36,7 +36,7 @@ import {
   FileCode2,
   Zap,
 } from "lucide-react";
-import { useVoiceInput } from "@/hooks/use-voice-input";
+import { useVoiceInput, getVoiceLang } from "@/hooks/use-voice-input";
 
 const TEMPLATE_CHIPS: Array<{
   label: string;
@@ -283,6 +283,8 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
     }, []),
   );
 
+  const voiceLang = getVoiceLang();
+
   function handleMicClick() {
     if (!isRecording) {
       basePromptRef.current = prompt ? prompt.trimEnd() + " " : "";
@@ -372,27 +374,39 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
               </button>
 
               {/* Mic button */}
-              <button
-                type="button"
-                onClick={isSupported ? handleMicClick : undefined}
-                className={cn(
-                  "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
-                  isRecording
-                    ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
-                    : isSupported
-                      ? "text-muted-foreground hover:text-foreground hover:bg-muted"
-                      : "text-muted-foreground/40 cursor-not-allowed",
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={isSupported ? handleMicClick : undefined}
+                  className={cn(
+                    "h-8 w-8 flex items-center justify-center rounded-lg transition-colors",
+                    isRecording
+                      ? "text-red-400 bg-red-500/15 hover:bg-red-500/25"
+                      : isSupported
+                        ? "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        : "text-muted-foreground/40 cursor-not-allowed",
+                  )}
+                  title={
+                    !isSupported
+                      ? "Voice input not supported in this browser"
+                      : isRecording
+                        ? "Stop recording"
+                        : "Voice input"
+                  }
+                >
+                  {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                </button>
+                {isSupported && (
+                  <Link
+                    href="/settings?tab=account#voice-input"
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Voice language: ${voiceLang} — click to change in Settings`}
+                    className="absolute -bottom-1.5 -right-1.5 px-1 rounded text-[9px] leading-[14px] font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-foreground transition-colors border border-border/60 z-10"
+                  >
+                    {voiceLang}
+                  </Link>
                 )}
-                title={
-                  !isSupported
-                    ? "Voice input not supported in this browser"
-                    : isRecording
-                      ? "Stop recording"
-                      : "Voice input"
-                }
-              >
-                {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              </button>
+              </div>
 
               {/* Discuss first */}
               <button
