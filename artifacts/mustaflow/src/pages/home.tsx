@@ -387,11 +387,11 @@ export default function HomePage() {
           <div className="flex justify-center mb-10">
             <div className="relative">
               <div className="absolute -inset-10 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.35)_0%,transparent_70%)] blur-3xl pointer-events-none" />
-              <div className="relative rounded-[2.5rem] border-2 border-border bg-gradient-to-br from-card via-card to-primary/5 p-7 shadow-2xl ring-1 ring-primary/20">
+              <div className="relative rounded-[2.5rem] border-2 border-border bg-gradient-to-br from-card via-card to-primary/5 p-3 shadow-2xl ring-1 ring-primary/20">
                 <img
                   src={`${import.meta.env.BASE_URL}logo.png`}
                   alt="MustaFlow AI"
-                  className="h-48 w-64 sm:h-56 sm:w-72 object-contain"
+                  className="h-48 w-56 sm:h-56 sm:w-64 object-contain"
                 />
               </div>
             </div>
