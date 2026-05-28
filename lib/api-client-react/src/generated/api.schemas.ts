@@ -570,6 +570,19 @@ export const ProjectInputBuilderMode = {
   agentic: 'agentic',
 } as const;
 
+export type ProjectInputBrainstormContextItemRole = typeof ProjectInputBrainstormContextItemRole[keyof typeof ProjectInputBrainstormContextItemRole];
+
+
+export const ProjectInputBrainstormContextItemRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export type ProjectInputBrainstormContextItem = {
+  role: ProjectInputBrainstormContextItemRole;
+  content: string;
+};
+
 export interface ProjectInput {
   /** @minLength 1 */
   name: string;
@@ -585,6 +598,8 @@ export interface ProjectInput {
   mode?: ProjectInputMode;
   /** Explicit builder mode for this project. 'agentic' = auto-provision a real server + Postgres DB (default). 'static-legacy' = static hosting only, no infra provisioned. */
   builderMode?: ProjectInputBuilderMode;
+  /** Optional brainstorm conversation history from the brainstorm panel. When provided alongside initialPrompt, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming. */
+  brainstormContext?: ProjectInputBrainstormContextItem[];
 }
 
 export type ProjectUpdateStatus = typeof ProjectUpdateStatus[keyof typeof ProjectUpdateStatus];

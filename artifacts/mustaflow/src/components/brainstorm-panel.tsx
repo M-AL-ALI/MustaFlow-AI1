@@ -237,6 +237,7 @@ export function BrainstormPanel({
     if (!resolvedSpec || isCreating) return;
     const name = (nameRef.current?.textContent ?? "").trim() || resolvedSpec.name;
     setIsCreating(true);
+    const brainstormMessages = messages.filter((m) => m !== OPENING_MESSAGE);
     createProject.mutate(
       {
         data: {
@@ -245,6 +246,7 @@ export function BrainstormPanel({
           kind: resolvedSpec.kind,
           initialPrompt: resolvedSpec.prompt,
           ...(mode ? { mode } : {}),
+          ...(brainstormMessages.length > 0 ? { brainstormContext: brainstormMessages } : {}),
         },
       },
       {
@@ -277,6 +279,7 @@ export function BrainstormPanel({
     mode,
     onCreated,
     effectiveKey,
+    messages,
   ]);
 
   return (

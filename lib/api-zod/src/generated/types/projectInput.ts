@@ -5,6 +5,7 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProjectInputBrainstormContextItem } from './projectInputBrainstormContextItem';
 import type { ProjectInputBuilderMode } from './projectInputBuilderMode';
 import type { ProjectInputKind } from './projectInputKind';
 import type { ProjectInputMode } from './projectInputMode';
@@ -25,4 +26,6 @@ export interface ProjectInput {
   mode?: ProjectInputMode;
   /** Explicit builder mode for this project. 'agentic' = auto-provision a real server + Postgres DB (default). 'static-legacy' = static hosting only, no infra provisioned. */
   builderMode?: ProjectInputBuilderMode;
+  /** Optional brainstorm conversation history from the brainstorm panel. When provided alongside initialPrompt, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming. */
+  brainstormContext?: ProjectInputBrainstormContextItem[];
 }

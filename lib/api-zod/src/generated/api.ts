@@ -757,7 +757,11 @@ export const CreateProjectBody = zod.object({
   "initialPrompt": zod.string().optional(),
   "chipLabel": zod.string().optional().describe('Name of the capability chip that pre-filled the prompt (e.g. \'React SaaS app\', \'REST API + Postgres\'). Omit if no chip was used.'),
   "mode": zod.enum(['builder', 'developer']).optional().describe('Surface creating the project. \'builder\' = AI Build Mode (default). \'developer\' = Developer Mode cloud IDE.'),
-  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Explicit builder mode for this project. \'agentic\' = auto-provision a real server + Postgres DB (default). \'static-legacy\' = static hosting only, no infra provisioned.')
+  "builderMode": zod.enum(['static-legacy', 'agentic']).optional().describe('Explicit builder mode for this project. \'agentic\' = auto-provision a real server + Postgres DB (default). \'static-legacy\' = static hosting only, no infra provisioned.'),
+  "brainstormContext": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})).optional().describe('Optional brainstorm conversation history from the brainstorm panel. When provided alongside initialPrompt, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming.')
 })
 
 

@@ -202,6 +202,7 @@ router.post("/projects", async (req, res): Promise<void> => {
 
   const {
     initialPrompt,
+    brainstormContext,
     chipLabel,
     mode,
     builderMode: requestedBuilderMode,
@@ -1183,10 +1184,25 @@ export default function HomeScreen() {
   }
 
   if (initialPrompt && initialPrompt.trim().length > 0) {
+    // Inject brainstorm context into the stored user message so the AI sees
+    // the full brainstorm conversation when the first build runs — same format
+    // as the workspace composer path (messages.ts userPromptWithContext).
+    const hasBrainstormContext =
+      Array.isArray(brainstormContext) && brainstormContext.length > 0;
+    let initialPromptWithContext = initialPrompt;
+    if (hasBrainstormContext) {
+      const turns = (brainstormContext as Array<{ role: string; content: string }>)
+        .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+        .join("\n");
+      initialPromptWithContext =
+        `${initialPrompt}\n\n` +
+        `[BRAINSTORM CONTEXT — conversation that shaped this request; use it to understand ` +
+        `the user's intent, priorities, and edge cases]\n${turns}\n[END BRAINSTORM CONTEXT]`;
+    }
     await db.insert(chatMessagesTable).values({
       projectId: project.id,
       role: "user",
-      content: initialPrompt,
+      content: initialPromptWithContext,
       agentMode: "eco",
       planMode: false,
     });

@@ -332,6 +332,8 @@ export * from './projectFileRename';
 export * from './projectFileSummary';
 export * from './projectFileUpdate';
 export * from './projectInput';
+export * from './projectInputBrainstormContextItem';
+export * from './projectInputBrainstormContextItemRole';
 export * from './projectInputBuilderMode';
 export * from './projectInputKind';
 export * from './projectInputMode';
