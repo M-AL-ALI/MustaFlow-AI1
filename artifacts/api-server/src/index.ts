@@ -15,6 +15,7 @@ import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
 import { startContainerLogRetentionScheduler } from "./lib/container-log-retention";
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 import { runStartupMigrations } from "./lib/startup-migrations";
+import { isOraSecretConfigured } from "./lib/public-ai/session";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,6 +43,15 @@ void execFileAsync("semgrep", ["--version"], { timeout: 5000 })
       "semgrep not found in PATH — semgrep-sast check will be skipped. Install semgrep to enable AST-aware security scanning.",
     );
   });
+
+// Log Ora public-AI session secret status so missing config is visible at boot.
+if (isOraSecretConfigured()) {
+  logger.info("ORA_SESSION_SECRET loaded — Ora public-AI endpoints active");
+} else {
+  logger.warn(
+    "ORA_SESSION_SECRET is not set — Ora public-AI endpoints will return 503. Set this secret to enable them.",
+  );
+}
 
 // Ensure the Fly.io app exists for container infrastructure (best-effort)
 void ensureFlyApp();
