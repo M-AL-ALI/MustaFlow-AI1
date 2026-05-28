@@ -1,0 +1,157 @@
+Thank you. Phase 2 correction report is accepted.
+
+Phase 2 is now approved as complete.
+
+Accepted confirmations:
+
+* Real readable PDF upload and analysis passed
+* TXT upload and analysis passed
+* DOCX upload and analysis passed
+* Arabic document analysis response passed
+* Spanish document analysis response passed
+* rejected file handling passed
+* unreadable PDF safe error path passed
+* cross-session fileRef protection passed
+* expired/missing fileRef safe 404 passed
+* prompt-injection protection passed
+* no file content appears in logs
+* no extracted text appears in logs
+* no raw IP logging
+* no Builder/project/secret/credit access
+* file-analysis uses premium model
+* gpt-5-nano is not used for visible document-analysis answers
+* upload UI states were proven
+* Ora Phase 1 + Phase 2 tests pass 61/61
+* unrelated stop-button failures are acknowledged as pre-existing and outside Phase 2
+
+Please make sure the final Phase 2 correction changes are committed and the commit hash is reported.
+
+Now move to Phase 3 planning only.
+
+Do not start Phase 3 implementation yet.
+
+Phase 3 should be: CSV/Excel dataset analysis, strategy analysis, KPI analysis, and root-cause analysis.
+
+Please prepare a Phase 3 implementation plan before coding. The plan must include:
+
+1. Approved Phase 3 scope
+
+* CSV upload and analysis
+* XLSX upload and analysis
+* dataset preview
+* KPI analysis
+* trend analysis
+* comparison analysis
+* performance gap analysis
+* cost analysis
+* defect/quality analysis
+* downtime analysis
+* root-cause analysis
+* 5 Whys
+* Fishbone/Ishikawa
+* Pareto analysis
+* action-plan recommendations
+* strategy recommendations
+
+2. Not approved yet
+    Do not include:
+
+* image upload
+* image analysis
+* image editing
+* voice
+* web search
+* Builder handoff
+* permanent storage
+* project creation
+* access to Builder/project files/database
+* chart-heavy advanced reporting unless clearly separated as a later Phase 9 feature
+
+3. Architecture
+    Explain:
+
+* new routes
+* modified routes
+* file validation changes
+* CSV/XLSX parsing strategy
+* dataset size limits
+* row/column limits
+* memory limits
+* session file-count behavior
+* temporary storage behavior
+* cleanup behavior
+* no database storage
+
+4. Data safety
+    Explain how Phase 3 prevents:
+
+* large dataset memory abuse
+* formula injection
+* CSV injection
+* malicious spreadsheet content
+* hidden sheet surprises
+* prompt injection inside cells
+* raw data leaking in logs
+* cross-session fileRef access
+* Builder/project access
+
+5. Model strategy
+    Explain:
+
+* premium model for dataset/root-cause/strategy analysis
+* fallback model
+* why mini/nano should not produce visible dataset-analysis responses
+* structured JSON response format
+* max token budget
+* summarization/chunking strategy for large datasets
+
+6. Output format
+    Recommend how Ora should return:
+
+* executive summary
+* key findings
+* KPI gaps
+* likely root causes
+* Pareto findings
+* 5 Whys
+* Fishbone categories
+* recommended actions
+* priority/action/timeline table
+* risks/limitations
+* next steps
+
+7. UI changes
+    Explain:
+
+* CSV/XLSX upload support in Ora
+* dataset chip behavior
+* file preview or summary
+* analysis mode selector if needed
+* error states
+* mobile behavior
+
+8. Tests and validation
+    Include tests for:
+
+* CSV accepted
+* XLSX accepted
+* unsupported XLS blocked if not approved
+* oversized file blocked
+* too many rows blocked or safely sampled
+* too many columns blocked or safely sampled
+* formula cells handled safely
+* hidden sheets handled safely
+* prompt-injection cells ignored as instructions
+* session A cannot access session B fileRef
+* no raw dataset in logs
+* model uses premium
+* Arabic dataset question returns Arabic answer
+* JSON structured output validates
+* typecheck/lint/format pass
+
+9. Rollback plan
+    Explain how to disable Phase 3 while keeping Phase 1 and Phase 2 working if needed.
+
+After you provide the Phase 3 plan, I will review and decide whether to approve implementation.
+
+Do not start Phase 3 coding until I explicitly approve it.
