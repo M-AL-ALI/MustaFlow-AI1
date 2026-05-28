@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
-import { X, Send, Globe, ChevronDown, MessageSquare } from "lucide-react";
+import {
+  X, Send, Globe, ChevronDown, MessageSquare,
+  Paperclip, FileText, AlertCircle, Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { UseOraChatReturn } from "@/hooks/use-ora-chat";
+import type { UseOraChatReturn, UploadState } from "@/hooks/use-ora-chat";
 
 const LANGUAGES = [
   { value: "auto", label: "Auto Detect" },
@@ -17,9 +20,68 @@ interface OraBubbleProps {
   chat: UseOraChatReturn;
 }
 
+function FileChip({
+  uploadState,
+  filename,
+  uploadError,
+  onClear,
+}: {
+  uploadState: UploadState;
+  filename?: string;
+  uploadError: string | null;
+  onClear: () => void;
+}) {
+  if (uploadState === "idle") return null;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] mb-2",
+        uploadState === "attached" &&
+          "border-[hsl(265_85%_65%/0.4)] bg-[hsl(265_85%_65%/0.08)] text-foreground",
+        uploadState === "uploading" &&
+          "border-border bg-muted/30 text-muted-foreground",
+        uploadState === "error" &&
+          "border-destructive/40 bg-destructive/10 text-destructive",
+      )}
+    >
+      {uploadState === "uploading" && (
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+      )}
+      {uploadState === "attached" && (
+        <FileText className="h-3 w-3 shrink-0 text-[hsl(265_85%_65%)]" />
+      )}
+      {uploadState === "error" && (
+        <AlertCircle className="h-3 w-3 shrink-0" />
+      )}
+
+      <span className="flex-1 truncate min-w-0">
+        {uploadState === "uploading" && `Uploading ${filename ?? "file"}…`}
+        {uploadState === "attached" && (filename ?? "File attached")}
+        {uploadState === "error" && (uploadError ?? "Upload failed")}
+      </span>
+
+      <button
+        type="button"
+        onClick={onClear}
+        className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+        aria-label="Remove attachment"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 function OraBubblePortal({ chat }: OraBubbleProps) {
-  const { messages, isLoading, error, atLimit, language, setLanguage, sendMessage, clearError } =
-    chat;
+  const {
+    messages, isLoading, error, atLimit, language, setLanguage,
+    sendMessage, clearError,
+    uploadFile, clearAttachment,
+    attachedFile, uploadState, uploadError, clearUploadError,
+    session,
+  } = chat;
+
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -27,6 +89,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
 
   useEffect(() => {
     if (open && feedRef.current) {
@@ -63,7 +128,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || isLoading || atLimit) return;
+    if (!text || isLoading || atLimit || uploadState === "uploading") return;
     setInput("");
     void sendMessage(text);
   };
@@ -74,6 +139,21 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       handleSend();
     }
   };
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      e.target.value = "";
+      void uploadFile(file);
+    },
+    [uploadFile],
+  );
+
+  const handleClearAttachment = useCallback(() => {
+    clearAttachment();
+    clearUploadError();
+  }, [clearAttachment, clearUploadError]);
 
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
 
@@ -195,7 +275,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   <p className="text-sm font-medium mb-1">Hi, I'm Ora</p>
                   <p className="text-xs text-muted-foreground max-w-[220px] mx-auto">
                     Your free AI consultant. Ask me anything about app planning, strategy, or
-                    MustaFlow.
+                    MustaFlow. You can also upload a PDF, DOCX, or TXT for analysis.
                   </p>
                 </div>
               )}
@@ -286,13 +366,57 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 </div>
               ) : (
                 <>
+                  {/* File chip */}
+                  <FileChip
+                    uploadState={uploadState}
+                    filename={attachedFile?.filename}
+                    uploadError={uploadError}
+                    onClear={handleClearAttachment}
+                  />
+
                   <div className="flex items-end gap-2">
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.docx,.txt"
+                      className="sr-only"
+                      aria-hidden
+                      onChange={handleFileChange}
+                    />
+
+                    {/* Upload button */}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLoading || uploadState === "uploading" || atFileLimit}
+                      title={
+                        atFileLimit
+                          ? `File limit reached (${session?.fileCount ?? 3}/${session?.fileLimit ?? 3})`
+                          : "Upload a PDF, DOCX, or TXT file"
+                      }
+                      className={cn(
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors",
+                        uploadState === "attached"
+                          ? "border-[hsl(265_85%_65%/0.5)] bg-[hsl(265_85%_65%/0.12)] text-[hsl(265_85%_65%)]"
+                          : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                        (isLoading || uploadState === "uploading" || atFileLimit) &&
+                          "opacity-40 cursor-not-allowed",
+                      )}
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                    </button>
+
                     <textarea
                       ref={textareaRef}
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="Ask Ora anything..."
+                      placeholder={
+                        uploadState === "attached"
+                          ? `Ask about ${attachedFile?.filename ?? "this file"}…`
+                          : "Ask Ora anything…"
+                      }
                       rows={1}
                       className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[hsl(265_85%_65%/0.5)] transition-all leading-snug"
                       style={{ maxHeight: "80px" }}
@@ -301,15 +425,15 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     <button
                       type="button"
                       onClick={handleSend}
-                      disabled={!input.trim() || isLoading}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[hsl(265_85%_65%)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors shadow-sm"
+                      disabled={!input.trim() || isLoading || uploadState === "uploading"}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[hsl(265_85%_65%)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors shadow-sm"
                     >
-                      <Send className="h-4 w-4" />
+                      <Send className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  {chat.session && (
+                  {session && (
                     <p className="text-[10px] text-muted-foreground/60 mt-1.5 text-right">
-                      {chat.session.msgLimit - chat.session.msgCount} messages left
+                      {session.msgLimit - session.msgCount} messages left
                     </p>
                   )}
                 </>

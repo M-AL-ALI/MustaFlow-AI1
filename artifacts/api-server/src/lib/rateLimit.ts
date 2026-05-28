@@ -250,6 +250,15 @@ export const oraSessionLimiter = createLimiter({
   message: "You have started too many Ora sessions today. Please try again tomorrow.",
 });
 
+// Sliding-window counter: 10 file uploads per IP per hour
+// Separate key prefix from session and chat limiters so uploads don't block chat.
+export const oraUploadLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 10,
+  keyPrefix: "ora_upload",
+  message: "You have uploaded too many files recently. Please wait before uploading again.",
+});
+
 // Publish/unpublish — 10 per minute per IP
 export const publishLimiter = createLimiter({
   windowMs: 60_000,

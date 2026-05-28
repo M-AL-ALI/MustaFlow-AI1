@@ -3,6 +3,8 @@ import type { Request, Response, NextFunction } from "express";
 import { isOraSecretConfigured } from "../../lib/public-ai/session";
 import sessionRouter from "./session";
 import chatRouter from "./chat";
+import uploadRouter from "./upload";
+import fileAnalysisRouter from "./file-analysis";
 
 const router = Router();
 
@@ -20,5 +22,7 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 
 router.use(sessionRouter);
 router.use(chatRouter);
+router.use(uploadRouter);
+router.use(fileAnalysisRouter);
 
 export default router;
