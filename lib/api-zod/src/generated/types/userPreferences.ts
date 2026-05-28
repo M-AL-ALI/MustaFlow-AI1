@@ -11,5 +11,7 @@ export interface UserPreferences {
   userId: string;
   dismissedOnboarding: boolean;
   preferredMode?: UserPreferencesPreferredMode;
+  /** BCP-47 language tag for speech recognition (null = auto-detect from browser) */
+  voiceLang?: string | null;
   updatedAt: Date;
 }

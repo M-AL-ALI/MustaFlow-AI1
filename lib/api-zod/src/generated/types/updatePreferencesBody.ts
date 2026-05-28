@@ -10,4 +10,6 @@ import type { UpdatePreferencesBodyPreferredMode } from './updatePreferencesBody
 export interface UpdatePreferencesBody {
   dismissedOnboarding?: boolean;
   preferredMode?: UpdatePreferencesBodyPreferredMode;
+  /** BCP-47 language tag for speech recognition (null = auto-detect from browser) */
+  voiceLang?: string | null;
 }

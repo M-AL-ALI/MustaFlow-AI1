@@ -7220,6 +7220,10 @@ components:
           type: string
           enum: [builder, developer]
           nullable: true
+        voiceLang:
+          type: string
+          nullable: true
+          description: BCP-47 language tag for speech recognition (null = auto-detect from browser)
         updatedAt: { type: string, format: date-time }
 
     UpdatePreferencesBody:
@@ -7230,6 +7234,10 @@ components:
           type: string
           enum: [builder, developer]
           nullable: true
+        voiceLang:
+          type: string
+          nullable: true
+          description: BCP-47 language tag for speech recognition (null = auto-detect from browser)
 
     UserCredit:
       type: object

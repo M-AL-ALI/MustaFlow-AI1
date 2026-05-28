@@ -3667,6 +3667,7 @@ export const GetMyPreferencesResponse = zod.object({
   "userId": zod.string(),
   "dismissedOnboarding": zod.boolean(),
   "preferredMode": zod.enum(['builder', 'developer']).nullish(),
+  "voiceLang": zod.string().nullish().describe('BCP-47 language tag for speech recognition (null = auto-detect from browser)'),
   "updatedAt": zod.coerce.date()
 })
 
@@ -3676,13 +3677,15 @@ export const GetMyPreferencesResponse = zod.object({
  */
 export const UpdateMyPreferencesBody = zod.object({
   "dismissedOnboarding": zod.boolean().optional(),
-  "preferredMode": zod.enum(['builder', 'developer']).nullish()
+  "preferredMode": zod.enum(['builder', 'developer']).nullish(),
+  "voiceLang": zod.string().nullish().describe('BCP-47 language tag for speech recognition (null = auto-detect from browser)')
 })
 
 export const UpdateMyPreferencesResponse = zod.object({
   "userId": zod.string(),
   "dismissedOnboarding": zod.boolean(),
   "preferredMode": zod.enum(['builder', 'developer']).nullish(),
+  "voiceLang": zod.string().nullish().describe('BCP-47 language tag for speech recognition (null = auto-detect from browser)'),
   "updatedAt": zod.coerce.date()
 })
 

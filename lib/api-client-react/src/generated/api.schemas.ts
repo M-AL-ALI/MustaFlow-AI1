@@ -1909,6 +1909,8 @@ export interface UserPreferences {
   userId: string;
   dismissedOnboarding: boolean;
   preferredMode?: UserPreferencesPreferredMode;
+  /** BCP-47 language tag for speech recognition (null = auto-detect from browser) */
+  voiceLang?: string | null;
   updatedAt: string;
 }
 
@@ -1923,6 +1925,8 @@ export const UpdatePreferencesBodyPreferredMode = {
 export interface UpdatePreferencesBody {
   dismissedOnboarding?: boolean;
   preferredMode?: UpdatePreferencesBodyPreferredMode;
+  /** BCP-47 language tag for speech recognition (null = auto-detect from browser) */
+  voiceLang?: string | null;
 }
 
 export interface UserCredit {

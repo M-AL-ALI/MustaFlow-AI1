@@ -78,6 +78,7 @@ const MIGRATIONS = [
   "migrate-message-origin",
   "migrate-command-approval",
   "migrate-reinforced-count",
+  "migrate-voice-lang",
 ] as const;
 
 async function main(): Promise<void> {

@@ -2238,6 +2238,14 @@ const MIGRATION_STEPS: MigrationStep[] = [
       );
     },
   },
+
+  // ── migrate-voice-lang ───────────────────────────────────────────────────────
+  {
+    name: "migrate-voice-lang",
+    async run(client) {
+      await client.query(`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS voice_lang TEXT`);
+    },
+  },
 ];
 
 /**

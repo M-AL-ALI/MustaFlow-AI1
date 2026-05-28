@@ -460,19 +460,66 @@ const VOICE_LANGUAGES = [
 ];
 
 function VoiceInputSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const prefsQuery = useGetMyPreferences({
+    query: { queryKey: ["/api/me/preferences"] },
+  });
+  const updatePreferences = useUpdateMyPreferences();
+
   const storedRaw =
     typeof window !== "undefined" ? localStorage.getItem("mustaflow_voice_lang") : null;
+
+  // Start from localStorage (or "auto") so the UI is instantly responsive;
+  // server value will be applied once on first successful fetch (see below).
   const [selected, setSelected] = useState<string>(storedRaw ?? "auto");
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  function handleSave() {
+  // Track whether we've already hydrated from the server so that subsequent
+  // refetches (or React re-renders) don't overwrite unsaved user changes.
+  const hydratedFromServer = useRef(false);
+
+  useEffect(() => {
+    if (prefsQuery.isPending || hydratedFromServer.current) return;
+    hydratedFromServer.current = true;
+
+    // Fallback chain: server (non-null) → localStorage → "auto"
+    const serverLang = prefsQuery.data?.voiceLang ?? null;
+    if (serverLang) {
+      setSelected(serverLang);
+    } else if (storedRaw) {
+      // Server has no preference yet; keep the local value already in state.
+      // (no-op — useState already initialised to storedRaw)
+    }
+    // else: neither server nor local → stay "auto" (already initialised)
+  }, [prefsQuery.isPending, prefsQuery.data, storedRaw]);
+
+  async function handleSave() {
+    setSaving(true);
+    // Apply locally right away for instant offline feedback
     if (selected === "auto") {
       localStorage.removeItem("mustaflow_voice_lang");
     } else {
       setVoiceLang(selected);
     }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+
+    try {
+      await updatePreferences.mutateAsync({
+        data: { voiceLang: selected === "auto" ? null : selected },
+      });
+      await queryClient.invalidateQueries({ queryKey: getGetMyPreferencesQueryKey() });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      toast({
+        title: "Could not save voice language",
+        description: "Your preference was saved locally but could not sync to the server.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   }
 
   const effectiveLang =
@@ -497,19 +544,23 @@ function VoiceInputSection() {
         <label htmlFor="voice-lang" className="text-sm font-medium">
           Transcription language
         </label>
-        <select
-          id="voice-lang"
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-          className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          {VOICE_LANGUAGES.map(({ code, label }) => (
-            <option key={code} value={code}>
-              {label}
-            </option>
-          ))}
-        </select>
-        {selected === "auto" && (
+        {prefsQuery.isPending ? (
+          <div className="h-9 w-full bg-muted rounded-md animate-pulse" />
+        ) : (
+          <select
+            id="voice-lang"
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {VOICE_LANGUAGES.map(({ code, label }) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </select>
+        )}
+        {selected === "auto" && !prefsQuery.isPending && (
           <p className="text-xs text-muted-foreground">
             Your browser reports <span className="font-mono text-foreground">{effectiveLang}</span>{" "}
             as its primary language.
@@ -519,11 +570,12 @@ function VoiceInputSection() {
 
       <div className="flex items-center gap-3">
         <button
-          onClick={handleSave}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          onClick={() => void handleSave()}
+          disabled={saving || prefsQuery.isPending}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <Save className="h-3.5 w-3.5" />
-          Save
+          {saving ? "Saving…" : "Save"}
         </button>
         {saved && <span className="text-sm text-green-500">Saved</span>}
       </div>

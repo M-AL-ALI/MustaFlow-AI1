@@ -79,6 +79,7 @@
     "migrate-low-credit-email": "tsx ./src/migrate-low-credit-email.ts",
     "migrate-provisioning-steps": "tsx ./src/migrate-provisioning-steps.ts",
     "migrate-gdpr-erasure-job": "tsx ./src/migrate-gdpr-erasure-job.ts",
+    "migrate-voice-lang": "tsx ./src/migrate-voice-lang.ts",
     "migrate-drop-conversations": "tsx ./src/migrate-drop-conversations.ts",
     "migrate-command-approval": "tsx ./src/migrate-command-approval.ts",
     "migrate-message-origin": "tsx ./src/migrate-message-origin.ts",

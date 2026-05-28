@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { syncThemeDom, getStoredTheme } from "@/lib/theme";
+import { setVoiceLang } from "@/hooks/use-voice-input";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
@@ -281,6 +282,35 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Fetches user preferences once on mount and seeds the voice language into
+// localStorage so that getVoiceLang() (used during recording) always returns
+// the server-authoritative value on any device, even before the Settings page
+// is visited.
+//
+// Important: we only write to localStorage when the server has an explicit
+// non-null value. A null server value means "auto / not set" — we leave any
+// existing localStorage entry intact so users who previously chose a language
+// locally are not silently reverted.
+function VoiceLangSyncer() {
+  const prefsQuery = useGetMyPreferences({
+    query: { queryKey: ["/api/me/preferences"], staleTime: Infinity },
+  });
+
+  useEffect(() => {
+    if (!prefsQuery.data) return;
+    const serverLang = prefsQuery.data.voiceLang ?? null;
+    if (serverLang) {
+      // Server has an explicit preference — make it authoritative locally too.
+      setVoiceLang(serverLang);
+    }
+    // server null → leave localStorage untouched (preserves any local pref
+    // users set before this feature shipped, and avoids erasing newly-set
+    // values on devices that haven't synced yet).
+  }, [prefsQuery.data]);
+
+  return null;
+}
+
 // Apply theme on mount and react to changes via storage and custom events.
 // NOTE: event listeners call syncThemeDom (not applyTheme) to avoid a
 // recursive loop: applyTheme dispatches mf-theme-change → listener →
@@ -381,6 +411,7 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeApplier />
+      {!isE2E && <VoiceLangSyncer />}
       {!isE2E && <ClerkQueryClientCacheInvalidator />}
       {!isE2E && <ClerkTokenProvider />}
       <MaybeClerkContextProviders isE2E={isE2E}>

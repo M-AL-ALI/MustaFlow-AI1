@@ -37,6 +37,7 @@ router.get("/me/preferences", async (req, res): Promise<void> => {
     userId: prefs.userId,
     dismissedOnboarding: prefs.dismissedOnboarding,
     preferredMode: prefs.preferredMode ?? null,
+    voiceLang: prefs.voiceLang ?? null,
     updatedAt: prefs.updatedAt,
   });
 });
@@ -44,6 +45,7 @@ router.get("/me/preferences", async (req, res): Promise<void> => {
 const updatePreferencesSchema = z.object({
   dismissedOnboarding: z.boolean().optional(),
   preferredMode: z.enum(["builder", "developer"]).nullable().optional(),
+  voiceLang: z.string().nullable().optional(),
 });
 
 router.patch("/me/preferences", async (req, res): Promise<void> => {
@@ -66,6 +68,9 @@ router.patch("/me/preferences", async (req, res): Promise<void> => {
   if (parsed.data.preferredMode !== undefined) {
     updates.preferredMode = parsed.data.preferredMode;
   }
+  if (parsed.data.voiceLang !== undefined) {
+    updates.voiceLang = parsed.data.voiceLang;
+  }
 
   const [updated] = await db
     .insert(userPreferencesTable)
@@ -80,6 +85,7 @@ router.patch("/me/preferences", async (req, res): Promise<void> => {
     userId: updated!.userId,
     dismissedOnboarding: updated!.dismissedOnboarding,
     preferredMode: updated!.preferredMode ?? null,
+    voiceLang: updated!.voiceLang ?? null,
     updatedAt: updated!.updatedAt,
   });
 });
