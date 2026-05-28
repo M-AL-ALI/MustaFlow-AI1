@@ -40,6 +40,8 @@ import {
   Presentation,
   Clapperboard,
   Bot,
+  Lightbulb,
+  Rocket,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
@@ -64,51 +66,60 @@ const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>>
   nonprofit: Heart,
 };
 
-// Capability chips — dual-audience, each pre-fills the prompt input
+// Capability chips — speak to ideas, not stacks. Each pre-fills the prompt input.
 const CAPABILITY_CHIPS = [
   {
-    name: "React SaaS app",
-    icon: Monitor,
-    prompt:
-      "Build me a React SaaS app with a dashboard, user authentication, and subscription billing",
-  },
-  {
-    name: "REST API + Postgres",
-    icon: Database,
-    prompt: "Build a REST API with Postgres, authentication, and CRUD endpoints for a todo app",
-  },
-  {
-    name: "Python script",
-    icon: Code2,
-    prompt: "Write a Python script that processes CSV files and generates a summary report",
-  },
-  {
-    name: "Go microservice",
-    icon: Cpu,
-    prompt: "Build a Go microservice with HTTP endpoints, middleware, and health checks",
+    name: "Brainstorm an idea",
+    icon: Lightbulb,
+    prompt: "I have a rough idea — help me think through what to build and how it should work",
   },
   {
     name: "Mobile app",
     icon: Smartphone,
-    prompt: "Build a React Native mobile app for tracking daily habits with local storage",
+    prompt: "A mobile app that helps me track my daily habits with reminders and streaks",
   },
   {
-    name: "Slide deck",
-    icon: Presentation,
-    prompt: "Create a pitch deck slide presentation for a B2B SaaS startup",
+    name: "Web app",
+    icon: Monitor,
+    prompt: "A web app where small businesses can manage bookings, customers, and invoices",
   },
   {
-    name: "Data automation",
-    icon: Zap,
-    prompt:
-      "Build a data automation pipeline that fetches data from an API and saves it to a database",
+    name: "Landing page",
+    icon: Rocket,
+    prompt: "A clean, modern landing page for my startup with a hero, features, and a signup form",
+  },
+  {
+    name: "Dashboard",
+    icon: LayoutDashboard,
+    prompt: "A dashboard that shows my key metrics with charts, filters, and live updates",
   },
   {
     name: "AI chatbot",
     icon: Bot,
-    prompt:
-      "Build an AI chatbot with a chat interface, conversation history, and OpenAI integration",
+    prompt: "An AI chatbot that answers questions about my product, with chat history",
   },
+  {
+    name: "Slide deck",
+    icon: Presentation,
+    prompt: "A pitch deck for my startup with problem, solution, market, and ask slides",
+  },
+  {
+    name: "Data automation",
+    icon: Zap,
+    prompt: "An automation that pulls data from a source on a schedule and emails me a summary",
+  },
+];
+
+// Rotating placeholder examples — cycles through the chat input when empty
+const ROTATING_PROMPTS = [
+  "A mobile app for tracking my daily habits…",
+  "A landing page for my new coffee shop…",
+  "A dashboard that shows my sales by region…",
+  "An AI chatbot that answers customer questions…",
+  "A simple booking site for my photography business…",
+  "A pitch deck for my startup's seed round…",
+  "An automation that emails me a weekly summary…",
+  "A web app for organising my recipe collection…",
 ];
 
 // Quick-start chips — developer-oriented first, maker-oriented second
@@ -205,8 +216,30 @@ export default function HomePage() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [activePersona, setActivePersona] = useState(0);
   const [activeChipLabel, setActiveChipLabel] = useState<string | undefined>();
+  const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
+
+  // Rotate the placeholder example every 3.2s while the input is empty
+  useEffect(() => {
+    if (prompt.trim().length > 0) return;
+    const id = setInterval(() => {
+      setPlaceholderIdx((i) => (i + 1) % ROTATING_PROMPTS.length);
+    }, 3200);
+    return () => clearInterval(id);
+  }, [prompt]);
+
+  function handleBrainstorm() {
+    // Seed the brainstorm panel with any current prompt and route to the
+    // workspace where the panel can actually call the auth-protected API.
+    // Signed-out visitors get sent through sign-up first.
+    try {
+      sessionStorage.setItem("mustaflow_brainstorm_seed", prompt.trim());
+    } catch {
+      /* ignore quota / privacy-mode errors */
+    }
+    setLocation("/projects");
+  }
 
   const { toast } = useToast();
 
@@ -434,7 +467,7 @@ export default function HomePage() {
                     setActiveChipLabel(undefined);
                   }
                 }}
-                placeholder="e.g. A REST API with Postgres and auth, or a landing page for my startup..."
+                placeholder={ROTATING_PROMPTS[placeholderIdx]}
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleBuild();
@@ -475,6 +508,14 @@ export default function HomePage() {
                   Start from a template
                 </>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={handleBrainstorm}
+              className="flex items-center gap-1.5 text-sm font-medium px-4 py-1.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-muted/50 transition-colors"
+            >
+              <Lightbulb className="h-3.5 w-3.5" />
+              Brainstorm first
             </button>
             <button
               type="button"

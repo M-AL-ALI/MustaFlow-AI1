@@ -43,6 +43,8 @@ interface BrainstormPanelProps {
    * Useful for panels without a project (e.g. dev-home "Discuss first").
    */
   storageKey?: string;
+  /** Pre-fill the composer with this text on mount (e.g. seeded from the landing page). */
+  initialInput?: string;
 }
 
 const OPENING_MESSAGE_CONTENT =
@@ -105,13 +107,14 @@ export function BrainstormPanel({
   onResolved,
   projectId,
   storageKey,
+  initialInput,
 }: BrainstormPanelProps) {
   const [visible, setVisible] = useState(false);
 
   const effectiveKey = resolveStorageKey(projectId, storageKey);
   const initialState = loadPersistedState(effectiveKey);
   const [messages, setMessages] = useState<Message[]>(initialState.messages);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialInput ?? "");
   const [buildIntent, setBuildIntent] = useState(initialState.buildIntent);
   const [pulseIntent, setPulseIntent] = useState(false);
   const [resolvedSpec, setResolvedSpec] = useState<{

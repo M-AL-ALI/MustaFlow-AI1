@@ -270,7 +270,21 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
   const [prompt, setPrompt] = useState("");
   const [planMode, setPlanMode] = useState(false);
   const [showDiscuss, setShowDiscuss] = useState(false);
+  const [discussSeed, setDiscussSeed] = useState<string | undefined>(undefined);
   const [, setLocation] = useLocation();
+
+  // Pick up a brainstorm seed handed off from the public landing page.
+  useEffect(() => {
+    try {
+      const seed = sessionStorage.getItem("mustaflow_brainstorm_seed");
+      if (seed === null) return;
+      sessionStorage.removeItem("mustaflow_brainstorm_seed");
+      setDiscussSeed(seed);
+      setShowDiscuss(true);
+    } catch {
+      /* sessionStorage may be unavailable in privacy mode */
+    }
+  }, []);
 
   const basePromptRef = useRef("");
   const {
@@ -440,9 +454,13 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
         {/* Brainstorm panel */}
         {showDiscuss && (
           <BrainstormPanel
-            onClose={() => setShowDiscuss(false)}
+            onClose={() => {
+              setShowDiscuss(false);
+              setDiscussSeed(undefined);
+            }}
             mode="developer"
             storageKey="brainstorm_dev"
+            initialInput={discussSeed}
             onCreated={(id) => setLocation(`/dev/workspace/${id}`)}
           />
         )}
