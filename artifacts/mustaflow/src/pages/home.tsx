@@ -383,18 +383,14 @@ export default function HomePage() {
 
         {/* Hero Section */}
         <div className="max-w-4xl mx-auto pt-10 px-6">
-          {/* Logo treatment — compact box, larger logo inside, dynamic float + glow */}
+          {/* Logo treatment — small tight box, logo fills it and spins */}
           <div className="flex justify-center mb-6">
-            <div className="relative animate-logo-float">
-              {/* Pulsing dynamic glow */}
-              <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.4)_0%,transparent_70%)] blur-2xl pointer-events-none animate-logo-glow" />
-              <div className="relative rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 p-2 shadow-xl ring-1 ring-primary/20 overflow-hidden">
-                <img
-                  src={`${import.meta.env.BASE_URL}logo.png`}
-                  alt="MustaFlow AI"
-                  className="h-20 w-28 sm:h-24 sm:w-32 object-contain"
-                />
-              </div>
+            <div className="relative rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 p-1 shadow-xl ring-1 ring-primary/20">
+              <img
+                src={`${import.meta.env.BASE_URL}logo.png`}
+                alt="MustaFlow AI"
+                className="h-20 w-20 sm:h-24 sm:w-24 object-contain animate-logo-spin"
+              />
             </div>
           </div>
           <div className="text-center mb-5">
