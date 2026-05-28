@@ -22,7 +22,8 @@ import {
   Presentation,
   Palette,
   Plus,
-  ArrowUp,
+  Rocket,
+  Lightbulb,
   Mic,
   Clock,
   Activity,
@@ -146,7 +147,7 @@ function HomeHero() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Make a landing page for..."
+            placeholder="What are we building today?"
             rows={3}
             className="w-full resize-none bg-transparent px-4 pt-4 pb-2 text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
@@ -207,13 +208,14 @@ function HomeHero() {
                 <Mic className="h-4 w-4" />
               </button>
 
-              {/* Discuss first */}
+              {/* Brainstorm first */}
               <button
                 type="button"
                 onClick={() => setShowDiscuss(true)}
-                className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors shrink-0 px-1"
+                className="flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300 px-2.5 py-1 text-xs font-medium hover:bg-violet-500/20 transition-colors shrink-0"
               >
-                Discuss first
+                <Lightbulb className="h-3.5 w-3.5" />
+                Brainstorm first
               </button>
 
               {/* Send button */}
@@ -229,7 +231,7 @@ function HomeHero() {
                 )}
                 title="Build"
               >
-                <ArrowUp className="h-4 w-4" />
+                <Rocket className="h-4 w-4" />
               </button>
             </div>
           )}

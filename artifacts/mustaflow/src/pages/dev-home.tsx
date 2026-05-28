@@ -21,7 +21,8 @@ import { cn } from "@/lib/utils";
 import { SlideOutNav } from "@/components/layout/slide-out-nav";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
 import {
-  ArrowUp,
+  Rocket,
+  MessageSquare,
   Mic,
   Clock,
   Plus,
@@ -298,7 +299,7 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="A REST API for a task manager with user auth..."
+            placeholder="What does this project need next?"
             rows={3}
             className="w-full resize-none bg-transparent px-4 pt-4 pb-2 text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
@@ -363,8 +364,9 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
               <button
                 type="button"
                 onClick={() => setShowDiscuss(true)}
-                className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors shrink-0 px-1"
+                className="flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 px-2.5 py-1 text-xs font-medium hover:bg-cyan-500/20 transition-colors shrink-0"
               >
+                <MessageSquare className="h-3.5 w-3.5" />
                 Discuss first
               </button>
 
@@ -381,7 +383,7 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
                 )}
                 title="Build"
               >
-                <ArrowUp className="h-4 w-4" />
+                <Rocket className="h-4 w-4" />
               </button>
             </div>
           )}
