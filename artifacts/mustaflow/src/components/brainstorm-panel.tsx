@@ -22,6 +22,13 @@ interface BrainstormPanelProps {
   mode?: "builder" | "developer";
   /** Called with the new project id after creation. Defaults to navigating to /projects/:id. */
   onCreated?: (projectId: number) => void;
+  /**
+   * When provided the panel operates in "workspace" mode: instead of offering
+   * to create a new project it calls this callback with the resolved prompt so
+   * the caller can seed it into the composer.  The "Create project" step is
+   * skipped entirely.
+   */
+  onResolved?: (prompt: string) => void;
 }
 
 const OPENING_MESSAGE: Message = {
@@ -30,7 +37,7 @@ const OPENING_MESSAGE: Message = {
     "What are you thinking of building? Tell me as much or as little as you'd like and I'll help shape it.",
 };
 
-export function BrainstormPanel({ onClose, mode, onCreated }: BrainstormPanelProps) {
+export function BrainstormPanel({ onClose, mode, onCreated, onResolved }: BrainstormPanelProps) {
   const [visible, setVisible] = useState(false);
   const [messages, setMessages] = useState<Message[]>([OPENING_MESSAGE]);
   const [input, setInput] = useState("");
@@ -228,41 +235,58 @@ export function BrainstormPanel({ onClose, mode, onCreated }: BrainstormPanelPro
           )}
         </div>
 
-        {/* Resolved spec + create form */}
+        {/* Resolved spec + create / use-prompt form */}
         {resolvedSpec && (
           <div className="px-4 py-3 border-t border-border bg-muted/20 space-y-3">
-            <div className="text-xs text-muted-foreground">
-              Project name:{" "}
-              <span
-                ref={nameRef}
-                contentEditable
-                suppressContentEditableWarning
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    (e.currentTarget as HTMLElement).blur();
-                  }
-                }}
-                className="font-semibold text-foreground border-b border-dashed border-border outline-none focus:border-primary px-0.5"
-              >
-                {resolvedSpec.name}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground line-clamp-2">{resolvedSpec.prompt}</p>
-            <button
-              onClick={handleCreateProject}
-              disabled={isCreating}
-              className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium"
-            >
-              {isCreating ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Creating project...
-                </>
-              ) : (
-                "Create project"
-              )}
-            </button>
+            {onResolved ? (
+              <>
+                <p className="text-xs text-muted-foreground line-clamp-3">{resolvedSpec.prompt}</p>
+                <button
+                  onClick={() => {
+                    onResolved(resolvedSpec.prompt);
+                    onClose();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors px-3 py-2 text-sm font-medium"
+                >
+                  Use this prompt
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="text-xs text-muted-foreground">
+                  Project name:{" "}
+                  <span
+                    ref={nameRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLElement).blur();
+                      }
+                    }}
+                    className="font-semibold text-foreground border-b border-dashed border-border outline-none focus:border-primary px-0.5"
+                  >
+                    {resolvedSpec.name}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-2">{resolvedSpec.prompt}</p>
+                <button
+                  onClick={handleCreateProject}
+                  disabled={isCreating}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium"
+                >
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Creating project...
+                    </>
+                  ) : (
+                    "Create project"
+                  )}
+                </button>
+              </>
+            )}
           </div>
         )}
 
