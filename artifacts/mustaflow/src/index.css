@@ -330,9 +330,32 @@
 
 @layer utilities {
   .logo-crisp {
-    filter: contrast(1.15) brightness(1.12) saturate(1.1)
-      drop-shadow(0 0 1px hsl(var(--primary) / 0.5));
+    filter: contrast(1.2) brightness(1.18) saturate(1.25)
+      drop-shadow(0 0 2px hsl(var(--primary) / 0.95))
+      drop-shadow(0 0 6px hsl(var(--primary) / 0.7))
+      drop-shadow(0 0 14px hsl(var(--primary) / 0.45));
     image-rendering: -webkit-optimize-contrast;
+    animation: logo-shine 3.5s ease-in-out infinite;
+  }
+  @keyframes logo-shine {
+    0%,
+    100% {
+      filter: contrast(1.2) brightness(1.18) saturate(1.25)
+        drop-shadow(0 0 2px hsl(var(--primary) / 0.95))
+        drop-shadow(0 0 6px hsl(var(--primary) / 0.7))
+        drop-shadow(0 0 14px hsl(var(--primary) / 0.45));
+    }
+    50% {
+      filter: contrast(1.25) brightness(1.28) saturate(1.35)
+        drop-shadow(0 0 3px hsl(var(--primary) / 1))
+        drop-shadow(0 0 10px hsl(var(--primary) / 0.85))
+        drop-shadow(0 0 22px hsl(var(--primary) / 0.6));
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .logo-crisp {
+      animation: none;
+    }
   }
   @keyframes logo-spin {
     from {
