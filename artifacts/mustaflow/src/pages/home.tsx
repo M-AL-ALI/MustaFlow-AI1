@@ -382,7 +382,20 @@ export default function HomePage() {
         </header>
 
         {/* Hero Section */}
-        <div className="max-w-4xl mx-auto pt-12 px-6">
+        <div className="max-w-4xl mx-auto pt-10 px-6">
+          {/* Logo treatment — compact framed mark */}
+          <div className="flex justify-center mb-6">
+            <div className="relative">
+              <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.3)_0%,transparent_70%)] blur-2xl pointer-events-none" />
+              <div className="relative rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 p-3 shadow-xl ring-1 ring-primary/20">
+                <img
+                  src={`${import.meta.env.BASE_URL}logo.png`}
+                  alt="MustaFlow AI"
+                  className="h-16 w-16 sm:h-20 sm:w-20 object-contain"
+                />
+              </div>
+            </div>
+          </div>
           <div className="text-center mb-5">
             <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-5">
               <Sparkles className="h-3 w-3" />
