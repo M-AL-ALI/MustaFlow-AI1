@@ -1,0 +1,99 @@
+Thank you. The Phase 1 correction report is accepted.
+
+Phase 1 is now approved as complete, with these confirmations accepted:
+
+* Arabic multilingual response is confirmed working
+* UI proof is confirmed
+* session refresh memory behavior is confirmed
+* kill-switch behavior is clarified correctly: env change requires API restart
+* raw IP logging issue was fixed with one-way IP hash
+* privacy/logging rules are now corrected
+* public AI isolation remains intact
+* no Builder/project/secret/credit access exists in public AI routes
+
+Before moving to Phase 2, please make sure the IP hash logging fix is committed and all workflows are green after that final code change.
+
+Now I approve Phase 2 only.
+
+Phase 2 scope: file upload and document analysis only.
+
+Approved Phase 2 features:
+
+1. File upload button in Ora
+2. Supported files for Phase 2 only:
+    * PDF
+    * DOCX
+    * TXT
+3. Temporary file handling only
+4. File validation using MIME + magic bytes
+5. 10 MB max file size
+6. 3 files max per anonymous session
+7. Server-side text extraction:
+    * PDF via pdf-parse
+    * DOCX via mammoth
+    * TXT via safe text read
+8. Content safety scan before model analysis
+9. Premium model analysis using the approved premium model strategy
+10. Ora can:
+
+* summarize documents
+* extract key points
+* explain document contents
+* identify issues
+* recommend improvements
+* answer visitor questions about the uploaded document
+
+11. Uploaded files must be temporary only
+12. No file contents stored in database
+13. No file contents logged
+14. No file contents transferred to Builder
+15. No permanent storage for anonymous visitors
+16. No training on visitor uploads
+17. Graceful error handling for unsupported, oversized, corrupted, or unsafe files
+
+Not approved in Phase 2:
+
+* CSV analysis
+* Excel/XLSX analysis
+* dataset analysis
+* root-cause analysis from datasets
+* image upload
+* image analysis
+* image editing
+* voice
+* web search
+* Builder handoff
+* project creation
+* storing files permanently
+* connecting uploads to Builder/project memory
+
+Security rules for Phase 2:
+
+* /api/public-ai/upload and /api/public-ai/file-analysis must stay public but isolated
+* public AI routes must not import project/user/secret/credit models
+* public AI routes must not call Builder pipelines
+* uploaded file refs must be session-scoped
+* one visitor must not access another visitor’s uploaded file
+* file paths must not expose server paths
+* dangerous file types must be blocked
+* unsupported files must return safe messages
+* raw model/file/parser errors must not be exposed to visitors
+
+Please provide a Phase 2 implementation plan before coding, including:
+
+* affected files
+* new routes
+* upload storage strategy
+* temp file cleanup strategy
+* file validation method
+* allowed file types
+* blocked file types
+* package dependencies
+* rate limits
+* model routing
+* UI changes
+* test plan
+* rollback plan
+* final validation checklist
+
+After you provide the Phase 2 plan, you may proceed only within the approved Phase 2 scope above. Do not start Phase 3 or any other phase.
