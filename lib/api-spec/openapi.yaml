@@ -6523,6 +6523,18 @@ components:
         idempotencyKey:
           type: string
           description: "Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call."
+        brainstormContext:
+          type: array
+          description: "Optional brainstorm conversation history from the brainstorm panel. When provided, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming — context that may not have fully made it into the resolved prompt."
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
 
     ChatExchange:
       type: object

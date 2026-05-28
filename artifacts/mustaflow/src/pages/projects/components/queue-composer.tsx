@@ -192,6 +192,7 @@ interface QueueComposerProps {
     content: string,
     agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain",
     attachments?: ComposerAttachment[],
+    brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>,
   ) => void;
   onBatchStarted: (batchId: string, totalCount: number) => void;
   promptValue?: string;
@@ -316,6 +317,10 @@ export function QueueComposer({
   const [showPlanHistory, setShowPlanHistory] = useState(false);
   const [showBrainstorm, setShowBrainstorm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const brainstormContextRef = useRef<Array<{
+    role: "user" | "assistant";
+    content: string;
+  }> | null>(null);
 
   const uploadFile = useCallback(
     async (file: File): Promise<{ attachment: ComposerAttachment | null; error?: string }> => {
@@ -947,6 +952,8 @@ export function QueueComposer({
     if (variantMode && messages.length === 1) {
       const text = messages[0]!;
       const variantMessages = [text + VARIANT_A_SUFFIX, text + VARIANT_B_SUFFIX];
+      // Clear brainstorm context — it doesn't apply to batch/variant paths
+      brainstormContextRef.current = null;
       setIsSubmitting(true);
       try {
         const res = await fetch(`/api/projects/${projectId}/queue`, {
@@ -998,10 +1005,19 @@ export function QueueComposer({
         : clientIntent === "plan" || clientIntent === "converse"
           ? clientIntent
           : undefined;
-      onSingleSend(text, detectedIntent, inlineImages.length > 0 ? inlineImages : undefined);
+      const brainstormCtx = brainstormContextRef.current ?? undefined;
+      brainstormContextRef.current = null;
+      onSingleSend(
+        text,
+        detectedIntent,
+        inlineImages.length > 0 ? inlineImages : undefined,
+        brainstormCtx,
+      );
       return;
     }
 
+    // Multi-message batch path — brainstorm context doesn't apply here
+    brainstormContextRef.current = null;
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/queue`, {
@@ -1137,9 +1153,10 @@ export function QueueComposer({
       {showBrainstorm && (
         <BrainstormPanel
           onClose={() => setShowBrainstorm(false)}
-          onResolved={(prompt) => {
+          onResolved={(prompt, messages) => {
             setRows([{ id: crypto.randomUUID(), text: prompt }]);
             if (onPromptValueChange) onPromptValueChange(prompt);
+            brainstormContextRef.current = messages;
           }}
         />
       )}

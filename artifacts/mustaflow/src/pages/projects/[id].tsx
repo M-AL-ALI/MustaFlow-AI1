@@ -1941,6 +1941,7 @@ export default function ProjectWorkspacePage() {
         agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
         idempotencyKey?: string;
+        brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
       },
     ) => {
       const effectiveMode = opts?.agentMode ?? agentMode;
@@ -1960,6 +1961,9 @@ export default function ProjectWorkspacePage() {
               ? { attachments: opts.attachments }
               : {}),
             ...(opts?.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+            ...(opts?.brainstormContext && opts.brainstormContext.length > 0
+              ? { brainstormContext: opts.brainstormContext }
+              : {}),
           },
         },
         {
@@ -2023,6 +2027,7 @@ export default function ProjectWorkspacePage() {
           alt?: string;
           generated?: boolean;
         }>;
+        brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
       },
     ) => {
       // Allow image-only sends — when no text prompt is given the server injects a default.
@@ -2137,6 +2142,9 @@ export default function ProjectWorkspacePage() {
         ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
         ...(opts?.attachments && opts.attachments.length > 0
           ? { attachments: opts.attachments }
+          : {}),
+        ...(opts?.brainstormContext && opts.brainstormContext.length > 0
+          ? { brainstormContext: opts.brainstormContext }
           : {}),
       });
 
@@ -4098,7 +4106,7 @@ export default function ProjectWorkspacePage() {
                           ? "Describe a feature or change — I'll plan, build, and test it for you…"
                           : undefined
                       }
-                      onSingleSend={(content, intent, attachments) => {
+                      onSingleSend={(content, intent, attachments, brainstormContext) => {
                         setPrompt("");
                         checkUpgradeNudge(content);
                         if (chatScrolledUp) {
@@ -4142,6 +4150,9 @@ export default function ProjectWorkspacePage() {
                                       : intent === "explain"
                                         ? { agentIntent: "explain" as const }
                                         : {}),
+                          ...(brainstormContext && brainstormContext.length > 0
+                            ? { brainstormContext }
+                            : {}),
                         });
                       }}
                       onBatchStarted={handleBatchStarted}

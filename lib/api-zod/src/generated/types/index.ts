@@ -110,6 +110,8 @@ export * from './chatMessageInput';
 export * from './chatMessageInputAgentIdentity';
 export * from './chatMessageInputAgentIntent';
 export * from './chatMessageInputAgentMode';
+export * from './chatMessageInputBrainstormContextItem';
+export * from './chatMessageInputBrainstormContextItemRole';
 export * from './chatMessagePlan';
 export * from './chatMessageRole';
 export * from './chatMessageSearchHit';

@@ -1319,7 +1319,11 @@ export const SendMessageBody = zod.object({
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
-  "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.')
+  "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
+  "brainstormContext": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})).optional().describe('Optional brainstorm conversation history from the brainstorm panel. When provided, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming — context that may not have fully made it into the resolved prompt.')
 })
 
 export const SendMessageResponse = zod.object({
@@ -1439,7 +1443,11 @@ export const StreamMessageBody = zod.object({
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
 })).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
-  "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.')
+  "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
+  "brainstormContext": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})).optional().describe('Optional brainstorm conversation history from the brainstorm panel. When provided, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming — context that may not have fully made it into the resolved prompt.')
 })
 
 

@@ -117,6 +117,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     attachments: rawAttachments,
     origin,
     idempotencyKey,
+    brainstormContext,
   } = parsed.data;
   let { content } = parsed.data;
 
@@ -153,6 +154,21 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   if (imageAttachments.length > 0 && content.trim().length < 10) {
     content = SCREENSHOT_DEFAULT_PROMPT + (content.trim() ? " " + content.trim() : "");
   }
+  // Brainstorm context — if the user resolved a brainstorm session before sending
+  // this message, attach the conversation thread as supplementary context so the
+  // builder AI understands the nuances, priorities, and edge cases discussed.
+  const hasBrainstormContext = Array.isArray(brainstormContext) && brainstormContext.length > 0;
+  let userPromptWithContext = content;
+  if (hasBrainstormContext) {
+    const turns = (brainstormContext as Array<{ role: string; content: string }>)
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n");
+    userPromptWithContext =
+      `${content}\n\n` +
+      `[BRAINSTORM CONTEXT — conversation that shaped this request; use it to understand ` +
+      `the user's intent, priorities, and edge cases]\n${turns}\n[END BRAINSTORM CONTEXT]`;
+  }
+
   // Foreground requests that were queued by aiBuilderLimiter physically wait
   // in-line (HTTP connection held open) until a slot frees, then run here
   // synchronously. Only explicit background=true from the client triggers
@@ -561,7 +577,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         taskId: task.id,
         projectId: project.id,
         kind,
-        userPrompt: content,
+        userPrompt: userPromptWithContext,
         agentMode: mode,
         agentIdentity: resolvedAgentIdentity,
         conversationHistory,
@@ -576,7 +592,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         taskId: task.id,
         projectId: project.id,
         kind,
-        userPrompt: content,
+        userPrompt: userPromptWithContext,
         agentMode: mode,
         agentIdentity: resolvedAgentIdentity,
         conversationHistory,

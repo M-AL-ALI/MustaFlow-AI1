@@ -9,6 +9,7 @@ import type { ChatAttachment } from './chatAttachment';
 import type { ChatMessageInputAgentIdentity } from './chatMessageInputAgentIdentity';
 import type { ChatMessageInputAgentIntent } from './chatMessageInputAgentIntent';
 import type { ChatMessageInputAgentMode } from './chatMessageInputAgentMode';
+import type { ChatMessageInputBrainstormContextItem } from './chatMessageInputBrainstormContextItem';
 
 export interface ChatMessageInput {
   /** @minLength 1 */
@@ -26,4 +27,6 @@ export interface ChatMessageInput {
   origin?: string;
   /** Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call. */
   idempotencyKey?: string;
+  /** Optional brainstorm conversation history from the brainstorm panel. When provided, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming — context that may not have fully made it into the resolved prompt. */
+  brainstormContext?: ChatMessageInputBrainstormContextItem[];
 }

@@ -27,8 +27,12 @@ interface BrainstormPanelProps {
    * to create a new project it calls this callback with the resolved prompt so
    * the caller can seed it into the composer.  The "Create project" step is
    * skipped entirely.
+   *
+   * The second argument is the full brainstorm conversation history (excluding
+   * the AI opening message) so the caller can forward it to the builder as
+   * supplementary context.
    */
-  onResolved?: (prompt: string) => void;
+  onResolved?: (prompt: string, messages: Message[]) => void;
 }
 
 const OPENING_MESSAGE: Message = {
@@ -243,7 +247,8 @@ export function BrainstormPanel({ onClose, mode, onCreated, onResolved }: Brains
                 <p className="text-xs text-muted-foreground line-clamp-3">{resolvedSpec.prompt}</p>
                 <button
                   onClick={() => {
-                    onResolved(resolvedSpec.prompt);
+                    const chatMessages = messages.filter((m) => m !== OPENING_MESSAGE);
+                    onResolved(resolvedSpec.prompt, chatMessages);
                     onClose();
                   }}
                   className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors px-3 py-2 text-sm font-medium"
