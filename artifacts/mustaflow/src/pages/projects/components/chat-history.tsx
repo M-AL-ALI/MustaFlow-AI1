@@ -861,6 +861,7 @@ function InlineReportCard({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [e2eOpen, setE2eOpen] = useState(false);
   const [e2eScreenshot, setE2eScreenshot] = useState<string | null>(null);
+  const [qualityGateOpen, setQualityGateOpen] = useState(false);
   const rerunTests = useRerunTaskTests();
   const queryClient = useQueryClient();
 
@@ -1545,6 +1546,84 @@ function InlineReportCard({
             </div>
           );
         })()}
+      {report.qualityGate && report.qualityGate.checks.length > 0 && (
+        <div
+          className={`pt-1.5 border-t ${
+            report.qualityGate.passed ? "border-border/40" : "border-amber-500/30"
+          }`}
+        >
+          <button
+            className={`flex items-center gap-1.5 text-[10px] font-semibold w-full transition-colors ${
+              report.qualityGate.allPassed
+                ? "text-green-400 hover:text-green-300"
+                : report.qualityGate.passed
+                  ? "text-muted-foreground hover:text-foreground"
+                  : "text-amber-400 hover:text-amber-300"
+            }`}
+            onClick={() => setQualityGateOpen((o) => !o)}
+          >
+            <ShieldCheck className="h-3 w-3 shrink-0" />
+            <span>
+              Quality checks —{" "}
+              {report.qualityGate.allPassed
+                ? "all passed"
+                : report.qualityGate.passed
+                  ? "passed (some skipped)"
+                  : `${report.qualityGate.checks.filter((c) => !c.skipped && !c.passed).length} issue(s)`}
+            </span>
+            {qualityGateOpen ? (
+              <ChevronDown className="h-3 w-3 ml-auto shrink-0" />
+            ) : (
+              <ChevronRight className="h-3 w-3 ml-auto shrink-0" />
+            )}
+          </button>
+          {qualityGateOpen && (
+            <ul className="mt-1.5 space-y-1.5 pl-1">
+              {report.qualityGate.checks.map((check) => (
+                <li key={check.id} className="text-[10px]">
+                  <div className="flex items-center gap-1.5">
+                    {check.skipped ? (
+                      <span className="h-3 w-3 rounded-full border border-muted-foreground/30 shrink-0 inline-block" />
+                    ) : check.passed ? (
+                      <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+                    )}
+                    <span
+                      className={
+                        check.skipped
+                          ? "text-muted-foreground/50"
+                          : check.passed
+                            ? "text-foreground/80"
+                            : "text-amber-300 font-medium"
+                      }
+                    >
+                      {check.label}
+                    </span>
+                    {check.skipped && (
+                      <span className="text-muted-foreground/40 text-[9px]">skipped</span>
+                    )}
+                    <span className="ml-auto text-muted-foreground/40 text-[9px]">
+                      {check.durationMs}ms
+                    </span>
+                  </div>
+                  {!check.skipped && !check.passed && check.output && (
+                    <pre className="mt-1 ml-4.5 text-[9px] leading-relaxed text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded p-1.5 overflow-x-auto whitespace-pre-wrap max-h-32">
+                      {check.output.slice(0, 800)}
+                      {check.output.length > 800 ? "\n…output truncated" : ""}
+                    </pre>
+                  )}
+                  {check.skipped && check.skipReason && (
+                    <p className="ml-4.5 text-[9px] text-muted-foreground/40 mt-0.5">
+                      {check.skipReason}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {report.assets && report.assets.length > 0 && projectId != null && (
         <div className="pt-1.5 border-t border-border space-y-1">
           <div className="text-[10px] uppercase text-muted-foreground/60 font-semibold flex items-center gap-1">

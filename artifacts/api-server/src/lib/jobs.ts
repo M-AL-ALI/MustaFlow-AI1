@@ -3533,6 +3533,68 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End auto-fix ESLint warnings after build ──────────────────────────
 
+      // ── Quality gate — non-task-agent path ────────────────────────────────
+      // Mirrors the quality gate that runs in the task-agent staging path, but
+      // is non-blocking here: files are already persisted, so failures surface
+      // as warnings rather than routing the task to needs_fix.
+      {
+        const _isJsTsStack = ["node-api", "nextjs", "react-vite"].includes(project.stack ?? "");
+        const _isServerStack = ["node-api", "nextjs"].includes(project.stack ?? "");
+        if (project.containerId && _isJsTsStack && filesToSmellScan.length > 0) {
+          try {
+            await emitEvent(taskId, "narration", "Running quality checks (TypeScript, ESLint)…");
+            const { runQualityGate, runSmokeTest } = await import("./quality-gate");
+            // Fetch just the paths of all project files so runQualityGate can
+            // detect tsconfig.json and ESLint configs even on refine tasks where
+            // filesToSmellScan only contains the changed files.
+            const allProjectFilePaths = await db
+              .select({ path: projectFilesTable.path })
+              .from(projectFilesTable)
+              .where(eq(projectFilesTable.projectId, projectId));
+            const gateResult = await runQualityGate(
+              project.containerId,
+              projectId,
+              filesToSmellScan, // changedFiles — used for ESLint batching
+              allProjectFilePaths, // allFiles — used for config detection (tsconfig, eslintrc)
+            );
+
+            if (gateResult.passed && _isServerStack) {
+              await emitEvent(taskId, "narration", "Running server startup smoke test…");
+              const smokeCheck = await runSmokeTest(project.containerId, projectId);
+              gateResult.checks.push(smokeCheck);
+              const executedAfterSmoke = gateResult.checks.filter((c) => !c.skipped);
+              gateResult.passed =
+                executedAfterSmoke.length > 0 && executedAfterSmoke.every((c) => c.passed);
+              gateResult.allPassed =
+                gateResult.checks.every((c) => !c.skipped) && gateResult.passed;
+            }
+
+            report.qualityGate = gateResult;
+
+            if (!gateResult.passed) {
+              const failedLabels = gateResult.checks
+                .filter((c) => !c.skipped && !c.passed)
+                .map((c) => c.label)
+                .join(", ");
+              report.warnings = [
+                ...(report.warnings ?? []),
+                `Quality checks flagged issues after build (${failedLabels}). Review the Quality Checks section for details.`,
+              ];
+              logger.info(
+                { projectId, taskId, failedChecks: failedLabels },
+                "Quality gate detected issues on non-task-agent build (non-blocking)",
+              );
+            }
+          } catch (gateErr) {
+            logger.warn(
+              { err: gateErr, projectId, taskId },
+              "Quality gate threw on non-task-agent path — skipping (non-fatal)",
+            );
+          }
+        }
+      }
+      // ── End quality gate — non-task-agent path ────────────────────────────
+
       await emitEvent(
         taskId,
         "narration",
