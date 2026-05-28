@@ -42,6 +42,10 @@ import {
   Bot,
   Lightbulb,
   Rocket,
+  Paperclip,
+  Mic,
+  Image as ImageIcon,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
@@ -455,33 +459,59 @@ export default function HomePage() {
 
           <div className="relative max-w-2xl mx-auto mb-4">
             <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.18)_0%,transparent_70%)] blur-2xl rounded-full pointer-events-none" />
-            <div className="relative bg-card border border-border shadow-xl rounded-2xl p-2 flex items-center gap-2 input-glow">
-              <div className="pl-4 text-primary">
-                <AgentIcon size={24} />
+            <div className="relative bg-card border border-border shadow-xl rounded-2xl input-glow overflow-hidden">
+              {/* Input row */}
+              <div className="flex items-center gap-2 p-2">
+                <div className="pl-4 text-primary">
+                  <AgentIcon size={24} />
+                </div>
+                <Input
+                  value={prompt}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    if (e.target.value !== activeChipLabel && activeChipLabel) {
+                      setActiveChipLabel(undefined);
+                    }
+                  }}
+                  placeholder={ROTATING_PROMPTS[placeholderIdx]}
+                  className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleBuild();
+                  }}
+                />
+                <Button
+                  size="lg"
+                  className="rounded-xl px-6 h-12 shrink-0"
+                  onClick={() => handleBuild()}
+                  disabled={createProject.isPending || !prompt.trim()}
+                >
+                  {createProject.isPending ? "Starting..." : "Start Building"}
+                  {!createProject.isPending && <ArrowRight className="ml-2 h-5 w-5" />}
+                </Button>
               </div>
-              <Input
-                value={prompt}
-                onChange={(e) => {
-                  setPrompt(e.target.value);
-                  if (e.target.value !== activeChipLabel && activeChipLabel) {
-                    setActiveChipLabel(undefined);
-                  }
-                }}
-                placeholder={ROTATING_PROMPTS[placeholderIdx]}
-                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleBuild();
-                }}
-              />
-              <Button
-                size="lg"
-                className="rounded-xl px-6 h-12 shrink-0"
-                onClick={() => handleBuild()}
-                disabled={createProject.isPending || !prompt.trim()}
-              >
-                {createProject.isPending ? "Starting..." : "Start Building"}
-                {!createProject.isPending && <ArrowRight className="ml-2 h-5 w-5" />}
-              </Button>
+              {/* Tool row — mirrors the in-app AI Builder; signed-out so each tool routes to sign-up */}
+              <div className="flex items-center gap-1 px-3 py-2 border-t border-border/60 bg-muted/30">
+                {[
+                  { icon: Paperclip, label: "Attach a file" },
+                  { icon: ImageIcon, label: "Add an image" },
+                  { icon: Mic, label: "Voice input" },
+                  { icon: SlidersHorizontal, label: "Agent mode" },
+                ].map(({ icon: Icon, label }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setLocation("/sign-up")}
+                    title={`${label} — sign in to use`}
+                    aria-label={`${label} (sign in to use)`}
+                    className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+                  >
+                    <Icon className="h-4 w-4" />
+                  </button>
+                ))}
+                <div className="ml-auto text-xs text-muted-foreground pr-2 hidden sm:block">
+                  Press <kbd className="px-1.5 py-0.5 rounded border border-border bg-background text-[10px] font-mono">Enter</kbd> to build
+                </div>
+              </div>
             </div>
           </div>
 
