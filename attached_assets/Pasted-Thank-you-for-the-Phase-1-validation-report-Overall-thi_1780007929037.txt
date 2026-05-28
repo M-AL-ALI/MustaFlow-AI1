@@ -1,0 +1,85 @@
+Thank you for the Phase 1 validation report. Overall, this is strong work. The architecture, route isolation, rate limits, refusal behavior, model routing, kill switch, and workflow status look good.
+
+However, I am not approving Phase 2 yet.
+
+Before Phase 2, please provide a short Phase 1 correction/verification report for the remaining items below.
+
+1. Arabic multilingual proof is not complete
+    The report says Arabic passed, but the actual Arabic test returned an empty response and was explained as a shell encoding issue.
+
+That is not enough proof.
+
+Please re-test Arabic using one of these reliable methods:
+
+* the real Ora UI in the browser
+* a properly encoded JSON request
+* a test file that sends UTF-8 Arabic text correctly
+
+Test prompt:
+“ما هو MustaFlow؟”
+
+Expected:
+Ora must respond clearly in Arabic, not English, and not empty.
+
+Please include:
+
+* request method used
+* response language
+* response excerpt
+* confirmation that the model generated non-empty Arabic text
+* confirmation that logs did not capture the Arabic message content
+
+2. UI screenshot/proof
+    The report says “screenshot above,” but I do not see the screenshot here.
+
+Please provide actual proof for:
+
+* Ora Lens inline panel on desktop
+* Ora Lens inline panel on mobile
+* floating Ask Ora bubble on desktop
+* mobile drawer or bottom sheet behavior
+* “Talk to Ora in your language” label
+* “Continue in MustaFlow Builder” CTA
+
+3. Session refresh memory proof
+    Please confirm whether the actual message transcript is restored after page refresh, not only the session ID and msgCount.
+
+The report says message history is stored in sessionStorage and restored by the hook. Please show proof:
+
+* ask Ora a question
+* refresh the page
+* confirm the prior messages still appear in the UI
+* ask “what did I just tell you?”
+* confirm Ora remembers using restored history
+
+4. Kill switch runtime clarification
+    The rollback plan says PUBLIC_AI_ENABLED=false disables Ora with no redeploy and maybe no restart.
+
+Please clarify whether production Replit env var updates are hot-reloaded in the running Node process. If not, say clearly:
+
+* changing the env var may require server restart/redeploy
+* after restart, Ora is disabled safely
+
+Do not promise “no restart” unless verified.
+
+5. Privacy wording clarification
+    Earlier rule said visitor IP addresses are never logged. The report says a truncated IP is logged at session creation.
+
+Please clarify and align the rule:
+
+* no raw full IP should be logged
+* if any IP-derived value is logged, it should be hashed or truncated
+* logs should not contain user message content, model reply content, uploaded content, or full identifiers
+
+6. Final pass/fail update
+    After the above checks, provide a short updated status:
+
+* Arabic multilingual proof: PASS/FAIL
+* UI proof: PASS/FAIL
+* page-refresh memory proof: PASS/FAIL
+* kill-switch runtime behavior clarified: PASS/FAIL
+* logging/privacy wording corrected: PASS/FAIL
+
+Phase 2 remains not approved until these items are verified.
+
+Once these are confirmed, I will review and decide whether to approve Phase 2: file upload and document analysis.
