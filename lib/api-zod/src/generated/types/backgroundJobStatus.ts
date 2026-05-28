@@ -16,6 +16,7 @@ export const BackgroundJobStatus = {
   testing: 'testing',
   needs_approval: 'needs_approval',
   needs_review: 'needs_review',
+  needs_fix: 'needs_fix',
   completed: 'completed',
   failed: 'failed',
   canceled: 'canceled',

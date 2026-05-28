@@ -253,6 +253,39 @@ export type TaskReport = {
     timedOut?: boolean;
     ranAt?: string;
   } | null;
+  /**
+   * Result of the mandatory quality gate that runs after the agent loop
+   * writes its staging snapshot (TypeScript, ESLint, server startup smoke test).
+   * Only populated for container-based JS/TS stacks.
+   */
+  qualityGate?: {
+    /** True when all executed checks passed (skipped checks don't count). */
+    passed: boolean;
+    /** True only when every applicable check ran AND passed — no skips, no failures. */
+    allPassed: boolean;
+    checks: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      /** True when the check's binary was not found — not a failure, not a pass. */
+      skipped: boolean;
+      skipReason?: string;
+      output: string;
+      durationMs: number;
+    }>;
+  } | null;
+  /**
+   * Environment variables referenced via `process.env.FOO` in the generated
+   * JS/TS files that are not declared in the project's secrets list.
+   * Each entry names the variable and the first file where it was found.
+   */
+  undeclaredEnvVars?: Array<{ varName: string; file: string }> | null;
+  /**
+   * True when all quality gate checks passed AND the architect review found
+   * no critical issues. Used to display the "All checks passed" banner in
+   * the staging review card.
+   */
+  allChecksPassed?: boolean | null;
 };
 
 /**

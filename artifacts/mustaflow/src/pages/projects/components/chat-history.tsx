@@ -31,6 +31,8 @@ import {
   Sparkles,
   MessageSquarePlus,
   Bug,
+  KeySquare,
+  Eye,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -180,6 +182,33 @@ type TaskReport = {
   }>;
   /** Knowledge Vault lessons that were injected into this build's context. */
   knowledgeApplied?: Array<{ id: number; title: string; type: string }> | null;
+  /**
+   * Quality gate result — TypeScript, ESLint, and (for server stacks) smoke test.
+   * Only populated for container-based JS/TS stacks.
+   */
+  qualityGate?: {
+    passed: boolean;
+    allPassed: boolean;
+    checks: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      skipped: boolean;
+      skipReason?: string;
+      output: string;
+      durationMs: number;
+    }>;
+  } | null;
+  /**
+   * `process.env.FOO` references in the generated code that don't map to a
+   * declared project secret.
+   */
+  undeclaredEnvVars?: Array<{ varName: string; file: string }> | null;
+  /**
+   * True when all quality gate checks passed and the architect review found no
+   * critical issues. Drives the "All checks passed" green banner.
+   */
+  allChecksPassed?: boolean | null;
 };
 
 type StructuredPlan = {
@@ -203,6 +232,8 @@ type ChatPlanPayload =
       taskId?: number;
       agentIdentity?: string;
       needsReview?: boolean;
+      /** Quality gate failed — shows QualityGateFailureCard instead of TaskReviewCard */
+      needsFix?: boolean;
     }
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
@@ -1767,6 +1798,8 @@ function MessageRow({
   onViewFile,
   onApply,
   onSendMessage,
+  onAutoFix,
+  onNavigateToSecret,
 }: {
   msg: Message;
   searchQuery: string;
@@ -1774,6 +1807,9 @@ function MessageRow({
   onViewFile?: (path: string, line?: number) => void;
   onApply?: (code: string) => void;
   onSendMessage?: (text: string) => void;
+  /** Forwarded to QualityGateFailureCard; always sends with task agent identity. */
+  onAutoFix?: (text: string) => void;
+  onNavigateToSecret?: (secretName: string) => void;
 }) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
@@ -1894,12 +1930,22 @@ function MessageRow({
         {/* Expandable report chip */}
         {isReport && (
           <div className="mt-2">
-            {(planPayload as { needsReview?: boolean }).needsReview ? (
+            {(planPayload as { needsFix?: boolean }).needsFix ? (
+              <QualityGateFailureCard
+                projectId={projectId}
+                taskId={(planPayload as { taskId?: number }).taskId ?? 0}
+                report={(planPayload as { report: TaskReport }).report}
+                onSendMessage={onSendMessage}
+                onAutoFix={onAutoFix}
+                onNavigateToSecret={onNavigateToSecret}
+              />
+            ) : (planPayload as { needsReview?: boolean }).needsReview ? (
               <TaskReviewCard
                 projectId={projectId}
                 taskId={(planPayload as { taskId?: number }).taskId ?? 0}
                 report={(planPayload as { report: TaskReport }).report}
                 onViewFile={onViewFile}
+                onNavigateToSecret={onNavigateToSecret}
               />
             ) : (
               <>
@@ -2163,16 +2209,214 @@ function SubagentActivityPanel({ projectId, taskId }: { projectId: number; taskI
   );
 }
 
+// ── Quality Gate Failure Card ─────────────────────────────────────────────────
+// Shown when the task agent's TypeScript / ESLint / smoke-test checks fail.
+// Includes an "Auto-fix" button that submits a targeted refine prompt and a
+// "Discard" button to abandon the staged changes.
+
+function QualityGateFailureCard({
+  projectId,
+  taskId,
+  report,
+  onSendMessage,
+  onAutoFix,
+  onNavigateToSecret,
+}: {
+  projectId: number;
+  taskId: number;
+  report: TaskReport;
+  onSendMessage?: (text: string) => void;
+  /** Called when the user clicks Auto-fix; always routed with task agent identity. */
+  onAutoFix?: (text: string) => void;
+  onNavigateToSecret?: (secretName: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const discardStaging = useDiscardTaskStaging();
+  const [discarded, setDiscarded] = useState(false);
+  const [openChecks, setOpenChecks] = useState<Set<string>>(new Set());
+
+  if (discarded) {
+    return (
+      <div className="mt-2 bg-muted border border-border/40 rounded-lg p-2.5 text-[11px] flex items-center gap-2 text-muted-foreground">
+        <Ban className="h-3.5 w-3.5 shrink-0" />
+        Changes discarded — no files were modified
+      </div>
+    );
+  }
+
+  const gate = report.qualityGate;
+  // Only non-skipped failed checks drive the auto-fix prompt and failure count.
+  const failedChecks = gate?.checks.filter((c) => !c.skipped && !c.passed) ?? [];
+  const skippedChecks = gate?.checks.filter((c) => c.skipped) ?? [];
+
+  function buildAutoFixPrompt(): string {
+    const lines: string[] = ["The quality gate found the following issues. Please fix them:"];
+    for (const check of failedChecks) {
+      lines.push(`\n### ${check.label}`);
+      const excerpt = check.output.slice(0, 600).trimEnd();
+      if (excerpt) lines.push("```\n" + excerpt + "\n```");
+    }
+    return lines.join("\n");
+  }
+
+  return (
+    <div className="mt-2 bg-background border border-rose-500/30 rounded-xl text-[11px] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-2.5 py-2 bg-rose-500/10 border-b border-rose-500/20">
+        <XCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+        <span className="font-semibold text-rose-400 flex-1">Task Agent — Quality Gate Failed</span>
+        <span className="text-[9px] text-rose-400/60 font-medium">Staged · not applied</span>
+      </div>
+
+      {/* Failed checks */}
+      <div className="px-2.5 py-2 space-y-2">
+        {failedChecks.length === 0 && skippedChecks.length === 0 && (
+          <p className="text-muted-foreground italic">No check details available.</p>
+        )}
+        {/* Skipped checks — shown first as informational, not failures */}
+        {skippedChecks.map((check) => (
+          <div
+            key={check.id}
+            className="rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 flex items-center gap-2"
+          >
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border/40">
+              Skipped
+            </span>
+            <span className="text-muted-foreground">{check.label}</span>
+            {check.skipReason && (
+              <span className="text-[9px] text-muted-foreground/60 truncate">
+                — {check.skipReason}
+              </span>
+            )}
+          </div>
+        ))}
+        {failedChecks.map((check) => {
+          const isOpen = openChecks.has(check.id);
+          return (
+            <div
+              key={check.id}
+              className="rounded-md border border-rose-500/20 bg-rose-500/5 overflow-hidden"
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenChecks((prev) => {
+                    const next = new Set(prev);
+                    if (isOpen) next.delete(check.id);
+                    else next.add(check.id);
+                    return next;
+                  })
+                }
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-[11px] hover:bg-rose-500/5 transition-colors"
+              >
+                <XCircle className="h-3 w-3 text-rose-400 shrink-0" />
+                <span className="font-medium text-rose-300 flex-1 text-left">{check.label}</span>
+                <span className="text-[9px] text-muted-foreground/60">
+                  {(check.durationMs / 1000).toFixed(1)} s
+                </span>
+                {isOpen ? (
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                )}
+              </button>
+              {isOpen && check.output && (
+                <pre className="px-2.5 pb-2 text-[10px] text-rose-200/80 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-48 overflow-y-auto bg-rose-950/30">
+                  {check.output.slice(0, 2000)}
+                  {check.output.length > 2000 && "\n… (truncated)"}
+                </pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Undeclared env vars — shown in the needs_fix card too */}
+      {(report.undeclaredEnvVars ?? []).length > 0 && (
+        <div className="px-2.5 pb-2">
+          <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 space-y-1">
+            <div className="flex items-center gap-1.5 text-amber-400">
+              <KeySquare className="h-3 w-3 shrink-0" />
+              <span className="text-[10px] font-semibold">Undeclared environment variables</span>
+            </div>
+            {report.undeclaredEnvVars!.map((v) => (
+              <div key={v.varName} className="flex items-center justify-between gap-1.5 pl-4">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-mono text-[10px] text-amber-300 truncate">{v.varName}</span>
+                  <span className="text-[10px] text-muted-foreground/60 truncate">in {v.file}</span>
+                </div>
+                {onNavigateToSecret && (
+                  <button
+                    onClick={() => onNavigateToSecret(v.varName)}
+                    className="shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors border border-amber-500/20"
+                  >
+                    Add secret
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 px-2.5 py-2 border-t border-border/40 bg-muted/20">
+        <button
+          onClick={() => {
+            const prompt = buildAutoFixPrompt();
+            // onAutoFix is wired to send with "task" agent identity so the retry
+            // uses the same agent persona as the original build.
+            (onAutoFix ?? onSendMessage)?.(prompt);
+          }}
+          disabled={!onAutoFix && !onSendMessage}
+          className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-lg bg-rose-500 text-white text-[11px] font-medium hover:bg-rose-600 transition-colors disabled:opacity-50"
+          title="Submit a targeted fix to the AI"
+        >
+          <Wrench className="h-3 w-3" />
+          Auto-fix
+        </button>
+        <button
+          onClick={() => {
+            discardStaging.mutate(
+              { id: projectId, taskId },
+              {
+                onSuccess: () => {
+                  setDiscarded(true);
+                  void queryClient.invalidateQueries({
+                    queryKey: getListMessagesQueryKey(projectId),
+                  });
+                },
+              },
+            );
+          }}
+          disabled={discardStaging.isPending}
+          className="flex items-center gap-1.5 h-7 px-3 rounded-lg border border-border text-muted-foreground text-[11px] font-medium hover:text-foreground hover:border-primary/30 transition-colors disabled:opacity-50"
+        >
+          {discardStaging.isPending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3 w-3" />
+          )}
+          Discard
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Task Review Card ──────────────────────────────────────────────────────────
 function TaskReviewCard({
   projectId,
   taskId,
   report,
   onViewFile,
+  onNavigateToSecret,
 }: {
   projectId: number;
   taskId: number;
   report: TaskReport;
   onViewFile?: (path: string, line?: number) => void;
+  onNavigateToSecret?: (secretName: string) => void;
 }) {
   const queryClient = useQueryClient();
   const applyStaging = useApplyTaskStaging();
@@ -2222,6 +2466,115 @@ function TaskReviewCard({
         <span className="font-semibold text-amber-400 flex-1">Task Agent — Review Required</span>
         <span className="text-[9px] text-amber-400/60 font-medium">Staged · not applied</span>
       </div>
+
+      {/* All checks passed banner */}
+      {report.allChecksPassed && (
+        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-400">
+          <ShieldCheck className="h-3 w-3 shrink-0" />
+          <span className="text-[10px] font-semibold">All checks passed</span>
+          {(report.qualityGate?.checks ?? []).length > 0 && (
+            <span className="text-[9px] text-emerald-400/70 ml-1">
+              {report.qualityGate!.checks.map((c) => c.label).join(" · ")}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Undeclared env vars warning */}
+      {(report.undeclaredEnvVars ?? []).length > 0 && (
+        <div className="px-2.5 py-2 border-b border-border/40">
+          <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 space-y-1">
+            <div className="flex items-center gap-1.5 text-amber-400">
+              <KeySquare className="h-3 w-3 shrink-0" />
+              <span className="text-[10px] font-semibold">Undeclared environment variables</span>
+            </div>
+            {report.undeclaredEnvVars!.map((v) => (
+              <div key={v.varName} className="flex items-center justify-between gap-1.5 pl-4">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-mono text-[10px] text-amber-300 truncate">{v.varName}</span>
+                  <span className="text-[10px] text-muted-foreground/60 truncate">in {v.file}</span>
+                </div>
+                {onNavigateToSecret && (
+                  <button
+                    onClick={() => onNavigateToSecret(v.varName)}
+                    className="shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors border border-amber-500/20"
+                  >
+                    Add secret
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Architect review findings — shown in review card when non-trivial */}
+      {report.architectReview &&
+        !report.architectReview.skipped &&
+        (report.architectReview.findings ?? []).length > 0 && (
+          <div className="px-2.5 py-2 border-b border-border/40">
+            <div className="rounded-md border border-border/50 bg-card/60 overflow-hidden">
+              <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/40 bg-muted/30">
+                <Eye className="h-3 w-3 text-muted-foreground shrink-0" />
+                <span className="text-[10px] font-semibold text-muted-foreground">
+                  Architect findings
+                </span>
+                <span
+                  className={cn(
+                    "ml-auto text-[9px] font-medium px-1.5 py-0.5 rounded",
+                    report.architectReview.verdict === "fail"
+                      ? "bg-rose-500/15 text-rose-400 border border-rose-500/20"
+                      : report.architectReview.verdict === "partial"
+                        ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                        : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20",
+                  )}
+                >
+                  {report.architectReview.verdict}
+                </span>
+              </div>
+              <div className="divide-y divide-border/30">
+                {report.architectReview.findings.map((f, i) => {
+                  // Normalize architect severity levels to UI taxonomy: critical | warning | info
+                  const uiSeverity =
+                    f.severity === "critical" || f.severity === "high"
+                      ? "critical"
+                      : f.severity === "medium"
+                        ? "warning"
+                        : "info";
+                  const sevClass =
+                    uiSeverity === "critical"
+                      ? "bg-rose-500/15 text-rose-400 border-rose-500/20"
+                      : uiSeverity === "warning"
+                        ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
+                        : "bg-blue-500/15 text-blue-400 border-blue-500/20";
+                  return (
+                    <div key={i} className="px-2 py-1.5 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "text-[9px] font-medium px-1 py-0.5 rounded border shrink-0",
+                            sevClass,
+                          )}
+                        >
+                          {uiSeverity}
+                        </span>
+                        <span className="text-[10px] font-medium text-foreground/90 truncate">
+                          {f.title}
+                        </span>
+                      </div>
+                      {f.detail && (
+                        <p className="text-[10px] text-muted-foreground leading-relaxed pl-1">
+                          {f.detail}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
       {/* File summary — Task #531: each file is an expandable per-file diff. */}
       <div className="px-2.5 py-2 space-y-1.5">
         {(report.filesCreated ?? []).length > 0 && (
@@ -2389,6 +2742,8 @@ export function ChatHistory({
   onClose,
   onApplyCode,
   onSendMessage,
+  onAutoFix,
+  onNavigateToSecret,
 }: {
   messages: Message[] | undefined;
   isLoading: boolean;
@@ -2397,6 +2752,9 @@ export function ChatHistory({
   onClose: () => void;
   onApplyCode?: (code: string) => void;
   onSendMessage?: (text: string) => void;
+  /** Forwarded to QualityGateFailureCard Auto-fix button with task agent identity. */
+  onAutoFix?: (text: string) => void;
+  onNavigateToSecret?: (secretName: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -2618,6 +2976,8 @@ export function ChatHistory({
                     onViewFile={onViewFile}
                     onApply={onApplyCode}
                     onSendMessage={onSendMessage}
+                    onAutoFix={onAutoFix}
+                    onNavigateToSecret={onNavigateToSecret}
                   />
                 ))}
               </div>

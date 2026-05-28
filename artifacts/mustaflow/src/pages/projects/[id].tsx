@@ -2015,6 +2015,8 @@ export default function ProjectWorkspacePage() {
         background?: boolean;
         agentMode?: AgentMode;
         agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+        /** Override agent identity — pass "task" for auto-fix retries from QualityGateFailureCard. */
+        agentIdentity?: string;
         attachments?: Array<{
           kind: "image";
           url: string;
@@ -2130,7 +2132,7 @@ export default function ProjectWorkspacePage() {
         agentMode: effectiveMode,
         planMode: effectivePlanMode,
         background: false,
-        agentIdentity,
+        agentIdentity: opts?.agentIdentity ?? agentIdentity,
         idempotencyKey,
         ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
         ...(opts?.attachments && opts.attachments.length > 0
@@ -3281,6 +3283,13 @@ export default function ProjectWorkspacePage() {
                       setShowChatHistory(false);
                       send(text);
                     }}
+                    onAutoFix={(text) => {
+                      // Always send auto-fix prompts with task agent identity so
+                      // the retry runs the same persona as the original build.
+                      setShowChatHistory(false);
+                      send(text, { agentIdentity: "task" });
+                    }}
+                    onNavigateToSecret={handleAddKey}
                   />
                 </div>
               )}

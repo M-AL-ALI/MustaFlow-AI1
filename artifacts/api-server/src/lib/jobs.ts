@@ -3129,8 +3129,323 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // ── Task Agent staging gate ────────────────────────────────────────────
       // If this job runs as the Task Agent, write files to stagingSnapshot
       // instead of committing directly to project_files.
-      // Post-build hooks (version save, knowledge vault, audit) fire at apply time.
+      // Quality gate (TypeScript, ESLint, smoke test), env-var scan, and a
+      // blocking architect review all run here before the final status is set.
       if (agentIdentity === "task") {
+        const batchMetaStaging = queueBatchId
+          ? {
+              queueBatchId,
+              queueIndex: queueIndex ?? null,
+              queueTotalCount: queueTotalCount ?? null,
+            }
+          : {};
+
+        // Flush token count once — both paths (needs_fix and needs_review) use it.
+        const flushedTokenCount = flushTokenCount(taskId);
+
+        // ── 1. Environment variable static analysis (always runs) ─────────────
+        try {
+          const secretRows = await db
+            .select({ name: secretsTable.name })
+            .from(secretsTable)
+            .where(eq(secretsTable.projectId, projectId));
+          const secretNames = secretRows.map((s) => s.name);
+          const { scanUndeclaredEnvVars } = await import("./quality-gate");
+          const undeclared = scanUndeclaredEnvVars(stagingData, secretNames);
+          if (undeclared.length > 0) {
+            report.undeclaredEnvVars = undeclared;
+          }
+        } catch (envScanErr) {
+          logger.warn(
+            { err: envScanErr, projectId, taskId },
+            "Env-var static scan failed (non-fatal)",
+          );
+        }
+
+        // ── 2. Quality gate — TypeScript, ESLint, smoke test ─────────────────
+        // Only for container-based JS/TS stacks where tooling is available.
+        let qualityGatePassed = true;
+        const isJsTsStack = ["node-api", "nextjs", "react-vite"].includes(project.stack ?? "");
+        const isServerStack = ["node-api", "nextjs"].includes(project.stack ?? "");
+
+        if (project.containerId && isJsTsStack) {
+          try {
+            await emitEvent(taskId, "narration", "Running quality checks (TypeScript, ESLint)…");
+            const { runQualityGate, runSmokeTest } = await import("./quality-gate");
+            // For build tasks _refineChangedFiles is empty; fall back to
+            // stagingData (the full merged set) so ESLint still runs.
+            const changedFilesForGate =
+              _refineChangedFiles.length > 0 ? _refineChangedFiles : stagingData;
+            const gateResult = await runQualityGate(
+              project.containerId,
+              projectId,
+              changedFilesForGate,
+              stagingData,
+            );
+
+            // Smoke test — only after TypeScript/ESLint pass, server-side stacks only.
+            if (gateResult.passed && isServerStack) {
+              await emitEvent(taskId, "narration", "Running server startup smoke test…");
+              const smokeCheck = await runSmokeTest(project.containerId, projectId);
+              gateResult.checks.push(smokeCheck);
+              // Re-derive passed/allPassed after adding the smoke check.
+              const executedAfterSmoke = gateResult.checks.filter((c) => !c.skipped);
+              gateResult.passed =
+                executedAfterSmoke.length > 0 && executedAfterSmoke.every((c) => c.passed);
+              gateResult.allPassed =
+                gateResult.checks.every((c) => !c.skipped) && gateResult.passed;
+            }
+
+            report.qualityGate = gateResult;
+            // qualityGatePassed tracks actual failures (not skips) — drives needs_fix.
+            qualityGatePassed = gateResult.passed;
+
+            if (!qualityGatePassed) {
+              const failedLabels = gateResult.checks
+                .filter((c) => !c.skipped && !c.passed)
+                .map((c) => c.label)
+                .join(", ");
+              logger.info(
+                { projectId, taskId, failedChecks: failedLabels },
+                "Quality gate failed — setting task to needs_fix",
+              );
+            }
+          } catch (gateErr) {
+            // Infrastructure error (Fly exec, timeout) — log and proceed to review.
+            // We never fail a build because of a quality-gate infrastructure failure.
+            logger.warn(
+              { err: gateErr, projectId, taskId },
+              "Quality gate threw — skipping (non-fatal)",
+            );
+          }
+        }
+
+        // ── 3. Architect review — blocking, 60 s cap ──────────────────────────
+        // Promotes the review from fire-and-forget to a required step before the
+        // task reaches needs_review. Times out at 60 s and proceeds (non-blocking
+        // on timeout only — a review that completes but fails still sets the flag).
+        if (qualityGatePassed) {
+          const totalFilesTouched =
+            (diffSummary?.filesAdded.length ?? 0) +
+            (diffSummary?.filesModified.length ?? 0) +
+            (diffSummary?.filesRemoved.length ?? 0);
+          const isDomainRewrite = (userPrompt ?? "").startsWith(DOMAIN_REWRITE_SENTINEL);
+          const shouldReview =
+            project.architectReviewEnabled !== false && !isDomainRewrite && totalFilesTouched > 0;
+
+          if (shouldReview) {
+            try {
+              await emitEvent(taskId, "narration", "Running architect review…");
+              const reviewDiff = {
+                filesAdded: diffSummary?.filesAdded ?? [],
+                filesModified: diffSummary?.filesModified ?? [],
+                filesRemoved: diffSummary?.filesRemoved ?? [],
+              };
+              const commandsRun = (report.agentLoop?.commandsRun ?? []).map((c) => ({
+                argv: c.argv,
+                exitCode: c.exitCode,
+              }));
+              const touchedPaths = new Set<string>([
+                ...reviewDiff.filesAdded,
+                ...reviewDiff.filesModified,
+              ]);
+              const fileExcerpts = filesToSmellScan
+                .filter((f: BuilderFile) => touchedPaths.has(f.path))
+                .slice(0, 6)
+                .map((f: BuilderFile) => ({ path: f.path, content: f.content }));
+
+              const ARCHITECT_TIMEOUT_MS = 60_000;
+              const reviewResult = await Promise.race([
+                (async () => {
+                  const { dispatchReviewerStandalone } = await import("./subagent");
+                  const dr = await dispatchReviewerStandalone({
+                    input: {
+                      mode: "refine",
+                      projectId,
+                      projectName: project.name,
+                      projectKind: project.kind,
+                      projectFormat: project.projectFormat ?? null,
+                      stack: project.stack ?? null,
+                      userPrompt,
+                      agentMode,
+                      planContext: input.planContext ?? null,
+                      existingFiles: [],
+                      taskId,
+                      onEvent: async () => {},
+                      signal: new AbortController().signal,
+                    },
+                    brief: `Architect review for task #${taskId} (task agent staging)`,
+                    reviewer: {
+                      diff: reviewDiff,
+                      commandsRun,
+                      fileExcerpts,
+                      assistantSummary,
+                      planContext: input.planContext ?? null,
+                      knownWarnings: report.warnings,
+                    },
+                    skipCredits: true,
+                  });
+                  return dr.review ?? null;
+                })(),
+                new Promise<null>((_, reject) =>
+                  setTimeout(
+                    () => reject(new Error("architect-review-timeout")),
+                    ARCHITECT_TIMEOUT_MS,
+                  ),
+                ),
+              ]).catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (msg === "architect-review-timeout") {
+                  logger.warn(
+                    { projectId, taskId },
+                    "Architect review timed out after 60 s — proceeding to needs_review",
+                  );
+                  return null;
+                }
+                // Non-timeout failure: re-throw so the outer catch can mark the task
+                // as needs_fix rather than silently skipping the architect step.
+                throw err;
+              });
+
+              if (reviewResult) {
+                report.architectReview = {
+                  ...architectToReportShape(reviewResult, {
+                    model: reviewResult.model,
+                    autoFixQueued: false,
+                    autoFixTaskId: null,
+                    creditsCharged: 0,
+                  }),
+                };
+                logger.info(
+                  {
+                    projectId,
+                    taskId,
+                    verdict: reviewResult.verdict,
+                    findings: reviewResult.findings.length,
+                  },
+                  "Architect review complete (task agent path)",
+                );
+              }
+            } catch (architectErr) {
+              // Architect review failed with a non-timeout error. Per contract, only
+              // timeouts are non-blocking — any other failure routes the task to
+              // needs_fix with an explicit error in the report rather than silently
+              // proceeding to needs_review.
+              logger.error(
+                { err: architectErr, projectId, taskId },
+                "Architect review failed (non-timeout) — routing task to needs_fix",
+              );
+              report.architectReview = {
+                verdict: "fail",
+                summary: "Architect review encountered an unexpected error. Please retry the task.",
+                findings: [
+                  {
+                    severity: "critical" as const,
+                    title: "Architect review error",
+                    detail:
+                      architectErr instanceof Error ? architectErr.message : String(architectErr),
+                    file: null,
+                  },
+                ],
+                nextActions: [],
+                autoFixQueued: false,
+                autoFixTaskId: null,
+                creditsCharged: 0,
+                reviewedAt: new Date().toISOString(),
+                model: "",
+                skipped: false,
+              };
+              qualityGatePassed = false;
+            }
+          } else {
+            report.architectReview = {
+              verdict: "pass",
+              summary: isDomainRewrite
+                ? "Architect review skipped — domain rewrite."
+                : totalFilesTouched === 0
+                  ? "Architect review skipped — no file changes."
+                  : "Architect review disabled for this project.",
+              findings: [],
+              nextActions: [],
+              autoFixQueued: false,
+              autoFixTaskId: null,
+              creditsCharged: 0,
+              reviewedAt: new Date().toISOString(),
+              model: "",
+              skipped: true,
+              skipReason: isDomainRewrite
+                ? "domain-rewrite"
+                : totalFilesTouched === 0
+                  ? "no-diff"
+                  : "disabled",
+            };
+          }
+        }
+
+        // ── 4. Determine overall gate status ──────────────────────────────────
+        const hasCriticalFindings = report.architectReview?.findings.some(
+          (f) => f.severity === "critical",
+        );
+        // allChecksPassed drives the green banner — only true when every check
+        // actually ran AND passed (no skips, no failures, no critical findings).
+        report.allChecksPassed = (report.qualityGate?.allPassed ?? false) && !hasCriticalFindings;
+
+        // ── 5a. Quality gate failed → needs_fix ───────────────────────────────
+        if (!qualityGatePassed) {
+          await db
+            .update(agentTasksTable)
+            .set({
+              status: "needs_fix",
+              result: assistantSummary,
+              report,
+              stagingSnapshot: stagingData,
+              completedAt: sql`now()`,
+              tokenCount: flushedTokenCount,
+            })
+            .where(eq(agentTasksTable.id, taskId));
+
+          await emitEvent(
+            taskId,
+            "completed",
+            "Quality checks failed — review the report and use Auto-fix to address the issues.",
+          );
+
+          await db.insert(chatMessagesTable).values({
+            projectId,
+            role: "system",
+            content: assistantSummary,
+            agentMode,
+            planMode: false,
+            plan: {
+              kind: "report",
+              report,
+              taskId,
+              agentIdentity: "task",
+              needsFix: true,
+              ...batchMetaStaging,
+            } as unknown as Record<string, unknown>,
+          });
+
+          void writeKnowledge({
+            title: `Task Agent quality gate failed: "${userPrompt.slice(0, 60)}"`,
+            content: `Task Agent completed "${userPrompt.slice(0, 100)}" but quality checks failed. Status set to needs_fix.`,
+            type: kind,
+            category: kind === "build" ? "build" : "refinement",
+            severity: "warning",
+            projectId,
+            userId: project.ownerId,
+            relatedTaskId: taskId,
+            tags: ["task-agent", "needs-fix", "quality-gate"],
+          });
+
+          void drainNextBatchTask(taskId).catch((err) =>
+            logger.warn({ err, taskId }, "Failed to drain next batch task (task agent needs_fix)"),
+          );
+
+          return;
+        }
+
+        // ── 5b. All checks passed → needs_review ─────────────────────────────
         await db
           .update(agentTasksTable)
           .set({
@@ -3139,7 +3454,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             report,
             stagingSnapshot: stagingData,
             completedAt: sql`now()`,
-            tokenCount: flushTokenCount(taskId),
+            tokenCount: flushedTokenCount,
           })
           .where(eq(agentTasksTable.id, taskId));
 
@@ -3149,14 +3464,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           `Task Agent: ${stagingData.length} file(s) staged for review — apply or discard.`,
         );
 
-        // Post a chat system message so the user sees the review card
-        const batchMetaStaging = queueBatchId
-          ? {
-              queueBatchId,
-              queueIndex: queueIndex ?? null,
-              queueTotalCount: queueTotalCount ?? null,
-            }
-          : {};
         await db.insert(chatMessagesTable).values({
           projectId,
           role: "system",
@@ -5175,8 +5482,8 @@ export async function discardTaskAgentStaging(taskId: number, projectId: number)
     .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
     .limit(1);
   if (!task) throw new Error("Task not found");
-  if (task.status !== "needs_review")
-    throw new Error(`Task is in state "${task.status}", not needs_review`);
+  if (task.status !== "needs_review" && task.status !== "needs_fix")
+    throw new Error(`Task is in state "${task.status}", expected needs_review or needs_fix`);
 
   await db
     .update(agentTasksTable)

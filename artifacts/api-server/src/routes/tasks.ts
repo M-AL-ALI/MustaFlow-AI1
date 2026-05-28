@@ -361,7 +361,7 @@ router.post(
         res.status(404).json({ error: message });
         return;
       }
-      if (message.includes("not needs_review")) {
+      if (message.includes("not needs_review") || message.includes("expected needs_review")) {
         res.status(409).json({ error: message });
         return;
       }
@@ -398,7 +398,7 @@ router.post(
         res.status(404).json({ error: message });
         return;
       }
-      if (message.includes("not needs_review")) {
+      if (message.includes("not needs_review") || message.includes("expected needs_review")) {
         res.status(409).json({ error: message });
         return;
       }
