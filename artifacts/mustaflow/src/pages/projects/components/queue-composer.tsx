@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Link } from "wouter";
 import { getVoiceLang } from "@/hooks/use-voice-input";
 import {
   Rocket,
@@ -28,7 +27,8 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useGetAgentRouting, useUpdateProject } from "@workspace/api-client-react";
+import { useGetAgentRouting, useUpdateProject, useUpdateMyPreferences } from "@workspace/api-client-react";
+import { getVoiceLang, setVoiceLang, VOICE_LANGUAGES } from "@/hooks/use-voice-input";
 import { PlanTemplatesPicker } from "./plan-templates-picker";
 import { PlanHistoryPanel } from "./plan-history";
 import type { StructuredPlan } from "./plan-card";
@@ -267,6 +267,32 @@ export function QueueComposer({
   );
 
   const { mutate: updateProject } = useUpdateProject();
+  const { mutate: updateMyPreferences } = useUpdateMyPreferences();
+
+  // ── Voice language picker ────────────────────────────────────────────────
+  const [currentVoiceLang, setCurrentVoiceLang] = useState<string>(() => {
+    if (typeof window === "undefined") return "auto";
+    return localStorage.getItem("mustaflow_voice_lang") ?? "auto";
+  });
+
+  const handleVoiceLangChange = useCallback(
+    (lang: string) => {
+      setCurrentVoiceLang(lang);
+      // Write localStorage immediately so it's available even when offline
+      if (lang === "auto") {
+        localStorage.removeItem("mustaflow_voice_lang");
+      } else {
+        setVoiceLang(lang);
+      }
+      // Best-effort server sync — silently no-ops when offline
+      try {
+        updateMyPreferences({ data: { voiceLang: lang === "auto" ? null : lang } });
+      } catch {
+        // offline — localStorage write above is the durable fallback
+      }
+    },
+    [updateMyPreferences],
+  );
 
   const setAgentType = useCallback(
     (type: AgentType) => {
@@ -609,7 +635,6 @@ export function QueueComposer({
     () => getSpeechRecognitionCtor() !== null || mediaRecorderSupported,
     [mediaRecorderSupported],
   );
-  const voiceLang = getVoiceLang();
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
@@ -856,7 +881,7 @@ export function QueueComposer({
       const rec = new Ctor();
       rec.continuous = true;
       rec.interimResults = true;
-      rec.lang = navigator.language || "en-US";
+      rec.lang = getVoiceLang();
       rec.onresult = (event) => {
         if (voiceSessionIdRef.current !== sessionId) return; // stale session
         let finalText = "";
@@ -1546,45 +1571,54 @@ export function QueueComposer({
                 >
                   <Paintbrush2 className="h-3.5 w-3.5" />
                 </button>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={startVoiceDictation}
-                    disabled={!voiceSupported}
-                    className={cn(
-                      "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
-                      isListening
-                        ? "text-red-400 bg-red-500/15 hover:bg-red-500/25 animate-pulse"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/60",
-                      !voiceSupported && "opacity-40 cursor-not-allowed",
-                    )}
-                    title={
-                      !voiceSupported
-                        ? "Voice input not supported in this browser"
-                        : isListening
-                          ? "Stop dictation — review the transcript before sending"
-                          : "Dictate by voice — transcript appears here so you can edit before sending"
-                    }
-                    aria-pressed={isListening}
-                    aria-label={isListening ? "Stop voice dictation" : "Start voice dictation"}
-                  >
-                    {isListening ? (
-                      <MicOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Mic className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                  {voiceSupported && (
-                    <Link
-                      href="/settings?tab=account#voice-input"
-                      onClick={(e) => e.stopPropagation()}
-                      title={`Voice language: ${voiceLang} — click to change in Settings`}
-                      className="absolute -bottom-1.5 -right-1.5 px-1 rounded text-[9px] leading-[14px] font-medium bg-muted text-muted-foreground hover:bg-accent hover:text-foreground transition-colors border border-border/60 z-10"
-                    >
-                      {voiceLang}
-                    </Link>
+                <button
+                  type="button"
+                  onClick={startVoiceDictation}
+                  disabled={!voiceSupported}
+                  className={cn(
+                    "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
+                    isListening
+                      ? "text-red-400 bg-red-500/15 hover:bg-red-500/25 animate-pulse"
+                      : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                    !voiceSupported && "opacity-40 cursor-not-allowed",
                   )}
-                </div>
+                  title={
+                    !voiceSupported
+                      ? "Voice input not supported in this browser"
+                      : isListening
+                        ? "Stop dictation — review the transcript before sending"
+                        : "Dictate by voice — transcript appears here so you can edit before sending"
+                  }
+                  aria-pressed={isListening}
+                  aria-label={isListening ? "Stop voice dictation" : "Start voice dictation"}
+                >
+                  {isListening ? (
+                    <MicOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Mic className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                {voiceSupported && (
+                  <select
+                    value={currentVoiceLang}
+                    onChange={(e) => handleVoiceLangChange(e.target.value)}
+                    title="Voice input language"
+                    aria-label="Voice input language"
+                    className={cn(
+                      "h-6 rounded-md border border-border bg-background/60 px-1 text-[10px] text-muted-foreground",
+                      "hover:text-foreground hover:bg-background transition-colors cursor-pointer",
+                      "focus:outline-none focus:ring-1 focus:ring-ring",
+                      isListening && "text-red-300 border-red-500/30",
+                    )}
+                    style={{ maxWidth: "4.5rem" }}
+                  >
+                    {VOICE_LANGUAGES.map(({ code, label }) => (
+                      <option key={code} value={code}>
+                        {code === "auto" ? "Auto" : code}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   onClick={addRow}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"

@@ -33,6 +33,33 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 
 const VOICE_LANG_KEY = "mustaflow_voice_lang";
 
+export const VOICE_LANGUAGES = [
+  { code: "auto", label: "Auto-detect (browser language)" },
+  { code: "en-US", label: "English (US)" },
+  { code: "en-GB", label: "English (UK)" },
+  { code: "es-ES", label: "Spanish (Spain)" },
+  { code: "es-MX", label: "Spanish (Mexico)" },
+  { code: "fr-FR", label: "French" },
+  { code: "de-DE", label: "German" },
+  { code: "pt-BR", label: "Portuguese (Brazil)" },
+  { code: "pt-PT", label: "Portuguese (Portugal)" },
+  { code: "it-IT", label: "Italian" },
+  { code: "nl-NL", label: "Dutch" },
+  { code: "pl-PL", label: "Polish" },
+  { code: "sv-SE", label: "Swedish" },
+  { code: "da-DK", label: "Danish" },
+  { code: "fi-FI", label: "Finnish" },
+  { code: "nb-NO", label: "Norwegian" },
+  { code: "ru-RU", label: "Russian" },
+  { code: "tr-TR", label: "Turkish" },
+  { code: "ar-SA", label: "Arabic" },
+  { code: "hi-IN", label: "Hindi" },
+  { code: "ja-JP", label: "Japanese" },
+  { code: "ko-KR", label: "Korean" },
+  { code: "zh-CN", label: "Chinese (Simplified)" },
+  { code: "zh-TW", label: "Chinese (Traditional)" },
+] as const;
+
 export function getVoiceLang(): string {
   if (typeof window === "undefined") return "en-US";
   return localStorage.getItem(VOICE_LANG_KEY) ?? navigator.language ?? "en-US";

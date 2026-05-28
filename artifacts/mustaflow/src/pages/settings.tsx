@@ -33,7 +33,7 @@ import {
   LayoutGrid,
   Mic,
 } from "lucide-react";
-import { setVoiceLang } from "@/hooks/use-voice-input";
+import { setVoiceLang, VOICE_LANGUAGES } from "@/hooks/use-voice-input";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import { EmbeddedCheckoutProvider, EmbeddedCheckout } from "@stripe/react-stripe-js";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
@@ -432,32 +432,6 @@ function AppearanceOption({
   );
 }
 
-const VOICE_LANGUAGES = [
-  { code: "auto", label: "Auto-detect (browser language)" },
-  { code: "en-US", label: "English (US)" },
-  { code: "en-GB", label: "English (UK)" },
-  { code: "es-ES", label: "Spanish (Spain)" },
-  { code: "es-MX", label: "Spanish (Mexico)" },
-  { code: "fr-FR", label: "French" },
-  { code: "de-DE", label: "German" },
-  { code: "pt-BR", label: "Portuguese (Brazil)" },
-  { code: "pt-PT", label: "Portuguese (Portugal)" },
-  { code: "it-IT", label: "Italian" },
-  { code: "nl-NL", label: "Dutch" },
-  { code: "pl-PL", label: "Polish" },
-  { code: "sv-SE", label: "Swedish" },
-  { code: "da-DK", label: "Danish" },
-  { code: "fi-FI", label: "Finnish" },
-  { code: "nb-NO", label: "Norwegian" },
-  { code: "ru-RU", label: "Russian" },
-  { code: "tr-TR", label: "Turkish" },
-  { code: "ar-SA", label: "Arabic" },
-  { code: "hi-IN", label: "Hindi" },
-  { code: "ja-JP", label: "Japanese" },
-  { code: "ko-KR", label: "Korean" },
-  { code: "zh-CN", label: "Chinese (Simplified)" },
-  { code: "zh-TW", label: "Chinese (Traditional)" },
-];
 
 function VoiceInputSection() {
   const { toast } = useToast();
