@@ -1187,8 +1187,7 @@ export default function HomeScreen() {
     // Inject brainstorm context into the stored user message so the AI sees
     // the full brainstorm conversation when the first build runs — same format
     // as the workspace composer path (messages.ts userPromptWithContext).
-    const hasBrainstormContext =
-      Array.isArray(brainstormContext) && brainstormContext.length > 0;
+    const hasBrainstormContext = Array.isArray(brainstormContext) && brainstormContext.length > 0;
     let initialPromptWithContext = initialPrompt;
     if (hasBrainstormContext) {
       const turns = (brainstormContext as Array<{ role: string; content: string }>)

@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { getVoiceLang } from "@/hooks/use-voice-input";
 import {
   Rocket,
   Plus,
@@ -27,7 +26,11 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useGetAgentRouting, useUpdateProject, useUpdateMyPreferences } from "@workspace/api-client-react";
+import {
+  useGetAgentRouting,
+  useUpdateProject,
+  useUpdateMyPreferences,
+} from "@workspace/api-client-react";
 import { getVoiceLang, setVoiceLang, VOICE_LANGUAGES } from "@/hooks/use-voice-input";
 import { PlanTemplatesPicker } from "./plan-templates-picker";
 import { PlanHistoryPanel } from "./plan-history";
@@ -623,6 +626,81 @@ export function QueueComposer({
   const voiceTargetRowIdRef = useRef<string | null>(null);
   // Whether we *intend* to be listening — survives browser-side session drops.
   const shouldListenRef = useRef(false);
+
+  // ── Waveform (AnalyserNode) ────────────────────────────────────────────────
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const analysisStreamRef = useRef<MediaStream | null>(null);
+  const [waveformBars, setWaveformBars] = useState<number[]>([0.15, 0.15, 0.15, 0.15, 0.15]);
+
+  const stopAudioAnalysis = useCallback(() => {
+    if (animFrameRef.current !== null) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (analyserRef.current) {
+      try {
+        analyserRef.current.disconnect();
+      } catch {
+        /* ignore */
+      }
+      analyserRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        void audioContextRef.current.close();
+      } catch {
+        /* ignore */
+      }
+      audioContextRef.current = null;
+    }
+    if (analysisStreamRef.current) {
+      analysisStreamRef.current.getTracks().forEach((t) => t.stop());
+      analysisStreamRef.current = null;
+    }
+    setWaveformBars([0.15, 0.15, 0.15, 0.15, 0.15]);
+  }, []);
+
+  const startAudioAnalysis = useCallback(
+    (stream: MediaStream) => {
+      // Tear down any previous analysis session first.
+      stopAudioAnalysis();
+      try {
+        const ctx = new AudioContext();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 64;
+        analyser.smoothingTimeConstant = 0.6;
+        const source = ctx.createMediaStreamSource(stream);
+        source.connect(analyser);
+        audioContextRef.current = ctx;
+        analyserRef.current = analyser;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const NUM_BARS = 5;
+        const tick = () => {
+          if (!analyserRef.current) return;
+          analyserRef.current.getByteFrequencyData(data);
+          const binCount = data.length;
+          const bars: number[] = [];
+          for (let i = 0; i < NUM_BARS; i++) {
+            const start = Math.floor((i / NUM_BARS) * binCount);
+            const end = Math.floor(((i + 1) / NUM_BARS) * binCount);
+            let sum = 0;
+            for (let j = start; j < end; j++) sum += data[j] ?? 0;
+            const avg = sum / Math.max(1, end - start);
+            bars.push(Math.max(0.08, avg / 255));
+          }
+          setWaveformBars(bars);
+          animFrameRef.current = requestAnimationFrame(tick);
+        };
+        animFrameRef.current = requestAnimationFrame(tick);
+      } catch {
+        /* Analysis is non-critical — silently skip if AudioContext is unavailable. */
+      }
+    },
+    [stopAudioAnalysis],
+  );
+
   const mediaRecorderSupported = useMemo(
     () =>
       typeof window !== "undefined" &&
@@ -654,7 +732,8 @@ export function QueueComposer({
     }
     mediaRecorderRef.current = null;
     mediaStreamRef.current = null;
-  }, []);
+    stopAudioAnalysis();
+  }, [stopAudioAnalysis]);
 
   const startWhisperRecording = useCallback(async () => {
     setVoiceError(null);
@@ -672,6 +751,7 @@ export function QueueComposer({
       return;
     }
     mediaStreamRef.current = stream;
+    startAudioAnalysis(stream);
     const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
     mediaChunksRef.current = [];
     mr.ondataavailable = (e) => {
@@ -723,7 +803,7 @@ export function QueueComposer({
       );
       stopWhisperRecording();
     }
-  }, [rows, onPromptValueChange, onPromptForRouting, stopWhisperRecording]);
+  }, [rows, onPromptValueChange, onPromptForRouting, stopWhisperRecording, startAudioAnalysis]);
 
   const isMultiRow = rows.length > 1;
 
@@ -755,29 +835,33 @@ export function QueueComposer({
     setTimeout(() => textareaRefs.current.get(newId)?.focus(), 50);
   }, []);
 
-  const removeRow = useCallback((id: string) => {
-    if (voiceTargetRowIdRef.current === id) {
-      voiceSessionIdRef.current += 1;
-      const rec = recognitionRef.current;
-      if (rec) {
-        rec.onresult = null;
-        rec.onerror = null;
-        rec.onend = null;
-        try {
-          rec.abort();
-        } catch {
-          // ignore
+  const removeRow = useCallback(
+    (id: string) => {
+      if (voiceTargetRowIdRef.current === id) {
+        voiceSessionIdRef.current += 1;
+        const rec = recognitionRef.current;
+        if (rec) {
+          rec.onresult = null;
+          rec.onerror = null;
+          rec.onend = null;
+          try {
+            rec.abort();
+          } catch {
+            // ignore
+          }
         }
+        recognitionRef.current = null;
+        voiceTargetRowIdRef.current = null;
+        stopAudioAnalysis();
+        setIsListening(false);
       }
-      recognitionRef.current = null;
-      voiceTargetRowIdRef.current = null;
-      setIsListening(false);
-    }
-    setRows((prev) => {
-      if (prev.length <= 1) return prev;
-      return prev.filter((r) => r.id !== id);
-    });
-  }, []);
+      setRows((prev) => {
+        if (prev.length <= 1) return prev;
+        return prev.filter((r) => r.id !== id);
+      });
+    },
+    [stopAudioAnalysis],
+  );
 
   const clearQueue = useCallback(() => {
     // Stop any active dictation — the row it was targeting is about to disappear.
@@ -795,12 +879,13 @@ export function QueueComposer({
     }
     recognitionRef.current = null;
     voiceTargetRowIdRef.current = null;
+    stopAudioAnalysis();
     setIsListening(false);
     const newId = crypto.randomUUID();
     setRows([{ id: newId, text: "" }]);
     setAttachErrors([]);
     if (onPromptValueChange) onPromptValueChange("");
-  }, [onPromptValueChange]);
+  }, [onPromptValueChange, stopAudioAnalysis]);
 
   const VARIANT_A_SUFFIX =
     "\n\n[VARIANT A — Design direction: clean, minimalist, light palette, generous whitespace, subtle typography]";
@@ -870,6 +955,27 @@ export function QueueComposer({
     shouldListenRef.current = true;
     setIsListening(true);
 
+    // Start waveform analysis: request a separate mic stream for the AnalyserNode
+    // (SpeechRecognition doesn't expose its underlying stream).
+    navigator.mediaDevices
+      ?.getUserMedia({ audio: true })
+      .then((s) => {
+        // Guard: if the user stopped dictation while the permission prompt was
+        // open (or before the promise resolved), immediately release the stream
+        // and bail — do not start analysis after stop.
+        if (!shouldListenRef.current) {
+          s.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        // Set ref AFTER startAudioAnalysis so the stopAudioAnalysis() call
+        // inside it doesn't immediately stop the newly-acquired stream.
+        startAudioAnalysis(s);
+        analysisStreamRef.current = s;
+      })
+      .catch(() => {
+        /* Non-critical — waveform just stays flat if this fails */
+      });
+
     // Creates and starts a fresh recognition instance.  Called on first start
     // and on every auto-restart after the browser ends the continuous session
     // (common on Chrome/Edge after a pause in speech).
@@ -932,6 +1038,7 @@ export function QueueComposer({
         if (code === "not-allowed" || code === "service-not-allowed") {
           // Hard permission error — stop permanently.
           shouldListenRef.current = false;
+          stopAudioAnalysis();
           setVoiceError(
             "Microphone access blocked. Allow microphone access in your browser to dictate.",
           );
@@ -942,6 +1049,7 @@ export function QueueComposer({
         } else if (code) {
           // Unknown hard error — stop permanently.
           shouldListenRef.current = false;
+          stopAudioAnalysis();
           setVoiceError(`Voice input error: ${code}`);
           setIsListening(false);
         }
@@ -952,6 +1060,7 @@ export function QueueComposer({
         if (!shouldListenRef.current) {
           // Intentional stop — clean up.
           voiceTargetRowIdRef.current = null;
+          stopAudioAnalysis();
           setIsListening(false);
           return;
         }
@@ -964,6 +1073,7 @@ export function QueueComposer({
         rec.start();
       } catch (err) {
         shouldListenRef.current = false;
+        stopAudioAnalysis();
         setVoiceError(
           `Could not start voice input: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -980,9 +1090,11 @@ export function QueueComposer({
     startWhisperRecording,
     onPromptValueChange,
     onPromptForRouting,
+    startAudioAnalysis,
+    stopAudioAnalysis,
   ]);
 
-  // Cleanup recognition on unmount
+  // Cleanup recognition and audio analysis on unmount
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
@@ -992,6 +1104,30 @@ export function QueueComposer({
           // ignore
         }
         recognitionRef.current = null;
+      }
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      if (analyserRef.current) {
+        try {
+          analyserRef.current.disconnect();
+        } catch {
+          // ignore
+        }
+        analyserRef.current = null;
+      }
+      if (audioContextRef.current) {
+        try {
+          void audioContextRef.current.close();
+        } catch {
+          // ignore
+        }
+        audioContextRef.current = null;
+      }
+      if (analysisStreamRef.current) {
+        analysisStreamRef.current.getTracks().forEach((t) => t.stop());
+        analysisStreamRef.current = null;
       }
     };
   }, []);
@@ -1349,7 +1485,22 @@ export function QueueComposer({
             >
               <span className="flex items-center gap-1.5">
                 {isListening && (
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                  <span
+                    className="flex items-end gap-px shrink-0"
+                    style={{ height: "12px" }}
+                    aria-hidden="true"
+                  >
+                    {waveformBars.map((h, i) => (
+                      <span
+                        key={i}
+                        className="w-[2px] rounded-full bg-red-400"
+                        style={{
+                          height: `${Math.round(Math.max(0.08, h) * 12)}px`,
+                          transition: "height 80ms ease-out",
+                        }}
+                      />
+                    ))}
+                  </span>
                 )}
                 {isListening
                   ? "Listening — speak now. Review and edit the transcript before pressing Send."
@@ -1612,7 +1763,7 @@ export function QueueComposer({
                     )}
                     style={{ maxWidth: "4.5rem" }}
                   >
-                    {VOICE_LANGUAGES.map(({ code, label }) => (
+                    {VOICE_LANGUAGES.map(({ code, label: _label }) => (
                       <option key={code} value={code}>
                         {code === "auto" ? "Auto" : code}
                       </option>

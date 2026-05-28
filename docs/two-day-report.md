@@ -22,17 +22,20 @@ The report below is grouped that way.
 # Part A — AI Builder
 
 ## A1. UI consistency on the home and workspace composers
+
 - **What:** The landing/Projects home composer was redesigned with a unified rich-card style: large textarea, Plan / Mic / Discuss / Send bar, and matching pill buttons in the in-workspace chat (`queue-composer.tsx`).
 - **How:** Replaced ad-hoc layouts in `projects.tsx` and `pages/projects/[id].tsx`. Removed the legacy tech-chip strip and the "Try: …" rotator.
 - **Why:** The composer is the single most-used control. One look, one mental model.
 - **Tasks:** #1047 (groundwork), #1091, #1095.
 
 ## A2. "Discuss first" Brainstorm panel — wired into AI builder
+
 - **What:** "Discuss first" pill on every composer entry point. On the Projects home it opens a guided brainstorm thread; finishing the brainstorm creates the project. In the workspace chat the same pill opens the full panel.
 - **How:** Shared `BrainstormPanel` component with `mode`, `onCreated`, `onResolved`, `storageKey`, `projectId` props. Workspace pill wired in `queue-composer.tsx` (#1097).
 - **Why:** Most users describe an idea in fragments. A short guided dialogue produces a much better first prompt.
 
 ## A3. Brainstorm memory and context
+
 - **What:**
   - Brainstorm threads persist per location (`brainstorm_messages_<projectId>` in the workspace) and survive panel close/reopen. "Start fresh" button clears them.
   - When you hit "Use this prompt", the full thread is sent to the build AI as a `[BRAINSTORM CONTEXT]` block — not just the one-line prompt.
@@ -43,18 +46,21 @@ The report below is grouped that way.
 - **Tasks:** #1102, #1103, #1114, #1115.
 
 ## A4. Voice input on the AI builder home and workspace
+
 - **What:** Mic button on the Projects home composer and on the workspace chat; live language badge bottom-right; in-chat language picker (Auto / en-US / fr-FR / etc.) right next to the mic.
 - **How:** Web Speech API behind `use-voice-input` hook with `useSyncExternalStore` so the badge updates across tabs. The picker writes localStorage immediately and best-effort syncs to the server via `PATCH /api/me/preferences`.
 - **Why:** Long product descriptions are faster spoken than typed.
 - **Tasks:** #1098 (also fixed dictation cutting off after ~1s), #1105, #1112, #1113, #1116.
 
 ## A5. Workspace reliability surface
+
 - **What:** Live **connection-quality indicator** in the workspace top bar and in the mobile chat drawer; **"Build blocked" banner** when container/DB preflight fails (with suggested fix).
 - **How:** New SSE health probe; banner reads structured error from preflight gate.
 - **Why:** Silent freezes were the #1 reported frustration.
 - **Tasks:** #1063, #1079.
 
 ## A6. Misc polish
+
 - Remembered which "What to look for" tips users dismissed across tasks (#1093).
 - Soft-delete gaps fixed on export and duplicate (so deleted projects don't leak out the side door).
 
@@ -65,16 +71,19 @@ The report below is grouped that way.
 Developer Mode is the power-user surface: `/dev` home, `/dev/deployments`, `/dev/workspace/:id` (an 18-panel workspace: file tree, Monaco editor, terminal, git, secrets, database, object storage, packages, deployments, resources, preview pane, canvas, tools, integrations search), `/docs/developer-mode`, and the agentic build engine that drives all of it.
 
 ## B1. Slide-out nav replaces the old DevSidebar
+
 - **What:** `/dev` and `/dev/deployments` now use the same `SlideOutNav` as the AI builder.
 - **How:** Direct component swap in `dev-home.tsx` and `dev-deployments.tsx`.
 - **Why:** Two products with two sidebars felt incoherent.
 
 ## B2. Dev home composer redesigned to match AI builder
+
 - **What:** Dev home `CreationZone` rebuilt with the same textarea + Plan / Mic / Discuss / Send pill bar as the AI builder. Tech chips and "Try:" rotator removed.
 - **How:** Edits in `pages/dev-home.tsx`.
 - **Why:** Even power users prefer a single consistent composer.
 
 ## B3. "Discuss first" Brainstorm panel on Developer Mode home
+
 - **What:** Same Brainstorm panel as AI builder, but on submit it **creates a developer-mode project** and routes the user to `/dev/workspace/:id`.
 - **How:** `BrainstormPanel` accepts `mode="developer"` and an `onCreated` callback; panel state is keyed by `brainstorm_dev` localStorage so dev-mode brainstorms persist independently.
 - **Why:** Developers benefit just as much from guided ideation before kicking off a build.
@@ -170,6 +179,7 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 # Part C — Shared platform (powers both surfaces)
 
 ## C1. AI builder engine reliability — the "0 files refined" class of bug
+
 - **What/Why:** Users were getting silent "Refined 0 files" outcomes — model replying with text but producing no code.
 - **How (root causes and fixes):**
   - **Provider-isolated circuit breakers** — one provider's outage no longer silently masks the others.
@@ -185,12 +195,14 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 - **Tasks:** #229, #951, #954, #955.
 
 ## C2. Streaming chat reliability
+
 - **What:** SSE keep-alive heartbeat, auto-reconnect with exponential back-off, **resume from token offset** (instead of replaying the whole response), per-send idempotency keys to prevent duplicate AI replies.
 - **How:** Server-side SSE work in `routes/messages.ts`; client retry orchestration in `pages/projects/[id].tsx`.
 - **Why:** Long builds were dropping silently when the proxy idled out or the network hiccuped.
 - **Tasks:** #1017, #1057, #1074.
 
 ## C3. Agentic provisioning (Fly + Neon)
+
 - **What:**
   - Step-by-step progress UI with readable error messages and a completion handoff (#988).
   - Container wake / health gate + DB preflight before kicking off a build (#989).
@@ -200,6 +212,7 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 - **How:** New `provisioning_step` and `provisioning_started_at` columns on `projects`; provisioning state machine in `lib/provisioning.ts` with idempotent retries.
 
 ## C4. API contract completeness
+
 - **Task #998:** 12 missing endpoints added to OpenAPI; hand-written `fetch` calls in admin job queue and inbox panels replaced with generated hooks.
 - OpenAPI coverage added for `POST /projects/{id}/messages/stream`.
 - Provisioning step/ETA fields cleaned up; unsafe type assertion removed (#1055).
@@ -207,31 +220,37 @@ Even though these live in shared platform (Part C1), the symptoms hit dev users 
 - New visual API reference page at **`/api/docs`** powered by Redoc (#1058).
 
 ## C5. Voice language preference — server-synced
+
 - New `voice_lang` column on `user_preferences`; exposed via `GET/PATCH /api/me/preferences`; included in GDPR export.
 - Tasks: #1104, #1117.
 
 ## C6. Billing and credits — money-safety fixes
+
 - **Stripe webhook idempotency race** fixed via status-based deduplication and atomic monthly credit grants — a retried webhook can no longer double-grant credits.
 - **Non-atomic credit deduction** replaced everywhere with `deductCreditsAtomic` so concurrent builds can't drive a user negative.
 
 ## C7. Notifications, activity log, transactional emails
+
 - Wired build complete / build failed / org invite / publish / @mention notification triggers.
 - Wired 4 missing transactional email types (#1003).
 - Activity log completeness — rollback, duplicate, delete, invite, comment events now appear (#1002).
 
 ## C8. GDPR
+
 - Full data export ZIP (all projects, files, AI chat history, knowledge entries — secrets excluded).
 - Proper account erasure moved to a background `gdpr-erasure` worker.
 - Body parser limit wired; stale `SESSION_SECRET` removed; `KNOWLEDGE_TOKEN_BUDGET` env var connected.
 - `voiceLang` added to export (#1117).
 
 ## C9. Knowledge Vault improvements (#980)
+
 - Feedback-weighted retrieval ranking (`USAGE_WEIGHT`, `FEEDBACK_WEIGHT` env-tunable).
 - Auto style refresh keeps style guidance current.
 - Semantic deduplication stops near-duplicate entries from cluttering retrieval.
 - High-quality lessons promoted to cross-project Knowledge Vault.
 
 ## C10. Security and infrastructure
+
 - **Encryption key rotation now covers all encrypted columns** — no missed fields during a rotation (#965).
 - **Cloudflare R2 CDN uploads wired** with proper Cache-Control headers and per-file retry logic (#961).
 - Knowledge route bugs fixed: strip embedding leakage from responses, add Zod validation, batch N+1 inserts.

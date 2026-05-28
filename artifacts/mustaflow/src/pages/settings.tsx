@@ -432,7 +432,6 @@ function AppearanceOption({
   );
 }
 
-
 function VoiceInputSection() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
