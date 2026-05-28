@@ -335,12 +335,33 @@
       transform: translateY(0);
     }
     50% {
-      transform: translateY(-6px);
+      transform: translateY(-12px);
     }
   }
-  .animate-float {
-    animation: logo-float 4s ease-in-out infinite;
+  @keyframes logo-glow {
+    0%,
+    100% {
+      opacity: 0.55;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.15);
+    }
+  }
+  .animate-logo-float {
+    animation: logo-float 3s ease-in-out infinite;
     will-change: transform;
+  }
+  .animate-logo-glow {
+    animation: logo-glow 3s ease-in-out infinite;
+    will-change: opacity, transform;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-logo-float,
+    .animate-logo-glow {
+      animation: none;
+    }
   }
   @keyframes agent-icon-spin {
     from {
