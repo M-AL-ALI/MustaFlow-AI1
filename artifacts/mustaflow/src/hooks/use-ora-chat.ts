@@ -26,6 +26,7 @@ export interface UseOraChatReturn {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const SESSION_STORAGE_KEY = "ora_session_id";
+const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 
 function getStoredLanguage(): string {
   try {
@@ -54,6 +55,40 @@ function getStoredSessionId(): string | null {
 function clearStoredSessionId(): void {
   try {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function storeTranscript(messages: OraMessage[]): void {
+  try {
+    sessionStorage.setItem(TRANSCRIPT_STORAGE_KEY, JSON.stringify(messages));
+  } catch {
+    /* ignore */
+  }
+}
+
+function getStoredTranscript(): OraMessage[] {
+  try {
+    const raw = sessionStorage.getItem(TRANSCRIPT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (m): m is OraMessage =>
+        typeof m === "object" &&
+        m !== null &&
+        ((m as OraMessage).role === "user" || (m as OraMessage).role === "assistant") &&
+        typeof (m as OraMessage).content === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function clearStoredTranscript(): void {
+  try {
+    sessionStorage.removeItem(TRANSCRIPT_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -113,11 +148,16 @@ export function useOraChat(): UseOraChatReturn {
         try {
           const data = await apiGet<OraSession>("/api/public-ai/session");
           setSession(data);
+          const stored = getStoredTranscript();
+          if (stored.length > 0) {
+            setMessages(stored);
+          }
           return;
         } catch (err: unknown) {
           const status = (err as { status?: number }).status;
           if (status === 401) {
             clearStoredSessionId();
+            clearStoredTranscript();
           }
         }
       }
@@ -139,7 +179,11 @@ export function useOraChat(): UseOraChatReturn {
       if (!content.trim() || isLoading) return;
 
       const userMsg: OraMessage = { role: "user", content };
-      setMessages((prev) => [...prev, userMsg]);
+      setMessages((prev) => {
+        const next = [...prev, userMsg];
+        storeTranscript(next);
+        return next;
+      });
       setIsLoading(true);
       setError(null);
 
@@ -158,10 +202,14 @@ export function useOraChat(): UseOraChatReturn {
           msgLimit: number;
         }>("/api/public-ai/chat", body);
 
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.reply, handoffCta: data.handoffCta },
-        ]);
+        setMessages((prev) => {
+          const next = [
+            ...prev,
+            { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+          ];
+          storeTranscript(next);
+          return next;
+        });
         setSession((prev) =>
           prev
             ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
@@ -174,13 +222,18 @@ export function useOraChat(): UseOraChatReturn {
           setError(msg ?? "You have reached the message limit for this session.");
         } else if (status === 401) {
           clearStoredSessionId();
+          clearStoredTranscript();
           setError(
             "Your session has expired. Please refresh the page to start a new conversation.",
           );
         } else {
           setError(msg ?? "Something went wrong. Please try again.");
         }
-        setMessages((prev) => prev.slice(0, -1));
+        setMessages((prev) => {
+          const next = prev.slice(0, -1);
+          storeTranscript(next);
+          return next;
+        });
       } finally {
         setIsLoading(false);
       }
