@@ -12,9 +12,13 @@ import {
   AlertCircle,
   Loader2,
   ArrowRight,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
+import { useOraVoice } from "@/hooks/use-ora-voice";
+import { OraVoiceMicButton } from "@/components/ora/ora-voice-button";
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
@@ -146,6 +150,29 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const langMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ─── Voice-A ──────────────────────────────────────────────────────────────
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setInput(text);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(text.length, text.length);
+    }, 40);
+  }, []);
+
+  const voice = useOraVoice(handleVoiceTranscript);
+
+  const voiceErrorMsg =
+    voice.voiceState === "permission_denied"
+      ? "Microphone access was denied. Enable it in your browser settings."
+      : voice.voiceState === "error"
+        ? "Voice recognition failed. Please try again or type your message."
+        : null;
+
+  const showInterim = voice.voiceState === "listening" || voice.interimTranscript !== "";
+
+  // ─── Derived state ────────────────────────────────────────────────────────
+
   const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
 
   const atomState: AtomState =
@@ -162,6 +189,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               : oraStatus === "analyzing"
                 ? "analyzing"
                 : "idle";
+
+  // ─── Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (open && feedRef.current) {
@@ -196,6 +225,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [open]);
 
+  // ─── Handlers ─────────────────────────────────────────────────────────────
+
   const handleSend = () => {
     const text = input.trim();
     if (!text || isLoading || atLimit || uploadState === "uploading") return;
@@ -204,6 +235,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Typing while Ora speaks → cancel TTS immediately
+    if (voice.voiceState === "speaking") {
+      voice.stopSpeaking();
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -226,6 +261,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   }, [clearAttachment, clearUploadError]);
 
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <>
@@ -286,6 +323,32 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* TTS toggle */}
+                {voice.isSpeechSynthesisSupported && (
+                  <button
+                    type="button"
+                    onClick={voice.toggleTts}
+                    title={
+                      voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"
+                    }
+                    aria-label={
+                      voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"
+                    }
+                    className={cn(
+                      "flex items-center justify-center h-6 w-6 rounded-lg transition-colors",
+                      voice.isTtsEnabled
+                        ? "text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)]"
+                        : "text-muted-foreground/40 hover:text-muted-foreground",
+                    )}
+                  >
+                    {voice.isTtsEnabled ? (
+                      <Volume2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <VolumeX className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                )}
+
                 {/* Language selector */}
                 <div className="relative" ref={langMenuRef}>
                   <button
@@ -383,6 +446,24 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                           {msg.content}
                         </div>
                       )}
+
+                      {/* TTS play button */}
+                      {msg.role === "assistant" &&
+                        !msg.datasetResult &&
+                        voice.isSpeechSynthesisSupported &&
+                        voice.isTtsEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => voice.speakText(msg.content, language)}
+                            title="Read this response aloud"
+                            aria-label="Read this response aloud"
+                            className="mt-1 flex items-center gap-1 text-[9px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                          >
+                            <Volume2 className="h-3 w-3" />
+                            <span>Read aloud</span>
+                          </button>
+                        )}
+
                       {showCta && (
                         <button
                           type="button"
@@ -476,6 +557,31 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     fileType={attachedFile?.fileType}
                   />
 
+                  {/* Voice interim transcript hint */}
+                  {showInterim && (
+                    <div className="flex items-center gap-1.5 px-1 pb-1.5 text-[11px] text-muted-foreground">
+                      {voice.voiceState === "listening" && (
+                        <span className="flex items-center gap-1.5">
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                          Listening…
+                        </span>
+                      )}
+                      {voice.interimTranscript && (
+                        <span className="italic text-muted-foreground/60 truncate">
+                          {voice.interimTranscript}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Voice error */}
+                  {voiceErrorMsg && (
+                    <div className="flex items-start gap-2 mb-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-400">
+                      <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                      <span>{voiceErrorMsg}</span>
+                    </div>
+                  )}
+
                   {/* Unified input bar */}
                   <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
                     <input
@@ -486,6 +592,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       aria-hidden
                       onChange={handleFileChange}
                     />
+                    {/* Attachment button */}
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
@@ -506,6 +613,19 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     >
                       <Paperclip className="h-3.5 w-3.5" />
                     </button>
+
+                    {/* Mic button */}
+                    <OraVoiceMicButton
+                      voiceState={voice.voiceState}
+                      isSupported={voice.isSupported}
+                      onStart={() => voice.startListening(language)}
+                      onStop={() => {
+                        voice.stopListening();
+                        voice.stopSpeaking();
+                      }}
+                      disabled={isLoading || atLimit}
+                      size="sm"
+                    />
 
                     <textarea
                       ref={textareaRef}
@@ -534,7 +654,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
                   <div className="flex items-center justify-between mt-1.5">
                     <p className="text-[9px] text-muted-foreground/50">
-                      Upload PDF, DOCX, TXT, CSV, XLSX · Talk in any language
+                      Upload PDF, DOCX, TXT, CSV, XLSX · Voice or type in any language
                     </p>
                     {session && (
                       <span className="text-[9px] text-muted-foreground/50">

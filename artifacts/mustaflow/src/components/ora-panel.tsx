@@ -11,9 +11,13 @@ import {
   Loader2,
   X,
   ArrowRight,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
+import { useOraVoice } from "@/hooks/use-ora-voice";
+import { OraVoiceMicButton } from "@/components/ora/ora-voice-button";
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
@@ -154,6 +158,29 @@ export function OraPanel({ chat }: OraPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasMessages = messages.length > 0;
 
+  // ─── Voice-A ──────────────────────────────────────────────────────────────
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setInput(text);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(text.length, text.length);
+    }, 40);
+  }, []);
+
+  const voice = useOraVoice(handleVoiceTranscript);
+
+  const voiceErrorMsg =
+    voice.voiceState === "permission_denied"
+      ? "Microphone access was denied. Enable it in your browser settings to use voice input."
+      : voice.voiceState === "error"
+        ? "Voice recognition failed. Please try again or type your message."
+        : null;
+
+  const showInterim = voice.voiceState === "listening" || voice.interimTranscript !== "";
+
+  // ─── Derived state ────────────────────────────────────────────────────────
+
   const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
 
   const atomState: AtomState =
@@ -170,6 +197,8 @@ export function OraPanel({ chat }: OraPanelProps) {
               : oraStatus === "analyzing"
                 ? "analyzing"
                 : "idle";
+
+  // ─── Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (feedRef.current) {
@@ -195,6 +224,8 @@ export function OraPanel({ chat }: OraPanelProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showLangMenu]);
 
+  // ─── Handlers ─────────────────────────────────────────────────────────────
+
   const handleSend = () => {
     const text = input.trim();
     if (!text || isLoading || atLimit || uploadState === "uploading") return;
@@ -203,6 +234,10 @@ export function OraPanel({ chat }: OraPanelProps) {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Typing while Ora speaks → cancel TTS immediately
+    if (voice.voiceState === "speaking") {
+      voice.stopSpeaking();
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -231,6 +266,8 @@ export function OraPanel({ chat }: OraPanelProps) {
 
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
 
+  // ─── Render ───────────────────────────────────────────────────────────────
+
   return (
     <div className="relative rounded-2xl border border-border/60 bg-card shadow-lg overflow-hidden transition-all duration-500">
       {/* Header */}
@@ -250,37 +287,61 @@ export function OraPanel({ chat }: OraPanelProps) {
           )}
         </div>
 
-        {/* Language selector */}
-        <div className="relative" ref={langMenuRef}>
-          <button
-            type="button"
-            onClick={() => setShowLangMenu((v) => !v)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2.5 py-1 hover:bg-muted/40 transition-colors"
-          >
-            <Globe className="h-3 w-3" />
-            {currentLangLabel}
-            <ChevronDown className="h-3 w-3" />
-          </button>
-          {showLangMenu && (
-            <div className="absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-popover border border-border rounded-xl shadow-lg py-1">
-              {LANGUAGES.map((l) => (
-                <button
-                  key={l.value}
-                  type="button"
-                  onClick={() => {
-                    setLanguage(l.value);
-                    setShowLangMenu(false);
-                  }}
-                  className={cn(
-                    "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors",
-                    language === l.value && "text-[hsl(265_85%_65%)] font-medium",
-                  )}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
+        <div className="flex items-center gap-2">
+          {/* TTS toggle — only shown when speechSynthesis is available */}
+          {voice.isSpeechSynthesisSupported && (
+            <button
+              type="button"
+              onClick={voice.toggleTts}
+              title={voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"}
+              aria-label={voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"}
+              className={cn(
+                "flex items-center justify-center h-6 w-6 rounded-lg transition-colors",
+                voice.isTtsEnabled
+                  ? "text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)]"
+                  : "text-muted-foreground/40 hover:text-muted-foreground",
+              )}
+            >
+              {voice.isTtsEnabled ? (
+                <Volume2 className="h-3.5 w-3.5" />
+              ) : (
+                <VolumeX className="h-3.5 w-3.5" />
+              )}
+            </button>
           )}
+
+          {/* Language selector */}
+          <div className="relative" ref={langMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowLangMenu((v) => !v)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2.5 py-1 hover:bg-muted/40 transition-colors"
+            >
+              <Globe className="h-3 w-3" />
+              {currentLangLabel}
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            {showLangMenu && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-popover border border-border rounded-xl shadow-lg py-1">
+                {LANGUAGES.map((l) => (
+                  <button
+                    key={l.value}
+                    type="button"
+                    onClick={() => {
+                      setLanguage(l.value);
+                      setShowLangMenu(false);
+                    }}
+                    className={cn(
+                      "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors",
+                      language === l.value && "text-[hsl(265_85%_65%)] font-medium",
+                    )}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -351,6 +412,24 @@ export function OraPanel({ chat }: OraPanelProps) {
                       {msg.content}
                     </div>
                   )}
+
+                  {/* TTS play button — only on assistant text messages, only when TTS enabled */}
+                  {msg.role === "assistant" &&
+                    !msg.datasetResult &&
+                    voice.isSpeechSynthesisSupported &&
+                    voice.isTtsEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => voice.speakText(msg.content, language)}
+                        title="Read this response aloud"
+                        aria-label="Read this response aloud"
+                        className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                      >
+                        <Volume2 className="h-3 w-3" />
+                        <span>Read aloud</span>
+                      </button>
+                    )}
+
                   {showCta && (
                     <button
                       type="button"
@@ -445,6 +524,31 @@ export function OraPanel({ chat }: OraPanelProps) {
               fileType={attachedFile?.fileType}
             />
 
+            {/* Voice interim transcript hint */}
+            {showInterim && (
+              <div className="flex items-center gap-1.5 px-1 pb-1.5 text-xs text-muted-foreground">
+                {voice.voiceState === "listening" && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                    Listening…
+                  </span>
+                )}
+                {voice.interimTranscript && (
+                  <span className="italic text-muted-foreground/60 truncate">
+                    {voice.interimTranscript}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Voice error */}
+            {voiceErrorMsg && (
+              <div className="flex items-start gap-2 mb-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>{voiceErrorMsg}</span>
+              </div>
+            )}
+
             {/* Unified input bar */}
             <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
               <input
@@ -455,6 +559,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                 aria-hidden
                 onChange={handleFileChange}
               />
+              {/* Attachment button */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -475,6 +580,19 @@ export function OraPanel({ chat }: OraPanelProps) {
               >
                 <Paperclip className="h-4 w-4" />
               </button>
+
+              {/* Mic button */}
+              <OraVoiceMicButton
+                voiceState={voice.voiceState}
+                isSupported={voice.isSupported}
+                onStart={() => voice.startListening(language)}
+                onStop={() => {
+                  voice.stopListening();
+                  voice.stopSpeaking();
+                }}
+                disabled={isLoading || atLimit}
+                size="md"
+              />
 
               <textarea
                 ref={textareaRef}
@@ -503,7 +621,7 @@ export function OraPanel({ chat }: OraPanelProps) {
 
             <div className="flex items-center justify-between mt-2">
               <p className="text-[10px] text-muted-foreground/50">
-                Upload PDF, DOCX, TXT, CSV, XLSX · Talk in any language
+                Upload PDF, DOCX, TXT, CSV, XLSX · Voice or type in any language
               </p>
               {session && (
                 <span className="text-[10px] text-muted-foreground/50">
