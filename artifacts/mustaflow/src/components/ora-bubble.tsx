@@ -167,6 +167,28 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const langMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ─── Resize (desktop only) ────────────────────────────────────────────────
+  const [panelWidth, setPanelWidth] = useState(() => {
+    try {
+      const v = localStorage.getItem("ora_bubble_width");
+      return v ? Math.max(320, Math.min(720, Number(v))) : 384;
+    } catch {
+      return 384;
+    }
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const panelWidthRef = useRef(panelWidth);
+  panelWidthRef.current = panelWidth;
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    setIsDesktop(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   // ─── Voice ────────────────────────────────────────────────────────────────
   // Two distinct modes share one SpeechRecognition instance:
   //   A. Normal dictation — transcript lands in the textarea; user presses Send.
@@ -431,6 +453,29 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     voiceRef.current.stopSpeaking();
   }, []);
 
+  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = panelWidthRef.current;
+    setIsResizing(true);
+
+    const onMove = (me: PointerEvent) => {
+      // Dragging left = increasing width (panel is on the right edge)
+      const newWidth = Math.max(320, Math.min(720, startWidth + startX - me.clientX));
+      setPanelWidth(newWidth);
+    };
+
+    const onUp = () => {
+      setIsResizing(false);
+      try { localStorage.setItem("ora_bubble_width", String(panelWidthRef.current)); } catch { /* ignore */ }
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
+
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -459,24 +504,40 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         </button>
       </div>
 
-      {/* Drawer */}
-      {open && (
-        <>
-          {/* Backdrop on mobile */}
-          <div
-            className="fixed inset-0 z-40 bg-background/50 backdrop-blur-sm sm:hidden"
-            onClick={() => setOpen(false)}
-          />
-          <div
-            className={cn(
-              "fixed z-50 bg-card border-border/50 shadow-2xl flex flex-col",
-              "bottom-0 right-0 w-full sm:w-96 sm:max-w-[92vw]",
-              "sm:top-0 sm:rounded-tl-3xl sm:rounded-bl-3xl sm:border-y sm:border-l sm:border-r-0",
-              "rounded-t-3xl sm:rounded-t-none border-t border-x sm:border-x-0",
-              "max-h-[80vh] sm:max-h-screen sm:h-full",
-              "border",
-            )}
-          >
+      {/* Backdrop on mobile — always mounted, fades in/out */}
+      <div
+        className={cn(
+          "fixed inset-0 z-40 bg-background/50 backdrop-blur-sm sm:hidden transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0 pointer-events-none",
+        )}
+        onClick={() => setOpen(false)}
+      />
+
+      {/* Drawer — always mounted; slides in from right (desktop) or up (mobile) */}
+      <div
+        className={cn(
+          "fixed z-50 bg-card border-border/50 shadow-2xl flex flex-col",
+          "bottom-0 right-0 w-full",
+          "sm:top-0 sm:rounded-tl-3xl sm:rounded-bl-3xl sm:border-y sm:border-l sm:border-r-0",
+          "rounded-t-3xl sm:rounded-t-none border-t border-x sm:border-x-0",
+          "max-h-[80vh] sm:max-h-screen sm:h-full",
+          "border",
+          !isResizing && "transition-transform duration-300 ease-in-out",
+          open
+            ? "translate-y-0 sm:translate-x-0"
+            : "translate-y-full sm:translate-y-0 sm:translate-x-full pointer-events-none",
+        )}
+        style={isDesktop ? { width: `${panelWidth}px` } : undefined}
+      >
+        {/* Resize handle — desktop only, left edge drag */}
+        <div
+          className="absolute left-0 top-0 h-full w-2 cursor-col-resize hidden sm:flex items-center justify-center group z-10"
+          onPointerDown={handleResizePointerDown}
+          title="Drag to resize"
+          aria-hidden
+        >
+          <div className="h-10 w-0.5 rounded-full bg-border/50 group-hover:bg-[hsl(265_85%_65%/0.7)] transition-colors duration-150" />
+        </div>
             {/* Drawer header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
               <div className="flex items-center gap-2.5">
@@ -922,9 +983,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 </>
               )}
             </div>
-          </div>
-        </>
-      )}
+      </div>
     </>
   );
 }
