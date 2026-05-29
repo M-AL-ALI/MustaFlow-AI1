@@ -20,7 +20,16 @@
  */
 
 import { useEffect } from "react";
-import { MicOff, AlertCircle, CheckCircle2, Mic, Square, PhoneOff, Volume2, VolumeX } from "lucide-react";
+import {
+  MicOff,
+  AlertCircle,
+  CheckCircle2,
+  Mic,
+  Square,
+  PhoneOff,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { VoiceState } from "@/hooks/use-ora-voice";
 
@@ -68,13 +77,13 @@ function injectKeyframes() {
 // ─── Shared waveform bars ────────────────────────────────────────────────────
 
 const BAR_DEFS: Array<{ min: number; max: number; dur: number }> = [
-  { min: 2, max: 5,  dur: 0.65 },
-  { min: 3, max: 9,  dur: 0.55 },
-  { min: 4, max: 11, dur: 0.7  },
-  { min: 2, max: 7,  dur: 0.6  },
-  { min: 5, max: 10, dur: 0.5  },
-  { min: 3, max: 6,  dur: 0.72 },
-  { min: 2, max: 8,  dur: 0.58 },
+  { min: 2, max: 5, dur: 0.65 },
+  { min: 3, max: 9, dur: 0.55 },
+  { min: 4, max: 11, dur: 0.7 },
+  { min: 2, max: 7, dur: 0.6 },
+  { min: 5, max: 10, dur: 0.5 },
+  { min: 3, max: 6, dur: 0.72 },
+  { min: 2, max: 8, dur: 0.58 },
 ];
 
 interface WaveformBarsProps {
@@ -83,7 +92,11 @@ interface WaveformBarsProps {
   scale?: number;
 }
 
-function WaveformBars({ animated = false, colorClass = "bg-white/90", scale = 1 }: WaveformBarsProps) {
+function WaveformBars({
+  animated = false,
+  colorClass = "bg-white/90",
+  scale = 1,
+}: WaveformBarsProps) {
   return (
     <div className="flex items-end gap-[2px]" aria-hidden>
       {BAR_DEFS.map((b, i) => {
@@ -241,17 +254,17 @@ export function OraVoiceModeButton({
 
   let ariaLabel = "Start voice conversation with Ora";
   if (isListening) ariaLabel = "Ora is listening — tap to end voice mode";
-  if (isSpeaking)  ariaLabel = "Ora is speaking — tap to end voice mode";
+  if (isSpeaking) ariaLabel = "Ora is speaking — tap to end voice mode";
   if (isUnsupported) ariaLabel = "Voice input is not supported in this browser";
   if (isDenied) ariaLabel = "Microphone permission denied — enable in browser settings";
-  if (isError)  ariaLabel = "Voice failed — tap to try again";
+  if (isError) ariaLabel = "Voice failed — tap to try again";
 
   let title = "Talk with Ora — voice conversation mode";
   if (isListening) title = "Ora is listening — tap to end voice mode";
-  if (isSpeaking)  title = "Ora is speaking — tap to end voice mode";
+  if (isSpeaking) title = "Ora is speaking — tap to end voice mode";
   if (isUnsupported) title = "Voice is not supported in this browser. You can still type.";
   if (isDenied) title = "Microphone access was denied. Enable it in your browser settings.";
-  if (isError)  title = "Voice failed. Tap to try again.";
+  if (isError) title = "Voice failed. Tap to try again.";
 
   const handleClick = () => {
     if (isInert || disabled) return;
@@ -270,7 +283,10 @@ export function OraVoiceModeButton({
       type="button"
       onClick={handleClick}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); }
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleClick();
+        }
       }}
       disabled={disabled || isInert}
       title={title}
@@ -281,9 +297,12 @@ export function OraVoiceModeButton({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
         dim,
         !isInert && !isError && "bg-gradient-to-br from-[hsl(265_85%_62%)] to-[hsl(220_80%_58%)]",
-        !isActive && !isInert && !isError &&
+        !isActive &&
+          !isInert &&
+          !isError &&
           "hover:scale-110 hover:from-[hsl(265_85%_58%)] hover:to-[hsl(220_80%_54%)] focus-visible:ring-[hsl(265_85%_65%)]",
-        isListening && "ring-2 ring-red-400/70 shadow-md shadow-red-400/20 focus-visible:ring-red-400 hover:scale-100",
+        isListening &&
+          "ring-2 ring-red-400/70 shadow-md shadow-red-400/20 focus-visible:ring-red-400 hover:scale-100",
         isSpeaking && "focus-visible:ring-[hsl(265_85%_65%)]",
         isInert && "bg-muted opacity-35 cursor-not-allowed shadow-none",
         isError && "bg-amber-500/15 text-amber-500 focus-visible:ring-amber-400",
@@ -299,11 +318,17 @@ export function OraVoiceModeButton({
         />
       )}
       {isInert ? (
-        <MicOff className={cn("text-muted-foreground", size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")} />
+        <MicOff
+          className={cn("text-muted-foreground", size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")}
+        />
       ) : isError ? (
         <AlertCircle className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />
       ) : (
-        <WaveformBars animated={isListening || isSpeaking} colorClass="bg-white/90" scale={waveScale} />
+        <WaveformBars
+          animated={isListening || isSpeaking}
+          colorClass="bg-white/90"
+          scale={waveScale}
+        />
       )}
     </button>
   );
@@ -372,7 +397,13 @@ export function OraVoiceConvPanel({
         />
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className={cn("font-semibold text-foreground", headingCls)}>{stateLabel}</span>
-          <span className={cn("text-muted-foreground/60 leading-snug truncate", labelCls, isListening && interimTranscript && "italic")}>
+          <span
+            className={cn(
+              "text-muted-foreground/60 leading-snug truncate",
+              labelCls,
+              isListening && interimTranscript && "italic",
+            )}
+          >
             {subLabel}
           </span>
         </div>
@@ -465,7 +496,11 @@ export function OraVoiceLiveArea({
       {isListening && (
         <div className="flex flex-col gap-1.5 rounded-xl border border-[hsl(265_85%_65%/0.22)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2.5">
           <div className="flex items-center gap-2.5">
-            <WaveformBars animated colorClass="bg-[hsl(265_85%_65%)]" scale={size === "sm" ? 0.8 : 1} />
+            <WaveformBars
+              animated
+              colorClass="bg-[hsl(265_85%_65%)]"
+              scale={size === "sm" ? 0.8 : 1}
+            />
             <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>
               Listening… speak now
             </span>
@@ -487,8 +522,14 @@ export function OraVoiceLiveArea({
       {/* Speaking panel (TTS read-aloud via normal toggle) */}
       {isSpeaking && (
         <div className="flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.22)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2.5">
-          <WaveformBars animated colorClass="bg-[hsl(265_85%_65%)]" scale={size === "sm" ? 0.8 : 1} />
-          <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>Ora is speaking…</span>
+          <WaveformBars
+            animated
+            colorClass="bg-[hsl(265_85%_65%)]"
+            scale={size === "sm" ? 0.8 : 1}
+          />
+          <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>
+            Ora is speaking…
+          </span>
           <span className={cn("ml-auto text-muted-foreground/50", label)}>Tap mic to stop</span>
         </div>
       )}
