@@ -1,0 +1,278 @@
+Important correction for Ora voice UI and handoff CTA behavior.
+
+The current implementation mixed two separate features together. Please correct this.
+
+There must be TWO different voice experiences:
+
+1. Mic / Dictation Mode
+2. Ora Voice Conversation Mode
+
+They are not the same feature.
+
+Current issue shown in screenshot:
+The premium voice orb replaced the normal mic behavior in the input area. This makes it look like a voice-mode/voicemail button, but the expected mic feature should still be available as a simple dictation control.
+
+Also, the “Ready to build this? Continue in Builder” card is showing too aggressively after a simple greeting like “Hello.” That is wrong. Visitors do not need to see Builder CTA while just chatting or talking casually.
+
+Please fix both issues.
+
+Part 1 — Restore the normal mic / dictation feature
+
+Return the normal microphone/dictation behavior in the message composer.
+
+Expected behavior:
+
+* user taps mic
+* Ora listens
+* live/interim transcript appears
+* final transcript lands in the text box/composer
+* user can review/edit transcript
+* user manually presses Send
+* transcript becomes a normal user message
+* Ora replies as normal assistant message
+* no automatic spoken reply required
+* TTS remains off unless user manually enables read-aloud
+
+This should be the normal mic button inside the input/composer area.
+
+Recommended composer order:
+
+* attachment button
+* normal microphone/dictation button
+* text input
+* send button
+
+Do not remove this normal mic behavior.
+
+Part 2 — Add separate Ora Voice Conversation Mode
+
+The premium circular voice orb should become a separate “Ora Voice Conversation Mode” feature, not the replacement for the normal mic button.
+
+This feature is for natural voice conversation.
+
+Expected behavior:
+
+* user taps “Talk with Ora” or the premium voice orb
+* Ora enters Voice Conversation Mode
+* user speaks naturally
+* transcript appears in the message thread
+* Ora can auto-send after silence or when user stops talking
+* Ora replies by sound automatically
+* Ora’s spoken reply also appears as normal assistant text in the thread
+* user can interrupt Ora while she is speaking
+* if user starts talking, Ora stops speaking and starts listening
+* user can exit Voice Conversation Mode anytime
+* transcript/message thread remains the source of truth
+
+This is different from the mic/dictation feature.
+
+Voice Conversation Mode should feel like a live conversation, while the normal mic button should feel like speech-to-text dictation.
+
+Part 3 — Placement recommendation
+
+Normal mic/dictation button:
+
+* stays inside the input bar beside the attachment button
+
+Voice Conversation Mode button:
+
+* should be separate and more premium
+* can appear in the Ora header, near the Dynamic Atom, or as a separate “Talk with Ora” pill/button
+* should not crowd the text input
+* can use the premium circular orb/waveform design
+
+Recommended UI:
+
+Header or top area:
+
+* “Talk with Ora” premium voice mode button/orb
+
+Composer/input area:
+
+* attachment button
+* small mic/dictation button
+* text box
+* send button
+
+This makes the two features clear.
+
+Part 4 — Voice Conversation Mode details
+
+When Voice Conversation Mode is active, show a clear state panel:
+
+* “Voice Mode active”
+* “Ora is listening…”
+* live waveform
+* transcript preview
+* “Ora is speaking…” when replying
+* Stop / End Voice Mode button
+* mute/disable voice reply option if needed
+
+Voice Mode should auto-play Ora’s response while this mode is active.
+
+Important:
+TTS should still default off for normal typed chat.
+But inside Voice Conversation Mode, automatic spoken replies are expected because that is the point of the mode.
+
+Part 5 — Handoff CTA card is showing too aggressively
+
+The “Ready to build this? Continue in Builder” card should NOT show after simple greetings, casual chat, voice testing, general questions, or while the user is just talking.
+
+Current bad example:
+User: “Hello”
+Ora: “Hello — how can I help?”
+Then the Builder CTA appears.
+
+This is wrong.
+
+Please update CTA logic.
+
+Show Builder CTA only when there is clear build/app intent, such as:
+
+* user asks to build an app
+* user asks if MustaFlow can build something
+* user discusses app idea/planning
+* user asks to continue into Builder
+* user uploads design/image/dataset/document and asks to build from it
+* Ora gives an app plan or build recommendation
+
+Do NOT show Builder CTA for:
+
+* hello / greetings
+* casual conversation
+* personal advice
+* machine/equipment troubleshooting unless user asks to build an app around it
+* general coding explanation unless user asks to build in MustaFlow
+* voice testing
+* “can you hear me”
+* “what can you do”
+* simple Q&A
+* document/image analysis unless the user asks to build from it
+
+Part 6 — Hide CTA while voice is active
+
+When Voice Conversation Mode is active:
+
+* do not show the large “Ready to build this?” CTA card during live conversation
+* do not interrupt the user with Builder conversion UI while they are talking
+* keep the conversation clean
+* if build intent is detected, show a small non-intrusive suggestion after the voice turn ends, not during listening/speaking
+
+Recommended:
+During voice mode:
+
+* no large Builder card
+* optional small text after answer: “When you’re ready, I can help move this idea into Builder.”
+
+Only show the full card after the user is no longer actively talking and the conversation clearly has build intent.
+
+Part 7 — Fix handoff trigger source
+
+Do not rely only on handoffCta: true being returned for every assistant response.
+
+Add stronger frontend/backend gating:
+
+* detect build intent before showing large card
+* show only on latest assistant message
+* keep dismiss behavior
+* do not show again immediately after dismissed
+* avoid showing after greetings
+* avoid showing during active voice mode
+* avoid showing while transcript is still being reviewed
+* avoid showing during listening/speaking states
+
+If backend currently returns handoffCta: true too often, adjust the logic so it returns true only for real build/app intent.
+
+Part 8 — Keep privacy and safety
+
+Do not add backend voice routes for this fix unless explicitly approved.
+
+For now:
+
+* use existing browser-native SpeechRecognition
+* use existing browser-native speechSynthesis
+* no audio upload
+* no audio storage
+* no transcript logging
+* no Builder/project memory access
+* no Knowledge Vault learning
+* transcript remains temporary session text only
+* voice mode messages still appear in the same message thread
+
+Part 9 — Required UI result
+
+After correction, Ora should have:
+
+A. Normal Mic / Dictation
+
+* small microphone button in composer
+* speech-to-text only
+* transcript lands in text box
+* user presses Send manually
+
+B. Ora Voice Conversation Mode
+
+* separate premium orb/button
+* live conversation mode
+* automatic spoken Ora replies while mode is active
+* transcript and replies still visible in thread
+* user can stop/end mode
+
+C. Correct Builder CTA
+
+* no CTA after “Hello”
+* no CTA during simple voice conversation
+* only appears when real build/app intent exists
+* not intrusive during voice mode
+
+Part 10 — Tests required
+
+Please add or update tests/proof for:
+
+* normal mic/dictation button exists in composer
+* dictation transcript lands in composer and does not auto-send
+* premium Voice Conversation Mode button exists separately
+* Voice Conversation Mode auto-plays Ora reply
+* Voice Conversation Mode still writes transcript and reply to message thread
+* user can interrupt Ora while speaking
+* user can exit Voice Conversation Mode
+* Builder CTA does not show after “Hello”
+* Builder CTA does not show during active voice listening/speaking
+* Builder CTA shows only for app/build intent
+* dismissed CTA does not immediately reappear
+* no backend voice route added
+* no audio stored or logged
+* Phase 1 chat still works
+* Phase 2 document analysis still works
+* Phase 3 dataset analysis still works
+* Phase 5 image analysis still works
+* Phase 6 handoff still works
+
+Part 11 — Validation report required
+
+After implementation, provide:
+
+* affected files
+* screenshots of normal mic/dictation button
+* screenshots of separate Voice Conversation Mode button
+* voice mode active screenshot
+* transcript-in-thread proof
+* auto spoken reply proof
+* CTA hidden after greeting proof
+* CTA hidden during voice active proof
+* CTA shown for build intent proof
+* no backend route proof
+* privacy proof
+* tests run
+* typecheck/lint/format status
+* rollback plan
+
+Final expectation:
+
+Return the normal mic feature back.
+
+Update the premium orb into a separate Ora Voice Conversation Mode feature.
+
+Fix the Builder CTA so it does not appear after simple greetings or while the visitor is just talking.
+
+Make the experience feel natural, clean, and premium.
