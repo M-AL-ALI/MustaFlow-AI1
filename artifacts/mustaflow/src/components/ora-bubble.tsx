@@ -18,7 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
-import { OraVoiceMicButton } from "@/components/ora/ora-voice-button";
+import { OraVoiceModeButton, OraVoiceLiveArea } from "@/components/ora/ora-voice-mode-button";
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
@@ -160,8 +160,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   // ─── Voice-A ──────────────────────────────────────────────────────────────
 
+  const [voiceReady, setVoiceReady] = useState(false);
+
   const handleVoiceTranscript = useCallback((text: string) => {
     setInput(text);
+    setVoiceReady(true);
     setTimeout(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(text.length, text.length);
@@ -170,14 +173,19 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   const voice = useOraVoice(handleVoiceTranscript);
 
+  // Auto-clear the transcript-ready hint after 5 s
+  useEffect(() => {
+    if (!voiceReady) return;
+    const t = setTimeout(() => setVoiceReady(false), 5000);
+    return () => clearTimeout(t);
+  }, [voiceReady]);
+
   const voiceErrorMsg =
     voice.voiceState === "permission_denied"
-      ? "Microphone access was denied. Enable it in your browser settings."
+      ? "Microphone access was denied. Enable it in your browser settings or type your message."
       : voice.voiceState === "error"
         ? "Voice recognition failed. Please try again or type your message."
         : null;
-
-  const showInterim = voice.voiceState === "listening" || voice.interimTranscript !== "";
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
@@ -620,30 +628,14 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     />
                   )}
 
-                  {/* Voice interim transcript hint */}
-                  {showInterim && (
-                    <div className="flex items-center gap-1.5 px-1 pb-1.5 text-[11px] text-muted-foreground">
-                      {voice.voiceState === "listening" && (
-                        <span className="flex items-center gap-1.5">
-                          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-                          Listening…
-                        </span>
-                      )}
-                      {voice.interimTranscript && (
-                        <span className="italic text-muted-foreground/60 truncate">
-                          {voice.interimTranscript}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Voice error */}
-                  {voiceErrorMsg && (
-                    <div className="flex items-start gap-2 mb-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-400">
-                      <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                      <span>{voiceErrorMsg}</span>
-                    </div>
-                  )}
+                  {/* Voice live area — listening / speaking / transcript-ready / error */}
+                  <OraVoiceLiveArea
+                    voiceState={voice.voiceState}
+                    interimTranscript={voice.interimTranscript}
+                    voiceReady={voiceReady}
+                    voiceErrorMsg={voiceErrorMsg}
+                    size="sm"
+                  />
 
                   {/* Unified input bar */}
                   <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
@@ -677,8 +669,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       <Paperclip className="h-3.5 w-3.5" />
                     </button>
 
-                    {/* Mic button */}
-                    <OraVoiceMicButton
+                    {/* Ora Voice Mode button */}
+                    <OraVoiceModeButton
                       voiceState={voice.voiceState}
                       isSupported={voice.isSupported}
                       onStart={() => voice.startListening(language)}
@@ -693,7 +685,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     <textarea
                       ref={textareaRef}
                       value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      onChange={(e) => {
+                        setInput(e.target.value);
+                        if (voiceReady) setVoiceReady(false);
+                      }}
                       onKeyDown={handleKeyDown}
                       placeholder={
                         uploadState === "attached"
@@ -719,7 +714,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
                   <div className="flex items-center justify-between mt-1.5">
                     <p className="text-[9px] text-muted-foreground/50">
-                      Upload images, PDF, DOCX, CSV, XLSX · Voice or type in any language
+                      Upload images, PDF, DOCX, CSV, XLSX ·{" "}
+                      {voice.isSupported
+                        ? "Voice or type in any language"
+                        : "Voice unavailable on this browser — typing still works"}
                     </p>
                     {session && (
                       <span className="text-[9px] text-muted-foreground/50">
