@@ -271,75 +271,36 @@ Phase 3 returns dataset analysis as structured text (column profiles, Pareto ana
 
 ---
 
-## Option 6 — Professional Message Actions & Export Experience
+## Option 6 — Professional Message Actions, Export & Conversation Thread Experience
 
 ### What it is
+Option 6 is a two-part background UI/UX polish task. It improves Ora's usability, professionalism, accessibility, and report portability without adding new AI models, APIs, backend complexity, or storage costs. It is designed to run as a background task independently of the main roadmap decisions (Web Search, Charts, Knowledge Vault, Voice-B, Image Generation).
+
+**This option is intentionally isolated from:**
+- Web Search
+- Advanced Charts
+- Knowledge Vault
+- Voice-B backend fallback
+- Image generation/editing
+- Database storage
+- Permanent message memory
+- Analytics tracking of message content
+- Billing/credit logic
+
+---
+
+### Part 1 — Message Actions & Export Experience
+
 Ora gains a professional message-action experience directly within the conversation thread. Users can copy, edit, download, reuse, listen to, and continue working from messages without leaving the chat experience. The design follows MustaFlow/Ora visual language and Dynamic Atom styling — not replicating any third-party UI.
 
 A reusable `OraMessageActions` component provides contextual actions for user messages, assistant responses, dataset analyses, image analyses, document analyses, voice transcripts, and Builder handoff responses.
-
-### Business value — HIGH
-- Makes Ora feel significantly more polished and production-ready
-- Improves usability for users who want to reuse AI-generated content
-- Reduces friction between discovery and execution workflows
-- Encourages Builder conversion through contextual continuation actions
-- Increases perceived quality without requiring new AI capabilities
-- Creates a stronger enterprise-ready experience for reports and analyses
-
-### User value — HIGH
-- One-click copy of useful responses
-- Easy editing and resubmission of previous prompts
-- Downloadable reports and analyses for offline use
-- Read-aloud support where voice capabilities exist
-- Faster iteration through retry/regenerate actions
-- Better handling of dataset, document, and image-analysis outputs
-- Improved accessibility and keyboard navigation
-
-### Risk level — LOW-MEDIUM
-- Primarily a UI enhancement with limited backend impact
-- Export functionality must avoid exposing sensitive internal references (fileRef, imageRef, session tokens, handoff tokens)
-- Edit-message workflows must preserve session consistency
-- Download generation must remain client-side only
-- Retry/regenerate actions must respect existing safety and rate-limit controls
-
-### Cost impact — LOW
-- No new AI models required
-- No new external APIs required
-- Browser clipboard and download APIs are sufficient
-- Minimal runtime overhead
-- No storage costs — exports generated locally
-
-### Security / privacy concerns
-- Do not log copied content
-- Do not log downloaded content
-- Do not log edited message text
-- Exported content must never expose: `fileRef`, `imageRef`, dataset raw rows, base64 image data, session tokens, handoff tokens, internal identifiers, or Builder/project internals
-- Downloads must be generated entirely client-side
-- Temporary uploads remain temporary and are never re-exposed through exports
-- Edited prompts must not silently reuse expired attachments
-
-### Implementation scope — MEDIUM (est. 1 phase)
-
-**Primary component:**
-- `artifacts/mustaflow/src/components/ora/ora-message-actions.tsx`
-
-**Optional helper module:**
-- `artifacts/mustaflow/src/lib/ora-message-export.ts`
-
-**Suggested helper functions:**
-- `copyMessageText(message)`
-- `downloadMessageAsMarkdown(message)`
-- `downloadDatasetReport(result)`
-- `downloadActionPlanCsv(actionPlan)`
-- `formatOraMessageForMarkdown(message)`
-- `sanitizeFilename(title)`
 
 **Actions by message type:**
 
 | Message type | Actions |
 |---|---|
 | User messages | Copy, Edit (loads into composer, append-only in Phase 1) |
-| Assistant messages | Copy, Download, Read aloud (when available), Retry/Regenerate (when safe), Continue in Builder (when applicable) |
+| Assistant messages | Copy, Download (.md), Read aloud (when available), Retry/Regenerate (when safe), Continue in Builder (when applicable) |
 | Dataset analysis | Copy summary, Download report (.md), Download JSON, Download action-plan CSV (when available) |
 | Image analysis | Copy analysis, Download analysis (.md), Read aloud, Continue in Builder |
 | Document analysis | Copy answer, Download report (.md), Read aloud, Continue in Builder |
@@ -349,7 +310,7 @@ A reusable `OraMessageActions` component provides contextual actions for user me
 - Load prior message into the composer
 - User edits and resubmits
 - New message is appended; existing thread history preserved
-- Marked as edited from a previous message
+- Marked as "edited from a previous message"
 - No destructive thread rewrites
 - Future (Option B): branch-style regeneration that replaces original + subsequent messages
 
@@ -385,9 +346,121 @@ Example labels: "Copy message", "Edit message", "Download response", "Read respo
 - Downloads: `Blob` + `URL.createObjectURL()` + `URL.revokeObjectURL()` after completion
 - Clipboard fallback: "Copy failed. Please select and copy manually."
 
+**Primary component:** `artifacts/mustaflow/src/components/ora/ora-message-actions.tsx`
+
+**Optional helper module:** `artifacts/mustaflow/src/lib/ora-message-export.ts`
+
+Suggested helper functions: `copyMessageText(message)`, `downloadMessageAsMarkdown(message)`, `downloadDatasetReport(result)`, `downloadActionPlanCsv(actionPlan)`, `formatOraMessageForMarkdown(message)`, `sanitizeFilename(title)`
+
+---
+
+### Part 2 — Conversation Thread Experience
+
+The Ora Panel and Ora Bubble gain a properly scrollable, restorable, and smart-scrolling conversation thread so users can read earlier messages, see all message types in correct order, and always reach the latest message without friction.
+
+**Scrollable thread requirements:**
+- Full conversation history is scrollable within the panel/bubble container
+- Previous messages remain visible above the current message — the thread does not collapse or truncate history while the session is open
+- Input composer is always accessible regardless of thread length (does not scroll out of view)
+- Dataset cards, image-analysis results, document-analysis results, voice transcripts, suggestions, and handoff cards remain visible in the correct chronological order
+- Message actions (Part 1) work correctly on older messages that have scrolled out of the initial viewport
+
+**Smart auto-scroll:**
+- Thread auto-scrolls to the latest message when a new message arrives and the user is already at (or near) the bottom
+- If the user has scrolled up to read earlier messages, auto-scroll is suspended — new messages arrive silently without hijacking the user's scroll position
+- Auto-scroll resumes when the user scrolls back to the bottom or clicks the "Scroll to latest" button
+
+**"Scroll to latest" / "New message" button:**
+- Appears as a fixed affordance within the thread container when the user is scrolled above the bottom
+- Shows a "New message" label (without emojis) when a new message has arrived while the user was scrolled up
+- Clicking it immediately scrolls to the latest message and resumes auto-scroll
+- Disappears automatically when the user reaches the bottom
+
+**Session restore (sessionStorage transcript):**
+- When the user refreshes the page or navigates away and back within the same browser session, the existing temporary sessionStorage transcript is restored into the thread
+- Message order is preserved exactly
+- All message types (chat, dataset, image, document, voice, suggestions, handoff) restore correctly
+- Message actions (Part 1) remain functional on restored messages
+- No new backend calls required for restore — sessionStorage is the sole source
+- Sensitive refs (`fileRef`, `imageRef`, session tokens, handoff tokens) are not written to sessionStorage; restored messages display without re-exposing those references
+
+**Mobile bottom-sheet scrolling:**
+- The Ora Bubble bottom sheet scrolls the thread independently of the page scroll
+- Overscroll does not accidentally dismiss the sheet while reading earlier messages
+- The input composer remains pinned at the bottom of the sheet regardless of thread length
+- Touch momentum scrolling works correctly on iOS and Android
+
+**In-scope touch points:**
+- `artifacts/mustaflow/src/components/ora-panel.tsx`
+- `artifacts/mustaflow/src/components/ora-bubble.tsx`
+- Thread scroll container (new or refactored `div` with `overflow-y: auto` and scroll behavior)
+- Scroll state management (ref-based, no global store changes needed)
+- sessionStorage transcript restore logic (already exists — wire to thread render)
+
+**Out of scope for this option:**
+- Permanent server-side message history (no DB, no API changes)
+- Cross-session message persistence (sessionStorage only)
+- Analytics or logging of scroll behavior or message content
+- Any changes to builder.ts, jobs.ts, or AI pipelines
+
+---
+
+### Business value — HIGH
+- Makes Ora feel significantly more polished and production-ready
+- Improves usability for users who want to read earlier context or reuse AI-generated content
+- Reduces friction between discovery and execution workflows
+- Encourages Builder conversion through contextual continuation actions
+- Increases perceived quality without requiring new AI capabilities
+- Creates a stronger enterprise-ready experience for reports and analyses
+
+### User value — HIGH
+- One-click copy, edit, download, read-aloud, retry, and continue actions on every message
+- Full scrollable thread — no more losing earlier messages
+- Automatic scroll that respects user's reading position
+- Previous messages restored after browser refresh
+- Proper mobile bottom-sheet scrolling
+- Improved accessibility and keyboard navigation
+
+### Risk level — LOW-MEDIUM
+- Primarily a UI enhancement with no backend impact
+- Export functionality must avoid exposing sensitive internal references
+- Edit-message workflows must preserve session consistency
+- Download generation must remain client-side only
+- Scroll state management must not introduce layout regressions
+- Retry/regenerate actions must respect existing safety and rate-limit controls
+
+### Cost impact — LOW
+- No new AI models required
+- No new external APIs required
+- Browser Clipboard API, Blob downloads, and CSS scroll behavior are sufficient
+- No storage costs — exports generated locally, sessionStorage restore uses existing data
+
+### Security / privacy concerns
+- Do not log copied content
+- Do not log downloaded content
+- Do not log edited message text
+- Do not log scroll position or thread length
+- Exported content must never expose: `fileRef`, `imageRef`, dataset raw rows, base64 image data, session tokens, handoff tokens, internal identifiers, or Builder/project internals
+- Downloads must be generated entirely client-side
+- Temporary uploads remain temporary and are never re-exposed through exports
+- Edited prompts must not silently reuse expired attachments
+- sessionStorage restore must not write or re-expose sensitive refs
+
+### Implementation scope — MEDIUM (est. 1 phase, background task)
+
+No backend changes. No DB migration. No OpenAPI changes. No new external APIs.
+
+Files expected to change:
+- `artifacts/mustaflow/src/components/ora/ora-message-actions.tsx` (NEW)
+- `artifacts/mustaflow/src/lib/ora-message-export.ts` (NEW, optional)
+- `artifacts/mustaflow/src/components/ora-panel.tsx` (scroll container, restore, auto-scroll, "new message" button, message-actions integration)
+- `artifacts/mustaflow/src/components/ora-bubble.tsx` (same as panel, mobile bottom-sheet)
+
 ### Validation plan
 
 Tests must verify:
+
+**Message actions (Part 1):**
 - Copy button renders on assistant messages
 - Copy button renders on user messages
 - Edit button renders only on user messages
@@ -402,26 +475,45 @@ Tests must verify:
 - Keyboard accessibility functions correctly
 - Mobile action menu renders correctly
 
-Regression coverage: Phase 1 chat, Phase 2 document analysis, Phase 3 dataset analysis, Voice-A, Phase 5 image analysis, Phase 6 Builder handoff
+**Thread experience (Part 2):**
+- Desktop Ora Panel scrolls through full message history
+- Ora Bubble scrolls through full message history
+- Mobile bottom-sheet scrolls correctly without dismissing on overscroll
+- Previous messages restore correctly after browser refresh (via sessionStorage)
+- All message types restore in correct order (chat, dataset, image, document, voice, suggestions, handoff)
+- Message actions remain functional on restored messages
+- Auto-scroll triggers on new message when user is at bottom
+- Auto-scroll is suspended when user has scrolled up
+- "Scroll to latest" button appears when scrolled above bottom
+- "Scroll to latest" button disappears when user reaches bottom
+- "New message" indicator appears when new message arrives while scrolled up
+- Input composer remains accessible regardless of thread length
 
-Validation report requirements (if approved and implemented):
+**Regression coverage:** Phase 1 chat, Phase 2 document analysis, Phase 3 dataset analysis, Voice-A, Phase 5 image analysis, Phase 6 Builder handoff
+
+**Validation report requirements (if approved and implemented):**
 - Affected files
-- Desktop UI proof
-- Mobile UI proof
-- Copy workflow proof
-- Edit workflow proof
-- Download workflow proof
-- Dataset export proof
+- Desktop Ora Panel scrolling proof
+- Ora Bubble scrolling proof
+- Mobile scrolling proof
+- Previous messages restore after refresh proof
+- Scroll-to-latest button proof
+- Copy action proof
+- Edit action proof
+- Download/export proof
+- Dataset report export proof
+- No sensitive refs in exported content proof
+- No message text in logs proof
 - Accessibility proof
-- Regression proof
-- Test results
-- Typecheck/lint/format status
+- Phase 1–6 regression proof
+- Typecheck/lint/format/test status
 - Rollback instructions
 
 ### Rollback plan
 - Remove `ora-message-actions.tsx`
-- Remove export helper utilities
-- Revert message-thread integrations in `ora-panel.tsx` and `ora-bubble.tsx`
+- Remove `ora-message-export.ts`
+- Revert scroll container and auto-scroll changes in `ora-panel.tsx` and `ora-bubble.tsx`
+- Revert sessionStorage restore wiring (if isolated to a separate hook/util)
 - No database migration required
 - No backend rollback required
 
@@ -429,7 +521,7 @@ Validation report requirements (if approved and implemented):
 
 ## Comparison Matrix
 
-| Criterion | 1 Web Search | 2 Voice-B | 3 Knowledge Vault | 4 Image Gen | 5 Charts | 6 Message Actions |
+| Criterion | 1 Web Search | 2 Voice-B | 3 Knowledge Vault | 4 Image Gen | 5 Charts | 6 Actions & Thread |
 |---|---|---|---|---|---|---|
 | **Business value** | HIGH | LOW | MED-HIGH | HIGH | MEDIUM | HIGH |
 | **User value** | HIGH | LOW-MED | HIGH (future) | HIGH | HIGH (data) | HIGH |
@@ -457,9 +549,9 @@ Deliver first. No new backend routes, no new APIs, no new security design — a 
 
 The highest-capability addition — directly addresses the largest gap in Ora's usefulness for app-building conversations: stale knowledge. Users deciding what to build, what stack to use, or what APIs to integrate need current information. The security design is solvable using the same patterns established in Phases 2 and 3 (untrusted input labeling, content sanitization, rate limiting). The right next full implementation phase.
 
-**3. Option 6 — Professional Message Actions & Export Experience**
+**3. Option 6 — Professional Message Actions, Export & Conversation Thread Experience**
 
-Strong candidate to follow Option 1. No backend routes, no new APIs, no DB changes — purely a frontend quality and usability upgrade. High user value and high business value (enterprise-readiness) at low cost and low risk. Suitable as a standalone phase or bundled alongside Option 5 if both are approved together. The download/export capability is particularly valuable for dataset and document analysis users.
+A strong background task that runs independently of the main roadmap decisions. No backend routes, no new APIs, no DB changes — two complementary frontend improvements: message actions (copy, edit, download, read-aloud, retry, continue) and a properly scrollable, restorable conversation thread with smart auto-scroll and a "new message" indicator. High user value and high business value (enterprise-readiness, report portability, accessibility) at low cost and low risk. Because it is fully isolated from Web Search, Charts, Knowledge Vault, Voice-B, and Image Generation, it can run as a parallel background task without blocking the main roadmap sequence.
 
 **4. Option 3 — Knowledge Vault Planning**
 

@@ -1,0 +1,93 @@
+Thank you for saving the six-option recommendation report to:
+
+docs/ora-next-phase-recommendation.md
+
+Please update the permanent Option 6 section to include the full scrolling/thread behavior that we discussed.
+
+Important clarification:
+
+Option 6 should not only be:
+
+“Professional Message Actions & Export Experience”
+
+It should be expanded to:
+
+“Professional Message Actions, Export & Conversation Thread Experience”
+
+This Option 6 background task should include two major parts:
+
+1. Message Actions / Export
+
+* Copy
+* Edit
+* Download
+* Read aloud
+* Retry / Regenerate where safe
+* Continue in Builder where applicable
+* Dataset/report export
+* Client-side downloads only
+* No sensitive refs in exported content
+
+2. Conversation Thread Experience
+
+* scrollable message thread
+* previous-message visibility
+* smart auto-scroll
+* “Scroll to latest” / “New message ↓” button
+* previous messages restored after refresh from the existing temporary sessionStorage transcript
+* mobile bottom-sheet scrolling
+* input remains accessible
+* message actions still work on older messages
+* dataset cards, image-analysis results, document-analysis results, voice transcripts, suggestions, and handoff cards stay visible in the correct order
+
+Please add this to docs/ora-next-phase-recommendation.md so the permanent record is complete.
+
+Also fix the small typo in the draft text:
+
+Requirements\:abd re
+
+It should just be:
+
+Requirements:
+
+Important scope reminder:
+
+This Option 6 task is being handled as a separate background UI/UX polish task. It should not block or replace the main next-phase roadmap discussion.
+
+Keep it isolated from:
+
+* Web Search
+* Advanced Charts
+* Knowledge Vault
+* Voice-B backend fallback
+* Image generation/editing
+* database storage
+* permanent message memory
+* analytics tracking of message content
+* billing/credit logic
+
+Recommended updated Option 6 priority wording:
+
+Option 6 is a strong background task because it improves usability, professionalism, accessibility, and report portability without adding new AI models, APIs, backend complexity, or storage costs.
+
+It should be allowed to run in the background as a UI polish task while the main roadmap decision continues separately.
+
+Validation for this background task must include:
+
+* desktop Ora Panel scrolling proof
+* Ora Bubble scrolling proof
+* mobile scrolling proof
+* previous messages restore after refresh
+* scroll-to-latest button proof
+* copy action proof
+* edit action proof
+* download/export proof
+* dataset report export proof
+* no sensitive refs in exported content
+* no message text in logs
+* accessibility proof
+* Phase 1–6 regression proof
+* typecheck/lint/format/test status
+* rollback plan
+
+Please update the permanent document with this complete Option 6 scope before proceeding further with the background UI task.
