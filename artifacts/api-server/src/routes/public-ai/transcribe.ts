@@ -81,7 +81,6 @@ router.post("/public-ai/transcribe", oraUploadLimiter, async (req, res) => {
         bytes: total,
         format,
         language: language ?? "auto",
-        sessionId: session.sessionId,
       },
       "Whisper transcription complete",
     );
