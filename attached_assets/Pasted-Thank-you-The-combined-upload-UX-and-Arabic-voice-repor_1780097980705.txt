@@ -1,0 +1,116 @@
+Thank you. The combined upload UX and Arabic voice report looks good, but I cannot accept the task as complete yet until the final checkpoint/commit and final proof are confirmed.
+
+Main issue:
+
+The report says:
+
+“Arabic voice changes are in the working tree, will be checkpointed next.”
+
+Please commit/checkpoint the Arabic voice fixes first, then provide the final commit hash.
+
+Required before acceptance:
+
+1. Final commit hash
+
+Please confirm the final commit hash that includes both:
+
+* upload UX drag/drop/paste improvements
+* Arabic voice recognition / RTL fixes
+
+Do not leave Arabic voice changes only in the working tree.
+
+2. Final affected files
+
+Please list every final modified file after the checkpoint.
+
+Expected touched areas include:
+
+* ora-panel.tsx
+* ora-bubble.tsx
+* ora-voice-mode-button.tsx
+* Whisper recorder/transcribe files if changed
+* transcribe.ts if changed
+* speechToText helper if changed
+
+3. Arabic voice live proof
+
+Please provide stronger proof for Arabic voice behavior.
+
+Required proof:
+
+* Arabic dictation path uses ar-SA for browser SpeechRecognition
+* Whisper path sends lang=ar
+* backend transcribe route receives lang=ar
+* speechToText(..., "ar") passes Arabic language hint to gpt-4o-mini-transcribe
+* returned transcript is Arabic script
+* Arabic transcript lands in composer for review/edit
+* Arabic transcript displays RTL correctly using dir="auto"
+* Ora replies in Arabic when Arabic transcript is sent
+* no Arabic transcript appears in logs
+* no audio is stored
+
+If a real microphone/audio test is not possible in the environment, please clearly say that and provide source-level proof plus a staging/manual test checklist.
+
+4. Normal voice regression proof
+
+Confirm:
+
+* English voice still works
+* Spanish voice still works
+* normal mic/dictation does not auto-send
+* Talk with Ora / Voice Conversation Mode still works
+* user can stop/exit Voice Conversation Mode
+* TTS behavior still works
+* no transcript logging was added
+
+5. Upload UX proof
+
+Please confirm again after final commit:
+
+* upload button remains visible
+* drag/drop image works
+* drag/drop document works
+* drag/drop dataset works
+* paste image works
+* normal text paste still works
+* image/document/dataset chips still render correctly
+* existing upload route POST /api/public-ai/upload is still used
+* no new upload backend route was added
+
+6. Quality checks after final commit
+
+Please run and report:
+
+* typecheck
+* lint
+* format
+* frontend workflow
+* backend workflow
+* relevant tests
+* any unrelated failures if present
+
+7. Privacy proof
+
+Confirm logs do not contain:
+
+* Arabic transcript text
+* uploaded file contents
+* image bytes
+* base64
+* pasted content
+* user message text
+* audio bytes
+* raw file contents
+* private refs
+
+8. Rollback plan
+
+Please provide the final rollback plan for:
+
+* upload drag/drop/paste changes
+* Arabic language hint changes
+* RTL dir="auto" changes
+
+After the final commit hash and this proof are provided, I will decide whether to accept the combined task as complete.
+
+Do not start Phase 7, Phase 8, Phase 9, thread scrolling, image generation, Knowledge Vault, or unrelated roadmap work under this task.
