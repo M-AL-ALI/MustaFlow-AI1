@@ -87,6 +87,7 @@ import clerkWebhookRouter from "./clerk-webhook";
 import brainstormRouter from "./brainstorm";
 import apiDocsRouter from "./api-docs";
 import publicAiRouter from "./public-ai/index";
+import oraTranscriptRouter from "./ora-transcript";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -185,6 +186,7 @@ const KNOWN_PREFIXES = [
   "/brainstorm",
   "/docs",
   "/public-ai",
+  "/ora",
 ];
 
 router.use((req, res, next) => {
@@ -291,6 +293,7 @@ router.use(ecosystemExtensionsRouter);
 router.use(profilesRouter);
 router.use(gdprRouter); // GET /me/export, DELETE /me
 router.use(tokensRouter); // GET/POST/DELETE /me/tokens
+router.use(oraTranscriptRouter); // GET/POST/DELETE /ora/transcript
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

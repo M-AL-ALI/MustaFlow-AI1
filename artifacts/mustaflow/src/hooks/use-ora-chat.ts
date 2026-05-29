@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 
 export interface OraMessage {
@@ -51,6 +52,7 @@ export interface UseOraChatReturn {
   uploadError: string | null;
   clearUploadError: () => void;
   oraStatus: OraStatus;
+  clearConversation: () => Promise<void>;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -153,6 +155,17 @@ async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function apiDelete(path: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status });
+  }
+}
+
 function isDatasetFileType(fileType: string, filename: string): boolean {
   const ft = fileType.toLowerCase();
   const name = filename.toLowerCase();
@@ -177,7 +190,18 @@ function deriveOraStatus(
   return "idle";
 }
 
+function serializeForStorage(
+  messages: OraMessage[],
+): Array<{ role: string; content: string; handoffCta?: boolean }> {
+  return messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+    ...(m.handoffCta !== undefined ? { handoffCta: m.handoffCta } : {}),
+  }));
+}
+
 export function useOraChat(): UseOraChatReturn {
+  const { isLoaded, isSignedIn } = useUser();
   const [messages, setMessages] = useState<OraMessage[]>([]);
   const [session, setSession] = useState<OraSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -186,7 +210,12 @@ export function useOraChat(): UseOraChatReturn {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const initRef = useRef(false);
+
+  // Tracks whether the initial Ora session setup has run (runs once on mount)
+  const sessionInitRef = useRef(false);
+  // Tracks whether we've already restored the server transcript for this mount
+  const transcriptRestoredRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setLanguage = useCallback((lang: string) => {
     setLanguageState(lang);
@@ -197,9 +226,19 @@ export function useOraChat(): UseOraChatReturn {
     }
   }, []);
 
+  const saveToServer = useCallback((msgs: OraMessage[]) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      apiPost("/api/ora/transcript", { messages: serializeForStorage(msgs) }).catch(() => {
+        /* best-effort; silent on failure */
+      });
+    }, 800);
+  }, []);
+
+  // Phase 1: Session init — runs once on mount regardless of auth state
   useEffect(() => {
-    if (initRef.current) return;
-    initRef.current = true;
+    if (sessionInitRef.current) return;
+    sessionInitRef.current = true;
 
     const storedSessionId = getStoredSessionId();
 
@@ -220,6 +259,7 @@ export function useOraChat(): UseOraChatReturn {
             fileCount: data.fileCount ?? 0,
             fileLimit: data.fileLimit ?? FILE_LIMIT,
           });
+          // Load sessionStorage transcript as a baseline; Phase 2 may overwrite with server data
           const stored = getStoredTranscript();
           if (stored.length > 0) {
             setMessages(stored);
@@ -233,6 +273,8 @@ export function useOraChat(): UseOraChatReturn {
           }
         }
       }
+
+      // No valid session — create one
       try {
         const data = await apiPost<{
           sessionId: string;
@@ -257,6 +299,26 @@ export function useOraChat(): UseOraChatReturn {
 
     void init();
   }, []);
+
+  // Phase 2: Server transcript restore — runs once Clerk confirms the user is signed in
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || transcriptRestoredRef.current) return;
+    transcriptRestoredRef.current = true;
+
+    const restoreTranscript = async () => {
+      try {
+        const data = await apiGet<{ messages: OraMessage[] }>("/api/ora/transcript");
+        if (data.messages.length > 0) {
+          setMessages(data.messages);
+          storeTranscript(data.messages);
+        }
+      } catch {
+        // Best-effort — sessionStorage messages (set in Phase 1) remain as fallback
+      }
+    };
+
+    void restoreTranscript();
+  }, [isLoaded, isSignedIn]);
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -358,6 +420,7 @@ export function useOraChat(): UseOraChatReturn {
       setMessages((prev) => {
         const next = [...prev, userMsg];
         storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
         return next;
       });
       setIsLoading(true);
@@ -399,6 +462,7 @@ export function useOraChat(): UseOraChatReturn {
                 },
               ];
               storeTranscript(next);
+              if (isSignedIn) saveToServer(next);
               return next;
             });
             setSession((prev) =>
@@ -426,6 +490,7 @@ export function useOraChat(): UseOraChatReturn {
                 { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
               ];
               storeTranscript(next);
+              if (isSignedIn) saveToServer(next);
               return next;
             });
             setSession((prev) =>
@@ -441,7 +506,6 @@ export function useOraChat(): UseOraChatReturn {
             );
           }
         } else {
-          // Plain chat
           const body: Record<string, unknown> = { message: content, messages: history };
           if (language && language !== "auto") {
             body.language = language;
@@ -465,6 +529,7 @@ export function useOraChat(): UseOraChatReturn {
               },
             ];
             storeTranscript(next);
+            if (isSignedIn) saveToServer(next);
             return next;
           });
           setSession((prev) =>
@@ -504,8 +569,48 @@ export function useOraChat(): UseOraChatReturn {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, language, attachedFile],
+    [isLoading, messages, language, attachedFile, isSignedIn, saveToServer],
   );
+
+  const clearConversation = useCallback(async () => {
+    // Cancel any pending debounced save so it cannot repopulate server state after clear
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    clearStoredTranscript();
+    clearStoredSessionId();
+    setMessages([]);
+    setError(null);
+    if (isSignedIn) {
+      try {
+        await apiDelete("/api/ora/transcript");
+      } catch {
+        /* best-effort */
+      }
+    }
+    // Reset the transcript-restored flag so a new sign-in cycle can restore again
+    transcriptRestoredRef.current = false;
+    try {
+      const data = await apiPost<{
+        sessionId: string;
+        msgCount: number;
+        msgLimit: number;
+        fileCount?: number;
+        fileLimit?: number;
+      }>("/api/public-ai/session", {});
+      storeSessionId(data.sessionId);
+      setSession({
+        sessionId: data.sessionId,
+        msgCount: data.msgCount,
+        msgLimit: data.msgLimit,
+        fileCount: data.fileCount ?? 0,
+        fileLimit: data.fileLimit ?? FILE_LIMIT,
+      });
+    } catch {
+      /* best-effort */
+    }
+  }, [isSignedIn]);
 
   const atLimit = (session?.msgCount ?? 0) >= (session?.msgLimit ?? 20);
 
@@ -528,5 +633,6 @@ export function useOraChat(): UseOraChatReturn {
     uploadError,
     clearUploadError: () => setUploadError(null),
     oraStatus,
+    clearConversation,
   };
 }

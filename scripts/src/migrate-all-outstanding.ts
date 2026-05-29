@@ -79,6 +79,7 @@ const MIGRATIONS = [
   "migrate-command-approval",
   "migrate-reinforced-count",
   "migrate-voice-lang",
+  "migrate-ora-transcripts",
 ] as const;
 
 async function main(): Promise<void> {

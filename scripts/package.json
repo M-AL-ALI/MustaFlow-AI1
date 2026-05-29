@@ -88,6 +88,7 @@
     "backfill-message-origin": "tsx ./src/backfill-message-origin.ts",
     "migrate-reinforced-count": "tsx ./src/migrate-reinforced-count.ts",
     "migrate-stripe-events-status": "tsx ./src/migrate-stripe-events-status.ts",
+    "migrate-ora-transcripts": "tsx ./src/migrate-ora-transcripts.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

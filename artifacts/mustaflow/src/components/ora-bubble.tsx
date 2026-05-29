@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Volume2,
   VolumeX,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
@@ -139,6 +140,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     clearUploadError,
     session,
     oraStatus,
+    clearConversation,
   } = chat;
 
   const [open, setOpen] = useState(false);
@@ -349,6 +351,18 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   </button>
                 )}
 
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void clearConversation()}
+                    disabled={isLoading}
+                    title="Clear conversation"
+                    className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
                 {/* Language selector */}
                 <div className="relative" ref={langMenuRef}>
                   <button
@@ -381,6 +395,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     </div>
                   )}
                 </div>
+
                 <button
                   type="button"
                   onClick={() => setOpen(false)}

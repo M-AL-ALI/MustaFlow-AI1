@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Volume2,
   VolumeX,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
@@ -147,6 +148,7 @@ export function OraPanel({ chat }: OraPanelProps) {
     clearUploadError,
     session,
     oraStatus,
+    clearConversation,
   } = chat;
 
   const [input, setInput] = useState("");
@@ -307,6 +309,19 @@ export function OraPanel({ chat }: OraPanelProps) {
               ) : (
                 <VolumeX className="h-3.5 w-3.5" />
               )}
+            </button>
+          )}
+
+          {/* Clear conversation */}
+          {hasMessages && (
+            <button
+              type="button"
+              onClick={() => void clearConversation()}
+              disabled={isLoading}
+              title="Clear conversation"
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
 
