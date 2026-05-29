@@ -8,6 +8,7 @@ import {
 } from "../../lib/public-ai/session";
 import { validateFile } from "../../lib/public-ai/file-validate";
 import { extractText, ExtractionError } from "../../lib/public-ai/file-extract";
+import { extractDataset, DatasetExtractionError } from "../../lib/public-ai/dataset-extract";
 import { scanContent } from "../../lib/public-ai/content-safety";
 import {
   storeFile,
@@ -77,9 +78,77 @@ router.post(
       return;
     }
 
+    const isDataset = validation.type === "csv" || validation.type === "xlsx";
+
+    if (isDataset) {
+      let summary: Awaited<ReturnType<typeof extractDataset>>;
+      try {
+        summary = await extractDataset(file.buffer, validation.type as "csv" | "xlsx");
+      } catch (err) {
+        if (err instanceof DatasetExtractionError) {
+          const code = err.code;
+          if (code === "empty" || code === "no-headers" || code === "no-visible-sheet") {
+            res.status(422).json({ error: "This file appears to be empty or has no readable data." });
+          } else if (code === "parse-timeout") {
+            res.status(422).json({ error: "This file took too long to process. Please try a smaller file." });
+          } else if (code === "too-many-zip-entries") {
+            res.status(422).json({ error: "This XLSX file is too complex to analyze. Please simplify it or convert it to CSV." });
+          } else {
+            res.status(422).json({ error: `This file could not be read. Please try another ${validation.type.toUpperCase()} file.` });
+          }
+        } else {
+          res.status(422).json({ error: `This file could not be read. Please try another ${validation.type.toUpperCase()} file.` });
+        }
+        return;
+      }
+
+      const fileRef = storeFile({
+        sessionId: session.sessionId,
+        filename: validation.sanitizedName,
+        mimeType: file.mimetype,
+        extractedText: "",
+        charCount: 0,
+        datasetSummary: summary,
+      });
+
+      const { token, payload } = incrementFileCount(session);
+      setSessionCookie(res, token);
+
+      logger.info(
+        {
+          component: "ora-upload",
+          fileType: validation.type,
+          rowCount: summary.rowCount,
+          colCount: summary.colCount,
+          sanitizedCellCount: summary.sanitizedCellCount,
+          hiddenSheetsSkipped: summary.hiddenSheetsSkipped,
+          truncated: summary.truncated,
+          fileCount: payload.fileCount,
+        },
+        "Ora dataset uploaded and profiled",
+      );
+
+      res.json({
+        fileRef,
+        filename: validation.sanitizedName,
+        fileType: validation.type,
+        charCount: 0,
+        rowCount: summary.rowCount,
+        colCount: summary.colCount,
+        truncated: summary.truncated,
+        fileCount: payload.fileCount,
+        fileLimit: FILE_LIMIT_VALUE,
+      });
+      return;
+    }
+
     let extractedText: string;
     try {
-      extractedText = await extractText(file.buffer, validation.type);
+      // validation.type is a document type here — csv/xlsx branch already returned above
+      extractedText = await extractText(
+        file.buffer,
+        validation.type as Exclude<typeof validation.type, "csv" | "xlsx">,
+      );
     } catch (err) {
       if (err instanceof ExtractionError) {
         res.status(422).json({

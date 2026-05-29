@@ -65,10 +65,10 @@ describe("validateFile — type detection", () => {
     if (!result.ok) expect(result.statusCode).toBe(415);
   });
 
-  it("rejects .csv extension", () => {
-    const result = validateFile(Buffer.from("a,b,c"), "data.csv", "text/csv");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.statusCode).toBe(415);
+  it("accepts .csv extension as a dataset file", () => {
+    const result = validateFile(Buffer.from("a,b,c\n1,2,3"), "data.csv", "text/csv");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.type).toBe("csv");
   });
 
   it("rejects .xlsx extension", () => {

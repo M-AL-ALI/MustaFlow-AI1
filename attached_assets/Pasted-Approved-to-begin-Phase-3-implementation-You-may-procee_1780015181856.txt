@@ -1,0 +1,54 @@
+Approved to begin Phase 3 implementation.
+
+You may proceed with the corrected Phase 3 plan exactly as written, with the following hard requirements:
+
+1. Do not modify or weaken Phase 1 or Phase 2 behavior.
+    * PDF, DOCX, and TXT upload/analysis must continue working.
+    * Existing fileRef session isolation must remain unchanged.
+    * Existing Phase 1 and Phase 2 tests must still pass after Phase 3.
+2. Implement Phase 3 as additive only.
+    * Add CSV and XLSX support alongside existing document types.
+    * Do not replace the existing file-analysis route.
+    * Dataset analysis must use the new separate route:
+        POST /api/public-ai/dataset-analysis
+3. Follow the corrected safety design exactly.
+    * Block .xls, .xlsm, .xlsb, and .ods.
+    * Validate XLSX with extension check, ZIP magic check, OOXML structure check, ZIP entry count guard, parse timeout, row/column caps, and visible worksheet check.
+    * Preserve negative numbers.
+    * Neutralize only CSV/string cells beginning with = or @.
+    * Never send formula expressions to the model.
+    * Treat all dataset cells as untrusted data, not instructions.
+    * Do not silently strip normal user text.
+    * Sanitize only control characters and Unicode direction override characters, and return sanitizedCellCount.
+4. Server-side dataset statistics are required.
+    * Do not rely only on sampled rows.
+    * Compute dataset profile from the full parsed dataset up to the 10,000-row cap.
+    * Include column profiles, numeric stats, categorical top values, date ranges, and Pareto pre-computation where applicable.
+5. Use the premium model for dataset analysis.
+    * Dataset analysis must bypass lite/eco/mini/nano routing.
+    * Use ORA_PREMIUM_MODEL ?? “gpt-5.4”.
+    * Use Anthropic fallback only if the primary model fails or if JSON validation fails.
+    * Validate the final response with Zod before returning it to the client.
+6. The UI must render structured cards and tables only.
+    * No dashboards.
+    * No chart-heavy visual reporting.
+    * No interactive chart library.
+    * Dataset preview should show headers, first 5 rows, row count, and column count.
+    * Results should render as Summary, Dataset Profile, Key Findings, KPI Gaps, Trend Analysis, Pareto Analysis, 5 Whys, Fishbone, Recommendations, Action Plan, Risks, and Next Steps when those sections are present.
+7. Logging must remain safe.
+    * Never log raw cell values.
+    * Never log column names.
+    * Never log row data.
+    * Never log formula strings.
+    * Never log user question text.
+    * Never log model response text.
+    * Only log the approved metadata fields from the plan.
+8. Testing is mandatory before reporting completion.
+    * Add phase3.test.ts.
+    * Do not modify Phase 1 or Phase 2 test files unless absolutely necessary, and if necessary, explain why before doing it.
+    * Confirm typecheck, lint, format, Phase 1 tests, Phase 2 tests, and Phase 3 tests all pass.
+    * Include proof for CSV upload, XLSX upload, KPI analysis, Pareto analysis, root-cause/5 Whys, hidden sheet handling, formula safety, cross-session fileRef blocking, and no raw data in logs.
+9. Do not add image upload, voice input, web search, builder handoff, project creation, permanent storage, database writes, or project/secret/credit access in Phase 3.
+10. Stop and report immediately if any existing Phase 1 or Phase 2 behavior breaks.
+
+You are approved to implement Phase 3 now, but only within this exact scope.

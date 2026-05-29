@@ -9,11 +9,13 @@ import {
   MessageSquare,
   Paperclip,
   FileText,
+  Table2,
   AlertCircle,
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState } from "@/hooks/use-ora-chat";
+import { DatasetResultCard } from "@/components/dataset-result-card";
 
 const LANGUAGES = [
   { value: "auto", label: "Auto Detect" },
@@ -32,13 +34,21 @@ function FileChip({
   filename,
   uploadError,
   onClear,
+  fileType,
+  rowCount,
+  colCount,
 }: {
   uploadState: UploadState;
   filename?: string;
   uploadError: string | null;
   onClear: () => void;
+  fileType?: string;
+  rowCount?: number;
+  colCount?: number;
 }) {
   if (uploadState === "idle") return null;
+
+  const isDataset = fileType === "csv" || fileType === "xlsx";
 
   return (
     <div
@@ -52,13 +62,24 @@ function FileChip({
     >
       {uploadState === "uploading" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
       {uploadState === "attached" && (
-        <FileText className="h-3 w-3 shrink-0 text-[hsl(265_85%_65%)]" />
+        isDataset
+          ? <Table2 className="h-3 w-3 shrink-0 text-amber-400" />
+          : <FileText className="h-3 w-3 shrink-0 text-[hsl(265_85%_65%)]" />
       )}
       {uploadState === "error" && <AlertCircle className="h-3 w-3 shrink-0" />}
 
       <span className="flex-1 truncate min-w-0">
         {uploadState === "uploading" && `Uploading ${filename ?? "file"}…`}
-        {uploadState === "attached" && (filename ?? "File attached")}
+        {uploadState === "attached" && (
+          <span className="flex flex-col gap-0.5">
+            <span className="truncate">{filename ?? "File attached"}</span>
+            {isDataset && rowCount !== undefined && colCount !== undefined && (
+              <span className="text-[10px] text-muted-foreground">
+                {rowCount.toLocaleString()} rows × {colCount} cols
+              </span>
+            )}
+          </span>
+        )}
         {uploadState === "error" && (uploadError ?? "Upload failed")}
       </span>
 
@@ -286,7 +307,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   <p className="text-sm font-medium mb-1">Hi, I'm Ora</p>
                   <p className="text-xs text-muted-foreground max-w-[220px] mx-auto">
                     Your free AI consultant. Ask me anything about app planning, strategy, or
-                    MustaFlow. You can also upload a PDF, DOCX, or TXT for analysis.
+                    MustaFlow. Upload a PDF, DOCX, TXT, CSV, or XLSX for analysis.
                   </p>
                 </div>
               )}
@@ -308,6 +329,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       <div className="bg-primary/15 border border-primary/20 text-sm rounded-2xl rounded-tr-sm px-3 py-2 text-foreground whitespace-pre-wrap break-words">
                         {msg.content}
                       </div>
+                    ) : msg.datasetResult ? (
+                      <DatasetResultCard result={msg.datasetResult} />
                     ) : (
                       <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap break-words">
                         {msg.content}
@@ -383,6 +406,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     filename={attachedFile?.filename}
                     uploadError={uploadError}
                     onClear={handleClearAttachment}
+                    fileType={attachedFile?.fileType}
+                    rowCount={attachedFile?.rowCount}
+                    colCount={attachedFile?.colCount}
                   />
 
                   <div className="flex items-end gap-2">
@@ -390,7 +416,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".pdf,.docx,.txt"
+                      accept=".pdf,.docx,.txt,.csv,.xlsx"
                       className="sr-only"
                       aria-hidden
                       onChange={handleFileChange}
@@ -404,7 +430,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       title={
                         atFileLimit
                           ? `File limit reached (${session?.fileCount ?? 3}/${session?.fileLimit ?? 3})`
-                          : "Upload a PDF, DOCX, or TXT file"
+                          : "Upload a PDF, DOCX, TXT, CSV, or XLSX file"
                       }
                       className={cn(
                         "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors",

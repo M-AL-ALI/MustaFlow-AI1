@@ -1,12 +1,15 @@
 /**
- * In-memory ephemeral file store for Ora Phase 2.
+ * In-memory ephemeral file store for Ora Phase 2 (documents) + Phase 3 (datasets).
  *
- * Only extracted plain text is stored — raw file bytes are discarded immediately
- * after extraction. Nothing is written to the database or to disk.
+ * Only extracted plain text (documents) or DatasetSummary (CSV/XLSX) is stored
+ * — raw file bytes are discarded immediately after extraction. Nothing is written
+ * to the database or to disk.
  *
  * Entries expire after 30 minutes (matching the session JWT TTL) and are evicted
  * by a cleanup interval and on every access attempt.
  */
+
+import type { DatasetSummary } from "./dataset-extract.js";
 
 export const MAX_TEXT_CHARS_PER_FILE = 25_000;
 export const MAX_TOTAL_CHARS_PER_SESSION = 75_000;
@@ -23,6 +26,7 @@ export interface FileEntry {
   extractedText: string;
   charCount: number;
   expiresAt: number;
+  datasetSummary?: DatasetSummary;
 }
 
 const store = new Map<string, FileEntry>();

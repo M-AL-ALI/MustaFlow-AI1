@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 
 export interface OraMessage {
   role: "user" | "assistant";
   content: string;
   handoffCta?: boolean;
+  datasetResult?: DatasetAnalysisResult;
 }
 
 export interface OraSession {
@@ -21,6 +23,9 @@ export interface AttachedFile {
   filename: string;
   fileType: string;
   charCount: number;
+  isDataset: boolean;
+  rowCount?: number;
+  colCount?: number;
 }
 
 export interface UseOraChatReturn {
@@ -46,7 +51,7 @@ const SESSION_STORAGE_KEY = "ora_session_id";
 const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 
 const FILE_LIMIT = 3;
-const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt"];
+const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 function getStoredLanguage(): string {
@@ -228,7 +233,9 @@ export function useOraChat(): UseOraChatReturn {
 
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
         setUploadState("error");
-        setUploadError(`Unsupported file type "${ext}". Please upload a PDF, DOCX, or TXT file.`);
+        setUploadError(
+          `Unsupported file type "${ext}". Please upload a PDF, DOCX, TXT, CSV, or XLSX file.`,
+        );
         return;
       }
 
@@ -271,15 +278,21 @@ export function useOraChat(): UseOraChatReturn {
           filename: string;
           fileType: string;
           charCount: number;
+          rowCount?: number;
+          colCount?: number;
           fileCount: number;
           fileLimit: number;
         };
 
+        const isDataset = data.fileType === "csv" || data.fileType === "xlsx";
         setAttachedFile({
           fileRef: data.fileRef,
           filename: data.filename,
           fileType: data.fileType,
           charCount: data.charCount,
+          isDataset,
+          rowCount: data.rowCount,
+          colCount: data.colCount,
         });
         setUploadState("attached");
         setSession((prev) =>
@@ -318,9 +331,10 @@ export function useOraChat(): UseOraChatReturn {
       try {
         const history = messages.slice(-20).map((m) => ({ role: m.role, content: m.content }));
 
-        let data: { reply: string; handoffCta: boolean; msgCount: number; msgLimit: number };
-
         if (currentAttachment) {
+          setAttachedFile(null);
+          setUploadState("idle");
+
           const body: Record<string, unknown> = {
             fileRef: currentAttachment.fileRef,
             message: content,
@@ -329,36 +343,98 @@ export function useOraChat(): UseOraChatReturn {
           if (language && language !== "auto") {
             body.language = language;
           }
-          data = await apiPost<typeof data>("/api/public-ai/file-analysis", body);
-          setAttachedFile(null);
-          setUploadState("idle");
+
+          if (currentAttachment.isDataset) {
+            const data = await apiPost<{
+              result: DatasetAnalysisResult;
+              msgCount: number;
+              msgLimit: number;
+            }>("/api/public-ai/dataset-analysis", body);
+
+            setMessages((prev) => {
+              const next = [
+                ...prev,
+                {
+                  role: "assistant" as const,
+                  content: data.result.summary,
+                  handoffCta: true,
+                  datasetResult: data.result,
+                },
+              ];
+              storeTranscript(next);
+              return next;
+            });
+            setSession((prev) =>
+              prev
+                ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
+                : {
+                    sessionId: "",
+                    msgCount: data.msgCount,
+                    msgLimit: data.msgLimit,
+                    fileCount: 0,
+                    fileLimit: FILE_LIMIT,
+                  },
+            );
+          } else {
+            const data = await apiPost<{
+              reply: string;
+              handoffCta: boolean;
+              msgCount: number;
+              msgLimit: number;
+            }>("/api/public-ai/file-analysis", body);
+
+            setMessages((prev) => {
+              const next = [
+                ...prev,
+                { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+              ];
+              storeTranscript(next);
+              return next;
+            });
+            setSession((prev) =>
+              prev
+                ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
+                : {
+                    sessionId: "",
+                    msgCount: data.msgCount,
+                    msgLimit: data.msgLimit,
+                    fileCount: 0,
+                    fileLimit: FILE_LIMIT,
+                  },
+            );
+          }
         } else {
           const body: Record<string, unknown> = { message: content, messages: history };
           if (language && language !== "auto") {
             body.language = language;
           }
-          data = await apiPost<typeof data>("/api/public-ai/chat", body);
-        }
+          const data = await apiPost<{
+            reply: string;
+            handoffCta: boolean;
+            msgCount: number;
+            msgLimit: number;
+          }>("/api/public-ai/chat", body);
 
-        setMessages((prev) => {
-          const next = [
-            ...prev,
-            { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
-          ];
-          storeTranscript(next);
-          return next;
-        });
-        setSession((prev) =>
-          prev
-            ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
-            : {
-                sessionId: "",
-                msgCount: data.msgCount,
-                msgLimit: data.msgLimit,
-                fileCount: 0,
-                fileLimit: FILE_LIMIT,
-              },
-        );
+          setMessages((prev) => {
+            const next = [
+              ...prev,
+              { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+            ];
+            storeTranscript(next);
+            return next;
+          });
+          setSession((prev) =>
+            prev
+              ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
+              : {
+                  sessionId: "",
+                  msgCount: data.msgCount,
+                  msgLimit: data.msgLimit,
+                  fileCount: 0,
+                  fileLimit: FILE_LIMIT,
+                },
+          );
+        }
       } catch (err: unknown) {
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;

@@ -73,7 +73,10 @@ function extractTxt(buffer: Buffer): string {
   }
 }
 
-export async function extractText(buffer: Buffer, type: AllowedFileType): Promise<string> {
+export async function extractText(
+  buffer: Buffer,
+  type: Exclude<AllowedFileType, "csv" | "xlsx">,
+): Promise<string> {
   switch (type) {
     case "pdf":
       return extractPdf(buffer);

@@ -6,12 +6,14 @@ import {
   ChevronDown,
   Paperclip,
   FileText,
+  Table2,
   AlertCircle,
   Loader2,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState } from "@/hooks/use-ora-chat";
+import { DatasetResultCard } from "@/components/dataset-result-card";
 
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
@@ -39,13 +41,21 @@ function FileChip({
   filename,
   uploadError,
   onClear,
+  fileType,
+  rowCount,
+  colCount,
 }: {
   uploadState: UploadState;
   filename?: string;
   uploadError: string | null;
   onClear: () => void;
+  fileType?: string;
+  rowCount?: number;
+  colCount?: number;
 }) {
   if (uploadState === "idle") return null;
+
+  const isDataset = fileType === "csv" || fileType === "xlsx";
 
   return (
     <div
@@ -59,13 +69,24 @@ function FileChip({
     >
       {uploadState === "uploading" && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
       {uploadState === "attached" && (
-        <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+        isDataset
+          ? <Table2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+          : <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
       )}
       {uploadState === "error" && <AlertCircle className="h-3.5 w-3.5 shrink-0" />}
 
       <span className="flex-1 truncate min-w-0">
         {uploadState === "uploading" && `Uploading ${filename ?? "file"}…`}
-        {uploadState === "attached" && (filename ?? "File attached")}
+        {uploadState === "attached" && (
+          <span className="flex flex-col gap-0.5">
+            <span className="truncate">{filename ?? "File attached"}</span>
+            {isDataset && rowCount !== undefined && colCount !== undefined && (
+              <span className="text-[10px] text-muted-foreground">
+                {rowCount.toLocaleString()} rows × {colCount} cols
+              </span>
+            )}
+          </span>
+        )}
         {uploadState === "error" && (uploadError ?? "Upload failed")}
       </span>
 
@@ -289,6 +310,8 @@ export function OraPanel({ chat }: OraPanelProps) {
                   <div className="bg-primary/15 border border-primary/20 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2 text-foreground whitespace-pre-wrap break-words">
                     {msg.content}
                   </div>
+                ) : msg.datasetResult ? (
+                  <DatasetResultCard result={msg.datasetResult} />
                 ) : (
                   <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap break-words">
                     {msg.content}
@@ -368,6 +391,9 @@ export function OraPanel({ chat }: OraPanelProps) {
               filename={attachedFile?.filename}
               uploadError={uploadError}
               onClear={handleClearAttachment}
+              fileType={attachedFile?.fileType}
+              rowCount={attachedFile?.rowCount}
+              colCount={attachedFile?.colCount}
             />
 
             <div className="flex items-end gap-2">
@@ -375,7 +401,7 @@ export function OraPanel({ chat }: OraPanelProps) {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.docx,.txt"
+                accept=".pdf,.docx,.txt,.csv,.xlsx"
                 className="sr-only"
                 aria-hidden
                 onChange={handleFileChange}
@@ -389,7 +415,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                 title={
                   atFileLimit
                     ? `File limit reached (${session?.fileCount ?? 3}/${session?.fileLimit ?? 3})`
-                    : "Upload a PDF, DOCX, or TXT file"
+                    : "Upload a PDF, DOCX, TXT, CSV, or XLSX file"
                 }
                 className={cn(
                   "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors",
@@ -431,7 +457,7 @@ export function OraPanel({ chat }: OraPanelProps) {
               <p className="text-[10px] text-muted-foreground/60">
                 {uploadState === "attached"
                   ? "File attached — type your question and send"
-                  : "Upload a PDF, DOCX, or TXT · Talk in any language"}
+                  : "Upload PDF, DOCX, TXT, CSV, or XLSX · Talk in any language"}
               </p>
               {session && (
                 <span className="text-[10px] text-muted-foreground/60">
