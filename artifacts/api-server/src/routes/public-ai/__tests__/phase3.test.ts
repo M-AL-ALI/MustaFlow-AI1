@@ -344,10 +344,7 @@ function makeApp(secret = TEST_SECRET) {
   return app;
 }
 
-function makeSession(
-  secret = TEST_SECRET,
-  overrides: Record<string, unknown> = {},
-) {
+function makeSession(secret = TEST_SECRET, overrides: Record<string, unknown> = {}) {
   const payload = {
     sessionId: "test-session-" + Math.random().toString(36).slice(2),
     msgCount: 0,
@@ -377,9 +374,39 @@ function makeFakeDatasetSummary() {
     headers: ["region", "revenue", "units"],
     sampleRows: [["North", "5000", "100"]],
     columnProfiles: [
-      { index: 0, type: "string" as const, nullCount: 0, uniqueCount: 3, topCategories: [{ value: "North", count: 40 }, { value: "South", count: 35 }, { value: "East", count: 25 }] },
-      { index: 1, type: "numeric" as const, nullCount: 0, uniqueCount: 100, min: 100, max: 10000, mean: 5050, sum: 505000, stddev: 2887 },
-      { index: 2, type: "numeric" as const, nullCount: 0, uniqueCount: 50, min: 1, max: 500, mean: 100, sum: 10000, stddev: 80 },
+      {
+        index: 0,
+        type: "string" as const,
+        nullCount: 0,
+        uniqueCount: 3,
+        topCategories: [
+          { value: "North", count: 40 },
+          { value: "South", count: 35 },
+          { value: "East", count: 25 },
+        ],
+      },
+      {
+        index: 1,
+        type: "numeric" as const,
+        nullCount: 0,
+        uniqueCount: 100,
+        min: 100,
+        max: 10000,
+        mean: 5050,
+        sum: 505000,
+        stddev: 2887,
+      },
+      {
+        index: 2,
+        type: "numeric" as const,
+        nullCount: 0,
+        uniqueCount: 50,
+        min: 1,
+        max: 500,
+        mean: 100,
+        sum: 10000,
+        stddev: 80,
+      },
     ],
     paretoSets: [],
     sanitizedCellCount: 0,
@@ -606,7 +633,10 @@ describe("buildDatasetContextBlock", () => {
       rowCount: 2,
       colCount: 2,
       headers: ["a", "b"],
-      sampleRows: [["1", "2"], ["3", "4"]],
+      sampleRows: [
+        ["1", "2"],
+        ["3", "4"],
+      ],
       columnProfiles: [],
       paretoSets: [],
       sanitizedCellCount: 0,

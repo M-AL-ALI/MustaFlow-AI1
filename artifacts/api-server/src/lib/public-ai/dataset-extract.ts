@@ -119,7 +119,10 @@ async function extractCsv(buffer: Buffer): Promise<DatasetSummary> {
   const colCount = headers.length;
 
   if (dataRows.length === 0) {
-    throw new DatasetExtractionError("empty", "The CSV file contains only a header row with no data.");
+    throw new DatasetExtractionError(
+      "empty",
+      "The CSV file contains only a header row with no data.",
+    );
   }
 
   const truncated = dataRows.length > MAX_DATASET_ROWS;
@@ -223,7 +226,10 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
   });
 
   if (headers.length === 0) {
-    throw new DatasetExtractionError("no-headers", "This XLSX file appears to be empty or has no column headers.");
+    throw new DatasetExtractionError(
+      "no-headers",
+      "This XLSX file appears to be empty or has no column headers.",
+    );
   }
 
   const colCount = headers.length;
@@ -231,47 +237,50 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
   let sanitizedCellCount = 0;
   let truncated = false;
 
-  sheet.eachRow({ includeEmpty: false }, (row: { getCell: (n: number) => { value: unknown } }, rowNumber: number) => {
-    if (rowNumber === 1) return;
-    if (allRows.length >= MAX_DATASET_ROWS) {
-      truncated = true;
-      return;
-    }
-
-    const rowData: string[] = [];
-    for (let ci = 1; ci <= colCount; ci++) {
-      const cell = row.getCell(ci);
-      let rawValue = "";
-
-      const cellVal = cell.value;
-      if (cellVal === null || cellVal === undefined) {
-        rawValue = "";
-      } else if (
-        typeof cellVal === "object" &&
-        cellVal !== null &&
-        "formula" in (cellVal as object)
-      ) {
-        const formulaCell = cellVal as { formula?: string; result?: unknown };
-        const result = formulaCell.result;
-        if (result === null || result === undefined) {
-          rawValue = "";
-        } else if (typeof result === "object" && result !== null && "error" in result) {
-          rawValue = "";
-        } else {
-          rawValue = String(result);
-        }
-      } else if (typeof cellVal === "object" && cellVal instanceof Date) {
-        rawValue = cellVal.toISOString().slice(0, 10);
-      } else {
-        rawValue = String(cellVal);
+  sheet.eachRow(
+    { includeEmpty: false },
+    (row: { getCell: (n: number) => { value: unknown } }, rowNumber: number) => {
+      if (rowNumber === 1) return;
+      if (allRows.length >= MAX_DATASET_ROWS) {
+        truncated = true;
+        return;
       }
 
-      const { value, sanitized } = sanitiseCell(rawValue);
-      if (sanitized) sanitizedCellCount++;
-      rowData.push(value);
-    }
-    allRows.push(rowData);
-  });
+      const rowData: string[] = [];
+      for (let ci = 1; ci <= colCount; ci++) {
+        const cell = row.getCell(ci);
+        let rawValue = "";
+
+        const cellVal = cell.value;
+        if (cellVal === null || cellVal === undefined) {
+          rawValue = "";
+        } else if (
+          typeof cellVal === "object" &&
+          cellVal !== null &&
+          "formula" in (cellVal as object)
+        ) {
+          const formulaCell = cellVal as { formula?: string; result?: unknown };
+          const result = formulaCell.result;
+          if (result === null || result === undefined) {
+            rawValue = "";
+          } else if (typeof result === "object" && result !== null && "error" in result) {
+            rawValue = "";
+          } else {
+            rawValue = String(result);
+          }
+        } else if (typeof cellVal === "object" && cellVal instanceof Date) {
+          rawValue = cellVal.toISOString().slice(0, 10);
+        } else {
+          rawValue = String(cellVal);
+        }
+
+        const { value, sanitized } = sanitiseCell(rawValue);
+        if (sanitized) sanitizedCellCount++;
+        rowData.push(value);
+      }
+      allRows.push(rowData);
+    },
+  );
 
   if (allRows.length === 0) {
     throw new DatasetExtractionError("empty", "This XLSX file has no data rows.");

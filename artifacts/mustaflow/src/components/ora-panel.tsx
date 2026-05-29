@@ -68,11 +68,12 @@ function FileChip({
       )}
     >
       {uploadState === "uploading" && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
-      {uploadState === "attached" && (
-        isDataset
-          ? <Table2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-          : <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
-      )}
+      {uploadState === "attached" &&
+        (isDataset ? (
+          <Table2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+        ) : (
+          <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+        ))}
       {uploadState === "error" && <AlertCircle className="h-3.5 w-3.5 shrink-0" />}
 
       <span className="flex-1 truncate min-w-0">

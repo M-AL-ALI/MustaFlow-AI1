@@ -88,16 +88,27 @@ router.post(
         if (err instanceof DatasetExtractionError) {
           const code = err.code;
           if (code === "empty" || code === "no-headers" || code === "no-visible-sheet") {
-            res.status(422).json({ error: "This file appears to be empty or has no readable data." });
+            res
+              .status(422)
+              .json({ error: "This file appears to be empty or has no readable data." });
           } else if (code === "parse-timeout") {
-            res.status(422).json({ error: "This file took too long to process. Please try a smaller file." });
+            res
+              .status(422)
+              .json({ error: "This file took too long to process. Please try a smaller file." });
           } else if (code === "too-many-zip-entries") {
-            res.status(422).json({ error: "This XLSX file is too complex to analyze. Please simplify it or convert it to CSV." });
+            res.status(422).json({
+              error:
+                "This XLSX file is too complex to analyze. Please simplify it or convert it to CSV.",
+            });
           } else {
-            res.status(422).json({ error: `This file could not be read. Please try another ${validation.type.toUpperCase()} file.` });
+            res.status(422).json({
+              error: `This file could not be read. Please try another ${validation.type.toUpperCase()} file.`,
+            });
           }
         } else {
-          res.status(422).json({ error: `This file could not be read. Please try another ${validation.type.toUpperCase()} file.` });
+          res.status(422).json({
+            error: `This file could not be read. Please try another ${validation.type.toUpperCase()} file.`,
+          });
         }
         return;
       }

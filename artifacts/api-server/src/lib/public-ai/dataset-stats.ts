@@ -44,9 +44,7 @@ function parseNumericStr(v: string): number {
   return parseFloat(v.replace(/,/g, ""));
 }
 
-function detectColumnType(
-  nonEmpty: string[],
-): "numeric" | "string" | "date" | "boolean" | "empty" {
+function detectColumnType(nonEmpty: string[]): "numeric" | "string" | "date" | "boolean" | "empty" {
   if (nonEmpty.length === 0) return "empty";
   if (nonEmpty.every((v) => BOOL_VALUES.has(v.toLowerCase().trim()))) return "boolean";
   if (
@@ -79,8 +77,7 @@ export function computeColumnProfiles(headers: string[], rows: string[][]): Colu
       if (nums.length > 0) {
         const sum = nums.reduce((a, b) => a + b, 0);
         const mean = sum / nums.length;
-        const variance =
-          nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length;
+        const variance = nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length;
         profile.min = Math.min(...nums);
         profile.max = Math.max(...nums);
         profile.mean = Math.round(mean * 1e6) / 1e6;

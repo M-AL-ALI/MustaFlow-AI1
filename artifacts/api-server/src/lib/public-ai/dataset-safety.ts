@@ -40,9 +40,7 @@ export interface SanitiseResult {
  * overrides, then apply formula neutralisation. Preserve negative numbers.
  */
 export function sanitiseCell(raw: string): SanitiseResult {
-  const stripped = raw
-    .replace(CONTROL_CHAR_RE, "")
-    .replace(UNICODE_DIR_OVERRIDE_RE, "");
+  const stripped = raw.replace(CONTROL_CHAR_RE, "").replace(UNICODE_DIR_OVERRIDE_RE, "");
   const neutralised = neutraliseFormula(stripped);
   return {
     value: neutralised,

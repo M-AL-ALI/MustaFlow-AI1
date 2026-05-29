@@ -8,7 +8,10 @@ import {
 } from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput } from "../../lib/public-ai/prompt";
-import { DATASET_SYSTEM_PROMPT, buildDatasetContextBlock } from "../../lib/public-ai/dataset-prompt";
+import {
+  DATASET_SYSTEM_PROMPT,
+  buildDatasetContextBlock,
+} from "../../lib/public-ai/dataset-prompt";
 import { DatasetAnalysisAiSchema } from "../../lib/public-ai/dataset-schema";
 import type { DatasetAnalysisAiOutput } from "../../lib/public-ai/dataset-schema";
 import { logger } from "../../lib/logger";
@@ -96,8 +99,7 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
 
   let systemPrompt = DATASET_SYSTEM_PROMPT;
   if (language && language !== "auto") {
-    systemPrompt +=
-      `\n\n## Language override\nRespond in "${language}" for all text fields in the JSON output.`;
+    systemPrompt += `\n\n## Language override\nRespond in "${language}" for all text fields in the JSON output.`;
   }
 
   const contextBlock = buildDatasetContextBlock(fileEntry.filename, summary, message);
@@ -136,7 +138,11 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
     aiOutput = DatasetAnalysisAiSchema.parse(parsedJson);
   } catch (primaryErr) {
     logger.warn(
-      { component: "ora-dataset-analysis", model: premiumModel, err: (primaryErr as Error).message },
+      {
+        component: "ora-dataset-analysis",
+        model: premiumModel,
+        err: (primaryErr as Error).message,
+      },
       "Primary model failed or returned invalid JSON — trying Anthropic fallback",
     );
     usedFallback = true;

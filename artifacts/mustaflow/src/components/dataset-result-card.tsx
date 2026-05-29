@@ -47,7 +47,9 @@ function NumberedList({ items }: { items: string[] }) {
     <ol className="space-y-1">
       {items.map((item, i) => (
         <li key={i} className="flex items-start gap-2 text-xs text-foreground/85">
-          <span className="shrink-0 min-w-[16px] font-semibold text-[hsl(265_85%_65%)]">{i + 1}.</span>
+          <span className="shrink-0 min-w-[16px] font-semibold text-[hsl(265_85%_65%)]">
+            {i + 1}.
+          </span>
           <span>{item}</span>
         </li>
       ))}
@@ -100,10 +102,24 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
               <div key={i} className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5">
                 <p className="text-xs font-medium text-foreground">{kpi.metric}</p>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                  <span className="text-[10px] text-muted-foreground">Current: <span className="text-foreground/80">{kpi.current}</span></span>
-                  {kpi.target && <span className="text-[10px] text-muted-foreground">Target: <span className="text-foreground/80">{kpi.target}</span></span>}
-                  {kpi.gap && <span className="text-[10px] text-muted-foreground">Gap: <span className="text-foreground/80">{kpi.gap}</span></span>}
-                  {kpi.trend && <span className="text-[10px] text-muted-foreground">Trend: <span className="text-foreground/80">{kpi.trend}</span></span>}
+                  <span className="text-[10px] text-muted-foreground">
+                    Current: <span className="text-foreground/80">{kpi.current}</span>
+                  </span>
+                  {kpi.target && (
+                    <span className="text-[10px] text-muted-foreground">
+                      Target: <span className="text-foreground/80">{kpi.target}</span>
+                    </span>
+                  )}
+                  {kpi.gap && (
+                    <span className="text-[10px] text-muted-foreground">
+                      Gap: <span className="text-foreground/80">{kpi.gap}</span>
+                    </span>
+                  )}
+                  {kpi.trend && (
+                    <span className="text-[10px] text-muted-foreground">
+                      Trend: <span className="text-foreground/80">{kpi.trend}</span>
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -118,7 +134,16 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
             {result.trendFindings.map((t, i) => (
               <li key={i} className="flex items-start gap-1.5 text-xs text-foreground/85">
                 {t.direction && (
-                  <span className={cn("shrink-0 font-bold", t.direction === "up" ? "text-green-400" : t.direction === "down" ? "text-red-400" : "text-muted-foreground")}>
+                  <span
+                    className={cn(
+                      "shrink-0 font-bold",
+                      t.direction === "up"
+                        ? "text-green-400"
+                        : t.direction === "down"
+                          ? "text-red-400"
+                          : "text-muted-foreground",
+                    )}
+                  >
                     {DIRECTION_SYMBOL[t.direction]}
                   </span>
                 )}
@@ -135,9 +160,13 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
           <div className="space-y-1">
             {result.paretoFindings.map((p, i) => (
               <div key={i} className="flex items-center gap-2 text-xs">
-                <span className="shrink-0 w-4 text-[10px] text-muted-foreground text-right">{i + 1}.</span>
+                <span className="shrink-0 w-4 text-[10px] text-muted-foreground text-right">
+                  {i + 1}.
+                </span>
                 <span className="flex-1 truncate text-foreground/85">{p.label}</span>
-                <span className="shrink-0 font-medium text-foreground/80">{typeof p.value === "number" ? p.value.toLocaleString() : p.value}</span>
+                <span className="shrink-0 font-medium text-foreground/80">
+                  {typeof p.value === "number" ? p.value.toLocaleString() : p.value}
+                </span>
                 {p.cumPct !== undefined && (
                   <span className="shrink-0 text-[10px] text-muted-foreground">({p.cumPct}%)</span>
                 )}
@@ -155,18 +184,24 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
               <p className="text-[10px] font-medium text-muted-foreground mb-1">5 Whys</p>
               <ol className="space-y-0.5">
                 {result.rootCauseAnalysis.fiveWhys.map((why, i) => (
-                  <li key={i} className="text-xs text-foreground/85 pl-2">{why}</li>
+                  <li key={i} className="text-xs text-foreground/85 pl-2">
+                    {why}
+                  </li>
                 ))}
               </ol>
             </div>
           )}
           {Object.keys(result.rootCauseAnalysis.fishbone).length > 0 && (
             <div className="mb-2">
-              <p className="text-[10px] font-medium text-muted-foreground mb-1">Fishbone Categories</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                Fishbone Categories
+              </p>
               <div className="space-y-1">
                 {Object.entries(result.rootCauseAnalysis.fishbone).map(([category, causes]) => (
                   <div key={category}>
-                    <span className="text-[10px] font-semibold text-[hsl(265_85%_65%)]">{category}: </span>
+                    <span className="text-[10px] font-semibold text-[hsl(265_85%_65%)]">
+                      {category}:{" "}
+                    </span>
                     <span className="text-xs text-foreground/80">{causes.join("; ")}</span>
                   </div>
                 ))}
@@ -175,7 +210,9 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
           )}
           {result.rootCauseAnalysis.likelyCauses.length > 0 && (
             <div>
-              <p className="text-[10px] font-medium text-muted-foreground mb-1">Most Likely Causes</p>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                Most Likely Causes
+              </p>
               <BulletList items={result.rootCauseAnalysis.likelyCauses} />
             </div>
           )}
@@ -197,14 +234,25 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
               <div key={i} className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5">
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-xs text-foreground/90 flex-1">{item.action}</p>
-                  <span className={cn("text-[10px] font-semibold shrink-0", PRIORITY_COLOR[item.priority])}>
+                  <span
+                    className={cn(
+                      "text-[10px] font-semibold shrink-0",
+                      PRIORITY_COLOR[item.priority],
+                    )}
+                  >
                     {item.priority}
                   </span>
                 </div>
                 {(item.owner || item.timeline) && (
                   <div className="flex gap-3 mt-0.5">
-                    {item.owner && <span className="text-[10px] text-muted-foreground">Owner: {item.owner}</span>}
-                    {item.timeline && <span className="text-[10px] text-muted-foreground">Timeline: {item.timeline}</span>}
+                    {item.owner && (
+                      <span className="text-[10px] text-muted-foreground">Owner: {item.owner}</span>
+                    )}
+                    {item.timeline && (
+                      <span className="text-[10px] text-muted-foreground">
+                        Timeline: {item.timeline}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -229,7 +277,9 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
 
       {/* Footer */}
       {result.usedFallback && (
-        <p className="mt-3 text-[9px] text-muted-foreground/50">Analysis generated via fallback model.</p>
+        <p className="mt-3 text-[9px] text-muted-foreground/50">
+          Analysis generated via fallback model.
+        </p>
       )}
     </div>
   );
