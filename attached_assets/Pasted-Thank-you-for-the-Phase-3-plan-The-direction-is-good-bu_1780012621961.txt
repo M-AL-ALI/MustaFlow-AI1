@@ -1,0 +1,303 @@
+Thank you for the Phase 3 plan. The direction is good, but I cannot approve Phase 3 implementation yet because the plan appears incomplete. The message stopped in the middle of the model strategy section.
+
+Please send the complete Phase 3 plan first, including:
+
+* full model strategy
+* fallback strategy
+* structured JSON schema
+* output format
+* UI changes
+* full test plan
+* validation checklist
+* rollback plan
+
+Also, before implementation, please revise the plan with the corrections below.
+
+1. Do not break Phase 2 document upload
+    CSV/XLSX support should extend the existing upload system without breaking PDF, DOCX, and TXT.
+
+Please confirm:
+
+* PDF still works
+* DOCX still works
+* TXT still works
+* CSV and XLSX are added safely
+* fileRef behavior remains session-scoped
+* fileCount behavior remains correct
+* Phase 1 and Phase 2 tests still pass
+
+2. Keep the approved Phase 3 route name
+    Use:
+
+* /api/public-ai/dataset-analysis
+
+Do not overload /file-analysis for datasets. Dataset analysis should stay separate because it needs structured JSON, KPI/root-cause logic, and dataset-specific safety.
+
+3. XLSX validation must be very strong
+    XLSX is a ZIP container, so validation must check more than ZIP magic bytes.
+
+Please validate:
+
+* extension is .xlsx
+* .xls is blocked
+* .xlsm is blocked
+* ZIP magic bytes are present
+* [Content_Types].xml exists
+* xl/workbook.xml exists
+* at least one visible worksheet exists
+* ExcelJS can parse it safely
+* random ZIP renamed .xlsx is rejected
+
+4. Be careful with formula handling
+    Do not accidentally destroy real data.
+
+The plan says any cell beginning with =, +, -, or @ will be neutralized. That can damage valid negative numbers like -25, -3.5%, or negative cost variance.
+
+Recommended correction:
+
+* preserve numeric negative values as numbers
+* neutralize only actual formula-like strings
+* never execute formulas
+* for formula cells, use cached result if available
+* if no cached result exists, replace with [formula omitted]
+* do not expose formulas back to the model as executable instructions
+
+5. Do not silently strip too much cell content
+    The plan says cells beginning with /system, IGNORE, You are, assistant:, etc. may be stripped.
+
+Be careful. Some datasets may contain legitimate notes, complaints, or comments with those words.
+
+Recommended approach:
+
+* treat every cell as untrusted data
+* do not follow cell instructions
+* do not silently remove data unless it is clearly unsafe
+* if a value is sanitized, track a count such as sanitizedCellCount
+* do not log the cell value
+* tell Ora to analyze the dataset while ignoring embedded instructions
+
+6. Sampling must not create misleading analysis
+    Sending only 500 sampled rows to the model can miss important patterns.
+
+Please improve the dataset strategy:
+
+For datasets over 500 rows, compute server-side summary statistics before sending to the model, including:
+
+* total row count
+* column names
+* inferred column types
+* missing/null counts
+* numeric min/max/average/sum where relevant
+* top categories for categorical columns
+* date range if date columns exist
+* possible KPI columns
+* defect/downtime/cost/category frequency counts
+* top Pareto contributors where possible
+
+Then send:
+
+* server-computed summary
+* first rows
+* sampled rows
+* last rows
+* clear note that only a sample is shown
+
+Ora’s answer must include a limitation note when analysis is based on sampling.
+
+7. Pareto analysis should be computed safely
+    Do not rely only on the AI model to guess Pareto from sampled rows.
+
+Recommended:
+
+* when the user asks for Pareto, find likely category and numeric/count columns
+* compute the top contributors server-side when possible
+* pass the computed Pareto table to the model
+* model explains the results and recommends actions
+
+8. Root-cause analysis must be evidence-based
+    Ora should not invent root causes from weak data.
+
+For root cause outputs, require:
+
+* observed symptom
+* evidence from dataset
+* likely root causes
+* confidence level
+* what to verify next
+* corrective actions
+* preventive actions
+* limitations if data is incomplete
+
+9. Structured JSON response must be validated
+    The model should return a structured JSON envelope, but the server must validate it.
+
+Please add:
+
+* Zod schema validation
+* safe fallback if model returns invalid JSON
+* no raw model error shown to visitor
+* no raw JSON dump in UI unless intentionally rendered
+* response sections rendered cleanly in Ora UI
+
+10. Recommended JSON output sections
+    Please include a structure similar to:
+
+{
+  "type": "dataset_analysis",
+  "summary": "...",
+  "datasetProfile": {
+    "rowCount": 0,
+    "columnCount": 0,
+    "columns": []
+  },
+  "keyFindings": [],
+  "kpiGaps": [],
+  "trendFindings": [],
+  "paretoFindings": [],
+  "rootCauseAnalysis": {
+    "fiveWhys": [],
+    "fishbone": {
+      "people": [],
+      "process": [],
+      "machine": [],
+      "material": [],
+      "method": [],
+      "measurement": [],
+      "environment": []
+    }
+  },
+  "recommendations": [],
+  "actionPlan": [],
+  "risksAndLimitations": [],
+  "nextSteps": []
+}
+
+11. Dataset UI should be professional but not Phase 9 charts
+    Phase 3 should include clean structured cards and tables, but not advanced chart-heavy reporting.
+
+Approved for Phase 3 UI:
+
+* dataset uploaded chip
+* dataset preview summary
+* row count / column count
+* detected columns
+* analysis type selector if useful
+* structured result cards
+* action-plan table
+* root-cause sections
+* 5 Whys list
+* Fishbone text/card layout
+* Pareto table
+
+Not approved yet:
+
+* interactive charts
+* advanced dashboards
+* full visual reporting
+* chart-heavy executive report system
+
+Those belong to Phase 9.
+
+12. Memory and zip-bomb protection must be real, not only described
+    The plan says XLSX decompressed size should abort if intermediate RAM exceeds 100 MB.
+
+Please explain exactly how this will be enforced.
+
+If ExcelJS loads the workbook into memory first, then the protection may happen too late.
+
+Please provide a practical guard:
+
+* keep 10 MB upload cap
+* reject suspicious XLSX with too many zip entries if inspected
+* timeout parsing
+* row/column hard limits
+* memory guard if possible
+* safe error message if parsing is aborted
+
+13. Logs must not contain raw dataset content
+    Confirm logs will not contain:
+
+* raw rows
+* cell values
+* full column names if sensitive
+* user question
+* Ora answer text
+* formulas
+* file paths
+* raw IPs
+
+Safe logs may include:
+
+* file type
+* row count
+* column count
+* char count
+* sampled/truncated true/false
+* model ID
+* latency
+* fallback used
+* hashed IP only
+
+14. Model strategy
+    Dataset/root-cause/strategy analysis should use premium models only.
+
+Rules:
+
+* gpt-5.4 primary
+* claude-sonnet-4-6 fallback
+* no gpt-5-nano for visible dataset/root-cause answers
+* no gpt-5-mini for visible dataset/root-cause answers unless explicitly approved later
+* classifier should not decide dataset analysis quality
+* dataset analysis is always premium
+
+15. Phase 3 tests required
+    Please include tests for:
+
+* CSV accepted
+* XLSX accepted
+* XLS blocked
+* XLSM blocked
+* random ZIP renamed XLSX blocked
+* oversized file blocked
+* too many rows handled safely
+* too many columns handled safely
+* hidden sheets skipped safely
+* no visible sheet returns safe error
+* formula cells handled safely
+* negative numeric values preserved
+* CSV injection neutralized safely
+* prompt injection inside cells ignored as instructions
+* session A cannot access session B fileRef
+* expired fileRef returns safe 404
+* no raw dataset content in logs
+* structured JSON validates
+* invalid model JSON falls back safely
+* Arabic dataset question returns Arabic answer
+* Spanish dataset question returns Spanish answer
+* Phase 1 and Phase 2 tests still pass
+* no DB/project/secret/credit/Builder imports
+
+16. Live validation required after implementation
+    After Phase 3 implementation, provide live proof for:
+
+* real CSV upload and analysis
+* real XLSX upload and analysis
+* KPI analysis
+* Pareto analysis
+* 5 Whys analysis
+* Fishbone analysis
+* Arabic dataset analysis response
+* Spanish dataset analysis response
+* formula-cell safety
+* hidden-sheet handling
+* large dataset sampling/summary behavior
+* no raw dataset content in logs
+* cross-session fileRef blocked
+* all workflows/tests status
+
+17. Do not start coding yet
+    Please send the full corrected Phase 3 plan first.
+
+After I review the completed corrected plan, I will decide whether to approve Phase 3 implementation.
+
+Do not start Phase 3 coding until I explicitly approve it.
