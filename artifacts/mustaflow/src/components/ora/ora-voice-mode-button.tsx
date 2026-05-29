@@ -430,6 +430,7 @@ export function OraVoiceConvPanel({
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className={cn("font-semibold text-foreground", headingCls)}>{stateLabel}</span>
           <span
+            dir="auto"
             className={cn(
               "text-muted-foreground/60 leading-snug truncate",
               labelCls,
@@ -585,7 +586,7 @@ export function OraVoiceLiveArea({
               aria-label="Recording"
             />
           </div>
-          <p className={cn("leading-snug text-muted-foreground/60", label)}>
+          <p dir="auto" className={cn("leading-snug text-muted-foreground/60", label)}>
             {interimTranscript ? (
               <span className="italic">"{interimTranscript}"</span>
             ) : (

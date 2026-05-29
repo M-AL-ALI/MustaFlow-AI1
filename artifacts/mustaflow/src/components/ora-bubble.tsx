@@ -257,7 +257,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     }
   }, []);
 
-  const whisperConv = useWhisperRecorder(handleWhisperTranscript);
+  const whisperConv = useWhisperRecorder(handleWhisperTranscript, () => languageRef.current);
 
   // Auto-clear the transcript-ready hint after 5 s (dictation mode only)
   useEffect(() => {
@@ -885,13 +885,19 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 )}
                 <div className="max-w-[85%]">
                   {msg.role === "user" ? (
-                    <div className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3 py-2 text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                    <div
+                      dir="auto"
+                      className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3 py-2 text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                    >
                       {msg.content}
                     </div>
                   ) : msg.datasetResult ? (
                     <DatasetResultCard result={msg.datasetResult} />
                   ) : (
-                    <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words">
+                    <div
+                      dir="auto"
+                      className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
+                    >
                       {msg.content}
                     </div>
                   )}
@@ -1142,6 +1148,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                           : "Ask Ora anything…"
                       }
                       rows={1}
+                      dir="auto"
                       className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
                       style={{ maxHeight: "80px" }}
                       disabled={isLoading}
@@ -1160,6 +1167,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   <div className="flex items-center justify-between mt-1.5">
                     {dropError ? (
                       <p className="text-[9px] text-destructive">{dropError}</p>
+                    ) : language === "ar" ? (
+                      <p className="text-[9px] text-muted-foreground/50">
+                        Arabic voice depends on your browser — review before sending
+                      </p>
                     ) : (
                       <p className="text-[9px] text-muted-foreground/50">
                         Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}

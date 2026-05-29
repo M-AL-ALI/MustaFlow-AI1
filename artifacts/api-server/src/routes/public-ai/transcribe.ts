@@ -35,6 +35,12 @@ router.post("/public-ai/transcribe", oraUploadLimiter, async (req, res) => {
   const format: "wav" | "mp3" | "webm" =
     formatRaw === "wav" || formatRaw === "mp3" ? formatRaw : "webm";
 
+  // Optional ISO-639-1 language hint (e.g. "ar", "en") forwarded from the client.
+  // "auto" is treated as "let Whisper detect" — we don't pass it to the API.
+  const langRaw = (req.query.lang as string | undefined)?.toLowerCase().trim();
+  const language =
+    langRaw && langRaw !== "auto" && /^[a-z]{2,3}$/.test(langRaw) ? langRaw : undefined;
+
   const chunks: Buffer[] = [];
   let total = 0;
   try {
@@ -68,9 +74,15 @@ router.post("/public-ai/transcribe", oraUploadLimiter, async (req, res) => {
   const buf = Buffer.concat(chunks, total);
 
   try {
-    const text = await speechToText(buf, format);
+    const text = await speechToText(buf, format, language);
     logger.info(
-      { component: "ora-transcribe", bytes: total, format, sessionId: session.sessionId },
+      {
+        component: "ora-transcribe",
+        bytes: total,
+        format,
+        language: language ?? "auto",
+        sessionId: session.sessionId,
+      },
       "Whisper transcription complete",
     );
     res.json({ text });

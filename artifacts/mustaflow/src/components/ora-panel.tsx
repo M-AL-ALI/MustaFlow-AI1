@@ -239,7 +239,7 @@ export function OraPanel({ chat }: OraPanelProps) {
     }
   }, []);
 
-  const whisperConv = useWhisperRecorder(handleWhisperTranscript);
+  const whisperConv = useWhisperRecorder(handleWhisperTranscript, () => languageRef.current);
 
   // Auto-clear the transcript-ready hint after 5 s (dictation mode only)
   useEffect(() => {
@@ -728,13 +728,19 @@ export function OraPanel({ chat }: OraPanelProps) {
                 )}
                 <div className="max-w-[85%]">
                   {msg.role === "user" ? (
-                    <div className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                    <div
+                      dir="auto"
+                      className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                    >
                       {msg.content}
                     </div>
                   ) : msg.datasetResult ? (
                     <DatasetResultCard result={msg.datasetResult} />
                   ) : (
-                    <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words">
+                    <div
+                      dir="auto"
+                      className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
+                    >
                       {msg.content}
                     </div>
                   )}
@@ -986,6 +992,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                         : "Ask Ora anything…"
                     }
                     rows={1}
+                    dir="auto"
                     className="flex-1 resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
                     style={{ maxHeight: "96px" }}
                     disabled={isLoading}
@@ -1004,6 +1011,10 @@ export function OraPanel({ chat }: OraPanelProps) {
                 <div className="flex items-center justify-between mt-2">
                   {dropError ? (
                     <p className="text-[10px] text-destructive">{dropError}</p>
+                  ) : language === "ar" ? (
+                    <p className="text-[10px] text-muted-foreground/50">
+                      Arabic voice depends on your browser — review the transcript before sending
+                    </p>
                   ) : (
                     <p className="text-[10px] text-muted-foreground/50">
                       Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}

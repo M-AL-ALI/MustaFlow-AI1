@@ -48,7 +48,16 @@ function getBestMimeType(): string {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useWhisperRecorder(onTranscript: (text: string) => void): UseWhisperRecorderReturn {
+/**
+ * @param onTranscript  Called with the final transcript text after recording stops.
+ * @param getLanguage   Optional — called at transcription time to get the current
+ *                      ISO-639-1 language code (e.g. "ar", "en"). "auto" or undefined
+ *                      lets Whisper detect the language automatically.
+ */
+export function useWhisperRecorder(
+  onTranscript: (text: string) => void,
+  getLanguage?: () => string,
+): UseWhisperRecorderReturn {
   const isSupported =
     typeof navigator !== "undefined" &&
     typeof window !== "undefined" &&
@@ -64,6 +73,11 @@ export function useWhisperRecorder(onTranscript: (text: string) => void): UseWhi
   const cancelledRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
+
+  // Stable ref for getLanguage — always holds the latest caller value without
+  // needing to add it to useCallback deps (same pattern as onTranscriptRef).
+  const getLanguageRef = useRef(getLanguage);
+  getLanguageRef.current = getLanguage;
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -151,7 +165,9 @@ export function useWhisperRecorder(onTranscript: (text: string) => void): UseWhi
       setState("transcribing");
 
       try {
-        const resp = await fetch("/api/public-ai/transcribe?format=webm", {
+        const lang = getLanguageRef.current?.();
+        const langParam = lang && lang !== "auto" ? `&lang=${encodeURIComponent(lang)}` : "";
+        const resp = await fetch(`/api/public-ai/transcribe?format=webm${langParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: blob,
