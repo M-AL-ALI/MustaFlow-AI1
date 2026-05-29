@@ -1,0 +1,97 @@
+Thank you. The premium Ora Voice Mode button implementation summary looks good.
+
+Before I accept this task as complete, please provide a short final validation report with proof.
+
+Required validation:
+
+1. Final affected files
+    List every file created or modified.
+2. Final commit hash
+    Confirm the final commit hash for this task.
+3. UI proof
+    Provide screenshots or clear proof for:
+
+* Ora Panel idle voice button
+* Ora Bubble idle voice button
+* mobile view if practical
+* listening state
+* interim transcript/live area
+* transcript-ready state
+* speaking state
+* unsupported browser state or source proof
+* permission denied/error state or source proof
+
+4. Behavior proof
+    Confirm:
+
+* clicking the new Ora Voice Mode button still uses the existing Voice-A browser-native system
+* transcript still lands in the composer for review before sending
+* transcript does not auto-send
+* user can edit transcript before sending
+* TTS still defaults off
+* read-aloud behavior still works only when enabled
+* tapping during speaking stops playback
+* typing while speaking stops playback
+
+5. Privacy proof
+    Confirm:
+
+* no backend voice routes were added
+* no /api/public-ai/transcribe
+* no /api/public-ai/tts
+* no audio upload
+* no audio storage
+* no transcript logging
+* no Builder/project memory access
+
+6. Scope proof
+    Confirm this task did not touch:
+
+* backend routes
+* database
+* OpenAPI
+* billing/credits
+* Builder pipelines
+* Knowledge Vault
+* image generation
+* web search
+* permanent message storage
+
+7. Accessibility proof
+    Confirm:
+
+* aria labels exist
+* tooltip/state text exists
+* keyboard focus works
+* reduced-motion support works
+* tap target is mobile-friendly
+
+8. Regression proof
+    Confirm:
+
+* Phase 1 chat still works
+* Phase 2 document analysis still works
+* Phase 3 dataset analysis still works
+* Voice-A tests still pass
+* Phase 5 image analysis still works
+* Phase 6 handoff still works
+* DynamicAtom/redesign still works
+* suggestion chips still work
+
+9. Quality checks
+    Report:
+
+* typecheck status
+* lint status
+* format status
+* codegen-drift status
+* frontend workflow status
+* backend workflow status
+* any unrelated failures if present
+
+10. Rollback plan
+    Explain how to revert the premium voice button back to the previous basic Voice-A button without affecting the rest of Ora.
+
+After I review this validation report, I will decide whether this premium voice UI task is accepted.
+
+Do not start any unrelated task under this work item.
