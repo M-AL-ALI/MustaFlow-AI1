@@ -72,7 +72,8 @@ export function OraHandoffCard({ messages, onDismiss }: Props) {
       }
     } catch (err: unknown) {
       const msg =
-        (err as Error).message ?? "Something went wrong. Please try again or describe your idea directly in the Builder.";
+        (err as Error).message ??
+        "Something went wrong. Please try again or describe your idea directly in the Builder.";
       setStatus("error");
       setErrorMsg(msg);
     }
@@ -82,9 +83,7 @@ export function OraHandoffCard({ messages, onDismiss }: Props) {
     <div className="mt-3 rounded-xl border border-[hsl(265_85%_65%/0.25)] bg-[hsl(265_85%_65%/0.06)] px-3.5 py-3 text-xs">
       {/* Header row */}
       <div className="flex items-start justify-between gap-2 mb-2">
-        <p className="font-medium text-foreground/90 leading-snug">
-          Ready to build this?
-        </p>
+        <p className="font-medium text-foreground/90 leading-snug">Ready to build this?</p>
         <button
           type="button"
           onClick={onDismiss}
@@ -99,9 +98,9 @@ export function OraHandoffCard({ messages, onDismiss }: Props) {
       <div className="flex items-start gap-1.5 mb-3 text-muted-foreground/70 leading-snug">
         <Info className="h-3 w-3 shrink-0 mt-px" />
         <span>
-          Only a short text summary is passed to the Builder — files, images, datasets, and
-          voice audio are <strong className="font-medium text-muted-foreground/90">not</strong> transferred automatically.
-          You can review and edit the idea before building.
+          Only a short text summary is passed to the Builder — files, images, datasets, and voice
+          audio are <strong className="font-medium text-muted-foreground/90">not</strong>{" "}
+          transferred automatically. You can review and edit the idea before building.
         </span>
       </div>
 

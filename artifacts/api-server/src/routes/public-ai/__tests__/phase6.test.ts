@@ -67,9 +67,7 @@ beforeEach(() => {
 describe("storeHandoff", () => {
   it("returns a valid UUID token and a future expiresAt", () => {
     const { token, expiresAt } = storeHandoff(SAMPLE_SUMMARY, "session_hash");
-    expect(token).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
+    expect(token).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(expiresAt).toBeGreaterThan(Date.now());
   });
 
@@ -269,9 +267,7 @@ describe("input sanitization (content stripping)", () => {
   });
 
   it("strips email addresses", () => {
-    expect(sanitize("my email is user@example.com please")).toBe(
-      "my email is [email] please",
-    );
+    expect(sanitize("my email is user@example.com please")).toBe("my email is [email] please");
   });
 
   it("truncates content to 300 chars", () => {
@@ -438,10 +434,10 @@ describe("rate limiter — oraHandoffLimiter", () => {
 
 describe("auth guard — exchange route contract", () => {
   it("exchangeHandoff function itself does not bypass authentication (requires caller to auth)", () => {
-      // exchangeHandoff is a store function — it does not authenticate.
-      // Authentication is enforced by the Express route in builder-handoff.ts
-      // (registered after attachUser) which sets req.userId before calling this.
-      // This test confirms the store function itself doesn't create users/sessions.
+    // exchangeHandoff is a store function — it does not authenticate.
+    // Authentication is enforced by the Express route in builder-handoff.ts
+    // (registered after attachUser) which sets req.userId before calling this.
+    // This test confirms the store function itself doesn't create users/sessions.
     const { token } = storeHandoff(SAMPLE_SUMMARY, "hash");
     const result = exchangeHandoff(token);
     // The function returns the summary — auth enforcement is the route's job
