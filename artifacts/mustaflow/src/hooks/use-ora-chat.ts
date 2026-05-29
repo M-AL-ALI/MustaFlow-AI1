@@ -6,6 +6,7 @@ export interface OraMessage {
   content: string;
   handoffCta?: boolean;
   datasetResult?: DatasetAnalysisResult;
+  suggestions?: string[];
 }
 
 export interface OraSession {
@@ -448,6 +449,7 @@ export function useOraChat(): UseOraChatReturn {
           const data = await apiPost<{
             reply: string;
             handoffCta: boolean;
+            suggestions?: string[];
             msgCount: number;
             msgLimit: number;
           }>("/api/public-ai/chat", body);
@@ -455,7 +457,12 @@ export function useOraChat(): UseOraChatReturn {
           setMessages((prev) => {
             const next = [
               ...prev,
-              { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+              {
+                role: "assistant" as const,
+                content: data.reply,
+                handoffCta: data.handoffCta,
+                suggestions: data.suggestions ?? [],
+              },
             ];
             storeTranscript(next);
             return next;

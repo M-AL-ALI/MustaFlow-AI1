@@ -134,6 +134,7 @@ router.post("/public-ai/chat", async (req, res) => {
   let modelUsed = primaryModel;
   let provider: "openai" | "anthropic" = "openai";
   let reply: string | null = null;
+  let suggestions: string[] = [];
 
   try {
     const { createChatCompletion } = await import("../../lib/ai-providers");
@@ -191,6 +192,42 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
+  // Generate follow-up suggestions using a fast model. Failures are silently swallowed
+  // so the main reply is never blocked.
+  try {
+    const { createChatCompletion } = await import("../../lib/ai-providers");
+    const recentHistory = historyMessages.slice(-4);
+    const suggestionResult = await createChatCompletion({
+      provider: "openai",
+      model: "gpt-5-mini",
+      messages: [
+        {
+          role: "system" as const,
+          content:
+            'You generate follow-up questions for a conversational AI assistant named Ora. Given the conversation so far and the latest assistant reply, return a JSON object with a "suggestions" array of 2-3 short follow-up questions the user could ask next. Each question must be under 60 characters, natural, and non-repetitive.',
+        },
+        ...recentHistory,
+        { role: "user" as const, content: message },
+        { role: "assistant" as const, content: reply },
+        {
+          role: "user" as const,
+          content: "Suggest 2-3 short follow-up questions I could ask next.",
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 200,
+    });
+    const raw = suggestionResult.choices[0]?.message?.content?.trim() ?? "{}";
+    const parsed = JSON.parse(raw) as { suggestions?: unknown };
+    if (Array.isArray(parsed.suggestions)) {
+      suggestions = (parsed.suggestions as unknown[])
+        .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 80)
+        .slice(0, 3);
+    }
+  } catch (suggestErr) {
+    logger.debug({ component: "ora-chat", err: suggestErr }, "Suggestion generation skipped");
+  }
+
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
@@ -203,6 +240,7 @@ router.post("/public-ai/chat", async (req, res) => {
   res.json({
     reply,
     handoffCta,
+    suggestions,
     msgCount: payload.msgCount,
     msgLimit: MSG_LIMIT_VALUE,
   });

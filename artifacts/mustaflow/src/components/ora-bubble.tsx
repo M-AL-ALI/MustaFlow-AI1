@@ -45,16 +45,12 @@ function DatasetChip({
   uploadError,
   onClear,
   fileType,
-  rowCount,
-  colCount,
 }: {
   file: AttachedFile | null;
   uploadState: UploadState;
   uploadError: string | null;
   onClear: () => void;
   fileType?: string;
-  rowCount?: number;
-  colCount?: number;
 }) {
   if (uploadState === "idle") return null;
 
@@ -345,6 +341,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 </div>
               )}
               {messages.map((msg, i) => {
+                const isLastMessage = i === messages.length - 1;
                 const prevUserMsg =
                   i > 0
                     ? messages
@@ -356,6 +353,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   msg.role === "assistant" &&
                   prevUserMsg != null &&
                   hasBuildIntent(prevUserMsg.content, msg.content);
+                const showSuggestions =
+                  msg.role === "assistant" &&
+                  isLastMessage &&
+                  !isLoading &&
+                  Array.isArray(msg.suggestions) &&
+                  msg.suggestions.length > 0;
 
                 return (
                   <div
@@ -389,6 +392,23 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                           Turn this into a project
                           <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
                         </button>
+                      )}
+                      {showSuggestions && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {msg.suggestions!.map((suggestion, si) => (
+                            <button
+                              key={si}
+                              type="button"
+                              onClick={() => {
+                                if (!isLoading && !atLimit) void sendMessage(suggestion);
+                              }}
+                              disabled={isLoading || atLimit}
+                              className="text-xs px-2.5 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -454,8 +474,6 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     uploadError={uploadError}
                     onClear={handleClearAttachment}
                     fileType={attachedFile?.fileType}
-                    rowCount={attachedFile?.rowCount}
-                    colCount={attachedFile?.colCount}
                   />
 
                   {/* Unified input bar */}
