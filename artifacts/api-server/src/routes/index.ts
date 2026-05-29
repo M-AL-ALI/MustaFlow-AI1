@@ -88,6 +88,7 @@ import brainstormRouter from "./brainstorm";
 import apiDocsRouter from "./api-docs";
 import publicAiRouter from "./public-ai/index";
 import oraTranscriptRouter from "./ora-transcript";
+import builderHandoffRouter from "./builder-handoff";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -95,6 +96,7 @@ import {
   exportLimiter,
   generalLimiter,
   oraLimiter,
+  oraHandoffLimiter,
 } from "../lib/rateLimit";
 
 const router: IRouter = Router();
@@ -187,6 +189,7 @@ const KNOWN_PREFIXES = [
   "/docs",
   "/public-ai",
   "/ora",
+  "/builder",
 ];
 
 router.use((req, res, next) => {
@@ -214,6 +217,10 @@ router.post("/projects/:id/duplicate", exportLimiter);
 router.get("/projects/:id/export", exportLimiter);
 router.post("/projects/:id/attachments/upload-url", exportLimiter);
 router.post("/billing/checkout", exportLimiter);
+
+// ── Builder handoff exchange (auth-gated) ─────────────────────────────────────
+router.post("/builder/handoff/exchange", oraHandoffLimiter);
+router.use(builderHandoffRouter);
 
 router.use(workspacesRouter);
 router.use(workspaceDomainsRouter);

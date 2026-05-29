@@ -1,0 +1,234 @@
+Thank you. The revised Phase 6 Builder Handoff plan is approved with corrections.
+
+You may proceed with Phase 6 implementation only after applying the corrections below.
+
+Approved direction:
+
+* Use short-lived opaque handoff token
+* Do not put the actual idea text in the URL
+* Public Ora route creates sanitized text-only handoff payload
+* Protected Builder route exchanges token after authentication
+* Public route cannot create projects
+* Public route cannot access Builder/project/user/secret/credit/billing systems
+* No raw files, images, datasets, audio, transcripts, fileRefs, imageRefs, or private session data transfer to Builder
+* User can review/edit the prefilled Builder idea before building
+* No database migration unless you determine in-memory handoff is not reliable enough
+
+Corrections before coding:
+
+1. Fix incorrect Voice-A route reference
+    In Section 11 regression tests, the plan says:
+
+“Voice-A (POST /api/public-ai/voice-session) still works”
+
+Voice-A has no backend route. It is browser-native frontend only.
+
+Please correct this test item to:
+
+* Voice-A UI still works
+* microphone button still renders
+* review-before-send transcript still works
+* TTS toggle still works
+* no backend voice routes were added
+
+2. Do not quote raw user message in deterministic fallback
+    The fallback currently says:
+
+summary: "Visitor described: \"[truncated last user message]\""
+
+That can violate the privacy rule because it may copy raw personal text, private details, or sensitive wording directly into the handoff.
+
+Please change the fallback to a safer structure.
+
+Recommended fallback:
+
+{
+  "summary": "Visitor wants to continue an idea from Ora inside the MustaFlow Builder.",
+  "appIdea": "Start a new MustaFlow project based on the visitor's current idea.",
+  "keyFeatures": [],
+  "suggestedNextStep": "Describe your idea in the Builder and click Build.",
+  "source": "ora_public_handoff"
+}
+
+If you do use the last user message, it must be sanitized aggressively:
+
+* remove names/emails/phone numbers
+* strip file names, URLs, IDs, refs
+* truncate heavily
+* do not wrap as a direct quote
+* do not include sensitive or personal content
+
+3. In-memory handoff store limitation must be documented
+    Using an in-memory Map is acceptable for initial Phase 6 if the deployment is single-process and low-risk.
+
+But please document the limitation:
+
+* handoff tokens are lost if the API server restarts
+* handoff tokens may fail if the app runs multiple server instances without sticky routing/shared storage
+* anonymous sign-up flows that take longer than the TTL will expire
+* future production scaling may require Redis, database TTL table, or another shared short-lived token store
+
+For Phase 6, in-memory is acceptable only if you include a graceful expired-token message and the user can continue manually.
+
+4. Consider TTL of 15 minutes
+    12 minutes may be too short if the user signs up and verifies email.
+
+Recommended:
+
+* 15 minutes minimum
+* possibly 20 minutes if Clerk email verification is commonly needed
+* still single-use
+* still consumed immediately after exchange
+
+Please choose a TTL and explain why.
+
+5. Token in URL still needs cleanup
+    Even though the token is opaque, it is still a bearer token.
+
+Please confirm:
+
+* token is removed from URL using history.replaceState() immediately after exchange attempt
+* token is never logged raw
+* token is never stored in localStorage
+* token is not sent to analytics
+* token is only kept in memory/session flow long enough to exchange
+* expired/used token gives safe message
+
+6. Public create route input must not be trusted
+    The public route accepts recent messages from the frontend, but the frontend is untrusted.
+
+Please enforce server-side:
+
+* max number of messages
+* max characters per message
+* max total characters
+* role allowlist only: user/assistant
+* strip metadata fields
+* strip fileRef/imageRef/dataset refs
+* strip base64/data URLs
+* strip HTML/scripts
+* reject huge payloads
+* sanitize before model call
+
+7. Handoff summary must be app-builder focused
+    The Builder handoff should only happen when there is something buildable or useful to continue.
+
+If conversation is personal advice, machine troubleshooting, general Q&A, or non-app topic, summary should safely say:
+“Describe what you want to build in MustaFlow Builder.”
+
+Do not create a misleading app idea from a non-build conversation.
+
+8. Protected exchange route should not create a project automatically yet
+    I agree with the plan: exchange should prefill the idea input only.
+
+Do not automatically create a project in Phase 6 unless I approve it later.
+
+Required behavior:
+
+* exchange token
+* return safe summary
+* prefill Builder idea/start screen
+* user reviews/edits
+* user clicks Build manually
+
+9. Logging/privacy must be strict
+    Confirm logs do not contain:
+
+* raw token
+* summary text
+* appIdea text
+* keyFeatures text
+* raw messages
+* user prompt text
+* user ID in cleartext
+* raw IP
+* file/image/dataset/audio contents
+
+Safe logs only:
+
+* token hash
+* userId hash
+* IP hash
+* created/consumed/expired status
+* latency
+* error category
+
+10. Add route-specific kill-switch/rollback if simple
+    The global PUBLIC_AI_ENABLED=false disables all Ora. That is fine.
+
+But if simple, add a phase-specific env flag:
+
+ORA_HANDOFF_ENABLED=false
+
+This would let us disable Builder handoff without disabling Ora chat, documents, datasets, voice, and image analysis.
+
+If you do not add it in Phase 6, explain why and include route rollback instructions.
+
+11. UI card must clearly say files are not transferred
+    The card should make this obvious:
+
+“Files, images, datasets, and voice audio are not transferred automatically. Ora will only pass a short text summary that you can review and edit.”
+
+12. Existing CTA behavior
+    Current Ora responses already return handoffCta: true.
+
+Please make sure the new card does not appear too aggressively or clutter every response.
+
+Recommended:
+
+* show compact CTA under helpful/substantive responses
+* allow user to dismiss/hide CTA in the session
+* avoid repeating a large card under every single message
+* keep the UI professional and not pushy
+
+13. Tests required — corrected list
+    Please include tests for:
+
+* public create returns opaque UUID token only
+* token does not contain summary
+* token expires safely
+* token is single-use
+* invalid token rejected
+* used token rejected
+* protected exchange requires auth
+* public route cannot create project
+* public route has no Builder/project/user/secret/credit/billing imports
+* files/images/datasets/audio are not transferred
+* fileRef/imageRef/base64/data URLs are stripped
+* raw transcript is not transferred
+* fallback summary does not quote raw user message
+* logs do not contain raw token or summary
+* signed-in exchange works
+* anonymous sign-in redirect works
+* token removed from URL after exchange
+* user can edit summary before building
+* non-build conversation fallback is safe
+* Phase 1 chat still works
+* Phase 2 document upload still works
+* Phase 3 dataset analysis still works
+* Voice-A frontend still works
+* Phase 5 image analysis still works
+
+14. Validation report required
+    After implementation, provide a full validation report with:
+
+* affected files
+* final commit hash
+* final routes
+* token proof
+* anonymous flow proof
+* signed-in flow proof
+* protected exchange proof
+* URL cleanup proof
+* fallback summary proof
+* non-build conversation proof
+* privacy/logging proof
+* security-boundary proof
+* tests run
+* typecheck/lint/format/workflow status
+* rollback plan
+
+15. Do not start next phase
+    After Phase 6, do not start Web Search, Voice-B, Knowledge Vault, or Image Editing until I approve.
+
+Proceed with Phase 6 implementation only after applying these corrections.

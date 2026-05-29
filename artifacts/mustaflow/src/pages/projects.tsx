@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
 import {
@@ -118,6 +118,45 @@ function HomeHero() {
     }
     toggleRecording();
   }
+
+  // ── Phase 6: Ora → Builder handoff ───────────────────────────────────────
+  // Reads ?handoff=TOKEN from URL, exchanges for a pre-filled app idea.
+  // Token is removed from URL immediately (correction #5).
+  // Fails silently — user can always type their idea manually (correction #3).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const handoffToken = params.get("handoff");
+    if (!handoffToken) return;
+
+    // Remove opaque token from URL immediately — it's a bearer credential
+    const cleanUrl = window.location.pathname + (window.location.hash || "");
+    window.history.replaceState({}, "", cleanUrl);
+
+    let cancelled = false;
+    const BASE = (import.meta.env.BASE_URL as string).replace(/\/$/, "");
+    void (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/builder/handoff/exchange`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ token: handoffToken }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { appIdea?: string; summary?: string };
+        const idea = (data.appIdea ?? data.summary ?? "").trim();
+        if (idea) {
+          setPrompt(idea);
+          setTimeout(() => textareaRef.current?.focus(), 100);
+        }
+      } catch {
+        // Silent — user can type idea manually
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const cycleExample = useCallback(() => {
     setExampleIndex((i) => (i + 1) % EXAMPLE_PROMPTS.length);

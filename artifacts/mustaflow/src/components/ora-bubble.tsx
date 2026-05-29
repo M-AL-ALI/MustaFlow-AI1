@@ -11,7 +11,6 @@ import {
   Table2,
   AlertCircle,
   Loader2,
-  ArrowRight,
   Volume2,
   VolumeX,
   Trash2,
@@ -24,6 +23,7 @@ import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
+import { OraHandoffCard } from "@/components/ora/ora-handoff-card";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
@@ -151,6 +151,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
+  const [handoffDismissed, setHandoffDismissed] = useState(false);
   const [, setLocation] = useLocation();
   const feedRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -462,10 +463,13 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         .reverse()
                         .find((m) => m.role === "user")
                     : null;
-                const showCta =
+                const showHandoffCard =
                   msg.role === "assistant" &&
-                  prevUserMsg != null &&
-                  hasBuildIntent(prevUserMsg.content, msg.content);
+                  isLastMessage &&
+                  !isLoading &&
+                  (msg.handoffCta === true ||
+                    (prevUserMsg != null && hasBuildIntent(prevUserMsg.content, msg.content))) &&
+                  !handoffDismissed;
                 const showSuggestions =
                   msg.role === "assistant" &&
                   isLastMessage &&
@@ -514,15 +518,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                           </button>
                         )}
 
-                      {showCta && (
-                        <button
-                          type="button"
-                          onClick={() => setLocation("/sign-up")}
-                          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)] transition-colors group"
-                        >
-                          Turn this into a project
-                          <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
-                        </button>
+                      {showHandoffCard && (
+                        <OraHandoffCard
+                          messages={messages}
+                          onDismiss={() => setHandoffDismissed(true)}
+                        />
                       )}
                       {showSuggestions && (
                         <div className="mt-3 flex flex-wrap gap-1.5">

@@ -293,6 +293,16 @@ export const exportLimiter = createLimiter({
   message: "Too many export or duplicate requests. Please wait before trying again.",
 });
 
+// Sliding-window counter: 5 handoff-create calls per IP per hour.
+// Stricter than chat since each call invokes an AI model for summarization.
+export const oraHandoffLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 5,
+  keyPrefix: "ora_handoff",
+  message:
+    "Too many Builder handoff requests. Please wait before trying again, or describe your idea directly in the Builder.",
+});
+
 // General API — 300 per minute per IP (broad safety net)
 export const generalLimiter = createLimiter({
   windowMs: 60_000,

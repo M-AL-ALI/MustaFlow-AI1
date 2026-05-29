@@ -7,6 +7,7 @@ import uploadRouter from "./upload";
 import fileAnalysisRouter from "./file-analysis";
 import datasetAnalysisRouter from "./dataset-analysis";
 import imageAnalysisRouter from "./image-analysis";
+import handoffRouter from "./handoff";
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use(uploadRouter);
 router.use(fileAnalysisRouter);
 router.use(datasetAnalysisRouter);
 router.use(imageAnalysisRouter);
+router.use(handoffRouter);
 
 export default router;
