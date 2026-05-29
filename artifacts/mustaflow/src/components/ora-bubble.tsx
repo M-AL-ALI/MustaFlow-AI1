@@ -158,6 +158,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const [showVoicePicker, setShowVoicePicker] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [handoffDismissed, setHandoffDismissed] = useState(false);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
@@ -165,6 +166,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const voicePickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Resize (desktop only) ────────────────────────────────────────────────
@@ -339,6 +341,17 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showLangMenu]);
+
+  useEffect(() => {
+    if (!showVoicePicker) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (voicePickerRef.current && !voicePickerRef.current.contains(e.target as Node)) {
+        setShowVoicePicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showVoicePicker]);
 
   useEffect(() => {
     if (!open) return;
@@ -591,6 +604,53 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   <VolumeX className="h-3.5 w-3.5" />
                 )}
               </button>
+            )}
+
+            {/* Voice picker — shown when TTS is available */}
+            {voice.isSpeechSynthesisSupported && voice.availableVoices.length > 0 && (
+              <div className="relative" ref={voicePickerRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowVoicePicker((v) => !v)}
+                  title="Change voice"
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2 py-1 hover:bg-muted/40 transition-colors"
+                >
+                  {(() => {
+                    const v = voice.availableVoices.find(
+                      (v) => v.voiceURI === voice.selectedVoiceURI,
+                    );
+                    return v ? v.name.split(" ")[0] : "Voice";
+                  })()}
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </button>
+                {showVoicePicker && (
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[200px] max-h-64 overflow-y-auto">
+                    <p className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                      Select voice
+                    </p>
+                    {voice.availableVoices.map((v) => (
+                      <button
+                        key={v.voiceURI}
+                        type="button"
+                        onClick={() => {
+                          voice.setVoiceURI(v.voiceURI);
+                          setShowVoicePicker(false);
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/60 transition-colors flex items-center justify-between gap-2",
+                          v.voiceURI === voice.selectedVoiceURI &&
+                            "text-[hsl(265_85%_65%)] font-medium",
+                        )}
+                      >
+                        <span className="truncate">{v.name}</span>
+                        <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                          {v.lang}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
 
             {messages.length > 0 && (
