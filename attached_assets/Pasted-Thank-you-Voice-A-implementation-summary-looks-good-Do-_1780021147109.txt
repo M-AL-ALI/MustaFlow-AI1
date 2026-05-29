@@ -1,0 +1,147 @@
+Thank you. Voice-A implementation summary looks good.
+
+Do not start Voice-B, image upload, web search, Builder handoff, or Knowledge Vault implementation yet.
+
+Voice-A is not accepted as complete until I review the full validation report with proof.
+
+Please provide the Voice-A final validation report.
+
+Required report:
+
+1. Final affected files
+    List every file created or modified for Voice-A.
+2. Final commit hash
+    Confirm the commit hash for Voice-A.
+3. Confirm no backend routes were added
+    Confirm:
+
+* no /api/public-ai/transcribe
+* no /api/public-ai/tts
+* no backend voice route added
+* Voice-A is browser-native only
+
+4. UI proof
+    Provide proof/screenshots for:
+
+* microphone button in Ora Panel
+* microphone button in Ora Bubble
+* microphone button on mobile drawer/bottom sheet
+* TTS/speaker toggle visible
+* “Voice or type in any language” hint
+* listening state
+* interim transcript state
+* final transcript in text box
+* permission denied or unsupported browser state if practical
+
+5. Review-before-send proof
+    Confirm:
+
+* voice transcript does not auto-send
+* final transcript lands in the text box
+* user can edit transcript before sending
+* pressing send sends the transcript as a normal user message
+* Ora’s response appears as a normal assistant message
+
+6. Message thread proof
+    Confirm:
+
+* spoken transcript appears in the same Ora message thread after sending
+* Ora response appears in the same thread
+* transcript survives refresh through the existing sessionStorage/session system
+* voice transcript is treated the same as typed text
+
+7. TTS proof
+    Confirm:
+
+* TTS defaults OFF
+* user must turn it on manually
+* read-aloud button appears only when TTS is enabled
+* text response is always visible even if TTS is enabled
+* no audio-only behavior
+
+8. Interruption behavior proof
+    Confirm:
+
+* tapping mic while Ora is speaking cancels playback
+* typing while Ora is speaking cancels playback
+* stop/cancel button cancels listening
+* no new AI response starts until the user confirms/sends the transcript
+
+9. Multilingual voice proof
+    Confirm language mapping:
+
+* Auto Detect → browser default/auto behavior
+* English → en-US
+* Arabic → ar-SA
+* Spanish → es-ES
+* French → fr-FR
+
+Also test where possible:
+
+* English voice transcript
+* Spanish voice transcript
+* Arabic voice transcript if browser/device supports it
+
+If browser voice support does not support a language, show graceful fallback and do not overpromise.
+
+10. Privacy proof
+    Confirm:
+
+* no audio is stored
+* no raw audio is logged
+* no transcript text is logged
+* no voice-specific backend route exists
+* final transcript is only stored temporarily through existing sessionStorage after user confirms/sends
+* no Builder/project memory access
+* no Knowledge Vault learning was implemented
+
+11. Regression proof
+    Confirm after Voice-A:
+
+* Phase 1 chat still works
+* Phase 2 PDF/DOCX/TXT upload and analysis still works
+* Phase 3 CSV/XLSX dataset analysis still works
+* DynamicAtom redesign still works
+* suggestions feature still works
+* public/private Builder boundary still works
+
+12. Tests and workflow status
+    Report:
+
+* Phase 4 tests: 43/43 pass
+* Phase 1 tests pass
+* Phase 2 tests pass
+* Phase 3 tests pass
+* typecheck status
+* lint status
+* format status
+* quality gate status
+* frontend workflow status
+* backend workflow status
+* full test suite status
+* any pre-existing unrelated failures, if still present
+
+13. Browser support clarification
+    Add a short note in the report:
+    “Voice support depends on browser/device support for SpeechRecognition and speechSynthesis. When unsupported, Ora falls back to typed chat.”
+14. Rollback plan
+    Explain how to disable/remove Voice-A while keeping:
+
+* Phase 1 chat
+* Phase 2 document upload
+* Phase 3 dataset analysis
+* Ora UI without voice
+
+15. Roadmap confirmation
+    Confirm:
+
+* Voice-B API fallback was not implemented
+* image upload was not implemented
+* web search was not implemented
+* Builder handoff was not implemented
+* Knowledge Vault / Controlled Learning Loop was not implemented
+* Knowledge Vault remains roadmap-only for future planning
+
+After I review this validation report, I will decide whether Voice-A is accepted as complete.
+
+Do not start the next phase until I explicitly approve it.
