@@ -424,9 +424,7 @@ export function OraVoiceConvPanel({
       <div className="flex items-center gap-3">
         <WaveformBars
           animated={isListening || isSpeaking || whisperRecording}
-          colorClass={
-            whisperRecording || isListening ? "bg-red-400" : "bg-[hsl(265_85%_65%)]"
-          }
+          colorClass={whisperRecording || isListening ? "bg-red-400" : "bg-[hsl(265_85%_65%)]"}
           scale={size === "sm" ? 0.85 : 1.1}
         />
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -498,7 +496,11 @@ export function OraVoiceConvPanel({
             ) : (
               <Mic className={cn("h-3 w-3", whisperRecording && "animate-pulse")} />
             )}
-            {whisperRecording ? "Recording…" : whisperTranscribing ? "Transcribing…" : "Hold to speak"}
+            {whisperRecording
+              ? "Recording…"
+              : whisperTranscribing
+                ? "Transcribing…"
+                : "Hold to speak"}
           </button>
         )}
 

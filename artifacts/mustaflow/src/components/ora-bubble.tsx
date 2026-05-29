@@ -475,7 +475,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
     whisperConv.cancelRecording();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {

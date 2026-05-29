@@ -39,12 +39,7 @@ export interface UseWhisperRecorderReturn {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getBestMimeType(): string {
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/ogg;codecs=opus",
-    "audio/mp4",
-  ];
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
   for (const t of candidates) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
   }
@@ -53,9 +48,7 @@ function getBestMimeType(): string {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useWhisperRecorder(
-  onTranscript: (text: string) => void,
-): UseWhisperRecorderReturn {
+export function useWhisperRecorder(onTranscript: (text: string) => void): UseWhisperRecorderReturn {
   const isSupported =
     typeof navigator !== "undefined" &&
     typeof window !== "undefined" &&
