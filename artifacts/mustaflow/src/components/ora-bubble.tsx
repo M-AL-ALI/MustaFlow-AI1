@@ -467,7 +467,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
     const onUp = () => {
       setIsResizing(false);
-      try { localStorage.setItem("ora_bubble_width", String(panelWidthRef.current)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem("ora_bubble_width", String(panelWidthRef.current));
+      } catch {
+        /* ignore */
+      }
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -538,451 +542,445 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         >
           <div className="h-10 w-0.5 rounded-full bg-border/50 group-hover:bg-[hsl(265_85%_65%/0.7)] transition-colors duration-150" />
         </div>
-            {/* Drawer header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <DynamicAtom state={atomState} size={26} />
-                <div>
-                  <span className="text-sm font-semibold tracking-tight">Ora</span>
-                  <span className="ml-1.5 text-[10px] text-muted-foreground/70">
-                    Free · No sign-in
-                  </span>
+        {/* Drawer header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <DynamicAtom state={atomState} size={26} />
+            <div>
+              <span className="text-sm font-semibold tracking-tight">Ora</span>
+              <span className="ml-1.5 text-[10px] text-muted-foreground/70">Free · No sign-in</span>
+            </div>
+            {oraStatus !== "idle" && (
+              <span className="text-[11px] text-muted-foreground animate-pulse">
+                {STATUS_LABELS[oraStatus]}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
+            {voice.isSupported && (
+              <OraVoiceModeButton
+                voiceState={voiceConvActive ? voice.voiceState : "idle"}
+                isSupported={voice.isSupported}
+                onStart={handleEnterVoiceConvMode}
+                onStop={handleExitVoiceConvMode}
+                disabled={!voiceConvActive && isLoading}
+                size="sm"
+              />
+            )}
+
+            {/* TTS toggle */}
+            {voice.isSpeechSynthesisSupported && (
+              <button
+                type="button"
+                onClick={voice.toggleTts}
+                title={voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"}
+                aria-label={
+                  voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"
+                }
+                className={cn(
+                  "flex items-center justify-center h-6 w-6 rounded-lg transition-colors",
+                  voice.isTtsEnabled
+                    ? "text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)]"
+                    : "text-muted-foreground/40 hover:text-muted-foreground",
+                )}
+              >
+                {voice.isTtsEnabled ? (
+                  <Volume2 className="h-3.5 w-3.5" />
+                ) : (
+                  <VolumeX className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void clearConversation()}
+                disabled={isLoading}
+                title="Clear conversation"
+                className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+
+            {/* Language selector */}
+            <div className="relative" ref={langMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowLangMenu((v) => !v)}
+                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2 py-1 hover:bg-muted/40 transition-colors"
+              >
+                <Globe className="h-3 w-3" />
+                {currentLangLabel}
+                <ChevronDown className="h-2.5 w-2.5" />
+              </button>
+              {showLangMenu && (
+                <div className="absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-popover border border-border rounded-xl shadow-lg py-1">
+                  {LANGUAGES.map((l) => (
+                    <button
+                      key={l.value}
+                      type="button"
+                      onClick={() => {
+                        setLanguage(l.value);
+                        setShowLangMenu(false);
+                      }}
+                      className={cn(
+                        "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors",
+                        language === l.value && "text-[hsl(265_85%_65%)] font-medium",
+                      )}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
                 </div>
-                {oraStatus !== "idle" && (
-                  <span className="text-[11px] text-muted-foreground animate-pulse">
-                    {STATUS_LABELS[oraStatus]}
-                  </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Message feed */}
+        <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-5 scroll-smooth">
+          {messages.length === 0 && !isLoading && (
+            <div className="text-center py-8">
+              <DynamicAtom state="idle" size={48} className="mx-auto mb-3" />
+              <p className="text-sm font-medium mb-1">Hi, I&apos;m Ora</p>
+              <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed">
+                Your free AI consultant. Ask me anything about app planning, strategy, or MustaFlow.
+                Upload a PDF, DOCX, TXT, CSV, or XLSX for analysis.
+              </p>
+            </div>
+          )}
+          {messages.map((msg, i) => {
+            const isLastMessage = i === messages.length - 1;
+            const prevUserMsg =
+              i > 0
+                ? messages
+                    .slice(0, i)
+                    .reverse()
+                    .find((m) => m.role === "user")
+                : null;
+            const showHandoffCard =
+              msg.role === "assistant" &&
+              isLastMessage &&
+              !isLoading &&
+              prevUserMsg != null &&
+              hasBuildIntent(prevUserMsg.content, msg.content) &&
+              !handoffDismissed &&
+              !voiceConvActive;
+            const showSuggestions =
+              msg.role === "assistant" &&
+              isLastMessage &&
+              !isLoading &&
+              Array.isArray(msg.suggestions) &&
+              msg.suggestions.length > 0;
+
+            const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
+
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "flex group",
+                  msg.role === "user" ? "justify-end" : "justify-start gap-2",
                 )}
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
-                {voice.isSupported && (
-                  <OraVoiceModeButton
-                    voiceState={voiceConvActive ? voice.voiceState : "idle"}
-                    isSupported={voice.isSupported}
-                    onStart={handleEnterVoiceConvMode}
-                    onStop={handleExitVoiceConvMode}
-                    disabled={!voiceConvActive && isLoading}
-                    size="sm"
+              >
+                {msg.role === "assistant" && (
+                  <DynamicAtom state="idle" size={20} className="shrink-0 mt-0.5" />
+                )}
+                <div className="max-w-[85%]">
+                  {msg.role === "user" ? (
+                    <div className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3 py-2 text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                      {msg.content}
+                    </div>
+                  ) : msg.datasetResult ? (
+                    <DatasetResultCard result={msg.datasetResult} />
+                  ) : (
+                    <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words">
+                      {msg.content}
+                    </div>
+                  )}
+
+                  {msg.editedFrom && (
+                    <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
+                      Edited from earlier message
+                    </p>
+                  )}
+
+                  <OraMessageActions
+                    message={msg}
+                    isLatestAssistant={isLatestAssistant}
+                    onEdit={msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined}
+                    onRegenerate={
+                      isLatestAssistant
+                        ? (() => {
+                            const prevUser = messages
+                              .slice(0, i)
+                              .reverse()
+                              .find((m) => m.role === "user");
+                            return prevUser
+                              ? () => void sendMessage(prevUser.content, { truncateTo: i })
+                              : undefined;
+                          })()
+                        : undefined
+                    }
+                    onContinueInBuilder={
+                      isLatestAssistant && msg.handoffCta
+                        ? () => void handleContinueInBuilder()
+                        : undefined
+                    }
+                    onReadAloud={
+                      msg.role === "assistant" && voice.isSpeechSynthesisSupported
+                        ? (text) => voice.speakText(text, language)
+                        : undefined
+                    }
+                    isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
+                    hasAttachment={msg.hadAttachment ?? false}
                   />
-                )}
 
-                {/* TTS toggle */}
-                {voice.isSpeechSynthesisSupported && (
-                  <button
-                    type="button"
-                    onClick={voice.toggleTts}
-                    title={
-                      voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"
-                    }
-                    aria-label={
-                      voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"
-                    }
-                    className={cn(
-                      "flex items-center justify-center h-6 w-6 rounded-lg transition-colors",
-                      voice.isTtsEnabled
-                        ? "text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)]"
-                        : "text-muted-foreground/40 hover:text-muted-foreground",
-                    )}
-                  >
-                    {voice.isTtsEnabled ? (
-                      <Volume2 className="h-3.5 w-3.5" />
-                    ) : (
-                      <VolumeX className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                )}
-
-                {messages.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void clearConversation()}
-                    disabled={isLoading}
-                    title="Clear conversation"
-                    className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-
-                {/* Language selector */}
-                <div className="relative" ref={langMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowLangMenu((v) => !v)}
-                    className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2 py-1 hover:bg-muted/40 transition-colors"
-                  >
-                    <Globe className="h-3 w-3" />
-                    {currentLangLabel}
-                    <ChevronDown className="h-2.5 w-2.5" />
-                  </button>
-                  {showLangMenu && (
-                    <div className="absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-popover border border-border rounded-xl shadow-lg py-1">
-                      {LANGUAGES.map((l) => (
+                  {showHandoffCard && (
+                    <OraHandoffCard
+                      messages={messages}
+                      onDismiss={() => setHandoffDismissed(true)}
+                    />
+                  )}
+                  {showSuggestions && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {msg.suggestions!.map((suggestion, si) => (
                         <button
-                          key={l.value}
+                          key={si}
                           type="button"
                           onClick={() => {
-                            setLanguage(l.value);
-                            setShowLangMenu(false);
+                            if (!isLoading && !atLimit) void sendMessage(suggestion);
                           }}
-                          className={cn(
-                            "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors",
-                            language === l.value && "text-[hsl(265_85%_65%)] font-medium",
-                          )}
+                          disabled={isLoading || atLimit}
+                          className="text-xs px-2.5 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          {l.label}
+                          {suggestion}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
+              </div>
+            );
+          })}
+          {/* Editing indicator */}
+          {editingFromIdx !== null && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+              <span>Editing earlier message — reply will be added to conversation</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingFromIdx(null);
+                  setInput("");
+                }}
+                className="shrink-0 opacity-60 hover:opacity-100"
+                aria-label="Cancel edit"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
 
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+          {isLoading && (
+            <div className="flex items-start gap-2">
+              <DynamicAtom state={atomState} size={20} className="shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1 pt-0.5">
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
+                      style={{ animationDelay: `${i * 200}ms` }}
+                    />
+                  ))}
+                </div>
+                {oraStatus !== "idle" && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Ora · {STATUS_LABELS[oraStatus]}
+                  </span>
+                )}
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Message feed */}
-            <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-5 scroll-smooth">
-              {messages.length === 0 && !isLoading && (
-                <div className="text-center py-8">
-                  <DynamicAtom state="idle" size={48} className="mx-auto mb-3" />
-                  <p className="text-sm font-medium mb-1">Hi, I&apos;m Ora</p>
-                  <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed">
-                    Your free AI consultant. Ask me anything about app planning, strategy, or
-                    MustaFlow. Upload a PDF, DOCX, TXT, CSV, or XLSX for analysis.
-                  </p>
-                </div>
+        {/* Error */}
+        {error && (
+          <div className="mx-4 mb-2 rounded-xl border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs text-destructive flex items-start justify-between gap-2 shrink-0">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={clearError}
+              className="shrink-0 opacity-60 hover:opacity-100"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
+        {/* Composer */}
+        <div className="border-t border-border/40 px-4 py-3 shrink-0">
+          {atLimit ? (
+            <div className="text-center py-1">
+              <p className="text-xs text-muted-foreground">
+                Session limit reached.{" "}
+                <button
+                  type="button"
+                  onClick={() => setLocation("/sign-up")}
+                  className="text-[hsl(265_85%_65%)] hover:underline"
+                >
+                  Sign up for unlimited
+                </button>
+              </p>
+            </div>
+          ) : (
+            <>
+              {attachedFile?.isImage || previewObjectUrl !== null ? (
+                <OraImageChip
+                  uploadState={uploadState}
+                  uploadError={uploadError}
+                  filename={attachedFile?.filename}
+                  sizeBytes={attachedFile?.sizeBytes}
+                  width={attachedFile?.width}
+                  height={attachedFile?.height}
+                  previewObjectUrl={previewObjectUrl}
+                  onClear={handleClearAttachment}
+                />
+              ) : (
+                <DatasetChip
+                  file={attachedFile}
+                  uploadState={uploadState}
+                  uploadError={uploadError}
+                  onClear={handleClearAttachment}
+                  fileType={attachedFile?.fileType}
+                />
               )}
-              {messages.map((msg, i) => {
-                const isLastMessage = i === messages.length - 1;
-                const prevUserMsg =
-                  i > 0
-                    ? messages
-                        .slice(0, i)
-                        .reverse()
-                        .find((m) => m.role === "user")
-                    : null;
-                const showHandoffCard =
-                  msg.role === "assistant" &&
-                  isLastMessage &&
-                  !isLoading &&
-                  prevUserMsg != null &&
-                  hasBuildIntent(prevUserMsg.content, msg.content) &&
-                  !handoffDismissed &&
-                  !voiceConvActive;
-                const showSuggestions =
-                  msg.role === "assistant" &&
-                  isLastMessage &&
-                  !isLoading &&
-                  Array.isArray(msg.suggestions) &&
-                  msg.suggestions.length > 0;
 
-                const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
+              {voiceConvActive ? (
+                /* ─── Voice Conversation Mode panel ─────────────────── */
+                <OraVoiceConvPanel
+                  voiceState={voice.voiceState}
+                  interimTranscript={voice.interimTranscript}
+                  isLoading={isLoading}
+                  isTtsMuted={voiceConvTtsMuted}
+                  onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
+                  onExit={handleExitVoiceConvMode}
+                  onInterrupt={() => voiceRef.current.stopSpeaking()}
+                  size="sm"
+                />
+              ) : (
+                /* ─── Normal dictation + text input ─────────────────── */
+                <>
+                  {/* Voice live area — dictation feedback only */}
+                  <OraVoiceLiveArea
+                    voiceState={voice.voiceState}
+                    interimTranscript={voice.interimTranscript}
+                    voiceReady={voiceReady}
+                    voiceErrorMsg={voiceErrorMsg}
+                    size="sm"
+                  />
 
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      "flex group",
-                      msg.role === "user" ? "justify-end" : "justify-start gap-2",
-                    )}
-                  >
-                    {msg.role === "assistant" && (
-                      <DynamicAtom state="idle" size={20} className="shrink-0 mt-0.5" />
-                    )}
-                    <div className="max-w-[85%]">
-                      {msg.role === "user" ? (
-                        <div className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3 py-2 text-foreground whitespace-pre-wrap break-words leading-relaxed">
-                          {msg.content}
-                        </div>
-                      ) : msg.datasetResult ? (
-                        <DatasetResultCard result={msg.datasetResult} />
-                      ) : (
-                        <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words">
-                          {msg.content}
-                        </div>
+                  {/* Unified input bar */}
+                  <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
+                      className="sr-only"
+                      aria-hidden
+                      onChange={handleFileChange}
+                    />
+                    {/* Attachment button */}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLoading || uploadState === "uploading" || atAllLimits}
+                      title={
+                        atAllLimits
+                          ? "Upload limit reached for this session"
+                          : "Upload images, PDF, DOCX, TXT, CSV, XLSX"
+                      }
+                      className={cn(
+                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
+                        uploadState === "attached"
+                          ? "text-[hsl(265_85%_65%)]"
+                          : "text-muted-foreground hover:text-foreground",
+                        (isLoading || uploadState === "uploading" || atAllLimits) &&
+                          "opacity-40 cursor-not-allowed",
                       )}
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                    </button>
 
-                      {msg.editedFrom && (
-                        <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
-                          Edited from earlier message
-                        </p>
-                      )}
+                    {/* Dictation button — speech-to-text only; transcript lands in textarea */}
+                    <OraDictationButton
+                      voiceState={voice.voiceState}
+                      isSupported={voice.isSupported}
+                      onStart={() => voice.startListening(language)}
+                      onStop={() => voice.stopListening()}
+                      disabled={isLoading || atLimit}
+                      size="sm"
+                    />
 
-                      <OraMessageActions
-                        message={msg}
-                        isLatestAssistant={isLatestAssistant}
-                        onEdit={
-                          msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined
-                        }
-                        onRegenerate={
-                          isLatestAssistant
-                            ? (() => {
-                                const prevUser = messages
-                                  .slice(0, i)
-                                  .reverse()
-                                  .find((m) => m.role === "user");
-                                return prevUser
-                                  ? () => void sendMessage(prevUser.content, { truncateTo: i })
-                                  : undefined;
-                              })()
-                            : undefined
-                        }
-                        onContinueInBuilder={
-                          isLatestAssistant && msg.handoffCta
-                            ? () => void handleContinueInBuilder()
-                            : undefined
-                        }
-                        onReadAloud={
-                          msg.role === "assistant" && voice.isSpeechSynthesisSupported
-                            ? (text) => voice.speakText(text, language)
-                            : undefined
-                        }
-                        isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
-                        hasAttachment={msg.hadAttachment ?? false}
-                      />
-
-                      {showHandoffCard && (
-                        <OraHandoffCard
-                          messages={messages}
-                          onDismiss={() => setHandoffDismissed(true)}
-                        />
-                      )}
-                      {showSuggestions && (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {msg.suggestions!.map((suggestion, si) => (
-                            <button
-                              key={si}
-                              type="button"
-                              onClick={() => {
-                                if (!isLoading && !atLimit) void sendMessage(suggestion);
-                              }}
-                              disabled={isLoading || atLimit}
-                              className="text-xs px-2.5 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              {suggestion}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <textarea
+                      ref={textareaRef}
+                      value={input}
+                      onChange={(e) => {
+                        setInput(e.target.value);
+                        if (voiceReady) setVoiceReady(false);
+                      }}
+                      onKeyDown={handleKeyDown}
+                      placeholder={
+                        uploadState === "attached"
+                          ? attachedFile?.isImage
+                            ? `Ask about ${attachedFile.filename ?? "this image"}…`
+                            : `Ask about ${attachedFile?.filename ?? "this file"}…`
+                          : "Ask Ora anything…"
+                      }
+                      rows={1}
+                      className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
+                      style={{ maxHeight: "80px" }}
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSend}
+                      disabled={!input.trim() || isLoading || uploadState === "uploading"}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
+                    >
+                      <Send className="h-3 w-3" />
+                    </button>
                   </div>
-                );
-              })}
-              {/* Editing indicator */}
-              {editingFromIdx !== null && (
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-                  <span>Editing earlier message — reply will be added to conversation</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingFromIdx(null);
-                      setInput("");
-                    }}
-                    className="shrink-0 opacity-60 hover:opacity-100"
-                    aria-label="Cancel edit"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
 
-              {isLoading && (
-                <div className="flex items-start gap-2">
-                  <DynamicAtom state={atomState} size={20} className="shrink-0 mt-0.5" />
-                  <div className="flex flex-col gap-1 pt-0.5">
-                    <div className="flex items-center gap-1">
-                      {[0, 1, 2].map((i) => (
-                        <span
-                          key={i}
-                          className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
-                          style={{ animationDelay: `${i * 200}ms` }}
-                        />
-                      ))}
-                    </div>
-                    {oraStatus !== "idle" && (
-                      <span className="text-[11px] text-muted-foreground">
-                        Ora · {STATUS_LABELS[oraStatus]}
+                  <div className="flex items-center justify-between mt-1.5">
+                    <p className="text-[9px] text-muted-foreground/50">
+                      Upload images, PDF, DOCX, CSV, XLSX ·{" "}
+                      {voice.isSupported
+                        ? "Voice or type in any language"
+                        : "Voice unavailable on this browser — typing still works"}
+                    </p>
+                    {session && (
+                      <span className="text-[9px] text-muted-foreground/50">
+                        {session.msgLimit - session.msgCount} left
                       </span>
                     )}
                   </div>
-                </div>
-              )}
-            </div>
-
-            {/* Error */}
-            {error && (
-              <div className="mx-4 mb-2 rounded-xl border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs text-destructive flex items-start justify-between gap-2 shrink-0">
-                <span>{error}</span>
-                <button
-                  type="button"
-                  onClick={clearError}
-                  className="shrink-0 opacity-60 hover:opacity-100"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-
-            {/* Composer */}
-            <div className="border-t border-border/40 px-4 py-3 shrink-0">
-              {atLimit ? (
-                <div className="text-center py-1">
-                  <p className="text-xs text-muted-foreground">
-                    Session limit reached.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setLocation("/sign-up")}
-                      className="text-[hsl(265_85%_65%)] hover:underline"
-                    >
-                      Sign up for unlimited
-                    </button>
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {attachedFile?.isImage || previewObjectUrl !== null ? (
-                    <OraImageChip
-                      uploadState={uploadState}
-                      uploadError={uploadError}
-                      filename={attachedFile?.filename}
-                      sizeBytes={attachedFile?.sizeBytes}
-                      width={attachedFile?.width}
-                      height={attachedFile?.height}
-                      previewObjectUrl={previewObjectUrl}
-                      onClear={handleClearAttachment}
-                    />
-                  ) : (
-                    <DatasetChip
-                      file={attachedFile}
-                      uploadState={uploadState}
-                      uploadError={uploadError}
-                      onClear={handleClearAttachment}
-                      fileType={attachedFile?.fileType}
-                    />
-                  )}
-
-                  {voiceConvActive ? (
-                    /* ─── Voice Conversation Mode panel ─────────────────── */
-                    <OraVoiceConvPanel
-                      voiceState={voice.voiceState}
-                      interimTranscript={voice.interimTranscript}
-                      isLoading={isLoading}
-                      isTtsMuted={voiceConvTtsMuted}
-                      onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
-                      onExit={handleExitVoiceConvMode}
-                      onInterrupt={() => voiceRef.current.stopSpeaking()}
-                      size="sm"
-                    />
-                  ) : (
-                    /* ─── Normal dictation + text input ─────────────────── */
-                    <>
-                      {/* Voice live area — dictation feedback only */}
-                      <OraVoiceLiveArea
-                        voiceState={voice.voiceState}
-                        interimTranscript={voice.interimTranscript}
-                        voiceReady={voiceReady}
-                        voiceErrorMsg={voiceErrorMsg}
-                        size="sm"
-                      />
-
-                      {/* Unified input bar */}
-                      <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
-                          className="sr-only"
-                          aria-hidden
-                          onChange={handleFileChange}
-                        />
-                        {/* Attachment button */}
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isLoading || uploadState === "uploading" || atAllLimits}
-                          title={
-                            atAllLimits
-                              ? "Upload limit reached for this session"
-                              : "Upload images, PDF, DOCX, TXT, CSV, XLSX"
-                          }
-                          className={cn(
-                            "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
-                            uploadState === "attached"
-                              ? "text-[hsl(265_85%_65%)]"
-                              : "text-muted-foreground hover:text-foreground",
-                            (isLoading || uploadState === "uploading" || atAllLimits) &&
-                              "opacity-40 cursor-not-allowed",
-                          )}
-                        >
-                          <Paperclip className="h-3.5 w-3.5" />
-                        </button>
-
-                        {/* Dictation button — speech-to-text only; transcript lands in textarea */}
-                        <OraDictationButton
-                          voiceState={voice.voiceState}
-                          isSupported={voice.isSupported}
-                          onStart={() => voice.startListening(language)}
-                          onStop={() => voice.stopListening()}
-                          disabled={isLoading || atLimit}
-                          size="sm"
-                        />
-
-                        <textarea
-                          ref={textareaRef}
-                          value={input}
-                          onChange={(e) => {
-                            setInput(e.target.value);
-                            if (voiceReady) setVoiceReady(false);
-                          }}
-                          onKeyDown={handleKeyDown}
-                          placeholder={
-                            uploadState === "attached"
-                              ? attachedFile?.isImage
-                                ? `Ask about ${attachedFile.filename ?? "this image"}…`
-                                : `Ask about ${attachedFile?.filename ?? "this file"}…`
-                              : "Ask Ora anything…"
-                          }
-                          rows={1}
-                          className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
-                          style={{ maxHeight: "80px" }}
-                          disabled={isLoading}
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSend}
-                          disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
-                        >
-                          <Send className="h-3 w-3" />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between mt-1.5">
-                        <p className="text-[9px] text-muted-foreground/50">
-                          Upload images, PDF, DOCX, CSV, XLSX ·{" "}
-                          {voice.isSupported
-                            ? "Voice or type in any language"
-                            : "Voice unavailable on this browser — typing still works"}
-                        </p>
-                        {session && (
-                          <span className="text-[9px] text-muted-foreground/50">
-                            {session.msgLimit - session.msgCount} left
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  )}
                 </>
               )}
-            </div>
+            </>
+          )}
+        </div>
       </div>
     </>
   );
