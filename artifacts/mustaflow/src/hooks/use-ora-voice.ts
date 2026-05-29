@@ -120,7 +120,13 @@ export interface UseOraVoiceReturn {
   toggleTts: () => void;
   startListening: (lang: string) => void;
   stopListening: () => void;
+  /** Speak only when the user's TTS toggle is on (regular read-aloud button). */
   speakText: (text: string, lang: string) => void;
+  /**
+   * Speak unconditionally — ignores the isTtsEnabled preference flag.
+   * Used by Voice Conversation Mode, which has its own mute control.
+   */
+  speakTextForce: (text: string, lang: string) => void;
   stopSpeaking: () => void;
 }
 
@@ -245,11 +251,11 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     [isSupported, SpeechRecognitionClass],
   );
 
-  const speakText = useCallback(
+  /** Shared speak logic — force=true bypasses the isTtsEnabled preference flag. */
+  const speakRaw = useCallback(
     (text: string, lang: string) => {
-      if (!isSpeechSynthesisSupported || !isTtsEnabled || !text.trim()) return;
+      if (!isSpeechSynthesisSupported || !text.trim()) return;
 
-      // Cancel any ongoing utterance first
       window.speechSynthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(text);
@@ -266,7 +272,27 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
       setVoiceState("speaking");
       window.speechSynthesis.speak(utterance);
     },
-    [isSpeechSynthesisSupported, isTtsEnabled],
+    [isSpeechSynthesisSupported],
+  );
+
+  /** Speak only when the user's TTS toggle is on (regular read-aloud button). */
+  const speakText = useCallback(
+    (text: string, lang: string) => {
+      if (!isTtsEnabled) return;
+      speakRaw(text, lang);
+    },
+    [isTtsEnabled, speakRaw],
+  );
+
+  /**
+   * Speak unconditionally — ignores the isTtsEnabled preference.
+   * Used by Voice Conversation Mode, which has its own mute control.
+   */
+  const speakTextForce = useCallback(
+    (text: string, lang: string) => {
+      speakRaw(text, lang);
+    },
+    [speakRaw],
   );
 
   const toggleTts = useCallback(() => {
@@ -291,6 +317,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     startListening,
     stopListening,
     speakText,
+    speakTextForce,
     stopSpeaking,
   };
 }

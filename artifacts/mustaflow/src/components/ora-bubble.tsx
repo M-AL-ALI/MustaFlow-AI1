@@ -225,7 +225,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   // ─── Voice Conversation Mode effects ──────────────────────────────────────
 
-  // Auto-TTS: speak each new Ora reply when voice conv mode is active
+  // Auto-TTS: speak each new Ora reply when voice conv mode is active.
+  // Uses speakTextForce so it works regardless of the user's TTS toggle preference —
+  // Voice Conversation Mode has its own mute control (voiceConvTtsMuted).
   useEffect(() => {
     if (!voiceConvActive || voiceConvTtsMuted || isLoading) return;
     if (!voiceRef.current.isSpeechSynthesisSupported) return;
@@ -233,7 +235,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     if (!lastMsg || lastMsg.role !== "assistant") return;
     if (lastMsg.content === lastConvAssistantMsgRef.current) return;
     lastConvAssistantMsgRef.current = lastMsg.content;
-    voiceRef.current.speakText(lastMsg.content, languageRef.current);
+    voiceRef.current.speakTextForce(lastMsg.content, languageRef.current);
   }, [messages, isLoading, voiceConvActive, voiceConvTtsMuted]);
 
   // Conversation cycling: after Ora finishes speaking, restart listening
