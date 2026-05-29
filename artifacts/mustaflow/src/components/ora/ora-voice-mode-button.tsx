@@ -1,25 +1,30 @@
 /**
- * OraVoiceModeButton — premium "Talk to Ora" button + live voice panel.
+ * Voice UI components for Ora.
  *
- * Design rules:
- * - Original MustaFlow/Ora visual language — not a copy of any third-party UI.
- * - Gradient orb (purple → blue) with animated waveform bars.
- * - CSS-only animations (no external animation library).
- * - prefers-reduced-motion respected via @media in injected keyframes.
- * - Dark mode default; all colours use the project's HSL tokens.
- * - No backend calls, no transcript logging, no audio storage.
+ * IMPORTANT: there are TWO distinct voice experiences:
  *
- * Exports:
- *   OraVoiceModeButton  — drop-in for OraVoiceMicButton in the input bar
- *   OraVoiceLiveArea    — live voice panel rendered above the input bar
+ *  A. OraDictationButton  — small mic in the composer input bar.
+ *     Starts/stops the SpeechRecognition listener. Transcript lands in the
+ *     textarea so the user can review and edit before pressing Send manually.
+ *     No automatic sending. No automatic TTS.
+ *
+ *  B. OraVoiceModeButton + OraVoiceConvPanel — "Talk with Ora" button that
+ *     lives in the panel/bubble header near the Dynamic Atom. Enters a full
+ *     Voice Conversation Mode: transcript is auto-sent, Ora's reply is
+ *     auto-spoken, then listening restarts automatically for a live
+ *     back-and-forth conversation.
+ *
+ * These are kept in one file so the shared waveform animation and keyframes
+ * are only defined once. No backend calls, no audio storage, no transcript
+ * logging — all implemented via browser-native Web Speech APIs.
  */
 
 import { useEffect } from "react";
-import { MicOff, AlertCircle, CheckCircle2 } from "lucide-react";
+import { MicOff, AlertCircle, CheckCircle2, Mic, Square, PhoneOff, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { VoiceState } from "@/hooks/use-ora-voice";
 
-// ─── CSS keyframes (injected once into <head>) ─────────────────────────────
+// ─── CSS keyframes (injected once into <head>) ──────────────────────────────
 
 const KEYFRAMES = `
 @keyframes ora-wave {
@@ -39,9 +44,9 @@ const KEYFRAMES = `
   50%       { box-shadow: 0 0 10px 4px hsl(265 85% 65% / 0.55), 0 4px 16px hsl(265 85% 65% / 0.35); }
 }
 @media (prefers-reduced-motion: reduce) {
-  @keyframes ora-wave        { 0%, 100% { height: 6px; } }
-  @keyframes ora-ping        { 0%, 100% { opacity: 0; } }
-  @keyframes ora-idle-glow   { 0%, 100% { box-shadow: 0 2px 8px hsl(265 85% 65% / 0.2); } }
+  @keyframes ora-wave          { 0%, 100% { height: 6px; } }
+  @keyframes ora-ping          { 0%, 100% { opacity: 0; } }
+  @keyframes ora-idle-glow     { 0%, 100% { box-shadow: 0 2px 8px hsl(265 85% 65% / 0.2); } }
   @keyframes ora-speaking-glow { 0%, 100% { box-shadow: 0 0 6px 2px hsl(265 85% 65% / 0.4); } }
 }
 `;
@@ -60,17 +65,16 @@ function injectKeyframes() {
   keyframesInjected = true;
 }
 
-// ─── Waveform bars ─────────────────────────────────────────────────────────
-// Seven bars with varied heights for a natural, asymmetric waveform shape.
+// ─── Shared waveform bars ────────────────────────────────────────────────────
 
 const BAR_DEFS: Array<{ min: number; max: number; dur: number }> = [
-  { min: 2, max: 5, dur: 0.65 },
-  { min: 3, max: 9, dur: 0.55 },
-  { min: 4, max: 11, dur: 0.7 },
-  { min: 2, max: 7, dur: 0.6 },
-  { min: 5, max: 10, dur: 0.5 },
-  { min: 3, max: 6, dur: 0.72 },
-  { min: 2, max: 8, dur: 0.58 },
+  { min: 2, max: 5,  dur: 0.65 },
+  { min: 3, max: 9,  dur: 0.55 },
+  { min: 4, max: 11, dur: 0.7  },
+  { min: 2, max: 7,  dur: 0.6  },
+  { min: 5, max: 10, dur: 0.5  },
+  { min: 3, max: 6,  dur: 0.72 },
+  { min: 2, max: 8,  dur: 0.58 },
 ];
 
 interface WaveformBarsProps {
@@ -79,11 +83,7 @@ interface WaveformBarsProps {
   scale?: number;
 }
 
-function WaveformBars({
-  animated = false,
-  colorClass = "bg-white/90",
-  scale = 1,
-}: WaveformBarsProps) {
+function WaveformBars({ animated = false, colorClass = "bg-white/90", scale = 1 }: WaveformBarsProps) {
   return (
     <div className="flex items-end gap-[2px]" aria-hidden>
       {BAR_DEFS.map((b, i) => {
@@ -110,7 +110,103 @@ function WaveformBars({
   );
 }
 
-// ─── OraVoiceModeButton ────────────────────────────────────────────────────
+// ─── A. OraDictationButton ───────────────────────────────────────────────────
+// Small mic button that lives in the composer input bar (beside attachment).
+// Activates speech-to-text dictation ONLY. Transcript lands in the textarea
+// for review; the user presses Send manually. No auto-send, no auto-TTS.
+
+export interface OraDictationButtonProps {
+  voiceState: VoiceState;
+  isSupported: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  disabled?: boolean;
+  /** "md" for OraPanel (h-7 w-7 icon h-4 w-4), "sm" for OraBubble (h-6 w-6 icon h-3.5 w-3.5) */
+  size?: "sm" | "md";
+}
+
+export function OraDictationButton({
+  voiceState,
+  isSupported,
+  onStart,
+  onStop,
+  disabled = false,
+  size = "md",
+}: OraDictationButtonProps) {
+  useEffect(injectKeyframes, []);
+
+  const isListening = voiceState === "listening";
+  const isUnsupported = !isSupported || voiceState === "unsupported";
+  const isDenied = voiceState === "permission_denied";
+  const isError = voiceState === "error";
+  const isInert = isUnsupported || isDenied;
+
+  const dim = size === "sm" ? "h-6 w-6" : "h-7 w-7";
+  const iconDim = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
+
+  const title = isUnsupported
+    ? "Voice input is not supported in this browser"
+    : isDenied
+      ? "Microphone access was denied. Enable it in your browser settings."
+      : isError
+        ? "Voice recognition failed. Tap to retry."
+        : isListening
+          ? "Stop dictation"
+          : "Dictate your message (transcript lands in the text box for review)";
+
+  const handleClick = () => {
+    if (isInert || disabled) return;
+    if (isListening) onStop();
+    else onStart();
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={disabled || isInert}
+      title={title}
+      aria-label={title}
+      aria-pressed={isListening}
+      className={cn(
+        "relative flex shrink-0 items-center justify-center rounded-lg transition-colors",
+        dim,
+        isListening
+          ? "text-red-400 hover:text-red-300"
+          : isInert
+            ? "text-muted-foreground/25 cursor-not-allowed"
+            : isError
+              ? "text-amber-500 hover:text-amber-400"
+              : "text-muted-foreground hover:text-foreground",
+        disabled && !isInert && "opacity-40 cursor-not-allowed",
+      )}
+    >
+      {isListening && (
+        <span
+          className="absolute inset-[-3px] rounded-full bg-red-400/20"
+          style={{ animation: "ora-ping 1.3s ease-out infinite" }}
+          aria-hidden
+        />
+      )}
+      {isInert ? (
+        <MicOff className={iconDim} />
+      ) : isError ? (
+        <AlertCircle className={iconDim} />
+      ) : isListening ? (
+        <Square className={iconDim} fill="currentColor" />
+      ) : (
+        <Mic className={iconDim} />
+      )}
+    </button>
+  );
+}
+
+// ─── B. OraVoiceModeButton ───────────────────────────────────────────────────
+// Premium circular orb shown in the panel/bubble header. Enters/exits the full
+// Voice Conversation Mode (auto-send + auto-TTS + conversation cycling).
+// The parent is responsible for the mode state and passing the correct
+// voiceState (pass "idle" when conv mode is inactive so the button shows
+// as ready-to-enter rather than reflecting dictation state).
 
 export interface OraVoiceModeButtonProps {
   voiceState: VoiceState;
@@ -143,33 +239,24 @@ export function OraVoiceModeButton({
   const dim = size === "sm" ? "h-6 w-6" : "h-7 w-7";
   const waveScale = size === "sm" ? 0.75 : 1;
 
-  let ariaLabel = "Start talking to Ora";
-  if (isListening) ariaLabel = "Stop listening";
-  if (isSpeaking) ariaLabel = "Ora is speaking — tap to stop";
+  let ariaLabel = "Start voice conversation with Ora";
+  if (isListening) ariaLabel = "Ora is listening — tap to end voice mode";
+  if (isSpeaking)  ariaLabel = "Ora is speaking — tap to end voice mode";
   if (isUnsupported) ariaLabel = "Voice input is not supported in this browser";
   if (isDenied) ariaLabel = "Microphone permission denied — enable in browser settings";
-  if (isError) ariaLabel = "Voice recognition failed — tap to try again";
+  if (isError)  ariaLabel = "Voice failed — tap to try again";
 
-  let title = "Talk to Ora";
-  if (isListening) title = "Stop listening";
-  if (isSpeaking) title = "Ora is speaking — tap to stop";
+  let title = "Talk with Ora — voice conversation mode";
+  if (isListening) title = "Ora is listening — tap to end voice mode";
+  if (isSpeaking)  title = "Ora is speaking — tap to end voice mode";
   if (isUnsupported) title = "Voice is not supported in this browser. You can still type.";
-  if (isDenied)
-    title =
-      "Microphone access was denied. Enable it in your browser settings or type your message.";
-  if (isError) title = "Voice recognition failed. Please try again or type your message.";
+  if (isDenied) title = "Microphone access was denied. Enable it in your browser settings.";
+  if (isError)  title = "Voice failed. Tap to try again.";
 
   const handleClick = () => {
     if (isInert || disabled) return;
     if (isActive) onStop();
     else onStart();
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      handleClick();
-    }
   };
 
   const buttonStyle: React.CSSProperties = isSpeaking
@@ -182,7 +269,9 @@ export function OraVoiceModeButton({
     <button
       type="button"
       onClick={handleClick}
-      onKeyDown={handleKeyDown}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); }
+      }}
       disabled={disabled || isInert}
       title={title}
       aria-label={ariaLabel}
@@ -191,28 +280,17 @@ export function OraVoiceModeButton({
         "relative flex shrink-0 items-center justify-center rounded-full transition-all duration-200",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
         dim,
-        // ── Gradient orb (default) ──────────────────────────────────────
         !isInert && !isError && "bg-gradient-to-br from-[hsl(265_85%_62%)] to-[hsl(220_80%_58%)]",
-        // ── Idle / hover ─────────────────────────────────────────────────
-        !isActive &&
-          !isInert &&
-          !isError &&
+        !isActive && !isInert && !isError &&
           "hover:scale-110 hover:from-[hsl(265_85%_58%)] hover:to-[hsl(220_80%_54%)] focus-visible:ring-[hsl(265_85%_65%)]",
-        // ── Listening: warm red ring + no hover scale ─────────────────────
-        isListening &&
-          "ring-2 ring-red-400/70 shadow-md shadow-red-400/20 focus-visible:ring-red-400 hover:scale-100",
-        // ── Speaking ─────────────────────────────────────────────────────
+        isListening && "ring-2 ring-red-400/70 shadow-md shadow-red-400/20 focus-visible:ring-red-400 hover:scale-100",
         isSpeaking && "focus-visible:ring-[hsl(265_85%_65%)]",
-        // ── Unsupported / denied ─────────────────────────────────────────
         isInert && "bg-muted opacity-35 cursor-not-allowed shadow-none",
-        // ── Error ────────────────────────────────────────────────────────
         isError && "bg-amber-500/15 text-amber-500 focus-visible:ring-amber-400",
-        // ── Loading / at-limit ────────────────────────────────────────────
         disabled && !isInert && "opacity-40 cursor-not-allowed",
       )}
       style={buttonStyle}
     >
-      {/* Ping ring when listening */}
       {isListening && (
         <span
           className="absolute inset-[-4px] rounded-full bg-red-400/25"
@@ -220,33 +298,147 @@ export function OraVoiceModeButton({
           aria-hidden
         />
       )}
-
       {isInert ? (
-        <MicOff
-          className={cn("text-muted-foreground", size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")}
-        />
+        <MicOff className={cn("text-muted-foreground", size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")} />
       ) : isError ? (
         <AlertCircle className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />
       ) : (
-        <WaveformBars
-          animated={isListening || isSpeaking}
-          colorClass="bg-white/90"
-          scale={waveScale}
-        />
+        <WaveformBars animated={isListening || isSpeaking} colorClass="bg-white/90" scale={waveScale} />
       )}
     </button>
   );
 }
 
-// ─── OraVoiceLiveArea ──────────────────────────────────────────────────────
-// Replaces the inline interim-transcript + error blocks above the input bar.
+// ─── B. OraVoiceConvPanel ────────────────────────────────────────────────────
+// Shown in the composer area in place of the normal text input while Voice
+// Conversation Mode is active. Displays live state (listening / thinking /
+// speaking), interim transcript, mute toggle, and an "End Voice Mode" button.
+
+export interface OraVoiceConvPanelProps {
+  voiceState: VoiceState;
+  interimTranscript: string;
+  isLoading: boolean;
+  isTtsMuted: boolean;
+  onToggleTtsMute: () => void;
+  onExit: () => void;
+  onInterrupt?: () => void;
+  size?: "sm" | "md";
+}
+
+export function OraVoiceConvPanel({
+  voiceState,
+  interimTranscript,
+  isLoading,
+  isTtsMuted,
+  onToggleTtsMute,
+  onExit,
+  onInterrupt,
+  size = "md",
+}: OraVoiceConvPanelProps) {
+  useEffect(injectKeyframes, []);
+
+  const isListening = voiceState === "listening";
+  const isSpeaking = voiceState === "speaking";
+
+  const labelCls = size === "sm" ? "text-[10px]" : "text-[11px]";
+  const headingCls = size === "sm" ? "text-xs" : "text-sm";
+
+  const stateLabel = isLoading
+    ? "Ora is thinking…"
+    : isSpeaking
+      ? "Ora is speaking…"
+      : isListening
+        ? "Listening…"
+        : "Voice Mode Active";
+
+  const subLabel = isSpeaking
+    ? "Tap interrupt to speak"
+    : isListening
+      ? interimTranscript
+        ? `"${interimTranscript}"`
+        : "Speak naturally — your words will auto-send"
+      : isLoading
+        ? "Preparing reply…"
+        : "Starting…";
+
+  return (
+    <div className="rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.06)] px-4 py-3 flex flex-col gap-3">
+      {/* State row */}
+      <div className="flex items-center gap-3">
+        <WaveformBars
+          animated={isListening || isSpeaking}
+          colorClass={isListening ? "bg-red-400" : "bg-[hsl(265_85%_65%)]"}
+          scale={size === "sm" ? 0.85 : 1.1}
+        />
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span className={cn("font-semibold text-foreground", headingCls)}>{stateLabel}</span>
+          <span className={cn("text-muted-foreground/60 leading-snug truncate", labelCls, isListening && interimTranscript && "italic")}>
+            {subLabel}
+          </span>
+        </div>
+        {/* Live indicator */}
+        {isListening && (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse"
+            aria-label="Recording"
+          />
+        )}
+      </div>
+
+      {/* Controls row */}
+      <div className="flex items-center gap-2">
+        {/* Mute / unmute Ora's spoken replies */}
+        <button
+          type="button"
+          onClick={onToggleTtsMute}
+          title={isTtsMuted ? "Unmute Ora's voice replies" : "Mute Ora's voice replies"}
+          aria-label={isTtsMuted ? "Unmute voice replies" : "Mute voice replies"}
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors",
+            isTtsMuted
+              ? "border-border/40 text-muted-foreground/50 hover:text-muted-foreground"
+              : "border-[hsl(265_85%_65%/0.35)] text-[hsl(265_85%_65%)] hover:border-[hsl(265_85%_65%/0.55)]",
+          )}
+        >
+          {isTtsMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+          {isTtsMuted ? "Muted" : "Voice on"}
+        </button>
+
+        {/* Interrupt button (visible while Ora is speaking) */}
+        {isSpeaking && onInterrupt && (
+          <button
+            type="button"
+            onClick={onInterrupt}
+            className="flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Mic className="h-3 w-3" />
+            Interrupt
+          </button>
+        )}
+
+        {/* End Voice Mode */}
+        <button
+          type="button"
+          onClick={onExit}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1 text-xs text-destructive/70 hover:border-destructive/55 hover:bg-destructive/5 hover:text-destructive transition-colors"
+        >
+          <PhoneOff className="h-3 w-3" />
+          End Voice Mode
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── OraVoiceLiveArea ────────────────────────────────────────────────────────
+// Shown above the composer input bar during normal dictation mode only.
+// Renders the listening panel, interim transcript, transcript-ready hint, and
+// error states. Not shown during Voice Conversation Mode.
 
 export interface OraVoiceLiveAreaProps {
   voiceState: VoiceState;
   interimTranscript: string;
-  /** Set true immediately after voice transcript lands in the composer. */
   voiceReady?: boolean;
-  /** Pre-computed error message string from the parent (null/undefined = none). */
   voiceErrorMsg?: string | null;
   size?: "sm" | "md";
 }
@@ -269,19 +461,14 @@ export function OraVoiceLiveArea({
 
   return (
     <div className="mb-2 flex flex-col gap-1.5">
-      {/* ── Listening panel ─────────────────────────────────────────────── */}
+      {/* Listening panel */}
       {isListening && (
         <div className="flex flex-col gap-1.5 rounded-xl border border-[hsl(265_85%_65%/0.22)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2.5">
           <div className="flex items-center gap-2.5">
-            <WaveformBars
-              animated
-              colorClass="bg-[hsl(265_85%_65%)]"
-              scale={size === "sm" ? 0.8 : 1}
-            />
+            <WaveformBars animated colorClass="bg-[hsl(265_85%_65%)]" scale={size === "sm" ? 0.8 : 1} />
             <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>
-              Ora is listening…
+              Listening… speak now
             </span>
-            {/* Live red indicator dot */}
             <span
               className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse"
               aria-label="Recording"
@@ -291,38 +478,32 @@ export function OraVoiceLiveArea({
             {interimTranscript ? (
               <span className="italic">"{interimTranscript}"</span>
             ) : (
-              "Speak naturally. Your words will appear here before sending."
+              "Your words will appear here. Press Send when done."
             )}
           </p>
         </div>
       )}
 
-      {/* ── Speaking panel ───────────────────────────────────────────────── */}
+      {/* Speaking panel (TTS read-aloud via normal toggle) */}
       {isSpeaking && (
         <div className="flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.22)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2.5">
-          <WaveformBars
-            animated
-            colorClass="bg-[hsl(265_85%_65%)]"
-            scale={size === "sm" ? 0.8 : 1}
-          />
-          <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>
-            Ora is speaking…
-          </span>
-          <span className={cn("ml-auto text-muted-foreground/50", label)}>Tap to stop</span>
+          <WaveformBars animated colorClass="bg-[hsl(265_85%_65%)]" scale={size === "sm" ? 0.8 : 1} />
+          <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>Ora is speaking…</span>
+          <span className={cn("ml-auto text-muted-foreground/50", label)}>Tap mic to stop</span>
         </div>
       )}
 
-      {/* ── Transcript ready ─────────────────────────────────────────────── */}
+      {/* Transcript ready */}
       {voiceReady && voiceState === "idle" && !voiceErrorMsg && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
           <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-500" />
           <span className={cn("text-emerald-600 dark:text-emerald-400", label)}>
-            Review your transcript, then press Send.
+            Transcript ready — review it, then press Send.
           </span>
         </div>
       )}
 
-      {/* ── Error / permission denied ────────────────────────────────────── */}
+      {/* Error / permission denied */}
       {voiceErrorMsg && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-2.5 py-2">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />

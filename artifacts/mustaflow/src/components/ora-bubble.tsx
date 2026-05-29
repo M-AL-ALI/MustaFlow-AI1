@@ -20,7 +20,12 @@ import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
-import { OraVoiceModeButton, OraVoiceLiveArea } from "@/components/ora/ora-voice-mode-button";
+import {
+  OraVoiceModeButton,
+  OraVoiceLiveArea,
+  OraDictationButton,
+  OraVoiceConvPanel,
+} from "@/components/ora/ora-voice-mode-button";
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
@@ -162,22 +167,49 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const langMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Voice-A ──────────────────────────────────────────────────────────────
+  // ─── Voice ────────────────────────────────────────────────────────────────
+  // Two distinct modes share one SpeechRecognition instance:
+  //   A. Normal dictation — transcript lands in the textarea; user presses Send.
+  //   B. Voice Conversation Mode — auto-sends transcript, auto-speaks Ora's
+  //      reply, then restarts listening for a continuous voice conversation.
 
   const [voiceReady, setVoiceReady] = useState(false);
+  const [voiceConvActive, setVoiceConvActive] = useState(false);
+  const [voiceConvTtsMuted, setVoiceConvTtsMuted] = useState(false);
+
+  // Stable refs — always current, so effects and callbacks never go stale
+  const voiceConvActiveRef = useRef(false);
+  const wasConvSpeakingRef = useRef(false);
+  const lastConvAssistantMsgRef = useRef<string | null>(null);
+  const languageRef = useRef(language);
+  const sendMessageRef = useRef(sendMessage);
+
+  voiceConvActiveRef.current = voiceConvActive;
+  languageRef.current = language;
+  sendMessageRef.current = sendMessage;
 
   const handleVoiceTranscript = useCallback((text: string) => {
-    setInput(text);
-    setVoiceReady(true);
-    setTimeout(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(text.length, text.length);
-    }, 40);
+    if (voiceConvActiveRef.current) {
+      // Voice Conversation Mode: auto-send — no textarea review step
+      void sendMessageRef.current(text);
+    } else {
+      // Normal dictation: put transcript in textarea for user review
+      setInput(text);
+      setVoiceReady(true);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(text.length, text.length);
+      }, 40);
+    }
   }, []);
 
   const voice = useOraVoice(handleVoiceTranscript);
 
-  // Auto-clear the transcript-ready hint after 5 s
+  // Stable ref to the voice hook (avoids adding the whole hook to effect deps)
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+
+  // Auto-clear the transcript-ready hint after 5 s (dictation mode only)
   useEffect(() => {
     if (!voiceReady) return;
     const t = setTimeout(() => setVoiceReady(false), 5000);
@@ -190,6 +222,36 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       : voice.voiceState === "error"
         ? "Voice recognition failed. Please try again or type your message."
         : null;
+
+  // ─── Voice Conversation Mode effects ──────────────────────────────────────
+
+  // Auto-TTS: speak each new Ora reply when voice conv mode is active
+  useEffect(() => {
+    if (!voiceConvActive || voiceConvTtsMuted || isLoading) return;
+    if (!voiceRef.current.isSpeechSynthesisSupported) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant") return;
+    if (lastMsg.content === lastConvAssistantMsgRef.current) return;
+    lastConvAssistantMsgRef.current = lastMsg.content;
+    voiceRef.current.speakText(lastMsg.content, languageRef.current);
+  }, [messages, isLoading, voiceConvActive, voiceConvTtsMuted]);
+
+  // Conversation cycling: after Ora finishes speaking, restart listening
+  useEffect(() => {
+    if (!voiceConvActive) return;
+    if (voice.voiceState === "speaking") {
+      wasConvSpeakingRef.current = true;
+      return;
+    }
+    if (!(voice.voiceState === "idle" && wasConvSpeakingRef.current && !isLoading)) return;
+    wasConvSpeakingRef.current = false;
+    const tid = setTimeout(() => {
+      if (voiceConvActiveRef.current) {
+        voiceRef.current.startListening(languageRef.current);
+      }
+    }, 350);
+    return () => clearTimeout(tid);
+  }, [voice.voiceState, voiceConvActive, isLoading]);
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
@@ -347,6 +409,26 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     clearUploadError();
   }, [clearAttachment, clearUploadError, previewObjectUrl]);
 
+  const handleEnterVoiceConvMode = useCallback(() => {
+    voiceRef.current.stopListening();
+    voiceRef.current.stopSpeaking();
+    setInput("");
+    setVoiceReady(false);
+    wasConvSpeakingRef.current = false;
+    lastConvAssistantMsgRef.current = null;
+    setVoiceConvActive(true);
+    voiceConvActiveRef.current = true;
+    setTimeout(() => voiceRef.current.startListening(languageRef.current), 150);
+  }, []);
+
+  const handleExitVoiceConvMode = useCallback(() => {
+    setVoiceConvActive(false);
+    voiceConvActiveRef.current = false;
+    wasConvSpeakingRef.current = false;
+    voiceRef.current.stopListening();
+    voiceRef.current.stopSpeaking();
+  }, []);
+
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -410,6 +492,18 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
+                {voice.isSupported && (
+                  <OraVoiceModeButton
+                    voiceState={voiceConvActive ? voice.voiceState : "idle"}
+                    isSupported={voice.isSupported}
+                    onStart={handleEnterVoiceConvMode}
+                    onStop={handleExitVoiceConvMode}
+                    disabled={!voiceConvActive && isLoading}
+                    size="sm"
+                  />
+                )}
+
                 {/* TTS toggle */}
                 {voice.isSpeechSynthesisSupported && (
                   <button
@@ -516,9 +610,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   msg.role === "assistant" &&
                   isLastMessage &&
                   !isLoading &&
-                  (msg.handoffCta === true ||
-                    (prevUserMsg != null && hasBuildIntent(prevUserMsg.content, msg.content))) &&
-                  !handoffDismissed;
+                  prevUserMsg != null &&
+                  hasBuildIntent(prevUserMsg.content, msg.content) &&
+                  !handoffDismissed &&
+                  !voiceConvActive;
                 const showSuggestions =
                   msg.role === "assistant" &&
                   isLastMessage &&
@@ -711,103 +806,117 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     />
                   )}
 
-                  {/* Voice live area — listening / speaking / transcript-ready / error */}
-                  <OraVoiceLiveArea
-                    voiceState={voice.voiceState}
-                    interimTranscript={voice.interimTranscript}
-                    voiceReady={voiceReady}
-                    voiceErrorMsg={voiceErrorMsg}
-                    size="sm"
-                  />
-
-                  {/* Unified input bar */}
-                  <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
-                      className="sr-only"
-                      aria-hidden
-                      onChange={handleFileChange}
-                    />
-                    {/* Attachment button */}
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isLoading || uploadState === "uploading" || atAllLimits}
-                      title={
-                        atAllLimits
-                          ? "Upload limit reached for this session"
-                          : "Upload images, PDF, DOCX, TXT, CSV, XLSX"
-                      }
-                      className={cn(
-                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
-                        uploadState === "attached"
-                          ? "text-[hsl(265_85%_65%)]"
-                          : "text-muted-foreground hover:text-foreground",
-                        (isLoading || uploadState === "uploading" || atAllLimits) &&
-                          "opacity-40 cursor-not-allowed",
-                      )}
-                    >
-                      <Paperclip className="h-3.5 w-3.5" />
-                    </button>
-
-                    {/* Ora Voice Mode button */}
-                    <OraVoiceModeButton
+                  {voiceConvActive ? (
+                    /* ─── Voice Conversation Mode panel ─────────────────── */
+                    <OraVoiceConvPanel
                       voiceState={voice.voiceState}
-                      isSupported={voice.isSupported}
-                      onStart={() => voice.startListening(language)}
-                      onStop={() => {
-                        voice.stopListening();
-                        voice.stopSpeaking();
-                      }}
-                      disabled={isLoading || atLimit}
+                      interimTranscript={voice.interimTranscript}
+                      isLoading={isLoading}
+                      isTtsMuted={voiceConvTtsMuted}
+                      onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
+                      onExit={handleExitVoiceConvMode}
+                      onInterrupt={() => voiceRef.current.stopSpeaking()}
                       size="sm"
                     />
+                  ) : (
+                    /* ─── Normal dictation + text input ─────────────────── */
+                    <>
+                      {/* Voice live area — dictation feedback only */}
+                      <OraVoiceLiveArea
+                        voiceState={voice.voiceState}
+                        interimTranscript={voice.interimTranscript}
+                        voiceReady={voiceReady}
+                        voiceErrorMsg={voiceErrorMsg}
+                        size="sm"
+                      />
 
-                    <textarea
-                      ref={textareaRef}
-                      value={input}
-                      onChange={(e) => {
-                        setInput(e.target.value);
-                        if (voiceReady) setVoiceReady(false);
-                      }}
-                      onKeyDown={handleKeyDown}
-                      placeholder={
-                        uploadState === "attached"
-                          ? attachedFile?.isImage
-                            ? `Ask about ${attachedFile.filename ?? "this image"}…`
-                            : `Ask about ${attachedFile?.filename ?? "this file"}…`
-                          : "Ask Ora anything…"
-                      }
-                      rows={1}
-                      className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
-                      style={{ maxHeight: "80px" }}
-                      disabled={isLoading}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSend}
-                      disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
-                    >
-                      <Send className="h-3 w-3" />
-                    </button>
-                  </div>
+                      {/* Unified input bar */}
+                      <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
+                          className="sr-only"
+                          aria-hidden
+                          onChange={handleFileChange}
+                        />
+                        {/* Attachment button */}
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isLoading || uploadState === "uploading" || atAllLimits}
+                          title={
+                            atAllLimits
+                              ? "Upload limit reached for this session"
+                              : "Upload images, PDF, DOCX, TXT, CSV, XLSX"
+                          }
+                          className={cn(
+                            "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
+                            uploadState === "attached"
+                              ? "text-[hsl(265_85%_65%)]"
+                              : "text-muted-foreground hover:text-foreground",
+                            (isLoading || uploadState === "uploading" || atAllLimits) &&
+                              "opacity-40 cursor-not-allowed",
+                          )}
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                        </button>
 
-                  <div className="flex items-center justify-between mt-1.5">
-                    <p className="text-[9px] text-muted-foreground/50">
-                      Upload images, PDF, DOCX, CSV, XLSX ·{" "}
-                      {voice.isSupported
-                        ? "Voice or type in any language"
-                        : "Voice unavailable on this browser — typing still works"}
-                    </p>
-                    {session && (
-                      <span className="text-[9px] text-muted-foreground/50">
-                        {session.msgLimit - session.msgCount} left
-                      </span>
-                    )}
-                  </div>
+                        {/* Dictation button — speech-to-text only; transcript lands in textarea */}
+                        <OraDictationButton
+                          voiceState={voice.voiceState}
+                          isSupported={voice.isSupported}
+                          onStart={() => voice.startListening(language)}
+                          onStop={() => voice.stopListening()}
+                          disabled={isLoading || atLimit}
+                          size="sm"
+                        />
+
+                        <textarea
+                          ref={textareaRef}
+                          value={input}
+                          onChange={(e) => {
+                            setInput(e.target.value);
+                            if (voiceReady) setVoiceReady(false);
+                          }}
+                          onKeyDown={handleKeyDown}
+                          placeholder={
+                            uploadState === "attached"
+                              ? attachedFile?.isImage
+                                ? `Ask about ${attachedFile.filename ?? "this image"}…`
+                                : `Ask about ${attachedFile?.filename ?? "this file"}…`
+                              : "Ask Ora anything…"
+                          }
+                          rows={1}
+                          className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
+                          style={{ maxHeight: "80px" }}
+                          disabled={isLoading}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSend}
+                          disabled={!input.trim() || isLoading || uploadState === "uploading"}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
+                        >
+                          <Send className="h-3 w-3" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between mt-1.5">
+                        <p className="text-[9px] text-muted-foreground/50">
+                          Upload images, PDF, DOCX, CSV, XLSX ·{" "}
+                          {voice.isSupported
+                            ? "Voice or type in any language"
+                            : "Voice unavailable on this browser — typing still works"}
+                        </p>
+                        {session && (
+                          <span className="text-[9px] text-muted-foreground/50">
+                            {session.msgLimit - session.msgCount} left
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>

@@ -20,6 +20,13 @@ const BUILD_INTENT_PATTERNS = [
 ];
 
 const SUPPRESS_PATTERNS = [
+  // Greetings and casual openers — never trigger the Builder CTA
+  /^(?:hi|hello|hey|yo|sup|howdy|greetings|good\s+(?:morning|afternoon|evening|day))[.!?\s]*$/i,
+  /^(?:hi|hello|hey|yo)\s+(?:there|ora|mustaflow)[.!?\s]*$/i,
+  /^(?:can you hear me|are you there|testing[\s!.]*|is this working)[.!?\s]*$/i,
+  /^(?:what can you do|who are you|what are you|how are you|tell me about yourself|nice to meet you)[.!?]*$/i,
+
+  // General Q&A question starters (not build intent)
   /^(?:what|how|why|when|where|who|which|is|are|does|do)\b/i,
   /^(?:tell me|explain|describe|summarize|translate|analyze|review|compare|list|show me)\b/i,
   /\bexplain\b/i,
