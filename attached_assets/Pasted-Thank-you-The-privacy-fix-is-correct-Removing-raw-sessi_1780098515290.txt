@@ -1,0 +1,71 @@
+Thank you. The privacy fix is correct.
+
+Removing raw sessionId from the Whisper transcription success log is approved.
+
+However, I cannot fully accept the combined upload UX + Arabic voice fix until the sessionId log removal is checkpointed/committed.
+
+Current accepted items:
+
+* Upload drag/drop is implemented
+* Paste-to-upload is implemented
+* Upload button accessibility was improved
+* Existing upload route is reused
+* Arabic browser SpeechRecognition uses ar-SA
+* Whisper transcription sends lang=ar
+* Backend validates the language hint
+* speechToText(..., "ar") passes Arabic language to gpt-4o-mini-transcribe
+* RTL display uses dir="auto"
+* Arabic transcript lands in composer for review/edit
+* Raw sessionId was removed from the success log
+* Transcript text is not logged
+* Audio is not stored
+* Typecheck/lint/format passed
+* Frontend and backend workflows are running
+
+Final requirement before acceptance:
+
+Please checkpoint/commit the sessionId log removal and provide the final commit hash.
+
+The final record should include:
+
+1. Final commit hash for the sessionId log removal
+2. Confirmation that the working tree is clean
+3. Confirmation that transcribe.ts no longer logs raw sessionId
+4. Confirmation that success logs contain only:
+    * component
+    * bytes
+    * format
+    * language
+5. Confirmation that error logs do not include:
+    * raw sessionId
+    * transcript text
+    * audio bytes
+    * user message text
+6. Final quality checks:
+    * typecheck
+    * lint
+    * format
+    * frontend workflow
+    * backend workflow
+
+After that final checkpoint is confirmed, I will accept the combined task as complete.
+
+Also keep this manual staging note in the record:
+
+Arabic voice transcription should still be manually verified in staging/production with a real microphone and Arabic speech before production launch.
+
+Manual Arabic staging checklist:
+
+* select Arabic language in Ora
+* test normal mic/dictation
+* confirm transcript appears in Arabic script
+* confirm transcript lands in composer first
+* confirm user can edit transcript before sending
+* send Arabic message
+* confirm Ora replies in Arabic
+* test Talk with Ora / Voice Conversation Mode
+* confirm Arabic transcript appears in the thread
+* confirm RTL layout looks correct
+* confirm no transcript/audio/sessionId appears in logs
+
+Do not start Phase 7, Phase 8, Phase 9, thread scrolling, image generation, Knowledge Vault, or unrelated roadmap work under this task.
