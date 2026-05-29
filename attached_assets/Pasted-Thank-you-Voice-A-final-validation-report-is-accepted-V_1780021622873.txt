@@ -1,0 +1,103 @@
+Thank you. Voice-A final validation report is accepted.
+
+Voice-A is now approved as complete.
+
+Accepted confirmations:
+
+* microphone button added to Ora Panel
+* microphone button added to Ora Bubble
+* mobile drawer/bottom sheet uses the same mic component
+* browser-native SpeechRecognition / webkitSpeechRecognition implemented
+* browser-native speechSynthesis implemented
+* no backend voice routes were added
+* no /api/public-ai/transcribe
+* no /api/public-ai/tts
+* review-before-send behavior confirmed
+* transcript lands in textarea first
+* user can edit transcript before sending
+* sent transcript becomes a normal user message
+* Ora response becomes a normal assistant message
+* transcript uses the existing message/session system
+* transcript restores through existing sessionStorage behavior
+* TTS defaults off
+* Read Aloud only appears when TTS is enabled
+* no autoplay audio
+* interruption behavior confirmed
+* multilingual voice language mapping confirmed
+* unsupported browser fallback confirmed
+* no audio is stored
+* no transcript text is logged
+* no Builder/project memory access
+* no Knowledge Vault implementation was added
+* Phase 1 tests pass
+* Phase 2 tests pass
+* Phase 3 tests pass
+* Phase 4 tests pass
+* typecheck/lint/format pass
+* frontend and backend workflows are running
+* rollback plan is clear
+* Voice-B remains deferred
+* image upload, web search, Builder handoff, and Knowledge Vault were not implemented
+
+One note for future user-facing wording:
+
+Please keep the browser support message realistic:
+“Voice support depends on your browser and device. You can still type in any supported language.”
+
+Now do not start the next phase yet.
+
+Please prepare next-phase recommendations only.
+
+I want you to recommend the best next phase from these options:
+
+1. Voice-B API fallback
+
+* backend transcription fallback
+* backend TTS fallback
+* strict rate limits
+* no audio retention
+
+2. Image upload and image analysis
+
+* screenshots
+* logos
+* diagrams
+* UI/UX review
+* OCR if possible
+* no image editing yet
+
+3. Web search/current information
+
+* safe search/retrieval
+* citations
+* current facts
+* no guessing
+
+4. Builder handoff
+
+* safe summary handoff after sign-in
+* no files transferred
+* no public AI project creation
+
+5. Ora Knowledge Vault / Controlled Learning Loop
+
+* roadmap and architecture first only
+* feedback buttons
+* safe approved learning
+* no private-data learning
+
+Please compare these options and recommend the safest, highest-value next phase for MustaFlow.
+
+Do not implement anything yet.
+
+Provide:
+
+* recommended next phase
+* why it should be next
+* what should wait
+* risk level
+* cost impact
+* security concerns
+* implementation scope
+* validation plan
+* rollback plan
