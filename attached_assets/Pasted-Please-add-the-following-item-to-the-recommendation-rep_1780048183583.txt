@@ -1,0 +1,291 @@
+Please add the following item to the recommendation report as a separate candidate option after Option 5 and before the Comparison Matrix.
+
+Option 6 — Professional Message Actions & Export Experience
+Date: 2026-05-29
+Status: Planning only — no implementation until approved
+Do not implement anything below without explicit approval.
+
+What it is
+
+Ora gains a professional message-action experience directly within the conversation thread. Users can copy, edit, download, reuse, listen to, and continue working from messages without leaving the chat experience. The design should follow MustaFlow/Ora visual language and Dynamic Atom styling rather than replicating any third-party UI.
+
+A reusable OraMessageActions component would provide contextual actions for user messages, assistant responses, dataset analyses, image analyses, document analyses, voice transcripts, and Builder handoff responses.
+
+Business value — HIGH
+
+* Makes Ora feel significantly more polished and production-ready
+* Improves usability for users who want to reuse AI-generated content
+* Reduces friction between discovery and execution workflows
+* Encourages Builder conversion through contextual continuation actions
+* Increases perceived quality without requiring new AI capabilities
+* Creates a stronger enterprise-ready experience for reports and analyses
+
+User value — HIGH
+
+* One-click copy of useful responses
+* Easy editing and resubmission of previous prompts
+* Downloadable reports and analyses for offline use
+* Read-aloud support where voice capabilities exist
+* Faster iteration through retry/regenerate actions
+* Better handling of dataset, document, and image-analysis outputs
+* Improved accessibility and keyboard navigation
+
+Risk level — LOW-MEDIUM
+
+* Primarily a UI enhancement with limited backend impact
+* Export functionality must avoid exposing sensitive internal references
+* Edit-message workflows must preserve session consistency
+* Download generation must remain client-side only
+* Care required to avoid accidental disclosure of temporary attachment references
+* Retry/regenerate actions must respect existing safety and rate-limit controls
+
+Cost impact — LOW
+
+* No new AI models required
+* No new external APIs required
+* Browser clipboard and download APIs are sufficient
+* Minimal runtime overhead
+* No storage costs because exports are generated locally
+
+Security / privacy concerns
+
+* Do not log copied content
+* Do not log downloaded content
+* Do not log edited message text
+* Do not expose:
+    * fileRef
+    * imageRef
+    * dataset raw rows
+    * base64 image data
+    * session tokens
+    * handoff tokens
+    * internal identifiers
+    * Builder/project internals
+* Downloads must be generated entirely client-side
+* Temporary uploads remain temporary and are never re-exposed through exports
+* Edited prompts must not silently reuse expired attachments
+
+Implementation scope — MEDIUM (est. 1 phase)
+
+Primary component:
+
+* artifacts/mustaflow/src/components/ora/ora-message-actions.tsx
+
+Optional helper module:
+
+* artifacts/mustaflow/src/lib/ora-message-export.ts
+
+Suggested helper functions:
+
+* copyMessageText(message)
+* downloadMessageAsMarkdown(message)
+* downloadDatasetReport(result)
+* downloadActionPlanCsv(actionPlan)
+* formatOraMessageForMarkdown(message)
+* sanitizeFilename(title)
+
+Message action support:
+
+User messages:
+
+* Copy
+* Edit
+
+Assistant messages:
+
+* Copy
+* Download
+* Read aloud (when available)
+* Retry / Regenerate (when safe)
+* Continue in Builder (when applicable)
+
+Dataset analysis:
+
+* Copy summary
+* Download report
+* Download JSON
+* Download action-plan CSV (when available)
+
+Image analysis:
+
+* Copy analysis
+* Download analysis
+* Read aloud
+* Continue in Builder
+
+Document analysis:
+
+* Copy answer
+* Download report
+* Read aloud
+* Continue in Builder
+
+Voice transcripts:
+
+* Copy
+* Edit transcript text
+* Optional “Voice transcript” indicator
+
+Recommended edit behavior
+
+Phase 1 recommendation:
+
+Option A — append-only editing
+
+* Load prior message into the composer
+* User edits and resubmits
+* New message is appended
+* Mark as edited from a previous message
+* Preserve existing thread history
+* Avoid destructive thread rewrites
+
+Future enhancement:
+
+Option B — branch-style regeneration
+
+* Replace original message
+* Remove subsequent messages
+* Regenerate downstream responses
+
+UI behavior
+
+Desktop:
+
+* Actions appear on hover and keyboard focus
+* Assistant actions align beneath assistant messages
+* User actions align near user messages
+* Low-contrast presentation until interaction
+
+Mobile:
+
+* Compact action pill or overflow menu
+* Tap-to-reveal interaction
+* Large touch targets
+* Avoid persistent icon clutter
+
+Accessibility requirements
+
+Every action button must include:
+
+* aria-label
+* tooltip
+* keyboard accessibility
+* visible focus state
+* visible hover state
+* mobile-friendly tap targets
+
+Example labels:
+
+* Copy message
+* Edit message
+* Download response
+* Read response aloud
+* Regenerate response
+* Continue in MustaFlow Builder
+
+Download formats
+
+Standard assistant response:
+
+* ora-response.md
+
+Dataset analysis:
+
+* ora-dataset-analysis.md
+* optional ora-dataset-analysis.json
+* optional ora-action-plan.csv
+
+Root-cause analysis:
+
+* ora-root-cause-report.md
+
+Image analysis:
+
+* ora-image-analysis.md
+
+Document analysis:
+
+* ora-document-analysis.md
+
+Implementation guidance
+
+Clipboard:
+
+* navigator.clipboard.writeText()
+
+Downloads:
+
+* Blob
+* URL.createObjectURL()
+* URL.revokeObjectURL() after completion
+
+Clipboard fallback:
+
+* “Copy failed. Please select and copy manually.”
+
+Validation plan
+
+Tests should verify:
+
+* Copy button renders on assistant messages
+* Copy button renders on user messages
+* Edit button renders only on user messages
+* Download button renders on assistant messages
+* Dataset export actions render correctly
+* Clipboard API integration works
+* Blob download generation works
+* Object URLs are revoked
+* Edit loads content into the composer
+* Voice transcript editing behaves as text editing
+* No sensitive references appear in exported content
+* Keyboard accessibility functions correctly
+* Mobile action menu renders correctly
+
+Regression coverage:
+
+* Phase 1 chat
+* Phase 2 document analysis
+* Phase 3 dataset analysis
+* Voice-A
+* Phase 5 image analysis
+* Phase 6 Builder handoff
+
+Validation report requirements
+
+If approved and implemented, provide:
+
+* affected files
+* desktop UI proof
+* mobile UI proof
+* copy workflow proof
+* edit workflow proof
+* download workflow proof
+* dataset export proof
+* accessibility proof
+* regression proof
+* test results
+* typecheck/lint/format status
+* rollback instructions
+
+Rollback plan
+
+* Remove ora-message-actions.tsx
+* Remove export helper utilities
+* Revert message-thread integrations
+* No database migration required
+* No backend rollback required
+
+Recommendation
+
+Priority: MEDIUM-HIGH
+
+This feature does not expand Ora’s intelligence, but it substantially improves usability, professionalism, accessibility, and report portability. It is lower risk than Web Search and significantly more visible to users than Voice-B. If approved, it is a strong candidate to bundle alongside a UI-focused phase or immediately after Option 5 (Charts).
+
+Recommended placement in priority order:
+
+1. Option 5 — Advanced Visual Charts
+2. Option 1 — Web Search with Citations
+3. Option 6 — Professional Message Actions & Export Experience
+4. Option 3 — Knowledge Vault Planning
+5. Option 4 — Image Generation Planning
+6. Option 2 — Voice-B API Fallback
