@@ -6,6 +6,7 @@ import chatRouter from "./chat";
 import uploadRouter from "./upload";
 import fileAnalysisRouter from "./file-analysis";
 import datasetAnalysisRouter from "./dataset-analysis";
+import imageAnalysisRouter from "./image-analysis";
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use(chatRouter);
 router.use(uploadRouter);
 router.use(fileAnalysisRouter);
 router.use(datasetAnalysisRouter);
+router.use(imageAnalysisRouter);
 
 export default router;

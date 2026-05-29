@@ -16,11 +16,22 @@ export interface OraSession {
   msgLimit: number;
   fileCount: number;
   fileLimit: number;
+  imageCount?: number;
+  imageLimit?: number;
+  imageAnalysisCount?: number;
+  imageAnalysisLimit?: number;
 }
 
 export type UploadState = "idle" | "uploading" | "attached" | "error";
 
-export type OraStatus = "idle" | "thinking" | "replying" | "uploading" | "reading" | "analyzing";
+export type OraStatus =
+  | "idle"
+  | "thinking"
+  | "replying"
+  | "uploading"
+  | "reading"
+  | "analyzing"
+  | "analyzing-image";
 
 export interface AttachedFile {
   fileRef: string;
@@ -28,6 +39,10 @@ export interface AttachedFile {
   fileType: string;
   charCount: number;
   isDataset: boolean;
+  isImage?: boolean;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
   rowCount?: number;
   colCount?: number;
   truncated?: boolean;
@@ -60,8 +75,18 @@ const SESSION_STORAGE_KEY = "ora_session_id";
 const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 
 const FILE_LIMIT = 3;
-const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx"];
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const IMAGE_LIMIT = 2;
+
+const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx"];
+const IMAGE_ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
+const ALLOWED_EXTENSIONS = [...DOC_ALLOWED_EXTENSIONS, ...IMAGE_ALLOWED_EXTENSIONS];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB for documents
+const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4 MB for images
+
+function isImageExt(ext: string): boolean {
+  return IMAGE_ALLOWED_EXTENSIONS.includes(ext);
+}
 
 function getStoredLanguage(): string {
   try {
@@ -107,15 +132,7 @@ function getStoredTranscript(): OraMessage[] {
   try {
     const raw = sessionStorage.getItem(TRANSCRIPT_STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (m): m is OraMessage =>
-        typeof m === "object" &&
-        m !== null &&
-        ((m as OraMessage).role === "user" || (m as OraMessage).role === "assistant") &&
-        typeof (m as OraMessage).content === "string",
-    );
+    return JSON.parse(raw) as OraMessage[];
   } catch {
     return [];
   }
@@ -176,10 +193,12 @@ function deriveOraStatus(
   isLoading: boolean,
   uploadState: UploadState,
   attachedFile: AttachedFile | null,
+  pendingImageAnalysis: boolean,
   messages: OraMessage[],
 ): OraStatus {
   if (uploadState === "uploading") return "uploading";
   if (isLoading) {
+    if (pendingImageAnalysis) return "analyzing-image";
     if (attachedFile) {
       if (isDatasetFileType(attachedFile.fileType, attachedFile.filename)) return "analyzing";
       return "reading";
@@ -210,10 +229,9 @@ export function useOraChat(): UseOraChatReturn {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [pendingImageAnalysis, setPendingImageAnalysis] = useState(false);
 
-  // Tracks whether the initial Ora session setup has run (runs once on mount)
   const sessionInitRef = useRef(false);
-  // Tracks whether we've already restored the server transcript for this mount
   const transcriptRestoredRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -259,7 +277,6 @@ export function useOraChat(): UseOraChatReturn {
             fileCount: data.fileCount ?? 0,
             fileLimit: data.fileLimit ?? FILE_LIMIT,
           });
-          // Load sessionStorage transcript as a baseline; Phase 2 may overwrite with server data
           const stored = getStoredTranscript();
           if (stored.length > 0) {
             setMessages(stored);
@@ -327,25 +344,43 @@ export function useOraChat(): UseOraChatReturn {
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
         setUploadState("error");
         setUploadError(
-          `Unsupported file type "${ext}". Please upload a PDF, DOCX, TXT, CSV, or XLSX file.`,
+          `Unsupported file type "${ext}". Please upload a PDF, DOCX, TXT, CSV, XLSX, PNG, JPG, or WEBP file.`,
         );
         return;
       }
 
-      if (file.size > MAX_FILE_SIZE) {
-        setUploadState("error");
-        setUploadError(
-          `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`,
-        );
-        return;
-      }
+      const isImg = isImageExt(ext);
 
-      if (session && session.fileCount >= session.fileLimit) {
-        setUploadState("error");
-        setUploadError(
-          `File limit reached (${session.fileLimit}/${session.fileLimit}). Start a new session to upload more files.`,
-        );
-        return;
+      if (isImg) {
+        if (file.size > MAX_IMAGE_SIZE) {
+          setUploadState("error");
+          setUploadError(
+            `Image is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size for images is 4 MB.`,
+          );
+          return;
+        }
+        if (session && (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)) {
+          setUploadState("error");
+          setUploadError(
+            `Image limit reached (${session.imageLimit ?? IMAGE_LIMIT}/${session.imageLimit ?? IMAGE_LIMIT}). Start a new session to upload more images.`,
+          );
+          return;
+        }
+      } else {
+        if (file.size > MAX_FILE_SIZE) {
+          setUploadState("error");
+          setUploadError(
+            `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`,
+          );
+          return;
+        }
+        if (session && session.fileCount >= session.fileLimit) {
+          setUploadState("error");
+          setUploadError(
+            `File limit reached (${session.fileLimit}/${session.fileLimit}). Start a new session to upload more files.`,
+          );
+          return;
+        }
       }
 
       setUploadState("uploading");
@@ -367,36 +402,72 @@ export function useOraChat(): UseOraChatReturn {
         }
 
         const data = (await res.json()) as {
-          fileRef: string;
+          fileRef?: string;
+          imageRef?: string;
           filename: string;
           fileType: string;
-          charCount: number;
+          charCount?: number;
           rowCount?: number;
           colCount?: number;
           truncated?: boolean;
           sanitizedCells?: number;
           hiddenSheetsSkipped?: number;
-          fileCount: number;
-          fileLimit: number;
+          fileCount?: number;
+          fileLimit?: number;
+          imageCount?: number;
+          imageLimit?: number;
+          sizeBytes?: number;
+          width?: number;
+          height?: number;
         };
 
-        const isDataset = data.fileType === "csv" || data.fileType === "xlsx";
-        setAttachedFile({
-          fileRef: data.fileRef,
-          filename: data.filename,
-          fileType: data.fileType,
-          charCount: data.charCount,
-          isDataset,
-          rowCount: data.rowCount,
-          colCount: data.colCount,
-          truncated: data.truncated,
-          sanitizedCells: data.sanitizedCells,
-          hiddenSheetsSkipped: data.hiddenSheetsSkipped,
-        });
-        setUploadState("attached");
-        setSession((prev) =>
-          prev ? { ...prev, fileCount: data.fileCount, fileLimit: data.fileLimit } : null,
-        );
+        if (data.fileType === "image") {
+          setAttachedFile({
+            fileRef: data.imageRef ?? "",
+            filename: data.filename,
+            fileType: data.fileType,
+            charCount: 0,
+            isDataset: false,
+            isImage: true,
+            sizeBytes: data.sizeBytes,
+            width: data.width,
+            height: data.height,
+          });
+          setUploadState("attached");
+          setSession((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  imageCount: data.imageCount ?? (prev.imageCount ?? 0) + 1,
+                  imageLimit: data.imageLimit ?? prev.imageLimit ?? IMAGE_LIMIT,
+                }
+              : null,
+          );
+        } else {
+          const isDataset = data.fileType === "csv" || data.fileType === "xlsx";
+          setAttachedFile({
+            fileRef: data.fileRef ?? "",
+            filename: data.filename,
+            fileType: data.fileType,
+            charCount: data.charCount ?? 0,
+            isDataset,
+            rowCount: data.rowCount,
+            colCount: data.colCount,
+            truncated: data.truncated,
+            sanitizedCells: data.sanitizedCells,
+            hiddenSheetsSkipped: data.hiddenSheetsSkipped,
+          });
+          setUploadState("attached");
+          setSession((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  fileCount: data.fileCount ?? prev.fileCount,
+                  fileLimit: data.fileLimit ?? prev.fileLimit,
+                }
+              : null,
+          );
+        }
       } catch (err: unknown) {
         const msg = (err as Error).message ?? "Upload failed. Please try again.";
         setUploadState("error");
@@ -436,7 +507,6 @@ export function useOraChat(): UseOraChatReturn {
           setUploadState("idle");
 
           const body: Record<string, unknown> = {
-            fileRef: currentAttachment.fileRef,
             message: content,
             messages: history,
           };
@@ -444,7 +514,38 @@ export function useOraChat(): UseOraChatReturn {
             body.language = language;
           }
 
-          if (currentAttachment.isDataset) {
+          if (currentAttachment.isImage) {
+            // Mark as analyzing-image for status display BEFORE async call
+            setPendingImageAnalysis(true);
+            body.imageRef = currentAttachment.fileRef;
+
+            const data = await apiPost<{
+              reply: string;
+              handoffCta: boolean;
+              imageAnalysisCount: number;
+              imageAnalysisLimit: number;
+            }>("/api/public-ai/image-analysis", body);
+
+            setMessages((prev) => {
+              const next = [
+                ...prev,
+                { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+              ];
+              storeTranscript(next);
+              if (isSignedIn) saveToServer(next);
+              return next;
+            });
+            setSession((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    imageAnalysisCount: data.imageAnalysisCount,
+                    imageAnalysisLimit: data.imageAnalysisLimit,
+                  }
+                : null,
+            );
+          } else if (currentAttachment.isDataset) {
+            body.fileRef = currentAttachment.fileRef;
             const data = await apiPost<{
               result: DatasetAnalysisResult;
               msgCount: number;
@@ -477,6 +578,7 @@ export function useOraChat(): UseOraChatReturn {
                   },
             );
           } else {
+            body.fileRef = currentAttachment.fileRef;
             const data = await apiPost<{
               reply: string;
               handoffCta: boolean;
@@ -556,9 +658,19 @@ export function useOraChat(): UseOraChatReturn {
             "Your session has expired. Please refresh the page to start a new conversation.",
           );
         } else if (status === 404 && currentAttachment) {
-          setError("The attached file has expired. Please upload it again.");
+          setError(
+            currentAttachment.isImage
+              ? "This image has expired. Please upload it again."
+              : "The attached file has expired. Please upload it again.",
+          );
         } else {
           setError(msg ?? "Something went wrong. Please try again.");
+          // For transient image-analysis failures (502, network, etc.) restore the chip
+          // so the visitor can retry without re-uploading.
+          if (currentAttachment?.isImage) {
+            setAttachedFile(currentAttachment);
+            setUploadState("attached");
+          }
         }
         setMessages((prev) => {
           const next = prev.slice(0, -1);
@@ -566,6 +678,7 @@ export function useOraChat(): UseOraChatReturn {
           return next;
         });
       } finally {
+        setPendingImageAnalysis(false);
         setIsLoading(false);
       }
     },
@@ -573,7 +686,6 @@ export function useOraChat(): UseOraChatReturn {
   );
 
   const clearConversation = useCallback(async () => {
-    // Cancel any pending debounced save so it cannot repopulate server state after clear
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -589,7 +701,6 @@ export function useOraChat(): UseOraChatReturn {
         /* best-effort */
       }
     }
-    // Reset the transcript-restored flag so a new sign-in cycle can restore again
     transcriptRestoredRef.current = false;
     try {
       const data = await apiPost<{
@@ -614,7 +725,13 @@ export function useOraChat(): UseOraChatReturn {
 
   const atLimit = (session?.msgCount ?? 0) >= (session?.msgLimit ?? 20);
 
-  const oraStatus = deriveOraStatus(isLoading, uploadState, attachedFile, messages);
+  const oraStatus = deriveOraStatus(
+    isLoading,
+    uploadState,
+    attachedFile,
+    pendingImageAnalysis,
+    messages,
+  );
 
   return {
     messages,

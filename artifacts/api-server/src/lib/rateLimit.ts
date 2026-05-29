@@ -259,6 +259,24 @@ export const oraUploadLimiter = createLimiter({
   message: "You have uploaded too many files recently. Please wait before uploading again.",
 });
 
+// Sliding-window counter: 10 image uploads per IP per hour (images only)
+export const oraImageUploadLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 10,
+  keyPrefix: "ora_image_upload",
+  message: "You have uploaded too many images recently. Please wait before uploading again.",
+});
+
+// Sliding-window counter: 6 image-analysis calls per IP per hour
+// Stricter than uploads since each call invokes the premium vision model.
+export const oraImageAnalysisLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 6,
+  keyPrefix: "ora_image_analysis",
+  message:
+    "Image analysis is temporarily at capacity. Please try again later or describe your question in text instead.",
+});
+
 // Publish/unpublish — 10 per minute per IP
 export const publishLimiter = createLimiter({
   windowMs: 60_000,

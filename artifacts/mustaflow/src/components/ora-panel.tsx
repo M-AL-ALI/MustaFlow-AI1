@@ -22,6 +22,9 @@ import { OraVoiceMicButton } from "@/components/ora/ora-voice-button";
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
+import { OraImageChip } from "@/components/ora/ora-image-chip";
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
@@ -46,6 +49,7 @@ const STATUS_LABELS: Record<string, string> = {
   uploading: "Uploading…",
   reading: "Reading document…",
   analyzing: "Analyzing dataset…",
+  "analyzing-image": "Analyzing image…",
 };
 
 interface OraPanelProps {
@@ -153,6 +157,7 @@ export function OraPanel({ chat }: OraPanelProps) {
 
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const feedRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -184,6 +189,8 @@ export function OraPanel({ chat }: OraPanelProps) {
   // ─── Derived state ────────────────────────────────────────────────────────
 
   const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
+  const atImageLimit = (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
+  const atAllLimits = atFileLimit && atImageLimit;
 
   const atomState: AtomState =
     oraStatus === "idle"
@@ -196,7 +203,7 @@ export function OraPanel({ chat }: OraPanelProps) {
             ? "uploading"
             : oraStatus === "reading"
               ? "reading"
-              : oraStatus === "analyzing"
+              : oraStatus === "analyzing" || oraStatus === "analyzing-image"
                 ? "analyzing"
                 : "idle";
 
@@ -207,6 +214,22 @@ export function OraPanel({ chat }: OraPanelProps) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight;
     }
   }, [messages, isLoading]);
+
+  // Revoke object URL when it changes (to free memory)
+  useEffect(() => {
+    return () => {
+      if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+    };
+  }, [previewObjectUrl]);
+
+  // Revoke preview URL when attachment is cleared after successful send
+  useEffect(() => {
+    if (!attachedFile && previewObjectUrl) {
+      URL.revokeObjectURL(previewObjectUrl);
+      setPreviewObjectUrl(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachedFile]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -256,15 +279,27 @@ export function OraPanel({ chat }: OraPanelProps) {
       const file = e.target.files?.[0];
       if (!file) return;
       e.target.value = "";
+      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+      if (IMAGE_EXTENSIONS.has(ext)) {
+        if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+        setPreviewObjectUrl(URL.createObjectURL(file));
+      } else if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        setPreviewObjectUrl(null);
+      }
       void uploadFile(file);
     },
-    [uploadFile],
+    [uploadFile, previewObjectUrl],
   );
 
   const handleClearAttachment = useCallback(() => {
+    if (previewObjectUrl) {
+      URL.revokeObjectURL(previewObjectUrl);
+      setPreviewObjectUrl(null);
+    }
     clearAttachment();
     clearUploadError();
-  }, [clearAttachment, clearUploadError]);
+  }, [clearAttachment, clearUploadError, previewObjectUrl]);
 
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
 
@@ -531,13 +566,26 @@ export function OraPanel({ chat }: OraPanelProps) {
           </div>
         ) : (
           <>
-            <DatasetChip
-              file={attachedFile}
-              uploadState={uploadState}
-              uploadError={uploadError}
-              onClear={handleClearAttachment}
-              fileType={attachedFile?.fileType}
-            />
+            {attachedFile?.isImage || previewObjectUrl !== null ? (
+              <OraImageChip
+                uploadState={uploadState}
+                uploadError={uploadError}
+                filename={attachedFile?.filename}
+                sizeBytes={attachedFile?.sizeBytes}
+                width={attachedFile?.width}
+                height={attachedFile?.height}
+                previewObjectUrl={previewObjectUrl}
+                onClear={handleClearAttachment}
+              />
+            ) : (
+              <DatasetChip
+                file={attachedFile}
+                uploadState={uploadState}
+                uploadError={uploadError}
+                onClear={handleClearAttachment}
+                fileType={attachedFile?.fileType}
+              />
+            )}
 
             {/* Voice interim transcript hint */}
             {showInterim && (
@@ -569,7 +617,7 @@ export function OraPanel({ chat }: OraPanelProps) {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.docx,.txt,.csv,.xlsx"
+                accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
                 className="sr-only"
                 aria-hidden
                 onChange={handleFileChange}
@@ -578,18 +626,18 @@ export function OraPanel({ chat }: OraPanelProps) {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || uploadState === "uploading" || atFileLimit}
+                disabled={isLoading || uploadState === "uploading" || atAllLimits}
                 title={
-                  atFileLimit
-                    ? `File limit reached (${session?.fileCount ?? 3}/${session?.fileLimit ?? 3})`
-                    : "Upload PDF, DOCX, TXT, CSV, XLSX"
+                  atAllLimits
+                    ? "Upload limit reached for this session"
+                    : "Upload images, PDF, DOCX, TXT, CSV, XLSX"
                 }
                 className={cn(
                   "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
                   uploadState === "attached"
                     ? "text-[hsl(265_85%_65%)]"
                     : "text-muted-foreground hover:text-foreground",
-                  (isLoading || uploadState === "uploading" || atFileLimit) &&
+                  (isLoading || uploadState === "uploading" || atAllLimits) &&
                     "opacity-40 cursor-not-allowed",
                 )}
               >
@@ -616,7 +664,9 @@ export function OraPanel({ chat }: OraPanelProps) {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   uploadState === "attached"
-                    ? `Ask about ${attachedFile?.filename ?? "this file"}…`
+                    ? attachedFile?.isImage
+                      ? `Ask about ${attachedFile.filename ?? "this image"}…`
+                      : `Ask about ${attachedFile?.filename ?? "this file"}…`
                     : "Ask Ora anything…"
                 }
                 rows={1}
@@ -636,7 +686,7 @@ export function OraPanel({ chat }: OraPanelProps) {
 
             <div className="flex items-center justify-between mt-2">
               <p className="text-[10px] text-muted-foreground/50">
-                Upload PDF, DOCX, TXT, CSV, XLSX · Voice or type in any language
+                Upload images, PDF, DOCX, CSV, XLSX · Voice or type in any language
               </p>
               {session && (
                 <span className="text-[10px] text-muted-foreground/50">

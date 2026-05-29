@@ -3,10 +3,14 @@ import multer from "multer";
 import {
   validateSession,
   incrementFileCount,
+  incrementImageCount,
   setSessionCookie,
   FILE_LIMIT_VALUE,
+  IMAGE_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { validateFile } from "../../lib/public-ai/file-validate";
+import { validateImage, processImage, isImageExtension } from "../../lib/public-ai/image-validate";
+import { storeImage } from "../../lib/public-ai/image-store";
 import { extractText, ExtractionError } from "../../lib/public-ai/file-extract";
 import { extractDataset, DatasetExtractionError } from "../../lib/public-ai/dataset-extract";
 import { scanContent } from "../../lib/public-ai/content-safety";
@@ -16,11 +20,13 @@ import {
   MAX_TEXT_CHARS_PER_FILE,
   MAX_TOTAL_CHARS_PER_SESSION,
 } from "../../lib/public-ai/file-store";
-import { oraUploadLimiter } from "../../lib/rateLimit";
+import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 
 const router = Router();
 
+// Multer limit kept at 10 MB to accommodate documents.
+// Image-specific 4 MB cap is enforced in validateImage() using the buffer.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
@@ -57,18 +63,103 @@ router.post(
       return;
     }
 
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: "No file was attached. Please select a file to upload." });
+      return;
+    }
+
+    // ── Image branch ────────────────────────────────────────────────────────
+    if (isImageExtension(file.originalname)) {
+      // Apply image-specific per-IP rate limit inline (middleware already ran oraUploadLimiter)
+      // The oraImageUploadLimiter is applied as a separate middleware via a sub-handler.
+      await new Promise<void>((resolve) => {
+        oraImageUploadLimiter(req, res, () => resolve());
+      });
+      if (res.headersSent) return;
+
+      // Check session image count limit BEFORE validating file bytes.
+      // Only increment after successful store so rejected files don't consume the limit.
+      if (session.imageCount >= IMAGE_LIMIT_VALUE) {
+        res.status(429).json({
+          error: `You have reached the image limit for this session (${IMAGE_LIMIT_VALUE} images). Start a new session to upload more.`,
+          imageCount: session.imageCount,
+          imageLimit: IMAGE_LIMIT_VALUE,
+        });
+        return;
+      }
+
+      const validation = validateImage(file.buffer, file.originalname);
+      if (!validation.ok) {
+        res.status(validation.statusCode).json({ error: validation.error });
+        return;
+      }
+
+      let processed: Awaited<ReturnType<typeof processImage>>;
+      try {
+        processed = await processImage(file.buffer, validation.mimeType);
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "This image could not be processed. Please try a different image file.";
+        res.status(422).json({ error: msg });
+        return;
+      }
+
+      const storeResult = storeImage({
+        sessionId: session.sessionId,
+        filename: validation.sanitizedName,
+        mimeType: validation.mimeType,
+        sizeBytes: processed.sizeBytes,
+        width: processed.width,
+        height: processed.height,
+        base64: processed.base64,
+      });
+
+      if (!storeResult.ok) {
+        res.status(503).json({ error: storeResult.error });
+        return;
+      }
+
+      // Increment imageCount ONLY after successful validation + store.
+      const { token, payload } = incrementImageCount(session);
+      setSessionCookie(res, token);
+
+      logger.info(
+        {
+          component: "ora-upload",
+          fileType: validation.type,
+          sizeBytes: processed.sizeBytes,
+          width: processed.width,
+          height: processed.height,
+          wasDownscaled: processed.wasDownscaled,
+          imageCount: payload.imageCount,
+        },
+        "Ora image uploaded and processed",
+      );
+
+      res.json({
+        imageRef: storeResult.imageRef,
+        filename: validation.sanitizedName,
+        mimeType: validation.mimeType,
+        fileType: "image",
+        sizeBytes: processed.sizeBytes,
+        width: processed.width,
+        height: processed.height,
+        imageCount: payload.imageCount,
+        imageLimit: IMAGE_LIMIT_VALUE,
+      });
+      return;
+    }
+
+    // ── Document / dataset branch ────────────────────────────────────────────
     if (session.fileCount >= FILE_LIMIT_VALUE) {
       res.status(429).json({
         error: `You have reached the file limit for this session (${FILE_LIMIT_VALUE} files). Start a new session to upload more.`,
         fileCount: session.fileCount,
         fileLimit: FILE_LIMIT_VALUE,
       });
-      return;
-    }
-
-    const file = req.file;
-    if (!file) {
-      res.status(400).json({ error: "No file was attached. Please select a file to upload." });
       return;
     }
 
@@ -155,7 +246,6 @@ router.post(
 
     let extractedText: string;
     try {
-      // validation.type is a document type here — csv/xlsx branch already returned above
       extractedText = await extractText(
         file.buffer,
         validation.type as Exclude<typeof validation.type, "csv" | "xlsx">,
