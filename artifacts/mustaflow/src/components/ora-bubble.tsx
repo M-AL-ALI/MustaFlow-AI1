@@ -20,6 +20,7 @@ import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
+import { useWhisperRecorder } from "@/hooks/use-whisper-recorder";
 import {
   OraVoiceModeButton,
   OraVoiceLiveArea,
@@ -233,6 +234,17 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
+  // ─── Whisper push-to-talk (voice conv mode) ────────────────────────────────
+  // When voice conv mode is active, Whisper AI transcribes the audio and
+  // auto-sends — same path as the Web Speech API onFinalTranscript.
+  const handleWhisperTranscript = useCallback((text: string) => {
+    if (voiceConvActiveRef.current) {
+      void sendMessageRef.current(text);
+    }
+  }, []);
+
+  const whisperConv = useWhisperRecorder(handleWhisperTranscript);
+
   // Auto-clear the transcript-ready hint after 5 s (dictation mode only)
   useEffect(() => {
     if (!voiceReady) return;
@@ -262,22 +274,19 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     voiceRef.current.speakTextForce(lastMsg.content, languageRef.current);
   }, [messages, isLoading, voiceConvActive, voiceConvTtsMuted]);
 
-  // Conversation cycling: after Ora finishes speaking, restart listening
+  // Conversation cycling: track when Ora finishes speaking so the UI can
+  // re-show the push-to-talk button. No auto-start listening — Whisper mode
+  // is push-to-talk: the user holds the "Hold to speak" button themselves.
   useEffect(() => {
     if (!voiceConvActive) return;
     if (voice.voiceState === "speaking") {
       wasConvSpeakingRef.current = true;
       return;
     }
-    if (!(voice.voiceState === "idle" && wasConvSpeakingRef.current && !isLoading)) return;
-    wasConvSpeakingRef.current = false;
-    const tid = setTimeout(() => {
-      if (voiceConvActiveRef.current) {
-        voiceRef.current.startListening(languageRef.current);
-      }
-    }, 350);
-    return () => clearTimeout(tid);
-  }, [voice.voiceState, voiceConvActive, isLoading]);
+    if (voice.voiceState === "idle" && wasConvSpeakingRef.current) {
+      wasConvSpeakingRef.current = false;
+    }
+  }, [voice.voiceState, voiceConvActive]);
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
@@ -455,7 +464,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     lastConvAssistantMsgRef.current = null;
     setVoiceConvActive(true);
     voiceConvActiveRef.current = true;
-    setTimeout(() => voiceRef.current.startListening(languageRef.current), 150);
+    // Whisper push-to-talk: don't auto-start the Web Speech API listener here.
+    // The user starts recording by holding the "Hold to speak" button.
   }, []);
 
   const handleExitVoiceConvMode = useCallback(() => {
@@ -464,6 +474,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     wasConvSpeakingRef.current = false;
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
+    whisperConv.cancelRecording();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -938,6 +950,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   onExit={handleExitVoiceConvMode}
                   onInterrupt={() => voiceRef.current.stopSpeaking()}
                   size="sm"
+                  whisperState={whisperConv.state}
+                  whisperSupported={whisperConv.isSupported}
+                  whisperError={whisperConv.error}
+                  onWhisperStart={whisperConv.startRecording}
+                  onWhisperStop={whisperConv.stopRecording}
+                  onWhisperCancel={whisperConv.cancelRecording}
                 />
               ) : (
                 /* ─── Normal dictation + text input ─────────────────── */
