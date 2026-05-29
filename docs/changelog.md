@@ -550,6 +550,64 @@ The intended user journey is: Login → create project → build app → preview
 - **Key new frontend files**: `plan-templates-picker.tsx`, `plan-history.tsx`, `plan-decompose.tsx`, `guided-refinement.tsx`.
 - **Plan card updates**: `PlanCard` now accepts `onRestorePlan?` prop; footer has "Build in steps" and "Plan history" secondary action links.
 
+## Phase 6 — Safe Ora → Builder Handoff (2026-05-29) — APPROVED
+
+Short-lived opaque token architecture for transferring sanitized chat summaries to the Builder.
+
+### Approval record
+
+Phase 6 accepted as complete by the user on 2026-05-29, subject to the staging note below.
+
+**Accepted confirmations:** token-based handoff architecture; no idea text in URL; public create returns opaque UUID token only; 15-min TTL; single-use; safe error codes (410/404); requires valid Ora session + real conversation (msgCount ≥ 1); public route has zero Builder/project/user/secret/credit/billing imports; protected exchange requires Clerk auth; exchange does not create project automatically; summary payload sanitized (HTML, base64, fileRef, imageRef, emails, phones, URLs stripped); fallback safe and does not quote raw user text; non-build conversation behavior safe; URL cleanup via `history.replaceState` before first await; token not in localStorage/sessionStorage; logs contain only hashed identifiers (tokenHash, userIdHash, ipHash, sessionIdHash); `ORA_HANDOFF_ENABLED=false` disables handoff only; `PUBLIC_AI_ENABLED=false` disables all Ora routes; CTA appears only on last assistant message; CTA is dismissible per session; disclaimer states files/images/datasets/voice audio are not transferred; no project created until user clicks Build; Phase 1–5 regression tests pass; 168/168 tests pass; typecheck/lint/format/quality-gate all pass; no DB migration added; rollback plan clear.
+
+### Staging verification note (formal record)
+
+> **Authenticated end-to-end browser proof should be verified manually in the deployed/staging environment with a real Clerk session before production launch.**
+
+**Anonymous flow staging checklist:**
+1. Signed-out visitor chats with Ora
+2. CTA appears on last assistant message
+3. Visitor clicks "Continue in Builder"
+4. Visitor is redirected to `/sign-up?handoff=TOKEN`
+5. Visitor completes Clerk sign-up/sign-in
+6. App lands on `/projects?handoff=TOKEN`
+7. Token is removed from URL immediately (verify: address bar shows `/projects` only)
+8. Builder idea input is pre-filled
+9. User can edit prompt
+10. No project is created until user clicks Build
+11. Reusing the same token returns safe used/expired behavior
+
+**Signed-in flow staging checklist:**
+1. Signed-in user chats with Ora
+2. CTA appears on last assistant message
+3. User clicks "Continue in Builder"
+4. Builder/projects page opens
+5. Token exchanges through protected route
+6. URL is cleaned (address bar shows `/projects` only)
+7. Builder idea input is pre-filled
+8. User can edit prompt
+9. No project is created until Build is clicked
+
+### Files added/modified
+
+| File | Change |
+|---|---|
+| `artifacts/api-server/src/lib/public-ai/handoff-store.ts` | NEW — in-memory token store |
+| `artifacts/api-server/src/lib/rateLimit.ts` | `oraHandoffLimiter` (5/hr/IP) |
+| `artifacts/api-server/src/routes/public-ai/handoff.ts` | NEW — public create route |
+| `artifacts/api-server/src/routes/public-ai/index.ts` | Handoff route registered |
+| `artifacts/api-server/src/routes/builder-handoff.ts` | NEW — auth-gated exchange route |
+| `artifacts/api-server/src/routes/index.ts` | `/builder` prefix; exchange after auth wall |
+| `artifacts/api-server/src/routes/public-ai/__tests__/phase6.test.ts` | NEW — 33 tests |
+| `artifacts/mustaflow/src/components/ora/ora-handoff-card.tsx` | NEW — CTA card |
+| `artifacts/mustaflow/src/components/ora-panel.tsx` | OraHandoffCard integration |
+| `artifacts/mustaflow/src/components/ora-bubble.tsx` | OraHandoffCard integration |
+| `artifacts/mustaflow/src/pages/projects.tsx` | `useEffect` token exchange + URL cleanup |
+
+**Commit:** `b7583903a586b30f13a76a4542a4be85bf23294f`
+
+---
+
 ## Task #762 — Agentic provisioning verification (2026-05-25)
 
 - **Outcome: FAIL** — Fly side works, Neon side is broken.
