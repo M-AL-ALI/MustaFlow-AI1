@@ -18,6 +18,8 @@ export interface OraSession {
 
 export type UploadState = "idle" | "uploading" | "attached" | "error";
 
+export type OraStatus = "idle" | "thinking" | "replying" | "uploading" | "reading" | "analyzing";
+
 export interface AttachedFile {
   fileRef: string;
   filename: string;
@@ -26,6 +28,9 @@ export interface AttachedFile {
   isDataset: boolean;
   rowCount?: number;
   colCount?: number;
+  truncated?: boolean;
+  sanitizedCells?: number;
+  hiddenSheetsSkipped?: number;
 }
 
 export interface UseOraChatReturn {
@@ -44,6 +49,7 @@ export interface UseOraChatReturn {
   uploadState: UploadState;
   uploadError: string | null;
   clearUploadError: () => void;
+  oraStatus: OraStatus;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -144,6 +150,30 @@ async function apiGet<T>(path: string): Promise<T> {
     throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status });
   }
   return res.json() as Promise<T>;
+}
+
+function isDatasetFileType(fileType: string, filename: string): boolean {
+  const ft = fileType.toLowerCase();
+  const name = filename.toLowerCase();
+  return ft === "csv" || ft === "xlsx" || name.endsWith(".csv") || name.endsWith(".xlsx");
+}
+
+function deriveOraStatus(
+  isLoading: boolean,
+  uploadState: UploadState,
+  attachedFile: AttachedFile | null,
+  messages: OraMessage[],
+): OraStatus {
+  if (uploadState === "uploading") return "uploading";
+  if (isLoading) {
+    if (attachedFile) {
+      if (isDatasetFileType(attachedFile.fileType, attachedFile.filename)) return "analyzing";
+      return "reading";
+    }
+    const hasAssistantReply = messages.some((m) => m.role === "assistant");
+    return hasAssistantReply ? "replying" : "thinking";
+  }
+  return "idle";
 }
 
 export function useOraChat(): UseOraChatReturn {
@@ -280,6 +310,9 @@ export function useOraChat(): UseOraChatReturn {
           charCount: number;
           rowCount?: number;
           colCount?: number;
+          truncated?: boolean;
+          sanitizedCells?: number;
+          hiddenSheetsSkipped?: number;
           fileCount: number;
           fileLimit: number;
         };
@@ -293,6 +326,9 @@ export function useOraChat(): UseOraChatReturn {
           isDataset,
           rowCount: data.rowCount,
           colCount: data.colCount,
+          truncated: data.truncated,
+          sanitizedCells: data.sanitizedCells,
+          hiddenSheetsSkipped: data.hiddenSheetsSkipped,
         });
         setUploadState("attached");
         setSession((prev) =>
@@ -404,6 +440,7 @@ export function useOraChat(): UseOraChatReturn {
             );
           }
         } else {
+          // Plain chat
           const body: Record<string, unknown> = { message: content, messages: history };
           if (language && language !== "auto") {
             body.language = language;
@@ -465,6 +502,8 @@ export function useOraChat(): UseOraChatReturn {
 
   const atLimit = (session?.msgCount ?? 0) >= (session?.msgLimit ?? 20);
 
+  const oraStatus = deriveOraStatus(isLoading, uploadState, attachedFile, messages);
+
   return {
     messages,
     session,
@@ -481,5 +520,6 @@ export function useOraChat(): UseOraChatReturn {
     uploadState,
     uploadError,
     clearUploadError: () => setUploadError(null),
+    oraStatus,
   };
 }

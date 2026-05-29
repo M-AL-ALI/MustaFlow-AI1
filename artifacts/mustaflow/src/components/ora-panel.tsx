@@ -10,10 +10,13 @@ import {
   AlertCircle,
   Loader2,
   X,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { UseOraChatReturn, UploadState } from "@/hooks/use-ora-chat";
+import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
 import { DatasetResultCard } from "@/components/dataset-result-card";
+import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
+import { hasBuildIntent } from "@/components/ora/build-intent";
 
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
@@ -32,21 +35,29 @@ const LANGUAGES = [
   { value: "fr", label: "French" },
 ];
 
+const STATUS_LABELS: Record<string, string> = {
+  thinking: "Thinking…",
+  replying: "Replying…",
+  uploading: "Uploading…",
+  reading: "Reading document…",
+  analyzing: "Analyzing dataset…",
+};
+
 interface OraPanelProps {
   chat: UseOraChatReturn;
 }
 
-function FileChip({
+function DatasetChip({
+  file,
   uploadState,
-  filename,
   uploadError,
   onClear,
   fileType,
   rowCount,
   colCount,
 }: {
+  file: AttachedFile | null;
   uploadState: UploadState;
-  filename?: string;
   uploadError: string | null;
   onClear: () => void;
   fileType?: string;
@@ -60,41 +71,56 @@ function FileChip({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-xl border px-3 py-2 text-xs mb-2",
+        "flex items-start gap-2 rounded-xl border px-3 py-2 text-xs mb-2",
         uploadState === "attached" &&
-          "border-[hsl(265_85%_65%/0.4)] bg-[hsl(265_85%_65%/0.08)] text-foreground",
+          "border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] text-foreground",
         uploadState === "uploading" && "border-border bg-muted/30 text-muted-foreground",
         uploadState === "error" && "border-destructive/40 bg-destructive/10 text-destructive",
       )}
     >
-      {uploadState === "uploading" && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
-      {uploadState === "attached" &&
-        (isDataset ? (
-          <Table2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-        ) : (
-          <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
-        ))}
-      {uploadState === "error" && <AlertCircle className="h-3.5 w-3.5 shrink-0" />}
+      <div className="shrink-0 mt-0.5">
+        {uploadState === "uploading" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        {uploadState === "attached" &&
+          (isDataset ? (
+            <Table2 className="h-3.5 w-3.5 text-[hsl(265_85%_65%)]" />
+          ) : (
+            <FileText className="h-3.5 w-3.5 text-[hsl(265_85%_65%)]" />
+          ))}
+        {uploadState === "error" && <AlertCircle className="h-3.5 w-3.5" />}
+      </div>
 
-      <span className="flex-1 truncate min-w-0">
-        {uploadState === "uploading" && `Uploading ${filename ?? "file"}…`}
-        {uploadState === "attached" && (
-          <span className="flex flex-col gap-0.5">
-            <span className="truncate">{filename ?? "File attached"}</span>
-            {isDataset && rowCount !== undefined && colCount !== undefined && (
-              <span className="text-[10px] text-muted-foreground">
-                {rowCount.toLocaleString()} rows × {colCount} cols
+      <div className="flex-1 min-w-0">
+        <span className="truncate block">
+          {uploadState === "uploading" && `Uploading ${file?.filename ?? "file"}…`}
+          {uploadState === "attached" && (file?.filename ?? "File attached")}
+          {uploadState === "error" && (uploadError ?? "Upload failed")}
+        </span>
+
+        {uploadState === "attached" && file && isDataset && (file.rowCount || file.colCount) && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {file.rowCount != null && (
+              <span className="inline-flex items-center rounded-full bg-[hsl(265_85%_65%/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(265_85%_65%)]">
+                {file.rowCount.toLocaleString()} rows
               </span>
             )}
-          </span>
+            {file.colCount != null && (
+              <span className="inline-flex items-center rounded-full bg-[hsl(265_85%_65%/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(265_85%_65%)]">
+                {file.colCount} cols
+              </span>
+            )}
+            {file.truncated && (
+              <span className="inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                Sampled
+              </span>
+            )}
+          </div>
         )}
-        {uploadState === "error" && (uploadError ?? "Upload failed")}
-      </span>
+      </div>
 
       <button
         type="button"
         onClick={onClear}
-        className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+        className="shrink-0 opacity-50 hover:opacity-100 transition-opacity mt-0.5"
         aria-label="Remove attachment"
       >
         <X className="h-3.5 w-3.5" />
@@ -120,6 +146,7 @@ export function OraPanel({ chat }: OraPanelProps) {
     uploadError,
     clearUploadError,
     session,
+    oraStatus,
   } = chat;
 
   const [input, setInput] = useState("");
@@ -132,6 +159,21 @@ export function OraPanel({ chat }: OraPanelProps) {
   const hasMessages = messages.length > 0;
 
   const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
+
+  const atomState: AtomState =
+    oraStatus === "idle"
+      ? "idle"
+      : oraStatus === "thinking"
+        ? "thinking"
+        : oraStatus === "replying"
+          ? "replying"
+          : oraStatus === "uploading"
+            ? "uploading"
+            : oraStatus === "reading"
+              ? "reading"
+              : oraStatus === "analyzing"
+                ? "analyzing"
+                : "idle";
 
   useEffect(() => {
     if (feedRef.current) {
@@ -194,47 +236,21 @@ export function OraPanel({ chat }: OraPanelProps) {
   const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
 
   return (
-    <div
-      className={cn(
-        "relative rounded-2xl border bg-card shadow-xl overflow-hidden transition-all duration-500",
-        "border-[hsl(265_85%_65%/0.3)]",
-      )}
-      style={{
-        background: "linear-gradient(135deg, hsl(265 85% 65% / 0.04) 0%, transparent 60%)",
-      }}
-    >
-      <div
-        className="absolute inset-0 rounded-2xl pointer-events-none"
-        style={{
-          background: "linear-gradient(135deg, hsl(265 85% 65% / 0.15) 0%, transparent 50%)",
-          mask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-          maskComposite: "exclude",
-          padding: "1px",
-        }}
-      />
-
+    <div className="relative rounded-2xl border border-border/60 bg-card shadow-lg overflow-hidden transition-all duration-500">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[hsl(265_85%_65%/0.2)] bg-[hsl(265_85%_65%/0.05)]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.2)] border border-[hsl(265_85%_65%/0.3)]">
-            <span className="text-sm font-bold text-[hsl(265_85%_65%)]">O</span>
-          </div>
+          <DynamicAtom state={atomState} size={28} />
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-bold tracking-tight">Ora</span>
-            <span className="text-[10px] text-muted-foreground font-medium border border-border rounded-full px-1.5 py-0.5">
+            <span className="text-sm font-semibold tracking-tight">Ora</span>
+            <span className="text-[10px] text-muted-foreground/70 font-medium border border-border/50 rounded-full px-1.5 py-0.5">
               Free · No sign-in required
             </span>
           </div>
-          {isLoading && (
-            <div className="flex items-center gap-0.5 ml-1">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%)] animate-pulse"
-                  style={{ animationDelay: `${i * 150}ms` }}
-                />
-              ))}
-            </div>
+          {oraStatus !== "idle" && (
+            <span className="text-[11px] text-muted-foreground animate-pulse">
+              {STATUS_LABELS[oraStatus]}
+            </span>
           )}
         </div>
 
@@ -243,7 +259,7 @@ export function OraPanel({ chat }: OraPanelProps) {
           <button
             type="button"
             onClick={() => setShowLangMenu((v) => !v)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded-full px-2.5 py-1 hover:bg-muted/50 transition-colors"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2.5 py-1 hover:bg-muted/40 transition-colors"
           >
             <Globe className="h-3 w-3" />
             {currentLangLabel}
@@ -274,7 +290,7 @@ export function OraPanel({ chat }: OraPanelProps) {
 
       {/* Example chips — shown before first message */}
       {!hasMessages && (
-        <div className="px-5 py-4">
+        <div className="px-4 py-4">
           <p className="text-xs text-muted-foreground mb-3">
             Ask Ora anything about planning your app, strategy, or MustaFlow:
           </p>
@@ -284,7 +300,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                 key={chip}
                 type="button"
                 onClick={() => handleChip(chip)}
-                className="text-xs px-3 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.08)] transition-all"
+                className="text-xs px-3 py-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.5)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all"
               >
                 {chip}
               </button>
@@ -295,60 +311,77 @@ export function OraPanel({ chat }: OraPanelProps) {
 
       {/* Message feed */}
       {hasMessages && (
-        <div ref={feedRef} className="px-5 py-4 max-h-80 overflow-y-auto space-y-4 scroll-smooth">
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start gap-2.5")}
-            >
-              {msg.role === "assistant" && (
-                <div className="flex h-6 w-6 shrink-0 mt-0.5 items-center justify-center rounded-md bg-[hsl(265_85%_65%/0.2)] border border-[hsl(265_85%_65%/0.3)]">
-                  <span className="text-[10px] font-bold text-[hsl(265_85%_65%)]">O</span>
-                </div>
-              )}
-              <div className="max-w-[85%]">
-                {msg.role === "user" ? (
-                  <div className="bg-primary/15 border border-primary/20 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2 text-foreground whitespace-pre-wrap break-words">
-                    {msg.content}
-                  </div>
-                ) : msg.datasetResult ? (
-                  <DatasetResultCard result={msg.datasetResult} />
-                ) : (
-                  <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap break-words">
-                    {msg.content}
-                  </div>
+        <div ref={feedRef} className="px-4 py-4 max-h-80 overflow-y-auto space-y-5 scroll-smooth">
+          {messages.map((msg, i) => {
+            const prevUserMsg =
+              i > 0
+                ? messages
+                    .slice(0, i)
+                    .reverse()
+                    .find((m) => m.role === "user")
+                : null;
+            const showCta =
+              msg.role === "assistant" &&
+              prevUserMsg != null &&
+              hasBuildIntent(prevUserMsg.content, msg.content);
+
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "flex",
+                  msg.role === "user" ? "justify-end" : "justify-start gap-2.5",
                 )}
-                {msg.role === "assistant" && msg.handoffCta && (
-                  <div className="mt-3 rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.06)] p-3.5 backdrop-blur-sm">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      Ready to build this with MustaFlow?
-                    </p>
+              >
+                {msg.role === "assistant" && (
+                  <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
+                )}
+                <div className="max-w-[85%]">
+                  {msg.role === "user" ? (
+                    <div className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                      {msg.content}
+                    </div>
+                  ) : msg.datasetResult ? (
+                    <DatasetResultCard result={msg.datasetResult} />
+                  ) : (
+                    <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words">
+                      {msg.content}
+                    </div>
+                  )}
+                  {showCta && (
                     <button
                       type="button"
                       onClick={() => setLocation("/sign-up")}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[hsl(265_85%_65%)] hover:underline"
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)] transition-colors group"
                     >
-                      Continue in the MustaFlow Builder
-                      <span aria-hidden>→</span>
+                      Turn this into a project
+                      <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
+
+          {/* Loading state */}
           {isLoading && (
             <div className="flex items-start gap-2.5">
-              <div className="flex h-6 w-6 shrink-0 mt-0.5 items-center justify-center rounded-md bg-[hsl(265_85%_65%/0.2)] border border-[hsl(265_85%_65%/0.3)]">
-                <span className="text-[10px] font-bold text-[hsl(265_85%_65%)]">O</span>
-              </div>
-              <div className="flex items-center gap-1 pt-1">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="block h-2 w-2 rounded-full bg-[hsl(265_85%_65%/0.6)] animate-pulse"
-                    style={{ animationDelay: `${i * 200}ms` }}
-                  />
-                ))}
+              <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1 pt-0.5">
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
+                      style={{ animationDelay: `${i * 200}ms` }}
+                    />
+                  ))}
+                </div>
+                {oraStatus !== "idle" && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Ora · {STATUS_LABELS[oraStatus]}
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -357,20 +390,20 @@ export function OraPanel({ chat }: OraPanelProps) {
 
       {/* Error */}
       {error && (
-        <div className="mx-5 mb-3 rounded-xl border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
+        <div className="mx-4 mb-3 rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
           <span>{error}</span>
           <button
             type="button"
             onClick={clearError}
             className="shrink-0 opacity-60 hover:opacity-100"
           >
-            ×
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
-      {/* Input footer */}
-      <div className="border-t border-[hsl(265_85%_65%/0.2)] bg-[hsl(265_85%_65%/0.03)] px-4 py-3">
+      {/* Composer */}
+      <div className="border-t border-border/40 px-4 py-3">
         {atLimit ? (
           <div className="text-center py-2">
             <p className="text-xs text-muted-foreground">
@@ -386,10 +419,9 @@ export function OraPanel({ chat }: OraPanelProps) {
           </div>
         ) : (
           <>
-            {/* File chip */}
-            <FileChip
+            <DatasetChip
+              file={attachedFile}
               uploadState={uploadState}
-              filename={attachedFile?.filename}
               uploadError={uploadError}
               onClear={handleClearAttachment}
               fileType={attachedFile?.fileType}
@@ -397,8 +429,8 @@ export function OraPanel({ chat }: OraPanelProps) {
               colCount={attachedFile?.colCount}
             />
 
-            <div className="flex items-end gap-2">
-              {/* Hidden file input */}
+            {/* Unified input bar */}
+            <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -407,8 +439,6 @@ export function OraPanel({ chat }: OraPanelProps) {
                 aria-hidden
                 onChange={handleFileChange}
               />
-
-              {/* Upload button */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -416,13 +446,13 @@ export function OraPanel({ chat }: OraPanelProps) {
                 title={
                   atFileLimit
                     ? `File limit reached (${session?.fileCount ?? 3}/${session?.fileLimit ?? 3})`
-                    : "Upload a PDF, DOCX, TXT, CSV, or XLSX file"
+                    : "Upload PDF, DOCX, TXT, CSV, XLSX"
                 }
                 className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors",
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
                   uploadState === "attached"
-                    ? "border-[hsl(265_85%_65%/0.5)] bg-[hsl(265_85%_65%/0.12)] text-[hsl(265_85%_65%)]"
-                    : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                    ? "text-[hsl(265_85%_65%)]"
+                    : "text-muted-foreground hover:text-foreground",
                   (isLoading || uploadState === "uploading" || atFileLimit) &&
                     "opacity-40 cursor-not-allowed",
                 )}
@@ -441,7 +471,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                     : "Ask Ora anything…"
                 }
                 rows={1}
-                className="flex-1 resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[hsl(265_85%_65%/0.5)] transition-all leading-snug"
+                className="flex-1 resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
                 style={{ maxHeight: "96px" }}
                 disabled={isLoading}
               />
@@ -449,19 +479,18 @@ export function OraPanel({ chat }: OraPanelProps) {
                 type="button"
                 onClick={handleSend}
                 disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[hsl(265_85%_65%)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors shadow-sm"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
               >
-                <Send className="h-4 w-4" />
+                <Send className="h-3.5 w-3.5" />
               </button>
             </div>
+
             <div className="flex items-center justify-between mt-2">
-              <p className="text-[10px] text-muted-foreground/60">
-                {uploadState === "attached"
-                  ? "File attached — type your question and send"
-                  : "Upload PDF, DOCX, TXT, CSV, or XLSX · Talk in any language"}
+              <p className="text-[10px] text-muted-foreground/50">
+                Upload PDF, DOCX, TXT, CSV, XLSX · Talk in any language
               </p>
               {session && (
-                <span className="text-[10px] text-muted-foreground/60">
+                <span className="text-[10px] text-muted-foreground/50">
                   {session.msgLimit - session.msgCount} messages left
                 </span>
               )}
