@@ -13,7 +13,7 @@ import {
   ORA_SYSTEM_PROMPT,
   BUILDER_REFUSAL,
 } from "../../lib/public-ai/prompt";
-import { classifyIntent } from "../../lib/public-ai/classifier";
+import { classifyIntent, type OraTopic } from "../../lib/public-ai/classifier";
 
 const router = Router();
 
@@ -41,6 +41,33 @@ function buildSystemPrompt(language: string | undefined): string {
     ORA_SYSTEM_PROMPT +
     `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`
   );
+}
+
+/**
+ * Returns topic-specific guidance injected into the suggestion system prompt
+ * so follow-up questions are relevant to the detected conversation domain.
+ */
+function topicSuggestionGuidance(topic: OraTopic): string {
+  const guidance: Record<OraTopic, string> = {
+    "product-features":
+      "Focus on MustaFlow capabilities: integrations available, how specific features work, what's possible with the platform.",
+    pricing:
+      "Focus on value and cost: plan comparisons, credit usage, what's included at each tier, how to get started cheaply.",
+    onboarding:
+      "Focus on first steps: how to create a first project, what to expect, common beginner questions, tips for getting results quickly.",
+    "app-planning":
+      "Focus on app scope and design decisions: must-have features, user flows, data model choices, MVP vs full build tradeoffs.",
+    saas: "Focus on SaaS-specific concerns: subscription billing, authentication, role-based access, multi-tenancy, dashboard design, churn reduction.",
+    ecommerce:
+      "Focus on e-commerce specifics: product catalog, checkout flow, payment integration, inventory management, order tracking, returns.",
+    mobile:
+      "Focus on mobile-specific concerns: iOS vs Android differences, offline support, push notifications, app store submission, performance on device.",
+    technical:
+      "Focus on technical depth: database schema choices, API design, deployment strategy, scaling, security hardening, monitoring.",
+    general:
+      "Focus on broadly useful follow-ups: clarifying the goal, exploring alternatives, understanding tradeoffs, next concrete steps.",
+  };
+  return guidance[topic] ?? guidance.general;
 }
 
 router.post("/public-ai/chat", async (req, res) => {
@@ -129,47 +156,96 @@ router.post("/public-ai/chat", async (req, res) => {
     { role: "user" as const, content: message },
   ];
 
+  // Build the topic-enriched suggestion prompt using the classifier's detected topic.
+  const topicGuidance = topicSuggestionGuidance(classifierResult.topic);
+  const suggestionSystemPrompt = [
+    "You generate follow-up questions for a conversational AI assistant named Ora.",
+    'Given the conversation so far, return a JSON object with a "suggestions" array of 2-3 short follow-up questions the user could ask next.',
+    "Each question must be under 60 characters, natural, and non-repetitive.",
+    "",
+    `Detected conversation topic: ${classifierResult.topic}`,
+    `Topic guidance: ${topicGuidance}`,
+    "",
+    'Generate follow-ups that are specific and useful for this topic — avoid generic questions like "Tell me more" or "What else can you do?".',
+  ].join("\n");
+
+  const recentHistory = historyMessages.slice(-4);
+  const { createChatCompletion } = await import("../../lib/ai-providers");
+
+  // Run the main reply and suggestion generation in parallel to reduce latency.
+  // Suggestions use the conversation history + current message + topic context;
+  // the main reply is not yet available but topic-enriched guidance compensates.
   const start = Date.now();
+
+  const [mainResult, suggestionResult] = await Promise.allSettled([
+    (async () => {
+      try {
+        const result = await createChatCompletion({
+          provider: "openai",
+          model: primaryModel,
+          messages: callMessages,
+          response_format: { type: "text" },
+          max_completion_tokens: maxTokens,
+        });
+        return {
+          reply: result.choices[0]?.message?.content?.trim() ?? null,
+          usedFallback: false,
+          modelUsed: primaryModel,
+          provider: "openai" as const,
+        };
+      } catch (primaryErr) {
+        logger.warn(
+          { component: "ora-chat", model: primaryModel, err: primaryErr },
+          "Primary model failed — trying fallback",
+        );
+        const result = await createChatCompletion({
+          provider: "anthropic",
+          model: fallbackModel,
+          messages: callMessages,
+          response_format: { type: "text" },
+          max_completion_tokens: maxTokens,
+        });
+        return {
+          reply: result.choices[0]?.message?.content?.trim() ?? null,
+          usedFallback: true,
+          modelUsed: fallbackModel,
+          provider: "anthropic" as const,
+        };
+      }
+    })(),
+    createChatCompletion({
+      provider: "openai",
+      model: "gpt-5-mini",
+      messages: [
+        { role: "system" as const, content: suggestionSystemPrompt },
+        ...recentHistory,
+        { role: "user" as const, content: message },
+        {
+          role: "user" as const,
+          content: "Suggest 2-3 short follow-up questions I could ask next.",
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 200,
+    }),
+  ]);
+
+  const latencyMs = Date.now() - start;
+
+  // Extract main reply result
+  let reply: string | null = null;
   let usedFallback = false;
   let modelUsed = primaryModel;
   let provider: "openai" | "anthropic" = "openai";
-  let reply: string | null = null;
-  let suggestions: string[] = [];
 
-  try {
-    const { createChatCompletion } = await import("../../lib/ai-providers");
-    const result = await createChatCompletion({
-      provider: "openai",
-      model: primaryModel,
-      messages: callMessages,
-      response_format: { type: "text" },
-      max_completion_tokens: maxTokens,
-    });
-    reply = result.choices[0]?.message?.content?.trim() ?? null;
-  } catch (primaryErr) {
-    logger.warn(
-      { component: "ora-chat", model: primaryModel, err: primaryErr },
-      "Primary model failed — trying fallback",
+  if (mainResult.status === "fulfilled") {
+    ({ reply, usedFallback, modelUsed, provider } = mainResult.value);
+  } else {
+    logger.error(
+      { component: "ora-chat", err: mainResult.reason },
+      "Main model and fallback both failed",
     );
-    usedFallback = true;
-    modelUsed = fallbackModel;
-    provider = "anthropic";
-    try {
-      const { createChatCompletion } = await import("../../lib/ai-providers");
-      const result = await createChatCompletion({
-        provider: "anthropic",
-        model: fallbackModel,
-        messages: callMessages,
-        response_format: { type: "text" },
-        max_completion_tokens: maxTokens,
-      });
-      reply = result.choices[0]?.message?.content?.trim() ?? null;
-    } catch (fallbackErr) {
-      logger.error({ component: "ora-chat", err: fallbackErr }, "Fallback model also failed");
-    }
   }
-
-  const latencyMs = Date.now() - start;
 
   logger.info(
     {
@@ -178,6 +254,7 @@ router.post("/public-ai/chat", async (req, res) => {
       provider,
       intent: classifierResult.intent,
       confidence: classifierResult.confidence,
+      topic: classifierResult.topic,
       latencyMs,
       usedFallback,
       maxTokens,
@@ -192,40 +269,25 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  // Generate follow-up suggestions using a fast model. Failures are silently swallowed
-  // so the main reply is never blocked.
-  try {
-    const { createChatCompletion } = await import("../../lib/ai-providers");
-    const recentHistory = historyMessages.slice(-4);
-    const suggestionResult = await createChatCompletion({
-      provider: "openai",
-      model: "gpt-5-mini",
-      messages: [
-        {
-          role: "system" as const,
-          content:
-            'You generate follow-up questions for a conversational AI assistant named Ora. Given the conversation so far and the latest assistant reply, return a JSON object with a "suggestions" array of 2-3 short follow-up questions the user could ask next. Each question must be under 60 characters, natural, and non-repetitive.',
-        },
-        ...recentHistory,
-        { role: "user" as const, content: message },
-        { role: "assistant" as const, content: reply },
-        {
-          role: "user" as const,
-          content: "Suggest 2-3 short follow-up questions I could ask next.",
-        },
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 200,
-    });
-    const raw = suggestionResult.choices[0]?.message?.content?.trim() ?? "{}";
-    const parsed = JSON.parse(raw) as { suggestions?: unknown };
-    if (Array.isArray(parsed.suggestions)) {
-      suggestions = (parsed.suggestions as unknown[])
-        .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 80)
-        .slice(0, 3);
+  // Extract suggestions — failures are silently swallowed so the main reply is never blocked.
+  let suggestions: string[] = [];
+  if (suggestionResult.status === "fulfilled") {
+    try {
+      const raw = suggestionResult.value.choices[0]?.message?.content?.trim() ?? "{}";
+      const parsedSuggestions = JSON.parse(raw) as { suggestions?: unknown };
+      if (Array.isArray(parsedSuggestions.suggestions)) {
+        suggestions = (parsedSuggestions.suggestions as unknown[])
+          .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 80)
+          .slice(0, 3);
+      }
+    } catch (parseErr) {
+      logger.debug({ component: "ora-chat", err: parseErr }, "Suggestion parse failed");
     }
-  } catch (suggestErr) {
-    logger.debug({ component: "ora-chat", err: suggestErr }, "Suggestion generation skipped");
+  } else {
+    logger.debug(
+      { component: "ora-chat", err: suggestionResult.reason },
+      "Suggestion generation skipped",
+    );
   }
 
   const { token, payload } = incrementMessageCount(session);
