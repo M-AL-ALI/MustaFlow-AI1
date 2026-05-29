@@ -15,6 +15,7 @@ import {
   Volume2,
   VolumeX,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,17 @@ import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraHandoffCard } from "@/components/ora/ora-handoff-card";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const ACCEPTED_EXTENSIONS = new Set([
+  ".pdf",
+  ".docx",
+  ".txt",
+  ".csv",
+  ".xlsx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+]);
 
 const LANGUAGES = [
   { value: "auto", label: "Auto Detect" },
@@ -163,6 +175,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [handoffDismissed, setHandoffDismissed] = useState(false);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const feedRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -371,7 +385,88 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [open]);
 
+  // Auto-clear drop error after 4 s
+  useEffect(() => {
+    if (!dropError) return;
+    const t = setTimeout(() => setDropError(null), 4000);
+    return () => clearTimeout(t);
+  }, [dropError]);
+
   // ─── Handlers ─────────────────────────────────────────────────────────────
+
+  // Shared file dispatch for drag-and-drop and clipboard paste
+  const handleDropFile = useCallback(
+    (file: File) => {
+      if (uploadState === "uploading") return;
+      if (uploadState === "attached" || attachedFile) {
+        setDropError("Remove the current attachment before uploading another.");
+        return;
+      }
+      if (atAllLimits) {
+        setDropError("Upload limit reached for this session.");
+        return;
+      }
+      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+      if (!ACCEPTED_EXTENSIONS.has(ext)) {
+        setDropError(`"${file.name.slice(0, 40)}" is not a supported file type.`);
+        return;
+      }
+      if (IMAGE_EXTENSIONS.has(ext)) {
+        if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+        setPreviewObjectUrl(URL.createObjectURL(file));
+      } else if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        setPreviewObjectUrl(null);
+      }
+      void uploadFile(file);
+    },
+    [uploadFile, uploadState, attachedFile, atAllLimits, previewObjectUrl],
+  );
+
+  const handleDragEnter = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (atAllLimits || uploadState === "uploading") return;
+      setIsDragOver(true);
+    },
+    [atAllLimits, uploadState],
+  );
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if ((e.currentTarget as Node).contains(e.relatedTarget as Node)) return;
+    setIsDragOver(false);
+  }, []);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      handleDropFile(file);
+    },
+    [handleDropFile],
+  );
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = Array.from(e.clipboardData.items);
+      const imgItem = items.find((it) => it.kind === "file" && it.type.startsWith("image/"));
+      if (!imgItem) return; // fall through to normal text paste
+      e.preventDefault();
+      const raw = imgItem.getAsFile();
+      if (!raw) return;
+      const ext = raw.type === "image/png" ? ".png" : raw.type === "image/webp" ? ".webp" : ".jpg";
+      handleDropFile(new File([raw], `pasted-image${ext}`, { type: raw.type }));
+    },
+    [handleDropFile],
+  );
 
   const handleSend = () => {
     const text = input.trim();
@@ -557,7 +652,26 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
             : "translate-y-full sm:translate-y-0 sm:translate-x-full pointer-events-none",
         )}
         style={isDesktop ? { width: `${panelWidth}px` } : undefined}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
+        {/* Drag-and-drop overlay */}
+        {isDragOver && (
+          <div
+            className="absolute inset-0 z-[60] flex items-center justify-center border-2 border-dashed border-[hsl(265_85%_65%/0.7)] bg-card/90 backdrop-blur-sm pointer-events-none"
+            aria-hidden
+          >
+            <div className="flex flex-col items-center gap-2 text-[hsl(265_85%_65%)]">
+              <Upload className="h-7 w-7" />
+              <span className="text-sm font-medium">Drop image or file to upload</span>
+              <span className="text-xs text-muted-foreground">
+                PNG, JPG, WEBP · PDF, DOCX, TXT · CSV, XLSX
+              </span>
+            </div>
+          </div>
+        )}
         {/* Resize handle — desktop only, left edge drag */}
         <div
           className="absolute left-0 top-0 h-full w-2 cursor-col-resize hidden sm:flex items-center justify-center group z-10"
@@ -987,8 +1101,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       title={
                         atAllLimits
                           ? "Upload limit reached for this session"
-                          : "Upload images, PDF, DOCX, TXT, CSV, XLSX"
+                          : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, TXT, CSV, XLSX)"
                       }
+                      aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
                       className={cn(
                         "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
                         uploadState === "attached"
@@ -1030,6 +1145,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
                       style={{ maxHeight: "80px" }}
                       disabled={isLoading}
+                      onPaste={handlePaste}
                     />
                     <button
                       type="button"
@@ -1042,14 +1158,18 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   </div>
 
                   <div className="flex items-center justify-between mt-1.5">
-                    <p className="text-[9px] text-muted-foreground/50">
-                      Upload images, PDF, DOCX, CSV, XLSX ·{" "}
-                      {voice.isSupported
-                        ? "Voice or type in any language"
-                        : "Voice unavailable on this browser — typing still works"}
-                    </p>
+                    {dropError ? (
+                      <p className="text-[9px] text-destructive">{dropError}</p>
+                    ) : (
+                      <p className="text-[9px] text-muted-foreground/50">
+                        Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
+                        {voice.isSupported
+                          ? "Voice or type in any language"
+                          : "Voice unavailable on this browser — typing still works"}
+                      </p>
+                    )}
                     {session && (
-                      <span className="text-[9px] text-muted-foreground/50">
+                      <span className="text-[9px] text-muted-foreground/50 shrink-0 ml-1.5">
                         {session.msgLimit - session.msgCount} left
                       </span>
                     )}
