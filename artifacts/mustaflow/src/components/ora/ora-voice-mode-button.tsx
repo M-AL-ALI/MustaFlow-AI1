@@ -49,7 +49,10 @@ const KEYFRAMES = `
 let keyframesInjected = false;
 function injectKeyframes() {
   if (typeof document === "undefined" || keyframesInjected) return;
-  if (document.getElementById("ora-voice-kf")) { keyframesInjected = true; return; }
+  if (document.getElementById("ora-voice-kf")) {
+    keyframesInjected = true;
+    return;
+  }
   const el = document.createElement("style");
   el.id = "ora-voice-kf";
   el.textContent = KEYFRAMES;
@@ -61,13 +64,13 @@ function injectKeyframes() {
 // Seven bars with varied heights for a natural, asymmetric waveform shape.
 
 const BAR_DEFS: Array<{ min: number; max: number; dur: number }> = [
-  { min: 2, max: 5,  dur: 0.65 },
-  { min: 3, max: 9,  dur: 0.55 },
-  { min: 4, max: 11, dur: 0.70 },
-  { min: 2, max: 7,  dur: 0.60 },
-  { min: 5, max: 10, dur: 0.50 },
-  { min: 3, max: 6,  dur: 0.72 },
-  { min: 2, max: 8,  dur: 0.58 },
+  { min: 2, max: 5, dur: 0.65 },
+  { min: 3, max: 9, dur: 0.55 },
+  { min: 4, max: 11, dur: 0.7 },
+  { min: 2, max: 7, dur: 0.6 },
+  { min: 5, max: 10, dur: 0.5 },
+  { min: 3, max: 6, dur: 0.72 },
+  { min: 2, max: 8, dur: 0.58 },
 ];
 
 interface WaveformBarsProps {
@@ -76,7 +79,11 @@ interface WaveformBarsProps {
   scale?: number;
 }
 
-function WaveformBars({ animated = false, colorClass = "bg-white/90", scale = 1 }: WaveformBarsProps) {
+function WaveformBars({
+  animated = false,
+  colorClass = "bg-white/90",
+  scale = 1,
+}: WaveformBarsProps) {
   return (
     <div className="flex items-end gap-[2px]" aria-hidden>
       {BAR_DEFS.map((b, i) => {
@@ -88,12 +95,12 @@ function WaveformBars({ animated = false, colorClass = "bg-white/90", scale = 1 
             className={cn("w-[2px] rounded-full", colorClass)}
             style={
               animated
-                ? {
+                ? ({
                     height: `${hMin}px`,
                     animation: `ora-wave ${b.dur}s ease-in-out ${i * 65}ms infinite alternate`,
                     "--h-min": `${hMin}px`,
                     "--h-max": `${hMax}px`,
-                  } as React.CSSProperties
+                  } as React.CSSProperties)
                 : { height: `${Math.round((hMin + hMax) / 2)}px` }
             }
           />
@@ -125,30 +132,32 @@ export function OraVoiceModeButton({
 }: OraVoiceModeButtonProps) {
   useEffect(injectKeyframes, []);
 
-  const isListening    = voiceState === "listening";
-  const isSpeaking     = voiceState === "speaking";
-  const isUnsupported  = !isSupported || voiceState === "unsupported";
-  const isDenied       = voiceState === "permission_denied";
-  const isError        = voiceState === "error";
-  const isInert        = isUnsupported || isDenied;
-  const isActive       = isListening || isSpeaking;
+  const isListening = voiceState === "listening";
+  const isSpeaking = voiceState === "speaking";
+  const isUnsupported = !isSupported || voiceState === "unsupported";
+  const isDenied = voiceState === "permission_denied";
+  const isError = voiceState === "error";
+  const isInert = isUnsupported || isDenied;
+  const isActive = isListening || isSpeaking;
 
-  const dim       = size === "sm" ? "h-6 w-6" : "h-7 w-7";
+  const dim = size === "sm" ? "h-6 w-6" : "h-7 w-7";
   const waveScale = size === "sm" ? 0.75 : 1;
 
   let ariaLabel = "Start talking to Ora";
-  if (isListening)   ariaLabel = "Stop listening";
-  if (isSpeaking)    ariaLabel = "Ora is speaking — tap to stop";
+  if (isListening) ariaLabel = "Stop listening";
+  if (isSpeaking) ariaLabel = "Ora is speaking — tap to stop";
   if (isUnsupported) ariaLabel = "Voice input is not supported in this browser";
-  if (isDenied)      ariaLabel = "Microphone permission denied — enable in browser settings";
-  if (isError)       ariaLabel = "Voice recognition failed — tap to try again";
+  if (isDenied) ariaLabel = "Microphone permission denied — enable in browser settings";
+  if (isError) ariaLabel = "Voice recognition failed — tap to try again";
 
   let title = "Talk to Ora";
-  if (isListening)   title = "Stop listening";
-  if (isSpeaking)    title = "Ora is speaking — tap to stop";
+  if (isListening) title = "Stop listening";
+  if (isSpeaking) title = "Ora is speaking — tap to stop";
   if (isUnsupported) title = "Voice is not supported in this browser. You can still type.";
-  if (isDenied)      title = "Microphone access was denied. Enable it in your browser settings or type your message.";
-  if (isError)       title = "Voice recognition failed. Please try again or type your message.";
+  if (isDenied)
+    title =
+      "Microphone access was denied. Enable it in your browser settings or type your message.";
+  if (isError) title = "Voice recognition failed. Please try again or type your message.";
 
   const handleClick = () => {
     if (isInert || disabled) return;
@@ -163,10 +172,9 @@ export function OraVoiceModeButton({
     }
   };
 
-  const buttonStyle: React.CSSProperties =
-    isSpeaking
-      ? { animation: "ora-speaking-glow 1.6s ease-in-out infinite" }
-      : !isInert && !isActive && !isError
+  const buttonStyle: React.CSSProperties = isSpeaking
+    ? { animation: "ora-speaking-glow 1.6s ease-in-out infinite" }
+    : !isInert && !isActive && !isError
       ? { animation: "ora-idle-glow 3.5s ease-in-out 1.5s infinite" }
       : {};
 
@@ -184,10 +192,11 @@ export function OraVoiceModeButton({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
         dim,
         // ── Gradient orb (default) ──────────────────────────────────────
-        !isInert && !isError &&
-          "bg-gradient-to-br from-[hsl(265_85%_62%)] to-[hsl(220_80%_58%)]",
+        !isInert && !isError && "bg-gradient-to-br from-[hsl(265_85%_62%)] to-[hsl(220_80%_58%)]",
         // ── Idle / hover ─────────────────────────────────────────────────
-        !isActive && !isInert && !isError &&
+        !isActive &&
+          !isInert &&
+          !isError &&
           "hover:scale-110 hover:from-[hsl(265_85%_58%)] hover:to-[hsl(220_80%_54%)] focus-visible:ring-[hsl(265_85%_65%)]",
         // ── Listening: warm red ring + no hover scale ─────────────────────
         isListening &&
@@ -214,10 +223,7 @@ export function OraVoiceModeButton({
 
       {isInert ? (
         <MicOff
-          className={cn(
-            "text-muted-foreground",
-            size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5",
-          )}
+          className={cn("text-muted-foreground", size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")}
         />
       ) : isError ? (
         <AlertCircle className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />
@@ -253,13 +259,12 @@ export function OraVoiceLiveArea({
   size = "md",
 }: OraVoiceLiveAreaProps) {
   const isListening = voiceState === "listening";
-  const isSpeaking  = voiceState === "speaking";
-  const showNothing =
-    voiceState === "idle" && !voiceReady && !voiceErrorMsg && !interimTranscript;
+  const isSpeaking = voiceState === "speaking";
+  const showNothing = voiceState === "idle" && !voiceReady && !voiceErrorMsg && !interimTranscript;
 
   if (showNothing) return null;
 
-  const label   = size === "sm" ? "text-[10px]" : "text-[11px]";
+  const label = size === "sm" ? "text-[10px]" : "text-[11px]";
   const heading = size === "sm" ? "text-[11px]" : "text-xs";
 
   return (
@@ -303,9 +308,7 @@ export function OraVoiceLiveArea({
           <span className={cn("font-medium text-[hsl(265_85%_65%)]", heading)}>
             Ora is speaking…
           </span>
-          <span className={cn("ml-auto text-muted-foreground/50", label)}>
-            Tap to stop
-          </span>
+          <span className={cn("ml-auto text-muted-foreground/50", label)}>Tap to stop</span>
         </div>
       )}
 

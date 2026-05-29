@@ -565,6 +565,7 @@ Phase 6 accepted as complete by the user on 2026-05-29, subject to the staging n
 > **Authenticated end-to-end browser proof should be verified manually in the deployed/staging environment with a real Clerk session before production launch.**
 
 **Anonymous flow staging checklist:**
+
 1. Signed-out visitor chats with Ora
 2. CTA appears on last assistant message
 3. Visitor clicks "Continue in Builder"
@@ -578,6 +579,7 @@ Phase 6 accepted as complete by the user on 2026-05-29, subject to the staging n
 11. Reusing the same token returns safe used/expired behavior
 
 **Signed-in flow staging checklist:**
+
 1. Signed-in user chats with Ora
 2. CTA appears on last assistant message
 3. User clicks "Continue in Builder"
@@ -590,19 +592,19 @@ Phase 6 accepted as complete by the user on 2026-05-29, subject to the staging n
 
 ### Files added/modified
 
-| File | Change |
-|---|---|
-| `artifacts/api-server/src/lib/public-ai/handoff-store.ts` | NEW — in-memory token store |
-| `artifacts/api-server/src/lib/rateLimit.ts` | `oraHandoffLimiter` (5/hr/IP) |
-| `artifacts/api-server/src/routes/public-ai/handoff.ts` | NEW — public create route |
-| `artifacts/api-server/src/routes/public-ai/index.ts` | Handoff route registered |
-| `artifacts/api-server/src/routes/builder-handoff.ts` | NEW — auth-gated exchange route |
-| `artifacts/api-server/src/routes/index.ts` | `/builder` prefix; exchange after auth wall |
-| `artifacts/api-server/src/routes/public-ai/__tests__/phase6.test.ts` | NEW — 33 tests |
-| `artifacts/mustaflow/src/components/ora/ora-handoff-card.tsx` | NEW — CTA card |
-| `artifacts/mustaflow/src/components/ora-panel.tsx` | OraHandoffCard integration |
-| `artifacts/mustaflow/src/components/ora-bubble.tsx` | OraHandoffCard integration |
-| `artifacts/mustaflow/src/pages/projects.tsx` | `useEffect` token exchange + URL cleanup |
+| File                                                                 | Change                                      |
+| -------------------------------------------------------------------- | ------------------------------------------- |
+| `artifacts/api-server/src/lib/public-ai/handoff-store.ts`            | NEW — in-memory token store                 |
+| `artifacts/api-server/src/lib/rateLimit.ts`                          | `oraHandoffLimiter` (5/hr/IP)               |
+| `artifacts/api-server/src/routes/public-ai/handoff.ts`               | NEW — public create route                   |
+| `artifacts/api-server/src/routes/public-ai/index.ts`                 | Handoff route registered                    |
+| `artifacts/api-server/src/routes/builder-handoff.ts`                 | NEW — auth-gated exchange route             |
+| `artifacts/api-server/src/routes/index.ts`                           | `/builder` prefix; exchange after auth wall |
+| `artifacts/api-server/src/routes/public-ai/__tests__/phase6.test.ts` | NEW — 33 tests                              |
+| `artifacts/mustaflow/src/components/ora/ora-handoff-card.tsx`        | NEW — CTA card                              |
+| `artifacts/mustaflow/src/components/ora-panel.tsx`                   | OraHandoffCard integration                  |
+| `artifacts/mustaflow/src/components/ora-bubble.tsx`                  | OraHandoffCard integration                  |
+| `artifacts/mustaflow/src/pages/projects.tsx`                         | `useEffect` token exchange + URL cleanup    |
 
 **Commit:** `b7583903a586b30f13a76a4542a4be85bf23294f`
 

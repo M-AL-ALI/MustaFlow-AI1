@@ -682,9 +682,9 @@ export function OraPanel({ chat }: OraPanelProps) {
             <div className="flex items-center justify-between mt-2">
               <p className="text-[10px] text-muted-foreground/50">
                 Upload images, PDF, DOCX, CSV, XLSX ·{" "}
-              {voice.isSupported
-                ? "Voice or type in any language"
-                : "Voice unavailable on this browser — typing still works"}
+                {voice.isSupported
+                  ? "Voice or type in any language"
+                  : "Voice unavailable on this browser — typing still works"}
               </p>
               {session && (
                 <span className="text-[10px] text-muted-foreground/50">
