@@ -1,0 +1,157 @@
+Thank you. The Phase 3 validation report is accepted.
+
+Phase 3 is approved as complete with the following confirmations accepted:
+
+* CSV upload and dataset analysis passed
+* XLSX upload and dataset analysis passed
+* KPI analysis passed
+* Pareto analysis passed
+* root-cause analysis passed
+* 5 Whys and Fishbone output passed
+* strategy recommendation output passed
+* formula safety passed
+* negative numbers are preserved
+* hidden sheets are skipped safely
+* all-hidden XLSX returns a safe error
+* prompt-injection cells are ignored as instructions
+* cross-session fileRef protection passed
+* expired/missing fileRef safe response passed
+* structured JSON validation passed
+* Arabic dataset response passed
+* Spanish dataset response passed
+* dataset UI rendering passed
+* no raw dataset content appears in logs
+* no Builder/project/secret/credit access was introduced
+* dataset analysis uses premium model only
+* gpt-5-nano and gpt-5-mini are not used for visible dataset-analysis answers
+* Ora Phase 1, Phase 2, and Phase 3 tests pass
+* the 7 stop-button test failures are acknowledged as pre-existing and unrelated
+* no voice implementation was started
+* the Dynamic Atom/redesign work was not included in Phase 3
+
+One small clarification needed:
+
+In the report, the Phase 1/2 regression section says:
+
+“Kill-switch behavior PASS — no session cookie → immediate 400”
+
+That is not actually kill-switch proof. That proves missing-session handling.
+
+Please clarify the kill-switch behavior separately:
+
+* PUBLIC_AI_ENABLED=false should disable Ora routes after API restart
+* /api/public-ai/chat should return safe 503
+* /api/public-ai/upload should return safe 503
+* /api/public-ai/file-analysis should return safe 503
+* /api/public-ai/dataset-analysis should return safe 503
+
+Also, the rollback section says ORA_SESSION_SECRET gates all public-AI routes. Please keep the wording clear:
+
+* PUBLIC_AI_ENABLED=false is the preferred kill switch
+* removing ORA_SESSION_SECRET is a secondary emergency disable mechanism
+* changing either env var requires API restart in production
+
+This clarification does not block Phase 3 acceptance, but please clean up the wording in the final records.
+
+Now move to the next phase planning only.
+
+I want the next phase to be Ora Voice Conversation, not image upload yet.
+
+Do not start implementation yet.
+
+Please prepare a full Ora Voice Phase implementation plan covering:
+
+1. Microphone button
+    Add a clear microphone button inside:
+
+* Ora Lens panel
+* Ora Bubble drawer
+* mobile Ora bottom sheet/drawer
+
+2. Voice-to-text transcript
+    Everything the visitor says must become a visible user message in the same Ora message thread.
+3. Assistant response in thread
+    Everything Ora replies must appear as a visible assistant message in the same thread.
+4. Optional speech playback
+    Ora may speak the answer aloud, but text must always remain visible. Do not make the experience audio-only.
+5. Natural conversation behavior
+    Support:
+
+* listening state
+* live/interim transcript if available
+* final transcript
+* stop/cancel button
+* silence detection
+* auto-stop after user finishes speaking
+* user interruption while Ora is speaking
+* stop playback if the user starts speaking again
+* prioritize user speech over assistant playback
+
+6. Multilingual voice
+    Voice must support:
+
+* Arabic
+* English
+* Spanish
+* French where possible
+* Auto Detect behavior
+* selected language behavior
+* transcript and response in the same language when possible
+
+7. Session memory
+    Voice transcripts must be stored in the same temporary session memory as typed messages and survive refresh within the active session.
+8. Privacy
+    Do not permanently store anonymous voice audio.
+    Do not log raw audio.
+    Do not log transcript text.
+    Do not send voice content to Builder/project memory.
+    Only temporary in-session memory should keep the transcript.
+9. Browser-native first
+    Use browser-native SpeechRecognition / webkitSpeechRecognition and speechSynthesis first to control cost.
+10. API fallback
+    Only recommend API transcription/TTS fallback if needed, with strict limits:
+
+* max clip length
+* per-session transcription limit
+* per-session TTS limit
+* no audio retention
+* safe errors
+
+11. UI states
+    Include:
+
+* microphone idle
+* listening
+* processing transcript
+* speaking
+* paused/stopped
+* unsupported browser
+* permission denied
+* transcript ready
+* retry/cancel
+
+12. Tests and validation
+    Plan tests for:
+
+* microphone button visible
+* transcript appears in message thread
+* Ora response appears in message thread
+* session memory includes voice transcript
+* refresh restores voice transcript text
+* browser unsupported fallback
+* mic permission denied handling
+* Arabic voice transcript behavior if browser supports it
+* Spanish voice transcript behavior
+* no audio/transcript in logs
+* no Builder access
+* no project access
+* no Phase 1/2/3 regression
+
+13. Rollback
+    Explain how to disable voice while keeping:
+
+* Phase 1 chat
+* Phase 2 document upload
+* Phase 3 dataset analysis
+
+Please provide the voice phase plan only. Do not start coding until I approve it.
