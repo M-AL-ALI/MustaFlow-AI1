@@ -8,6 +8,9 @@ export interface OraMessage {
   handoffCta?: boolean;
   datasetResult?: DatasetAnalysisResult;
   suggestions?: string[];
+  messageKind?: "image-analysis" | "document-analysis";
+  hadAttachment?: boolean;
+  editedFrom?: boolean;
 }
 
 export interface OraSession {
@@ -58,7 +61,10 @@ export interface UseOraChatReturn {
   atLimit: boolean;
   language: string;
   setLanguage: (lang: string) => void;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    opts?: { truncateTo?: number; editedFrom?: boolean },
+  ) => Promise<void>;
   clearError: () => void;
   uploadFile: (file: File) => Promise<void>;
   clearAttachment: () => void;
@@ -209,13 +215,21 @@ function deriveOraStatus(
   return "idle";
 }
 
-function serializeForStorage(
-  messages: OraMessage[],
-): Array<{ role: string; content: string; handoffCta?: boolean }> {
+function serializeForStorage(messages: OraMessage[]): Array<{
+  role: string;
+  content: string;
+  handoffCta?: boolean;
+  messageKind?: string;
+  hadAttachment?: boolean;
+  editedFrom?: boolean;
+}> {
   return messages.map((m) => ({
     role: m.role,
     content: m.content,
     ...(m.handoffCta !== undefined ? { handoffCta: m.handoffCta } : {}),
+    ...(m.messageKind !== undefined ? { messageKind: m.messageKind } : {}),
+    ...(m.hadAttachment ? { hadAttachment: true } : {}),
+    ...(m.editedFrom ? { editedFrom: true } : {}),
   }));
 }
 
@@ -484,12 +498,21 @@ export function useOraChat(): UseOraChatReturn {
   }, []);
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, opts?: { truncateTo?: number; editedFrom?: boolean }) => {
       if (!content.trim() || isLoading) return;
 
-      const userMsg: OraMessage = { role: "user", content };
-      setMessages((prev) => {
-        const next = [...prev, userMsg];
+      const currentAttachment = attachedFile;
+      const baseMessages =
+        opts?.truncateTo !== undefined ? messages.slice(0, opts.truncateTo) : messages;
+
+      const userMsg: OraMessage = {
+        role: "user",
+        content,
+        ...(currentAttachment ? { hadAttachment: true } : {}),
+        ...(opts?.editedFrom ? { editedFrom: true } : {}),
+      };
+      setMessages(() => {
+        const next = [...baseMessages, userMsg];
         storeTranscript(next);
         if (isSignedIn) saveToServer(next);
         return next;
@@ -497,10 +520,8 @@ export function useOraChat(): UseOraChatReturn {
       setIsLoading(true);
       setError(null);
 
-      const currentAttachment = attachedFile;
-
       try {
-        const history = messages.slice(-20).map((m) => ({ role: m.role, content: m.content }));
+        const history = baseMessages.slice(-20).map((m) => ({ role: m.role, content: m.content }));
 
         if (currentAttachment) {
           setAttachedFile(null);
@@ -529,7 +550,12 @@ export function useOraChat(): UseOraChatReturn {
             setMessages((prev) => {
               const next = [
                 ...prev,
-                { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+                {
+                  role: "assistant" as const,
+                  content: data.reply,
+                  handoffCta: data.handoffCta,
+                  messageKind: "image-analysis" as const,
+                },
               ];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);
@@ -589,7 +615,12 @@ export function useOraChat(): UseOraChatReturn {
             setMessages((prev) => {
               const next = [
                 ...prev,
-                { role: "assistant" as const, content: data.reply, handoffCta: data.handoffCta },
+                {
+                  role: "assistant" as const,
+                  content: data.reply,
+                  handoffCta: data.handoffCta,
+                  messageKind: "document-analysis" as const,
+                },
               ];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);

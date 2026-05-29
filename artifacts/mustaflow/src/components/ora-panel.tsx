@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import { useUser } from "@clerk/react";
 import { useLocation } from "wouter";
 import {
   Send,
@@ -14,6 +15,7 @@ import {
   VolumeX,
   Trash2,
 } from "lucide-react";
+import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
@@ -155,10 +157,12 @@ export function OraPanel({ chat }: OraPanelProps) {
     clearConversation,
   } = chat;
 
+  const { isSignedIn } = useUser();
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [handoffDismissed, setHandoffDismissed] = useState(false);
+  const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
   const [, setLocation] = useLocation();
   const feedRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -264,7 +268,9 @@ export function OraPanel({ chat }: OraPanelProps) {
     const text = input.trim();
     if (!text || isLoading || atLimit || uploadState === "uploading") return;
     setInput("");
-    void sendMessage(text);
+    const editedFrom = editingFromIdx !== null ? true : undefined;
+    setEditingFromIdx(null);
+    void sendMessage(text, editedFrom ? { editedFrom: true } : undefined);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -282,6 +288,41 @@ export function OraPanel({ chat }: OraPanelProps) {
     if (isLoading || atLimit) return;
     void sendMessage(chip);
   };
+
+  const handleEditMessage = useCallback((text: string, fromIndex?: number) => {
+    if (fromIndex !== undefined) setEditingFromIdx(fromIndex);
+    setInput(text);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(text.length, text.length);
+    }, 40);
+  }, []);
+
+  const handleContinueInBuilder = useCallback(async () => {
+    try {
+      const safeMessages = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .filter((m) => !m.datasetResult)
+        .slice(-8)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, 300) }));
+      const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+      const res = await fetch(`${BASE}/api/public-ai/handoff/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ messages: safeMessages }),
+      });
+      if (!res.ok) throw new Error("Could not create handoff");
+      const { token } = (await res.json()) as { token: string };
+      setLocation(
+        isSignedIn
+          ? `/projects?handoff=${encodeURIComponent(token)}`
+          : `/sign-up?handoff=${encodeURIComponent(token)}`,
+      );
+    } catch {
+      setLocation("/sign-up");
+    }
+  }, [messages, isSignedIn, setLocation]);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -451,11 +492,13 @@ export function OraPanel({ chat }: OraPanelProps) {
               Array.isArray(msg.suggestions) &&
               msg.suggestions.length > 0;
 
+            const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
+
             return (
               <div
                 key={i}
                 className={cn(
-                  "flex",
+                  "flex group",
                   msg.role === "user" ? "justify-end" : "justify-start gap-2.5",
                 )}
               >
@@ -475,22 +518,42 @@ export function OraPanel({ chat }: OraPanelProps) {
                     </div>
                   )}
 
-                  {/* TTS play button — only on assistant text messages, only when TTS enabled */}
-                  {msg.role === "assistant" &&
-                    !msg.datasetResult &&
-                    voice.isSpeechSynthesisSupported &&
-                    voice.isTtsEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => voice.speakText(msg.content, language)}
-                        title="Read this response aloud"
-                        aria-label="Read this response aloud"
-                        className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                      >
-                        <Volume2 className="h-3 w-3" />
-                        <span>Read aloud</span>
-                      </button>
-                    )}
+                  {msg.editedFrom && (
+                    <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
+                      Edited from earlier message
+                    </p>
+                  )}
+
+                  <OraMessageActions
+                    message={msg}
+                    isLatestAssistant={isLatestAssistant}
+                    onEdit={msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined}
+                    onRegenerate={
+                      isLatestAssistant
+                        ? (() => {
+                            const prevUser = messages
+                              .slice(0, i)
+                              .reverse()
+                              .find((m) => m.role === "user");
+                            return prevUser
+                              ? () => void sendMessage(prevUser.content, { truncateTo: i })
+                              : undefined;
+                          })()
+                        : undefined
+                    }
+                    onContinueInBuilder={
+                      isLatestAssistant && msg.handoffCta
+                        ? () => void handleContinueInBuilder()
+                        : undefined
+                    }
+                    onReadAloud={
+                      msg.role === "assistant" && voice.isSpeechSynthesisSupported
+                        ? (text) => voice.speakText(text, language)
+                        : undefined
+                    }
+                    isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
+                    hasAttachment={msg.hadAttachment ?? false}
+                  />
 
                   {showHandoffCard && (
                     <OraHandoffCard
@@ -553,6 +616,24 @@ export function OraPanel({ chat }: OraPanelProps) {
             className="shrink-0 opacity-60 hover:opacity-100"
           >
             <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Editing indicator */}
+      {editingFromIdx !== null && (
+        <div className="mx-4 mb-1 flex items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+          <span>Editing earlier message — reply will be added to conversation</span>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingFromIdx(null);
+              setInput("");
+            }}
+            className="shrink-0 opacity-60 hover:opacity-100"
+            aria-label="Cancel edit"
+          >
+            <X className="h-3 w-3" />
           </button>
         </div>
       )}
