@@ -15,14 +15,9 @@ import {
   VolumeX,
   Trash2,
   Upload,
-  FileDown,
-  FileJson,
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
-import {
-  downloadConversationAsMarkdown,
-  downloadConversationAsJson,
-} from "@/lib/ora-message-export";
+import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { cn } from "@/lib/utils";
 import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
@@ -650,24 +645,11 @@ export function OraPanel({ chat }: OraPanelProps) {
           {/* Export + clear conversation */}
           {hasMessages && (
             <>
-              <button
-                type="button"
-                onClick={() => downloadConversationAsMarkdown(messages, "ora-conversation")}
+              <OraExportMenu
+                source={{ kind: "conversation", messages }}
                 disabled={isLoading}
-                title="Export as Markdown"
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-40"
-              >
-                <FileDown className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadConversationAsJson(messages, "ora-conversation")}
-                disabled={isLoading}
-                title="Export as JSON"
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-40"
-              >
-                <FileJson className="h-3.5 w-3.5" />
-              </button>
+                variant="header"
+              />
               <button
                 type="button"
                 onClick={() => void clearConversation()}

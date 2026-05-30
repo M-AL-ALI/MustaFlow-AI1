@@ -7,9 +7,9 @@ import {
   RefreshCw,
   ArrowRight,
   MoreHorizontal,
-  FileJson,
-  FileSpreadsheet,
   FileText,
+  FileSpreadsheet,
+  FileJson,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,6 +23,8 @@ import {
   downloadDatasetJson,
   downloadActionPlanCsv,
 } from "@/lib/ora-message-export";
+import { downloadDocx, downloadXlsx } from "@/lib/file-generation";
+import { OraExportMenu } from "@/components/ora/ora-export-menu";
 
 export interface OraMessageActionsProps {
   message: OraMessage;
@@ -186,53 +188,7 @@ export function OraMessageActions({
         <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} label="Edit" onClick={handleEdit} />
       )}
 
-      {isAssistant && hasDataset && (
-        <ActionButton
-          icon={<Download className="h-3.5 w-3.5" />}
-          label="Download report"
-          onClick={handleDownload}
-        />
-      )}
-
-      {isAssistant && hasDataset && (
-        <ActionButton
-          icon={<FileJson className="h-3.5 w-3.5" />}
-          label="Download JSON"
-          onClick={handleDownloadJson}
-        />
-      )}
-
-      {isAssistant && hasActionPlan && (
-        <ActionButton
-          icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
-          label="Download action plan CSV"
-          onClick={handleDownloadCsv}
-        />
-      )}
-
-      {isAssistant && message.messageKind === "image-analysis" && (
-        <ActionButton
-          icon={<FileText className="h-3.5 w-3.5" />}
-          label="Download image analysis"
-          onClick={handleDownload}
-        />
-      )}
-
-      {isAssistant && message.messageKind === "document-analysis" && (
-        <ActionButton
-          icon={<FileText className="h-3.5 w-3.5" />}
-          label="Download document analysis"
-          onClick={handleDownload}
-        />
-      )}
-
-      {isAssistant && !hasDataset && !message.messageKind && (
-        <ActionButton
-          icon={<Download className="h-3.5 w-3.5" />}
-          label="Download as Markdown"
-          onClick={handleDownload}
-        />
-      )}
+      {isAssistant && <OraExportMenu source={{ kind: "message", message }} />}
 
       {isAssistant && isTtsAvailable && onReadAloud && (
         <ActionButton
@@ -285,6 +241,35 @@ export function OraMessageActions({
               icon={<Pencil className="h-3.5 w-3.5" />}
               label="Edit"
               onClick={handleEdit}
+              onClose={() => setMobileOpen(false)}
+            />
+          )}
+
+          {isAssistant && (
+            <MobileActionItem
+              icon={<FileText className="h-3.5 w-3.5" />}
+              label="Word Report"
+              onClick={() => {
+                void downloadDocx({ kind: "message", message }, downloadFilename);
+              }}
+              onClose={() => setMobileOpen(false)}
+            />
+          )}
+
+          {isAssistant && hasDataset && (
+            <MobileActionItem
+              icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
+              label="Excel Workbook"
+              onClick={() => {
+                void downloadXlsx(
+                  {
+                    kind: "dataset",
+                    data: message.datasetResult!,
+                    title: "Dataset Analysis Report",
+                  },
+                  downloadFilename,
+                );
+              }}
               onClose={() => setMobileOpen(false)}
             />
           )}

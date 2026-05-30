@@ -1,0 +1,13 @@
+export const LIMITS = {
+  titleMaxChars: 200,
+  summaryMaxChars: 3_000,
+  maxFindings: 20,
+  maxRecommendations: 20,
+  maxActionPlanRows: 30,
+  maxXlsxRowsPerSheet: 5_000,
+  maxJsonExportBytes: 2_000_000,
+  maxDocxSections: 50,
+  maxKpiRows: 50,
+  maxParetoRows: 50,
+  maxTrendRows: 30,
+} as const;
