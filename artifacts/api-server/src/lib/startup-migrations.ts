@@ -2914,7 +2914,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
           ON vault_entries
           USING GIN(
             to_tsvector('pg_catalog.english'::regconfig,
-              coalesce(title, '') || ' ' || coalesce(summary, '')
+              concat(coalesce(title, ''), ' ', coalesce(summary, ''))
             )
           )
       `);
