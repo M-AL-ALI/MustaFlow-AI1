@@ -1,0 +1,101 @@
+Thank you. The Ora mobile layout fix looks good and the root cause explanation makes sense.
+
+Before I accept this separate UI bug fix, please provide a corrected final validation report with the exact final commit hash and clearer device validation.
+
+Required corrections:
+
+1. Final commit hash
+
+The report says:
+
+“Commit: captured in checkpoint”
+
+Please provide the exact commit hash for this fix.
+
+2. Android validation proof
+
+The task required validation for both iPhone and Android.
+
+Please confirm specifically:
+
+* Android Chrome tested or simulated
+* Android Samsung Internet tested if possible, or explain if not available
+* message thread scrolls normally on Android
+* assistant text no longer overlaps the composer on Android
+* keyboard-open state works on Android
+* composer remains visible and usable on Android
+* upload hint/message count does not overlap content on Android
+
+3. iPhone validation proof
+
+Please confirm specifically:
+
+* iPhone Safari tested or simulated
+* iPhone Chrome tested or simulated
+* safe-area/home-indicator padding works
+* keyboard-open state works
+* composer remains visible
+* messages do not render underneath composer
+
+4. Desktop regression proof
+
+Please confirm:
+
+* desktop Ask Ora button still appears
+* desktop side panel/drawer still opens and closes
+* desktop message thread still scrolls
+* desktop Latest button still works
+* desktop composer remains correct
+
+5. Files changed
+
+Please confirm final changed files:
+
+* artifacts/mustaflow/src/components/ora-bubble.tsx
+* artifacts/mustaflow/src/components/ora-panel.tsx
+* artifacts/mustaflow/index.html
+
+Also confirm no unrelated Phase 8B, Knowledge Vault, RAG, semantic search, or roadmap files were touched.
+
+6. Root cause summary
+
+Please include final root cause summary:
+
+* overlap caused by floating Ask Ora trigger and open drawer both using fixed z-index positioning on mobile
+* scrolling caused by h-full inside a flex context not becoming a real scroll container
+* Latest button issue caused by button being positioned inside scroll content instead of visible feed shell
+* safe-area issue caused by missing viewport-fit=cover and missing bottom safe-area padding
+
+7. Quality proof
+
+Please confirm final status:
+
+* typecheck
+* lint
+* format
+* frontend workflow
+* backend workflow
+
+8. Regression proof
+
+Please confirm no regression to:
+
+* Ora Panel
+* Ora Bubble
+* Voice mode
+* File upload
+* Image upload
+* Dataset analysis
+* Code block rendering
+* Smart auto-scroll
+* Latest button
+* Message export
+* Builder handoff
+
+9. Scope confirmation
+
+Confirm this was a separate UI/UX bug fix only.
+
+Do not mark any roadmap phase complete because of this fix.
+
+Do not start Phase 8B-2, semantic search, RAG, AI memory, Knowledge Vault intelligence, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until explicitly approved.
