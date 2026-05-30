@@ -9702,8 +9702,19 @@ components:
     VaultSemanticSearchResult:
       type: object
       required:
-        [entryId, title, category, summary, tags, status, version,
-         chunkIndex, chunkPreview, similarityScore, updatedAt]
+        [
+          entryId,
+          title,
+          category,
+          summary,
+          tags,
+          status,
+          version,
+          chunkIndex,
+          chunkPreview,
+          similarityScore,
+          updatedAt,
+        ]
       properties:
         entryId: { type: integer }
         title: { type: string }
