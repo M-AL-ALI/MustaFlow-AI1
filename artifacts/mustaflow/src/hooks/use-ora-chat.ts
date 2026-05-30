@@ -233,6 +233,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   messageKind?: string;
   hadAttachment?: boolean;
   editedFrom?: boolean;
+  generatedFile?: GeneratedFile;
 }> {
   return messages.map((m) => ({
     role: m.role,
@@ -241,6 +242,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.messageKind !== undefined ? { messageKind: m.messageKind } : {}),
     ...(m.hadAttachment ? { hadAttachment: true } : {}),
     ...(m.editedFrom ? { editedFrom: true } : {}),
+    // Include generatedFile so the download card persists across re-renders
+    ...(m.generatedFile ? { generatedFile: m.generatedFile } : {}),
   }));
 }
 

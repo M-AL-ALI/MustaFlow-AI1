@@ -53,10 +53,14 @@ function downloadOraFile(file: GeneratedFile) {
   const a = document.createElement("a");
   a.href = url;
   a.download = file.fileName;
+  a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Revoke after a delay so the browser has time to start the download
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 2000);
 }
 
 const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] = [
@@ -1062,22 +1066,24 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     )}
 
                     {msg.generatedFile && (
-                      <div className="mt-2 flex items-center gap-2 rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.07)] px-2.5 py-2">
-                        <FileSpreadsheet className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0" />
+                      <button
+                        type="button"
+                        onClick={() => downloadOraFile(msg.generatedFile!)}
+                        className="mt-2 w-full text-left group flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3 py-2.5 transition-all cursor-pointer"
+                      >
+                        <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
+                          <FileSpreadsheet className="h-4 w-4 text-[hsl(265_85%_65%)]" />
+                        </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[11px] font-medium truncate">
+                          <p className="text-[11px] font-semibold truncate text-foreground">
                             {msg.generatedFile.fileName}
                           </p>
+                          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            {msg.generatedFile.format.toUpperCase()} · Click to download
+                          </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => downloadOraFile(msg.generatedFile!)}
-                          className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-lg bg-[hsl(265_85%_65%)] text-white hover:bg-[hsl(265_85%_58%)] transition-colors"
-                        >
-                          <Download className="h-2.5 w-2.5" />
-                          Download
-                        </button>
-                      </div>
+                        <Download className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                      </button>
                     )}
 
                     {msg.editedFrom && (
