@@ -656,8 +656,12 @@ export function useOraChat(): UseOraChatReturn {
           }
           const data = await apiPost<{
             reply: string;
-            handoffCta: boolean;
+            handoffCta?: boolean;
             suggestions?: string[];
+            // Present when the chat route auto-detected a file generation request
+            fileName?: string;
+            fileData?: string;
+            mimeType?: string;
             msgCount: number;
             msgLimit: number;
           }>("/api/public-ai/chat", body);
@@ -670,6 +674,17 @@ export function useOraChat(): UseOraChatReturn {
                 content: data.reply,
                 handoffCta: data.handoffCta,
                 suggestions: data.suggestions ?? [],
+                ...(data.fileName && data.fileData && data.mimeType
+                  ? {
+                      generatedFile: {
+                        fileName: data.fileName,
+                        fileData: data.fileData,
+                        mimeType: data.mimeType,
+                        // Infer format from file extension
+                        format: data.fileName.split(".").pop() as GeneratedFile["format"],
+                      } satisfies GeneratedFile,
+                    }
+                  : {}),
               },
             ];
             storeTranscript(next);

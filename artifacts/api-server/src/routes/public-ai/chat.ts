@@ -10,9 +10,11 @@ import {
 import {
   scanUserInput,
   isBuilderRequest,
+  detectFileRequest,
   ORA_SYSTEM_PROMPT,
   BUILDER_REFUSAL,
 } from "../../lib/public-ai/prompt";
+import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
 import { classifyIntent, type OraTopic } from "../../lib/public-ai/classifier";
 
 const router = Router();
@@ -105,6 +107,35 @@ router.post("/public-ai/chat", async (req, res) => {
     res
       .status(400)
       .json({ error: "Your message contains patterns that cannot be processed. Please rephrase." });
+    return;
+  }
+
+  // Auto-detect file generation requests and handle them inline so users
+  // don't need to use the format picker — typing "make me a CSV" just works.
+  const detectedFormat = detectFileRequest(message);
+  if (detectedFormat) {
+    const history = messages
+      .slice(-10)
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    try {
+      const result = await generateFileFromPrompt(message, detectedFormat, history, language);
+      const { token, payload } = incrementMessageCount(session);
+      setSessionCookie(res, token);
+      res.json({
+        reply: result.reply,
+        fileName: result.fileName,
+        fileData: result.fileData,
+        mimeType: result.mimeType,
+        msgCount: payload.msgCount,
+        msgLimit: MSG_LIMIT_VALUE,
+      });
+    } catch (err) {
+      logger.error(
+        { component: "ora-chat-file", format: detectedFormat, err },
+        "Auto file generation failed",
+      );
+      res.status(500).json({ error: "Failed to generate file. Please try again." });
+    }
     return;
   }
 
