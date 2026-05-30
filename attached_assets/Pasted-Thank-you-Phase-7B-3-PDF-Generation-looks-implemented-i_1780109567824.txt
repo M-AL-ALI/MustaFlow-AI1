@@ -1,0 +1,166 @@
+Thank you. Phase 7B-3 PDF Generation looks implemented in the correct direction.
+
+Before I officially accept Phase 7B-3, please provide the final validation report and final commit hash.
+
+Required final validation report:
+
+1. Final commit hash
+2. Final affected files
+
+Please list all files created or modified, including:
+
+* print-styles.ts
+* report-print-template.tsx
+* generate-pdf.ts
+* report-export-dialog.tsx
+* ora-export-menu.tsx
+* any index/barrel exports touched
+* any tests or validation scripts
+
+3. PDF strategy proof
+
+Confirm:
+
+* zero new PDF dependencies
+* no jsPDF
+* no pdf-lib
+* no Puppeteer
+* no Playwright PDF generation
+* no external PDF API
+* no backend route
+* no server-side PDF generation
+
+4. Print flow proof
+
+Confirm:
+
+* downloadPdf() sanitizes content first
+* print HTML is generated from sanitized content
+* hidden iframe is created
+* iframe content is written safely
+* print dialog is triggered via iframe.contentWindow.print()
+* cleanup runs after print
+* Safari/cancel fallback cleanup timer exists
+* no permanent DOM nodes are left behind
+
+5. Template compatibility proof
+
+Confirm:
+
+* all 11 report templates work
+* section gating matches DOCX/XLSX logic
+* all 14 report sections are supported
+* cover page renders correctly
+* KPI Scorecard renders correctly
+* Status column uses deriveKpiStatus
+* Priority Matrix renders correctly
+* Improvement Roadmap renders correctly
+
+6. Print stylesheet proof
+
+Confirm:
+
+* A4 / Letter friendly
+* cover page isolated
+* table headers repeat
+* table rows avoid page breaks
+* readable grayscale fallback
+* print-color-adjust applied
+* dark theme does not affect printed output
+
+7. Privacy and security proof
+
+Confirm generated PDF/print HTML does not include:
+
+* fileRef
+* imageRef
+* datasetRef
+* session token
+* handoff token
+* projectId
+* builderId
+* containerId
+* neonProjectId
+* flyMachineId
+* base64 content
+* secrets
+* API keys
+* internal IDs
+* hidden metadata
+
+Also confirm:
+
+* all user content is HTML-escaped
+* no report content is logged
+* no report content is uploaded
+* no report content is stored
+* no backend route was added
+* no DB changes
+* no OpenAPI changes
+
+8. Export menu proof
+
+Confirm:
+
+* “PDF Report” appears in the Export / Generate menu
+* it uses the same template picker dialog
+* company / department / prepared-for / prepared-by metadata flows into the PDF
+* Word / Excel / PowerPoint / Markdown / JSON / CSV exports still work
+
+9. Manual validation required
+
+Please perform or record as required:
+
+* Chrome → Export → PDF Report → Save as PDF
+* Edge → Export → PDF Report → Save as PDF
+* Safari → Print to PDF if available
+
+Verify:
+
+* cover page appears
+* sections render correctly
+* tables do not break badly
+* repeated table headers work
+* no hidden metadata appears
+* all 11 templates render correctly
+
+10. Regression proof
+
+Confirm:
+
+* Phase 1 chat still works
+* Phase 2 document analysis still works
+* Phase 3 dataset analysis still works
+* Phase 4 voice still works
+* Phase 5 image analysis still works
+* Phase 6 handoff still works
+* Phase 7A smart scroll/export still works
+* 7B-1 Word/Excel still works
+* 7B-2 PowerPoint still works
+* 7B-4A professional report enhancements still work
+
+11. Quality proof
+
+Report:
+
+* typecheck
+* lint
+* format
+* quality gate
+* frontend workflow
+* backend workflow
+* any unrelated failures if present
+
+12. Rollback plan
+
+Explain how to remove PDF generation while keeping:
+
+* 7B-1 Word/Excel
+* 7B-2 PowerPoint
+* 7B-4A templates and professional reporting
+
+intact.
+
+After this validation report is complete, I will decide whether to accept Phase 7B-3 as complete.
+
+Do not start 7B-4B AI Reporting Intelligence, Web Search, Knowledge Vault, Image Generation, Advanced Charts, or any unrelated roadmap task until I explicitly approve.
