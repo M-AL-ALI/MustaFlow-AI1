@@ -1,0 +1,231 @@
+Thank you. Phase 8B-2 Semantic Search looks implemented, but I cannot officially accept it yet without the full final validation report.
+
+Please provide the complete Phase 8B-2 validation report before I accept this phase.
+
+Required validation report:
+
+1. Final commit hash
+
+Please provide the exact final commit hash for Phase 8B-2.
+
+2. Final affected files
+
+List every file created or modified, including:
+
+* vault-search-service.ts
+* semantic search route file
+* route registration file
+* OpenAPI file
+* generated API client files
+* generated Zod files
+* frontend Vault page changes
+* any related shared utility or rate-limit changes
+
+3. API route proof
+
+Confirm the real externally accessible route path:
+
+POST /api/vault/search/semantic
+
+Confirm:
+
+* route is registered
+* route is authenticated
+* route is not public
+* route is not under /api/public-ai
+* request body is Zod-validated
+* invalid requests return safe validation errors
+
+4. Auth and ownership proof
+
+Confirm:
+
+* anonymous users receive 401
+* authenticated users can only search their own vault embeddings
+* another user’s entries/chunks are never returned
+* ownership is enforced at both vault_entries and vault_embeddings level
+* public Ora cannot access this route
+
+5. Query embedding proof
+
+Confirm:
+
+* user query is embedded using text-embedding-3-small
+* query vector dimension is 1536
+* only the search query is sent to the embedding model
+* vault entry content is not sent to the model during search
+* no query text is logged if avoidable
+* no chunk text is logged
+
+6. pgvector similarity proof
+
+Confirm:
+
+* search compares the query embedding against vault_embeddings.embedding
+* pgvector cosine distance or equivalent operator is used
+* ranking orders by closest vector match
+* raw vectors are never returned
+* raw vectors are never logged
+* chunk preview is safely limited, for example 300 characters
+
+7. Result ranking proof
+
+Confirm:
+
+* best matching chunks are ranked correctly
+* DISTINCT ON (entry_id) or equivalent prevents duplicate entry spam
+* each result includes one best chunk per entry
+* similarity score is normalized and documented as 0–100 or 0–1
+* result limit is enforced
+
+8. Filter proof
+
+Confirm semantic search supports:
+
+* category filter
+* department filter
+* tags filter
+* status filter
+* archived / includeArchived filter
+* limit parameter
+* ownership filter
+
+Also confirm existing keyword search and filters still work.
+
+9. No raw vector exposure proof
+
+Confirm frontend response does not include:
+
+* raw embedding vectors
+* full embedding arrays
+* raw chunk vectors
+* hidden internal vector metadata
+
+Only safe result fields should be returned.
+
+10. No RAG / no prompt injection proof
+
+Confirm Phase 8B-2 did NOT implement:
+
+* RAG
+* AI answer generation from vault
+* prompt injection from saved knowledge
+* Ora using vault entries automatically
+* Builder using vault entries automatically
+* report generation using vault entries automatically
+* AI memory
+* automatic recommendations
+* auto-learning
+* background knowledge processing
+* cross-project intelligence
+
+Semantic search should only return matching vault entries/chunks.
+
+11. Frontend semantic search UI proof
+
+Confirm the Vault page includes:
+
+* Keyword / Semantic toggle
+* semantic search input
+* semantic search submit behavior
+* semantic result cards
+* similarity score display
+* matching chunk preview
+* title/category/department/tags/summary/date display
+* clicking a result opens the existing entry viewer
+* empty state for no embeddings
+* empty state for no results
+* reindex button if semantic search has no indexed entries
+* graceful handling of embedding/search errors
+* no raw vector display
+
+12. Reindex dependency proof
+
+Confirm:
+
+* if no embeddings exist, the UI tells the user to reindex
+* Reindex My Vault button calls the existing Phase 8B-1 endpoint
+* semantic search does not silently fail when embeddings are missing
+* semantic search depends on the Phase 8B-1 vault_embeddings table
+
+13. Rate-limit proof
+
+Confirm:
+
+* semantic search is rate-limited
+* limit is 30 searches per hour per user, or explain the chosen value
+* 429 response includes safe retry information
+* this rate limit does not affect:
+    * normal vault CRUD
+    * keyword search
+    * public Ora chat
+    * Builder Mode
+    * Developer Mode
+    * Plan Mode
+
+14. Regression proof
+
+Confirm:
+
+* Phase 8A CRUD still works
+* Phase 8A.1 tags/search still works
+* Phase 8B-1 embedding infrastructure still works
+* create vault entry still works
+* edit/versioning still works
+* archive/restore still works
+* keyword search still works
+* tag filtering still works
+* dataset Save to Vault still works
+* reporting/export stack still works
+* Builder Mode remains unaffected
+* Developer Mode remains unaffected
+* Plan Mode remains unaffected
+* public Ora remains isolated
+
+15. Quality proof
+
+Please report final clean status for:
+
+* typecheck
+* lint
+* format
+* codegen drift
+* API server workflow
+* frontend workflow
+* any unrelated failures if present
+
+16. Manual validation
+
+Please state whether the following were manually tested:
+
+* create or use indexed vault entries
+* run semantic search
+* search by meaning rather than exact keyword
+* apply filters during semantic search
+* click result and open entry viewer
+* no embeddings empty state
+* reindex button from semantic empty state
+* rate-limit behavior if tested
+
+17. Rollback plan
+
+Explain how to roll back Phase 8B-2 while preserving:
+
+* Phase 8A vault foundation
+* Phase 8A.1 tags/search optimization
+* Phase 8B-1 embedding infrastructure
+* all vault entries
+* all vault versions
+* all stored embeddings
+* reporting/export stack
+* Builder / Developer / Plan modes
+
+Rollback should remove only:
+
+* semantic search service
+* semantic search route
+* semantic search OpenAPI entries
+* generated semantic search client hooks
+* semantic search UI
+
+Do not start Phase 8B-3, RAG, AI memory, knowledge-aware reporting, automatic recommendations, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until Phase 8B-2 is officially accepted.
