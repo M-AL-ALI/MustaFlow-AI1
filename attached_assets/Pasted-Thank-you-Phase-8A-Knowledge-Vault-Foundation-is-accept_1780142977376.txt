@@ -1,0 +1,144 @@
+Thank you. Phase 8A Knowledge Vault Foundation is accepted as complete.
+
+Accepted implementation commit:
+
+* a29f31b1
+
+Accepted validation fix:
+
+* /vault was missing from KNOWN_PREFIXES, causing anonymous /api/vault requests to return 404 before reaching the auth wall.
+* This was caught during validation.
+* /vault was added to KNOWN_PREFIXES.
+* API server was restarted.
+* Anonymous calls to all 7 vault routes now correctly return 401.
+* This fix must be included in the next commit/checkpoint.
+
+Accepted database foundation:
+
+* vault_entries table created
+* vault_versions table created
+* startup migration added
+* standalone migration runner added
+* version history is append-only
+* archive / restore fields are present
+* status supports draft / approved / archived
+
+Accepted authenticated API routes:
+
+* POST /api/vault
+* GET /api/vault
+* GET /api/vault/:id
+* PATCH /api/vault/:id
+* POST /api/vault/:id/archive
+* POST /api/vault/:id/restore
+* GET /api/vault/:id/versions
+
+Accepted security/authentication proof:
+
+* anonymous users cannot access /vault
+* anonymous users cannot call /api/vault
+* all vault routes require authentication
+* vault routes are behind the authenticated app route layer
+* Knowledge Vault is not exposed through public Ora routes
+* public Ora routes do not import vault services
+
+Accepted ownership proof:
+
+* users can only list/read/edit/archive/restore their own entries
+* version history follows the same ownership checks
+* another user’s private entry returns unavailable/404 behavior
+* no workspace/org sharing was added in 8A, which is acceptable for this foundation phase
+
+Accepted UI foundation:
+
+* /vault page created
+* Knowledge Vault added to sidebar navigation
+* entry card grid implemented
+* search implemented
+* category filters implemented
+* status filter implemented
+* archived toggle implemented
+* slide-out detail viewer implemented
+* inline edit implemented
+* version history toggle implemented
+* archive / restore actions implemented
+* Save to Knowledge Vault button added to dataset analysis result cards
+* save dialog pre-populates useful fields from dataset analysis
+
+Accepted sanitization proof:
+
+Before saving, vault content blocks or strips:
+
+* API keys
+* secrets
+* tokens
+* passwords
+* connection strings
+* session identifiers
+* handoff tokens
+* Builder secrets
+* deployment secrets
+* private credentials
+* internal infrastructure IDs
+* base64 payloads
+* fileRef
+* imageRef
+* datasetRef
+
+Accepted scope proof:
+
+Phase 8A did NOT implement:
+
+* autonomous learning
+* auto-learning
+* vector embeddings
+* semantic search
+* RAG
+* prompt injection from saved knowledge
+* automatic recommendations
+* automatic report modification
+* background learning
+* agent memory
+* cross-project intelligence
+
+Accepted regression proof:
+
+* Phase 1 chat remains untouched
+* Phase 2 document analysis remains untouched
+* Phase 3 dataset analysis remains functional
+* Phase 4 voice remains untouched
+* Phase 5 image analysis remains untouched
+* Phase 6 handoff remains untouched
+* Phase 7A smart scroll/export remains untouched
+* 7B reporting/export remains intact
+* 7B-4B AI Reporting Intelligence remains intact
+* Task #1155 code generation / voice cancel remains intact
+* existing Builder / Developer / Plan modes remain unaffected
+
+Accepted quality proof:
+
+* typecheck passed
+* lint passed
+* format passed
+* migration applied successfully
+* codegen drift passed
+* API server running
+* frontend running
+
+Manual note:
+
+Full browser validation with Clerk authentication should still be performed before production release:
+
+* create vault entry
+* search vault
+* filter vault
+* open detail viewer
+* edit entry
+* view versions
+* archive entry
+* restore entry
+* save from dataset card
+
+Phase 8A is now closed and part of the stable Knowledge Vault foundation baseline.
+
+Do not start Phase 8B, RAG, embeddings, semantic search, auto-learning, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until I explicitly approve.

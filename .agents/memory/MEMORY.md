@@ -3,3 +3,4 @@
 - [AI provider circuit breaker isolation](circuit-breaker-provider-isolation.md) — each provider needs its own CircuitBreaker; shared breaker causes cross-provider outages silently masked as "Refined 0 files".
 - [Startup migrations registration](startup-migrations-registration.md) — every scripts/src/migrate-\*.ts script must also be appended to startup-migrations.ts MIGRATIONS array or fresh DBs/deploys boot missing columns.
 - [Wouter Link nested anchors](wouter-link-nested-anchors.md) — wouter Link renders `<a>` by default; wrapping a shadcn `<Button>` (also `<a>`) or raw `<button>` produces invalid nested anchors. Use Button asChild around Link, or put className directly on Link.
+- [KNOWN_PREFIXES pre-auth 404 guard](known-prefixes-guard.md) — every new /api route prefix must be added to KNOWN_PREFIXES in routes/index.ts or anonymous callers get 404 (not 401) before the auth wall.
