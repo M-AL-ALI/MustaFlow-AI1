@@ -462,8 +462,19 @@ export function useOraChat(): UseOraChatReturn {
           return;
         }
 
+        // When compressImageForUpload re-encodes a .webp as image/jpeg, the
+        // server's magic-byte validator would reject JPEG bytes under a .webp
+        // name. Rename the file to .jpg in that case so the extension matches.
+        const uploadName = (() => {
+          if (uploadBlob === (file as Blob)) return file.name;
+          if (uploadBlob.type === "image/jpeg" && !/\.(jpe?g)$/i.test(file.name)) {
+            return file.name.replace(/\.[^.]+$/, ".jpg");
+          }
+          return file.name;
+        })();
+
         const formData = new FormData();
-        formData.append("file", uploadBlob, file.name);
+        formData.append("file", uploadBlob, uploadName);
 
         const res = await fetch(`${BASE}/api/public-ai/upload`, {
           method: "POST",
