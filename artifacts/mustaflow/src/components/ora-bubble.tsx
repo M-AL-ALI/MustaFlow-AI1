@@ -998,15 +998,16 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         </div>
 
         {/* Message feed
-             outer div is `overflow-hidden` so absolute children clip correctly;
-             inner div is `absolute inset-0` so it reliably fills the flex-1 space
-             even without an explicit CSS height on the parent — this fixes the
-             scrolling regression on mobile where `h-full` resolved to `auto`. */}
-        <div className="relative flex-1 min-h-0 overflow-hidden">
+             outer: `relative flex-1 min-h-0` — gives jump button an
+             absolutely-positioned anchor in the visible area.
+             inner: `h-full overflow-y-auto` — scrolls within the flex space
+             allocated to the outer div. `min-h-0` on the outer div is required
+             so the flex item can shrink below its content height. */}
+        <div className="relative flex-1 min-h-0">
           <div
             ref={feedRef}
             onScroll={handleFeedScroll}
-            className="absolute inset-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-5 scroll-smooth"
+            className="h-full overflow-y-auto overscroll-contain px-4 py-4 space-y-5 scroll-smooth"
           >
             {messages.length === 0 && !isLoading && (
               <div className="text-center py-8">
