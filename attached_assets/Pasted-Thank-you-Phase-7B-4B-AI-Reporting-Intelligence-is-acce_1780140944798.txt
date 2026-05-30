@@ -1,0 +1,177 @@
+Thank you. Phase 7B-4B AI Reporting Intelligence is accepted as complete.
+
+Accepted implementation commit:
+
+* 075e9b03 — feat(ora): Phase 7B-4B — AI Reporting Intelligence
+
+Current HEAD containing the implementation:
+
+* 28ad5c11
+
+Accepted scope:
+
+* Health Score
+* Financial Impact
+* Operational Impact
+* Customer Impact
+* Why This Matters
+* Enhanced Recommendations
+* Strategic Roadmap
+* Enhanced Risks
+* Executive / consultant-grade reporting prompt
+* Dataset analysis max token budget increased to 5000
+* UI support in DatasetResultCard
+* DOCX export support
+* XLSX export support
+* PPTX export support
+* PDF export support
+* Report template integration
+
+Accepted schema proof:
+
+All 8 new fields are optional and backward-compatible:
+
+* healthScore
+* financialImpact
+* operationalImpact
+* customerImpact
+* whyThisMatters
+* enhancedRecommendations
+* strategicRoadmap
+* enhancedRisks
+
+Accepted prompt proof:
+
+The dataset reporting prompt now includes:
+
+* executive-grade / consultant-grade guidance
+* McKinsey / BCG / Bain quality target
+* Health Score instructions
+* Financial Impact instructions
+* Operational Impact instructions
+* Customer Impact instructions
+* Why This Matters instructions
+* Enhanced Recommendations instructions
+* Strategic Roadmap instructions
+* Enhanced Risks instructions
+* confidence scoring
+* explicit warning not to fabricate exact financial numbers
+* uncertainty handling when data is insufficient
+
+Accepted token proof:
+
+* Dataset analysis max tokens increased from 3000 to 5000
+* This applies only to dataset analysis
+* Phase 1 chat token budgets are unchanged
+* Document analysis is unchanged
+* Image analysis is unchanged
+* Builder Mode is unchanged
+* Developer Mode is unchanged
+* Plan Mode is unchanged
+
+Accepted UI proof:
+
+DatasetResultCard now supports:
+
+* Health Score badge
+* Health category
+* Why This Matters
+* Financial Impact
+* Operational Impact
+* Customer Impact
+* Enhanced Recommendations
+* Strategic Roadmap
+* Enhanced Risks
+* impact / effort / confidence score bars
+* backward-compatible rendering when fields are missing
+
+Accepted template proof:
+
+All 11 report templates are supported:
+
+* Default
+* Executive Summary
+* Operations Review
+* Manufacturing Review
+* KPI Review
+* Root Cause Investigation
+* Corrective Action
+* Continuous Improvement
+* Lean Six Sigma
+* Project Status
+* Strategic Planning
+
+Accepted export proof:
+
+New intelligence sections are integrated into:
+
+* Word / DOCX
+* Excel / XLSX
+* PowerPoint / PPTX
+* PDF print template
+
+Accepted privacy/safety proof:
+
+Reports continue to strip or avoid:
+
+* fileRef
+* imageRef
+* datasetRef
+* session token
+* handoff token
+* projectId
+* builderId
+* containerId
+* neonProjectId
+* flyMachineId
+* base64 content
+* secrets
+* API keys
+* internal metadata
+
+Accepted safety behavior:
+
+* exact financial numbers must not be fabricated when unsupported
+* confidence indicators are required for estimates
+* no report content is logged
+* no report content is stored server-side
+* exports remain client-side
+
+Accepted regression proof:
+
+* Phase 1 chat remains unchanged
+* Phase 2 document analysis remains unchanged
+* Phase 3 dataset analysis remains backward-compatible
+* Phase 4 voice remains unchanged
+* Phase 5 image analysis remains unchanged
+* Phase 6 handoff remains unchanged
+* Phase 7A smart scroll/export remains unchanged
+* 7B-1 Word/Excel baseline remains intact
+* 7B-2 PowerPoint remains intact
+* 7B-3 PDF remains intact
+* 7B-4A templates/cover pages remain intact
+* Task #1155 code generation and voice cancel fixes remain intact
+
+Accepted quality gates:
+
+* format passed
+* lint passed
+* typecheck passed
+* quality gate passed
+* frontend workflow running
+* backend workflow running
+
+Manual validation note:
+
+Before production release, we still need to manually verify in the browser with a real uploaded dataset:
+
+* dataset analysis produces the new intelligence fields
+* DOCX opens with the new sections
+* XLSX opens with the new sheets
+* PPTX opens with the new slides
+* PDF print preview shows the new sections
+* old dataset analysis responses still render correctly without the new fields
+
+Phase 7B-4B is now closed and part of the stable reporting intelligence baseline.
+
+Do not start Web Search, Knowledge Vault, Image Generation, Advanced Charts, or unrelated roadmap work until I explicitly approve the next phase.
