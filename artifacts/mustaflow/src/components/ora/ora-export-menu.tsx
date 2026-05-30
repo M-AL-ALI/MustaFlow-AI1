@@ -1,10 +1,10 @@
 import { useState } from "react";
 import {
   Download,
-  FileText,
-  FileSpreadsheet,
   FileDown,
   FileJson,
+  FileSpreadsheet,
+  FileText,
   Loader2,
   Presentation,
 } from "lucide-react";
@@ -27,7 +27,8 @@ import {
   downloadDatasetJson,
   downloadActionPlanCsv,
 } from "@/lib/ora-message-export";
-import { downloadDocx, downloadXlsx, downloadPptx } from "@/lib/file-generation";
+import { ReportExportDialog } from "./report-export-dialog";
+import type { ExportDialogType } from "./report-export-dialog";
 
 export type ExportSource =
   | { kind: "message"; message: OraMessage }
@@ -42,6 +43,8 @@ interface OraExportMenuProps {
 export function OraExportMenu({ source, disabled, variant = "actions" }: OraExportMenuProps) {
   const { toast } = useToast();
   const [generating, setGenerating] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogExportType, setDialogExportType] = useState<ExportDialogType>("docx");
 
   const isMessage = source.kind === "message";
   const message = isMessage ? source.message : null;
@@ -76,6 +79,11 @@ export function OraExportMenu({ source, disabled, variant = "actions" }: OraExpo
     }
   }
 
+  function openDialog(type: ExportDialogType) {
+    setDialogExportType(type);
+    setDialogOpen(true);
+  }
+
   const isDisabled = disabled || generating !== null;
 
   const triggerClass =
@@ -97,147 +105,122 @@ export function OraExportMenu({ source, disabled, variant = "actions" }: OraExpo
   );
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          title="Export / Generate"
-          disabled={isDisabled}
-          className={triggerClass}
-        >
-          {variant === "header" ? icon : <span className={iconWrapClass}>{icon}</span>}
-        </button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="start" side="bottom" className="w-52">
-        <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
-          Export / Generate
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-
-        {/* Word Report — for assistant messages and conversations */}
-        {(isMessage ? isAssistant : true) && (
-          <DropdownMenuItem
-            onSelect={() => {
-              void run("docx", () =>
-                isMessage
-                  ? downloadDocx({ kind: "message", message: message! }, basename)
-                  : downloadDocx({ kind: "conversation", messages: messages! }, "ora-conversation"),
-              );
-            }}
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title="Export / Generate"
             disabled={isDisabled}
+            className={triggerClass}
           >
-            <FileText className="h-3.5 w-3.5 mr-2 shrink-0" />
-            Word Report
-          </DropdownMenuItem>
-        )}
+            {variant === "header" ? icon : <span className={iconWrapClass}>{icon}</span>}
+          </button>
+        </DropdownMenuTrigger>
 
-        {/* Excel Workbook — only when dataset result is present */}
-        {hasDataset && (
-          <DropdownMenuItem
-            onSelect={() => {
-              void run("xlsx", () =>
-                downloadXlsx(
-                  {
-                    kind: "dataset",
-                    data: message!.datasetResult!,
-                    title: "Dataset Analysis Report",
-                  },
-                  basename,
-                ),
-              );
-            }}
-            disabled={isDisabled}
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5 mr-2 shrink-0" />
-            Excel Workbook
-          </DropdownMenuItem>
-        )}
+        <DropdownMenuContent align="start" side="bottom" className="w-52">
+          <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+            Export / Generate
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
 
-        {/* PowerPoint Presentation — for assistant messages and conversations */}
-        {(isMessage ? isAssistant : true) && (
-          <DropdownMenuItem
-            onSelect={() => {
-              void run("pptx", () =>
-                isMessage
-                  ? downloadPptx(
-                      hasDataset
-                        ? { kind: "dataset", data: message!.datasetResult!, title: basename }
-                        : { kind: "message", message: message! },
-                      basename,
-                    )
-                  : downloadPptx({ kind: "conversation", messages: messages! }, "ora-conversation"),
-              );
-            }}
-            disabled={isDisabled}
-          >
-            <Presentation className="h-3.5 w-3.5 mr-2 shrink-0" />
-            Presentation
-          </DropdownMenuItem>
-        )}
+          {/* Word Report — opens template picker dialog */}
+          {(isMessage ? isAssistant : true) && (
+            <DropdownMenuItem onSelect={() => openDialog("docx")} disabled={disabled}>
+              <FileText className="h-3.5 w-3.5 mr-2 shrink-0" />
+              Word Report
+            </DropdownMenuItem>
+          )}
 
-        <DropdownMenuSeparator />
+          {/* Excel Workbook — opens template picker dialog (dataset only) */}
+          {hasDataset && (
+            <DropdownMenuItem onSelect={() => openDialog("xlsx")} disabled={disabled}>
+              <FileSpreadsheet className="h-3.5 w-3.5 mr-2 shrink-0" />
+              Excel Workbook
+            </DropdownMenuItem>
+          )}
 
-        {/* Markdown */}
-        {(isMessage ? isAssistant : true) && (
-          <DropdownMenuItem
-            onSelect={() => {
-              void run("md", () => {
-                if (isMessage) {
-                  if (hasDataset) {
-                    downloadDatasetReport(message!.datasetResult!, basename);
-                  } else {
-                    downloadMessageAsMarkdown(message!, basename);
-                  }
-                } else {
-                  downloadConversationAsMarkdown(messages!, "ora-conversation");
-                }
-              });
-            }}
-            disabled={isDisabled}
-          >
-            <FileDown className="h-3.5 w-3.5 mr-2 shrink-0" />
-            Markdown
-          </DropdownMenuItem>
-        )}
+          {/* Presentation — opens template picker dialog */}
+          {(isMessage ? isAssistant : true) && (
+            <DropdownMenuItem onSelect={() => openDialog("pptx")} disabled={disabled}>
+              <Presentation className="h-3.5 w-3.5 mr-2 shrink-0" />
+              Presentation
+            </DropdownMenuItem>
+          )}
 
-        {/* JSON — for dataset messages and full conversations */}
-        {(hasDataset || !isMessage) && (
-          <DropdownMenuItem
-            onSelect={() => {
-              void run("json", () => {
-                if (isMessage) {
-                  downloadDatasetJson(message!.datasetResult!, basename);
-                } else {
-                  downloadConversationAsJson(messages!, "ora-conversation");
-                }
-              });
-            }}
-            disabled={isDisabled}
-          >
-            <FileJson className="h-3.5 w-3.5 mr-2 shrink-0" />
-            JSON
-          </DropdownMenuItem>
-        )}
+          <DropdownMenuSeparator />
 
-        {/* CSV Action Plan — only when action plan is present */}
-        {hasActionPlan && (
-          <>
-            <DropdownMenuSeparator />
+          {/* Markdown — direct download */}
+          {(isMessage ? isAssistant : true) && (
             <DropdownMenuItem
               onSelect={() => {
-                void run("csv", () =>
-                  downloadActionPlanCsv(message!.datasetResult!.actionPlan!, basename),
-                );
+                void run("md", () => {
+                  if (isMessage) {
+                    if (hasDataset) {
+                      downloadDatasetReport(message!.datasetResult!, basename);
+                    } else {
+                      downloadMessageAsMarkdown(message!, basename);
+                    }
+                  } else {
+                    downloadConversationAsMarkdown(messages!, "ora-conversation");
+                  }
+                });
               }}
               disabled={isDisabled}
             >
-              <FileSpreadsheet className="h-3.5 w-3.5 mr-2 shrink-0" />
-              CSV Action Plan
+              <FileDown className="h-3.5 w-3.5 mr-2 shrink-0" />
+              Markdown
             </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          )}
+
+          {/* JSON — direct download */}
+          {(hasDataset || !isMessage) && (
+            <DropdownMenuItem
+              onSelect={() => {
+                void run("json", () => {
+                  if (isMessage) {
+                    downloadDatasetJson(message!.datasetResult!, basename);
+                  } else {
+                    downloadConversationAsJson(messages!, "ora-conversation");
+                  }
+                });
+              }}
+              disabled={isDisabled}
+            >
+              <FileJson className="h-3.5 w-3.5 mr-2 shrink-0" />
+              JSON
+            </DropdownMenuItem>
+          )}
+
+          {/* CSV Action Plan — direct download */}
+          {hasActionPlan && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => {
+                  void run("csv", () =>
+                    downloadActionPlanCsv(message!.datasetResult!.actionPlan!, basename),
+                  );
+                }}
+                disabled={isDisabled}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-2 shrink-0" />
+                CSV Action Plan
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Report template picker + cover page metadata dialog */}
+      <ReportExportDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        source={source}
+        hasDataset={hasDataset}
+        exportType={dialogExportType}
+        basename={basename}
+      />
+    </>
   );
 }

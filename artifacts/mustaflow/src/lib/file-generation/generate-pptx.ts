@@ -1,5 +1,7 @@
 import type { OraMessage } from "@/hooks/use-ora-chat";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
+import type { ReportMetadata } from "./report-metadata";
+import type { ReportTemplateId } from "./report-templates";
 import { sanitizeForExport, sanitizeSummary, sanitizeTitle, truncateArray } from "./sanitizer";
 import { LIMITS } from "./size-limits";
 import { triggerDownload, sanitizeFilenameLocal } from "./utils";
@@ -35,7 +37,12 @@ function dateLabel(): string {
   });
 }
 
-export async function downloadPptx(source: PptxExportSource, basename: string): Promise<void> {
+export async function downloadPptx(
+  source: PptxExportSource,
+  basename: string,
+  meta?: ReportMetadata,
+  _templateId?: ReportTemplateId,
+): Promise<void> {
   const { default: PptxGenJS } = await import("pptxgenjs");
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
@@ -272,7 +279,7 @@ export async function downloadPptx(source: PptxExportSource, basename: string): 
     const raw = source.kind === "dataset" ? source.data : source.message.datasetResult!;
     const data = sanitizeForExport(raw);
     const inputTitle = source.kind === "dataset" ? source.title : source.title;
-    const reportTitle = sanitizeTitle(inputTitle ?? "Dataset Analysis Report");
+    const reportTitle = meta?.title ?? sanitizeTitle(inputTitle ?? "Dataset Analysis Report");
     const analysisType = data.analysisType
       .replace(/-/g, " ")
       .replace(/\b\w/g, (c) => c.toUpperCase());

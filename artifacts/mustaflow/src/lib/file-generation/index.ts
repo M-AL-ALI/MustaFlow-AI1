@@ -6,3 +6,7 @@ export { downloadPptx } from "./generate-pptx";
 export type { PptxExportSource } from "./generate-pptx";
 export { sanitizeForExport } from "./sanitizer";
 export { LIMITS } from "./size-limits";
+export type { ReportMetadata, KpiStatus, ImprovementRoadmap } from "./report-metadata";
+export { deriveKpiStatus, deriveRiskLevel, buildRoadmap } from "./report-metadata";
+export type { ReportTemplateId, ReportSectionId, ReportTemplate } from "./report-templates";
+export { REPORT_TEMPLATES, getTemplate } from "./report-templates";

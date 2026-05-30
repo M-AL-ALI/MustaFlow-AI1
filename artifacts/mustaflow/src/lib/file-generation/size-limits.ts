@@ -13,4 +13,7 @@ export const LIMITS = {
   maxPptxBullets: 10,
   maxPptxTableRows: 12,
   maxPptxSlides: 20,
+  maxRoadmapItems: 10,
+  maxPriorityMatrixRows: 20,
+  maxOpportunities: 10,
 } as const;
