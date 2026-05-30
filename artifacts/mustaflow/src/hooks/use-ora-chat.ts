@@ -2,6 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 
+export type FileFormat = "csv" | "xlsx" | "docx" | "pdf";
+
+export interface GeneratedFile {
+  fileName: string;
+  fileData: string;
+  mimeType: string;
+  format: FileFormat;
+}
+
 export interface OraMessage {
   role: "user" | "assistant";
   content: string;
@@ -11,6 +20,7 @@ export interface OraMessage {
   messageKind?: "image-analysis" | "document-analysis";
   hadAttachment?: boolean;
   editedFrom?: boolean;
+  generatedFile?: GeneratedFile;
 }
 
 export interface OraSession {
@@ -65,6 +75,7 @@ export interface UseOraChatReturn {
     content: string,
     opts?: { truncateTo?: number; editedFrom?: boolean },
   ) => Promise<void>;
+  generateFile: (content: string, format: FileFormat) => Promise<void>;
   clearError: () => void;
   uploadFile: (file: File) => Promise<void>;
   clearAttachment: () => void;
@@ -716,6 +727,93 @@ export function useOraChat(): UseOraChatReturn {
     [isLoading, messages, language, attachedFile, isSignedIn, saveToServer],
   );
 
+  const generateFile = useCallback(
+    async (content: string, format: FileFormat) => {
+      if (!content.trim() || isLoading) return;
+
+      const formatLabel = format.toUpperCase();
+      const userMsg: OraMessage = {
+        role: "user",
+        content: `Create a ${formatLabel} file: ${content}`,
+      };
+      setMessages((prev) => {
+        const next = [...prev, userMsg];
+        storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
+        return next;
+      });
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
+        const body: Record<string, unknown> = { message: content, messages: history, format };
+        if (language && language !== "auto") body.language = language;
+
+        const data = await apiPost<{
+          reply: string;
+          fileName: string;
+          fileData: string;
+          mimeType: string;
+          msgCount: number;
+          msgLimit: number;
+        }>("/api/public-ai/generate-file", body);
+
+        setMessages((prev) => {
+          const next = [
+            ...prev,
+            {
+              role: "assistant" as const,
+              content: data.reply,
+              generatedFile: {
+                fileName: data.fileName,
+                fileData: data.fileData,
+                mimeType: data.mimeType,
+                format,
+              } satisfies GeneratedFile,
+            },
+          ];
+          storeTranscript(next);
+          if (isSignedIn) saveToServer(next);
+          return next;
+        });
+        setSession((prev) =>
+          prev
+            ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
+            : {
+                sessionId: "",
+                msgCount: data.msgCount,
+                msgLimit: data.msgLimit,
+                fileCount: 0,
+                fileLimit: FILE_LIMIT,
+              },
+        );
+      } catch (err: unknown) {
+        const status = (err as { status?: number }).status;
+        const msg = (err as Error).message;
+        if (status === 429) {
+          setError(msg ?? "You have reached the message limit for this session.");
+        } else if (status === 401) {
+          clearStoredSessionId();
+          clearStoredTranscript();
+          setError(
+            "Your session has expired. Please refresh the page to start a new conversation.",
+          );
+        } else {
+          setError(msg ?? "File generation failed. Please try again.");
+        }
+        setMessages((prev) => {
+          const next = prev.slice(0, -1);
+          storeTranscript(next);
+          return next;
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isLoading, messages, language, isSignedIn, saveToServer],
+  );
+
   const clearConversation = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
@@ -773,6 +871,7 @@ export function useOraChat(): UseOraChatReturn {
     language,
     setLanguage,
     sendMessage,
+    generateFile,
     clearError: () => setError(null),
     uploadFile,
     clearAttachment,

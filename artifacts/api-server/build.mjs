@@ -111,6 +111,7 @@ async function buildAll() {
       "electron",
       "ws",
       "openai",
+      "pdfkit",
       "pg-boss",
       "prom-client",
       "@sentry/node",

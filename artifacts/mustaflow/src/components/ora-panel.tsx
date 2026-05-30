@@ -15,11 +15,19 @@ import {
   VolumeX,
   Trash2,
   Upload,
+  FileSpreadsheet,
+  Download,
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { cn } from "@/lib/utils";
-import type { UseOraChatReturn, UploadState, AttachedFile } from "@/hooks/use-ora-chat";
+import type {
+  UseOraChatReturn,
+  UploadState,
+  AttachedFile,
+  FileFormat,
+  GeneratedFile,
+} from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
 import { useWhisperRecorder } from "@/hooks/use-whisper-recorder";
 import {
@@ -33,6 +41,28 @@ import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { hasBuildIntent } from "@/components/ora/build-intent";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraHandoffCard } from "@/components/ora/ora-handoff-card";
+
+function downloadOraFile(file: GeneratedFile) {
+  const byteChars = atob(file.fileData);
+  const byteNums = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteNums], { type: file.mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] = [
+  { value: "csv", label: "CSV Spreadsheet", ext: ".csv" },
+  { value: "xlsx", label: "Excel (.xlsx)", ext: ".xlsx" },
+  { value: "docx", label: "Word Document", ext: ".docx" },
+  { value: "pdf", label: "PDF Document", ext: ".pdf" },
+];
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const ACCEPTED_EXTENSIONS = new Set([
@@ -164,6 +194,7 @@ export function OraPanel({ chat }: OraPanelProps) {
     language,
     setLanguage,
     sendMessage,
+    generateFile,
     clearError,
     uploadFile,
     clearAttachment,
@@ -179,6 +210,8 @@ export function OraPanel({ chat }: OraPanelProps) {
   const { isSignedIn } = useUser();
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
+  const [showFormatMenu, setShowFormatMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [handoffDismissed, setHandoffDismissed] = useState(false);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
@@ -191,6 +224,7 @@ export function OraPanel({ chat }: OraPanelProps) {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const formatMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasMessages = messages.length > 0;
 
@@ -371,6 +405,17 @@ export function OraPanel({ chat }: OraPanelProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showLangMenu]);
 
+  useEffect(() => {
+    if (!showFormatMenu) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (formatMenuRef.current && !formatMenuRef.current.contains(e.target as Node)) {
+        setShowFormatMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showFormatMenu]);
+
   // Auto-clear drop error after 4 s
   useEffect(() => {
     if (!dropError) return;
@@ -458,9 +503,15 @@ export function OraPanel({ chat }: OraPanelProps) {
     const text = input.trim();
     if (!text || isLoading || atLimit || uploadState === "uploading") return;
     setInput("");
-    const editedFrom = editingFromIdx !== null ? true : undefined;
-    setEditingFromIdx(null);
-    void sendMessage(text, editedFrom ? { editedFrom: true } : undefined);
+    if (selectedFormat) {
+      const fmt = selectedFormat;
+      setSelectedFormat(null);
+      void generateFile(text, fmt);
+    } else {
+      const editedFrom = editingFromIdx !== null ? true : undefined;
+      setEditingFromIdx(null);
+      void sendMessage(text, editedFrom ? { editedFrom: true } : undefined);
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -784,6 +835,23 @@ export function OraPanel({ chat }: OraPanelProps) {
                     </div>
                   )}
 
+                  {msg.generatedFile && (
+                    <div className="mt-2 flex items-center gap-2.5 rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2">
+                      <FileSpreadsheet className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{msg.generatedFile.fileName}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadOraFile(msg.generatedFile!)}
+                        className="shrink-0 flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-lg bg-[hsl(265_85%_65%)] text-white hover:bg-[hsl(265_85%_58%)] transition-colors"
+                      >
+                        <Download className="h-3 w-3" />
+                        Download
+                      </button>
+                    </div>
+                  )}
+
                   {msg.editedFrom && (
                     <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
                       Edited from earlier message
@@ -984,6 +1052,24 @@ export function OraPanel({ chat }: OraPanelProps) {
                   size="md"
                 />
 
+                {/* Selected format chip */}
+                {selectedFormat && (
+                  <div className="flex items-center gap-2 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2 text-xs mb-2">
+                    <FileSpreadsheet className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0" />
+                    <span className="flex-1 text-foreground">
+                      Generate: {FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFormat(null)}
+                      className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
+                      aria-label="Cancel file generation"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Unified input bar */}
                 <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
                   <input
@@ -1017,6 +1103,53 @@ export function OraPanel({ chat }: OraPanelProps) {
                     <Paperclip className="h-4 w-4" />
                   </button>
 
+                  {/* Generate file button */}
+                  <div className="relative shrink-0" ref={formatMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowFormatMenu((v) => !v)}
+                      disabled={isLoading}
+                      title="Generate a file (CSV, Excel, Word, PDF)"
+                      aria-label="Generate file"
+                      className={cn(
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+                        selectedFormat
+                          ? "text-[hsl(265_85%_65%)] bg-[hsl(265_85%_65%/0.12)]"
+                          : "text-muted-foreground hover:text-foreground",
+                        isLoading && "opacity-40 cursor-not-allowed",
+                      )}
+                    >
+                      <FileSpreadsheet className="h-4 w-4" />
+                    </button>
+                    {showFormatMenu && (
+                      <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[160px]">
+                        <p className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                          Generate file
+                        </p>
+                        {FILE_FORMAT_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              setSelectedFormat(opt.value);
+                              setShowFormatMenu(false);
+                              textareaRef.current?.focus();
+                            }}
+                            className={cn(
+                              "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center justify-between gap-2",
+                              selectedFormat === opt.value && "text-[hsl(265_85%_65%)] font-medium",
+                            )}
+                          >
+                            <span>{opt.label}</span>
+                            <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                              {opt.ext}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Dictation button — speech-to-text only; transcript lands in textarea */}
                   <OraDictationButton
                     voiceState={voice.voiceState}
@@ -1036,11 +1169,13 @@ export function OraPanel({ chat }: OraPanelProps) {
                     }}
                     onKeyDown={handleKeyDown}
                     placeholder={
-                      uploadState === "attached"
-                        ? attachedFile?.isImage
-                          ? `Ask about ${attachedFile.filename ?? "this image"}…`
-                          : `Ask about ${attachedFile?.filename ?? "this file"}…`
-                        : "Ask Ora anything…"
+                      selectedFormat
+                        ? `Describe the ${FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label} you want…`
+                        : uploadState === "attached"
+                          ? attachedFile?.isImage
+                            ? `Ask about ${attachedFile.filename ?? "this image"}…`
+                            : `Ask about ${attachedFile?.filename ?? "this file"}…`
+                          : "Ask Ora anything…"
                     }
                     rows={1}
                     dir="auto"
