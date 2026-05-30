@@ -9,7 +9,7 @@ const router: IRouter = Router();
 // ── Server-side sanitization ──────────────────────────────────────────────────
 // Patterns that must never be stored in the Knowledge Vault.
 const BANNED_PATTERNS = [
-  /sk-[A-Za-z0-9]{20,}/gi, // OpenAI / generic API keys
+  /\bsk-(?:[A-Za-z0-9]+-)*[A-Za-z0-9]{20,}/gi, // OpenAI / Anthropic keys (sk-xxx, sk-proj-xxx, sk-ant-xxx)
   /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/gi, // Bearer tokens
   /eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*/g, // JWTs
   /postgresql:\/\/[^\s"']+/gi, // DB connection strings
