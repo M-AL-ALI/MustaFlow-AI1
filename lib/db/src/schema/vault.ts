@@ -71,7 +71,7 @@ export const vaultEntriesTable = pgTable(
   (t) => [
     index("vault_entries_search_idx").using(
       "gin",
-      sql`to_tsvector('pg_catalog.english'::regconfig, coalesce(${t.title}, '') || ' ' || coalesce(${t.summary}, ''))`,
+      sql`to_tsvector('pg_catalog.english'::regconfig, concat(coalesce(${t.title}, ''), ' ', coalesce(${t.summary}, '')))`,
     ),
     index("vault_entries_tags_idx").using("gin", t.tags),
     index("vault_entries_updated_idx").on(t.userId, t.updatedAt.desc()),
