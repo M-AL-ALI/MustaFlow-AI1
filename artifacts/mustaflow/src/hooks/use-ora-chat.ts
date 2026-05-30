@@ -99,10 +99,51 @@ const IMAGE_ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
 const ALLOWED_EXTENSIONS = [...DOC_ALLOWED_EXTENSIONS, ...IMAGE_ALLOWED_EXTENSIONS];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB for documents
-const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4 MB for images
+const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4 MB hard cap (after compression)
 
 function isImageExt(ext: string): boolean {
   return IMAGE_ALLOWED_EXTENSIONS.includes(ext);
+}
+
+/**
+ * Compress an image file client-side before upload.
+ * Downscales to ≤ 1920 px on either side and re-encodes as JPEG (q=0.88).
+ * Resolves to the original File if it is already small or can't be decoded.
+ */
+async function compressImageForUpload(file: File): Promise<Blob> {
+  const MAX_PX = 1920;
+  const QUALITY = 0.88;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      const needsScale = width > MAX_PX || height > MAX_PX;
+      if (!needsScale && file.size <= MAX_IMAGE_SIZE) {
+        resolve(file);
+        return;
+      }
+      if (needsScale) {
+        const scale = Math.min(MAX_PX / width, MAX_PX / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+      // Use image/jpeg for photos; preserve png for images that need transparency
+      const outType = file.type === "image/png" ? "image/png" : "image/jpeg";
+      canvas.toBlob((b) => resolve(b ?? file), outType, QUALITY);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
 }
 
 function getStoredLanguage(): string {
@@ -380,13 +421,6 @@ export function useOraChat(): UseOraChatReturn {
       const isImg = isImageExt(ext);
 
       if (isImg) {
-        if (file.size > MAX_IMAGE_SIZE) {
-          setUploadState("error");
-          setUploadError(
-            `Image is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size for images is 4 MB.`,
-          );
-          return;
-        }
         if (session && (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)) {
           setUploadState("error");
           setUploadError(
@@ -415,8 +449,21 @@ export function useOraChat(): UseOraChatReturn {
       setUploadError(null);
 
       try {
+        // Compress images client-side before upload so large phone photos (4-6 MB)
+        // are automatically resized to ≤ 1920 px and re-encoded at high quality.
+        const uploadBlob = isImg ? await compressImageForUpload(file) : file;
+
+        // Final size check after compression — catches truly enormous files
+        if (isImg && uploadBlob.size > MAX_IMAGE_SIZE) {
+          setUploadState("error");
+          setUploadError(
+            `Image is too large even after compression (${(uploadBlob.size / 1024 / 1024).toFixed(1)} MB). Please crop it first.`,
+          );
+          return;
+        }
+
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("file", uploadBlob, file.name);
 
         const res = await fetch(`${BASE}/api/public-ai/upload`, {
           method: "POST",
