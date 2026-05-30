@@ -4,6 +4,7 @@ description: GENERATED ALWAYS AS STORED columns require fully IMMUTABLE expressi
 ---
 
 ## The rule
+
 PostgreSQL `GENERATED ALWAYS AS (...) STORED` rejects any expression that is not fully IMMUTABLE (all functions, operators, casts).
 
 ## What fails
