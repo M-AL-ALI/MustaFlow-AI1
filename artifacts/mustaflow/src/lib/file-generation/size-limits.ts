@@ -10,4 +10,7 @@ export const LIMITS = {
   maxKpiRows: 50,
   maxParetoRows: 50,
   maxTrendRows: 30,
+  maxPptxBullets: 10,
+  maxPptxTableRows: 12,
+  maxPptxSlides: 20,
 } as const;

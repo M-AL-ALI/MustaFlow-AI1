@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Download, FileText, FileSpreadsheet, FileDown, FileJson, Loader2 } from "lucide-react";
+import {
+  Download,
+  FileText,
+  FileSpreadsheet,
+  FileDown,
+  FileJson,
+  Loader2,
+  Presentation,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +27,7 @@ import {
   downloadDatasetJson,
   downloadActionPlanCsv,
 } from "@/lib/ora-message-export";
-import { downloadDocx, downloadXlsx } from "@/lib/file-generation";
+import { downloadDocx, downloadXlsx, downloadPptx } from "@/lib/file-generation";
 
 export type ExportSource =
   | { kind: "message"; message: OraMessage }
@@ -143,6 +151,28 @@ export function OraExportMenu({ source, disabled, variant = "actions" }: OraExpo
           >
             <FileSpreadsheet className="h-3.5 w-3.5 mr-2 shrink-0" />
             Excel Workbook
+          </DropdownMenuItem>
+        )}
+
+        {/* PowerPoint Presentation — for assistant messages and conversations */}
+        {(isMessage ? isAssistant : true) && (
+          <DropdownMenuItem
+            onSelect={() => {
+              void run("pptx", () =>
+                isMessage
+                  ? downloadPptx(
+                      hasDataset
+                        ? { kind: "dataset", data: message!.datasetResult!, title: basename }
+                        : { kind: "message", message: message! },
+                      basename,
+                    )
+                  : downloadPptx({ kind: "conversation", messages: messages! }, "ora-conversation"),
+              );
+            }}
+            disabled={isDisabled}
+          >
+            <Presentation className="h-3.5 w-3.5 mr-2 shrink-0" />
+            Presentation
           </DropdownMenuItem>
         )}
 

@@ -98,6 +98,7 @@
     "docx": "^9.7.1",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",
+    "pptxgenjs": "^4.0.1",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
