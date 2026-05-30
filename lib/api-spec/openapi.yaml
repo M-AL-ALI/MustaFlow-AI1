@@ -9467,6 +9467,7 @@ components:
         - category
         - summary
         - content
+        - tags
         - sourceType
         - status
         - version
@@ -9481,7 +9482,10 @@ components:
         subcategory: { type: string, nullable: true }
         summary: { type: string }
         content: { type: string }
-        tags: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+          default: []
         department: { type: string, nullable: true }
         sourceType: { type: string }
         sourceReference: { type: string, nullable: true }
@@ -9522,6 +9526,7 @@ components:
         - title
         - summary
         - content
+        - tags
         - editedBy
         - editedAt
       properties:
@@ -9531,7 +9536,10 @@ components:
         title: { type: string }
         summary: { type: string }
         content: { type: string }
-        tags: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+          default: []
         department: { type: string, nullable: true }
         editedBy: { type: string }
         editedAt: { type: string, format: date-time }

@@ -45,7 +45,7 @@ interface VaultEntry {
   subcategory?: string | null;
   summary: string;
   content: string;
-  tags?: string | null;
+  tags: string[];
   department?: string | null;
   sourceType: string;
   sourceReference?: string | null;
@@ -66,7 +66,7 @@ interface VaultVersion {
   title: string;
   summary: string;
   content: string;
-  tags?: string | null;
+  tags: string[];
   department?: string | null;
   editedBy: string;
   editedAt: string;
@@ -116,13 +116,6 @@ const STATUS_COLORS: Record<string, string> = {
   archived: "text-muted-foreground/50",
 };
 
-function useTags(entry: VaultEntry): string[] {
-  return (entry.tags ?? "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
-
 function CategoryBadge({ category }: { category: string }) {
   const color = CATEGORY_COLORS[category] ?? CATEGORY_COLORS["OTHER"];
   const label = CATEGORY_LABELS[category] ?? category;
@@ -134,7 +127,6 @@ function CategoryBadge({ category }: { category: string }) {
 }
 
 function EntryCard({ entry, onClick }: { entry: VaultEntry; onClick: (e: VaultEntry) => void }) {
-  const tags = useTags(entry);
   return (
     <button
       onClick={() => onClick(entry)}
@@ -176,9 +168,9 @@ function EntryCard({ entry, onClick }: { entry: VaultEntry; onClick: (e: VaultEn
         </span>
       </div>
       <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{entry.summary}</p>
-      {tags.length > 0 && (
+      {entry.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {tags.slice(0, 5).map((t) => (
+          {entry.tags.slice(0, 5).map((t) => (
             <span
               key={t}
               className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted border border-border/60 text-muted-foreground flex items-center gap-1"
@@ -187,8 +179,8 @@ function EntryCard({ entry, onClick }: { entry: VaultEntry; onClick: (e: VaultEn
               {t}
             </span>
           ))}
-          {tags.length > 5 && (
-            <span className="text-[10px] text-muted-foreground/50">+{tags.length - 5}</span>
+          {entry.tags.length > 5 && (
+            <span className="text-[10px] text-muted-foreground/50">+{entry.tags.length - 5}</span>
           )}
         </div>
       )}
@@ -211,13 +203,7 @@ function EntryViewer({
   const [editTitle, setEditTitle] = useState(entry.title);
   const [editSummary, setEditSummary] = useState(entry.summary);
   const [editContent, setEditContent] = useState(entry.content);
-  const [editTags, setEditTags] = useState(
-    (entry.tags ?? "")
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .join(", "),
-  );
+  const [editTags, setEditTags] = useState(entry.tags.join(", "));
   const [saving, setSaving] = useState(false);
 
   const { data: versions } = useQuery<VaultVersion[]>({
@@ -290,8 +276,6 @@ function EntryViewer({
     }
   };
 
-  const tags = useTags(entry);
-
   return (
     <Sheet open onOpenChange={(v) => !v && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto flex flex-col gap-0 p-0">
@@ -354,9 +338,9 @@ function EntryViewer({
           </div>
 
           {/* Tags */}
-          {tags.length > 0 && (
+          {entry.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {tags.map((t) => (
+              {entry.tags.map((t) => (
                 <span
                   key={t}
                   className="text-[10px] px-2 py-0.5 rounded-full bg-muted border border-border/60 text-muted-foreground"
@@ -627,7 +611,7 @@ export default function VaultPage() {
                 "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
                 categoryFilter === val
                   ? "bg-primary/15 border-primary/40 text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-primary/30",
+                  : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
               )}
             >
               {label}
@@ -639,7 +623,7 @@ export default function VaultPage() {
         <div className="flex items-center gap-3">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-36 h-8 text-xs">
-              <SelectValue placeholder="Status" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
@@ -647,47 +631,38 @@ export default function VaultPage() {
               <SelectItem value="approved">Approved</SelectItem>
             </SelectContent>
           </Select>
-
           <button
             onClick={() => setShowArchived((v) => !v)}
             className={cn(
-              "text-xs px-3 py-1 rounded-full border transition-colors",
+              "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
               showArchived
-                ? "bg-muted border-border text-foreground"
-                : "border-border text-muted-foreground hover:text-foreground",
+                ? "bg-muted border-border text-muted-foreground"
+                : "border-border text-muted-foreground/60 hover:text-foreground",
             )}
           >
             {showArchived ? "Hide archived" : "Show archived"}
           </button>
-
-          {total > 0 && (
-            <span className="text-xs text-muted-foreground/60 ml-auto">
-              {total} entr{total === 1 ? "y" : "ies"}
-            </span>
-          )}
+          <span className="text-xs text-muted-foreground/50 ml-auto">
+            {total} {total === 1 ? "entry" : "entries"}
+          </span>
         </div>
 
         {/* Entry grid */}
         {isLoading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : entries.length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground space-y-3">
-            <BookOpen className="h-10 w-10 mx-auto opacity-30" />
-            <div>
-              <p className="text-sm font-medium">No entries yet</p>
-              <p className="text-xs mt-1">
-                Save a report, lesson learned, or SOP to start building your vault.
-              </p>
-            </div>
-            <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Create your first entry
-            </Button>
+          <div className="text-center py-16 space-y-2">
+            <BookOpen className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+            <p className="text-sm text-muted-foreground">
+              {search || categoryFilter !== "ALL"
+                ? "No entries match your filters."
+                : "No vault entries yet. Create your first entry or save a report from Ora."}
+            </p>
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             {entries.map((entry) => (
               <EntryCard key={entry.id} entry={entry} onClick={setSelectedEntry} />
             ))}
@@ -695,7 +670,7 @@ export default function VaultPage() {
         )}
       </div>
 
-      {/* Entry viewer sheet */}
+      {/* Detail viewer */}
       {selectedEntry && (
         <EntryViewer
           entry={selectedEntry}
@@ -710,6 +685,7 @@ export default function VaultPage() {
         onOpenChange={setShowCreateDialog}
         defaults={{ sourceType: "USER_CREATED" }}
         onSaved={() => {
+          setShowCreateDialog(false);
           handleInvalidate();
         }}
       />

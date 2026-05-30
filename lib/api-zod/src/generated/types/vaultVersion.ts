@@ -13,7 +13,7 @@ export interface VaultVersion {
   title: string;
   summary: string;
   content: string;
-  tags?: string | null;
+  tags: string[];
   department?: string | null;
   editedBy: string;
   editedAt: Date;

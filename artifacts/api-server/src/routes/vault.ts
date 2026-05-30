@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, isNull, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, vaultEntriesTable, vaultVersionsTable } from "@workspace/db";
 import { z } from "zod";
 import { logger } from "../lib/logger";
@@ -134,7 +134,6 @@ router.post("/vault", async (req, res): Promise<void> => {
 
   const safeContent = sanitizeText(body.content);
   const safeSummary = sanitizeText(body.summary);
-  const tagsStr = body.tags.length > 0 ? body.tags.join(",") : null;
 
   const [entry] = await db
     .insert(vaultEntriesTable)
@@ -145,7 +144,7 @@ router.post("/vault", async (req, res): Promise<void> => {
       subcategory: body.subcategory ?? null,
       summary: safeSummary,
       content: safeContent,
-      tags: tagsStr,
+      tags: body.tags,
       department: body.department ?? null,
       sourceType: body.sourceType,
       sourceReference: body.sourceReference ?? null,
@@ -206,12 +205,12 @@ router.get("/vault", async (req, res): Promise<void> => {
     conditions.push(eq(vaultEntriesTable.status, status));
   }
   if (q) {
+    // Functional GIN index: to_tsvector('pg_catalog.english'::regconfig, title || summary)
+    // Matches vault_entries_search_idx created in migrate-vault-phase81.
     conditions.push(
-      or(
-        ilike(vaultEntriesTable.title, `%${q}%`),
-        ilike(vaultEntriesTable.summary, `%${q}%`),
-        ilike(vaultEntriesTable.tags, `%${q}%`),
-      ) as ReturnType<typeof eq>,
+      sql`to_tsvector('pg_catalog.english'::regconfig, coalesce(${vaultEntriesTable.title}, '') || ' ' || coalesce(${vaultEntriesTable.summary}, '')) @@ plainto_tsquery('pg_catalog.english'::regconfig, ${q})` as ReturnType<
+        typeof eq
+      >,
     );
   }
 
@@ -319,7 +318,7 @@ router.patch("/vault/:id", async (req, res): Promise<void> => {
   if (body.subcategory !== undefined) updates.subcategory = body.subcategory;
   if (body.summary !== undefined) updates.summary = sanitizeText(body.summary);
   if (body.content !== undefined) updates.content = sanitizeText(body.content);
-  if (body.tags !== undefined) updates.tags = body.tags.length > 0 ? body.tags.join(",") : null;
+  if (body.tags !== undefined) updates.tags = body.tags;
   if (body.department !== undefined) updates.department = body.department;
   if (body.sourceType !== undefined) updates.sourceType = body.sourceType;
   if (body.sourceReference !== undefined) updates.sourceReference = body.sourceReference;

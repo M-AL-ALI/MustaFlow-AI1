@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgTable, serial, text, integer, boolean, timestamp } from "drizzle-orm/pg-core";
 
 export const VAULT_CATEGORIES = [
@@ -40,7 +41,7 @@ export const vaultEntriesTable = pgTable("vault_entries", {
   subcategory: text("subcategory"),
   summary: text("summary").notNull(),
   content: text("content").notNull(),
-  tags: text("tags"),
+  tags: text("tags").array().notNull().default(sql`'{}'`),
   department: text("department"),
   sourceType: text("source_type").notNull().default("USER_CREATED"),
   sourceReference: text("source_reference"),
@@ -64,7 +65,7 @@ export const vaultVersionsTable = pgTable("vault_versions", {
   title: text("title").notNull(),
   summary: text("summary").notNull(),
   content: text("content").notNull(),
-  tags: text("tags"),
+  tags: text("tags").array().notNull().default(sql`'{}'`),
   department: text("department"),
   editedBy: text("edited_by").notNull(),
   editedAt: timestamp("edited_at", { withTimezone: true }).notNull().defaultNow(),

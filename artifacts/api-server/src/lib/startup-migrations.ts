@@ -2855,6 +2855,86 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-vault-phase81 ─────────────────────────────────────────────────
+  {
+    name: "migrate-vault-phase81",
+    async run(client) {
+      await client.query("BEGIN");
+      // Convert tags TEXT → TEXT[] in vault_entries
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'vault_entries' AND column_name = 'tags'
+              AND data_type = 'text'
+          ) THEN
+            ALTER TABLE vault_entries
+              ALTER COLUMN tags TYPE text[]
+              USING (
+                CASE
+                  WHEN tags IS NULL OR tags = '' THEN '{}'::text[]
+                  ELSE string_to_array(tags, ',')
+                END
+              );
+            ALTER TABLE vault_entries ALTER COLUMN tags SET DEFAULT '{}';
+            ALTER TABLE vault_entries ALTER COLUMN tags SET NOT NULL;
+          END IF;
+        END $$
+      `);
+      // Convert tags TEXT → TEXT[] in vault_versions
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'vault_versions' AND column_name = 'tags'
+              AND data_type = 'text'
+          ) THEN
+            ALTER TABLE vault_versions
+              ALTER COLUMN tags TYPE text[]
+              USING (
+                CASE
+                  WHEN tags IS NULL OR tags = '' THEN '{}'::text[]
+                  ELSE string_to_array(tags, ',')
+                END
+              );
+            ALTER TABLE vault_versions ALTER COLUMN tags SET DEFAULT '{}';
+            ALTER TABLE vault_versions ALTER COLUMN tags SET NOT NULL;
+          END IF;
+        END $$
+      `);
+      // Functional GIN index on title+summary for full-text search.
+      // NOTE: A GENERATED tsvector column was considered but array_to_string() is STABLE
+      // (not IMMUTABLE), which PostgreSQL rejects in generated column expressions.
+      // A functional index is equivalent for query planning and avoids the restriction.
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS vault_entries_search_idx
+          ON vault_entries
+          USING GIN(
+            to_tsvector('pg_catalog.english'::regconfig,
+              coalesce(title, '') || ' ' || coalesce(summary, '')
+            )
+          )
+      `);
+      // GIN index on tags array
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_tags_idx ON vault_entries USING GIN(tags)`,
+      );
+      // Performance indexes
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_updated_idx ON vault_entries (user_id, updated_at DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_dept_idx ON vault_entries (user_id, department)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_archived_idx ON vault_entries (user_id, archived_at) WHERE archived_at IS NOT NULL`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

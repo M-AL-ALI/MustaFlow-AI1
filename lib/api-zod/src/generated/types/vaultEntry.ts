@@ -15,7 +15,7 @@ export interface VaultEntry {
   subcategory?: string | null;
   summary: string;
   content: string;
-  tags?: string | null;
+  tags: string[];
   department?: string | null;
   sourceType: string;
   sourceReference?: string | null;

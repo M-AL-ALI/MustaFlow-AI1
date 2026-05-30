@@ -4347,6 +4347,8 @@ export const ListVaultEntriesQueryParams = zod.object({
   "offset": zod.coerce.number().default(listVaultEntriesQueryOffsetDefault)
 })
 
+export const listVaultEntriesResponseEntriesItemTagsDefault = [];
+
 export const ListVaultEntriesResponse = zod.object({
   "entries": zod.array(zod.object({
   "id": zod.number(),
@@ -4356,7 +4358,7 @@ export const ListVaultEntriesResponse = zod.object({
   "subcategory": zod.string().nullish(),
   "summary": zod.string(),
   "content": zod.string(),
-  "tags": zod.string().nullish(),
+  "tags": zod.array(zod.string()).default(listVaultEntriesResponseEntriesItemTagsDefault),
   "department": zod.string().nullish(),
   "sourceType": zod.string(),
   "sourceReference": zod.string().nullish(),
@@ -4380,6 +4382,8 @@ export const GetVaultEntryParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getVaultEntryResponseTagsDefault = [];
+
 export const GetVaultEntryResponse = zod.object({
   "id": zod.number(),
   "userId": zod.string(),
@@ -4388,7 +4392,7 @@ export const GetVaultEntryResponse = zod.object({
   "subcategory": zod.string().nullish(),
   "summary": zod.string(),
   "content": zod.string(),
-  "tags": zod.string().nullish(),
+  "tags": zod.array(zod.string()).default(getVaultEntryResponseTagsDefault),
   "department": zod.string().nullish(),
   "sourceType": zod.string(),
   "sourceReference": zod.string().nullish(),
@@ -4439,6 +4443,8 @@ export const UpdateVaultEntryBody = zod.object({
   "changeSummary": zod.string().max(updateVaultEntryBodyChangeSummaryMax).optional()
 })
 
+export const updateVaultEntryResponseTagsDefault = [];
+
 export const UpdateVaultEntryResponse = zod.object({
   "id": zod.number(),
   "userId": zod.string(),
@@ -4447,7 +4453,7 @@ export const UpdateVaultEntryResponse = zod.object({
   "subcategory": zod.string().nullish(),
   "summary": zod.string(),
   "content": zod.string(),
-  "tags": zod.string().nullish(),
+  "tags": zod.array(zod.string()).default(updateVaultEntryResponseTagsDefault),
   "department": zod.string().nullish(),
   "sourceType": zod.string(),
   "sourceReference": zod.string().nullish(),
@@ -4469,6 +4475,8 @@ export const ArchiveVaultEntryParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const archiveVaultEntryResponseTagsDefault = [];
+
 export const ArchiveVaultEntryResponse = zod.object({
   "id": zod.number(),
   "userId": zod.string(),
@@ -4477,7 +4485,7 @@ export const ArchiveVaultEntryResponse = zod.object({
   "subcategory": zod.string().nullish(),
   "summary": zod.string(),
   "content": zod.string(),
-  "tags": zod.string().nullish(),
+  "tags": zod.array(zod.string()).default(archiveVaultEntryResponseTagsDefault),
   "department": zod.string().nullish(),
   "sourceType": zod.string(),
   "sourceReference": zod.string().nullish(),
@@ -4499,6 +4507,8 @@ export const RestoreVaultEntryParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const restoreVaultEntryResponseTagsDefault = [];
+
 export const RestoreVaultEntryResponse = zod.object({
   "id": zod.number(),
   "userId": zod.string(),
@@ -4507,7 +4517,7 @@ export const RestoreVaultEntryResponse = zod.object({
   "subcategory": zod.string().nullish(),
   "summary": zod.string(),
   "content": zod.string(),
-  "tags": zod.string().nullish(),
+  "tags": zod.array(zod.string()).default(restoreVaultEntryResponseTagsDefault),
   "department": zod.string().nullish(),
   "sourceType": zod.string(),
   "sourceReference": zod.string().nullish(),
@@ -4529,6 +4539,8 @@ export const GetVaultVersionsParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getVaultVersionsResponseTagsDefault = [];
+
 export const GetVaultVersionsResponseItem = zod.object({
   "id": zod.number(),
   "entryId": zod.number(),
@@ -4536,7 +4548,7 @@ export const GetVaultVersionsResponseItem = zod.object({
   "title": zod.string(),
   "summary": zod.string(),
   "content": zod.string(),
-  "tags": zod.string().nullish(),
+  "tags": zod.array(zod.string()).default(getVaultVersionsResponseTagsDefault),
   "department": zod.string().nullish(),
   "editedBy": zod.string(),
   "editedAt": zod.coerce.date(),
