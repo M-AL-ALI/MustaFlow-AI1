@@ -682,21 +682,30 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       {/* Drawer — always mounted; slides in from right (desktop) or up (mobile) */}
       <div
         className={cn(
-          "fixed z-50 bg-card border-border/50 shadow-2xl flex flex-col",
+          "fixed z-50 bg-card border-border/50 flex flex-col",
           "bottom-0 right-0 w-full",
           "sm:top-0 sm:rounded-tl-3xl sm:rounded-bl-3xl sm:border-y sm:border-l sm:border-r-0",
           "rounded-t-3xl sm:rounded-t-none border-t border-x sm:border-x-0",
           "max-h-[85dvh] sm:max-h-screen sm:h-full",
           "border",
           !isResizing && [
-            "transition-transform ease-[cubic-bezier(0.32,0.72,0,1)]",
+            "transition-[transform,box-shadow] ease-[cubic-bezier(0.32,0.72,0,1)]",
             open ? "duration-[350ms]" : "duration-[250ms]",
           ],
           open
-            ? "translate-y-0 sm:translate-x-0"
-            : "translate-y-full sm:translate-y-0 sm:translate-x-full pointer-events-none",
+            ? "translate-y-0 sm:translate-x-0 shadow-2xl"
+            : "translate-y-full sm:translate-y-0 sm:translate-x-full shadow-none pointer-events-none",
         )}
-        style={isDesktop ? { width: `${panelWidth}px` } : undefined}
+        style={
+          isDesktop
+            ? {
+                width: `${panelWidth}px`,
+                transition: isResizing
+                  ? undefined
+                  : `transform ${open ? "350ms" : "250ms"} cubic-bezier(0.32,0.72,0,1), box-shadow ${open ? "350ms" : "250ms"} cubic-bezier(0.32,0.72,0,1), width 350ms cubic-bezier(0.32,0.72,0,1)`,
+              }
+            : undefined
+        }
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -719,7 +728,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         )}
         {/* Resize handle — desktop only, left edge drag */}
         <div
-          className="absolute left-0 top-0 h-full w-2 cursor-col-resize hidden sm:flex items-center justify-center group z-10"
+          className={cn(
+            "absolute left-0 top-0 h-full w-2 cursor-col-resize hidden sm:flex items-center justify-center group z-10",
+            "transition-opacity ease-[cubic-bezier(0.32,0.72,0,1)]",
+            open ? "opacity-100 duration-[350ms] delay-100" : "opacity-0 duration-[150ms]",
+          )}
           onPointerDown={handleResizePointerDown}
           title="Drag to resize"
           aria-hidden
