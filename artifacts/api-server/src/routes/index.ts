@@ -152,6 +152,7 @@ const KNOWN_PREFIXES = [
   "/versions",
   "/secrets",
   "/knowledge",
+  "/vault",
   "/activity",
   "/events",
   "/credits",
