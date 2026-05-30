@@ -9,9 +9,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 
 // Resolve xlsx/docx from mustaflow's node_modules (they aren't in scripts/)
-const mfRequire = createRequire(
-  new URL("../../artifacts/mustaflow/package.json", import.meta.url),
-);
+const mfRequire = createRequire(new URL("../../artifacts/mustaflow/package.json", import.meta.url));
 
 const PASS = "[PASS]";
 const FAIL = "[FAIL]";
@@ -88,7 +86,12 @@ const SAMPLE_ACTION_PLAN = [
   { action: "Recalibrate Line 3", priority: "high", owner: "Ops Lead", timeline: "Week 21" },
   { action: "Review SPC charts", priority: "high", owner: "Quality", timeline: "Week 22" },
   { action: "Retrain operators", priority: "medium", owner: "HR", timeline: "Month 2" },
-  { action: "Update maintenance schedule", priority: "medium", owner: "Maintenance", timeline: "Month 2" },
+  {
+    action: "Update maintenance schedule",
+    priority: "medium",
+    owner: "Maintenance",
+    timeline: "Month 2",
+  },
   { action: "Implement OEE dashboard", priority: "low", owner: "IT", timeline: "Q3" },
 ];
 
@@ -97,7 +100,13 @@ const SAMPLE_KPI_GAPS = [
   { metric: "Defect Rate", current: "3.2%", target: "< 1%", gap: "-2.2pp", trend: "stable" },
   { metric: "On-Time Delivery", current: "94%", target: "98%", gap: "-4pp", trend: "up" },
   { metric: "Cycle Time", current: "18 min", target: "18 min", gap: "0", trend: "flat" },
-  { metric: "Throughput", current: "520 units", target: "500 units", gap: "+20 units", trend: "up" },
+  {
+    metric: "Throughput",
+    current: "520 units",
+    target: "500 units",
+    gap: "+20 units",
+    trend: "up",
+  },
 ];
 
 const SAMPLE_NEXT_STEPS = [
@@ -145,10 +154,7 @@ check(
 
 // Validate full sample
 const statuses = SAMPLE_KPI_GAPS.map(deriveKpiStatus);
-check(
-  "OEE (-13pp, down trend) → Immediate Action",
-  statuses[0] === "Immediate Action",
-);
+check("OEE (-13pp, down trend) → Immediate Action", statuses[0] === "Immediate Action");
 check("Defect Rate (-2.2pp, stable) → Immediate Action", statuses[1] === "Immediate Action");
 check("On-Time Delivery (-4pp, up) → Immediate Action", statuses[2] === "Immediate Action");
 check("Cycle Time (0 gap) → On Target", statuses[3] === "On Target");
@@ -166,14 +172,19 @@ check("5 risks → High", deriveRiskLevel(5) === "High");
 console.log("\n── Improvement Roadmap ────────────────────────────");
 const roadmap = buildRoadmap(SAMPLE_ACTION_PLAN, SAMPLE_NEXT_STEPS);
 check("Immediate (0-30d) contains high-priority items", roadmap.immediate.length === 2);
-check(
-  "Immediate item 1 = Recalibrate Line 3",
-  roadmap.immediate[0] === "Recalibrate Line 3",
-);
+check("Immediate item 1 = Recalibrate Line 3", roadmap.immediate[0] === "Recalibrate Line 3");
 check("30-day contains medium-priority items", roadmap.thirtyDay.length === 2);
 check("60-day contains low-priority items", roadmap.sixtyDay.length === 1);
 check("90+ day contains nextSteps (capped at 5)", roadmap.ninetyPlus.length === 3);
-check("No high items in 30-day", roadmap.thirtyDay.every((a) => !SAMPLE_ACTION_PLAN.filter(x => x.priority === "high").map(x => x.action).includes(a)));
+check(
+  "No high items in 30-day",
+  roadmap.thirtyDay.every(
+    (a) =>
+      !SAMPLE_ACTION_PLAN.filter((x) => x.priority === "high")
+        .map((x) => x.action)
+        .includes(a),
+  ),
+);
 
 // Group 4: Template definitions
 console.log("\n── Template Definitions ───────────────────────────");
@@ -185,15 +196,33 @@ for (const id of EXPECTED_TEMPLATES) {
 
 // Verify section IDs are all valid for key templates
 const defaultSections = [
-  "executive-summary", "management-summary", "key-findings", "kpi-scorecard",
-  "trend-analysis", "pareto-analysis", "root-cause", "risks", "opportunities",
-  "recommendations", "action-plan", "priority-matrix", "improvement-roadmap", "next-steps",
+  "executive-summary",
+  "management-summary",
+  "key-findings",
+  "kpi-scorecard",
+  "trend-analysis",
+  "pareto-analysis",
+  "root-cause",
+  "risks",
+  "opportunities",
+  "recommendations",
+  "action-plan",
+  "priority-matrix",
+  "improvement-roadmap",
+  "next-steps",
 ];
 check(
   "Default template includes all 14 sections",
   defaultSections.length === 14 && defaultSections.every((s) => VALID_SECTIONS.has(s)),
 );
-const execSummarySections = ["executive-summary", "management-summary", "key-findings", "risks", "recommendations", "next-steps"];
+const execSummarySections = [
+  "executive-summary",
+  "management-summary",
+  "key-findings",
+  "risks",
+  "recommendations",
+  "next-steps",
+];
 check(
   "Executive Summary template omits kpi-scorecard",
   !execSummarySections.includes("kpi-scorecard"),
@@ -206,7 +235,10 @@ check(
   "Executive Summary template omits trend-analysis",
   !execSummarySections.includes("trend-analysis"),
 );
-check("All 14 section IDs are valid", defaultSections.every((s) => VALID_SECTIONS.has(s)));
+check(
+  "All 14 section IDs are valid",
+  defaultSections.every((s) => VALID_SECTIONS.has(s)),
+);
 check("14 distinct valid section IDs defined", VALID_SECTIONS.size === 14);
 
 // Group 5: Priority matrix categorization
@@ -222,10 +254,14 @@ check("High group: Recalibrate Line 3", high[0].action === "Recalibrate Line 3")
 
 // Group 6: Management summary derivation
 console.log("\n── Management Summary ─────────────────────────────");
-const summary = "OEE dropped to 72% after Line 3 reconfiguration. Root cause investigation underway.";
+const summary =
+  "OEE dropped to 72% after Line 3 reconfiguration. Root cause investigation underway.";
 const firstSentence = summary.split(/[.!?]/)[0]?.trim() ?? summary.slice(0, 180);
 const risks = ["Equipment wear on Line 3", "Operator training gap", "Delayed spare parts supply"];
-check("What happened: first sentence extracted", firstSentence === "OEE dropped to 72% after Line 3 reconfiguration");
+check(
+  "What happened: first sentence extracted",
+  firstSentence === "OEE dropped to 72% after Line 3 reconfiguration",
+);
 check("Risk level from 3 risks = High", deriveRiskLevel(risks.length) === "High");
 check("Risk level from 2 risks = Medium", deriveRiskLevel(2) === "Medium");
 check("Risk level from 0 risks = Low", deriveRiskLevel(0) === "Low");
@@ -258,10 +294,23 @@ check("Meta generatedDate set", meta.generatedDate === "June 1, 2026");
 // Group 8: Privacy audit — banned fields
 console.log("\n── Privacy Audit (Banned Fields) ──────────────────");
 const BANNED_FIELDS = [
-  "fileRef", "imageRef", "datasetRef", "sessionToken", "handoffToken",
-  "projectId", "builderId", "containerId", "neonProjectId", "flyMachineId",
-  "base64", "sessiontoken", "handofftoken", "builderid", "containerid",
-  "neonproject", "flymachine",
+  "fileRef",
+  "imageRef",
+  "datasetRef",
+  "sessionToken",
+  "handoffToken",
+  "projectId",
+  "builderId",
+  "containerId",
+  "neonProjectId",
+  "flyMachineId",
+  "base64",
+  "sessiontoken",
+  "handofftoken",
+  "builderid",
+  "containerid",
+  "neonproject",
+  "flymachine",
 ];
 
 function hasNoBannedFields(obj, path = "") {
@@ -285,14 +334,38 @@ const sanitizedTestData = {
 };
 
 const privacyResult = hasNoBannedFields(sanitizedTestData);
-check("No banned field: fileRef", !JSON.stringify(sanitizedTestData).toLowerCase().includes("fileref"));
-check("No banned field: imageRef", !JSON.stringify(sanitizedTestData).toLowerCase().includes("imageref"));
-check("No banned field: datasetRef", !JSON.stringify(sanitizedTestData).toLowerCase().includes("datasetref"));
-check("No banned field: sessionToken", !JSON.stringify(sanitizedTestData).toLowerCase().includes("sessiontoken"));
-check("No banned field: handoffToken", !JSON.stringify(sanitizedTestData).toLowerCase().includes("handofftoken"));
-check("No banned field: builderId", !JSON.stringify(sanitizedTestData).toLowerCase().includes("builderid"));
-check("No banned field: containerId", !JSON.stringify(sanitizedTestData).toLowerCase().includes("containerid"));
-check("No banned field: base64", !JSON.stringify(sanitizedTestData).toLowerCase().includes("base64"));
+check(
+  "No banned field: fileRef",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("fileref"),
+);
+check(
+  "No banned field: imageRef",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("imageref"),
+);
+check(
+  "No banned field: datasetRef",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("datasetref"),
+);
+check(
+  "No banned field: sessionToken",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("sessiontoken"),
+);
+check(
+  "No banned field: handoffToken",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("handofftoken"),
+);
+check(
+  "No banned field: builderId",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("builderid"),
+);
+check(
+  "No banned field: containerId",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("containerid"),
+);
+check(
+  "No banned field: base64",
+  !JSON.stringify(sanitizedTestData).toLowerCase().includes("base64"),
+);
 check("Overall privacy audit: clean sample data", privacyResult.clean);
 
 // Group 9: XLSX generation with xlsx library
@@ -316,7 +389,12 @@ try {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(coverRows), "Cover Page");
 
   // Summary
-  const summaryRows = [["Q3 Operations Review"], [], ["Analysis Type", "kpi"], ["Generated", "June 1, 2026"]];
+  const summaryRows = [
+    ["Q3 Operations Review"],
+    [],
+    ["Analysis Type", "kpi"],
+    ["Generated", "June 1, 2026"],
+  ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "Summary");
 
   // KPI Scorecard with Status
@@ -335,10 +413,14 @@ try {
 
   // Priority Matrix
   const pmRows = [["Priority Matrix"], [], ["High Priority — Immediate Action Required"]];
-  high.forEach((a) => pmRows.push([a.action, "High", "Estimated Medium", a.owner ?? "", a.timeline ?? ""]));
+  high.forEach((a) =>
+    pmRows.push([a.action, "High", "Estimated Medium", a.owner ?? "", a.timeline ?? ""]),
+  );
   pmRows.push([]);
   pmRows.push(["Medium Priority — Short-term Action"]);
-  medium.forEach((a) => pmRows.push([a.action, "Medium", "Estimated Medium", a.owner ?? "", a.timeline ?? ""]));
+  medium.forEach((a) =>
+    pmRows.push([a.action, "Medium", "Estimated Medium", a.owner ?? "", a.timeline ?? ""]),
+  );
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pmRows), "Priority Matrix");
 
   // Improvement Roadmap
@@ -378,9 +460,7 @@ try {
   check("XLSX: KPI Scorecard has 5 data rows + header = 6 total", kpiData.length === 6);
   check(
     "XLSX: Status values are valid",
-    kpiData
-      .slice(1)
-      .every((row) => ["On Target", "Monitor", "Immediate Action"].includes(row[4])),
+    kpiData.slice(1).every((row) => ["On Target", "Monitor", "Immediate Action"].includes(row[4])),
   );
   check(
     "XLSX: At least one Immediate Action status present",
@@ -395,10 +475,22 @@ try {
   const coverSheet2 = wb2.Sheets["Cover Page"];
   const coverData = XLSX.utils.sheet_to_json(coverSheet2, { header: 1 });
   check("XLSX: Cover Page has title row", coverData[0][0] === "Q3 Operations Review");
-  check("XLSX: Cover Page has Report Type field", coverData.some((r) => r[0] === "Report Type"));
-  check("XLSX: Cover Page has Company field", coverData.some((r) => r[0] === "Company"));
-  check("XLSX: Cover Page has Generated By", coverData.some((r) => r[1]?.includes?.("MustaFlow")));
-  check("XLSX: Cover Page has Prepared For", coverData.some((r) => r[0] === "Prepared For"));
+  check(
+    "XLSX: Cover Page has Report Type field",
+    coverData.some((r) => r[0] === "Report Type"),
+  );
+  check(
+    "XLSX: Cover Page has Company field",
+    coverData.some((r) => r[0] === "Company"),
+  );
+  check(
+    "XLSX: Cover Page has Generated By",
+    coverData.some((r) => r[1]?.includes?.("MustaFlow")),
+  );
+  check(
+    "XLSX: Cover Page has Prepared For",
+    coverData.some((r) => r[0] === "Prepared For"),
+  );
 
   // Validate Priority Matrix
   const pmSheet2 = wb2.Sheets["Priority Matrix"];
@@ -457,25 +549,55 @@ try {
   } = mfRequire("docx");
 
   // ── Helpers ──
-  const h1 = (text) => new Paragraph({ text, heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } });
-  const h2 = (text) => new Paragraph({ text, heading: HeadingLevel.HEADING_2, spacing: { before: 280, after: 120 } });
+  const h1 = (text) =>
+    new Paragraph({ text, heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } });
+  const h2 = (text) =>
+    new Paragraph({ text, heading: HeadingLevel.HEADING_2, spacing: { before: 280, after: 120 } });
   const body = (text) => new Paragraph({ children: [new TextRun(text)], spacing: { after: 100 } });
   const spacer = () => new Paragraph({ text: "" });
   const centeredBold = (text, size) =>
-    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 160, after: 160 }, children: [new TextRun({ text, bold: true, size })] });
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 160, after: 160 },
+      children: [new TextRun({ text, bold: true, size })],
+    });
   const centeredText = (text, size) =>
-    new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80, after: 80 }, children: [new TextRun({ text, size })] });
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 80, after: 80 },
+      children: [new TextRun({ text, size })],
+    });
   const hrLine = () =>
-    new Paragraph({ border: { bottom: { color: "1E3A5F", space: 4, style: BorderStyle.SINGLE, size: 6 } }, spacing: { before: 240, after: 240 }, children: [] });
+    new Paragraph({
+      border: { bottom: { color: "1E3A5F", space: 4, style: BorderStyle.SINGLE, size: 6 } },
+      spacing: { before: 240, after: 240 },
+      children: [],
+    });
   const metaRow = (label, value) =>
-    new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: `${label}: `, bold: true, size: 22 }), new TextRun({ text: value || "\u2014", size: 22 })] });
+    new Paragraph({
+      spacing: { after: 80 },
+      children: [
+        new TextRun({ text: `${label}: `, bold: true, size: 22 }),
+        new TextRun({ text: value || "\u2014", size: 22 }),
+      ],
+    });
 
   const shadedHeaderCell = (text) =>
-    new TableCell({ shading: { fill: "1E3A5F", type: ShadingType.CLEAR, color: "auto" }, children: [new Paragraph({ children: [new TextRun({ text, bold: true, color: "FFFFFF" })], spacing: { after: 60 } })] });
+    new TableCell({
+      shading: { fill: "1E3A5F", type: ShadingType.CLEAR, color: "auto" },
+      children: [
+        new Paragraph({
+          children: [new TextRun({ text, bold: true, color: "FFFFFF" })],
+          spacing: { after: 60 },
+        }),
+      ],
+    });
   const dataCell = (text) => new TableCell({ children: [body(text)] });
 
   const makeTable = (headers, rows, widths) =>
-    new Table({ width: { size: 9000, type: WidthType.DXA }, columnWidths: widths,
+    new Table({
+      width: { size: 9000, type: WidthType.DXA },
+      columnWidths: widths,
       rows: [
         new TableRow({ children: headers.map(shadedHeaderCell), tableHeader: true }),
         ...rows.map((row) => new TableRow({ children: row.map(dataCell) })),
@@ -502,48 +624,83 @@ try {
 
   // Management Summary
   mainChildren.push(h2("Management Summary"));
-  mainChildren.push(makeTable(
-    ["Category", "Detail"],
-    [
-      ["What Happened", "OEE dropped to 72% after Line 3 reconfiguration."],
-      ["Why It Happened", "Equipment wear on Line 3"],
-      ["Operational Impact", "Equipment wear on Line 3"],
-      ["Risk Level", "High"],
-      ["Recommended Action", "Recalibrate Line 3"],
-    ],
-    [2500, 6500],
-  ));
+  mainChildren.push(
+    makeTable(
+      ["Category", "Detail"],
+      [
+        ["What Happened", "OEE dropped to 72% after Line 3 reconfiguration."],
+        ["Why It Happened", "Equipment wear on Line 3"],
+        ["Operational Impact", "Equipment wear on Line 3"],
+        ["Risk Level", "High"],
+        ["Recommended Action", "Recalibrate Line 3"],
+      ],
+      [2500, 6500],
+    ),
+  );
   mainChildren.push(spacer());
 
   // KPI Scorecard with Status
   mainChildren.push(h2("KPI Scorecard"));
   const kpiRows = SAMPLE_KPI_GAPS.map((k) => [
-    k.metric, k.current, k.target ?? "", k.gap ?? "", deriveKpiStatus(k), k.trend ?? "",
+    k.metric,
+    k.current,
+    k.target ?? "",
+    k.gap ?? "",
+    deriveKpiStatus(k),
+    k.trend ?? "",
   ]);
-  mainChildren.push(makeTable(["Metric", "Current", "Target", "Gap", "Status", "Trend"], kpiRows, [2000, 1300, 1300, 1400, 1800, 1200]));
+  mainChildren.push(
+    makeTable(
+      ["Metric", "Current", "Target", "Gap", "Status", "Trend"],
+      kpiRows,
+      [2000, 1300, 1300, 1400, 1800, 1200],
+    ),
+  );
   mainChildren.push(spacer());
 
   // Priority Matrix
   mainChildren.push(h2("Priority Action Matrix"));
-  mainChildren.push(new Paragraph({ children: [new TextRun({ text: "High Priority \u2014 Immediate Action Required", bold: true })], spacing: { after: 80 } }));
-  high.forEach((a) => mainChildren.push(new Paragraph({ children: [new TextRun(`\u2022  ${a.action} (Owner: ${a.owner ?? "TBD"})`)] })));
+  mainChildren.push(
+    new Paragraph({
+      children: [
+        new TextRun({ text: "High Priority \u2014 Immediate Action Required", bold: true }),
+      ],
+      spacing: { after: 80 },
+    }),
+  );
+  high.forEach((a) =>
+    mainChildren.push(
+      new Paragraph({
+        children: [new TextRun(`\u2022  ${a.action} (Owner: ${a.owner ?? "TBD"})`)],
+      }),
+    ),
+  );
   mainChildren.push(spacer());
-  mainChildren.push(new Paragraph({ children: [new TextRun({ text: "Medium Priority \u2014 Short-term Action", bold: true })], spacing: { after: 80 } }));
-  medium.forEach((a) => mainChildren.push(new Paragraph({ children: [new TextRun(`\u2022  ${a.action}`)] })));
+  mainChildren.push(
+    new Paragraph({
+      children: [new TextRun({ text: "Medium Priority \u2014 Short-term Action", bold: true })],
+      spacing: { after: 80 },
+    }),
+  );
+  medium.forEach((a) =>
+    mainChildren.push(new Paragraph({ children: [new TextRun(`\u2022  ${a.action}`)] })),
+  );
   mainChildren.push(spacer());
 
   // Improvement Roadmap
   mainChildren.push(h2("Improvement Roadmap"));
-  mainChildren.push(makeTable(
-    ["Timeframe", "Action", "Priority"],
-    [
-      ...roadmap.immediate.map((a) => ["Immediate (0\u201330 Days)", a, "High"]),
-      ...roadmap.thirtyDay.map((a) => ["Short-term (30\u201360 Days)", a, "Medium"]),
-      ...roadmap.sixtyDay.map((a) => ["Medium-term (60\u201390 Days)", a, "Low"]),
-      ...roadmap.ninetyPlus.map((a) => ["Strategic (90+ Days)", a, "Strategic"]),
-    ],
-    [2800, 5000, 1200],
-  ));
+  mainChildren.push(
+    makeTable(
+      ["Timeframe", "Action", "Priority"],
+      [
+        ...roadmap.immediate.map((a) => ["Immediate (0\u201330 Days)", a, "High"]),
+        ...roadmap.thirtyDay.map((a) => ["Short-term (30\u201360 Days)", a, "Medium"]),
+        ...roadmap.sixtyDay.map((a) => ["Medium-term (60\u201390 Days)", a, "Low"]),
+        ...roadmap.ninetyPlus.map((a) => ["Strategic (90+ Days)", a, "Strategic"]),
+      ],
+      [2800, 5000, 1200],
+    ),
+  );
 
   // Generate document with 2 sections (cover + content)
   const doc = new Document({
@@ -559,8 +716,7 @@ try {
 
   // Validate: DOCX is a ZIP (magic bytes PK\x03\x04)
   const magic = buf.slice(0, 4);
-  const isZip =
-    magic[0] === 0x50 && magic[1] === 0x4b && magic[2] === 0x03 && magic[3] === 0x04;
+  const isZip = magic[0] === 0x50 && magic[1] === 0x4b && magic[2] === 0x03 && magic[3] === 0x04;
 
   const fileSizeKB = Math.round(buf.byteLength / 1024);
   check(`DOCX: Valid ZIP container (magic bytes PK 03 04)`, isZip);
@@ -607,8 +763,17 @@ try {
 
 // Group 11: Regression — existing section IDs still match code
 console.log("\n── Regression Audit ───────────────────────────────");
-const legacyExportSections = ["executive-summary", "key-findings", "recommendations", "action-plan", "next-steps"];
-check("Legacy section IDs still valid (executive-summary)", VALID_SECTIONS.has("executive-summary"));
+const legacyExportSections = [
+  "executive-summary",
+  "key-findings",
+  "recommendations",
+  "action-plan",
+  "next-steps",
+];
+check(
+  "Legacy section IDs still valid (executive-summary)",
+  VALID_SECTIONS.has("executive-summary"),
+);
 check("Legacy section IDs still valid (key-findings)", VALID_SECTIONS.has("key-findings"));
 check("Legacy section IDs still valid (recommendations)", VALID_SECTIONS.has("recommendations"));
 check("Legacy section IDs still valid (action-plan)", VALID_SECTIONS.has("action-plan"));
