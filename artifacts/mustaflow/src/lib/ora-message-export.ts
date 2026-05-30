@@ -167,3 +167,53 @@ export function downloadActionPlanCsv(actionPlan: ActionItem[], basename?: strin
   const name = basename ?? "ora-action-plan";
   triggerDownload(blob, sanitizeFilename(name) + ".csv");
 }
+
+// ─── Conversation-level exports ───────────────────────────────────────────────
+
+export function downloadConversationAsMarkdown(messages: OraMessage[], basename?: string): void {
+  if (messages.length === 0) return;
+  const md = formatConversationForMarkdown(messages);
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  const name = basename ?? "ora-conversation";
+  triggerDownload(blob, sanitizeFilename(name) + ".md");
+}
+
+function sanitizeMessageForJson(msg: OraMessage): object {
+  const entry: Record<string, unknown> = {
+    role: msg.role,
+    content: msg.content,
+  };
+  if (msg.messageKind) entry.messageKind = msg.messageKind;
+  if (msg.datasetResult) {
+    const r = msg.datasetResult;
+    // Include only public analysis fields; strip any internal refs
+    entry.datasetAnalysis = {
+      analysisType: r.analysisType,
+      summary: r.summary,
+      keyFindings: r.keyFindings,
+      kpiGaps: r.kpiGaps,
+      trendFindings: r.trendFindings,
+      paretoFindings: r.paretoFindings,
+      recommendations: r.recommendations,
+      actionPlan: r.actionPlan,
+      risksAndLimitations: r.risksAndLimitations,
+      nextSteps: r.nextSteps,
+    };
+  }
+  // Intentionally omit: handoffCta, editedFrom, hadAttachment, suggestions
+  return entry;
+}
+
+export function downloadConversationAsJson(messages: OraMessage[], basename?: string): void {
+  if (messages.length === 0) return;
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    messageCount: messages.length,
+    messages: messages.map(sanitizeMessageForJson),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  const name = basename ?? "ora-conversation";
+  triggerDownload(blob, sanitizeFilename(name) + ".json");
+}
