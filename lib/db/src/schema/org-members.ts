@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, unique, index } from "drizzle-orm/pg-core";
 import { organizationsTable } from "./organizations";
 
 // Roles in ascending privilege order:
@@ -22,7 +22,11 @@ export const orgMembersTable = pgTable(
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique("org_members_unique_user").on(t.organizationId, t.userId)],
+  (t) => [
+    unique("org_members_unique_user").on(t.organizationId, t.userId),
+    index("org_members_user_idx").on(t.userId),
+    index("org_members_org_idx").on(t.organizationId),
+  ],
 );
 
 export type OrgMember = typeof orgMembersTable.$inferSelect;

@@ -428,6 +428,7 @@ export const agentTasksTable = pgTable(
   (table) => [
     index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),
     index("agent_tasks_queue_batch_id_idx").on(table.queueBatchId),
+    index("agent_tasks_run_mode_status_idx").on(table.runMode, table.status),
     // Partial unique index: prevents more than one active background auto-fix task
     // with the same title from being queued for the same project simultaneously.
     // Rows that have transitioned to done/failed/canceled fall outside the index,

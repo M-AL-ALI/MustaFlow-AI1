@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
@@ -51,9 +52,10 @@ export const projectArtifactsTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({
-    slugUniq: uniqueIndex("project_artifacts_project_slug_unique").on(t.projectId, t.slug),
-  }),
+  (t) => [
+    uniqueIndex("project_artifacts_project_slug_unique").on(t.projectId, t.slug),
+    index("project_artifacts_project_idx").on(t.projectId),
+  ],
 );
 
 export type ProjectArtifact = typeof projectArtifactsTable.$inferSelect;

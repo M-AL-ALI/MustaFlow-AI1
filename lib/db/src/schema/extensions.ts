@@ -7,6 +7,7 @@ import {
   jsonb,
   boolean,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const EXTENSION_SCOPES = [
@@ -102,6 +103,7 @@ export const projectExtensionsTable = pgTable(
   (table) => [
     index("project_extensions_project_idx").on(table.projectId),
     index("project_extensions_extension_idx").on(table.extensionId),
+    uniqueIndex("project_extensions_unique").on(table.projectId, table.extensionId),
   ],
 );
 

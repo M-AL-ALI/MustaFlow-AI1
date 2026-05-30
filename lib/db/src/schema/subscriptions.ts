@@ -1,4 +1,4 @@
-import { pgTable, serial, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, index } from "drizzle-orm/pg-core";
 
 export const SUBSCRIPTION_TIERS = ["free", "core", "pro", "team"] as const;
 export type SubscriptionTier = (typeof SUBSCRIPTION_TIERS)[number];
@@ -35,20 +35,27 @@ export const TIER_PRICE_USD: Record<SubscriptionTier, number> = {
 };
 
 // Per-user subscription row. Created on first subscribe or free-tier initialisation.
-export const userSubscriptionsTable = pgTable("user_subscriptions", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull().unique(),
-  stripeCustomerId: text("stripe_customer_id"),
-  stripeSubscriptionId: text("stripe_subscription_id"),
-  tier: text("tier").notNull().default("free"),
-  status: text("status").notNull().default("active"),
-  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
-  gracePeriodEnd: timestamp("grace_period_end", { withTimezone: true }),
-  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
-  lastMonthlyGrantAt: timestamp("last_monthly_grant_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const userSubscriptionsTable = pgTable(
+  "user_subscriptions",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull().unique(),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    tier: text("tier").notNull().default("free"),
+    status: text("status").notNull().default("active"),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    gracePeriodEnd: timestamp("grace_period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    lastMonthlyGrantAt: timestamp("last_monthly_grant_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("user_subscriptions_stripe_customer_idx").on(t.stripeCustomerId),
+    index("user_subscriptions_stripe_sub_idx").on(t.stripeSubscriptionId),
+  ],
+);
 
 export type UserSubscription = typeof userSubscriptionsTable.$inferSelect;
 export type InsertUserSubscription = typeof userSubscriptionsTable.$inferInsert;

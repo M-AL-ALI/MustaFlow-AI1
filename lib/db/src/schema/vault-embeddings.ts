@@ -5,6 +5,7 @@ import {
   integer,
   timestamp,
   uniqueIndex,
+  index,
   vector,
 } from "drizzle-orm/pg-core";
 
@@ -32,12 +33,11 @@ export const vaultEmbeddingsTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({
-    entryChunkUnique: uniqueIndex("vault_embeddings_entry_chunk_unique").on(
-      t.entryId,
-      t.chunkIndex,
-    ),
-  }),
+  (t) => [
+    uniqueIndex("vault_embeddings_entry_chunk_unique").on(t.entryId, t.chunkIndex),
+    index("vault_embeddings_entry_idx").on(t.entryId),
+    index("vault_embeddings_user_idx").on(t.userId, t.entryId),
+  ],
 );
 
 export type VaultEmbedding = typeof vaultEmbeddingsTable.$inferSelect;

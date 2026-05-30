@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const projectFilesTable = pgTable(
@@ -19,16 +19,13 @@ export const projectFilesTable = pgTable(
     mimeType: text("mime_type").notNull().default("text/html"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({
+  (t) => [
     // Task #544: uniqueness is scoped by artifact so two artifacts inside the
     // same project can each have their own `package.json` / `README.md` / etc.
     // The migration drops the legacy (project_id, path) index and adds this one.
-    pathUniq: uniqueIndex("project_files_project_artifact_path_unique").on(
-      t.projectId,
-      t.artifactId,
-      t.path,
-    ),
-  }),
+    uniqueIndex("project_files_project_artifact_path_unique").on(t.projectId, t.artifactId, t.path),
+    index("project_files_artifact_idx").on(t.artifactId),
+  ],
 );
 
 export type ProjectFile = typeof projectFilesTable.$inferSelect;

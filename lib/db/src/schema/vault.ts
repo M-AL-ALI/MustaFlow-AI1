@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { pgTable, serial, text, integer, boolean, timestamp, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 export const VAULT_CATEGORIES = [
   "REPORT",
@@ -70,28 +79,35 @@ export const vaultEntriesTable = pgTable(
     index("vault_entries_archived_idx")
       .on(t.userId, t.archivedAt)
       .where(sql`archived_at IS NOT NULL`),
+    index("vault_entries_user_idx").on(t.userId, t.createdAt),
+    index("vault_entries_category_idx").on(t.userId, t.category),
+    index("vault_entries_status_idx").on(t.userId, t.status),
   ],
 );
 
 export type VaultEntry = typeof vaultEntriesTable.$inferSelect;
 export type InsertVaultEntry = typeof vaultEntriesTable.$inferInsert;
 
-export const vaultVersionsTable = pgTable("vault_versions", {
-  id: serial("id").primaryKey(),
-  entryId: integer("entry_id").notNull(),
-  version: integer("version").notNull(),
-  title: text("title").notNull(),
-  summary: text("summary").notNull(),
-  content: text("content").notNull(),
-  tags: text("tags")
-    .array()
-    .notNull()
-    .default(sql`'{}'`),
-  department: text("department"),
-  editedBy: text("edited_by").notNull(),
-  editedAt: timestamp("edited_at", { withTimezone: true }).notNull().defaultNow(),
-  changeSummary: text("change_summary"),
-});
+export const vaultVersionsTable = pgTable(
+  "vault_versions",
+  {
+    id: serial("id").primaryKey(),
+    entryId: integer("entry_id").notNull(),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    content: text("content").notNull(),
+    tags: text("tags")
+      .array()
+      .notNull()
+      .default(sql`'{}'`),
+    department: text("department"),
+    editedBy: text("edited_by").notNull(),
+    editedAt: timestamp("edited_at", { withTimezone: true }).notNull().defaultNow(),
+    changeSummary: text("change_summary"),
+  },
+  (t) => [index("vault_versions_entry_idx").on(t.entryId, t.version)],
+);
 
 export type VaultVersion = typeof vaultVersionsTable.$inferSelect;
 export type InsertVaultVersion = typeof vaultVersionsTable.$inferInsert;

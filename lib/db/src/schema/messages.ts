@@ -8,6 +8,7 @@ import {
   jsonb,
   index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
 import { projectVersionsTable } from "./versions";
 
@@ -38,6 +39,10 @@ export const chatMessagesTable = pgTable(
   },
   (table) => [
     index("chat_messages_project_id_created_at_idx").on(table.projectId, table.createdAt),
+    index("chat_messages_checkpoint_id_idx")
+      .on(table.checkpointId)
+      .where(sql`checkpoint_id IS NOT NULL`),
+    index("chat_messages_content_tsv_idx").using("gin", sql`content_tsv`),
   ],
 );
 

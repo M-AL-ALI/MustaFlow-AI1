@@ -1,4 +1,13 @@
-import { pgTable, serial, integer, text, jsonb, timestamp, boolean } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  integer,
+  text,
+  jsonb,
+  timestamp,
+  boolean,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export type FileSnapshotEntry = {
@@ -73,21 +82,25 @@ export const projectVersionsTable = pgTable("project_versions", {
 // ── preview_snapshots — ephemeral per-build preview URLs ─────────────────────
 // Created after every successful build. Expire after PREVIEW_EXPIRY_DAYS (default 7).
 // The preview URL pattern is: {slug}-preview-{taskId}.mustaflow.app
-export const previewSnapshotsTable = pgTable("preview_snapshots", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id")
-    .notNull()
-    .references(() => projectsTable.id, { onDelete: "cascade" }),
-  // versionId: the project_versions row that holds the frozen snapshot files.
-  versionId: integer("version_id").notNull(),
-  // taskId: the agent task that produced this build (used in preview URL slug).
-  taskId: integer("task_id"),
-  // previewSlug: the full URL subdomain label, e.g. "myapp-abc123-preview-42"
-  previewSlug: text("preview_slug").notNull().unique(),
-  // expiresAt: when this preview URL should be considered stale and purged.
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const previewSnapshotsTable = pgTable(
+  "preview_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projectsTable.id, { onDelete: "cascade" }),
+    // versionId: the project_versions row that holds the frozen snapshot files.
+    versionId: integer("version_id").notNull(),
+    // taskId: the agent task that produced this build (used in preview URL slug).
+    taskId: integer("task_id"),
+    // previewSlug: the full URL subdomain label, e.g. "myapp-abc123-preview-42"
+    previewSlug: text("preview_slug").notNull(),
+    // expiresAt: when this preview URL should be considered stale and purged.
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("preview_snapshots_slug_unique").on(t.previewSlug)],
+);
 
 export type ProjectVersion = typeof projectVersionsTable.$inferSelect;
 export type InsertProjectVersion = typeof projectVersionsTable.$inferInsert;

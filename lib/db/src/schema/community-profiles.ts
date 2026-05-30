@@ -7,6 +7,7 @@ import {
   jsonb,
   boolean,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const communityProfilesTable = pgTable(
@@ -51,6 +52,7 @@ export const profileFollowsTable = pgTable(
   (table) => [
     index("profile_follows_follower_idx").on(table.followerId),
     index("profile_follows_following_idx").on(table.followingId),
+    uniqueIndex("profile_follows_unique").on(table.followerId, table.followingId),
   ],
 );
 

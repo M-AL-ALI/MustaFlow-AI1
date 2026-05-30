@@ -8,6 +8,7 @@ import {
   boolean,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const GALLERY_CATEGORIES = [
@@ -86,6 +87,7 @@ export const templateRatingsTable = pgTable(
   (table) => [
     index("template_ratings_template_idx").on(table.templateId),
     index("template_ratings_user_idx").on(table.userId),
+    uniqueIndex("template_ratings_user_template_unique").on(table.templateId, table.userId),
   ],
 );
 
