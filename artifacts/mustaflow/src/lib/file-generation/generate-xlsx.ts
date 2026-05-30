@@ -280,6 +280,181 @@ export async function downloadXlsx(
     XLSX.utils.book_append_sheet(wb, sheet, "Risk Matrix");
   }
 
+  // ─── Health Score ──────────────────────────────────────────────────────────
+  if (data.healthScore) {
+    const hs = data.healthScore;
+    const hsRows: (string | number)[][] = [
+      ["Overall Health Score"],
+      [],
+      ["Score", hs.score],
+      ["Category", hs.category],
+      ["Explanation", hs.explanation],
+    ];
+    const hsSheet = XLSX.utils.aoa_to_sheet(hsRows);
+    hsSheet["!cols"] = [{ wch: 18 }, { wch: 70 }];
+    XLSX.utils.book_append_sheet(wb, hsSheet, "Health Score");
+  }
+
+  // ─── Financial Impact ──────────────────────────────────────────────────────
+  if (data.financialImpact) {
+    const fi = data.financialImpact;
+    const fiRows: (string | number)[][] = [
+      ["Financial Impact Assessment"],
+      [],
+      ["Confidence", fi.confidence],
+      [],
+    ];
+    if (fi.costOfIssues) fiRows.push(["Cost of Current Issues", fi.costOfIssues]);
+    if (fi.savingsOpportunity) fiRows.push(["Savings Opportunity", fi.savingsOpportunity]);
+    if (fi.revenueOpportunity) fiRows.push(["Revenue Opportunity", fi.revenueOpportunity]);
+    if (fi.wasteReduction) fiRows.push(["Waste Reduction", fi.wasteReduction]);
+    if (fi.notes) {
+      fiRows.push([]);
+      fiRows.push(["Notes", fi.notes]);
+    }
+    const fiSheet = XLSX.utils.aoa_to_sheet(fiRows);
+    fiSheet["!cols"] = [{ wch: 28 }, { wch: 65 }];
+    XLSX.utils.book_append_sheet(wb, fiSheet, "Financial Impact");
+  }
+
+  // ─── Operational Impact ────────────────────────────────────────────────────
+  if (data.operationalImpact) {
+    const oi = data.operationalImpact;
+    const oiRows: (string | number)[][] = [
+      ["Operational Impact Assessment"],
+      [],
+      ["Overall Level", oi.overallLevel],
+      ...(oi.summary ? [["Summary", oi.summary]] : []),
+      [],
+      ["Dimension", "Level", "Explanation"],
+    ];
+    const dims: [string, typeof oi.productivity][] = [
+      ["Productivity", oi.productivity],
+      ["Throughput", oi.throughput],
+      ["Downtime", oi.downtime],
+      ["Labor", oi.labor],
+      ["Quality", oi.quality],
+      ["Capacity", oi.capacity],
+    ];
+    dims.filter(([, d]) => d).forEach(([name, d]) => oiRows.push([name, d!.level, d!.explanation]));
+    const oiSheet = XLSX.utils.aoa_to_sheet(oiRows);
+    oiSheet["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 65 }];
+    XLSX.utils.book_append_sheet(wb, oiSheet, "Operational Impact");
+  }
+
+  // ─── Customer Impact ───────────────────────────────────────────────────────
+  if (data.customerImpact) {
+    const ci = data.customerImpact;
+    const ciRows: (string | number)[][] = [
+      ["Customer Impact Assessment"],
+      [],
+      ["Overall Level", ci.overallLevel],
+      ...(ci.summary ? [["Summary", ci.summary]] : []),
+      [],
+      ["Dimension", "Level", "Explanation"],
+    ];
+    const cdims: [string, typeof ci.experience][] = [
+      ["Customer Experience", ci.experience],
+      ["Service", ci.service],
+      ["Delivery", ci.delivery],
+      ["Product Quality", ci.productQuality],
+      ["Reputation", ci.reputation],
+    ];
+    cdims
+      .filter(([, d]) => d)
+      .forEach(([name, d]) => ciRows.push([name, d!.level, d!.explanation]));
+    const ciSheet = XLSX.utils.aoa_to_sheet(ciRows);
+    ciSheet["!cols"] = [{ wch: 22 }, { wch: 12 }, { wch: 65 }];
+    XLSX.utils.book_append_sheet(wb, ciSheet, "Customer Impact");
+  }
+
+  // ─── Enhanced Recommendations ──────────────────────────────────────────────
+  if (data.enhancedRecommendations?.length) {
+    const erRows: (string | number)[][] = [
+      [
+        "Recommendation",
+        "Priority",
+        "Impact Score",
+        "Effort Score",
+        "Confidence Score",
+        "Expected Benefit",
+        "Timeline",
+        "Difficulty",
+        "Confidence",
+      ],
+      ...data.enhancedRecommendations.map((r) => [
+        r.recommendation,
+        r.priority,
+        r.impactScore,
+        r.effortScore,
+        r.confidenceScore,
+        r.expectedBenefit,
+        r.timeline,
+        r.difficulty,
+        r.confidence,
+      ]),
+    ];
+    const erSheet = XLSX.utils.aoa_to_sheet(erRows);
+    erSheet["!cols"] = [
+      { wch: 50 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 45 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+    ];
+    XLSX.utils.book_append_sheet(wb, erSheet, "Enhanced Recommendations");
+  }
+
+  // ─── Strategic Roadmap ─────────────────────────────────────────────────────
+  if (data.strategicRoadmap) {
+    const sr = data.strategicRoadmap;
+    const srRows: (string | number)[][] = [
+      ["Timeframe", "Action", "Owner", "Expected Outcome", "Priority"],
+    ];
+    const addPhase = (label: string, items: typeof sr.immediate) =>
+      items.forEach((item) =>
+        srRows.push([label, item.action, item.owner ?? "", item.expectedOutcome, item.priority]),
+      );
+    addPhase("Immediate (0\u201330 Days)", sr.immediate);
+    addPhase("Short-term (30\u201360 Days)", sr.shortTerm);
+    addPhase("Medium-term (60\u201390 Days)", sr.mediumTerm);
+    addPhase("Strategic (90+ Days)", sr.strategic);
+    if (srRows.length > 1) {
+      const srSheet = XLSX.utils.aoa_to_sheet(srRows);
+      srSheet["!cols"] = [{ wch: 24 }, { wch: 48 }, { wch: 20 }, { wch: 45 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, srSheet, "Strategic Roadmap");
+    }
+  }
+
+  // ─── Enhanced Risk Assessment ──────────────────────────────────────────────
+  if (data.enhancedRisks?.length) {
+    const eriskRows: (string | number)[][] = [
+      ["Risk", "Risk Score", "Level", "Probability", "Impact", "Mitigation"],
+      ...data.enhancedRisks.map((r) => [
+        r.risk,
+        r.riskScore,
+        r.riskLevel,
+        r.probability,
+        r.impact,
+        r.mitigation,
+      ]),
+    ];
+    const eriskSheet = XLSX.utils.aoa_to_sheet(eriskRows);
+    eriskSheet["!cols"] = [
+      { wch: 45 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 50 },
+    ];
+    XLSX.utils.book_append_sheet(wb, eriskSheet, "Risk Assessment");
+  }
+
   const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
   const blob = new Blob([buf], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

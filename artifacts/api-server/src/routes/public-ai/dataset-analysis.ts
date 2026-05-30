@@ -116,7 +116,7 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
 
   const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
   const fallbackModel = "claude-sonnet-4-6";
-  const maxTokens = 3000;
+  const maxTokens = 5000;
 
   const start = Date.now();
   let usedFallback = false;

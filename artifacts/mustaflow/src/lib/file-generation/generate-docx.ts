@@ -452,6 +452,173 @@ export async function downloadDocx(
     if (show("next-steps") && data.nextSteps?.length) {
       children.push(h2("Next Steps"));
       data.nextSteps.forEach((s) => children.push(bullet(s)));
+      children.push(spacer());
+    }
+
+    // Health Score
+    if (show("health-score") && data.healthScore) {
+      const hs = data.healthScore;
+      children.push(h2("Overall Health Score"));
+      children.push(body(`Score: ${hs.score}/100 \u2014 ${hs.category}`));
+      children.push(body(hs.explanation));
+      children.push(spacer());
+    }
+
+    // Why This Matters
+    if (show("why-this-matters") && data.whyThisMatters) {
+      const wtm = data.whyThisMatters;
+      children.push(h2("Why This Matters"));
+      children.push(h3("Leadership Rationale"));
+      children.push(body(wtm.leadershipRationale));
+      children.push(h3("Consequences of Inaction"));
+      children.push(body(wtm.consequencesOfInaction));
+      children.push(h3("Strategic Implications"));
+      children.push(body(wtm.strategicImplications));
+      if (wtm.competitiveImplications) {
+        children.push(h3("Competitive Implications"));
+        children.push(body(wtm.competitiveImplications));
+      }
+      children.push(spacer());
+    }
+
+    // Financial Impact
+    if (show("financial-impact") && data.financialImpact) {
+      const fi = data.financialImpact;
+      children.push(h2("Financial Impact Assessment"));
+      children.push(body(`Confidence Level: ${fi.confidence}`));
+      const fiRows: string[][] = [];
+      if (fi.costOfIssues) fiRows.push(["Cost of Current Issues", fi.costOfIssues]);
+      if (fi.savingsOpportunity) fiRows.push(["Savings Opportunity", fi.savingsOpportunity]);
+      if (fi.revenueOpportunity) fiRows.push(["Revenue Opportunity", fi.revenueOpportunity]);
+      if (fi.wasteReduction) fiRows.push(["Waste Reduction Opportunity", fi.wasteReduction]);
+      if (fiRows.length > 0) {
+        children.push(makeTable(["Category", "Estimate"], fiRows, [3500, 5500], true));
+      }
+      if (fi.notes) children.push(body(`Note: ${fi.notes}`));
+      children.push(spacer());
+    }
+
+    // Operational Impact
+    if (show("operational-impact") && data.operationalImpact) {
+      const oi = data.operationalImpact;
+      children.push(h2("Operational Impact Assessment"));
+      children.push(
+        body(`Overall Level: ${oi.overallLevel}${oi.summary ? ` \u2014 ${oi.summary}` : ""}`),
+      );
+      const oiDims: [string, typeof oi.productivity][] = [
+        ["Productivity", oi.productivity],
+        ["Throughput", oi.throughput],
+        ["Downtime", oi.downtime],
+        ["Labor", oi.labor],
+        ["Quality", oi.quality],
+        ["Capacity", oi.capacity],
+      ];
+      const oiRows = oiDims
+        .filter(([, d]) => d !== undefined)
+        .map(([name, d]) => [name, d!.level, d!.explanation]);
+      if (oiRows.length > 0) {
+        children.push(
+          makeTable(["Dimension", "Level", "Explanation"], oiRows, [2000, 1500, 5500], true),
+        );
+      }
+      children.push(spacer());
+    }
+
+    // Customer Impact
+    if (show("customer-impact") && data.customerImpact) {
+      const ci = data.customerImpact;
+      children.push(h2("Customer Impact Assessment"));
+      children.push(
+        body(`Overall Level: ${ci.overallLevel}${ci.summary ? ` \u2014 ${ci.summary}` : ""}`),
+      );
+      const ciDims: [string, typeof ci.experience][] = [
+        ["Customer Experience", ci.experience],
+        ["Service", ci.service],
+        ["Delivery", ci.delivery],
+        ["Product Quality", ci.productQuality],
+        ["Reputation", ci.reputation],
+      ];
+      const ciRows = ciDims
+        .filter(([, d]) => d !== undefined)
+        .map(([name, d]) => [name, d!.level, d!.explanation]);
+      if (ciRows.length > 0) {
+        children.push(
+          makeTable(["Dimension", "Level", "Explanation"], ciRows, [2200, 1500, 5300], true),
+        );
+      }
+      children.push(spacer());
+    }
+
+    // Enhanced Recommendations
+    if (show("enhanced-recommendations") && data.enhancedRecommendations?.length) {
+      children.push(h2("Prioritized Recommendations"));
+      const erRows = truncateArray(data.enhancedRecommendations, LIMITS.maxRecommendations).map(
+        (r) => [
+          r.recommendation,
+          r.priority,
+          `Impact: ${r.impactScore} | Effort: ${r.effortScore} | Confidence: ${r.confidenceScore}`,
+          r.expectedBenefit,
+          r.timeline,
+          r.difficulty,
+        ],
+      );
+      children.push(
+        makeTable(
+          ["Recommendation", "Priority", "Scores", "Expected Benefit", "Timeline", "Difficulty"],
+          erRows,
+          [3000, 1000, 2000, 2000, 1200, 900],
+          true,
+        ),
+      );
+      children.push(spacer());
+    }
+
+    // Strategic Roadmap
+    if (show("strategic-roadmap") && data.strategicRoadmap) {
+      const sr = data.strategicRoadmap;
+      children.push(h2("Strategic Roadmap"));
+      const srRows: string[][] = [];
+      const addSrPhase = (label: string, items: typeof sr.immediate) =>
+        items.forEach((item) =>
+          srRows.push([label, item.action, item.owner ?? "", item.expectedOutcome, item.priority]),
+        );
+      addSrPhase("Immediate (0\u201330 Days)", sr.immediate);
+      addSrPhase("Short-term (30\u201360 Days)", sr.shortTerm);
+      addSrPhase("Medium-term (60\u201390 Days)", sr.mediumTerm);
+      addSrPhase("Strategic (90+ Days)", sr.strategic);
+      if (srRows.length > 0) {
+        children.push(
+          makeTable(
+            ["Timeframe", "Action", "Owner", "Expected Outcome", "Priority"],
+            srRows,
+            [1800, 2800, 1400, 2600, 900],
+            true,
+          ),
+        );
+      }
+      children.push(spacer());
+    }
+
+    // Enhanced Risks
+    if (show("enhanced-risks") && data.enhancedRisks?.length) {
+      children.push(h2("Risk Assessment"));
+      const eriskRows = truncateArray(data.enhancedRisks, 10).map((r) => [
+        r.risk,
+        `${r.riskScore}/100`,
+        r.riskLevel,
+        r.probability,
+        r.impact,
+        r.mitigation,
+      ]);
+      children.push(
+        makeTable(
+          ["Risk", "Score", "Level", "Probability", "Impact", "Mitigation"],
+          eriskRows,
+          [2500, 700, 900, 900, 900, 3100],
+          true,
+        ),
+      );
+      children.push(spacer());
     }
   } else if (source.kind === "message") {
     const msg = sanitizeForExport(source.message);

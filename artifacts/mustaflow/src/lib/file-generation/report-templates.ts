@@ -25,7 +25,16 @@ export type ReportSectionId =
   | "action-plan"
   | "priority-matrix"
   | "improvement-roadmap"
-  | "next-steps";
+  | "next-steps"
+  // Phase 7B-4B intelligence sections
+  | "health-score"
+  | "financial-impact"
+  | "operational-impact"
+  | "customer-impact"
+  | "why-this-matters"
+  | "enhanced-recommendations"
+  | "strategic-roadmap"
+  | "enhanced-risks";
 
 export interface ReportTemplate {
   id: ReportTemplateId;
@@ -38,33 +47,45 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "default",
     label: "Standard Report",
-    description: "Complete report with all available sections.",
+    description: "Complete report with all available sections including AI intelligence.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
+      "why-this-matters",
       "key-findings",
       "kpi-scorecard",
       "trend-analysis",
       "pareto-analysis",
       "root-cause",
       "risks",
+      "enhanced-risks",
+      "financial-impact",
+      "operational-impact",
+      "customer-impact",
       "opportunities",
       "recommendations",
+      "enhanced-recommendations",
       "action-plan",
       "priority-matrix",
       "improvement-roadmap",
+      "strategic-roadmap",
       "next-steps",
     ],
   },
   {
     id: "executive-summary",
     label: "Executive Summary",
-    description: "Concise 1–2 page overview for senior leadership.",
+    description: "Concise 1–2 page overview for senior leadership with AI health scoring.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
+      "why-this-matters",
       "key-findings",
+      "financial-impact",
       "risks",
+      "enhanced-risks",
       "recommendations",
       "next-steps",
     ],
@@ -72,17 +93,23 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "operations-review",
     label: "Operations Review",
-    description: "Operational performance with KPIs, trends, and action plan.",
+    description: "Operational performance with KPIs, trends, and AI impact assessment.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
       "kpi-scorecard",
       "key-findings",
       "trend-analysis",
       "root-cause",
+      "operational-impact",
+      "financial-impact",
       "risks",
+      "enhanced-risks",
       "recommendations",
+      "enhanced-recommendations",
       "action-plan",
+      "strategic-roadmap",
       "improvement-roadmap",
       "next-steps",
     ],
@@ -90,16 +117,21 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "manufacturing-review",
     label: "Manufacturing Performance Review",
-    description: "Shop-floor and production metrics with root cause analysis.",
+    description:
+      "Shop-floor and production metrics with root cause analysis and operational impact.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
       "kpi-scorecard",
       "pareto-analysis",
       "root-cause",
       "key-findings",
+      "operational-impact",
       "risks",
+      "enhanced-risks",
       "recommendations",
+      "enhanced-recommendations",
       "action-plan",
       "improvement-roadmap",
       "next-steps",
@@ -108,21 +140,25 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "kpi-review",
     label: "KPI Performance Review",
-    description: "Focused KPI scorecard with status, trends, and gap analysis.",
+    description: "Focused KPI scorecard with status, trends, gap analysis, and financial impact.",
     sections: [
+      "health-score",
       "executive-summary",
       "kpi-scorecard",
       "trend-analysis",
       "key-findings",
+      "financial-impact",
       "risks",
       "recommendations",
+      "enhanced-recommendations",
       "next-steps",
     ],
   },
   {
     id: "root-cause-investigation",
     label: "Root Cause Investigation",
-    description: "Structured RCA with five whys, fishbone, and corrective actions.",
+    description:
+      "Structured RCA with five whys, fishbone, corrective actions, and enhanced risk scoring.",
     sections: [
       "executive-summary",
       "management-summary",
@@ -130,7 +166,9 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
       "root-cause",
       "pareto-analysis",
       "risks",
+      "enhanced-risks",
       "recommendations",
+      "enhanced-recommendations",
       "action-plan",
       "next-steps",
     ],
@@ -145,7 +183,9 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
       "key-findings",
       "root-cause",
       "risks",
+      "enhanced-risks",
       "action-plan",
+      "enhanced-recommendations",
       "improvement-roadmap",
       "next-steps",
     ],
@@ -153,34 +193,44 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "continuous-improvement",
     label: "Continuous Improvement Report",
-    description: "CI initiative status with opportunities and improvement roadmap.",
+    description:
+      "CI initiative status with opportunities, financial impact, and strategic roadmap.",
     sections: [
+      "health-score",
       "executive-summary",
       "kpi-scorecard",
       "key-findings",
+      "financial-impact",
       "opportunities",
       "recommendations",
+      "enhanced-recommendations",
       "priority-matrix",
       "action-plan",
       "improvement-roadmap",
+      "strategic-roadmap",
       "next-steps",
     ],
   },
   {
     id: "lean-six-sigma",
     label: "Lean Six Sigma Report",
-    description: "DMAIC-aligned report with pareto analysis and statistical findings.",
+    description:
+      "DMAIC-aligned report with pareto analysis, operational impact, and strategic roadmap.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
       "kpi-scorecard",
       "pareto-analysis",
       "root-cause",
       "key-findings",
+      "operational-impact",
       "recommendations",
+      "enhanced-recommendations",
       "action-plan",
       "priority-matrix",
       "improvement-roadmap",
+      "strategic-roadmap",
       "next-steps",
     ],
   },
@@ -189,10 +239,13 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
     label: "Project Status Report",
     description: "Project health, milestones, risks, and next steps.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
+      "why-this-matters",
       "key-findings",
       "risks",
+      "enhanced-risks",
       "action-plan",
       "improvement-roadmap",
       "next-steps",
@@ -201,16 +254,24 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "strategic-planning",
     label: "Strategic Planning Report",
-    description: "Strategic recommendations and long-range planning horizon.",
+    description: "Strategic recommendations, long-range planning, and executive intelligence.",
     sections: [
+      "health-score",
       "executive-summary",
       "management-summary",
+      "why-this-matters",
       "key-findings",
+      "financial-impact",
+      "operational-impact",
+      "customer-impact",
       "opportunities",
       "risks",
+      "enhanced-risks",
       "recommendations",
+      "enhanced-recommendations",
       "priority-matrix",
       "improvement-roadmap",
+      "strategic-roadmap",
       "next-steps",
     ],
   },

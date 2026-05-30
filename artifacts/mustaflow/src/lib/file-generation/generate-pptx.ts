@@ -369,6 +369,136 @@ export async function downloadPptx(
         .slice(0, 5);
       if (highPri.length) addSection("Next Steps", highPri);
     }
+
+    // 11. Health Score
+    if (data.healthScore) {
+      const hs = data.healthScore;
+      addSection("Overall Health Score", [
+        `Score: ${hs.score}/100 \u2014 ${hs.category}`,
+        hs.explanation,
+      ]);
+    }
+
+    // 12. Why This Matters
+    if (data.whyThisMatters) {
+      const wtm = data.whyThisMatters;
+      addSection("Why This Matters", [
+        `Leadership: ${wtm.leadershipRationale}`,
+        `Inaction Risk: ${wtm.consequencesOfInaction}`,
+        `Strategic: ${wtm.strategicImplications}`,
+        ...(wtm.competitiveImplications ? [`Competitive: ${wtm.competitiveImplications}`] : []),
+      ]);
+    }
+
+    // 13. Financial Impact
+    if (data.financialImpact) {
+      const fi = data.financialImpact;
+      const fiItems: string[] = [`Confidence: ${fi.confidence}`];
+      if (fi.costOfIssues) fiItems.push(`Cost of Issues: ${fi.costOfIssues}`);
+      if (fi.savingsOpportunity) fiItems.push(`Savings Opportunity: ${fi.savingsOpportunity}`);
+      if (fi.revenueOpportunity) fiItems.push(`Revenue Opportunity: ${fi.revenueOpportunity}`);
+      if (fi.wasteReduction) fiItems.push(`Waste Reduction: ${fi.wasteReduction}`);
+      if (fi.notes) fiItems.push(`Note: ${fi.notes}`);
+      addSection("Financial Impact Assessment", fiItems);
+    }
+
+    // 14. Operational Impact
+    if (data.operationalImpact) {
+      const oi = data.operationalImpact;
+      const oiItems: string[] = [`Overall Level: ${oi.overallLevel}`];
+      if (oi.summary) oiItems.push(oi.summary);
+      const dims: [string, typeof oi.productivity][] = [
+        ["Productivity", oi.productivity],
+        ["Throughput", oi.throughput],
+        ["Downtime", oi.downtime],
+        ["Labor", oi.labor],
+        ["Quality", oi.quality],
+        ["Capacity", oi.capacity],
+      ];
+      dims
+        .filter(([, d]) => d)
+        .forEach(([name, d]) => oiItems.push(`${name}: ${d!.level} \u2014 ${d!.explanation}`));
+      addSection("Operational Impact", oiItems);
+    }
+
+    // 15. Customer Impact
+    if (data.customerImpact) {
+      const ci = data.customerImpact;
+      const ciItems: string[] = [`Overall Level: ${ci.overallLevel}`];
+      if (ci.summary) ciItems.push(ci.summary);
+      const cdims: [string, typeof ci.experience][] = [
+        ["Experience", ci.experience],
+        ["Service", ci.service],
+        ["Delivery", ci.delivery],
+        ["Product Quality", ci.productQuality],
+        ["Reputation", ci.reputation],
+      ];
+      cdims
+        .filter(([, d]) => d)
+        .forEach(([name, d]) => ciItems.push(`${name}: ${d!.level} \u2014 ${d!.explanation}`));
+      addSection("Customer Impact", ciItems);
+    }
+
+    // 16. Enhanced Recommendations
+    if (data.enhancedRecommendations?.length) {
+      const erHdrs = ["Recommendation", "Priority", "Impact", "Effort", "Benefit", "Timeline"];
+      const erRows = data.enhancedRecommendations
+        .slice(0, LIMITS.maxPptxTableRows)
+        .map((r) => [
+          r.recommendation,
+          r.priority,
+          String(r.impactScore),
+          String(r.effortScore),
+          r.expectedBenefit,
+          r.timeline,
+        ]);
+      addTableSection(
+        "Prioritized Recommendations",
+        erHdrs,
+        erRows,
+        [4.0, 1.5, 1.2, 1.2, 3.0, 1.5],
+      );
+    }
+
+    // 17. Strategic Roadmap
+    if (data.strategicRoadmap) {
+      const sr = data.strategicRoadmap;
+      const srHdrs = ["Timeframe", "Action", "Owner", "Outcome", "Priority"];
+      const srRows: string[][] = [];
+      const addSrPhase = (label: string, items: typeof sr.immediate) =>
+        items
+          .slice(0, 3)
+          .forEach((item) =>
+            srRows.push([
+              label,
+              item.action,
+              item.owner ?? "\u2014",
+              item.expectedOutcome,
+              item.priority,
+            ]),
+          );
+      addSrPhase("0\u201330 Days", sr.immediate);
+      addSrPhase("30\u201360 Days", sr.shortTerm);
+      addSrPhase("60\u201390 Days", sr.mediumTerm);
+      addSrPhase("90+ Days", sr.strategic);
+      if (srRows.length > 0) {
+        addTableSection(
+          "Strategic Roadmap",
+          srHdrs,
+          srRows.slice(0, LIMITS.maxPptxTableRows),
+          [2.0, 3.5, 1.8, 3.5, 1.5],
+        );
+      }
+    }
+
+    // 18. Enhanced Risk Assessment
+    if (data.enhancedRisks?.length) {
+      const eriskHdrs = ["Risk", "Score", "Level", "Probability", "Impact"];
+      const eriskRows = data.enhancedRisks
+        .slice(0, LIMITS.maxPptxTableRows)
+        .map((r) => [r.risk, String(r.riskScore), r.riskLevel, r.probability, r.impact]);
+      addTableSection("Risk Assessment", eriskHdrs, eriskRows, [5.0, 1.2, 1.5, 1.8, 1.8]);
+    }
   } else if (source.kind === "message") {
     const msg = sanitizeForExport(source.message);
     const reportTitle = sanitizeTitle(source.title ?? "Ora Response");

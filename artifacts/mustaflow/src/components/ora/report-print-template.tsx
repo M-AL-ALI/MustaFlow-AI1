@@ -316,6 +316,167 @@ function buildDatasetHtml(
     parts.push(sec(h2("Next Steps") + ul(data.nextSteps)));
   }
 
+  // Health Score
+  if (show("health-score") && data.healthScore) {
+    const hs = data.healthScore;
+    parts.push(
+      sec(
+        h2("Overall Health Score") +
+          simpleTable(
+            ["Category", "Detail"],
+            [
+              ["Score", `${hs.score}/100`],
+              ["Rating", hs.category],
+              ["Assessment", hs.explanation],
+            ],
+          ),
+      ),
+    );
+  }
+
+  // Why This Matters
+  if (show("why-this-matters") && data.whyThisMatters) {
+    const wtm = data.whyThisMatters;
+    const wtmRows: string[][] = [
+      ["Leadership Rationale", wtm.leadershipRationale],
+      ["Consequences of Inaction", wtm.consequencesOfInaction],
+      ["Strategic Implications", wtm.strategicImplications],
+    ];
+    if (wtm.competitiveImplications) {
+      wtmRows.push(["Competitive Implications", wtm.competitiveImplications]);
+    }
+    parts.push(sec(h2("Why This Matters") + simpleTable(["Dimension", "Detail"], wtmRows)));
+  }
+
+  // Financial Impact
+  if (show("financial-impact") && data.financialImpact) {
+    const fi = data.financialImpact;
+    const fiRows: string[][] = [["Confidence Level", fi.confidence]];
+    if (fi.costOfIssues) fiRows.push(["Cost of Current Issues", fi.costOfIssues]);
+    if (fi.savingsOpportunity) fiRows.push(["Savings Opportunity", fi.savingsOpportunity]);
+    if (fi.revenueOpportunity) fiRows.push(["Revenue Opportunity", fi.revenueOpportunity]);
+    if (fi.wasteReduction) fiRows.push(["Waste Reduction", fi.wasteReduction]);
+    if (fi.notes) fiRows.push(["Notes", fi.notes]);
+    parts.push(
+      sec(h2("Financial Impact Assessment") + simpleTable(["Category", "Estimate"], fiRows)),
+    );
+  }
+
+  // Operational Impact
+  if (show("operational-impact") && data.operationalImpact) {
+    const oi = data.operationalImpact;
+    const oiRows: string[][] = [["Overall Level", oi.overallLevel]];
+    if (oi.summary) oiRows.push(["Summary", oi.summary]);
+    const oiDims: [string, typeof oi.productivity][] = [
+      ["Productivity", oi.productivity],
+      ["Throughput", oi.throughput],
+      ["Downtime", oi.downtime],
+      ["Labor", oi.labor],
+      ["Quality", oi.quality],
+      ["Capacity", oi.capacity],
+    ];
+    oiDims
+      .filter(([, d]) => d !== undefined)
+      .forEach(([name, d]) => oiRows.push([name, `${d!.level} \u2014 ${d!.explanation}`]));
+    parts.push(
+      sec(h2("Operational Impact Assessment") + simpleTable(["Dimension", "Assessment"], oiRows)),
+    );
+  }
+
+  // Customer Impact
+  if (show("customer-impact") && data.customerImpact) {
+    const ci = data.customerImpact;
+    const ciRows: string[][] = [["Overall Level", ci.overallLevel]];
+    if (ci.summary) ciRows.push(["Summary", ci.summary]);
+    const ciDims: [string, typeof ci.experience][] = [
+      ["Customer Experience", ci.experience],
+      ["Service", ci.service],
+      ["Delivery", ci.delivery],
+      ["Product Quality", ci.productQuality],
+      ["Reputation", ci.reputation],
+    ];
+    ciDims
+      .filter(([, d]) => d !== undefined)
+      .forEach(([name, d]) => ciRows.push([name, `${d!.level} \u2014 ${d!.explanation}`]));
+    parts.push(
+      sec(h2("Customer Impact Assessment") + simpleTable(["Dimension", "Assessment"], ciRows)),
+    );
+  }
+
+  // Enhanced Recommendations
+  if (show("enhanced-recommendations") && data.enhancedRecommendations?.length) {
+    const erRows = truncateArray(data.enhancedRecommendations, LIMITS.maxRecommendations).map(
+      (r) => [
+        r.recommendation,
+        r.priority,
+        `${r.impactScore}`,
+        `${r.effortScore}`,
+        `${r.confidenceScore}`,
+        r.expectedBenefit,
+        r.timeline,
+        r.difficulty,
+      ],
+    );
+    parts.push(
+      sec(
+        h2("Prioritized Recommendations") +
+          simpleTable(
+            [
+              "Recommendation",
+              "Priority",
+              "Impact",
+              "Effort",
+              "Conf.",
+              "Expected Benefit",
+              "Timeline",
+              "Difficulty",
+            ],
+            erRows,
+          ),
+      ),
+    );
+  }
+
+  // Strategic Roadmap
+  if (show("strategic-roadmap") && data.strategicRoadmap) {
+    const sr = data.strategicRoadmap;
+    const srRows: string[][] = [];
+    const addSrPhase = (label: string, items: typeof sr.immediate) =>
+      items.forEach((item) =>
+        srRows.push([label, item.action, item.owner ?? "", item.expectedOutcome, item.priority]),
+      );
+    addSrPhase("Immediate (0\u201330 Days)", sr.immediate);
+    addSrPhase("Short-term (30\u201360 Days)", sr.shortTerm);
+    addSrPhase("Medium-term (60\u201390 Days)", sr.mediumTerm);
+    addSrPhase("Strategic (90+ Days)", sr.strategic);
+    if (srRows.length > 0) {
+      parts.push(
+        sec(
+          h2("Strategic Roadmap") +
+            simpleTable(["Timeframe", "Action", "Owner", "Expected Outcome", "Priority"], srRows),
+        ),
+      );
+    }
+  }
+
+  // Enhanced Risks
+  if (show("enhanced-risks") && data.enhancedRisks?.length) {
+    const eriskRows = truncateArray(data.enhancedRisks, 10).map((r) => [
+      r.risk,
+      `${r.riskScore}/100`,
+      r.riskLevel,
+      r.probability,
+      r.impact,
+      r.mitigation,
+    ]);
+    parts.push(
+      sec(
+        h2("Risk Assessment") +
+          simpleTable(["Risk", "Score", "Level", "Probability", "Impact", "Mitigation"], eriskRows),
+      ),
+    );
+  }
+
   parts.push("</div>");
   return parts.join("\n");
 }
