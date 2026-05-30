@@ -1,0 +1,74 @@
+Thank you for the corrected Phase 8B-1 validation report.
+
+This report is much better, and the final implementation commit is now clear:
+
+* Phase 8B-1 commit: f202548c28af6175fedf146da782b685c2257ee3
+
+However, I cannot officially accept Phase 8B-1 yet because the report identifies two remaining issues that must be fixed first.
+
+Please complete these two fixes before final acceptance:
+
+1. Add migrate-vault-embeddings to migrate-all-outstanding.ts
+
+Issue:
+The embedding migration is registered in startup migrations, but it is not included in scripts/src/migrate-all-outstanding.ts.
+
+Why this matters:
+A fresh database or one-shot migration workflow must create the vault_embeddings table without requiring a separate manual migration command.
+
+Required fix:
+Add the Phase 8B-1 embedding migration to migrate-all-outstanding.ts.
+
+Then rerun and confirm:
+
+* migration succeeds
+* fresh DB path includes vault_embeddings
+* pgvector extension exists
+* vault_embeddings.embedding is vector(1536)
+* all embedding indexes are created
+
+2. Fix the dead failed embedding status
+
+Issue:
+The UI and type system include a failed embedding status, but getEmbeddingStatus() never returns failed.
+
+Current behavior:
+If reindexing fails, the API returns an error, but the status endpoint later shows not_indexed instead of failed.
+
+Required fix:
+Choose one of the following approaches:
+
+Preferred:
+Implement real failed status tracking.
+
+For example:
+
+* store a safe failure state per entry
+* record last failed attempt time
+* record safe failure category only, not raw sensitive content
+* make GET /api/vault/:id/embedding-status return failed when the last indexing attempt failed
+
+Or, if you decide not to support failed status in Phase 8B-1:
+
+* remove failed from the status type
+* remove the failed badge branch from the UI
+* remove failed from the validation claims
+
+Do not leave dead UI/type code.
+
+After both fixes are complete, please provide a final short validation report with:
+
+1. Final commit hash after the fixes
+2. Files changed by the fixes
+3. Confirmation migrate-all-outstanding.ts includes the embedding migration
+4. Confirmation the failed status is either truly implemented or fully removed
+5. Format result
+6. Typecheck result
+7. Lint result
+8. Codegen drift result
+9. API server status
+10. Frontend status
+11. Confirmation no Phase 8B-2 work was started
+
+Important:
+Do not start Phase 8B-2 semantic search, RAG, AI memory, knowledge-aware reporting, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until Phase 8B-1 is officially accepted.

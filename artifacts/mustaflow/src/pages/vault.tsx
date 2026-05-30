@@ -77,7 +77,7 @@ interface VaultVersion {
 
 interface EmbeddingStatusResult {
   entryId: number;
-  status: "not_indexed" | "indexed" | "out_of_date" | "failed";
+  status: "not_indexed" | "indexed" | "out_of_date";
   chunkCount: number;
   embeddingModel: string | null;
   sourceVersion: number | null;
@@ -556,7 +556,6 @@ function EntryViewer({
                 className={cn("ml-1 text-[10px] font-medium", {
                   "text-green-500": embeddingStatus.status === "indexed",
                   "text-amber-500": embeddingStatus.status === "out_of_date",
-                  "text-destructive": embeddingStatus.status === "failed",
                   "text-muted-foreground/60": embeddingStatus.status === "not_indexed",
                 })}
               >
@@ -564,9 +563,7 @@ function EntryViewer({
                   ? "Indexed"
                   : embeddingStatus.status === "out_of_date"
                     ? "Out of Date"
-                    : embeddingStatus.status === "failed"
-                      ? "Failed"
-                      : "Not Indexed"}
+                    : "Not Indexed"}
               </span>
             )}
           </button>
@@ -585,7 +582,6 @@ function EntryViewer({
                         className={cn("font-medium", {
                           "text-green-500": embeddingStatus.status === "indexed",
                           "text-amber-500": embeddingStatus.status === "out_of_date",
-                          "text-destructive": embeddingStatus.status === "failed",
                           "text-foreground": embeddingStatus.status === "not_indexed",
                         })}
                       >
@@ -593,9 +589,7 @@ function EntryViewer({
                           ? "Indexed"
                           : embeddingStatus.status === "out_of_date"
                             ? "Out of Date"
-                            : embeddingStatus.status === "failed"
-                              ? "Failed"
-                              : "Not Indexed"}
+                            : "Not Indexed"}
                       </p>
                     </div>
                     <div>

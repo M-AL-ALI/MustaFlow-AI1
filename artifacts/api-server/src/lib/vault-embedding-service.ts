@@ -111,7 +111,7 @@ function hashChunk(text: string): string {
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
-export type EmbeddingStatus = "not_indexed" | "indexed" | "out_of_date" | "failed";
+export type EmbeddingStatus = "not_indexed" | "indexed" | "out_of_date";
 
 export interface VaultEmbeddingStatusResult {
   entryId: number;
@@ -187,7 +187,7 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
     chunksUpserted: 0,
     chunksSkipped: 0,
     chunksDeleted: 0,
-    status: "failed",
+    status: "not_indexed",
   };
 
   // Load entry with ownership check
