@@ -671,10 +671,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       {/* Backdrop on mobile — always mounted, fades in/out */}
       <div
         className={cn(
-          "fixed inset-0 z-40 bg-background/50 backdrop-blur-sm sm:hidden transition-opacity duration-300",
-          open ? "opacity-100" : "opacity-0 pointer-events-none",
+          "fixed inset-0 z-40 bg-black/50 sm:hidden",
+          "transition-opacity ease-[cubic-bezier(0.32,0.72,0,1)]",
+          open ? "opacity-100 duration-[350ms]" : "opacity-0 duration-200 pointer-events-none",
         )}
         onClick={() => setOpen(false)}
+        aria-hidden
       />
 
       {/* Drawer — always mounted; slides in from right (desktop) or up (mobile) */}
@@ -686,7 +688,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           "rounded-t-3xl sm:rounded-t-none border-t border-x sm:border-x-0",
           "max-h-[85dvh] sm:max-h-screen sm:h-full",
           "border",
-          !isResizing && "transition-transform duration-300 ease-in-out",
+          !isResizing && [
+            "transition-transform ease-[cubic-bezier(0.32,0.72,0,1)]",
+            open ? "duration-[350ms]" : "duration-[250ms]",
+          ],
           open
             ? "translate-y-0 sm:translate-x-0"
             : "translate-y-full sm:translate-y-0 sm:translate-x-full pointer-events-none",
