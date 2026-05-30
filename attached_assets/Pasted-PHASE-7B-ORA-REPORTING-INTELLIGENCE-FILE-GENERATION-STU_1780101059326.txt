@@ -1,0 +1,241 @@
+PHASE 7B — ORA REPORTING INTELLIGENCE & FILE GENERATION STUDIO
+
+Status: Planning Approved
+Implementation: Do NOT start coding yet. First return a detailed implementation plan.
+
+PRIMARY GOAL
+
+Transform Ora from a chatbot that gives answers into an AI analyst that creates professional reports, presentations, spreadsheets, executive summaries, action plans, and downloadable business documents.
+
+==================================================
+PART 1 — FILE GENERATION STUDIO
+
+Supported outputs:
+
+* DOCX (Word)
+* PDF
+* XLSX (Excel)
+* PPTX (PowerPoint)
+* CSV
+* JSON
+* Markdown
+* TXT
+
+Examples:
+
+Dataset Analysis:
+
+* Excel workbook
+* Executive PDF report
+* PowerPoint presentation
+* Action-plan spreadsheet
+
+Document Analysis:
+
+* Executive summary PDF
+* Word report
+* PowerPoint briefing
+
+Image Analysis:
+
+* Findings report
+* Corrective-action report
+* Inspection report
+
+Ora Conversations:
+
+* Export full conversation
+* Export selected messages
+* Export AI-generated report
+
+==================================================
+PART 2 — REPORTING INTELLIGENCE
+
+Ora should become significantly stronger at business reporting.
+
+Add structured reporting modes:
+
+1. Executive Summary
+2. Operations Review
+3. Manufacturing Review
+4. KPI Review
+5. Root Cause Investigation
+6. Corrective Action Report
+7. Continuous Improvement Report
+8. Lean/Six Sigma Report
+9. Project Status Report
+10. Strategic Planning Report
+
+For each report:
+
+Generate:
+
+* Title
+* Executive Summary
+* Key Findings
+* Opportunities
+* Risks
+* Recommendations
+* Action Plan
+* Next Steps
+
+==================================================
+PART 3 — ADVANCED DATASET REPORTING
+
+Enhance Phase 3 outputs.
+
+Current:
+
+* KPI analysis
+* Root cause
+* Pareto
+* Fishbone
+* Recommendations
+
+New:
+
+* Executive narrative
+* Statistical observations
+* Trend interpretation
+* Management summary
+* Department scorecard
+* Risk scoring
+* Opportunity ranking
+* Priority matrix
+* Improvement roadmap
+
+Output should feel like:
+
+McKinsey
+BCG
+Bain
+Fortune-500 operations review
+
+—not a simple chatbot response.
+
+==================================================
+PART 4 — POWERPOINT GENERATION
+
+Generate professional slide decks.
+
+Default structure:
+
+Slide 1
+
+* Title
+
+Slide 2
+
+* Executive Summary
+
+Slide 3
+
+* Key Findings
+
+Slide 4
+
+* KPI Performance
+
+Slide 5
+
+* Root Cause
+
+Slide 6
+
+* Risks
+
+Slide 7
+
+* Recommendations
+
+Slide 8
+
+* Action Plan
+
+Slide 9
+
+* Timeline
+
+Slide 10
+
+* Next Steps
+
+==================================================
+PART 5 — EXCEL GENERATION
+
+Multi-sheet workbook.
+
+Suggested tabs:
+
+* Summary
+* KPI Results
+* Findings
+* Trends
+* Root Cause
+* Action Plan
+* Recommendations
+* Risk Matrix
+
+When allowed:
+
+* Raw Dataset
+
+==================================================
+PART 6 — KNOWLEDGE IMPROVEMENT
+
+Without implementing Knowledge Vault yet:
+
+Improve Ora’s reporting intelligence.
+
+Research and propose:
+
+* stronger reporting prompts
+* stronger analysis prompts
+* better executive language
+* industry-specific reporting styles
+* manufacturing analysis improvements
+* operations management analysis improvements
+* quality and food manufacturing reporting improvements
+
+Goal:
+
+Ora should generate reports similar to a senior consultant, plant manager, operations director, quality manager, or business analyst.
+
+==================================================
+PART 7 — SECURITY
+
+Generated files must never contain:
+
+* fileRef
+* imageRef
+* datasetRef
+* session tokens
+* handoff tokens
+* internal IDs
+* Builder secrets
+* API keys
+* hidden metadata
+
+No generated content logging.
+
+No permanent storage unless separately approved.
+
+==================================================
+PART 8 — VALIDATION REQUIRED
+
+Before implementation approval provide:
+
+* architecture plan
+* package recommendations
+* DOCX strategy
+* PDF strategy
+* XLSX strategy
+* PPTX strategy
+* client/server split
+* privacy model
+* rate limits
+* export size limits
+* validation plan
+* rollback plan
+
+Do not begin implementation until architecture plan is reviewed and approved.
