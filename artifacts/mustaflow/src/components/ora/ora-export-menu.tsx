@@ -7,6 +7,7 @@ import {
   FileText,
   Loader2,
   Presentation,
+  Printer,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -145,6 +146,14 @@ export function OraExportMenu({ source, disabled, variant = "actions" }: OraExpo
             <DropdownMenuItem onSelect={() => openDialog("pptx")} disabled={disabled}>
               <Presentation className="h-3.5 w-3.5 mr-2 shrink-0" />
               Presentation
+            </DropdownMenuItem>
+          )}
+
+          {/* PDF Report — opens template picker dialog, then browser print */}
+          {(isMessage ? isAssistant : true) && (
+            <DropdownMenuItem onSelect={() => openDialog("pdf")} disabled={disabled}>
+              <Printer className="h-3.5 w-3.5 mr-2 shrink-0" />
+              PDF Report
             </DropdownMenuItem>
           )}
 

@@ -32,12 +32,13 @@ import type { ReportMetadata } from "@/lib/file-generation/report-metadata";
 import { downloadDocx } from "@/lib/file-generation/generate-docx";
 import { downloadXlsx } from "@/lib/file-generation/generate-xlsx";
 import { downloadPptx } from "@/lib/file-generation/generate-pptx";
+import { downloadPdf } from "@/lib/file-generation/generate-pdf";
 
 export type ExportSource =
   | { kind: "message"; message: OraMessage }
   | { kind: "conversation"; messages: OraMessage[] };
 
-export type ExportDialogType = "docx" | "xlsx" | "pptx";
+export type ExportDialogType = "docx" | "xlsx" | "pptx" | "pdf";
 
 interface ReportExportDialogProps {
   open: boolean;
@@ -66,6 +67,7 @@ const EXPORT_TYPE_LABEL: Record<ExportDialogType, string> = {
   docx: "Word Report",
   xlsx: "Excel Workbook",
   pptx: "Presentation",
+  pdf: "PDF Report",
 };
 
 const LS_META_KEY = "mf_report_meta_v1";
@@ -205,6 +207,29 @@ export function ReportExportDialog({
           );
         } else if (messages) {
           await downloadPptx(
+            { kind: "conversation", messages, title: reportTitle },
+            basename,
+            meta,
+            selectedTemplate,
+          );
+        }
+      } else if (exportType === "pdf") {
+        if (hasDataset && message?.datasetResult) {
+          downloadPdf(
+            { kind: "dataset", data: message.datasetResult, title: reportTitle },
+            basename,
+            meta,
+            selectedTemplate,
+          );
+        } else if (message) {
+          downloadPdf(
+            { kind: "message", message, title: reportTitle },
+            basename,
+            meta,
+            selectedTemplate,
+          );
+        } else if (messages) {
+          downloadPdf(
             { kind: "conversation", messages, title: reportTitle },
             basename,
             meta,
