@@ -16,6 +16,7 @@ import {
   VolumeX,
   Trash2,
   Upload,
+  MoreHorizontal,
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
@@ -173,6 +174,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showVoicePicker, setShowVoicePicker] = useState(false);
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [handoffDismissed, setHandoffDismissed] = useState(false);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
@@ -310,7 +313,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
   const atImageLimit = (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
-  const atAllLimits = atFileLimit && atImageLimit;
+  const atAllLimits = atFileLimit || atImageLimit;
 
   const atomState: AtomState =
     oraStatus === "idle"
@@ -401,6 +404,17 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showVoicePicker]);
+
+  useEffect(() => {
+    if (!showOverflowMenu) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (overflowMenuRef.current && !overflowMenuRef.current.contains(e.target as Node)) {
+        setShowOverflowMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showOverflowMenu]);
 
   useEffect(() => {
     if (!open) return;
@@ -670,7 +684,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           "bottom-0 right-0 w-full",
           "sm:top-0 sm:rounded-tl-3xl sm:rounded-bl-3xl sm:border-y sm:border-l sm:border-r-0",
           "rounded-t-3xl sm:rounded-t-none border-t border-x sm:border-x-0",
-          "max-h-[80vh] sm:max-h-screen sm:h-full",
+          "max-h-[85dvh] sm:max-h-screen sm:h-full",
           "border",
           !isResizing && "transition-transform duration-300 ease-in-out",
           open
@@ -758,9 +772,9 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               </button>
             )}
 
-            {/* Voice picker — shown when TTS is available */}
+            {/* Voice picker — desktop only (hidden on mobile to save header space) */}
             {voice.isSpeechSynthesisSupported && voice.availableVoices.length > 0 && (
-              <div className="relative" ref={voicePickerRef}>
+              <div className="relative hidden sm:block" ref={voicePickerRef}>
                 <button
                   type="button"
                   onClick={() => setShowVoicePicker((v) => !v)}
@@ -805,35 +819,73 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               </div>
             )}
 
+            {/* Export + trash — inline on desktop, collapsed into ⋯ on mobile */}
             {messages.length > 0 && (
               <>
-                <OraExportMenu
-                  source={{ kind: "conversation", messages }}
-                  disabled={isLoading}
-                  variant="header"
-                />
-                <button
-                  type="button"
-                  onClick={() => void clearConversation()}
-                  disabled={isLoading}
-                  title="Clear conversation"
-                  className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                {/* Desktop: show inline */}
+                <div className="hidden sm:flex items-center gap-2">
+                  <OraExportMenu
+                    source={{ kind: "conversation", messages }}
+                    disabled={isLoading}
+                    variant="header"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void clearConversation()}
+                    disabled={isLoading}
+                    title="Clear conversation"
+                    className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Mobile: ⋯ overflow menu */}
+                <div className="relative sm:hidden" ref={overflowMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowOverflowMenu((v) => !v)}
+                    title="More options"
+                    className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {showOverflowMenu && (
+                    <div className="absolute right-0 top-full mt-1 z-50 bg-popover border border-border rounded-xl shadow-lg py-1 min-w-[140px]">
+                      <OraExportMenu
+                        source={{ kind: "conversation", messages }}
+                        disabled={isLoading}
+                        variant="header"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void clearConversation();
+                          setShowOverflowMenu(false);
+                        }}
+                        disabled={isLoading}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Clear conversation
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
-            {/* Language selector */}
+            {/* Language selector — icon-only on mobile, label on desktop */}
             <div className="relative" ref={langMenuRef}>
               <button
                 type="button"
                 onClick={() => setShowLangMenu((v) => !v)}
                 className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2 py-1 hover:bg-muted/40 transition-colors"
+                title={currentLangLabel}
               >
                 <Globe className="h-3 w-3" />
-                {currentLangLabel}
-                <ChevronDown className="h-2.5 w-2.5" />
+                <span className="hidden sm:inline">{currentLangLabel}</span>
+                <ChevronDown className="hidden sm:inline h-2.5 w-2.5" />
               </button>
               {showLangMenu && (
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-popover border border-border rounded-xl shadow-lg py-1">
@@ -872,7 +924,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           <div
             ref={feedRef}
             onScroll={handleFeedScroll}
-            className="h-full overflow-y-auto px-4 py-4 space-y-5 scroll-smooth"
+            className="h-full overflow-y-auto overscroll-contain px-4 py-4 space-y-5 scroll-smooth"
           >
             {messages.length === 0 && !isLoading && (
               <div className="text-center py-8">

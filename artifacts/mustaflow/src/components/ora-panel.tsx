@@ -291,7 +291,7 @@ export function OraPanel({ chat }: OraPanelProps) {
 
   const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
   const atImageLimit = (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
-  const atAllLimits = atFileLimit && atImageLimit;
+  const atAllLimits = atFileLimit || atImageLimit;
 
   const atomState: AtomState =
     oraStatus === "idle"
@@ -569,7 +569,7 @@ export function OraPanel({ chat }: OraPanelProps) {
 
   return (
     <div
-      className="relative rounded-2xl border border-border/60 bg-card shadow-lg overflow-hidden transition-all duration-500"
+      className="relative rounded-2xl border border-border/60 bg-card shadow-lg flex flex-col max-h-[70dvh] transition-all duration-500"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -719,171 +719,167 @@ export function OraPanel({ chat }: OraPanelProps) {
       )}
 
       {/* Message feed */}
-      {hasMessages && (
-        <div className="relative">
-          <div
-            ref={feedRef}
-            onScroll={handleFeedScroll}
-            className="px-4 py-4 max-h-80 overflow-y-auto space-y-5 scroll-smooth"
-          >
-            {messages.map((msg, i) => {
-              const isLastMessage = i === messages.length - 1;
-              const prevUserMsg =
-                i > 0
-                  ? messages
-                      .slice(0, i)
-                      .reverse()
-                      .find((m) => m.role === "user")
-                  : null;
-              const showHandoffCard =
-                msg.role === "assistant" &&
-                isLastMessage &&
-                !isLoading &&
-                prevUserMsg != null &&
-                hasBuildIntent(prevUserMsg.content, msg.content) &&
-                !handoffDismissed &&
-                !voiceConvActive;
-              const showSuggestions =
-                msg.role === "assistant" &&
-                isLastMessage &&
-                !isLoading &&
-                Array.isArray(msg.suggestions) &&
-                msg.suggestions.length > 0;
+      <div className={cn("relative flex-1 min-h-0 overflow-hidden", !hasMessages && "hidden")}>
+        <div
+          ref={feedRef}
+          onScroll={handleFeedScroll}
+          className="h-full px-4 py-4 overflow-y-auto overscroll-contain space-y-5 scroll-smooth"
+        >
+          {messages.map((msg, i) => {
+            const isLastMessage = i === messages.length - 1;
+            const prevUserMsg =
+              i > 0
+                ? messages
+                    .slice(0, i)
+                    .reverse()
+                    .find((m) => m.role === "user")
+                : null;
+            const showHandoffCard =
+              msg.role === "assistant" &&
+              isLastMessage &&
+              !isLoading &&
+              prevUserMsg != null &&
+              hasBuildIntent(prevUserMsg.content, msg.content) &&
+              !handoffDismissed &&
+              !voiceConvActive;
+            const showSuggestions =
+              msg.role === "assistant" &&
+              isLastMessage &&
+              !isLoading &&
+              Array.isArray(msg.suggestions) &&
+              msg.suggestions.length > 0;
 
-              const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
+            const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
 
-              return (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex group",
-                    msg.role === "user" ? "justify-end" : "justify-start gap-2.5",
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "flex group",
+                  msg.role === "user" ? "justify-end" : "justify-start gap-2.5",
+                )}
+              >
+                {msg.role === "assistant" && (
+                  <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
+                )}
+                <div className="max-w-[85%]">
+                  {msg.role === "user" ? (
+                    <div
+                      dir="auto"
+                      className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                    >
+                      {msg.content}
+                    </div>
+                  ) : msg.datasetResult ? (
+                    <DatasetResultCard result={msg.datasetResult} />
+                  ) : (
+                    <div
+                      dir="auto"
+                      className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
+                    >
+                      {msg.content}
+                    </div>
                   )}
-                >
-                  {msg.role === "assistant" && (
-                    <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
+
+                  {msg.editedFrom && (
+                    <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
+                      Edited from earlier message
+                    </p>
                   )}
-                  <div className="max-w-[85%]">
-                    {msg.role === "user" ? (
-                      <div
-                        dir="auto"
-                        className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed"
-                      >
-                        {msg.content}
-                      </div>
-                    ) : msg.datasetResult ? (
-                      <DatasetResultCard result={msg.datasetResult} />
-                    ) : (
-                      <div
-                        dir="auto"
-                        className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
-                      >
-                        {msg.content}
-                      </div>
-                    )}
 
-                    {msg.editedFrom && (
-                      <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
-                        Edited from earlier message
-                      </p>
-                    )}
+                  <OraMessageActions
+                    message={msg}
+                    isLatestAssistant={isLatestAssistant}
+                    onEdit={msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined}
+                    onRegenerate={
+                      isLatestAssistant
+                        ? (() => {
+                            const prevUser = messages
+                              .slice(0, i)
+                              .reverse()
+                              .find((m) => m.role === "user");
+                            return prevUser
+                              ? () => void sendMessage(prevUser.content, { truncateTo: i })
+                              : undefined;
+                          })()
+                        : undefined
+                    }
+                    onContinueInBuilder={
+                      isLatestAssistant && msg.handoffCta
+                        ? () => void handleContinueInBuilder()
+                        : undefined
+                    }
+                    onReadAloud={
+                      msg.role === "assistant" && voice.isSpeechSynthesisSupported
+                        ? (text) => voice.speakText(text, language)
+                        : undefined
+                    }
+                    isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
+                    hasAttachment={msg.hadAttachment ?? false}
+                  />
 
-                    <OraMessageActions
-                      message={msg}
-                      isLatestAssistant={isLatestAssistant}
-                      onEdit={
-                        msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined
-                      }
-                      onRegenerate={
-                        isLatestAssistant
-                          ? (() => {
-                              const prevUser = messages
-                                .slice(0, i)
-                                .reverse()
-                                .find((m) => m.role === "user");
-                              return prevUser
-                                ? () => void sendMessage(prevUser.content, { truncateTo: i })
-                                : undefined;
-                            })()
-                          : undefined
-                      }
-                      onContinueInBuilder={
-                        isLatestAssistant && msg.handoffCta
-                          ? () => void handleContinueInBuilder()
-                          : undefined
-                      }
-                      onReadAloud={
-                        msg.role === "assistant" && voice.isSpeechSynthesisSupported
-                          ? (text) => voice.speakText(text, language)
-                          : undefined
-                      }
-                      isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
-                      hasAttachment={msg.hadAttachment ?? false}
+                  {showHandoffCard && (
+                    <OraHandoffCard
+                      messages={messages}
+                      onDismiss={() => setHandoffDismissed(true)}
                     />
-
-                    {showHandoffCard && (
-                      <OraHandoffCard
-                        messages={messages}
-                        onDismiss={() => setHandoffDismissed(true)}
-                      />
-                    )}
-                    {showSuggestions && (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {msg.suggestions!.map((suggestion, si) => (
-                          <button
-                            key={si}
-                            type="button"
-                            onClick={() => handleChip(suggestion)}
-                            disabled={isLoading || atLimit}
-                            className="text-xs px-3 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Loading state */}
-            {isLoading && (
-              <div className="flex items-start gap-2.5">
-                <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" />
-                <div className="flex flex-col gap-1 pt-0.5">
-                  <div className="flex items-center gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
-                        style={{ animationDelay: `${i * 200}ms` }}
-                      />
-                    ))}
-                  </div>
-                  {oraStatus !== "idle" && (
-                    <span className="text-[11px] text-muted-foreground">
-                      Ora · {STATUS_LABELS[oraStatus]}
-                    </span>
+                  )}
+                  {showSuggestions && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {msg.suggestions!.map((suggestion, si) => (
+                        <button
+                          key={si}
+                          type="button"
+                          onClick={() => handleChip(suggestion)}
+                          disabled={isLoading || atLimit}
+                          className="text-xs px-3 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
-            )}
-          </div>
-          {showJumpToLatest && (
-            <div className="absolute bottom-2 right-3 z-10">
-              <button
-                type="button"
-                onClick={jumpToLatest}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-card border border-border/60 text-[11px] text-muted-foreground hover:text-foreground shadow-sm hover:shadow-md transition-all"
-              >
-                <ChevronDown className="h-3 w-3" />
-                Latest
-              </button>
+            );
+          })}
+
+          {/* Loading state */}
+          {isLoading && (
+            <div className="flex items-start gap-2.5">
+              <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1 pt-0.5">
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
+                      style={{ animationDelay: `${i * 200}ms` }}
+                    />
+                  ))}
+                </div>
+                {oraStatus !== "idle" && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Ora · {STATUS_LABELS[oraStatus]}
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
-      )}
+        {showJumpToLatest && (
+          <div className="absolute bottom-2 right-3 z-10">
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-card border border-border/60 text-[11px] text-muted-foreground hover:text-foreground shadow-sm hover:shadow-md transition-all"
+            >
+              <ChevronDown className="h-3 w-3" />
+              Latest
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Error */}
       {error && (
@@ -918,7 +914,7 @@ export function OraPanel({ chat }: OraPanelProps) {
       )}
 
       {/* Composer */}
-      <div className="border-t border-border/40 px-4 py-3">
+      <div className="border-t border-border/40 px-4 py-3 shrink-0">
         {atLimit ? (
           <div className="text-center py-2">
             <p className="text-xs text-muted-foreground">
