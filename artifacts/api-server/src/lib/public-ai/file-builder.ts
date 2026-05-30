@@ -414,7 +414,14 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
 
   return new Promise((resolve, reject) => {
     const MARGIN = 60;
-    const doc = new PDFDocument({ margin: MARGIN, size: "A4", autoFirstPage: true });
+    // bufferPages:true lets us stamp page numbers after all content is written
+    // via switchToPage(), avoiding the recursive pageAdded→text→addPage loop.
+    const doc = new PDFDocument({
+      margin: MARGIN,
+      size: "A4",
+      autoFirstPage: true,
+      bufferPages: true,
+    });
     const pass = new PassThrough();
     const chunks: Buffer[] = [];
 
@@ -425,26 +432,6 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
 
     const PAGE_W = doc.page.width;
     const CONTENT_W = PAGE_W - MARGIN * 2;
-
-    // Page number helper
-    let pageNum = 1;
-    const addPageNumber = () => {
-      doc
-        .save()
-        .font("Helvetica")
-        .fontSize(9)
-        .fillColor("#9CA3AF")
-        .text(`Page ${pageNum}`, MARGIN, doc.page.height - 40, {
-          width: CONTENT_W,
-          align: "center",
-        })
-        .restore();
-    };
-
-    doc.on("pageAdded", () => {
-      pageNum++;
-      addPageNumber();
-    });
 
     // Title block
     doc
@@ -555,8 +542,23 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
       doc.moveDown(0.4);
     }
 
-    // First page number
-    addPageNumber();
+    // Stamp page numbers on every page now that all content is buffered
+    const range = doc.bufferedPageRange();
+    const totalPages = range.count;
+    for (let i = 0; i < totalPages; i++) {
+      doc.switchToPage(range.start + i);
+      doc
+        .save()
+        .font("Helvetica")
+        .fontSize(9)
+        .fillColor("#9CA3AF")
+        .text(`Page ${i + 1} of ${totalPages}`, MARGIN, doc.page.height - 40, {
+          width: CONTENT_W,
+          align: "center",
+        })
+        .restore();
+    }
+
     doc.end();
   });
 }
