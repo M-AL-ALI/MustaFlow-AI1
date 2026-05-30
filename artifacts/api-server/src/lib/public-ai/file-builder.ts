@@ -48,10 +48,19 @@ function buildTabularSystemPrompt(format: "csv" | "xlsx", language?: string): st
     `{\n` +
     `  "title": "Descriptive title for the file",\n` +
     `  "sheetName": "Sheet1",\n` +
-    `  "headers": ["Column A", "Column B", ...],\n` +
-    `  "rows": [["value1", "value2", ...], ...]\n` +
-    `}\n` +
-    `Generate realistic, complete data with at least 5 rows. Use strings for all cell values.${langNote}`
+    `  "headers": ["Column A", "Column B", "Column C"],\n` +
+    `  "rows": [\n` +
+    `    ["row1_value_A", "row1_value_B", "row1_value_C"],\n` +
+    `    ["row2_value_A", "row2_value_B", "row2_value_C"]\n` +
+    `  ]\n` +
+    `}\n\n` +
+    `CRITICAL RULES — you must follow all of these:\n` +
+    `1. Every row in "rows" MUST have EXACTLY the same number of values as there are items in "headers". No more, no fewer.\n` +
+    `2. The order of values in each row must match the order of headers exactly (first value = first column, second value = second column, etc.).\n` +
+    `3. Use short, clean header names (1-3 words). No trailing spaces, no newlines inside values.\n` +
+    `4. All values must be strings. Numbers should be written as strings (e.g. "42", "1500.00").\n` +
+    `5. Generate at least 8 realistic, varied rows. Data should be meaningful and consistent within each column.\n` +
+    `6. Do not include any explanation or extra keys — only title, sheetName, headers, rows.${langNote}`
   );
 }
 
@@ -254,7 +263,7 @@ export async function generateFileFromPrompt(
     model: process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4",
     messages: callMessages,
     response_format: { type: "json_object" },
-    max_completion_tokens: 2000,
+    max_completion_tokens: 4000,
   });
 
   const raw = result.choices[0]?.message?.content?.trim() ?? "{}";
@@ -266,15 +275,26 @@ export async function generateFileFromPrompt(
   let sectionCount = 0;
 
   if (isTabular) {
+    const rawHeaders = Array.isArray(aiData.headers)
+      ? (aiData.headers as string[]).map((h) => String(h).trim()).filter(Boolean)
+      : ["Column A"];
+    const colCount = rawHeaders.length;
+
+    const rawRows = Array.isArray(aiData.rows) ? (aiData.rows as unknown[]) : [];
+    const normalizedRows = rawRows
+      .filter((r) => Array.isArray(r) && (r as unknown[]).length > 0)
+      .map((r) => {
+        const cells = (r as unknown[]).map((v) => String(v ?? "").trim());
+        // Pad short rows with empty strings, trim rows that are too long
+        while (cells.length < colCount) cells.push("");
+        return cells.slice(0, colCount);
+      });
+
     const data: TabularData = {
       title: String(aiData.title ?? "Data"),
       sheetName: String(aiData.sheetName ?? "Sheet1"),
-      headers: Array.isArray(aiData.headers)
-        ? (aiData.headers as string[]).map(String)
-        : ["Column A"],
-      rows: Array.isArray(aiData.rows)
-        ? (aiData.rows as unknown[][]).map((r) => (Array.isArray(r) ? r.map(String) : [String(r)]))
-        : [],
+      headers: rawHeaders,
+      rows: normalizedRows,
     };
     title = data.title;
     rowCount = data.rows.length;
