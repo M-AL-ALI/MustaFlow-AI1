@@ -95,8 +95,7 @@ function splitIntoChunks(text: string): string[] {
     const para = remaining.lastIndexOf("\n\n", window);
     const nl = remaining.lastIndexOf("\n", window);
     const sp = remaining.lastIndexOf(" ", window);
-    let splitAt =
-      para >= half ? para : nl >= half ? nl : sp > 0 ? sp : window;
+    let splitAt = para >= half ? para : nl >= half ? nl : sp > 0 ? sp : window;
     splitAt = Math.max(1, splitAt); // never infinite loop on very long words
     chunks.push(remaining.slice(0, splitAt).trim());
     remaining = remaining.slice(splitAt).trim();
@@ -151,12 +150,7 @@ export async function getEmbeddingStatus(
       maxUpdatedAt: sql<string>`max(updated_at)::text`,
     })
     .from(vaultEmbeddingsTable)
-    .where(
-      and(
-        eq(vaultEmbeddingsTable.entryId, entryId),
-        eq(vaultEmbeddingsTable.userId, userId),
-      ),
-    )
+    .where(and(eq(vaultEmbeddingsTable.entryId, entryId), eq(vaultEmbeddingsTable.userId, userId)))
     .groupBy(vaultEmbeddingsTable.embeddingModel);
 
   if (rows.length === 0) return base;
@@ -164,8 +158,7 @@ export async function getEmbeddingStatus(
   const row = rows[0]!;
   const chunkCount = row.chunkCount;
   const sourceVersion = row.maxSourceVersion;
-  const status: EmbeddingStatus =
-    sourceVersion === entry.version ? "indexed" : "out_of_date";
+  const status: EmbeddingStatus = sourceVersion === entry.version ? "indexed" : "out_of_date";
 
   return {
     entryId,
@@ -188,10 +181,7 @@ export interface ReindexResult {
   error?: string;
 }
 
-export async function reindexVaultEntry(
-  entryId: number,
-  userId: string,
-): Promise<ReindexResult> {
+export async function reindexVaultEntry(entryId: number, userId: string): Promise<ReindexResult> {
   const base: ReindexResult = {
     entryId,
     chunksUpserted: 0,
@@ -238,12 +228,7 @@ export async function reindexVaultEntry(
       chunkHash: vaultEmbeddingsTable.chunkHash,
     })
     .from(vaultEmbeddingsTable)
-    .where(
-      and(
-        eq(vaultEmbeddingsTable.entryId, entryId),
-        eq(vaultEmbeddingsTable.userId, userId),
-      ),
-    );
+    .where(and(eq(vaultEmbeddingsTable.entryId, entryId), eq(vaultEmbeddingsTable.userId, userId)));
 
   const existingByIndex = new Map(existingChunks.map((r) => [r.chunkIndex, r.chunkHash]));
   const newIndexSet = new Set(textChunks.map((_, i) => i));
@@ -371,12 +356,7 @@ export async function reindexAllVaultEntries(userId: string): Promise<ReindexAll
   const entries = await db
     .select({ id: vaultEntriesTable.id })
     .from(vaultEntriesTable)
-    .where(
-      and(
-        eq(vaultEntriesTable.userId, userId),
-        sql`${vaultEntriesTable.archivedAt} IS NULL`,
-      ),
-    )
+    .where(and(eq(vaultEntriesTable.userId, userId), sql`${vaultEntriesTable.archivedAt} IS NULL`))
     .limit(MAX_ENTRIES_PER_BATCH);
 
   let indexed = 0;
@@ -415,7 +395,5 @@ export async function reindexAllVaultEntries(userId: string): Promise<ReindexAll
 export async function deleteEmbeddingsForEntry(entryId: number, userId: string): Promise<void> {
   await db
     .delete(vaultEmbeddingsTable)
-    .where(
-      and(eq(vaultEmbeddingsTable.entryId, entryId), eq(vaultEmbeddingsTable.userId, userId)),
-    );
+    .where(and(eq(vaultEmbeddingsTable.entryId, entryId), eq(vaultEmbeddingsTable.userId, userId)));
 }

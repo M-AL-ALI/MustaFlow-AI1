@@ -1,4 +1,12 @@
-import { pgTable, serial, text, integer, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  text,
+  integer,
+  timestamp,
+  uniqueIndex,
+  vector,
+} from "drizzle-orm/pg-core";
 
 /** Dimension of text-embedding-3-small (1536). Matches KNOWLEDGE_EMBEDDING_DIM. */
 export const VAULT_EMBEDDING_DIM = 1536;
