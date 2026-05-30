@@ -752,18 +752,39 @@ export function QueueComposer({
     }
     mediaStreamRef.current = stream;
     startAudioAnalysis(stream);
-    const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    const bestMime = (() => {
+      const candidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+        "audio/mp4",
+      ];
+      for (const t of candidates) {
+        if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
+      }
+      return "";
+    })();
+    const audioFmt = (() => {
+      const base = bestMime.split(";")[0].trim().toLowerCase();
+      if (base === "audio/mp4" || base === "video/mp4") return "mp4";
+      if (base === "audio/ogg" || base === "video/ogg") return "ogg";
+      if (base === "audio/wav") return "wav";
+      if (base === "audio/mpeg" || base === "audio/mp3") return "mp3";
+      return "webm";
+    })();
+    const mr = new MediaRecorder(stream, bestMime ? { mimeType: bestMime } : undefined);
     mediaChunksRef.current = [];
     mr.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) mediaChunksRef.current.push(e.data);
     };
     mr.onstop = async () => {
-      const blob = new Blob(mediaChunksRef.current, { type: "audio/webm" });
+      const blob = new Blob(mediaChunksRef.current, { type: bestMime || "audio/webm" });
       mediaChunksRef.current = [];
       setIsListening(false);
       if (blob.size === 0) return;
       try {
-        const res = await fetch("/api/transcribe?format=webm", {
+        const res = await fetch(`/api/transcribe?format=${audioFmt}`, {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: blob,

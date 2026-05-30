@@ -32,8 +32,11 @@ router.post("/public-ai/transcribe", oraUploadLimiter, async (req, res) => {
   }
 
   const formatRaw = (req.query.format as string | undefined)?.toLowerCase() ?? "webm";
-  const format: "wav" | "mp3" | "webm" =
-    formatRaw === "wav" || formatRaw === "mp3" ? formatRaw : "webm";
+  const ALLOWED = ["wav", "mp3", "webm", "mp4", "m4a", "ogg"] as const;
+  type AudioFormat = (typeof ALLOWED)[number];
+  const format: AudioFormat = (ALLOWED as readonly string[]).includes(formatRaw)
+    ? (formatRaw as AudioFormat)
+    : "webm";
 
   // Optional ISO-639-1 language hint (e.g. "ar", "en") forwarded from the client.
   // "auto" is treated as "let Whisper detect" — we don't pass it to the API.

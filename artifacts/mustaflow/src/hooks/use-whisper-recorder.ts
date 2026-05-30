@@ -39,12 +39,30 @@ export interface UseWhisperRecorderReturn {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getBestMimeType(): string {
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+  ];
   for (const t of candidates) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
   }
   return "";
 }
+
+/** Derives the file-extension format string to pass to the server transcribe endpoint. */
+function mimeTypeToFormat(mimeType: string): string {
+  const base = mimeType.split(";")[0].trim().toLowerCase();
+  if (base === "audio/mp4" || base === "audio/m4a" || base === "video/mp4") return "mp4";
+  if (base === "audio/ogg" || base === "video/ogg") return "ogg";
+  if (base === "audio/wav" || base === "audio/wave") return "wav";
+  if (base === "audio/mpeg" || base === "audio/mp3") return "mp3";
+  return "webm";
+}
+
+const MIN_AUDIO_BYTES = 5_000;
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -162,12 +180,20 @@ export function useWhisperRecorder(
         return;
       }
 
+      // Reject accidental taps — clips this small are always silent noise
+      if (blob.size < MIN_AUDIO_BYTES) {
+        setState("idle");
+        return;
+      }
+
       setState("transcribing");
+
+      const audioFormat = mimeTypeToFormat(mimeType);
 
       try {
         const lang = getLanguageRef.current?.();
         const langParam = lang && lang !== "auto" ? `&lang=${encodeURIComponent(lang)}` : "";
-        const resp = await fetch(`/api/public-ai/transcribe?format=webm${langParam}`, {
+        const resp = await fetch(`/api/public-ai/transcribe?format=${audioFormat}${langParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: blob,

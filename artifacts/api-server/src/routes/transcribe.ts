@@ -24,8 +24,11 @@ router.post(
   // We need raw bytes — body-parser's express.json won't help. Use a manual buffer collector.
   async (req: Request, res: Response) => {
     const formatRaw = (req.query.format as string | undefined)?.toLowerCase() ?? "webm";
-    const format: "wav" | "mp3" | "webm" =
-      formatRaw === "wav" || formatRaw === "mp3" ? formatRaw : "webm";
+    const ALLOWED = ["wav", "mp3", "webm", "mp4", "m4a", "ogg"] as const;
+    type AudioFormat = (typeof ALLOWED)[number];
+    const format: AudioFormat = (ALLOWED as readonly string[]).includes(formatRaw)
+      ? (formatRaw as AudioFormat)
+      : "webm";
 
     // Express may have already parsed the body for JSON-typed requests; the chat
     // composer always sends application/octet-stream so we read the raw stream.
