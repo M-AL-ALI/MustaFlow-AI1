@@ -2935,6 +2935,40 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-vault-embeddings ───────────────────────────────────────────────
+  {
+    name: "migrate-vault-embeddings",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query("CREATE EXTENSION IF NOT EXISTS vector");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS vault_embeddings (
+          id              serial PRIMARY KEY,
+          entry_id        integer NOT NULL,
+          user_id         text NOT NULL,
+          chunk_index     integer NOT NULL,
+          chunk_text      text NOT NULL,
+          chunk_hash      text NOT NULL,
+          embedding       vector(1536),
+          embedding_model text NOT NULL DEFAULT 'text-embedding-3-small',
+          source_version  integer NOT NULL,
+          created_at      timestamptz NOT NULL DEFAULT now(),
+          updated_at      timestamptz NOT NULL DEFAULT now(),
+          CONSTRAINT vault_embeddings_entry_chunk_unique UNIQUE (entry_id, chunk_index)
+        )
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS vault_embeddings_entry_idx
+          ON vault_embeddings (entry_id)
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS vault_embeddings_user_idx
+          ON vault_embeddings (user_id, entry_id)
+      `);
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

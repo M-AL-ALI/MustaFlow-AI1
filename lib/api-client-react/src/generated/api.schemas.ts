@@ -3974,6 +3974,35 @@ export interface VaultVersion {
   changeSummary?: string | null;
 }
 
+export type VaultEmbeddingStatusStatus = typeof VaultEmbeddingStatusStatus[keyof typeof VaultEmbeddingStatusStatus];
+
+
+export const VaultEmbeddingStatusStatus = {
+  not_indexed: 'not_indexed',
+  indexed: 'indexed',
+  out_of_date: 'out_of_date',
+  failed: 'failed',
+} as const;
+
+export interface VaultEmbeddingStatus {
+  entryId: number;
+  status: VaultEmbeddingStatusStatus;
+  chunkCount: number;
+  embeddingModel?: string | null;
+  sourceVersion?: number | null;
+  updatedAt?: string | null;
+}
+
+export interface VaultReindexAllResult {
+  total: number;
+  indexed: number;
+  skipped: number;
+  failed: number;
+  rateLimited: boolean;
+  retryAfterSec: number;
+  remaining: number;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;

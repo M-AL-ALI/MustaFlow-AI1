@@ -1,0 +1,431 @@
+Phase 8B-1 — Knowledge Vault Embedding Infrastructure
+
+Status: Approved to Plan / Begin Carefully
+
+Goal
+
+Begin Phase 8B safely by building embedding infrastructure only for the Knowledge Vault.
+
+This phase is not RAG yet.
+
+This phase is not AI memory yet.
+
+This phase is not automatic learning yet.
+
+The goal is to prepare Knowledge Vault entries for future semantic search by creating a controlled, secure, re-indexable embedding foundation.
+
+Current stable rollback point:
+
+* ef0327e1
+* Phase 8A + Phase 8A.1 stable baseline
+
+Do not disturb the stable baseline.
+
+⸻
+
+Current Stable Vault Baseline
+
+Already completed:
+
+* Phase 8A — Knowledge Vault Foundation
+* Phase 8A.1 — Tags TEXT[]
+* GIN tag index
+* Functional full-text search index
+* Authenticated vault routes
+* CRUD
+* Versioning
+* Archive / restore
+* Search / filters
+* Dataset save to vault
+* Sanitization
+* Ownership controls
+
+Phase 8B-1 must build on top of this without breaking it.
+
+⸻
+
+Scope of Phase 8B-1
+
+In Scope
+
+Build embedding infrastructure for Knowledge Vault entries.
+
+Required:
+
+1. Embedding table
+2. Chunking logic
+3. Embedding generation service
+4. Manual reindex endpoint
+5. Manual reindex UI button
+6. Embedding status display
+7. Safe batch processing
+8. Rebuild embeddings for selected entry
+9. Rebuild embeddings for all user entries
+10. Validation report
+
+⸻
+
+Out of Scope
+
+Do NOT implement yet:
+
+* RAG
+* AI memory
+* prompt injection from vault knowledge
+* automatic recommendations
+* automatic report improvement
+* auto-learning
+* semantic answers
+* knowledge-aware Ora responses
+* background autonomous learning
+* cross-project intelligence
+* automatic context injection
+* AI choosing vault entries by itself
+* Web Search
+* Image Generation
+* Advanced Charts
+
+Those belong to later phases.
+
+⸻
+
+Database Design
+
+Create a new table:
+
+vault_embeddings {
+  id: string;
+  entryId: number;
+  userId: string;
+  chunkIndex: number;
+  chunkText: string;
+  chunkHash: string;
+  embedding: vector;
+  embeddingModel: string;
+  sourceVersion: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+If pgvector is not available yet, stop and report before implementing an alternative.
+
+Do not fake embeddings.
+
+Do not store embeddings as plain JSON unless explicitly approved.
+
+Preferred:
+
+* PostgreSQL pgvector
+* vector dimension based on selected embedding model
+
+⸻
+
+Embedding Model
+
+Use a modern OpenAI embedding model if already available in the project’s provider layer.
+
+Recommended:
+
+* text-embedding-3-small
+
+Reason:
+
+* lower cost
+* good semantic retrieval quality
+* suitable for vault search foundation
+
+If model/provider wiring is unclear, stop and ask before proceeding.
+
+⸻
+
+Chunking Rules
+
+Each Knowledge Vault entry should be converted into chunks using:
+
+* title
+* category
+* department
+* tags
+* summary
+* content
+
+Chunking requirements:
+
+* chunk size target: 800–1200 tokens or equivalent character range
+* overlap: small overlap only if needed
+* preserve source metadata
+* include entry id and version
+* do not include secrets or internal refs
+* run sanitizer before embedding
+
+Each chunk must store:
+
+* entryId
+* userId
+* chunkIndex
+* chunkText
+* chunkHash
+* sourceVersion
+
+⸻
+
+Reindex Logic
+
+Create a service such as:
+
+reindexVaultEntry(entryId, userId)
+reindexAllVaultEntries(userId)
+deleteEmbeddingsForEntry(entryId, userId)
+getEmbeddingStatus(entryId, userId)
+
+Behavior:
+
+1. Load vault entry with ownership check.
+2. Sanitize entry.
+3. Chunk entry.
+4. Hash each chunk.
+5. Skip chunks with unchanged hash.
+6. Generate embeddings for changed chunks.
+7. Store embeddings.
+8. Delete stale chunks that no longer exist.
+9. Return status.
+
+⸻
+
+Manual Only
+
+Phase 8B-1 must be manual only.
+
+Allowed:
+
+* User clicks “Rebuild Embeddings”
+* User clicks “Reindex Vault”
+* Admin/manual action triggers reindex
+
+Not allowed:
+
+* automatic background reindexing
+* automatic embedding on every save
+* automatic AI learning
+* automatic prompt usage
+
+We will add controlled automation later if needed.
+
+⸻
+
+API Routes
+
+Create authenticated routes only.
+
+Suggested routes:
+
+POST /api/vault/:id/reindex
+POST /api/vault/reindex
+GET  /api/vault/:id/embedding-status
+
+All routes must:
+
+* require authentication
+* enforce ownership
+* never expose another user’s embeddings
+* never expose raw embedding vectors to the frontend unless explicitly needed
+* return only status and counts
+
+Example response:
+
+{
+  "entryId": 123,
+  "status": "indexed",
+  "chunkCount": 4,
+  "embeddingModel": "text-embedding-3-small",
+  "sourceVersion": 2,
+  "updatedAt": "..."
+}
+
+⸻
+
+UI Requirements
+
+Add to Knowledge Vault entry viewer:
+
+* Embedding status badge:
+    * Not Indexed
+    * Indexed
+    * Out of Date
+    * Failed
+
+Add buttons:
+
+* Rebuild Embeddings for this entry
+* Reindex All My Vault Entries
+
+Show:
+
+* number of chunks
+* last indexed date
+* model used
+* source version
+
+Do not show raw vectors.
+
+⸻
+
+Security Requirements
+
+Before embedding, reuse the vault sanitizer.
+
+Never embed:
+
+* API keys
+* secrets
+* tokens
+* passwords
+* connection strings
+* session identifiers
+* handoff tokens
+* Builder secrets
+* deployment secrets
+* private credentials
+* internal infrastructure IDs
+* base64 payloads
+* fileRef
+* imageRef
+* datasetRef
+
+If sensitive content is detected:
+
+* block embedding
+* show safe error message
+* do not send content to embedding model
+
+⸻
+
+Privacy Requirements
+
+Embeddings are user-scoped.
+
+Rules:
+
+* user can only index their own entries
+* user can only see status for their own entries
+* user cannot access another user’s embedding rows
+* raw embedding vectors should not be returned in normal API responses
+* no embedding content should be logged
+* no chunk text should be logged
+* no raw vault content should be logged
+
+Safe logs only:
+
+* entryId
+* userId hash if needed
+* chunk count
+* model name
+* duration
+* success/failure category
+
+⸻
+
+Performance Requirements
+
+Add limits:
+
+* max entries per reindex-all run
+* max chunks per entry
+* max chunk length
+* rate limit manual reindex routes
+* timeout protection
+* safe error handling
+
+Suggested initial caps:
+
+* max 100 entries per reindex-all
+* max 20 chunks per entry
+* max 12,000 characters per entry before chunking
+* max 5 manual reindex-all calls per hour per user
+
+If caps are different, explain why.
+
+⸻
+
+Important Boundary
+
+Do not use embeddings for search results yet unless explicitly approved.
+
+Phase 8B-1 may calculate and store embeddings only.
+
+Phase 8B-2 will implement semantic search.
+
+Phase 8B-3 will implement knowledge-aware reporting.
+
+Phase 8B-4 will implement recommendations.
+
+⸻
+
+Required Validation Report
+
+After implementation, provide a full validation report with:
+
+1. Final commit hash
+2. Final affected files
+3. Database migration proof
+4. pgvector proof
+5. Embedding table proof
+6. Chunking proof
+7. Sanitization proof
+8. Manual reindex endpoint proof
+9. Ownership/auth proof
+10. Embedding status UI proof
+11. Rate-limit proof
+12. No RAG / no prompt injection proof
+13. No automatic learning proof
+14. No semantic search proof
+15. No public Ora access proof
+16. Regression proof for Phase 8A and 8A.1
+17. Regression proof for reporting/export stack
+18. Regression proof for Builder / Developer / Plan modes
+19. Typecheck result
+20. Lint result
+21. Format result
+22. Codegen drift result
+23. API server workflow status
+24. Frontend workflow status
+25. Rollback plan
+
+⸻
+
+Rollback Requirements
+
+Rollback must preserve:
+
+* Phase 8A vault foundation
+* Phase 8A.1 tag/search optimization
+* all existing vault entries
+* all existing vault versions
+* reporting/export features
+* Builder / Developer / Plan modes
+
+Rollback should only remove:
+
+* embedding table
+* embedding routes
+* embedding UI
+* embedding service
+* embedding migration
+
+⸻
+
+Success Criteria
+
+Phase 8B-1 is complete only when:
+
+* authenticated user can manually reindex one vault entry
+* authenticated user can manually reindex their own vault entries
+* embeddings are stored per chunk
+* embedding status displays in the Vault UI
+* stale/out-of-date status can be detected when entry version changes
+* sensitive content is blocked before embedding
+* ownership checks are enforced
+* no semantic search or RAG is implemented yet
+* all quality gates pass
+
+This phase is infrastructure only. Build it carefully and keep the AI memory layer disabled until future approval.

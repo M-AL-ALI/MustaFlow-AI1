@@ -26,9 +26,11 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Database,
   FilePen,
   Loader2,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
   Tag,
@@ -71,6 +73,15 @@ interface VaultVersion {
   editedBy: string;
   editedAt: string;
   changeSummary?: string | null;
+}
+
+interface EmbeddingStatusResult {
+  entryId: number;
+  status: "not_indexed" | "indexed" | "out_of_date" | "failed";
+  chunkCount: number;
+  embeddingModel: string | null;
+  sourceVersion: number | null;
+  updatedAt: string | null;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -205,6 +216,22 @@ function EntryViewer({
   const [editContent, setEditContent] = useState(entry.content);
   const [editTags, setEditTags] = useState(entry.tags.join(", "));
   const [saving, setSaving] = useState(false);
+  const [showEmbeddings, setShowEmbeddings] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexingAll, setReindexingAll] = useState(false);
+
+  const { data: embeddingStatus, refetch: refetchEmbeddingStatus } =
+    useQuery<EmbeddingStatusResult>({
+      queryKey: ["vault-embedding-status", entry.id],
+      queryFn: async () => {
+        const res = await fetch(`/api/vault/${entry.id}/embedding-status`, {
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error("Failed to load embedding status");
+        return res.json() as Promise<EmbeddingStatusResult>;
+      },
+      enabled: showEmbeddings,
+    });
 
   const { data: versions } = useQuery<VaultVersion[]>({
     queryKey: ["vault-versions", entry.id],
@@ -273,6 +300,60 @@ function EntryViewer({
       onUpdated();
     } catch {
       toast({ title: "Failed to restore", variant: "destructive" });
+    }
+  };
+
+  const handleReindex = async () => {
+    setReindexing(true);
+    try {
+      const res = await fetch(`/api/vault/${entry.id}/reindex`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `Reindex failed (${res.status})`);
+      }
+      await refetchEmbeddingStatus();
+      toast({ title: "Embeddings rebuilt" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Reindex failed";
+      toast({ title: "Reindex failed", description: msg, variant: "destructive" });
+    } finally {
+      setReindexing(false);
+    }
+  };
+
+  const handleReindexAll = async () => {
+    setReindexingAll(true);
+    try {
+      const res = await fetch("/api/vault/reindex", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.status === 429) {
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          retryAfterSec?: number;
+        };
+        throw new Error(err.error ?? "Rate limit exceeded — try again in an hour.");
+      }
+      if (!res.ok) throw new Error(`Reindex-all failed (${res.status})`);
+      const result = (await res.json()) as {
+        total: number;
+        indexed: number;
+        failed: number;
+      };
+      await refetchEmbeddingStatus();
+      toast({
+        title: "Vault reindexed",
+        description: `${result.indexed} updated, ${result.failed} failed, ${result.total} total.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Reindex-all failed";
+      toast({ title: "Reindex all failed", description: msg, variant: "destructive" });
+    } finally {
+      setReindexingAll(false);
     }
   };
 
@@ -455,6 +536,133 @@ function EntryViewer({
               </div>
             )}
           </div>
+        </div>
+
+        {/* ── Embeddings ── */}
+        <div className="border-t border-border px-6 py-4">
+          <button
+            onClick={() => setShowEmbeddings((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showEmbeddings ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            <Database className="h-3.5 w-3.5" />
+            Embeddings
+            {embeddingStatus && (
+              <span
+                className={cn("ml-1 text-[10px] font-medium", {
+                  "text-green-500": embeddingStatus.status === "indexed",
+                  "text-amber-500": embeddingStatus.status === "out_of_date",
+                  "text-destructive": embeddingStatus.status === "failed",
+                  "text-muted-foreground/60": embeddingStatus.status === "not_indexed",
+                })}
+              >
+                {embeddingStatus.status === "indexed"
+                  ? "Indexed"
+                  : embeddingStatus.status === "out_of_date"
+                    ? "Out of Date"
+                    : embeddingStatus.status === "failed"
+                      ? "Failed"
+                      : "Not Indexed"}
+              </span>
+            )}
+          </button>
+          {showEmbeddings && (
+            <div className="mt-3 space-y-3">
+              {!embeddingStatus ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground/60">Status</span>
+                      <p
+                        className={cn("font-medium", {
+                          "text-green-500": embeddingStatus.status === "indexed",
+                          "text-amber-500": embeddingStatus.status === "out_of_date",
+                          "text-destructive": embeddingStatus.status === "failed",
+                          "text-foreground": embeddingStatus.status === "not_indexed",
+                        })}
+                      >
+                        {embeddingStatus.status === "indexed"
+                          ? "Indexed"
+                          : embeddingStatus.status === "out_of_date"
+                            ? "Out of Date"
+                            : embeddingStatus.status === "failed"
+                              ? "Failed"
+                              : "Not Indexed"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground/60">Chunks</span>
+                      <p className="text-foreground">{embeddingStatus.chunkCount}</p>
+                    </div>
+                    {embeddingStatus.embeddingModel && (
+                      <div>
+                        <span className="text-muted-foreground/60">Model</span>
+                        <p className="text-foreground font-mono text-[10px]">
+                          {embeddingStatus.embeddingModel}
+                        </p>
+                      </div>
+                    )}
+                    {embeddingStatus.sourceVersion != null && (
+                      <div>
+                        <span className="text-muted-foreground/60">Indexed at version</span>
+                        <p className="text-foreground">v{embeddingStatus.sourceVersion}</p>
+                      </div>
+                    )}
+                    {embeddingStatus.updatedAt && (
+                      <div>
+                        <span className="text-muted-foreground/60">Last indexed</span>
+                        <p className="text-foreground">
+                          {new Date(embeddingStatus.updatedAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleReindex}
+                      disabled={reindexing || reindexingAll}
+                      className="text-xs h-7"
+                    >
+                      {reindexing ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      Rebuild embeddings
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleReindexAll}
+                      disabled={reindexing || reindexingAll}
+                      className="text-xs h-7 text-muted-foreground"
+                    >
+                      {reindexingAll ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Database className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      Reindex all my entries
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer actions */}

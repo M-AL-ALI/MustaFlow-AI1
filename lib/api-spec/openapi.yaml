@@ -3687,6 +3687,64 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /vault/{id}/embedding-status:
+    get:
+      operationId: getVaultEmbeddingStatus
+      tags: [vault]
+      summary: Get embedding status for a Knowledge Vault entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Embedding status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEmbeddingStatus"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/{id}/reindex:
+    post:
+      operationId: reindexVaultEntry
+      tags: [vault]
+      summary: Manually reindex a single Knowledge Vault entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Updated embedding status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEmbeddingStatus"
+        "400":
+          description: Bad request (sensitive content blocked or entry not found)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/reindex:
+    post:
+      operationId: reindexAllVaultEntries
+      tags: [vault]
+      summary: Manually reindex all Knowledge Vault entries for the authenticated user
+      responses:
+        "200":
+          description: Reindex-all result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultReindexAllResult"
+        "429":
+          description: Rate limit exceeded (max 5 per hour)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /projects/{id}/builds:
     post:
       operationId: triggerMobileBuild
@@ -9544,3 +9602,28 @@ components:
         editedBy: { type: string }
         editedAt: { type: string, format: date-time }
         changeSummary: { type: string, nullable: true }
+
+    VaultEmbeddingStatus:
+      type: object
+      required: [entryId, status, chunkCount]
+      properties:
+        entryId: { type: integer }
+        status:
+          type: string
+          enum: [not_indexed, indexed, out_of_date, failed]
+        chunkCount: { type: integer }
+        embeddingModel: { type: string, nullable: true }
+        sourceVersion: { type: integer, nullable: true }
+        updatedAt: { type: string, format: date-time, nullable: true }
+
+    VaultReindexAllResult:
+      type: object
+      required: [total, indexed, skipped, failed, rateLimited, retryAfterSec, remaining]
+      properties:
+        total: { type: integer }
+        indexed: { type: integer }
+        skipped: { type: integer }
+        failed: { type: integer }
+        rateLimited: { type: boolean }
+        retryAfterSec: { type: integer }
+        remaining: { type: integer }

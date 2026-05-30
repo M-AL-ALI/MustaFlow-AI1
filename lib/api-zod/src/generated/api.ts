@@ -4558,6 +4558,54 @@ export const GetVaultVersionsResponse = zod.array(GetVaultVersionsResponseItem)
 
 
 /**
+ * @summary Get embedding status for a Knowledge Vault entry
+ */
+export const GetVaultEmbeddingStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetVaultEmbeddingStatusResponse = zod.object({
+  "entryId": zod.number(),
+  "status": zod.enum(['not_indexed', 'indexed', 'out_of_date', 'failed']),
+  "chunkCount": zod.number(),
+  "embeddingModel": zod.string().nullish(),
+  "sourceVersion": zod.number().nullish(),
+  "updatedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Manually reindex a single Knowledge Vault entry
+ */
+export const ReindexVaultEntryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReindexVaultEntryResponse = zod.object({
+  "entryId": zod.number(),
+  "status": zod.enum(['not_indexed', 'indexed', 'out_of_date', 'failed']),
+  "chunkCount": zod.number(),
+  "embeddingModel": zod.string().nullish(),
+  "sourceVersion": zod.number().nullish(),
+  "updatedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Manually reindex all Knowledge Vault entries for the authenticated user
+ */
+export const ReindexAllVaultEntriesResponse = zod.object({
+  "total": zod.number(),
+  "indexed": zod.number(),
+  "skipped": zod.number(),
+  "failed": zod.number(),
+  "rateLimited": zod.boolean(),
+  "retryAfterSec": zod.number(),
+  "remaining": zod.number()
+})
+
+
+/**
  * @summary Trigger an EAS cloud build for iOS or Android
  */
 export const TriggerMobileBuildParams = zod.object({

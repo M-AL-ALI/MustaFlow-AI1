@@ -311,8 +311,10 @@ import type {
   V1ListProjects200,
   V1TriggerBuild202,
   V1TriggerBuildBody,
+  VaultEmbeddingStatus,
   VaultEntry,
   VaultEntryInput,
+  VaultReindexAllResult,
   VaultVersion,
   VisualEditInput,
   VisualEditResult,
@@ -12010,6 +12012,223 @@ export function useGetVaultVersions<TData = Awaited<ReturnType<typeof getVaultVe
 
 
 
+
+export const getGetVaultEmbeddingStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}/embedding-status`
+}
+
+/**
+ * @summary Get embedding status for a Knowledge Vault entry
+ */
+export const getVaultEmbeddingStatus = async (id: number, options?: RequestInit): Promise<VaultEmbeddingStatus> => {
+
+  return customFetch<VaultEmbeddingStatus>(getGetVaultEmbeddingStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVaultEmbeddingStatusQueryKey = (id: number,) => {
+    return [
+    `/api/vault/${id}/embedding-status`
+    ] as const;
+    }
+
+
+export const getGetVaultEmbeddingStatusQueryOptions = <TData = Awaited<ReturnType<typeof getVaultEmbeddingStatus>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVaultEmbeddingStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVaultEmbeddingStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVaultEmbeddingStatus>>> = ({ signal }) => getVaultEmbeddingStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVaultEmbeddingStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVaultEmbeddingStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getVaultEmbeddingStatus>>>
+export type GetVaultEmbeddingStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get embedding status for a Knowledge Vault entry
+ */
+
+export function useGetVaultEmbeddingStatus<TData = Awaited<ReturnType<typeof getVaultEmbeddingStatus>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVaultEmbeddingStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVaultEmbeddingStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getReindexVaultEntryUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}/reindex`
+}
+
+/**
+ * @summary Manually reindex a single Knowledge Vault entry
+ */
+export const reindexVaultEntry = async (id: number, options?: RequestInit): Promise<VaultEmbeddingStatus> => {
+
+  return customFetch<VaultEmbeddingStatus>(getReindexVaultEntryUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getReindexVaultEntryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reindexVaultEntry>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reindexVaultEntry>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['reindexVaultEntry'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reindexVaultEntry>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  reindexVaultEntry(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReindexVaultEntryMutationResult = NonNullable<Awaited<ReturnType<typeof reindexVaultEntry>>>
+
+    export type ReindexVaultEntryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Manually reindex a single Knowledge Vault entry
+ */
+export const useReindexVaultEntry = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reindexVaultEntry>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reindexVaultEntry>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getReindexVaultEntryMutationOptions(options));
+    }
+
+export const getReindexAllVaultEntriesUrl = () => {
+
+
+
+
+  return `/api/vault/reindex`
+}
+
+/**
+ * @summary Manually reindex all Knowledge Vault entries for the authenticated user
+ */
+export const reindexAllVaultEntries = async ( options?: RequestInit): Promise<VaultReindexAllResult> => {
+
+  return customFetch<VaultReindexAllResult>(getReindexAllVaultEntriesUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getReindexAllVaultEntriesMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reindexAllVaultEntries>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reindexAllVaultEntries>>, TError,void, TContext> => {
+
+const mutationKey = ['reindexAllVaultEntries'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reindexAllVaultEntries>>, void> = () => {
+
+
+          return  reindexAllVaultEntries(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReindexAllVaultEntriesMutationResult = NonNullable<Awaited<ReturnType<typeof reindexAllVaultEntries>>>
+
+    export type ReindexAllVaultEntriesMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Manually reindex all Knowledge Vault entries for the authenticated user
+ */
+export const useReindexAllVaultEntries = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reindexAllVaultEntries>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reindexAllVaultEntries>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getReindexAllVaultEntriesMutationOptions(options));
+    }
 
 export const getTriggerMobileBuildUrl = (id: number,) => {
 
