@@ -33,10 +33,11 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Sparkles,
   Tag,
   X,
 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { VaultSaveDialog } from "@/components/vault-save-dialog";
 
 interface VaultEntry {
@@ -82,6 +83,31 @@ interface EmbeddingStatusResult {
   embeddingModel: string | null;
   sourceVersion: number | null;
   updatedAt: string | null;
+}
+
+interface SemanticSearchResult {
+  entryId: number;
+  title: string;
+  category: string;
+  department: string | null;
+  summary: string;
+  tags: string[];
+  status: string;
+  version: number;
+  chunkIndex: number;
+  /** First 300 characters of the best-matching chunk. Raw vectors are never returned. */
+  chunkPreview: string;
+  /** Cosine similarity score 0–100 (100 = identical). */
+  similarityScore: number;
+  updatedAt: string;
+}
+
+interface SemanticSearchResponse {
+  query: string;
+  results: SemanticSearchResult[];
+  remaining?: number;
+  noEmbeddingsExist?: boolean;
+  embeddingError?: boolean;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -698,8 +724,69 @@ function EntryViewer({
   );
 }
 
+function SemanticResultCard({
+  result,
+  isOpening,
+  onClick,
+}: {
+  result: SemanticSearchResult;
+  isOpening: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={isOpening}
+      className="w-full text-left rounded-xl border border-border bg-card hover:border-primary/30 hover:bg-muted/30 transition-all p-4 space-y-2 disabled:opacity-60"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <CategoryBadge category={result.category} />
+          <span className="text-sm font-medium truncate">{result.title}</span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isOpening ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          ) : (
+            <span className="text-[11px] font-semibold text-primary tabular-nums">
+              {result.similarityScore.toFixed(1)}%
+            </span>
+          )}
+        </div>
+      </div>
+      {result.summary && (
+        <p className="text-xs text-muted-foreground line-clamp-2">{result.summary}</p>
+      )}
+      {result.chunkPreview && (
+        <div className="rounded-lg bg-muted/50 border border-border/40 px-3 py-2">
+          <p className="text-xs text-muted-foreground/80 line-clamp-3 leading-relaxed">
+            {result.chunkPreview}
+          </p>
+        </div>
+      )}
+      <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+        {result.department && (
+          <span className="text-[10px] text-muted-foreground/60">{result.department}</span>
+        )}
+        {result.tags.slice(0, 3).map((t) => (
+          <span
+            key={t}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground/70"
+          >
+            {t}
+          </span>
+        ))}
+        <span className="text-[10px] text-muted-foreground/50 ml-auto">
+          {new Date(result.updatedAt).toLocaleDateString()}
+        </span>
+      </div>
+    </button>
+  );
+}
+
 export default function VaultPage() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showArchived, setShowArchived] = useState(false);
@@ -707,6 +794,9 @@ export default function VaultPage() {
   const [searchInput, setSearchInput] = useState("");
   const [selectedEntry, setSelectedEntry] = useState<VaultEntry | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [openingEntryId, setOpeningEntryId] = useState<number | null>(null);
 
   const queryKey = useMemo(
     () => ["vault", { categoryFilter, statusFilter, showArchived, search }],
@@ -753,6 +843,48 @@ export default function VaultPage() {
     }
   }, [handleInvalidate, selectedEntry, queryClient, queryKey]);
 
+  const semanticMutation = useMutation<SemanticSearchResponse, Error, string>({
+    mutationFn: async (query: string) => {
+      const res = await fetch("/api/vault/search/semantic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query, limit: 15 }),
+      });
+      if (res.status === 429) {
+        const j = (await res.json()) as { error: string; retryAfter?: number };
+        throw new Error(j.error ?? "Too many searches. Please wait before trying again.");
+      }
+      if (!res.ok) throw new Error("Search failed. Please try again.");
+      return res.json() as Promise<SemanticSearchResponse>;
+    },
+    onError: (err) => {
+      toast({ title: "Search failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleSemanticSearch = useCallback(() => {
+    if (!semanticQuery.trim()) return;
+    semanticMutation.mutate(semanticQuery.trim());
+  }, [semanticQuery, semanticMutation]);
+
+  const handleOpenSemanticResult = useCallback(
+    async (entryId: number) => {
+      setOpeningEntryId(entryId);
+      try {
+        const res = await fetch(`/api/vault/${entryId}`, { credentials: "include" });
+        if (!res.ok) throw new Error("Entry not found");
+        const entry = (await res.json()) as VaultEntry;
+        setSelectedEntry(entry);
+      } catch {
+        toast({ title: "Could not open entry", variant: "destructive" });
+      } finally {
+        setOpeningEntryId(null);
+      }
+    },
+    [toast],
+  );
+
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
@@ -775,100 +907,221 @@ export default function VaultPage() {
           </Button>
         </div>
 
-        {/* Search + filters */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="Search title, summary, or tags…"
-              className="pl-9 pr-8"
-            />
-            {searchInput && (
-              <button
-                onClick={() => {
-                  setSearchInput("");
-                  setSearch("");
-                }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-          <Button size="sm" variant="outline" onClick={handleSearch}>
-            Search
-          </Button>
-        </div>
-
-        {/* Category pills */}
-        <div className="flex flex-wrap gap-1.5">
-          {Object.entries(CATEGORY_LABELS).map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => setCategoryFilter(val)}
-              className={cn(
-                "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
-                categoryFilter === val
-                  ? "bg-primary/15 border-primary/40 text-primary"
-                  : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Status + archived filters */}
-        <div className="flex items-center gap-3">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-36 h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Search mode toggle */}
+        <div className="flex gap-0.5 p-0.5 bg-muted/40 rounded-lg border border-border/40 w-fit">
           <button
-            onClick={() => setShowArchived((v) => !v)}
+            onClick={() => setSearchMode("keyword")}
             className={cn(
-              "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
-              showArchived
-                ? "bg-muted border-border text-muted-foreground"
-                : "border-border text-muted-foreground/60 hover:text-foreground",
+              "text-xs px-3 py-1.5 rounded-[5px] font-medium transition-colors",
+              searchMode === "keyword"
+                ? "bg-background shadow-sm text-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {showArchived ? "Hide archived" : "Show archived"}
+            Keyword
           </button>
-          <span className="text-xs text-muted-foreground/50 ml-auto">
-            {total} {total === 1 ? "entry" : "entries"}
-          </span>
+          <button
+            onClick={() => setSearchMode("semantic")}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded-[5px] font-medium transition-colors flex items-center gap-1.5",
+              searchMode === "semantic"
+                ? "bg-background shadow-sm text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Sparkles className="h-3 w-3" />
+            Semantic
+          </button>
         </div>
 
-        {/* Entry grid */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="text-center py-16 space-y-2">
-            <BookOpen className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-            <p className="text-sm text-muted-foreground">
-              {search || categoryFilter !== "ALL"
-                ? "No entries match your filters."
-                : "No vault entries yet. Create your first entry or save a report from Ora."}
-            </p>
-          </div>
+        {searchMode === "keyword" ? (
+          <>
+            {/* Keyword search + filters */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  placeholder="Search title, summary, or tags…"
+                  className="pl-9 pr-8"
+                />
+                {searchInput && (
+                  <button
+                    onClick={() => {
+                      setSearchInput("");
+                      setSearch("");
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <Button size="sm" variant="outline" onClick={handleSearch}>
+                Search
+              </Button>
+            </div>
+
+            {/* Category pills */}
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(CATEGORY_LABELS).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setCategoryFilter(val)}
+                  className={cn(
+                    "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
+                    categoryFilter === val
+                      ? "bg-primary/15 border-primary/40 text-primary"
+                      : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Status + archived filters */}
+            <div className="flex items-center gap-3">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-36 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                </SelectContent>
+              </Select>
+              <button
+                onClick={() => setShowArchived((v) => !v)}
+                className={cn(
+                  "text-xs px-3 py-1 rounded-full border font-medium transition-colors",
+                  showArchived
+                    ? "bg-muted border-border text-muted-foreground"
+                    : "border-border text-muted-foreground/60 hover:text-foreground",
+                )}
+              >
+                {showArchived ? "Hide archived" : "Show archived"}
+              </button>
+              <span className="text-xs text-muted-foreground/50 ml-auto">
+                {total} {total === 1 ? "entry" : "entries"}
+              </span>
+            </div>
+
+            {/* Entry grid */}
+            {isLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : entries.length === 0 ? (
+              <div className="text-center py-16 space-y-2">
+                <BookOpen className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                <p className="text-sm text-muted-foreground">
+                  {search || categoryFilter !== "ALL"
+                    ? "No entries match your filters."
+                    : "No vault entries yet. Create your first entry or save a report from Ora."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {entries.map((entry) => (
+                  <EntryCard key={entry.id} entry={entry} onClick={setSelectedEntry} />
+                ))}
+              </div>
+            )}
+          </>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {entries.map((entry) => (
-              <EntryCard key={entry.id} entry={entry} onClick={setSelectedEntry} />
-            ))}
-          </div>
+          <>
+            {/* Semantic search input */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-primary/60" />
+                <Input
+                  value={semanticQuery}
+                  onChange={(e) => setSemanticQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSemanticSearch()}
+                  placeholder="Search by meaning, e.g. sealing failures, root cause of downtime, WBI improvement actions"
+                  className="pl-9"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={handleSemanticSearch}
+                disabled={semanticMutation.isPending || !semanticQuery.trim()}
+              >
+                {semanticMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Search"
+                )}
+              </Button>
+            </div>
+
+            {/* Semantic results / empty states */}
+            {semanticMutation.isPending ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : semanticMutation.data?.noEmbeddingsExist ? (
+              <div className="text-center py-16 space-y-3">
+                <Database className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                <p className="text-sm text-muted-foreground">
+                  Semantic search requires indexed vault entries. Reindex your vault first.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void fetch("/api/vault/reindex", {
+                      method: "POST",
+                      credentials: "include",
+                    });
+                    toast({
+                      title: "Reindexing started",
+                      description:
+                        "Your vault entries are being indexed. Try searching again in a moment.",
+                    });
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                  Reindex My Vault
+                </Button>
+              </div>
+            ) : semanticMutation.data?.embeddingError ? (
+              <div className="text-center py-12 space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Search unavailable right now. Please try again in a moment.
+                </p>
+              </div>
+            ) : semanticMutation.data && semanticMutation.data.results.length === 0 ? (
+              <div className="text-center py-16 space-y-2">
+                <Search className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                <p className="text-sm text-muted-foreground">No matching entries found.</p>
+                <p className="text-xs text-muted-foreground/60">
+                  Try a different query or reindex your vault to include more entries.
+                </p>
+              </div>
+            ) : semanticMutation.data ? (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  {semanticMutation.data.results.length}{" "}
+                  {semanticMutation.data.results.length === 1 ? "result" : "results"}
+                  {semanticMutation.data.remaining !== undefined &&
+                    ` · ${semanticMutation.data.remaining} searches remaining this hour`}
+                </p>
+                {semanticMutation.data.results.map((result) => (
+                  <SemanticResultCard
+                    key={result.entryId}
+                    result={result}
+                    isOpening={openingEntryId === result.entryId}
+                    onClick={() => void handleOpenSemanticResult(result.entryId)}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </>
         )}
       </div>
 

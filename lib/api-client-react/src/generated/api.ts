@@ -315,6 +315,8 @@ import type {
   VaultEntry,
   VaultEntryInput,
   VaultReindexAllResult,
+  VaultSemanticSearchRequest,
+  VaultSemanticSearchResponse,
   VaultVersion,
   VisualEditInput,
   VisualEditResult,
@@ -12228,6 +12230,79 @@ export const useReindexAllVaultEntries = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getReindexAllVaultEntriesMutationOptions(options));
+    }
+
+export const getSemanticSearchVaultUrl = () => {
+
+
+
+
+  return `/api/vault/search/semantic`
+}
+
+/**
+ * @summary Semantic search across the authenticated user's Knowledge Vault entries using pgvector cosine similarity. The user query is embedded; stored chunk embeddings are compared. No RAG, no AI answer generation.
+
+ */
+export const semanticSearchVault = async (vaultSemanticSearchRequest: VaultSemanticSearchRequest, options?: RequestInit): Promise<VaultSemanticSearchResponse> => {
+
+  return customFetch<VaultSemanticSearchResponse>(getSemanticSearchVaultUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      vaultSemanticSearchRequest,)
+  }
+);}
+
+
+
+
+export const getSemanticSearchVaultMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof semanticSearchVault>>, TError,{data: BodyType<VaultSemanticSearchRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof semanticSearchVault>>, TError,{data: BodyType<VaultSemanticSearchRequest>}, TContext> => {
+
+const mutationKey = ['semanticSearchVault'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof semanticSearchVault>>, {data: BodyType<VaultSemanticSearchRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  semanticSearchVault(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SemanticSearchVaultMutationResult = NonNullable<Awaited<ReturnType<typeof semanticSearchVault>>>
+    export type SemanticSearchVaultMutationBody = BodyType<VaultSemanticSearchRequest>
+    export type SemanticSearchVaultMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Semantic search across the authenticated user's Knowledge Vault entries using pgvector cosine similarity. The user query is embedded; stored chunk embeddings are compared. No RAG, no AI answer generation.
+
+ */
+export const useSemanticSearchVault = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof semanticSearchVault>>, TError,{data: BodyType<VaultSemanticSearchRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof semanticSearchVault>>,
+        TError,
+        {data: BodyType<VaultSemanticSearchRequest>},
+        TContext
+      > => {
+      return useMutation(getSemanticSearchVaultMutationOptions(options));
     }
 
 export const getTriggerMobileBuildUrl = (id: number,) => {

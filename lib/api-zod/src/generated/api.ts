@@ -4606,6 +4606,56 @@ export const ReindexAllVaultEntriesResponse = zod.object({
 
 
 /**
+ * @summary Semantic search across the authenticated user's Knowledge Vault entries using pgvector cosine similarity. The user query is embedded; stored chunk embeddings are compared. No RAG, no AI answer generation.
+
+ */
+export const semanticSearchVaultBodyQueryMax = 1000;
+
+export const semanticSearchVaultBodyLimitDefault = 10;
+export const semanticSearchVaultBodyLimitMax = 30;
+
+export const semanticSearchVaultBodyTagsMax = 20;
+
+export const semanticSearchVaultBodyIncludeArchivedDefault = false;
+
+export const SemanticSearchVaultBody = zod.object({
+  "query": zod.string().min(1).max(semanticSearchVaultBodyQueryMax).describe('Natural-language search query. Only this text is sent to the embedding model.'),
+  "limit": zod.number().min(1).max(semanticSearchVaultBodyLimitMax).default(semanticSearchVaultBodyLimitDefault),
+  "category": zod.string().optional().describe('Filter results to a specific category.'),
+  "department": zod.string().optional().describe('Filter results to a specific department.'),
+  "tags": zod.array(zod.string()).max(semanticSearchVaultBodyTagsMax).optional().describe('Filter to entries that share at least one of these tags.'),
+  "status": zod.enum(['draft', 'approved']).optional().describe('Filter by entry status.'),
+  "includeArchived": zod.boolean().default(semanticSearchVaultBodyIncludeArchivedDefault).describe('When true, archived entries are included in results.')
+})
+
+export const semanticSearchVaultResponseResultsItemSimilarityScoreMin = 0;
+export const semanticSearchVaultResponseResultsItemSimilarityScoreMax = 100;
+
+
+
+export const SemanticSearchVaultResponse = zod.object({
+  "query": zod.string(),
+  "results": zod.array(zod.object({
+  "entryId": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "department": zod.string().nullish(),
+  "summary": zod.string(),
+  "tags": zod.array(zod.string()),
+  "status": zod.string(),
+  "version": zod.number(),
+  "chunkIndex": zod.number().describe('Index of the best-matching chunk within the entry.'),
+  "chunkPreview": zod.string().describe('First 300 characters of the best-matching chunk. Raw vectors are never returned.'),
+  "similarityScore": zod.number().min(semanticSearchVaultResponseResultsItemSimilarityScoreMin).max(semanticSearchVaultResponseResultsItemSimilarityScoreMax).describe('Cosine similarity score expressed as 0–100 (100 = identical).'),
+  "updatedAt": zod.string()
+})),
+  "remaining": zod.number().optional().describe('Remaining searches allowed in the current hourly window.'),
+  "noEmbeddingsExist": zod.boolean().optional().describe('True when the user has no indexed embeddings; prompt them to reindex.'),
+  "embeddingError": zod.boolean().optional().describe('True when the query embedding call failed.')
+})
+
+
+/**
  * @summary Trigger an EAS cloud build for iOS or Android
  */
 export const TriggerMobileBuildParams = zod.object({

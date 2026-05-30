@@ -4003,6 +4003,77 @@ export interface VaultReindexAllResult {
   remaining: number;
 }
 
+/**
+ * Filter by entry status.
+ */
+export type VaultSemanticSearchRequestStatus = typeof VaultSemanticSearchRequestStatus[keyof typeof VaultSemanticSearchRequestStatus];
+
+
+export const VaultSemanticSearchRequestStatus = {
+  draft: 'draft',
+  approved: 'approved',
+} as const;
+
+export interface VaultSemanticSearchRequest {
+  /**
+     * Natural-language search query. Only this text is sent to the embedding model.
+     * @minLength 1
+     * @maxLength 1000
+     */
+  query: string;
+  /**
+     * @minimum 1
+     * @maximum 30
+     */
+  limit?: number;
+  /** Filter results to a specific category. */
+  category?: string;
+  /** Filter results to a specific department. */
+  department?: string;
+  /**
+     * Filter to entries that share at least one of these tags.
+     * @maxItems 20
+     */
+  tags?: string[];
+  /** Filter by entry status. */
+  status?: VaultSemanticSearchRequestStatus;
+  /** When true, archived entries are included in results. */
+  includeArchived?: boolean;
+}
+
+export interface VaultSemanticSearchResult {
+  entryId: number;
+  title: string;
+  category: string;
+  department?: string | null;
+  summary: string;
+  tags: string[];
+  status: string;
+  version: number;
+  /** Index of the best-matching chunk within the entry. */
+  chunkIndex: number;
+  /** First 300 characters of the best-matching chunk. Raw vectors are never returned. */
+  chunkPreview: string;
+  /**
+     * Cosine similarity score expressed as 0–100 (100 = identical).
+     * @minimum 0
+     * @maximum 100
+     */
+  similarityScore: number;
+  updatedAt: string;
+}
+
+export interface VaultSemanticSearchResponse {
+  query: string;
+  results: VaultSemanticSearchResult[];
+  /** Remaining searches allowed in the current hourly window. */
+  remaining?: number;
+  /** True when the user has no indexed embeddings; prompt them to reindex. */
+  noEmbeddingsExist?: boolean;
+  /** True when the query embedding call failed. */
+  embeddingError?: boolean;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;

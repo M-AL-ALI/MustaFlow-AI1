@@ -3745,6 +3745,43 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /vault/search/semantic:
+    post:
+      operationId: semanticSearchVault
+      tags: [vault]
+      summary: >
+        Semantic search across the authenticated user's Knowledge Vault entries
+        using pgvector cosine similarity. The user query is embedded;
+        stored chunk embeddings are compared. No RAG, no AI answer generation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultSemanticSearchRequest"
+      responses:
+        "200":
+          description: Semantic search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultSemanticSearchResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "429":
+          description: Rate limit exceeded (max 30 per hour)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /projects/{id}/builds:
     post:
       operationId: triggerMobileBuild
@@ -9627,3 +9664,87 @@ components:
         rateLimited: { type: boolean }
         retryAfterSec: { type: integer }
         remaining: { type: integer }
+
+    VaultSemanticSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Natural-language search query. Only this text is sent to the embedding model.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 30
+          default: 10
+        category:
+          type: string
+          description: Filter results to a specific category.
+        department:
+          type: string
+          description: Filter results to a specific department.
+        tags:
+          type: array
+          items: { type: string }
+          maxItems: 20
+          description: Filter to entries that share at least one of these tags.
+        status:
+          type: string
+          enum: [draft, approved]
+          description: Filter by entry status.
+        includeArchived:
+          type: boolean
+          default: false
+          description: When true, archived entries are included in results.
+
+    VaultSemanticSearchResult:
+      type: object
+      required:
+        [entryId, title, category, summary, tags, status, version,
+         chunkIndex, chunkPreview, similarityScore, updatedAt]
+      properties:
+        entryId: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        department:
+          type: string
+          nullable: true
+        summary: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        status: { type: string }
+        version: { type: integer }
+        chunkIndex:
+          type: integer
+          description: Index of the best-matching chunk within the entry.
+        chunkPreview:
+          type: string
+          description: First 300 characters of the best-matching chunk. Raw vectors are never returned.
+        similarityScore:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Cosine similarity score expressed as 0–100 (100 = identical).
+        updatedAt: { type: string }
+
+    VaultSemanticSearchResponse:
+      type: object
+      required: [query, results]
+      properties:
+        query: { type: string }
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/VaultSemanticSearchResult"
+        remaining:
+          type: integer
+          description: Remaining searches allowed in the current hourly window.
+        noEmbeddingsExist:
+          type: boolean
+          description: True when the user has no indexed embeddings; prompt them to reindex.
+        embeddingError:
+          type: boolean
+          description: True when the query embedding call failed.
