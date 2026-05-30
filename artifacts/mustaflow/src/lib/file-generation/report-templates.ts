@@ -117,7 +117,8 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "manufacturing-review",
     label: "Manufacturing Performance Review",
-    description: "Shop-floor and production metrics with root cause analysis and operational impact.",
+    description:
+      "Shop-floor and production metrics with root cause analysis and operational impact.",
     sections: [
       "health-score",
       "executive-summary",
@@ -156,7 +157,8 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "root-cause-investigation",
     label: "Root Cause Investigation",
-    description: "Structured RCA with five whys, fishbone, corrective actions, and enhanced risk scoring.",
+    description:
+      "Structured RCA with five whys, fishbone, corrective actions, and enhanced risk scoring.",
     sections: [
       "executive-summary",
       "management-summary",
@@ -191,7 +193,8 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "continuous-improvement",
     label: "Continuous Improvement Report",
-    description: "CI initiative status with opportunities, financial impact, and strategic roadmap.",
+    description:
+      "CI initiative status with opportunities, financial impact, and strategic roadmap.",
     sections: [
       "health-score",
       "executive-summary",
@@ -211,7 +214,8 @@ export const REPORT_TEMPLATES: ReportTemplate[] = [
   {
     id: "lean-six-sigma",
     label: "Lean Six Sigma Report",
-    description: "DMAIC-aligned report with pareto analysis, operational impact, and strategic roadmap.",
+    description:
+      "DMAIC-aligned report with pareto analysis, operational impact, and strategic roadmap.",
     sections: [
       "health-score",
       "executive-summary",

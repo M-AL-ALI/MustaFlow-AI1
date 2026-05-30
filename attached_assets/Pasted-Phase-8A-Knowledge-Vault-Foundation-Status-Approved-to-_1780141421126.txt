@@ -1,0 +1,507 @@
+Phase 8A — Knowledge Vault Foundation
+
+Status: Approved to Begin
+
+Goal
+
+Build the foundation for the MustaFlow AI Knowledge Vault.
+
+The purpose is to let users save, organize, search, review, edit, version, and archive approved knowledge from reports, investigations, corrective actions, lessons learned, SOPs, standards, and improvement projects.
+
+This phase is foundation only.
+
+Do not implement autonomous AI learning yet.
+
+Do not implement automatic memory injection yet.
+
+Do not implement RAG, vector search, semantic search, or embeddings yet.
+
+Do not allow Ora to permanently learn anything unless the user explicitly approves saving it.
+
+⸻
+
+Core Principle
+
+Knowledge Vault is not uncontrolled memory.
+
+Knowledge Vault is a structured, permission-controlled organizational intelligence repository.
+
+Every saved item must be:
+
+* User-approved
+* Searchable
+* Categorized
+* Tagged
+* Versioned
+* Timestamped
+* Attributed to a source
+* Editable
+* Archivable
+* Permission-controlled
+* Sanitized before saving
+
+Nothing should be automatically saved without user action.
+
+⸻
+
+What Can Be Saved
+
+Allow users to save:
+
+Reports
+
+* Executive Reports
+* Operations Reviews
+* Manufacturing Reviews
+* KPI Reviews
+* Root Cause Reports
+* Corrective Action Reports
+* Strategic Planning Reports
+* Continuous Improvement Reports
+* Lean Six Sigma Reports
+
+Investigations
+
+* Root Cause Analysis
+* Five Whys
+* Fishbone Results
+* Pareto Findings
+* CAPA Results
+* Quality Investigations
+* Downtime Investigations
+
+Improvement Projects
+
+* Lean Projects
+* Six Sigma Projects
+* Kaizen Events
+* Automation Projects
+* Process Improvements
+* Productivity Improvements
+* Waste Reduction Projects
+
+SOPs and Standards
+
+* Standard Operating Procedures
+* Work Instructions
+* Quality Standards
+* Safety Standards
+* Audit Findings
+* Compliance Standards
+
+Lessons Learned
+
+Examples:
+
+* Multivac seal failures
+* WBI throughput improvements
+* Debone productivity gains
+* Staffing improvements
+* Packaging optimization
+* Downtime reduction actions
+* Maintenance fixes
+* Quality defect reductions
+
+⸻
+
+New Data Entity
+
+Create a new Knowledge Vault entity.
+
+Suggested model:
+
+KnowledgeVaultEntry {
+  id: string;
+  title: string;
+  category: KnowledgeCategory;
+  subcategory?: string;
+  summary: string;
+  content: string;
+  tags: string[];
+  department?: string;
+  sourceType: KnowledgeSourceType;
+  sourceReference?: string;
+  status: "draft" | "approved" | "archived";
+  version: number;
+  confidenceScore?: number;
+  approved: boolean;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+⸻
+
+Categories
+
+Use these categories:
+
+REPORT
+INVESTIGATION
+CORRECTIVE_ACTION
+LESSON_LEARNED
+BEST_PRACTICE
+PROJECT
+SOP
+STANDARD
+AUDIT
+KPI
+RISK
+OTHER
+
+⸻
+
+Source Types
+
+Use these source types:
+
+ORA_REPORT
+DATASET_ANALYSIS
+DOCUMENT_ANALYSIS
+IMAGE_ANALYSIS
+VOICE_TRANSCRIPT
+USER_CREATED
+MANUAL_ENTRY
+IMPORT
+OTHER
+
+⸻
+
+Departments
+
+Support departments such as:
+
+Operations
+Manufacturing
+Packaging
+Debone
+WBI
+Maintenance
+Quality
+Safety
+Engineering
+Management
+Corporate
+Other
+
+⸻
+
+Required Features
+
+1. Save to Knowledge Vault
+
+Add a “Save to Knowledge Vault” action in the appropriate Ora/report surfaces.
+
+User should be able to save:
+
+* Dataset analysis
+* Generated reports
+* Root cause reports
+* Corrective action reports
+* Executive reports
+* Operations reports
+* Strategic reports
+* Lessons learned
+
+Save flow:
+
+1. User clicks “Save to Knowledge Vault”
+2. A review modal opens
+3. User reviews title, category, department, tags, summary, and content
+4. User confirms save
+5. Entry is saved
+6. Entry appears in the Knowledge Vault tab
+
+No automatic saving.
+
+⸻
+
+2. Knowledge Vault Page / Tab
+
+Create a new Knowledge Vault page or tab.
+
+Sections:
+
+* All
+* Reports
+* Investigations
+* Corrective Actions
+* Lessons Learned
+* Best Practices
+* Projects
+* SOPs
+* Standards
+* Audits
+* KPIs
+* Risks
+* Archived
+
+Each entry should show:
+
+* Title
+* Category
+* Department
+* Tags
+* Summary
+* Status
+* Version
+* Created date
+* Updated date
+
+⸻
+
+3. Entry Viewer
+
+Each entry should open into a detailed viewer showing:
+
+* Title
+* Category
+* Subcategory
+* Department
+* Tags
+* Summary
+* Full content
+* Source type
+* Source reference
+* Status
+* Version
+* Created by
+* Updated by
+* Created date
+* Updated date
+
+Actions:
+
+* Edit
+* Archive
+* Restore
+* View version history
+
+⸻
+
+4. Search and Filters
+
+Implement simple structured search first.
+
+Support:
+
+* Keyword search
+* Category filter
+* Department filter
+* Status filter
+* Tag filter
+* Date filter
+
+Do not implement vector search yet.
+
+Do not implement semantic search yet.
+
+Do not implement RAG yet.
+
+⸻
+
+5. Versioning
+
+Every edit should create a new version.
+
+Rules:
+
+* Never destructively overwrite prior content
+* Version starts at 1
+* Each update increments version by 1
+* Previous versions remain viewable
+* Version history shows:
+    * version number
+    * edited by
+    * edited date
+    * summary of changes if available
+
+Suggested model:
+
+KnowledgeVaultVersion {
+  id: string;
+  entryId: string;
+  version: number;
+  title: string;
+  summary: string;
+  content: string;
+  tags: string[];
+  department?: string;
+  editedBy: string;
+  editedAt: Date;
+}
+
+⸻
+
+6. Security and Sanitization
+
+Before saving any entry, sanitize the content.
+
+Must never store:
+
+* API keys
+* Secrets
+* Tokens
+* Passwords
+* Connection strings
+* Session identifiers
+* Handoff tokens
+* Builder secrets
+* Deployment secrets
+* Private credentials
+* Internal infrastructure IDs
+* Base64 payloads
+* File references
+* Image references
+* Dataset references
+
+Reuse the existing sanitizer where possible.
+
+If sensitive content is detected, either:
+
+* remove/redact it automatically, or
+* block the save and tell the user what needs to be removed
+
+⸻
+
+7. Permissions
+
+Knowledge Vault entries must be permission controlled.
+
+Minimum requirement:
+
+* User can only see entries they created or entries allowed for their organization/workspace.
+* Public Ora visitors must not access Knowledge Vault.
+* Knowledge Vault should require authentication.
+* No anonymous user can save or read Knowledge Vault entries.
+
+Do not expose Knowledge Vault through public Ora routes.
+
+⸻
+
+8. Backend Services
+
+Create service functions such as:
+
+saveKnowledgeEntry()
+searchKnowledgeEntries()
+getKnowledgeEntry()
+updateKnowledgeEntry()
+archiveKnowledgeEntry()
+restoreKnowledgeEntry()
+getKnowledgeVersions()
+
+Keep this separate from public Ora routes.
+
+Do not connect it to autonomous AI learning yet.
+
+⸻
+
+9. API Routes
+
+Create authenticated routes only.
+
+Suggested routes:
+
+POST   /api/knowledge-vault
+GET    /api/knowledge-vault
+GET    /api/knowledge-vault/:id
+PATCH  /api/knowledge-vault/:id
+POST   /api/knowledge-vault/:id/archive
+POST   /api/knowledge-vault/:id/restore
+GET    /api/knowledge-vault/:id/versions
+
+All routes must require authentication.
+
+All routes must enforce ownership / workspace permissions.
+
+⸻
+
+10. UI Entry Points
+
+Add “Save to Knowledge Vault” from:
+
+* Dataset analysis card
+* Report export dialog
+* Generated report result
+* Root cause report
+* Corrective action report
+* Strategic report
+
+If a surface does not have enough data to save, hide the button.
+
+⸻
+
+Explicitly Out of Scope for Phase 8A
+
+Do not build:
+
+* AI learning
+* Auto-learning
+* Background learning
+* Vector embeddings
+* Semantic search
+* RAG
+* Automatic report improvement from saved knowledge
+* Knowledge injection into prompts
+* Agent memory
+* Cross-project intelligence
+* Autonomous recommendations
+* Self-updating AI behavior
+* Web search
+* Image generation
+* Advanced charts
+* New billing or credit behavior
+
+Those belong to future phases 8B and 8C.
+
+⸻
+
+Required Validation Report
+
+After implementation, provide a complete validation report with:
+
+1. Final commit hash
+2. Final affected files
+3. Database migration proof
+4. API route proof
+5. Authentication proof
+6. Permission / ownership proof
+7. Save flow proof
+8. Search proof
+9. Filter proof
+10. Entry viewer proof
+11. Edit/versioning proof
+12. Archive/restore proof
+13. Sanitization proof
+14. Public Ora isolation proof
+15. No RAG / no vector / no AI learning proof
+16. Regression proof for Ora phases 1–7B
+17. Typecheck result
+18. Lint result
+19. Format result
+20. Backend workflow status
+21. Frontend workflow status
+22. Rollback plan
+
+⸻
+
+Success Criteria
+
+Phase 8A is complete only when an authenticated user can:
+
+* Save a report to Knowledge Vault
+* Save a lesson learned
+* Save a corrective action
+* Search saved entries
+* Filter saved entries
+* View entry details
+* Edit an entry
+* See version history
+* Archive an entry
+* Restore an archived entry
+
+without any autonomous learning, prompt injection, semantic search, or vector retrieval.
+
+The goal is to build the safe foundation first.

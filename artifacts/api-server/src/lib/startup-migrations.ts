@@ -2796,6 +2796,65 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-vault ────────────────────────────────────────────────────────────
+  {
+    name: "migrate-vault",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS vault_entries (
+          id               serial PRIMARY KEY,
+          user_id          text NOT NULL,
+          title            text NOT NULL,
+          category         text NOT NULL DEFAULT 'OTHER',
+          subcategory      text,
+          summary          text NOT NULL,
+          content          text NOT NULL,
+          tags             text,
+          department       text,
+          source_type      text NOT NULL DEFAULT 'USER_CREATED',
+          source_reference text,
+          status           text NOT NULL DEFAULT 'draft',
+          version          integer NOT NULL DEFAULT 1,
+          confidence_score integer,
+          approved         boolean NOT NULL DEFAULT false,
+          updated_by       text,
+          created_at       timestamptz NOT NULL DEFAULT now(),
+          updated_at       timestamptz NOT NULL DEFAULT now(),
+          archived_at      timestamptz
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_user_idx ON vault_entries(user_id, created_at DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_category_idx ON vault_entries(user_id, category)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_entries_status_idx ON vault_entries(user_id, status)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS vault_versions (
+          id             serial PRIMARY KEY,
+          entry_id       integer NOT NULL REFERENCES vault_entries(id) ON DELETE CASCADE,
+          version        integer NOT NULL,
+          title          text NOT NULL,
+          summary        text NOT NULL,
+          content        text NOT NULL,
+          tags           text,
+          department     text,
+          edited_by      text NOT NULL,
+          edited_at      timestamptz NOT NULL DEFAULT now(),
+          change_summary text
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS vault_versions_entry_idx ON vault_versions(entry_id, version DESC)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

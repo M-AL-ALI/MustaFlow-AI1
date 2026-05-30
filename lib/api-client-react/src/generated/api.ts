@@ -174,6 +174,8 @@ import type {
   ListSecurityFindingsParams,
   ListSuggestionsParams,
   ListTestRunsParams,
+  ListVaultEntries200,
+  ListVaultEntriesParams,
   MobileAppSettings,
   MobileAppSettingsInput,
   MobileBuildInput,
@@ -309,6 +311,9 @@ import type {
   V1ListProjects200,
   V1TriggerBuild202,
   V1TriggerBuildBody,
+  VaultEntry,
+  VaultEntryInput,
+  VaultVersion,
   VisualEditInput,
   VisualEditResult,
   WhoisContactUpdate,
@@ -11484,6 +11489,527 @@ export const useRateKnowledge = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getRateKnowledgeMutationOptions(options));
     }
+
+export const getCreateVaultEntryUrl = () => {
+
+
+
+
+  return `/api/vault`
+}
+
+/**
+ * @summary Create a Knowledge Vault entry
+ */
+export const createVaultEntry = async (vaultEntryInput: VaultEntryInput, options?: RequestInit): Promise<VaultEntry> => {
+
+  return customFetch<VaultEntry>(getCreateVaultEntryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      vaultEntryInput,)
+  }
+);}
+
+
+
+
+export const getCreateVaultEntryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createVaultEntry>>, TError,{data: BodyType<VaultEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createVaultEntry>>, TError,{data: BodyType<VaultEntryInput>}, TContext> => {
+
+const mutationKey = ['createVaultEntry'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createVaultEntry>>, {data: BodyType<VaultEntryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createVaultEntry(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateVaultEntryMutationResult = NonNullable<Awaited<ReturnType<typeof createVaultEntry>>>
+    export type CreateVaultEntryMutationBody = BodyType<VaultEntryInput>
+    export type CreateVaultEntryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Create a Knowledge Vault entry
+ */
+export const useCreateVaultEntry = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createVaultEntry>>, TError,{data: BodyType<VaultEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createVaultEntry>>,
+        TError,
+        {data: BodyType<VaultEntryInput>},
+        TContext
+      > => {
+      return useMutation(getCreateVaultEntryMutationOptions(options));
+    }
+
+export const getListVaultEntriesUrl = (params?: ListVaultEntriesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/vault?${stringifiedParams}` : `/api/vault`
+}
+
+/**
+ * @summary List Knowledge Vault entries for the authenticated user
+ */
+export const listVaultEntries = async (params?: ListVaultEntriesParams, options?: RequestInit): Promise<ListVaultEntries200> => {
+
+  return customFetch<ListVaultEntries200>(getListVaultEntriesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListVaultEntriesQueryKey = (params?: ListVaultEntriesParams,) => {
+    return [
+    `/api/vault`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListVaultEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listVaultEntries>>, TError = ErrorType<unknown>>(params?: ListVaultEntriesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listVaultEntries>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListVaultEntriesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listVaultEntries>>> = ({ signal }) => listVaultEntries(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listVaultEntries>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListVaultEntriesQueryResult = NonNullable<Awaited<ReturnType<typeof listVaultEntries>>>
+export type ListVaultEntriesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List Knowledge Vault entries for the authenticated user
+ */
+
+export function useListVaultEntries<TData = Awaited<ReturnType<typeof listVaultEntries>>, TError = ErrorType<unknown>>(
+ params?: ListVaultEntriesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listVaultEntries>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListVaultEntriesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetVaultEntryUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}`
+}
+
+/**
+ * @summary Get a single Knowledge Vault entry
+ */
+export const getVaultEntry = async (id: number, options?: RequestInit): Promise<VaultEntry> => {
+
+  return customFetch<VaultEntry>(getGetVaultEntryUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVaultEntryQueryKey = (id: number,) => {
+    return [
+    `/api/vault/${id}`
+    ] as const;
+    }
+
+
+export const getGetVaultEntryQueryOptions = <TData = Awaited<ReturnType<typeof getVaultEntry>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVaultEntry>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVaultEntryQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVaultEntry>>> = ({ signal }) => getVaultEntry(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVaultEntry>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVaultEntryQueryResult = NonNullable<Awaited<ReturnType<typeof getVaultEntry>>>
+export type GetVaultEntryQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get a single Knowledge Vault entry
+ */
+
+export function useGetVaultEntry<TData = Awaited<ReturnType<typeof getVaultEntry>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVaultEntry>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVaultEntryQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateVaultEntryUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}`
+}
+
+/**
+ * @summary Update a Knowledge Vault entry (bumps version)
+ */
+export const updateVaultEntry = async (id: number,
+    vaultEntryInput: VaultEntryInput, options?: RequestInit): Promise<VaultEntry> => {
+
+  return customFetch<VaultEntry>(getUpdateVaultEntryUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      vaultEntryInput,)
+  }
+);}
+
+
+
+
+export const getUpdateVaultEntryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateVaultEntry>>, TError,{id: number;data: BodyType<VaultEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateVaultEntry>>, TError,{id: number;data: BodyType<VaultEntryInput>}, TContext> => {
+
+const mutationKey = ['updateVaultEntry'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateVaultEntry>>, {id: number;data: BodyType<VaultEntryInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateVaultEntry(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateVaultEntryMutationResult = NonNullable<Awaited<ReturnType<typeof updateVaultEntry>>>
+    export type UpdateVaultEntryMutationBody = BodyType<VaultEntryInput>
+    export type UpdateVaultEntryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Update a Knowledge Vault entry (bumps version)
+ */
+export const useUpdateVaultEntry = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateVaultEntry>>, TError,{id: number;data: BodyType<VaultEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateVaultEntry>>,
+        TError,
+        {id: number;data: BodyType<VaultEntryInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateVaultEntryMutationOptions(options));
+    }
+
+export const getArchiveVaultEntryUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}/archive`
+}
+
+/**
+ * @summary Archive a Knowledge Vault entry
+ */
+export const archiveVaultEntry = async (id: number, options?: RequestInit): Promise<VaultEntry> => {
+
+  return customFetch<VaultEntry>(getArchiveVaultEntryUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getArchiveVaultEntryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof archiveVaultEntry>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof archiveVaultEntry>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['archiveVaultEntry'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof archiveVaultEntry>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  archiveVaultEntry(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ArchiveVaultEntryMutationResult = NonNullable<Awaited<ReturnType<typeof archiveVaultEntry>>>
+
+    export type ArchiveVaultEntryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Archive a Knowledge Vault entry
+ */
+export const useArchiveVaultEntry = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof archiveVaultEntry>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof archiveVaultEntry>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getArchiveVaultEntryMutationOptions(options));
+    }
+
+export const getRestoreVaultEntryUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}/restore`
+}
+
+/**
+ * @summary Restore an archived Knowledge Vault entry
+ */
+export const restoreVaultEntry = async (id: number, options?: RequestInit): Promise<VaultEntry> => {
+
+  return customFetch<VaultEntry>(getRestoreVaultEntryUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRestoreVaultEntryMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreVaultEntry>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreVaultEntry>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['restoreVaultEntry'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreVaultEntry>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  restoreVaultEntry(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreVaultEntryMutationResult = NonNullable<Awaited<ReturnType<typeof restoreVaultEntry>>>
+
+    export type RestoreVaultEntryMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Restore an archived Knowledge Vault entry
+ */
+export const useRestoreVaultEntry = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreVaultEntry>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreVaultEntry>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRestoreVaultEntryMutationOptions(options));
+    }
+
+export const getGetVaultVersionsUrl = (id: number,) => {
+
+
+
+
+  return `/api/vault/${id}/versions`
+}
+
+/**
+ * @summary Get version history for a Knowledge Vault entry
+ */
+export const getVaultVersions = async (id: number, options?: RequestInit): Promise<VaultVersion[]> => {
+
+  return customFetch<VaultVersion[]>(getGetVaultVersionsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVaultVersionsQueryKey = (id: number,) => {
+    return [
+    `/api/vault/${id}/versions`
+    ] as const;
+    }
+
+
+export const getGetVaultVersionsQueryOptions = <TData = Awaited<ReturnType<typeof getVaultVersions>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVaultVersions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVaultVersionsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVaultVersions>>> = ({ signal }) => getVaultVersions(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVaultVersions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVaultVersionsQueryResult = NonNullable<Awaited<ReturnType<typeof getVaultVersions>>>
+export type GetVaultVersionsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get version history for a Knowledge Vault entry
+ */
+
+export function useGetVaultVersions<TData = Awaited<ReturnType<typeof getVaultVersions>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVaultVersions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVaultVersionsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getTriggerMobileBuildUrl = (id: number,) => {
 

@@ -30,6 +30,8 @@ tags:
     description: User credits and billing
   - name: preferences
     description: Current user preferences (persisted to DB)
+  - name: vault
+    description: Knowledge Vault — user-controlled organizational knowledge repository
   - name: builds
     description: EAS mobile cloud builds (iOS / Android)
   - name: admin
@@ -1339,7 +1341,11 @@ paths:
               type: object
               required: [hint]
               properties:
-                hint: { type: string, description: "Plain-English guidance to inject into the running task" }
+                hint:
+                  {
+                    type: string,
+                    description: "Plain-English guidance to inject into the running task",
+                  }
       responses:
         "200":
           description: Steering hint queued
@@ -3497,6 +3503,189 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /vault:
+    post:
+      operationId: createVaultEntry
+      tags: [vault]
+      summary: Create a Knowledge Vault entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultEntryInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "422":
+          description: Sensitive content detected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    get:
+      operationId: listVaultEntries
+      tags: [vault]
+      summary: List Knowledge Vault entries for the authenticated user
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string }
+        - name: department
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [draft, approved, archived] }
+        - name: archived
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Vault entries list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, total]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VaultEntry"
+                  total:
+                    type: integer
+
+  /vault/{id}:
+    get:
+      operationId: getVaultEntry
+      tags: [vault]
+      summary: Get a single Knowledge Vault entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Vault entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    patch:
+      operationId: updateVaultEntry
+      tags: [vault]
+      summary: Update a Knowledge Vault entry (bumps version)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultEntryInput"
+      responses:
+        "200":
+          description: Updated entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/{id}/archive:
+    post:
+      operationId: archiveVaultEntry
+      tags: [vault]
+      summary: Archive a Knowledge Vault entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Archived entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "404":
+          description: Not found or already archived
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/{id}/restore:
+    post:
+      operationId: restoreVaultEntry
+      tags: [vault]
+      summary: Restore an archived Knowledge Vault entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Restored entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/{id}/versions:
+    get:
+      operationId: getVaultVersions
+      tags: [vault]
+      summary: Get version history for a Knowledge Vault entry
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Version history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VaultVersion"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
 
   /projects/{id}/builds:
     post:
@@ -9268,3 +9457,82 @@ components:
             Database ID of the persisted assistant error message. Present when the
             fallback error assistant message was successfully written to the DB
             before the stream terminated; absent or null otherwise.
+
+    VaultEntry:
+      type: object
+      required:
+        - id
+        - userId
+        - title
+        - category
+        - summary
+        - content
+        - sourceType
+        - status
+        - version
+        - approved
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: integer }
+        userId: { type: string }
+        title: { type: string }
+        category: { type: string }
+        subcategory: { type: string, nullable: true }
+        summary: { type: string }
+        content: { type: string }
+        tags: { type: string, nullable: true }
+        department: { type: string, nullable: true }
+        sourceType: { type: string }
+        sourceReference: { type: string, nullable: true }
+        status: { type: string, enum: [draft, approved, archived] }
+        version: { type: integer }
+        confidenceScore: { type: integer, nullable: true }
+        approved: { type: boolean }
+        updatedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        archivedAt: { type: string, format: date-time, nullable: true }
+
+    VaultEntryInput:
+      type: object
+      properties:
+        title: { type: string, maxLength: 500 }
+        category: { type: string }
+        subcategory: { type: string }
+        summary: { type: string, maxLength: 2000 }
+        content: { type: string, maxLength: 50000 }
+        tags:
+          type: array
+          items: { type: string }
+        department: { type: string }
+        sourceType: { type: string }
+        sourceReference: { type: string }
+        confidenceScore: { type: integer, minimum: 0, maximum: 100 }
+        status: { type: string, enum: [draft, approved, archived] }
+        approved: { type: boolean }
+        changeSummary: { type: string, maxLength: 500 }
+
+    VaultVersion:
+      type: object
+      required:
+        - id
+        - entryId
+        - version
+        - title
+        - summary
+        - content
+        - editedBy
+        - editedAt
+      properties:
+        id: { type: integer }
+        entryId: { type: integer }
+        version: { type: integer }
+        title: { type: string }
+        summary: { type: string }
+        content: { type: string }
+        tags: { type: string, nullable: true }
+        department: { type: string, nullable: true }
+        editedBy: { type: string }
+        editedAt: { type: string, format: date-time }
+        changeSummary: { type: string, nullable: true }

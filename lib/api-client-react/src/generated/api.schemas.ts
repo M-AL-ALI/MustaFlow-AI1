@@ -3896,6 +3896,84 @@ export interface StreamErrorEvent {
   assistantMessageId?: number | null;
 }
 
+export type VaultEntryStatus = typeof VaultEntryStatus[keyof typeof VaultEntryStatus];
+
+
+export const VaultEntryStatus = {
+  draft: 'draft',
+  approved: 'approved',
+  archived: 'archived',
+} as const;
+
+export interface VaultEntry {
+  id: number;
+  userId: string;
+  title: string;
+  category: string;
+  subcategory?: string | null;
+  summary: string;
+  content: string;
+  tags?: string | null;
+  department?: string | null;
+  sourceType: string;
+  sourceReference?: string | null;
+  status: VaultEntryStatus;
+  version: number;
+  confidenceScore?: number | null;
+  approved: boolean;
+  updatedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
+export type VaultEntryInputStatus = typeof VaultEntryInputStatus[keyof typeof VaultEntryInputStatus];
+
+
+export const VaultEntryInputStatus = {
+  draft: 'draft',
+  approved: 'approved',
+  archived: 'archived',
+} as const;
+
+export interface VaultEntryInput {
+  /** @maxLength 500 */
+  title?: string;
+  category?: string;
+  subcategory?: string;
+  /** @maxLength 2000 */
+  summary?: string;
+  /** @maxLength 50000 */
+  content?: string;
+  tags?: string[];
+  department?: string;
+  sourceType?: string;
+  sourceReference?: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  confidenceScore?: number;
+  status?: VaultEntryInputStatus;
+  approved?: boolean;
+  /** @maxLength 500 */
+  changeSummary?: string;
+}
+
+export interface VaultVersion {
+  id: number;
+  entryId: number;
+  version: number;
+  title: string;
+  summary: string;
+  content: string;
+  tags?: string | null;
+  department?: string | null;
+  editedBy: string;
+  editedAt: string;
+  changeSummary?: string | null;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;
@@ -4459,6 +4537,30 @@ export type RateKnowledge200 = KnowledgeEntry & {
   contributorRewardGranted?: boolean;
   /** Number of credits granted to the contributor (0 when not granted). */
   contributorRewardCredits?: number;
+};
+
+export type ListVaultEntriesParams = {
+q?: string;
+category?: string;
+department?: string;
+status?: ListVaultEntriesStatus;
+archived?: boolean;
+limit?: number;
+offset?: number;
+};
+
+export type ListVaultEntriesStatus = typeof ListVaultEntriesStatus[keyof typeof ListVaultEntriesStatus];
+
+
+export const ListVaultEntriesStatus = {
+  draft: 'draft',
+  approved: 'approved',
+  archived: 'archived',
+} as const;
+
+export type ListVaultEntries200 = {
+  entries: VaultEntry[];
+  total: number;
 };
 
 export type ListMobileBuilds200 = {

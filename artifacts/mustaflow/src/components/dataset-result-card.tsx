@@ -1,3 +1,7 @@
+import { useState } from "react";
+import { BookOpen } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { VaultSaveDialog } from "@/components/vault-save-dialog";
 import { cn } from "@/lib/utils";
 import type {
   DatasetAnalysisResult,
@@ -436,6 +440,25 @@ function EnhancedRisksSection({ risks }: { risks: EnhancedRisk[] }) {
 
 export function DatasetResultCard({ result }: DatasetResultCardProps) {
   const dp = result.datasetProfile;
+  const [vaultOpen, setVaultOpen] = useState(false);
+
+  const vaultContent = [
+    result.summary ? `## Summary\n${result.summary}` : "",
+    result.keyFindings && result.keyFindings.length > 0
+      ? `## Key Findings\n${result.keyFindings.map((k: string) => `- ${k}`).join("\n")}`
+      : "",
+    result.recommendations && result.recommendations.length > 0
+      ? `## Recommendations\n${result.recommendations.map((r) => `- ${r}`).join("\n")}`
+      : "",
+    result.actionPlan && result.actionPlan.length > 0
+      ? `## Action Plan\n${result.actionPlan.map((a) => `- ${a.action} [${a.priority}]${a.owner ? ` — ${a.owner}` : ""}${a.timeline ? ` by ${a.timeline}` : ""}`).join("\n")}`
+      : "",
+    result.nextSteps && result.nextSteps.length > 0
+      ? `## Next Steps\n${result.nextSteps.map((s) => `- ${s}`).join("\n")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return (
     <div className="rounded-xl border border-[hsl(265_85%_65%/0.25)] bg-[hsl(265_85%_65%/0.04)] p-3.5 text-sm max-w-full overflow-x-hidden">
@@ -681,11 +704,37 @@ export function DatasetResultCard({ result }: DatasetResultCardProps) {
       {result.strategicRoadmap && <StrategicRoadmapSection sr={result.strategicRoadmap} />}
 
       {/* Footer */}
-      {result.usedFallback && (
-        <p className="mt-3 text-[9px] text-muted-foreground/50">
-          Analysis generated via fallback model.
-        </p>
-      )}
+      <div className="mt-4 pt-3 border-t border-border/40 flex items-center gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs gap-1.5"
+          onClick={() => setVaultOpen(true)}
+        >
+          <BookOpen className="h-3.5 w-3.5" />
+          Save to Knowledge Vault
+        </Button>
+        {result.usedFallback && (
+          <p className="text-[9px] text-muted-foreground/50 ml-auto">
+            Analysis generated via fallback model.
+          </p>
+        )}
+      </div>
+
+      <VaultSaveDialog
+        open={vaultOpen}
+        onOpenChange={setVaultOpen}
+        defaults={{
+          title: result.datasetProfile?.sheetName
+            ? `Dataset Analysis — ${result.datasetProfile.sheetName}`
+            : "Dataset Analysis",
+          category: "REPORT",
+          summary: result.summary ?? "Dataset analysis result.",
+          content: (vaultContent || result.summary) ?? "",
+          tags: ["dataset-analysis"],
+          sourceType: "DATASET_ANALYSIS",
+        }}
+      />
     </div>
   );
 }

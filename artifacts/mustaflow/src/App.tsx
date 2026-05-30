@@ -22,6 +22,7 @@ import HomePage from "./pages/home";
 import ProjectsPage from "./pages/projects";
 import ProjectWorkspacePage from "./pages/projects/[id]";
 import KnowledgePage from "./pages/knowledge";
+import VaultPage from "./pages/vault";
 import MemoryPage from "./pages/memory";
 import LibraryPage from "./pages/library";
 import SettingsPage from "./pages/settings";
@@ -472,6 +473,13 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 <Protected>
                   <AppLayout>
                     <KnowledgePage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/vault">
+                <Protected>
+                  <AppLayout>
+                    <VaultPage />
                   </AppLayout>
                 </Protected>
               </Route>

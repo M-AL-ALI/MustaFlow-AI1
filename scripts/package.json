@@ -39,6 +39,7 @@
     "migrate-lesson-contribution-reward": "tsx ./src/migrate-lesson-contribution-reward.ts",
     "migrate-canvas-variants-v2": "tsx ./src/migrate-canvas-variants-v2.ts",
     "migrate-blueprints": "tsx ./src/migrate-blueprints.ts",
+    "migrate-vault": "tsx ./src/migrate-vault.ts",
     "migrate-deployment-substrate": "tsx ./src/migrate-deployment-substrate.ts",
     "migrate-project-artifacts": "tsx ./src/migrate-project-artifacts.ts",
     "migrate-security-scanners": "tsx ./src/migrate-security-scanners.ts",

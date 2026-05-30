@@ -4299,6 +4299,253 @@ export const RateKnowledgeResponse = zod.object({
 
 
 /**
+ * @summary Create a Knowledge Vault entry
+ */
+export const createVaultEntryBodyTitleMax = 500;
+
+export const createVaultEntryBodySummaryMax = 2000;
+
+export const createVaultEntryBodyContentMax = 50000;
+
+export const createVaultEntryBodyConfidenceScoreMin = 0;
+export const createVaultEntryBodyConfidenceScoreMax = 100;
+
+export const createVaultEntryBodyChangeSummaryMax = 500;
+
+
+
+export const CreateVaultEntryBody = zod.object({
+  "title": zod.string().max(createVaultEntryBodyTitleMax).optional(),
+  "category": zod.string().optional(),
+  "subcategory": zod.string().optional(),
+  "summary": zod.string().max(createVaultEntryBodySummaryMax).optional(),
+  "content": zod.string().max(createVaultEntryBodyContentMax).optional(),
+  "tags": zod.array(zod.string()).optional(),
+  "department": zod.string().optional(),
+  "sourceType": zod.string().optional(),
+  "sourceReference": zod.string().optional(),
+  "confidenceScore": zod.number().min(createVaultEntryBodyConfidenceScoreMin).max(createVaultEntryBodyConfidenceScoreMax).optional(),
+  "status": zod.enum(['draft', 'approved', 'archived']).optional(),
+  "approved": zod.boolean().optional(),
+  "changeSummary": zod.string().max(createVaultEntryBodyChangeSummaryMax).optional()
+})
+
+
+/**
+ * @summary List Knowledge Vault entries for the authenticated user
+ */
+export const listVaultEntriesQueryLimitDefault = 50;
+export const listVaultEntriesQueryOffsetDefault = 0;
+
+export const ListVaultEntriesQueryParams = zod.object({
+  "q": zod.coerce.string().optional(),
+  "category": zod.coerce.string().optional(),
+  "department": zod.coerce.string().optional(),
+  "status": zod.enum(['draft', 'approved', 'archived']).optional(),
+  "archived": zod.coerce.boolean().optional(),
+  "limit": zod.coerce.number().default(listVaultEntriesQueryLimitDefault),
+  "offset": zod.coerce.number().default(listVaultEntriesQueryOffsetDefault)
+})
+
+export const ListVaultEntriesResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "subcategory": zod.string().nullish(),
+  "summary": zod.string(),
+  "content": zod.string(),
+  "tags": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "sourceType": zod.string(),
+  "sourceReference": zod.string().nullish(),
+  "status": zod.enum(['draft', 'approved', 'archived']),
+  "version": zod.number(),
+  "confidenceScore": zod.number().nullish(),
+  "approved": zod.boolean(),
+  "updatedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "archivedAt": zod.coerce.date().nullish()
+})),
+  "total": zod.number()
+})
+
+
+/**
+ * @summary Get a single Knowledge Vault entry
+ */
+export const GetVaultEntryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetVaultEntryResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "subcategory": zod.string().nullish(),
+  "summary": zod.string(),
+  "content": zod.string(),
+  "tags": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "sourceType": zod.string(),
+  "sourceReference": zod.string().nullish(),
+  "status": zod.enum(['draft', 'approved', 'archived']),
+  "version": zod.number(),
+  "confidenceScore": zod.number().nullish(),
+  "approved": zod.boolean(),
+  "updatedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "archivedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Update a Knowledge Vault entry (bumps version)
+ */
+export const UpdateVaultEntryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateVaultEntryBodyTitleMax = 500;
+
+export const updateVaultEntryBodySummaryMax = 2000;
+
+export const updateVaultEntryBodyContentMax = 50000;
+
+export const updateVaultEntryBodyConfidenceScoreMin = 0;
+export const updateVaultEntryBodyConfidenceScoreMax = 100;
+
+export const updateVaultEntryBodyChangeSummaryMax = 500;
+
+
+
+export const UpdateVaultEntryBody = zod.object({
+  "title": zod.string().max(updateVaultEntryBodyTitleMax).optional(),
+  "category": zod.string().optional(),
+  "subcategory": zod.string().optional(),
+  "summary": zod.string().max(updateVaultEntryBodySummaryMax).optional(),
+  "content": zod.string().max(updateVaultEntryBodyContentMax).optional(),
+  "tags": zod.array(zod.string()).optional(),
+  "department": zod.string().optional(),
+  "sourceType": zod.string().optional(),
+  "sourceReference": zod.string().optional(),
+  "confidenceScore": zod.number().min(updateVaultEntryBodyConfidenceScoreMin).max(updateVaultEntryBodyConfidenceScoreMax).optional(),
+  "status": zod.enum(['draft', 'approved', 'archived']).optional(),
+  "approved": zod.boolean().optional(),
+  "changeSummary": zod.string().max(updateVaultEntryBodyChangeSummaryMax).optional()
+})
+
+export const UpdateVaultEntryResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "subcategory": zod.string().nullish(),
+  "summary": zod.string(),
+  "content": zod.string(),
+  "tags": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "sourceType": zod.string(),
+  "sourceReference": zod.string().nullish(),
+  "status": zod.enum(['draft', 'approved', 'archived']),
+  "version": zod.number(),
+  "confidenceScore": zod.number().nullish(),
+  "approved": zod.boolean(),
+  "updatedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "archivedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Archive a Knowledge Vault entry
+ */
+export const ArchiveVaultEntryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ArchiveVaultEntryResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "subcategory": zod.string().nullish(),
+  "summary": zod.string(),
+  "content": zod.string(),
+  "tags": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "sourceType": zod.string(),
+  "sourceReference": zod.string().nullish(),
+  "status": zod.enum(['draft', 'approved', 'archived']),
+  "version": zod.number(),
+  "confidenceScore": zod.number().nullish(),
+  "approved": zod.boolean(),
+  "updatedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "archivedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Restore an archived Knowledge Vault entry
+ */
+export const RestoreVaultEntryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RestoreVaultEntryResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "subcategory": zod.string().nullish(),
+  "summary": zod.string(),
+  "content": zod.string(),
+  "tags": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "sourceType": zod.string(),
+  "sourceReference": zod.string().nullish(),
+  "status": zod.enum(['draft', 'approved', 'archived']),
+  "version": zod.number(),
+  "confidenceScore": zod.number().nullish(),
+  "approved": zod.boolean(),
+  "updatedBy": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "archivedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Get version history for a Knowledge Vault entry
+ */
+export const GetVaultVersionsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetVaultVersionsResponseItem = zod.object({
+  "id": zod.number(),
+  "entryId": zod.number(),
+  "version": zod.number(),
+  "title": zod.string(),
+  "summary": zod.string(),
+  "content": zod.string(),
+  "tags": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "editedBy": zod.string(),
+  "editedAt": zod.coerce.date(),
+  "changeSummary": zod.string().nullish()
+})
+export const GetVaultVersionsResponse = zod.array(GetVaultVersionsResponseItem)
+
+
+/**
  * @summary Trigger an EAS cloud build for iOS or Android
  */
 export const TriggerMobileBuildParams = zod.object({
