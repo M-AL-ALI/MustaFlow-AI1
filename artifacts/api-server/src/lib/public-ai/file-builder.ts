@@ -7,19 +7,12 @@ import {
   Document,
   Packer,
   Paragraph,
-  HeadingLevel,
   TextRun,
   AlignmentType,
   BorderStyle,
   convertInchesToTwip,
   PageNumber,
-  Header,
   Footer,
-  Table,
-  TableRow,
-  TableCell,
-  WidthType,
-  ShadingType,
 } from "docx";
 import { PassThrough } from "stream";
 import { createChatCompletion } from "../ai-providers";
