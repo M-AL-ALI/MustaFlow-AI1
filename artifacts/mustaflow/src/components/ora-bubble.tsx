@@ -997,18 +997,19 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           </div>
         </div>
 
-        {/* Message feed
-             outer: `relative flex-1 min-h-0` — gives jump button an
-             absolutely-positioned anchor in the visible area.
-             inner: `h-full overflow-y-auto` — scrolls within the flex space
-             allocated to the outer div. `min-h-0` on the outer div is required
-             so the flex item can shrink below its content height. */}
-        <div className="relative flex-1 min-h-0">
-          <div
-            ref={feedRef}
-            onScroll={handleFeedScroll}
-            className="h-full overflow-y-auto overscroll-contain px-4 py-4 space-y-5 scroll-smooth"
-          >
+        {/* Message feed — overflow-y-auto sits directly on the flex-1 min-h-0
+             element so the flex algorithm constrains its height first, then
+             overflow clips at that boundary. Putting h-full on a child inside
+             a flex-1 wrapper does NOT work when the flex container only has
+             max-height (not an explicit height), which the mobile drawer uses.
+             Content is wrapped in an inner padding div; the jump button uses
+             sticky so it stays pinned to the visible bottom of the scroll area. */}
+        <div
+          ref={feedRef}
+          onScroll={handleFeedScroll}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain scroll-smooth"
+        >
+          <div className="px-4 py-4 space-y-5">
             {messages.length === 0 && !isLoading && (
               <div className="text-center py-8">
                 <DynamicAtom state="idle" size={48} className="mx-auto mb-3" />
@@ -1203,7 +1204,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
             )}
           </div>
           {showJumpToLatest && (
-            <div className="absolute bottom-2 right-3 z-10">
+            <div className="sticky bottom-2 flex justify-end pr-3 z-10">
               <button
                 type="button"
                 onClick={jumpToLatest}
