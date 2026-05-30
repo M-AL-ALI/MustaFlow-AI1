@@ -144,10 +144,7 @@ export async function buildCsv(data: TabularData): Promise<Buffer> {
 // XLSX builder
 // ---------------------------------------------------------------------------
 
-function parseCellValue(
-  raw: string,
-  type: ColumnType | undefined,
-): string | number | Date {
+function parseCellValue(raw: string, type: ColumnType | undefined): string | number | Date {
   if (!type || type === "text") return raw;
   if (type === "number" || type === "currency" || type === "percent") {
     const n = parseFloat(raw.replace(/[^0-9.\-]/g, ""));
@@ -273,7 +270,9 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
   // Title
   children.push(
     new Paragraph({
-      children: [new TextRun({ text: data.title, bold: true, size: 48, color: DARK, font: "Calibri" })],
+      children: [
+        new TextRun({ text: data.title, bold: true, size: 48, color: DARK, font: "Calibri" }),
+      ],
       spacing: { after: data.subtitle ? 80 : 240 },
     }),
   );
@@ -302,7 +301,13 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
       children.push(
         new Paragraph({
           children: [
-            new TextRun({ text: section.heading, bold: true, size: 28, color: DARK, font: "Calibri" }),
+            new TextRun({
+              text: section.heading,
+              bold: true,
+              size: 28,
+              color: DARK,
+              font: "Calibri",
+            }),
           ],
           spacing: { before: 400, after: 120 },
           border: { left: { color: ACCENT, space: 8, style: BorderStyle.SINGLE, size: 20 } },
@@ -332,7 +337,9 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
         } else {
           children.push(
             new Paragraph({
-              children: [new TextRun({ text: trimmed, size: 22, color: "374151", font: "Calibri" })],
+              children: [
+                new TextRun({ text: trimmed, size: 22, color: "374151", font: "Calibri" }),
+              ],
               alignment: AlignmentType.JUSTIFIED,
               spacing: { after: 180, line: 300 },
             }),
@@ -477,12 +484,7 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
       if (section.heading) {
         const headingY = doc.y;
         // Left accent bar
-        doc
-          .save()
-          .rect(MARGIN, headingY, 3, 16)
-          .fillColor("#6366F1")
-          .fill()
-          .restore();
+        doc.save().rect(MARGIN, headingY, 3, 16).fillColor("#6366F1").fill().restore();
 
         doc
           .font("Helvetica-Bold")
@@ -630,7 +632,9 @@ export async function generateFileFromPrompt(
 
     const rawColTypes = Array.isArray(aiData.columnTypes)
       ? (aiData.columnTypes as string[]).map((t) =>
-          ["text", "number", "currency", "date", "percent"].includes(t) ? (t as ColumnType) : "text",
+          ["text", "number", "currency", "date", "percent"].includes(t)
+            ? (t as ColumnType)
+            : "text",
         )
       : undefined;
 
