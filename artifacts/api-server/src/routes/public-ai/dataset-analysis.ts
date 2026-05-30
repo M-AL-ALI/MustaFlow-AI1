@@ -20,7 +20,7 @@ const router = Router();
 
 const messageItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().max(4000),
+  content: z.string().max(40000),
 });
 
 const bodySchema = z.object({
