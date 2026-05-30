@@ -2091,18 +2091,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   signal,
                   onBillableSenseBatch: (credits, total) => {
                     if (!project.ownerId) return;
-                    void deductCreditsAtomic(project.ownerId, credits, {
-                      type: "senses",
-                      description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                      projectId,
-                    })
-                      .then((result) => {
-                        if ("insufficient" in result) {
+                    void getOrCreateCredits(project.ownerId)
+                      .then((bal) => {
+                        if (bal.balance < credits) {
                           logger.warn(
-                            { projectId, credits },
-                            "Sense credit deduction: insufficient balance — work already delivered",
+                            { projectId, credits, balance: bal.balance },
+                            "credits_exhausted: skipping senses deduction — insufficient balance",
                           );
+                          return;
                         }
+                        return deductCreditsAtomic(project.ownerId!, credits, {
+                          type: "senses",
+                          description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                          projectId,
+                        }).then((result) => {
+                          if ("insufficient" in result) {
+                            logger.warn(
+                              { projectId, credits },
+                              "Sense credit deduction: insufficient balance — work already delivered",
+                            );
+                          }
+                        });
                       })
                       .catch((err) =>
                         logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
@@ -2110,18 +2119,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   },
                   onBillableCreativeCall: (credits, tool) => {
                     if (!project.ownerId) return;
-                    void deductCreditsAtomic(project.ownerId, credits, {
-                      type: "creative",
-                      description: `Agent ${tool} — project ${projectId}`,
-                      projectId,
-                    })
-                      .then((result) => {
-                        if ("insufficient" in result) {
+                    void getOrCreateCredits(project.ownerId)
+                      .then((bal) => {
+                        if (bal.balance < credits) {
                           logger.warn(
-                            { projectId, credits, tool },
-                            "Creative credit deduction: insufficient balance — work already delivered",
+                            { projectId, credits, tool, balance: bal.balance },
+                            "credits_exhausted: skipping creative deduction — insufficient balance",
                           );
+                          return;
                         }
+                        return deductCreditsAtomic(project.ownerId!, credits, {
+                          type: "creative",
+                          description: `Agent ${tool} — project ${projectId}`,
+                          projectId,
+                        }).then((result) => {
+                          if ("insufficient" in result) {
+                            logger.warn(
+                              { projectId, credits, tool },
+                              "Creative credit deduction: insufficient balance — work already delivered",
+                            );
+                          }
+                        });
                       })
                       .catch((err) =>
                         logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
@@ -2565,18 +2583,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   signal,
                   onBillableSenseBatch: (credits, total) => {
                     if (!project.ownerId) return;
-                    void deductCreditsAtomic(project.ownerId, credits, {
-                      type: "senses",
-                      description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                      projectId,
-                    })
-                      .then((result) => {
-                        if ("insufficient" in result) {
+                    void getOrCreateCredits(project.ownerId)
+                      .then((bal) => {
+                        if (bal.balance < credits) {
                           logger.warn(
-                            { projectId, credits },
-                            "Sense credit deduction: insufficient balance — work already delivered",
+                            { projectId, credits, balance: bal.balance },
+                            "credits_exhausted: skipping senses deduction — insufficient balance",
                           );
+                          return;
                         }
+                        return deductCreditsAtomic(project.ownerId!, credits, {
+                          type: "senses",
+                          description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                          projectId,
+                        }).then((result) => {
+                          if ("insufficient" in result) {
+                            logger.warn(
+                              { projectId, credits },
+                              "Sense credit deduction: insufficient balance — work already delivered",
+                            );
+                          }
+                        });
                       })
                       .catch((err) =>
                         logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
@@ -2584,18 +2611,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   },
                   onBillableCreativeCall: (credits, tool) => {
                     if (!project.ownerId) return;
-                    void deductCreditsAtomic(project.ownerId, credits, {
-                      type: "creative",
-                      description: `Agent ${tool} — project ${projectId}`,
-                      projectId,
-                    })
-                      .then((result) => {
-                        if ("insufficient" in result) {
+                    void getOrCreateCredits(project.ownerId)
+                      .then((bal) => {
+                        if (bal.balance < credits) {
                           logger.warn(
-                            { projectId, credits, tool },
-                            "Creative credit deduction: insufficient balance — work already delivered",
+                            { projectId, credits, tool, balance: bal.balance },
+                            "credits_exhausted: skipping creative deduction — insufficient balance",
                           );
+                          return;
                         }
+                        return deductCreditsAtomic(project.ownerId!, credits, {
+                          type: "creative",
+                          description: `Agent ${tool} — project ${projectId}`,
+                          projectId,
+                        }).then((result) => {
+                          if ("insufficient" in result) {
+                            logger.warn(
+                              { projectId, credits, tool },
+                              "Creative credit deduction: insufficient balance — work already delivered",
+                            );
+                          }
+                        });
                       })
                       .catch((err) =>
                         logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
@@ -2852,23 +2888,45 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 signal,
                 onBillableSenseBatch: (credits, total) => {
                   if (!project.ownerId) return;
-                  void deductCreditsAtomic(project.ownerId, credits, {
-                    type: "senses",
-                    description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
-                    projectId,
-                  }).catch((err) =>
-                    logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
-                  );
+                  void getOrCreateCredits(project.ownerId)
+                    .then((bal) => {
+                      if (bal.balance < credits) {
+                        logger.warn(
+                          { projectId, credits, balance: bal.balance },
+                          "credits_exhausted: skipping senses deduction — insufficient balance",
+                        );
+                        return;
+                      }
+                      return deductCreditsAtomic(project.ownerId!, credits, {
+                        type: "senses",
+                        description: `Web senses batch (${total} call${total === 1 ? "" : "s"}) — project ${projectId}`,
+                        projectId,
+                      });
+                    })
+                    .catch((err) =>
+                      logger.warn({ err }, "Sense credit deduction failed (non-fatal)"),
+                    );
                 },
                 onBillableCreativeCall: (credits, tool) => {
                   if (!project.ownerId) return;
-                  void deductCreditsAtomic(project.ownerId, credits, {
-                    type: "creative",
-                    description: `Agent ${tool} — project ${projectId}`,
-                    projectId,
-                  }).catch((err) =>
-                    logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
-                  );
+                  void getOrCreateCredits(project.ownerId)
+                    .then((bal) => {
+                      if (bal.balance < credits) {
+                        logger.warn(
+                          { projectId, credits, tool, balance: bal.balance },
+                          "credits_exhausted: skipping creative deduction — insufficient balance",
+                        );
+                        return;
+                      }
+                      return deductCreditsAtomic(project.ownerId!, credits, {
+                        type: "creative",
+                        description: `Agent ${tool} — project ${projectId}`,
+                        projectId,
+                      });
+                    })
+                    .catch((err) =>
+                      logger.warn({ err }, "Creative credit deduction failed (non-fatal)"),
+                    );
                 },
               });
               const retryResult = loopResultToRefineResult(retryLoopRes, stricterPrompt);

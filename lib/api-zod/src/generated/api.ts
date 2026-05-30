@@ -2015,6 +2015,23 @@ export const ApplyTaskStagingResponse = zod.object({
 
 
 /**
+ * @summary Queue a steering hint for an in-progress task
+ */
+export const SteerTaskParams = zod.object({
+  "id": zod.coerce.number(),
+  "taskId": zod.coerce.number()
+})
+
+export const SteerTaskBody = zod.object({
+  "hint": zod.string().describe('Plain-English guidance to inject into the running task')
+})
+
+export const SteerTaskResponse = zod.object({
+  "queued": zod.boolean()
+})
+
+
+/**
  * Streams the explanation as `text/plain` chunks (chunked transfer encoding). Callers should consume the response body as a ReadableStream rather than parsing it as JSON. The generated client hook is not suitable for this endpoint; use a native `fetch` with a streaming reader instead.
 
  * @summary Stream a plain-English AI explanation of a staged file change

@@ -4082,6 +4082,15 @@ export type ListAdminRecentUnreadInboxParams = {
 limit?: number;
 };
 
+export type SteerTaskBody = {
+  /** Plain-English guidance to inject into the running task */
+  hint: string;
+};
+
+export type SteerTask200 = {
+  queued: boolean;
+};
+
 export type GetAgentRoutingParams = {
 prompt?: string;
 };

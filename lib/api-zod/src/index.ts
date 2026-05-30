@@ -52,3 +52,4 @@ export { SubmitAbuseReportBody } from "./generated/api";
 export { ToggleAdminSkillBody } from "./generated/api";
 export { UpdateAdminSkillDraftBody } from "./generated/api";
 export { ResumeStreamParams } from "./generated/api";
+export { SteerTaskBody } from "./generated/api";

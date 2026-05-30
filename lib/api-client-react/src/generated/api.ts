@@ -259,6 +259,8 @@ import type {
   SetProjectSubdomain400,
   SetPurchasedDomainAutoRenewBody,
   StartPreviewEnv202,
+  SteerTask200,
+  SteerTaskBody,
   StopContainer200,
   StopPreviewEnv200,
   StreamDoneEvent,
@@ -4846,6 +4848,80 @@ export const useApplyTaskStaging = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getApplyTaskStagingMutationOptions(options));
+    }
+
+export const getSteerTaskUrl = (id: number,
+    taskId: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/${taskId}/steer`
+}
+
+/**
+ * @summary Queue a steering hint for an in-progress task
+ */
+export const steerTask = async (id: number,
+    taskId: number,
+    steerTaskBody: SteerTaskBody, options?: RequestInit): Promise<SteerTask200> => {
+
+  return customFetch<SteerTask200>(getSteerTaskUrl(id,taskId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      steerTaskBody,)
+  }
+);}
+
+
+
+
+export const getSteerTaskMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof steerTask>>, TError,{id: number;taskId: number;data: BodyType<SteerTaskBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof steerTask>>, TError,{id: number;taskId: number;data: BodyType<SteerTaskBody>}, TContext> => {
+
+const mutationKey = ['steerTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof steerTask>>, {id: number;taskId: number;data: BodyType<SteerTaskBody>}> = (props) => {
+          const {id,taskId,data} = props ?? {};
+
+          return  steerTask(id,taskId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SteerTaskMutationResult = NonNullable<Awaited<ReturnType<typeof steerTask>>>
+    export type SteerTaskMutationBody = BodyType<SteerTaskBody>
+    export type SteerTaskMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Queue a steering hint for an in-progress task
+ */
+export const useSteerTask = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof steerTask>>, TError,{id: number;taskId: number;data: BodyType<SteerTaskBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof steerTask>>,
+        TError,
+        {id: number;taskId: number;data: BodyType<SteerTaskBody>},
+        TContext
+      > => {
+      return useMutation(getSteerTaskMutationOptions(options));
     }
 
 export const getExplainTaskChangeUrl = (id: number,

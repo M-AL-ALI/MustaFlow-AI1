@@ -318,11 +318,42 @@ async function handleSubscriptionEvent(event: {
   }
 
   if (workspaceId === null) {
-    logger.warn(
-      { eventId: event.id, subscriptionId, customerId },
-      "Subscription event has no resolvable workspaceId — skipping",
+    // Race condition guard: checkout.session.completed may not have had time to
+    // write workspaceId metadata to the subscription before this event fired.
+    // Wait 3 seconds and retry all workspace lookups using the customer ID.
+    await new Promise((r) => setTimeout(r, 3_000));
+
+    if (subscriptionId) {
+      const [retrySub] = await db
+        .select({ workspaceId: workspaceSubscriptionsTable.workspaceId })
+        .from(workspaceSubscriptionsTable)
+        .where(eq(workspaceSubscriptionsTable.stripeSubscriptionId, subscriptionId))
+        .limit(1);
+      if (retrySub) workspaceId = retrySub.workspaceId;
+    }
+
+    if (workspaceId === null && customerId) {
+      const [retryCustomer] = await db
+        .select({ workspaceId: workspaceSubscriptionsTable.workspaceId })
+        .from(workspaceSubscriptionsTable)
+        .where(eq(workspaceSubscriptionsTable.stripeCustomerId, customerId))
+        .orderBy(desc(workspaceSubscriptionsTable.workspaceId))
+        .limit(1);
+      if (retryCustomer) workspaceId = retryCustomer.workspaceId;
+    }
+
+    if (workspaceId === null) {
+      logger.warn(
+        { eventId: event.id, subscriptionId, customerId },
+        "Subscription event has no resolvable workspaceId after retry — skipping",
+      );
+      return;
+    }
+
+    logger.info(
+      { eventId: event.id, subscriptionId, customerId, workspaceId },
+      "Subscription event workspace resolved after retry",
     );
-    return;
   }
 
   // Confirm the workspace still exists (soft-delete tolerant).

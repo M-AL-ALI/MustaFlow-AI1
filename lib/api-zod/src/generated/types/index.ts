@@ -454,6 +454,8 @@ export * from './setProjectDomainWwwRedirectBody';
 export * from './setProjectSubdomain400';
 export * from './setPurchasedDomainAutoRenewBody';
 export * from './startPreviewEnv202';
+export * from './steerTask200';
+export * from './steerTaskBody';
 export * from './stopContainer200';
 export * from './stopPreviewEnv200';
 export * from './streamDoneEvent';

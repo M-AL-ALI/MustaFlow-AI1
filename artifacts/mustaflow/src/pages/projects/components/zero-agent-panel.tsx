@@ -575,7 +575,7 @@ export function ZeroAgentPanel({
           body: JSON.stringify({
             objectPath,
             name: file.name,
-            size: file.size,
+            sizeBytes: file.size,
             contentType: file.type || "application/octet-stream",
           }),
         });

@@ -458,23 +458,18 @@ export async function serveSnapshot(
         signal: controller.signal,
       });
       clearTimeout(timeout);
-      // Only forward 2xx and 3xx responses — anything else falls back to snapshot.
-      if (upstreamRes.status >= 200 && upstreamRes.status < 500) {
-        res.status(upstreamRes.status);
-        const contentType = upstreamRes.headers.get("content-type");
-        if (contentType) res.setHeader("Content-Type", contentType);
-        const location = upstreamRes.headers.get("location");
-        if (location) res.setHeader("Location", location);
-        res.setHeader("Cache-Control", "no-store");
-        const body = await upstreamRes.arrayBuffer();
-        res.end(Buffer.from(body));
-        containerServed = true;
-      } else {
-        logger.warn(
-          { projectId, status: upstreamRes.status, filePath },
-          "Production container returned 5xx — falling back to published snapshot",
-        );
-      }
+      // Forward all HTTP responses (2xx, 3xx, 4xx, 5xx) from the container so
+      // real application errors are visible to the user. Only network-level
+      // failures (ECONNREFUSED, timeout, AbortError) fall back to the snapshot.
+      res.status(upstreamRes.status);
+      const contentType = upstreamRes.headers.get("content-type");
+      if (contentType) res.setHeader("Content-Type", contentType);
+      const location = upstreamRes.headers.get("location");
+      if (location) res.setHeader("Location", location);
+      res.setHeader("Cache-Control", "no-store");
+      const body = await upstreamRes.arrayBuffer();
+      res.end(Buffer.from(body));
+      containerServed = true;
     } catch (err) {
       // ECONNREFUSED / ETIMEDOUT / AbortError — fall back to snapshot gracefully.
       logger.warn(
