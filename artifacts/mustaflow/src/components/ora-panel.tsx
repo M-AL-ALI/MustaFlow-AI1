@@ -719,13 +719,15 @@ export function OraPanel({ chat }: OraPanelProps) {
       )}
 
       {/* Message feed */}
-      <div className={cn("relative flex-1 min-h-0 overflow-y-auto scroll-smooth", !hasMessages && "hidden")}
+      <div
+        className={cn(
+          "relative flex-1 min-h-0 overflow-y-auto scroll-smooth",
+          !hasMessages && "hidden",
+        )}
         ref={feedRef}
         onScroll={handleFeedScroll}
       >
-        <div
-          className="px-4 py-4 space-y-5"
-        >
+        <div className="px-4 py-4 space-y-5">
           {messages.map((msg, i) => {
             const isLastMessage = i === messages.length - 1;
             const prevUserMsg =
