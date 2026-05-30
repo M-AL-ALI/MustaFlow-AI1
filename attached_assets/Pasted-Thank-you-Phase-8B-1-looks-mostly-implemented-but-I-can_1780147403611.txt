@@ -1,0 +1,222 @@
+Thank you. Phase 8B-1 looks mostly implemented, but I cannot officially accept it yet because the validation report has two issues:
+
+1. The report says Commit: merged instead of giving the final commit hash.
+2. The report says all quality gates pass, but then says Format check failed.
+
+Before I accept Phase 8B-1, please provide a corrected final validation report.
+
+Required corrections:
+
+1. Final commit hash
+
+Please provide the exact final commit hash for Phase 8B-1.
+
+Do not use only:
+
+* merged
+* complete
+* accepted
+
+I need the real commit hash.
+
+2. Format check proof
+
+Please rerun:
+
+pnpm run format:check
+
+If it fails, run Prettier, commit the formatting fix, then rerun:
+
+pnpm run format:check
+pnpm run typecheck
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/api-spec run codegen
+git diff --exit-code
+
+Then provide the final clean result.
+
+3. Confirm API route paths
+
+Please confirm whether the routes are mounted as:
+
+/api/vault/:id/embedding-status
+/api/vault/:id/reindex
+/api/vault/reindex
+
+or:
+
+/vault/:id/embedding-status
+/vault/:id/reindex
+/vault/reindex
+
+The public validation report should use the real externally accessible route paths.
+
+4. Final affected files
+
+Please list all files created or modified, including:
+
+* embedding schema/table file
+* migration file
+* startup migration change
+* embedding service
+* chunking service/helper
+* vault route changes
+* rate limiter changes
+* OpenAPI changes
+* generated API clients
+* frontend Vault UI changes
+* any sanitizer/shared utility changes
+
+5. Database proof
+
+Confirm:
+
+* pgvector extension exists
+* vault_embeddings table exists
+* embedding column is vector(1536)
+* unique constraint exists on (entry_id, chunk_index)
+* indexes exist
+* migration is idempotent
+* startup migration includes the embedding migration
+
+6. Embedding logic proof
+
+Confirm:
+
+* model is text-embedding-3-small
+* vector dimension is 1536
+* chunking uses sanitized vault content
+* max 20 chunks per entry
+* max 12,000 chars before chunking
+* chunk hashes are SHA-256
+* unchanged chunks skip re-embedding
+* stale chunks are deleted when content shrinks
+* status detects:
+    * not indexed
+    * indexed
+    * out of date
+    * failed
+
+7. Security and privacy proof
+
+Confirm:
+
+* sensitive content is blocked before embedding
+* API keys are blocked
+* sk-proj and sk-ant keys are blocked
+* JWTs are blocked
+* Bearer tokens are blocked
+* database connection strings are blocked
+* base64 blobs are blocked
+* fileRef / imageRef / datasetRef are blocked
+* chunk text is not logged
+* raw vectors are not returned to frontend
+* raw vectors are not logged
+* only status/counts are returned
+
+8. Auth and ownership proof
+
+Confirm:
+
+* all embedding routes require authentication
+* user can only reindex their own vault entries
+* user cannot access another user’s embedding status
+* user cannot reindex another user’s entry
+* reindex-all only indexes the authenticated user’s entries
+* public Ora cannot access embedding routes
+
+9. Rate-limit proof
+
+Confirm:
+
+* reindex-all is limited to 5 per hour per user
+* 429 response includes retry information
+* rate limit does not affect normal vault CRUD
+* rate limit does not affect public Ora chat
+* rate limit does not affect Builder / Developer / Plan modes
+
+10. UI proof
+
+Confirm:
+
+* Vault entry viewer shows embedding status
+* status badge renders correctly
+* chunk count displays
+* model name displays
+* source version displays
+* last indexed date displays
+* Rebuild Embeddings button works for one entry
+* Reindex All My Entries button works
+* 429 errors are handled gracefully
+* raw vectors are never shown
+
+11. Boundary proof
+
+Confirm Phase 8B-1 did NOT implement:
+
+* RAG
+* semantic search
+* knowledge-aware responses
+* prompt injection from vault
+* AI memory
+* auto-learning
+* automatic recommendations
+* automatic report improvement
+* background autonomous learning
+* cross-project intelligence
+* public Ora retrieval from vault
+
+Embeddings should be stored only and unused until Phase 8B-2.
+
+12. Regression proof
+
+Confirm:
+
+* Phase 8A CRUD still works
+* Phase 8A.1 tags/search still works
+* create vault entry still works
+* edit/versioning still works
+* archive/restore still works
+* search/filter still works
+* dataset Save to Vault still works
+* reporting/export stack still works
+* Builder Mode remains unaffected
+* Developer Mode remains unaffected
+* Plan Mode remains unaffected
+* public Ora remains isolated
+
+13. Quality proof
+
+Please provide final clean status for:
+
+* migration run
+* typecheck
+* lint
+* format
+* codegen drift
+* API server workflow
+* frontend workflow
+* any unrelated failures if present
+
+14. Rollback plan
+
+Explain how to roll back Phase 8B-1 while preserving:
+
+* Phase 8A vault foundation
+* Phase 8A.1 tags/search optimization
+* all vault entries
+* all vault versions
+* reporting/export features
+* Builder / Developer / Plan modes
+
+Rollback should remove only:
+
+* embedding table
+* embedding routes
+* embedding service
+* embedding UI
+* embedding migration
+
+Once the exact commit hash is provided and the format check contradiction is resolved, I will review Phase 8B-1 for acceptance.
+
+Do not start Phase 8B-2 semantic search, RAG, AI memory, knowledge-aware reporting, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until Phase 8B-1 is officially accepted.
