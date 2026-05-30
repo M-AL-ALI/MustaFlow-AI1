@@ -773,178 +773,183 @@ export function OraPanel({ chat }: OraPanelProps) {
         </div>
       )}
 
-      {/* Message feed */}
-      <div
-        className={cn(
-          "relative flex-1 min-h-0 overflow-y-auto scroll-smooth",
-          !hasMessages && "hidden",
-        )}
-        ref={feedRef}
-        onScroll={handleFeedScroll}
-      >
-        <div className="px-4 py-4 space-y-5">
-          {messages.map((msg, i) => {
-            const isLastMessage = i === messages.length - 1;
-            const prevUserMsg =
-              i > 0
-                ? messages
-                    .slice(0, i)
-                    .reverse()
-                    .find((m) => m.role === "user")
-                : null;
-            const showHandoffCard =
-              msg.role === "assistant" &&
-              isLastMessage &&
-              !isLoading &&
-              prevUserMsg != null &&
-              hasBuildIntent(prevUserMsg.content, msg.content) &&
-              !handoffDismissed &&
-              !voiceConvActive;
-            const showSuggestions =
-              msg.role === "assistant" &&
-              isLastMessage &&
-              !isLoading &&
-              Array.isArray(msg.suggestions) &&
-              msg.suggestions.length > 0;
+      {/* Message feed
+           outer: `overflow-hidden` shell so the jump-to-latest button is clipped
+           to the visible area, not the scrollable content area.
+           inner: `absolute inset-0` fills the shell reliably without needing an
+           explicit CSS height (avoids the `h-full`→`auto` trap inside flex-1). */}
+      <div className={cn("relative flex-1 min-h-0 overflow-hidden", !hasMessages && "hidden")}>
+        <div
+          className="absolute inset-0 overflow-y-auto scroll-smooth"
+          ref={feedRef}
+          onScroll={handleFeedScroll}
+        >
+          <div className="px-4 py-4 space-y-5">
+            {messages.map((msg, i) => {
+              const isLastMessage = i === messages.length - 1;
+              const prevUserMsg =
+                i > 0
+                  ? messages
+                      .slice(0, i)
+                      .reverse()
+                      .find((m) => m.role === "user")
+                  : null;
+              const showHandoffCard =
+                msg.role === "assistant" &&
+                isLastMessage &&
+                !isLoading &&
+                prevUserMsg != null &&
+                hasBuildIntent(prevUserMsg.content, msg.content) &&
+                !handoffDismissed &&
+                !voiceConvActive;
+              const showSuggestions =
+                msg.role === "assistant" &&
+                isLastMessage &&
+                !isLoading &&
+                Array.isArray(msg.suggestions) &&
+                msg.suggestions.length > 0;
 
-            const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
+              const isLatestAssistant = msg.role === "assistant" && isLastMessage && !isLoading;
 
-            return (
-              <div
-                key={i}
-                className={cn(
-                  "flex group",
-                  msg.role === "user" ? "justify-end" : "justify-start gap-2.5",
-                )}
-              >
-                {msg.role === "assistant" && (
-                  <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
-                )}
-                <div className="max-w-[85%]">
-                  {msg.role === "user" ? (
-                    <div
-                      dir="auto"
-                      className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed"
-                    >
-                      {msg.content}
-                    </div>
-                  ) : msg.datasetResult ? (
-                    <DatasetResultCard result={msg.datasetResult} />
-                  ) : (
-                    <div
-                      dir="auto"
-                      className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
-                    >
-                      {msg.content}
-                    </div>
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex group",
+                    msg.role === "user" ? "justify-end" : "justify-start gap-2.5",
                   )}
-
-                  {msg.generatedFile && (
-                    <button
-                      type="button"
-                      onClick={() => downloadOraFile(msg.generatedFile!)}
-                      className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3.5 py-3 transition-all cursor-pointer"
-                    >
-                      <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
-                        <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(265_85%_65%)]" />
+                >
+                  {msg.role === "assistant" && (
+                    <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
+                  )}
+                  <div className="max-w-[85%]">
+                    {msg.role === "user" ? (
+                      <div
+                        dir="auto"
+                        className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                      >
+                        {msg.content}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold truncate text-foreground">
-                          {msg.generatedFile.fileName}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                          {msg.generatedFile.format.toUpperCase()} · Click to download
-                        </p>
+                    ) : msg.datasetResult ? (
+                      <DatasetResultCard result={msg.datasetResult} />
+                    ) : (
+                      <div
+                        dir="auto"
+                        className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
+                      >
+                        {msg.content}
                       </div>
-                      <Download className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
-                    </button>
-                  )}
+                    )}
 
-                  {msg.editedFrom && (
-                    <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
-                      Edited from earlier message
-                    </p>
-                  )}
+                    {msg.generatedFile && (
+                      <button
+                        type="button"
+                        onClick={() => downloadOraFile(msg.generatedFile!)}
+                        className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3.5 py-3 transition-all cursor-pointer"
+                      >
+                        <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
+                          <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(265_85%_65%)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate text-foreground">
+                            {msg.generatedFile.fileName}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            {msg.generatedFile.format.toUpperCase()} · Click to download
+                          </p>
+                        </div>
+                        <Download className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                    )}
 
-                  <OraMessageActions
-                    message={msg}
-                    isLatestAssistant={isLatestAssistant}
-                    onEdit={msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined}
-                    onRegenerate={
-                      isLatestAssistant
-                        ? (() => {
-                            const prevUser = messages
-                              .slice(0, i)
-                              .reverse()
-                              .find((m) => m.role === "user");
-                            return prevUser
-                              ? () => void sendMessage(prevUser.content, { truncateTo: i })
-                              : undefined;
-                          })()
-                        : undefined
-                    }
-                    onContinueInBuilder={
-                      isLatestAssistant && msg.handoffCta
-                        ? () => void handleContinueInBuilder()
-                        : undefined
-                    }
-                    onReadAloud={
-                      msg.role === "assistant" && voice.isSpeechSynthesisSupported
-                        ? (text) => voice.speakText(text, language)
-                        : undefined
-                    }
-                    isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
-                    hasAttachment={msg.hadAttachment ?? false}
-                  />
+                    {msg.editedFrom && (
+                      <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
+                        Edited from earlier message
+                      </p>
+                    )}
 
-                  {showHandoffCard && (
-                    <OraHandoffCard
-                      messages={messages}
-                      onDismiss={() => setHandoffDismissed(true)}
+                    <OraMessageActions
+                      message={msg}
+                      isLatestAssistant={isLatestAssistant}
+                      onEdit={
+                        msg.role === "user" ? (text) => handleEditMessage(text, i) : undefined
+                      }
+                      onRegenerate={
+                        isLatestAssistant
+                          ? (() => {
+                              const prevUser = messages
+                                .slice(0, i)
+                                .reverse()
+                                .find((m) => m.role === "user");
+                              return prevUser
+                                ? () => void sendMessage(prevUser.content, { truncateTo: i })
+                                : undefined;
+                            })()
+                          : undefined
+                      }
+                      onContinueInBuilder={
+                        isLatestAssistant && msg.handoffCta
+                          ? () => void handleContinueInBuilder()
+                          : undefined
+                      }
+                      onReadAloud={
+                        msg.role === "assistant" && voice.isSpeechSynthesisSupported
+                          ? (text) => voice.speakText(text, language)
+                          : undefined
+                      }
+                      isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}
+                      hasAttachment={msg.hadAttachment ?? false}
                     />
-                  )}
-                  {showSuggestions && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {msg.suggestions!.map((suggestion, si) => (
-                        <button
-                          key={si}
-                          type="button"
-                          onClick={() => handleChip(suggestion)}
-                          disabled={isLoading || atLimit}
-                          className="text-xs px-3 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
+
+                    {showHandoffCard && (
+                      <OraHandoffCard
+                        messages={messages}
+                        onDismiss={() => setHandoffDismissed(true)}
+                      />
+                    )}
+                    {showSuggestions && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {msg.suggestions!.map((suggestion, si) => (
+                          <button
+                            key={si}
+                            type="button"
+                            onClick={() => handleChip(suggestion)}
+                            disabled={isLoading || atLimit}
+                            className="text-xs px-3 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Loading state */}
+            {isLoading && (
+              <div className="flex items-start gap-2.5">
+                <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-1 pt-0.5">
+                  <div className="flex items-center gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
+                        style={{ animationDelay: `${i * 200}ms` }}
+                      />
+                    ))}
+                  </div>
+                  {oraStatus !== "idle" && (
+                    <span className="text-[11px] text-muted-foreground">
+                      Ora · {STATUS_LABELS[oraStatus]}
+                    </span>
                   )}
                 </div>
               </div>
-            );
-          })}
-
-          {/* Loading state */}
-          {isLoading && (
-            <div className="flex items-start gap-2.5">
-              <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" />
-              <div className="flex flex-col gap-1 pt-0.5">
-                <div className="flex items-center gap-1">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
-                      style={{ animationDelay: `${i * 200}ms` }}
-                    />
-                  ))}
-                </div>
-                {oraStatus !== "idle" && (
-                  <span className="text-[11px] text-muted-foreground">
-                    Ora · {STATUS_LABELS[oraStatus]}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
         {showJumpToLatest && (
           <div className="absolute bottom-2 right-3 z-10">
@@ -992,8 +997,11 @@ export function OraPanel({ chat }: OraPanelProps) {
         </div>
       )}
 
-      {/* Composer */}
-      <div className="border-t border-border/40 px-4 py-3 shrink-0">
+      {/* Composer — pb uses safe-area-inset-bottom so iPhone home bar never clips input */}
+      <div
+        className="border-t border-border/40 px-4 pt-3 shrink-0"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}
+      >
         {atLimit ? (
           <div className="text-center py-2">
             <p className="text-xs text-muted-foreground">

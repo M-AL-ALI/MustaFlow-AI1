@@ -701,8 +701,13 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   return (
     <>
-      {/* Floating trigger button */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+      {/* Floating trigger button — hidden on mobile while drawer is open (drawer header X handles close) */}
+      <div
+        className={cn(
+          "fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3",
+          open && "hidden sm:flex",
+        )}
+      >
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -992,12 +997,16 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           </div>
         </div>
 
-        {/* Message feed */}
-        <div className="relative flex-1 min-h-0">
+        {/* Message feed
+             outer div is `overflow-hidden` so absolute children clip correctly;
+             inner div is `absolute inset-0` so it reliably fills the flex-1 space
+             even without an explicit CSS height on the parent — this fixes the
+             scrolling regression on mobile where `h-full` resolved to `auto`. */}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
           <div
             ref={feedRef}
             onScroll={handleFeedScroll}
-            className="h-full overflow-y-auto overscroll-contain px-4 py-4 space-y-5 scroll-smooth"
+            className="absolute inset-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-5 scroll-smooth"
           >
             {messages.length === 0 && !isLoading && (
               <div className="text-center py-8">
@@ -1220,8 +1229,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           </div>
         )}
 
-        {/* Composer */}
-        <div className="border-t border-border/40 px-4 py-3 shrink-0">
+        {/* Composer — pb uses safe-area-inset-bottom so the iPhone home indicator
+             never clips the input area. Falls back to 12 px on non-notched devices. */}
+        <div
+          className="border-t border-border/40 px-4 pt-3 shrink-0"
+          style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}
+        >
           {atLimit ? (
             <div className="text-center py-1">
               <p className="text-xs text-muted-foreground">
