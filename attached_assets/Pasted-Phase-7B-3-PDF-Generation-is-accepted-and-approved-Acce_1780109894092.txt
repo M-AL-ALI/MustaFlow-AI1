@@ -1,0 +1,100 @@
+Phase 7B-3 (PDF Generation) is accepted and approved.
+
+Accepted commit:
+
+* c45f09cb — Browser-native PDF generation
+
+Accepted scope:
+
+* Browser-native PDF generation using the operating system print dialog
+* No jsPDF
+* No pdf-lib
+* No Puppeteer
+* No Playwright PDF generation
+* No external PDF service
+* No backend PDF route
+* No server-side PDF rendering
+* No new PDF dependencies
+
+Accepted architecture:
+
+* Hidden iframe rendering model
+* Sanitization before all PDF generation paths
+* HTML generated only from sanitized content
+* Browser print engine used for PDF creation
+* Automatic iframe cleanup after print
+* 120-second fallback cleanup for Safari and print-cancel scenarios
+
+Accepted reporting compatibility:
+
+* Full support for all 11 report templates
+* Full support for all 14 report sections
+* Template gating matches DOCX/XLSX behavior
+* Cover page support preserved
+* KPI Scorecard support preserved
+* Priority Matrix support preserved
+* Improvement Roadmap support preserved
+* Professional report metadata support preserved
+
+Accepted privacy controls:
+
+* fileRef removed
+* imageRef removed
+* datasetRef removed
+* session tokens removed
+* handoff tokens removed
+* project identifiers removed
+* builder identifiers removed
+* container identifiers removed
+* base64 content removed
+* secrets and API keys removed
+* HTML escaping enforced on all user content
+* No report content logging
+* No report content uploads
+* No report content storage
+
+Accepted export behavior:
+
+* PDF Report appears in Export menu
+* Uses the same template picker dialog as DOCX/XLSX/PPTX
+* Supports Company, Department, Prepared For, Prepared By, Generated Date metadata
+* Word export remains functional
+* Excel export remains functional
+* PowerPoint export remains functional
+* Markdown export remains functional
+* JSON export remains functional
+* CSV export remains functional
+
+Accepted quality gates:
+
+* typecheck passed
+* lint passed
+* format passed
+* quality-gate passed
+* frontend running
+* backend running
+* no unrelated failures
+
+Accepted non-regression statement:
+
+* Phase 7A remains intact
+* Phase 7B-1 remains intact
+* Phase 7B-2 remains intact
+* Phase 7B-4A remains intact
+* Chat functionality unchanged
+* Dataset analysis unchanged
+* Image analysis unchanged
+* Voice functionality unchanged
+* Builder functionality unchanged
+* Handoff functionality unchanged
+
+Phase 7B-3 is now considered closed and part of the stable reporting/export baseline.
+
+Current stable reporting stack:
+
+* 7B-1: Word (.docx) and Excel (.xlsx)
+* 7B-2: PowerPoint (.pptx)
+* 7B-3: PDF generation
+* 7B-4A: Professional reporting templates, cover pages, KPI scorecards, priority matrices, and improvement roadmaps
+
+Do not begin 7B-4B (AI Reporting Intelligence), Knowledge Vault, Web Search, Image Generation, Advanced Charts, or any other roadmap phase until explicit approval is provided.
