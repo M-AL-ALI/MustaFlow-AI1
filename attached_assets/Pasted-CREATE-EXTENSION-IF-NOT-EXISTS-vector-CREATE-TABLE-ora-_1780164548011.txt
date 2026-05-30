@@ -1,0 +1,85 @@
+CREATE EXTENSION IF NOT EXISTS "vector";
+CREATE TABLE "ora_transcripts" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"user_id" text NOT NULL,
+	"messages" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "ora_transcripts_user_id_key" UNIQUE("user_id")
+);
+CREATE TABLE "vault_versions" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"entry_id" integer NOT NULL,
+	"version" integer NOT NULL,
+	"title" text NOT NULL,
+	"summary" text NOT NULL,
+	"content" text NOT NULL,
+	"tags" text[] DEFAULT '{}' NOT NULL,
+	"department" text,
+	"edited_by" text NOT NULL,
+	"edited_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"change_summary" text
+);
+CREATE TABLE "vault_embeddings" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"entry_id" integer NOT NULL,
+	"user_id" text NOT NULL,
+	"chunk_index" integer NOT NULL,
+	"chunk_text" text NOT NULL,
+	"chunk_hash" text NOT NULL,
+	"embedding" vector(1536),
+	"embedding_model" text DEFAULT 'text-embedding-3-small' NOT NULL,
+	"source_version" integer NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "vault_embeddings_entry_chunk_unique" UNIQUE("entry_id","chunk_index")
+);
+CREATE TABLE "vault_entries" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"user_id" text NOT NULL,
+	"title" text NOT NULL,
+	"category" text DEFAULT 'OTHER' NOT NULL,
+	"subcategory" text,
+	"summary" text NOT NULL,
+	"content" text NOT NULL,
+	"tags" text[] DEFAULT '{}' NOT NULL,
+	"department" text,
+	"source_type" text DEFAULT 'USER_CREATED' NOT NULL,
+	"source_reference" text,
+	"status" text DEFAULT 'draft' NOT NULL,
+	"version" integer DEFAULT 1 NOT NULL,
+	"confidence_score" integer,
+	"approved" boolean DEFAULT false NOT NULL,
+	"updated_by" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"archived_at" timestamp with time zone
+);
+DROP INDEX "notifications_recipient_idx";
+DROP INDEX "gallery_templates_rating_idx";
+DROP INDEX "project_activity_project_idx";
+DROP INDEX "project_comments_project_idx";
+DROP INDEX "idx_domain_serve_events_domain";
+DROP INDEX "idx_domain_serve_events_project";
+DROP INDEX "canvas_ab_tests_project_idx";
+DROP INDEX "canvas_variant_library_user_idx";
+ALTER TABLE "vault_versions" ADD CONSTRAINT "vault_versions_entry_id_fkey" FOREIGN KEY ("entry_id") REFERENCES "public"."vault_entries"("id") ON DELETE cascade ON UPDATE no action;
+CREATE INDEX "ora_transcripts_user_id_idx" ON "ora_transcripts" USING btree ("user_id");
+CREATE INDEX "vault_versions_entry_idx" ON "vault_versions" USING btree ("entry_id","version");
+CREATE INDEX "vault_embeddings_entry_idx" ON "vault_embeddings" USING btree ("entry_id");
+CREATE INDEX "vault_embeddings_user_idx" ON "vault_embeddings" USING btree ("user_id","entry_id");
+CREATE INDEX "vault_entries_archived_idx" ON "vault_entries" USING btree ("user_id","archived_at") WHERE (archived_at IS NOT NULL);
+CREATE INDEX "vault_entries_category_idx" ON "vault_entries" USING btree ("user_id","category");
+CREATE INDEX "vault_entries_dept_idx" ON "vault_entries" USING btree ("user_id","department");
+CREATE INDEX "vault_entries_search_idx" ON "vault_entries" USING gin (vault_fts(title, summary) tsvector_ops);
+CREATE INDEX "vault_entries_status_idx" ON "vault_entries" USING btree ("user_id","status");
+CREATE INDEX "vault_entries_tags_idx" ON "vault_entries" USING gin ("tags");
+CREATE INDEX "vault_entries_updated_idx" ON "vault_entries" USING btree ("user_id","updated_at");
+CREATE INDEX "vault_entries_user_idx" ON "vault_entries" USING btree ("user_id","created_at");
+CREATE INDEX "notifications_recipient_idx" ON "notifications" USING btree ("recipient_id","created_at");
+CREATE INDEX "gallery_templates_rating_idx" ON "gallery_templates" USING btree ("rating");
+CREATE INDEX "project_activity_project_idx" ON "project_activity" USING btree ("project_id","created_at");
+CREATE INDEX "project_comments_project_idx" ON "project_comments" USING btree ("project_id","created_at");
+CREATE INDEX "idx_domain_serve_events_domain" ON "domain_serve_events" USING btree ("domain_id","ts");
+CREATE INDEX "idx_domain_serve_events_project" ON "domain_serve_events" USING btree ("project_id","ts");
+CREATE INDEX "canvas_ab_tests_project_idx" ON "canvas_ab_tests" USING btree ("project_id","created_at");
+CREATE INDEX "canvas_variant_library_user_idx" ON "canvas_variant_library" USING btree ("user_id","created_at");
