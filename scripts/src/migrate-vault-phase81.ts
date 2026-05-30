@@ -61,15 +61,22 @@ async function run() {
     // A functional index is equivalent for query planning and avoids the restriction.
     console.log("Phase 8A.1: Creating functional GIN index for full-text search...");
     await client.query(`
-      CREATE INDEX IF NOT EXISTS vault_entries_search_idx
-        ON vault_entries
-        USING GIN(
-          to_tsvector('pg_catalog.english'::regconfig,
-            concat(coalesce(title, ''), ' ', coalesce(summary, ''))
-          )
-        )
+      CREATE OR REPLACE FUNCTION vault_fts(title text, summary text)
+        RETURNS tsvector
+        LANGUAGE sql
+        IMMUTABLE PARALLEL SAFE
+        AS $fn$
+          SELECT to_tsvector('english'::regconfig,
+            coalesce(title, '') || ' ' || coalesce(summary, ''))
+        $fn$
     `);
-    console.log("  FTS GIN index created");
+    await client.query(`DROP INDEX IF EXISTS vault_entries_search_idx`);
+    await client.query(`
+      CREATE INDEX vault_entries_search_idx
+        ON vault_entries
+        USING GIN(vault_fts(title, summary))
+    `);
+    console.log("  vault_fts function + FTS GIN index created");
 
     console.log("Phase 8A.1: Creating GIN index on tags array...");
     await client.query(

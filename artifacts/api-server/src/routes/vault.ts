@@ -153,10 +153,11 @@ router.get("/vault", async (req, res): Promise<void> => {
     conditions.push(eq(vaultEntriesTable.status, status));
   }
   if (q) {
-    // Functional GIN index: to_tsvector('pg_catalog.english'::regconfig, title || summary)
-    // Matches vault_entries_search_idx created in migrate-vault-phase81.
+    // Uses vault_fts(title, summary) — the IMMUTABLE wrapper function whose
+    // definition is created by the startup migration.  The query expression must
+    // exactly match the index expression so the planner uses vault_entries_search_idx.
     conditions.push(
-      sql`to_tsvector('pg_catalog.english'::regconfig, coalesce(${vaultEntriesTable.title}, '') || ' ' || coalesce(${vaultEntriesTable.summary}, '')) @@ plainto_tsquery('pg_catalog.english'::regconfig, ${q})` as ReturnType<
+      sql`vault_fts(${vaultEntriesTable.title}, ${vaultEntriesTable.summary}) @@ plainto_tsquery('english'::regconfig, ${q})` as ReturnType<
         typeof eq
       >,
     );

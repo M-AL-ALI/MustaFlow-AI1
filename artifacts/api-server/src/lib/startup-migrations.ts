@@ -2905,18 +2905,28 @@ const MIGRATION_STEPS: MigrationStep[] = [
           END IF;
         END $$
       `);
-      // Functional GIN index on title+summary for full-text search.
-      // NOTE: A GENERATED tsvector column was considered but array_to_string() is STABLE
-      // (not IMMUTABLE), which PostgreSQL rejects in generated column expressions.
-      // A functional index is equivalent for query planning and avoids the restriction.
+      // Create a stable IMMUTABLE wrapper so the GIN index expression stored in
+      // pg_indexes does NOT contain || (pipe-pipe). Replit's deployment tool
+      // misparses || in functional GIN index definitions and generates broken SQL.
+      // Using a named function means pg_indexes shows `vault_fts(title, summary)` —
+      // no || — so the tool copies it to production without corruption.
       await client.query(`
-        CREATE INDEX IF NOT EXISTS vault_entries_search_idx
+        CREATE OR REPLACE FUNCTION vault_fts(title text, summary text)
+          RETURNS tsvector
+          LANGUAGE sql
+          IMMUTABLE PARALLEL SAFE
+          AS $fn$
+            SELECT to_tsvector('english'::regconfig,
+              coalesce(title, '') || ' ' || coalesce(summary, ''))
+          $fn$
+      `);
+      // Drop-then-recreate so any stale definition (e.g. the old inline ||
+      // expression) is replaced with the function-based definition on every boot.
+      await client.query(`DROP INDEX IF EXISTS vault_entries_search_idx`);
+      await client.query(`
+        CREATE INDEX vault_entries_search_idx
           ON vault_entries
-          USING GIN(
-            to_tsvector('pg_catalog.english'::regconfig,
-              concat(coalesce(title, ''), ' ', coalesce(summary, ''))
-            )
-          )
+          USING GIN(vault_fts(title, summary))
       `);
       // GIN index on tags array
       await client.query(
