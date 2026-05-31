@@ -7110,8 +7110,8 @@ components:
           description: "Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically."
         agentIntent:
           type: string
-          enum: [converse, plan, build, debug, refactor, review, explain]
-          description: "Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt."
+          enum: [converse, plan, build, debug, refactor, review, explain, fix_tests]
+          description: "Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt."
         attachments:
           type: array
           items: { $ref: "#/components/schemas/ChatAttachment" }
@@ -10278,13 +10278,7 @@ components:
     DeveloperModeRuntimeStatus:
       type: object
       required:
-        [
-          flyApiTokenPresent,
-          neonApiKeyPresent,
-          builderMode,
-          provisioningStatus,
-          preflightOk,
-        ]
+        [flyApiTokenPresent, neonApiKeyPresent, builderMode, provisioningStatus, preflightOk]
       properties:
         flyApiTokenPresent: { type: boolean }
         neonApiKeyPresent: { type: boolean }

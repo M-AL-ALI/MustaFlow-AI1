@@ -235,6 +235,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     | "refactor"
     | "review"
     | "explain"
+    | "fix_tests"
     | "image_generate";
 
   // Pattern for detecting explicit image generation requests in Ora chat.
@@ -270,7 +271,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     explicitAgentIntent === "debug" ||
     explicitAgentIntent === "refactor" ||
     explicitAgentIntent === "review" ||
-    explicitAgentIntent === "explain"
+    explicitAgentIntent === "explain" ||
+    explicitAgentIntent === "fix_tests"
   ) {
     // Explicit client override takes second priority — always honor it,
     // even when the Plan Mode toggle is on (e.g. "Apply to app" must build).
@@ -609,6 +611,23 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       .from(sql`(select 1 from project_files where project_id = ${project.id} limit 1) as f`);
     const hasFiles = (existing?.c ?? 0) > 0;
     const kind = hasFiles ? "refine" : "build";
+
+    // fix_tests intent: prepend a structured test-fix loop instruction so the
+    // agent starts by running tests rather than guessing what to fix.
+    if (resolvedIntent === "fix_tests") {
+      const userContext = userPromptWithContext.trim();
+      const fixInstruction =
+        `[TASK: Fix Failing Tests]\n` +
+        `Start by calling \`run_tests\` with no arguments to get the current pass/fail status. ` +
+        `Read the \`failedTests\` array in the result, locate each failing file with \`search\` and \`read_file\`, ` +
+        `then fix the implementation (not the tests) using \`apply_patch\` or \`write_file\`. ` +
+        `Re-run \`run_tests\` after each fix batch and repeat the loop until all tests pass or the step cap is reached. ` +
+        `Finalize with a summary of tests fixed and any remaining failures.\n\n` +
+        (userContext && !/^\[TASK:/i.test(userContext)
+          ? `User context: ${userContext}`
+          : userContext);
+      userPromptWithContext = fixInstruction;
+    }
 
     // Check for an active build/refine — prevent concurrent runs for the same project.
     // needs_review is included so a queued Task Agent staging that hasn't been
@@ -1184,9 +1203,16 @@ router.post(
       explicitAgentIntent === "debug" ||
       explicitAgentIntent === "refactor" ||
       explicitAgentIntent === "review" ||
-      explicitAgentIntent === "explain"
+      explicitAgentIntent === "explain" ||
+      explicitAgentIntent === "fix_tests"
     ) {
-      resolvedIntent = explicitAgentIntent as StreamResolvedIntent;
+      // fix_tests is not a converse-family intent — treat it as build so the
+      // streaming route emits a fallback event and the regular endpoint runs
+      // the full agentic loop with the test-fix prompt transformation.
+      resolvedIntent =
+        explicitAgentIntent === "fix_tests"
+          ? "build"
+          : (explicitAgentIntent as StreamResolvedIntent);
     } else if (planMode) {
       resolvedIntent = "plan";
     } else {

@@ -12,6 +12,7 @@ import {
   Paintbrush2,
   Image as ImageIcon,
   Layers2,
+  FlaskConical,
   Navigation,
   Cpu,
   Zap,
@@ -196,7 +197,15 @@ interface QueueComposerProps {
   onStopBuild?: () => void;
   onSingleSend: (
     content: string,
-    agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain",
+    agentIntent?:
+      | "converse"
+      | "plan"
+      | "build"
+      | "debug"
+      | "refactor"
+      | "review"
+      | "explain"
+      | "fix_tests",
     attachments?: ComposerAttachment[],
     brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>,
   ) => void;
@@ -2059,6 +2068,19 @@ export function QueueComposer({
               </button>
             );
           })}
+
+          {/* Fix failing tests — one-shot trigger for the test-fix loop */}
+          <button
+            disabled={disabled}
+            onClick={() => {
+              if (disabled) return;
+              onSingleSend("Fix all failing tests in this project", "fix_tests");
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-emerald-500/20 text-emerald-400/70 hover:text-emerald-400 hover:border-emerald-500/40 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Run the test suite, identify failing tests, and automatically fix them — loops until all tests pass · costs build credits"
+          >
+            <FlaskConical className="h-3 w-3" /> Fix tests
+          </button>
 
           {/* Template picker + plan history — shown in Planning mode */}
           {agentType === "planning" && (

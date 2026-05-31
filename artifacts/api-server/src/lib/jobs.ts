@@ -206,11 +206,7 @@ async function runAgenticPreflightGate(
 
       const writeResult = await execInContainer(
         containerId,
-        [
-          "/bin/sh",
-          "-c",
-          "printf 'runtime working' > /app/.mustaflow-runtime-test && echo ok",
-        ],
+        ["/bin/sh", "-c", "printf 'runtime working' > /app/.mustaflow-runtime-test && echo ok"],
         projectId,
       );
       if (!writeResult.ok) {

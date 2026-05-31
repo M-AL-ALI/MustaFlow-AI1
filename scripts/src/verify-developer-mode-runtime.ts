@@ -118,17 +118,14 @@ if (!project.container_id) {
     const containerId = project.container_id;
 
     async function execInMachine(command: string[], cwd = "/app") {
-      const res = await fetch(
-        `${FLY_API_BASE}/apps/${FLY_APP}/machines/${containerId}/exec`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${FLY_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ command, cwd, timeout: 15 }),
+      const res = await fetch(`${FLY_API_BASE}/apps/${FLY_APP}/machines/${containerId}/exec`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${FLY_TOKEN}`,
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({ command, cwd, timeout: 15 }),
+      });
       if (!res.ok) {
         const text = await res.text();
         return { ok: false as const, stdout: "", stderr: text, exitCode: -1 };
@@ -246,9 +243,7 @@ if (!project.container_id || !FLY_API_TOKEN_PRESENT) {
       );
       const notableEvent = eventsRes.rows[0];
       if (notableEvent) {
-        console.log(
-          `  Event: ${notableEvent.event_type} — ${notableEvent.message?.slice(0, 120)}`,
-        );
+        console.log(`  Event: ${notableEvent.event_type} — ${notableEvent.message?.slice(0, 120)}`);
       }
 
       // Check if agent-test.txt was created in project_files

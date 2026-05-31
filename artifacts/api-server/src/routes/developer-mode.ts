@@ -62,8 +62,7 @@ router.get(
         preflightMessage = result.message ?? null;
       } catch (err) {
         preflightOk = false;
-        preflightMessage =
-          err instanceof Error ? err.message : "Container wake probe failed";
+        preflightMessage = err instanceof Error ? err.message : "Container wake probe failed";
         logger.warn(
           { err, projectId },
           "developer-mode/runtime-status: container wake probe failed",

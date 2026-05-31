@@ -1594,7 +1594,15 @@ export default function ProjectWorkspacePage() {
       planMode?: boolean;
       background?: boolean;
       agentMode?: AgentMode;
-      agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+      agentIntent?:
+        | "converse"
+        | "plan"
+        | "build"
+        | "debug"
+        | "refactor"
+        | "review"
+        | "explain"
+        | "fix_tests";
       attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
     };
   } | null>(null);
@@ -1938,7 +1946,15 @@ export default function ProjectWorkspacePage() {
         planMode?: boolean;
         background?: boolean;
         agentMode?: AgentMode;
-        agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+        agentIntent?:
+          | "converse"
+          | "plan"
+          | "build"
+          | "debug"
+          | "refactor"
+          | "review"
+          | "explain"
+          | "fix_tests";
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
         idempotencyKey?: string;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -2018,7 +2034,15 @@ export default function ProjectWorkspacePage() {
         planMode?: boolean;
         background?: boolean;
         agentMode?: AgentMode;
-        agentIntent?: "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+        agentIntent?:
+          | "converse"
+          | "plan"
+          | "build"
+          | "debug"
+          | "refactor"
+          | "review"
+          | "explain"
+          | "fix_tests";
         /** Override agent identity — pass "task" for auto-fix retries from QualityGateFailureCard. */
         agentIdentity?: string;
         attachments?: Array<{
@@ -2263,6 +2287,7 @@ export default function ProjectWorkspacePage() {
                     | "refactor"
                     | "review"
                     | "explain"
+                    | "fix_tests"
                     | undefined;
                   sendRegular(content, {
                     ...opts,
@@ -4149,7 +4174,9 @@ export default function ProjectWorkspacePage() {
                                       ? { agentIntent: "review" as const }
                                       : intent === "explain"
                                         ? { agentIntent: "explain" as const }
-                                        : {}),
+                                        : intent === "fix_tests"
+                                          ? { agentIntent: "fix_tests" as const }
+                                          : {}),
                           ...(brainstormContext && brainstormContext.length > 0
                             ? { brainstormContext }
                             : {}),

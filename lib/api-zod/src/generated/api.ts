@@ -1332,7 +1332,7 @@ export const SendMessageBody = zod.object({
   "planMode": zod.boolean(),
   "background": zod.boolean().optional(),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
-  "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt.'),
+  "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt.'),
   "attachments": zod.array(zod.object({
   "kind": zod.enum(['image']),
   "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
@@ -1456,7 +1456,7 @@ export const StreamMessageBody = zod.object({
   "planMode": zod.boolean(),
   "background": zod.boolean().optional(),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
-  "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt.'),
+  "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt.'),
   "attachments": zod.array(zod.object({
   "kind": zod.enum(['image']),
   "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),

@@ -7,7 +7,7 @@
  */
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt.
+ * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
@@ -20,4 +20,5 @@ export const ChatMessageInputAgentIntent = {
   refactor: 'refactor',
   review: 'review',
   explain: 'explain',
+  fix_tests: 'fix_tests',
 } as const;
