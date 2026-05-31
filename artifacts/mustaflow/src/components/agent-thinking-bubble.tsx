@@ -519,9 +519,7 @@ function getStepLabel(step: StepEvent): string {
 function CheckResultsInlineRow({ message }: { message: string }) {
   const checks = parseCheckResultsFromEvent(message);
   if (checks.length === 0) {
-    return (
-      <span className="text-[10px] text-muted-foreground/80 italic">Running checks…</span>
-    );
+    return <span className="text-[10px] text-muted-foreground/80 italic">Running checks…</span>;
   }
   return (
     <div className="flex flex-wrap gap-0.5 mt-0.5">

@@ -1872,8 +1872,7 @@ export default function ProjectWorkspacePage() {
           }
         } else if (event.eventType === "file_diff" && event.message) {
           // Refresh the preview iframe a few seconds after a file is written
-          if (livePreviewRefreshTimerRef.current)
-            clearTimeout(livePreviewRefreshTimerRef.current);
+          if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
           livePreviewRefreshTimerRef.current = setTimeout(() => {
             setBuildRefreshCount((n) => n + 1);
           }, 3500);
@@ -1911,7 +1910,6 @@ export default function ProjectWorkspacePage() {
   const dismissAgentPrompt = useCallback((promptId: string) => {
     setAgentPrompts((prev) => prev.filter((p) => p.promptId !== promptId));
   }, []);
-
 
   // Auto-generate a plan analysis when a project opens with no messages yet
   useEffect(() => {
@@ -3750,7 +3748,6 @@ export default function ProjectWorkspacePage() {
                           );
                         });
                       })()}
-
 
                       {/* Task #532: human-in-the-loop prompts from the agent loop */}
                       <AgentPromptCardsList
