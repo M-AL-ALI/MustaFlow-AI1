@@ -108,10 +108,7 @@ export function LiveAgentProgress({
               {fileDiffs.length} file{fileDiffs.length !== 1 ? "s" : ""} changed
             </span>
             <ChevronDown
-              className={cn(
-                "w-3 h-3 transition-transform",
-                filesExpanded && "rotate-180",
-              )}
+              className={cn("w-3 h-3 transition-transform", filesExpanded && "rotate-180")}
             />
           </button>
           {filesExpanded && (

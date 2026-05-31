@@ -4425,11 +4425,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         const RISKY_CMD_RE =
           /\b(migrate|migration|drizzle-kit\s+push|prisma\s+migrate|alembic\s+upgrade|flask\s+db\s+upgrade|fly\s+deploy|git\s+push)\b|\brm\s+-rf\b/i;
         if (RISKY_CMD_RE.test(cmdStr) && input.onBeforeRiskyOp) {
-          await safeEvent(
-            input.onEvent,
-            "narration",
-            "Saving checkpoint before risky operation…",
-          );
+          await safeEvent(input.onEvent, "narration", "Saving checkpoint before risky operation…");
           try {
             await input.onBeforeRiskyOp(`run_command: ${cmdStr.slice(0, 80)}`);
           } catch {}
