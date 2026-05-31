@@ -6375,6 +6375,86 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
           }
 
+  /images/upload:
+    post:
+      summary: Upload a user image to Image Studio
+      operationId: uploadImage
+      tags: [Images]
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Image uploaded and stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadResponse"
+        "400":
+          {
+            description: Bad request,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "413":
+          {
+            description: File too large,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "415":
+          {
+            description: Unsupported file type,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+
+  /images/{id}/edit:
+    post:
+      summary: Edit an existing image with AI
+      operationId: editImage
+      tags: [Images]
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageEditRequest"
+      responses:
+        "202":
+          description: Edit job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageGenerateResponse"
+        "402":
+          {
+            description: Insufficient credits,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "404":
+          {
+            description: Image not found,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+        "422":
+          {
+            description: Safety blocked or image not editable,
+            content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
+          }
+
 components:
   schemas:
     HealthStatus:
@@ -10213,6 +10293,9 @@ components:
         storageKey: { type: string, nullable: true }
         safetyStatus: { type: string }
         creditCost: { type: integer }
+        parentImageId: { type: integer, nullable: true }
+        sourceType: { type: string, nullable: true }
+        editInstruction: { type: string, nullable: true }
         errorMessage: { type: string, nullable: true }
         errorCategory: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
@@ -10294,6 +10377,32 @@ components:
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
+
+    ImageUploadResponse:
+      type: object
+      required: [imageId, fileUrl, creditCost]
+      properties:
+        imageId: { type: integer }
+        fileUrl: { type: string }
+        thumbnailUrl: { type: string, nullable: true }
+        creditCost: { type: integer }
+        image:
+          $ref: "#/components/schemas/GeneratedImage"
+
+    ImageEditRequest:
+      type: object
+      required: [instruction]
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        quality:
+          type: string
+          enum: [standard, high]
+          default: standard
+        projectId:
+          type: integer
 
     DeveloperModeRuntimeStatus:
       type: object

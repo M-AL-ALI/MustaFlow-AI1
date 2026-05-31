@@ -1,12 +1,15 @@
 /**
- * Image Studio API routes — Phase 9A-1.
+ * Image Studio API routes — Phase 9A-1 / Phase 9A-2.
  *
  * Routes:
- *   POST   /images/generate        — enqueue async image generation (variationCount 1/2/4)
- *   GET    /images/status/:jobId   — poll job status (pending→generating→completed|failed)
- *   GET    /images                 — list user's generated images (paginated, optional projectId filter)
- *   GET    /images/:id             — get a single generated image
- *   DELETE /images/:id             — soft-delete an image
+ *   POST   /images/generate         — enqueue async image generation (variationCount 1/2/4)
+ *   POST   /images/upload           — upload a user image (free, MIME + dimension validation)
+ *   GET    /images/status/:jobId    — poll job status (pending→generating→completed|failed)
+ *   GET    /images                  — list user's generated images (paginated, optional projectId filter)
+ *   GET    /images/:id              — get a single generated image
+ *   GET    /images/:id/file         — serve dev-mode tmpdir file
+ *   POST   /images/:id/edit         — edit an existing image with AI
+ *   DELETE /images/:id              — soft-delete an image
  *
  * All routes require authentication (mounted after the auth wall in index.ts).
  * ISOLATION: this file MUST NOT import from builder.ts or any pipeline module.
@@ -14,15 +17,47 @@
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Router, type IRouter } from "express";
+import multer from "multer";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
+import sharp from "sharp";
 import { db, generatedImagesTable } from "@workspace/db";
 import { EnqueueImageGenerationBody } from "@workspace/api-zod";
 import { isImageProviderConfigured } from "../lib/image-provider";
-import { enqueueImageJob, getJob, preflightImageJobs } from "../lib/image-generation-jobs";
+import {
+  enqueueImageJob,
+  getJob,
+  preflightImageJobs,
+  enqueueImageEditJob,
+} from "../lib/image-generation-jobs";
+import { storeUploadedImage } from "../lib/image-storage";
 import { IMAGE_CREDIT_COSTS } from "./image-credits";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+// ── Multer for image uploads ──────────────────────────────────────────────────
+
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_DIMENSION_PX = 4096;
+
+const uploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(
+        Object.assign(
+          new Error("Unsupported file type. Allowed: JPEG, PNG, WebP, GIF"),
+          { code: "UNSUPPORTED_FILE_TYPE" },
+        ),
+      );
+    }
+  },
+});
 
 // ── POST /images/generate ─────────────────────────────────────────────────────
 router.post("/images/generate", async (req, res): Promise<void> => {
@@ -57,7 +92,6 @@ router.post("/images/generate", async (req, res): Promise<void> => {
     projectId,
   } = parsed.data;
 
-  // variationCount: DALL-E 3 only supports n=1, so we enqueue multiple separate jobs
   const safeVariationCount = variationCount;
 
   const baseOpts = {
@@ -84,11 +118,7 @@ router.post("/images/generate", async (req, res): Promise<void> => {
         imageIds: [imageId],
       });
     } else {
-      // Atomic preflight: verify rate limits + total credit balance before ANY job is
-      // inserted or credits are deducted. This prevents partial-enqueue scenarios
-      // (e.g. first variation deducts credits, second fails → half-done state).
       await preflightImageJobs(userId, safeVariationCount, quality);
-
       const results = await Promise.all(
         Array.from({ length: safeVariationCount }, () => enqueueImageJob(baseOpts)),
       );
@@ -125,6 +155,123 @@ router.post("/images/generate", async (req, res): Promise<void> => {
     res.status(500).json({ error: "Image generation failed" });
   }
 });
+
+// ── POST /images/upload ───────────────────────────────────────────────────────
+router.post(
+  "/images/upload",
+  (req, res, next) => {
+    uploadMiddleware.single("image")(req, res, (err) => {
+      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+        res.status(413).json({ error: "File too large. Maximum size is 10 MB." });
+        return;
+      }
+      if (err instanceof Error && (err as { code?: string }).code === "UNSUPPORTED_FILE_TYPE") {
+        res.status(415).json({ error: err.message });
+        return;
+      }
+      if (err) {
+        res.status(400).json({ error: "Upload failed" });
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res): Promise<void> => {
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: "No image file provided. Send a multipart/form-data request with field name 'image'." });
+      return;
+    }
+
+    try {
+      // Validate dimensions using sharp (also strips EXIF automatically on re-encode)
+      let metadata: sharp.Metadata;
+      try {
+        metadata = await sharp(file.buffer).metadata();
+      } catch {
+        res.status(422).json({ error: "Could not read image. Please upload a valid image file." });
+        return;
+      }
+
+      const { width = 0, height = 0 } = metadata;
+      if (width > MAX_DIMENSION_PX || height > MAX_DIMENSION_PX) {
+        res.status(422).json({
+          error: `Image too large. Maximum dimensions are ${MAX_DIMENSION_PX}×${MAX_DIMENSION_PX}px.`,
+        });
+        return;
+      }
+      if (width < 1 || height < 1) {
+        res.status(422).json({ error: "Could not determine image dimensions." });
+        return;
+      }
+
+      // Convert to WebP (also strips EXIF)
+      const webpBuffer = await sharp(file.buffer).webp({ quality: 85 }).toBuffer();
+
+      // Create the DB record first to get an imageId
+      const [imageRow] = await db
+        .insert(generatedImagesTable)
+        .values({
+          userId,
+          prompt: "[uploaded]",
+          quality: "standard",
+          aspectRatio: width >= height ? (width / height > 1.3 ? "16:9" : "1:1") : "9:16",
+          providerName: "upload",
+          status: "pending",
+          safetyStatus: "passed",
+          creditCost: 0,
+          sourceType: "uploaded",
+        })
+        .returning({ id: generatedImagesTable.id });
+
+      if (!imageRow) {
+        res.status(500).json({ error: "Failed to create image record" });
+        return;
+      }
+
+      const imageId = imageRow.id;
+
+      // Store to R2 (or dev tmpdir)
+      const { fileUrl, thumbnailUrl, storageKey } = await storeUploadedImage(
+        webpBuffer,
+        file.buffer,
+        imageId,
+      );
+
+      // Update DB to completed
+      const [updated] = await db
+        .update(generatedImagesTable)
+        .set({
+          status: "completed",
+          fileUrl,
+          thumbnailUrl,
+          storageKey,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(generatedImagesTable.id, imageId))
+        .returning();
+
+      logger.info({ imageId, userId }, "image-gen: upload stored");
+
+      res.status(201).json({
+        imageId,
+        fileUrl,
+        thumbnailUrl,
+        creditCost: 0,
+        image: updated,
+      });
+    } catch (err) {
+      logger.warn({ err }, "image-gen: unexpected error in /images/upload");
+      res.status(500).json({ error: "Upload failed. Please try again." });
+    }
+  },
+);
 
 // ── GET /images/status/:jobId ─────────────────────────────────────────────────
 router.get("/images/status/:jobId", async (req, res): Promise<void> => {
@@ -200,6 +347,9 @@ router.get("/images", async (req, res): Promise<void> => {
       thumbnailUrl: generatedImagesTable.thumbnailUrl,
       creditCost: generatedImagesTable.creditCost,
       errorMessage: generatedImagesTable.errorMessage,
+      parentImageId: generatedImagesTable.parentImageId,
+      sourceType: generatedImagesTable.sourceType,
+      editInstruction: generatedImagesTable.editInstruction,
       createdAt: generatedImagesTable.createdAt,
     })
     .from(generatedImagesTable)
@@ -313,6 +463,110 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
   } catch (err) {
     logger.warn({ err, imageId, storageKey }, "image-gen: /file read failed");
     res.status(404).json({ error: "Image file not found on disk" });
+  }
+});
+
+// ── POST /images/:id/edit ─────────────────────────────────────────────────────
+
+const ImageEditBody = z.object({
+  instruction: z.string().min(1).max(4000),
+  quality: z.enum(["standard", "high"]).default("standard"),
+  projectId: z.number().int().optional(),
+});
+
+router.post("/images/:id/edit", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  if (!isImageProviderConfigured()) {
+    res.status(503).json({
+      error: "Image editing is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
+    });
+    return;
+  }
+
+  const parentId = Number(req.params.id);
+  if (!Number.isFinite(parentId)) {
+    res.status(400).json({ error: "Invalid image id" });
+    return;
+  }
+
+  const parsed = ImageEditBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { instruction, quality, projectId } = parsed.data;
+
+  // Fetch parent image and verify ownership
+  const [parent] = await db
+    .select({
+      id: generatedImagesTable.id,
+      fileUrl: generatedImagesTable.fileUrl,
+      storageKey: generatedImagesTable.storageKey,
+      aspectRatio: generatedImagesTable.aspectRatio,
+      status: generatedImagesTable.status,
+    })
+    .from(generatedImagesTable)
+    .where(
+      and(
+        eq(generatedImagesTable.id, parentId),
+        eq(generatedImagesTable.userId, userId),
+        isNull(generatedImagesTable.deletedAt),
+      ),
+    );
+
+  if (!parent) {
+    res.status(404).json({ error: "Image not found" });
+    return;
+  }
+
+  if (parent.status !== "completed") {
+    res.status(422).json({ error: "Cannot edit an image that is not completed." });
+    return;
+  }
+
+  if (!parent.fileUrl) {
+    res.status(422).json({ error: "Image has no file URL — cannot edit." });
+    return;
+  }
+
+  try {
+    const { jobId, imageId } = await enqueueImageEditJob({
+      userId,
+      parentImageId: parentId,
+      parentStorageKey: parent.storageKey,
+      parentFileUrl: parent.fileUrl,
+      parentAspectRatio: parent.aspectRatio,
+      instruction: instruction.trim(),
+      quality,
+      projectId,
+    });
+
+    res.status(202).json({
+      jobId,
+      imageId,
+      creditCost: IMAGE_CREDIT_COSTS[quality] ?? 3,
+      status: "pending",
+    });
+  } catch (err) {
+    const e = err as { code?: string; message?: string; balance?: number; category?: string };
+    if (e.code === "INSUFFICIENT_CREDITS") {
+      res.status(402).json({ error: "Insufficient credits", balance: e.balance });
+      return;
+    }
+    if (e.code === "SAFETY_BLOCKED") {
+      res
+        .status(422)
+        .json({ error: e.message ?? "Instruction failed safety check", category: e.category });
+      return;
+    }
+    logger.warn({ err }, "image-gen: unexpected error in /images/:id/edit");
+    res.status(500).json({ error: "Image edit failed. Please try again." });
   }
 });
 

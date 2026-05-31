@@ -11,6 +11,9 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  Upload,
+  Pencil,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -102,7 +105,15 @@ function LabelPill({ children }: { children: React.ReactNode }) {
 
 // ── Image card ────────────────────────────────────────────────────────────────
 
-function ImageCard({ image, onDelete }: { image: GeneratedImage; onDelete: (id: number) => void }) {
+function ImageCard({
+  image,
+  onDelete,
+  onEditClick,
+}: {
+  image: GeneratedImage;
+  onDelete: (id: number) => void;
+  onEditClick: (image: GeneratedImage) => void;
+}) {
   const [deleting, setDeleting] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
 
@@ -207,6 +218,13 @@ function ImageCard({ image, onDelete }: { image: GeneratedImage; onDelete: (id: 
             )}
           </button>
           <button
+            onClick={() => onEditClick(image)}
+            className="p-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+            title="Edit with AI"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
             disabled
             title="Use in Project — Coming soon"
             className="p-1.5 rounded-lg bg-white/10 text-white/40 cursor-not-allowed"
@@ -239,6 +257,18 @@ export default function ImageStudioPage() {
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingJobsRef = useRef<Set<string>>(new Set());
+
+  // Upload
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Edit modal
+  const [editingImage, setEditingImage] = useState<GeneratedImage | null>(null);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editQuality, setEditQuality] = useState<"standard" | "high">("standard");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const selectedQuality = QUALITY_OPTIONS.find((q) => q.value === quality)!;
   const totalCost = selectedQuality.cost * variationCount;
@@ -348,6 +378,72 @@ export default function ImageStudioPage() {
 
   const handleDelete = (id: number) => {
     setImages((prev) => prev.filter((img) => img.id !== id));
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/images/upload", { method: "POST", body: formData });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setUploadError(body.error ?? "Upload failed");
+        return;
+      }
+      await fetchImages();
+    } catch {
+      setUploadError("Network error — please try again");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingImage || !editInstruction.trim() || editSubmitting) return;
+    setEditError(null);
+    setEditSubmitting(true);
+    try {
+      const res = await fetch(`/api/images/${editingImage.id}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),
+      });
+      const body = (await res.json()) as {
+        jobId?: string;
+        imageId?: number;
+        creditCost?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setEditError(body.error ?? "Edit failed");
+        return;
+      }
+      const placeholder: GeneratedImage = {
+        id: body.imageId!,
+        prompt: editInstruction.trim(),
+        quality: editQuality,
+        aspectRatio: editingImage.aspectRatio,
+        style: editingImage.style ?? null,
+        purpose: editingImage.purpose ?? null,
+        status: "pending",
+        creditCost: body.creditCost ?? (editQuality === "high" ? 6 : 3),
+        createdAt: new Date().toISOString(),
+      };
+      setImages((prev) => [placeholder, ...prev]);
+      if (body.jobId) pendingJobsRef.current.add(body.jobId);
+      setEditingImage(null);
+      setEditInstruction("");
+      setEditQuality("standard");
+    } catch {
+      setEditError("Network error — please try again");
+    } finally {
+      setEditSubmitting(false);
+    }
   };
 
   return (
@@ -602,6 +698,48 @@ export default function ImageStudioPage() {
               Credits are deducted when generation starts. Failed jobs are automatically refunded.
             </span>
           </div>
+
+          {/* Upload section */}
+          <div className="border-t border-border pt-4 space-y-2">
+            <p className="text-xs font-medium text-foreground">Upload image</p>
+            <p className="text-[10px] text-muted-foreground">
+              Add an existing image to your gallery (free). You can then edit it with AI.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => void handleFileChange(e)}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className={cn(
+                "w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-medium transition-colors",
+                "border-border bg-muted text-muted-foreground hover:text-foreground hover:border-border/80",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+              )}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Uploading…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-3.5 w-3.5" />
+                  Choose file
+                </>
+              )}
+            </button>
+            {uploadError && (
+              <p className="text-[10px] text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                {uploadError}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Right panel — Gallery */}
@@ -625,12 +763,121 @@ export default function ImageStudioPage() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {images.map((img) => (
-                <ImageCard key={img.id} image={img} onDelete={handleDelete} />
+                <ImageCard
+                  key={img.id}
+                  image={img}
+                  onDelete={handleDelete}
+                  onEditClick={setEditingImage}
+                />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Edit modal */}
+      {editingImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-background border border-border rounded-xl shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Pencil className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold">Edit with AI</span>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingImage(null);
+                  setEditInstruction("");
+                  setEditError(null);
+                }}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {editingImage.fileUrl && (
+                <img
+                  src={editingImage.thumbnailUrl ?? editingImage.fileUrl}
+                  alt={editingImage.prompt}
+                  className="w-full max-h-40 object-cover rounded-lg border border-border"
+                />
+              )}
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1.5">
+                  Edit instruction
+                </label>
+                <textarea
+                  value={editInstruction}
+                  onChange={(e) => setEditInstruction(e.target.value)}
+                  placeholder="Describe what you want to change…"
+                  rows={3}
+                  autoFocus
+                  className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:border-primary/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1.5">Quality</label>
+                <div className="flex gap-1.5">
+                  {(["standard", "high"] as const).map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => setEditQuality(q)}
+                      className={cn(
+                        "flex-1 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                        editQuality === q
+                          ? "border-primary/50 bg-primary/8 text-foreground"
+                          : "border-border bg-muted text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {q === "standard" ? "Standard · 3 credits" : "High · 6 credits"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {editError && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  {editError}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setEditingImage(null);
+                    setEditInstruction("");
+                    setEditError(null);
+                  }}
+                  className="flex-1 py-2 rounded-lg border border-border bg-muted text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => void handleEditSubmit()}
+                  disabled={!editInstruction.trim() || editSubmitting}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-colors",
+                    "bg-primary text-primary-foreground hover:bg-primary/90",
+                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                  )}
+                >
+                  {editSubmitting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Applying…
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="h-3.5 w-3.5" />
+                      Apply edit
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

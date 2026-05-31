@@ -4225,6 +4225,9 @@ export interface GeneratedImage {
   storageKey?: string | null;
   safetyStatus: string;
   creditCost: number;
+  parentImageId?: number | null;
+  sourceType?: string | null;
+  editInstruction?: string | null;
   errorMessage?: string | null;
   errorCategory?: string | null;
   createdAt: string;
@@ -4331,6 +4334,32 @@ export interface ImageListResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface ImageUploadResponse {
+  imageId: number;
+  fileUrl: string;
+  thumbnailUrl?: string | null;
+  creditCost: number;
+  image?: GeneratedImage;
+}
+
+export type ImageEditRequestQuality = typeof ImageEditRequestQuality[keyof typeof ImageEditRequestQuality];
+
+
+export const ImageEditRequestQuality = {
+  standard: 'standard',
+  high: 'high',
+} as const;
+
+export interface ImageEditRequest {
+  /**
+     * @minLength 1
+     * @maxLength 4000
+     */
+  instruction: string;
+  quality?: ImageEditRequestQuality;
+  projectId?: number;
 }
 
 export interface DeveloperModeRuntimeStatus {
@@ -5346,5 +5375,9 @@ projectId?: number;
 
 export type DeleteGeneratedImage200 = {
   success: boolean;
+};
+
+export type UploadImageBody = {
+  image: Blob;
 };
 

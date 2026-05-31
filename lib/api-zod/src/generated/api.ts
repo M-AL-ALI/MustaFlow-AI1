@@ -6993,6 +6993,9 @@ export const ListImagesResponse = zod.object({
   "storageKey": zod.string().nullish(),
   "safetyStatus": zod.string(),
   "creditCost": zod.number(),
+  "parentImageId": zod.number().nullish(),
+  "sourceType": zod.string().nullish(),
+  "editInstruction": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "errorCategory": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
@@ -7032,6 +7035,9 @@ export const GetGeneratedImageResponse = zod.object({
   "storageKey": zod.string().nullish(),
   "safetyStatus": zod.string(),
   "creditCost": zod.number(),
+  "parentImageId": zod.number().nullish(),
+  "sourceType": zod.string().nullish(),
+  "editInstruction": zod.string().nullish(),
   "errorMessage": zod.string().nullish(),
   "errorCategory": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
@@ -7049,6 +7055,32 @@ export const DeleteGeneratedImageParams = zod.object({
 
 export const DeleteGeneratedImageResponse = zod.object({
   "success": zod.boolean()
+})
+
+
+/**
+ * @summary Upload a user image to Image Studio
+ */
+export const UploadImageBody = zod.object({
+  "image": zod.instanceof(File)
+})
+
+
+/**
+ * @summary Edit an existing image with AI
+ */
+export const EditImageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const editImageBodyInstructionMax = 4000;
+
+export const editImageBodyQualityDefault = `standard`;
+
+export const EditImageBody = zod.object({
+  "instruction": zod.string().min(1).max(editImageBodyInstructionMax),
+  "quality": zod.enum(['standard', 'high']).default(editImageBodyQualityDefault),
+  "projectId": zod.number().optional()
 })
 
 

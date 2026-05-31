@@ -69,6 +69,7 @@ import {
   Minus,
   Info,
   Image as ImageIcon,
+  Pencil,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -2036,6 +2037,32 @@ function InlineImagePendingCard({
   const [pollStatus, setPollStatus] = useState<ImagePendingStatus | null>(null);
   const [downloaded, setDownloaded] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editQuality, setEditQuality] = useState<"standard" | "high">("standard");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editDone, setEditDone] = useState(false);
+
+  const handleInlineEdit = async () => {
+    if (!editInstruction.trim() || editSubmitting || !imageId) return;
+    setEditSubmitting(true);
+    try {
+      const res = await fetch(`/api/images/${imageId}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),
+      });
+      if (res.ok) {
+        setEditDone(true);
+        setEditOpen(false);
+        setEditInstruction("");
+      }
+    } catch {
+      // ignore
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     let stopped = false;
@@ -2174,6 +2201,15 @@ function InlineImagePendingCard({
           <RefreshCw className="h-3 w-3" />
           Regenerate
         </button>
+        {imageId && (
+          <button
+            onClick={() => setEditOpen((v) => !v)}
+            className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+          >
+            <Pencil className="h-3 w-3" />
+            Edit
+          </button>
+        )}
         <a
           href="/image-studio"
           className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
@@ -2181,14 +2217,53 @@ function InlineImagePendingCard({
           <ImageIcon className="h-3 w-3" />
           Image Studio
         </a>
-        <button
-          disabled
-          title="Use in Project — Coming soon"
-          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground/40 cursor-not-allowed"
-        >
-          Use in Project — Coming soon
-        </button>
       </div>
+      {/* Inline edit form */}
+      {editOpen && (
+        <div className="mt-1 space-y-1.5">
+          <textarea
+            value={editInstruction}
+            onChange={(e) => setEditInstruction(e.target.value)}
+            placeholder="Describe the change you want…"
+            rows={2}
+            autoFocus
+            className="w-full bg-muted border border-border rounded-lg px-2 py-1.5 text-[10px] text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:border-primary/50 transition-colors"
+          />
+          <div className="flex gap-1">
+            {(["standard", "high"] as const).map((q) => (
+              <button
+                key={q}
+                onClick={() => setEditQuality(q)}
+                className={cn(
+                  "flex-1 py-1 rounded border text-[10px] font-medium transition-colors",
+                  editQuality === q
+                    ? "border-primary/50 bg-primary/8 text-foreground"
+                    : "border-border bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {q === "standard" ? "Standard · 3cr" : "High · 6cr"}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => void handleInlineEdit()}
+            disabled={!editInstruction.trim() || editSubmitting}
+            className="w-full flex items-center justify-center gap-1 py-1 rounded border border-primary/40 bg-primary/8 text-[10px] font-medium text-primary hover:bg-primary/12 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {editSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+            {editSubmitting ? "Applying…" : "Apply edit"}
+          </button>
+        </div>
+      )}
+      {editDone && (
+        <p className="text-[10px] text-emerald-500/80 flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" />
+          Edit queued —{" "}
+          <a href="/image-studio" className="underline hover:text-emerald-400">
+            check Image Studio
+          </a>
+        </p>
+      )}
       {/* Commercial-use notice */}
       <p className="text-[9px] text-muted-foreground/60 leading-snug">
         Generated images may be used for commercial purposes. You are responsible for ensuring your
@@ -2221,6 +2296,11 @@ function InlineImageResultCard({
   onSendMessage?: (text: string) => void;
 }) {
   const [downloaded, setDownloaded] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editQuality, setEditQuality] = useState<"standard" | "high">("standard");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editDone, setEditDone] = useState(false);
   const {
     imageUrl,
     prompt = "",
@@ -2231,6 +2311,27 @@ function InlineImageResultCard({
     style = "vivid",
     purpose,
   } = payload;
+
+  const handleInlineEdit = async () => {
+    if (!editInstruction.trim() || editSubmitting || !imageId) return;
+    setEditSubmitting(true);
+    try {
+      const res = await fetch(`/api/images/${imageId}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),
+      });
+      if (res.ok) {
+        setEditDone(true);
+        setEditOpen(false);
+        setEditInstruction("");
+      }
+    } catch {
+      // ignore
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
 
   const handleDownload = () => {
     if (!imageUrl) return;
@@ -2306,6 +2407,15 @@ function InlineImageResultCard({
           <RefreshCw className="h-3 w-3" />
           Regenerate
         </button>
+        {imageId && (
+          <button
+            onClick={() => setEditOpen((v) => !v)}
+            className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+          >
+            <Pencil className="h-3 w-3" />
+            Edit
+          </button>
+        )}
         <a
           href="/image-studio"
           className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
@@ -2313,14 +2423,53 @@ function InlineImageResultCard({
           <ImageIcon className="h-3 w-3" />
           Image Studio
         </a>
-        <button
-          disabled
-          title="Use in Project — Coming soon"
-          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground/40 cursor-not-allowed"
-        >
-          Use in Project — Coming soon
-        </button>
       </div>
+      {/* Inline edit form */}
+      {editOpen && (
+        <div className="mt-1 space-y-1.5">
+          <textarea
+            value={editInstruction}
+            onChange={(e) => setEditInstruction(e.target.value)}
+            placeholder="Describe the change you want…"
+            rows={2}
+            autoFocus
+            className="w-full bg-muted border border-border rounded-lg px-2 py-1.5 text-[10px] text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:border-primary/50 transition-colors"
+          />
+          <div className="flex gap-1">
+            {(["standard", "high"] as const).map((q) => (
+              <button
+                key={q}
+                onClick={() => setEditQuality(q)}
+                className={cn(
+                  "flex-1 py-1 rounded border text-[10px] font-medium transition-colors",
+                  editQuality === q
+                    ? "border-primary/50 bg-primary/8 text-foreground"
+                    : "border-border bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {q === "standard" ? "Standard · 3cr" : "High · 6cr"}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => void handleInlineEdit()}
+            disabled={!editInstruction.trim() || editSubmitting}
+            className="w-full flex items-center justify-center gap-1 py-1 rounded border border-primary/40 bg-primary/8 text-[10px] font-medium text-primary hover:bg-primary/12 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {editSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+            {editSubmitting ? "Applying…" : "Apply edit"}
+          </button>
+        </div>
+      )}
+      {editDone && (
+        <p className="text-[10px] text-emerald-500/80 flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" />
+          Edit queued —{" "}
+          <a href="/image-studio" className="underline hover:text-emerald-400">
+            check Image Studio
+          </a>
+        </p>
+      )}
       {/* Commercial-use notice */}
       <p className="text-[9px] text-muted-foreground/60 leading-snug">
         Generated images may be used for commercial purposes. You are responsible for ensuring your

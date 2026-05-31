@@ -1,5 +1,5 @@
 /**
- * Image storage helper — Phase 9A-1.
+ * Image storage helper — Phase 9A-1 / Phase 9A-2.
  *
  * Storage strategy (in priority order):
  *   1. Cloudflare R2 (S3-compatible) when CF_R2_* env vars are set.
@@ -14,7 +14,7 @@
  */
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { logger } from "./logger";
@@ -110,7 +110,48 @@ async function resolveRawBuffer(openaiUrlOrData: string): Promise<Buffer> {
   return downloadBuffer(openaiUrlOrData);
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── Shared store helper (WebP already in hand) ───────────────────────────────
+
+async function storeWebpBuffer(
+  webpBuffer: Buffer,
+  rawBufferForThumb: Buffer,
+  keyPrefix: string,
+  imageId: number,
+  devFileUrl: string,
+): Promise<StorageResult> {
+  const r2 = getR2Config();
+
+  if (r2) {
+    const key = `${keyPrefix}/${imageId}/full.webp`;
+    const thumbKey = `${keyPrefix}/${imageId}/thumb.webp`;
+
+    const thumbBuffer = await sharp(rawBufferForThumb)
+      .resize({ width: 400, withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toBuffer();
+
+    const [fileUrl, thumbnailUrl] = await Promise.all([
+      uploadToR2(r2, key, webpBuffer, "image/webp"),
+      uploadToR2(r2, thumbKey, thumbBuffer, "image/webp"),
+    ]);
+
+    return { fileUrl, thumbnailUrl, storageKey: key };
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Image storage is not configured: set CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY, " +
+        "CF_R2_BUCKET, and CF_ACCOUNT_ID to enable R2 image storage in production.",
+    );
+  }
+
+  const tmpBase = join(tmpdir(), `mustaflow-img-${imageId}-${Date.now()}`);
+  const tmpPath = `${tmpBase}.webp`;
+  await writeFile(tmpPath, webpBuffer);
+  return { fileUrl: devFileUrl, thumbnailUrl: null, storageKey: tmpPath };
+}
+
+// ── Main export: generated images ─────────────────────────────────────────────
 
 export async function storeGeneratedImage(
   openaiUrl: string,
@@ -123,57 +164,98 @@ export async function storeGeneratedImage(
   );
 
   const rawBuffer = await resolveRawBuffer(openaiUrl);
-
   logger.info({ imageId, rawBytes: rawBuffer.length }, "image-storage: converting to WebP");
 
   const webpBuffer = await sharp(rawBuffer).webp({ quality: 85 }).toBuffer();
 
   const r2 = getR2Config();
-
   if (r2) {
-    // ── R2 upload path ──────────────────────────────────────────────────────
     logger.info({ imageId }, "image-storage: uploading to R2");
-
-    const key = `generated-images/${imageId}/full.webp`;
-    const thumbKey = `generated-images/${imageId}/thumb.webp`;
-
-    const thumbBuffer = await sharp(rawBuffer)
-      .resize({ width: 400, withoutEnlargement: true })
-      .webp({ quality: 75 })
-      .toBuffer();
-
-    const [fileUrl, thumbnailUrl] = await Promise.all([
-      uploadToR2(r2, key, webpBuffer, "image/webp"),
-      uploadToR2(r2, thumbKey, thumbBuffer, "image/webp"),
-    ]);
-
-    logger.info({ imageId, key }, "image-storage: R2 upload complete");
-
-    return { fileUrl, thumbnailUrl, storageKey: key };
-  }
-
-  // ── No R2 ──────────────────────────────────────────────────────────────────
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "Image storage is not configured: set CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY, " +
-        "CF_R2_BUCKET, and CF_ACCOUNT_ID to enable R2 image storage in production.",
+    const result = await storeWebpBuffer(
+      webpBuffer,
+      rawBuffer,
+      "generated-images",
+      imageId,
+      `/api/images/${imageId}/file`,
     );
+    logger.info({ imageId }, "image-storage: R2 upload complete");
+    return result;
   }
 
-  // Dev fallback: write to OS temp dir; return an API URL (not a base64 data URI)
-  // so the DB stores only a small URL, not megabytes of encoded image data.
-  // The file is served by GET /api/images/:id/file in image-gen.ts.
   logger.warn({ imageId }, "image-storage: R2 not configured — writing to OS temp dir (dev only)");
+  return storeWebpBuffer(
+    webpBuffer,
+    rawBuffer,
+    "generated-images",
+    imageId,
+    `/api/images/${imageId}/file`,
+  );
+}
 
-  const tmpBase = join(tmpdir(), `mustaflow-img-${imageId}-${Date.now()}`);
-  const tmpPath = `${tmpBase}.webp`;
-  await writeFile(tmpPath, webpBuffer);
+// ── Uploaded images (user-supplied, already WebP from route) ─────────────────
 
-  logger.debug({ imageId, tmpPath }, "image-storage: temp file written");
+/**
+ * Store a user-uploaded image that has already been validated and converted to WebP.
+ * `rawBuffer` is the original (pre-conversion) bytes used to generate the thumbnail.
+ */
+export async function storeUploadedImage(
+  webpBuffer: Buffer,
+  rawBuffer: Buffer,
+  imageId: number,
+): Promise<StorageResult> {
+  logger.info({ imageId }, "image-storage: storing uploaded image");
+  return storeWebpBuffer(
+    webpBuffer,
+    rawBuffer,
+    "uploaded-images",
+    imageId,
+    `/api/images/${imageId}/file`,
+  );
+}
 
-  return {
-    fileUrl: `/api/images/${imageId}/file`,
-    thumbnailUrl: null,
-    storageKey: tmpPath,
-  };
+// ── Edited images (result from provider edit API) ─────────────────────────────
+
+export async function storeEditedImage(
+  openaiUrl: string,
+  imageId: number,
+): Promise<StorageResult> {
+  logger.info({ imageId }, "image-storage: storing edited image");
+  const rawBuffer = await resolveRawBuffer(openaiUrl);
+  const webpBuffer = await sharp(rawBuffer).webp({ quality: 85 }).toBuffer();
+  return storeWebpBuffer(
+    webpBuffer,
+    rawBuffer,
+    "edited-images",
+    imageId,
+    `/api/images/${imageId}/file`,
+  );
+}
+
+// ── Fetch image buffer from storage (for edit source) ────────────────────────
+
+/**
+ * Retrieve the raw image bytes for an existing DB image record.
+ * In R2 mode: fetches from the public fileUrl.
+ * In dev mode: reads from the OS temp-dir storageKey.
+ */
+export async function getImageBuffer(
+  storageKey: string | null,
+  fileUrl: string,
+): Promise<Buffer> {
+  if (fileUrl.startsWith("/api/images/")) {
+    if (!storageKey) {
+      throw new Error("No storageKey available for dev-mode image retrieval");
+    }
+    const sysTmp = tmpdir();
+    if (!storageKey.startsWith(sysTmp)) {
+      throw new Error("storageKey is outside tmpdir — refusing to read");
+    }
+    return readFile(storageKey);
+  }
+  // R2 public URL or any HTTPS URL
+  const res = await fetch(fileUrl, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch image from storage: HTTP ${res.status}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
 }

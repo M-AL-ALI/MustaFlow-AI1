@@ -148,10 +148,12 @@ import type {
   GithubSyncStatusResult,
   GrantAdminRole200,
   HealthStatus,
+  ImageEditRequest,
   ImageGenerateRequest,
   ImageGenerateResponse,
   ImageListResponse,
   ImageStatusResponse,
+  ImageUploadResponse,
   ImportKnowledge201,
   ImportKnowledgeBody,
   InferStyleMemory200,
@@ -302,6 +304,7 @@ import type {
   UpdatePreferencesBody,
   UpdateProjectDomainDnsRecord200,
   UpdateTaskBody,
+  UploadImageBody,
   UploadProjectDomainCertificate200,
   UploadProjectDomainCertificateBody,
   UploadUrlRequest,
@@ -20004,5 +20007,150 @@ export const useDeleteGeneratedImage = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getDeleteGeneratedImageMutationOptions(options));
+    }
+
+export const getUploadImageUrl = () => {
+
+
+
+
+  return `/api/images/upload`
+}
+
+/**
+ * @summary Upload a user image to Image Studio
+ */
+export const uploadImage = async (uploadImageBody: UploadImageBody, options?: RequestInit): Promise<ImageUploadResponse> => {
+    const formData = new FormData();
+formData.append(`image`, uploadImageBody.image);
+
+  return customFetch<ImageUploadResponse>(getUploadImageUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body:
+      formData,
+  }
+);}
+
+
+
+
+export const getUploadImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImage>>, TError,{data: BodyType<UploadImageBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadImage>>, TError,{data: BodyType<UploadImageBody>}, TContext> => {
+
+const mutationKey = ['uploadImage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadImage>>, {data: BodyType<UploadImageBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadImage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadImageMutationResult = NonNullable<Awaited<ReturnType<typeof uploadImage>>>
+    export type UploadImageMutationBody = BodyType<UploadImageBody>
+    export type UploadImageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Upload a user image to Image Studio
+ */
+export const useUploadImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImage>>, TError,{data: BodyType<UploadImageBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadImage>>,
+        TError,
+        {data: BodyType<UploadImageBody>},
+        TContext
+      > => {
+      return useMutation(getUploadImageMutationOptions(options));
+    }
+
+export const getEditImageUrl = (id: number,) => {
+
+
+
+
+  return `/api/images/${id}/edit`
+}
+
+/**
+ * @summary Edit an existing image with AI
+ */
+export const editImage = async (id: number,
+    imageEditRequest: ImageEditRequest, options?: RequestInit): Promise<ImageGenerateResponse> => {
+
+  return customFetch<ImageGenerateResponse>(getEditImageUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      imageEditRequest,)
+  }
+);}
+
+
+
+
+export const getEditImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editImage>>, TError,{id: number;data: BodyType<ImageEditRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof editImage>>, TError,{id: number;data: BodyType<ImageEditRequest>}, TContext> => {
+
+const mutationKey = ['editImage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof editImage>>, {id: number;data: BodyType<ImageEditRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  editImage(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EditImageMutationResult = NonNullable<Awaited<ReturnType<typeof editImage>>>
+    export type EditImageMutationBody = BodyType<ImageEditRequest>
+    export type EditImageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Edit an existing image with AI
+ */
+export const useEditImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editImage>>, TError,{id: number;data: BodyType<ImageEditRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof editImage>>,
+        TError,
+        {id: number;data: BodyType<ImageEditRequest>},
+        TContext
+      > => {
+      return useMutation(getEditImageMutationOptions(options));
     }
 

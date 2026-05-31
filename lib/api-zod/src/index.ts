@@ -49,6 +49,8 @@ export { ApplyFileSuggestionResponse } from "./generated/api";
 export { V1ListBuildsParams } from "./generated/api";
 export { V1TriggerBuildBody } from "./generated/api";
 export { SubmitProjectQueueBody } from "./generated/api";
+export { UploadImageBody } from "./generated/api";
+export { EditImageBody } from "./generated/api";
 export { SubmitAbuseReportBody } from "./generated/api";
 export { ToggleAdminSkillBody } from "./generated/api";
 export { UpdateAdminSkillDraftBody } from "./generated/api";

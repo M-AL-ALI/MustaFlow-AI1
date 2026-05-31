@@ -56,6 +56,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-knowledge-usage-events` — creates `knowledge_usage_events` table (Phase 8B-3A; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-image-studio` — creates `generated_images` table (Task #1178 Phase 9A-1; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-image-studio-v2` — adds negativePrompt, purpose, providerName, modelName, thumbnailUrl columns to `generated_images` (Phase 9A-1 completion; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-image-edit-lineage` — adds parentImageId, sourceType, editInstruction columns to `generated_images` (Phase 9A-2 image editing; run before deploy)
 
 ## Stack
 

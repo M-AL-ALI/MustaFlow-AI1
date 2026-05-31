@@ -20,7 +20,7 @@
  *     - Sizes:    1024x1024 | 1792x1024 | 1024x1792
  *     - style: vivid | natural; returns URL
  */
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { logger } from "./logger";
 
 export type ImageAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
@@ -232,6 +232,91 @@ export async function generateImage(opts: ImageGenerateOptions): Promise<ImageGe
   }
 
   logger.info({ model, size }, "image-provider: generation complete");
+
+  return {
+    openaiUrl: imageSource,
+    revisedPrompt: item.revised_prompt ?? null,
+    width,
+    height,
+    mimeType: "image/png",
+  };
+}
+
+// ── Edit function ─────────────────────────────────────────────────────────────
+
+export interface ImageEditOptions {
+  imageBuffer: Buffer;
+  instruction: string;
+  quality?: ImageQuality;
+  aspectRatio?: ImageAspectRatio;
+}
+
+/**
+ * Edit an existing image using the provider's edit/inpainting API.
+ * Converts the source buffer to a File object and calls client.images.edit().
+ */
+export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateResult> {
+  const { imageBuffer, instruction, quality = "standard", aspectRatio = "1:1" } = opts;
+
+  const model = process.env.IMAGE_MODEL ?? "gpt-image-1";
+  const size = resolveSize(aspectRatio, model);
+  const resolvedQuality = resolveQuality(quality, model);
+  const { width, height } = sizeToPixels(size);
+
+  const client = getClient();
+
+  logger.info(
+    { model, size, quality: resolvedQuality, instructionLen: instruction.length },
+    "image-provider: editing image",
+  );
+
+  const imageFile = await toFile(imageBuffer, "image.webp", { type: "image/webp" });
+
+  // The edit endpoint only supports gpt-image quality values (low/medium/high/standard/auto).
+  // Map "hd" (dall-e-3 legacy) → "high" so the call is always valid.
+  const editQuality = (
+    resolvedQuality === "hd" ? "high" : resolvedQuality
+  ) as "low" | "medium" | "high" | "standard";
+
+  const baseParams = {
+    image: imageFile,
+    prompt: instruction,
+    model,
+    n: 1 as const,
+    size,
+    quality: editQuality,
+  };
+
+  let response: OpenAI.ImagesResponse;
+  try {
+    response = (await client.images.edit(baseParams)) as OpenAI.ImagesResponse;
+  } catch (err) {
+    const e = err as { code?: string; param?: string };
+    if (e.code === "unknown_parameter" && e.param === "quality") {
+      logger.warn({ model }, "image-provider: 'quality' not supported by edit endpoint — retrying without it");
+      const { quality: _q, ...paramsWithoutQuality } = baseParams;
+      void _q;
+      response = (await client.images.edit(
+        paramsWithoutQuality as Parameters<typeof client.images.edit>[0],
+      )) as OpenAI.ImagesResponse;
+    } else {
+      throw err;
+    }
+  }
+
+  const item = response.data?.[0];
+  if (!item) throw new Error("Image edit returned no data");
+
+  let imageSource: string;
+  if (item.url) {
+    imageSource = item.url;
+  } else if (item.b64_json) {
+    imageSource = `data:image/png;base64,${item.b64_json}`;
+  } else {
+    throw new Error("Image edit returned neither a URL nor base64 data");
+  }
+
+  logger.info({ model, size }, "image-provider: edit complete");
 
   return {
     openaiUrl: imageSource,

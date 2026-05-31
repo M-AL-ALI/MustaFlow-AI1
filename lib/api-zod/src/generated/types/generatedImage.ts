@@ -28,6 +28,9 @@ export interface GeneratedImage {
   storageKey?: string | null;
   safetyStatus: string;
   creditCost: number;
+  parentImageId?: number | null;
+  sourceType?: string | null;
+  editInstruction?: string | null;
   errorMessage?: string | null;
   errorCategory?: string | null;
   createdAt: Date;

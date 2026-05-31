@@ -18,12 +18,13 @@ import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
 import { db, generatedImagesTable, userCreditsTable } from "@workspace/db";
 import {
   generateImage,
+  editImage,
   type ImageAspectRatio,
   type ImageQuality,
   type ImageStyle,
 } from "./image-provider";
 import { validateImagePrompt } from "./image-safety";
-import { storeGeneratedImage } from "./image-storage";
+import { storeGeneratedImage, storeEditedImage, getImageBuffer } from "./image-storage";
 import {
   deductCreditsAtomic,
   refundCredits,
@@ -286,6 +287,185 @@ export async function enqueueImageJob(
   void runImageJob(job, opts, creditCost, CREDITS_ENFORCEMENT_ENABLED);
 
   return { jobId, imageId };
+}
+
+// ── Image edit job ────────────────────────────────────────────────────────────
+
+export interface EnqueueImageEditJobOpts {
+  userId: string;
+  parentImageId: number;
+  parentStorageKey: string | null;
+  parentFileUrl: string;
+  parentAspectRatio: string;
+  instruction: string;
+  quality?: ImageQuality;
+  projectId?: number;
+}
+
+export async function enqueueImageEditJob(
+  opts: EnqueueImageEditJobOpts,
+): Promise<{ jobId: string; imageId: number }> {
+  const {
+    userId,
+    parentImageId,
+    instruction,
+    quality = "standard",
+    parentAspectRatio,
+    projectId,
+  } = opts;
+
+  // Safety check on instruction text
+  const safetyResult = validateImagePrompt(instruction);
+  if (!safetyResult.safe) {
+    throw Object.assign(new Error(safetyResult.reason ?? "Instruction failed safety check"), {
+      code: "SAFETY_BLOCKED",
+      category: safetyResult.category,
+    });
+  }
+
+  const creditCost = IMAGE_CREDIT_COSTS[quality] ?? 3;
+  const providerName = "openai";
+  const modelName = process.env.IMAGE_MODEL ?? "gpt-image-1";
+
+  // Create DB row with status=pending
+  const [imageRow] = await db
+    .insert(generatedImagesTable)
+    .values({
+      userId,
+      projectId: projectId ?? null,
+      prompt: instruction,
+      quality,
+      aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
+      providerName,
+      modelName,
+      status: "pending",
+      safetyStatus: "passed",
+      creditCost,
+      parentImageId,
+      sourceType: "edited",
+      editInstruction: instruction,
+    })
+    .returning({ id: generatedImagesTable.id });
+
+  if (!imageRow) throw new Error("Failed to create edit image record");
+  const imageId = imageRow.id;
+
+  // Deduct credits atomically
+  const deduction = await deductCreditsAtomic(userId, creditCost, {
+    type: "creative",
+    description: `Image edit (${quality} quality) — image #${imageId}`,
+  });
+
+  if ("insufficient" in deduction) {
+    await db
+      .update(generatedImagesTable)
+      .set({
+        status: "failed",
+        errorMessage: "Insufficient credits",
+        errorCategory: "credits",
+        updatedAt: sql`now()`,
+      })
+      .where(eq(generatedImagesTable.id, imageId));
+    throw Object.assign(new Error("Insufficient credits for image editing"), {
+      code: "INSUFFICIENT_CREDITS",
+      balance: deduction.balance,
+    });
+  }
+
+  const jobId = randomUUID();
+  const job: ImageJob = {
+    jobId,
+    imageId,
+    userId,
+    status: "pending",
+    createdAt: new Date(),
+  };
+  jobs.set(jobId, job);
+
+  void runImageEditJob(job, opts, creditCost, CREDITS_ENFORCEMENT_ENABLED);
+
+  return { jobId, imageId };
+}
+
+async function runImageEditJob(
+  job: ImageJob,
+  opts: EnqueueImageEditJobOpts,
+  creditCost: number,
+  creditsWereDeducted: boolean,
+): Promise<void> {
+  const { jobId, imageId, userId } = job;
+  const { parentStorageKey, parentFileUrl, instruction, quality = "standard", parentAspectRatio } =
+    opts;
+
+  try {
+    job.status = "generating";
+    await db
+      .update(generatedImagesTable)
+      .set({ status: "generating", updatedAt: sql`now()` })
+      .where(eq(generatedImagesTable.id, imageId));
+
+    logger.info({ jobId, imageId, quality }, "image-jobs: fetching source image for edit");
+
+    const imageBuffer = await getImageBuffer(parentStorageKey, parentFileUrl);
+
+    logger.info({ jobId, imageId }, "image-jobs: calling edit provider");
+
+    const result = await editImage({
+      imageBuffer,
+      instruction,
+      quality,
+      aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
+    });
+
+    logger.info({ jobId, imageId }, "image-jobs: storing edit result");
+
+    const { fileUrl, thumbnailUrl, storageKey } = await storeEditedImage(result.openaiUrl, imageId);
+
+    await db
+      .update(generatedImagesTable)
+      .set({
+        status: "completed",
+        fileUrl,
+        thumbnailUrl,
+        storageKey,
+        revisedPrompt: result.revisedPrompt,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(generatedImagesTable.id, imageId));
+
+    job.status = "completed";
+    job.fileUrl = fileUrl;
+    job.thumbnailUrl = thumbnailUrl ?? undefined;
+
+    logger.info({ jobId, imageId }, "image-jobs: edit completed");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ jobId, imageId, err }, "image-jobs: edit job failed, refunding credits");
+
+    const errorCategory =
+      err instanceof Error && "code" in err
+        ? String((err as { code?: string }).code)
+        : "provider_error";
+
+    await db
+      .update(generatedImagesTable)
+      .set({
+        status: "failed",
+        errorMessage: message,
+        errorCategory,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(generatedImagesTable.id, imageId));
+
+    if (creditsWereDeducted) {
+      await refundCredits(userId, creditCost, {
+        description: `Image edit failed — image #${imageId}: ${message.slice(0, 100)}`,
+      });
+    }
+
+    job.status = "failed";
+    job.error = message;
+  }
 }
 
 async function runImageJob(
