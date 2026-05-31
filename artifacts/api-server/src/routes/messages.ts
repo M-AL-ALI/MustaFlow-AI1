@@ -254,8 +254,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   //             ("of/showing/depicting/featuring").
   //   Path C — purely visual real-world artifact nouns (painting/portrait/watercolor/…)
   //             that never appear in a code-writing task, regardless of verb.
+  // Matches image-generation intent across a wide range of natural phrasings.
+  // Covers both singular and plural nouns, and weak-verb+preposition variants.
+  // Negative lookahead prevents "create an icon component" from being misrouted.
+  // Covers singular/plural visual nouns, multi-word fillers ("me some", "a few"),
+  // and purely-visual noun phrases that never appear in code-writing tasks.
+  // Negative lookahead blocks "create an icon component" etc.
   const IMAGE_GENERATE_PATTERNS =
-    /\b(?:generate|draw|render|produce|create|make|design)\s+(?:(?:a|an|me|us|some|my)\s+)?(?:logo|banner|icon|thumbnail|avatar|hero\s+image|image|picture|illustration|photo|wallpaper|background\s+image|cover\s+(?:art|image)|mockup|poster|flyer|badge)\b(?!\s+(?:component|element|widget|button|tab|panel|section|function|class|style|color|handler|hook|hooks|template|route|page|view|modal|menu|form|input|type|types|prop|props|state|util|utils|helper|helpers|module|library|lib|file|folder|dir|container|context|provider|reducer|action|slice|store|service|controller|model|schema|interface|enum|const|var|let))|\b(?:create|make|design)\s+(?:(?:a|an|me|us|some|my)\s+)?(?:image|photo|picture|illustration)\s+(?:of|showing|depicting|featuring)\b|\b(?:create|make|generate|design)\s+(?:(?:a|an|me|us|some|my)\s+)?(?:painting|portrait|mural|watercolor|sketch|photorealistic\s+image|ai\s+art)\b/i;
+    /\b(?:generate|draw|render|produce|create|make|design|show\s+me)\s+(?:(?:a|an|me|us|some|my|the|few|several)\s+){0,3}(?:logo|logos|banner|banners|icon|icons|thumbnail|thumbnails|avatar|avatars|hero\s+images?|images?|pictures?|illustrations?|photos?|wallpapers?|background\s+images?|cover\s+(?:art|images?)|mockups?|posters?|flyers?|badges?|graphics?|visuals?|artworks?|artwork|paintings?|portraits?|murals?|watercolors?|sketches?)\b(?!\s+(?:component|element|widget|button|tab|panel|section|function|class|style|color|handler|hook|hooks|template|route|page|view|modal|menu|form|input|type|types|prop|props|state|util|utils|helper|helpers|module|library|lib|file|folder|dir|container|context|provider|reducer|action|slice|store|service|controller|model|schema|interface|enum|const|var|let))|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?)\s+(?:of|showing|depicting|featuring|with)\b|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:photorealistic\s+images?|ai\s+art)\b/i;
 
   let resolvedIntent: ResolvedIntent = "build";
   let intentConfidence = 1.0;

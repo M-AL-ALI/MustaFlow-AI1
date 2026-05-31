@@ -22,10 +22,16 @@ const IMAGE_GENERATE_CTA =
   "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including the Image Studio with quality presets, aspect ratios, and style controls.";
 
 const ORA_IMAGE_PATTERNS: RegExp[] = [
-  /\b(generate|create|make|draw|render|produce|design)\s+(?:(?:me|us|my|you)\s+)?(?:a[n]?\s+)?(image|photo|picture|illustration|artwork|graphic|logo|banner|icon|thumbnail)\b/i,
-  /\b(image|photo|picture|illustration|artwork)\s+(of|showing|depicting|with)\b/i,
+  // Verb + optional filler + singular or plural visual noun
+  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?)\b/i,
+  // Visual noun + preposition (describing what's in it)
+  /\b(images?|photos?|pictures?|illustrations?|artworks?|graphic)\s+(of|showing|depicting|featuring|with)\b/i,
+  // Image generation feature references
   /\bimage\s+(generation|studio|ai)\b/i,
+  // AI art tool references
   /\b(dall-?e|stable\s+diffusion|midjourney|ai\s+art)\b/i,
+  // "Can you generate/make/draw a picture/image/graphic"
+  /\bcan\s+you\s+(generate|create|make|draw|render|produce|design)\b.*\b(images?|pictures?|photos?|visuals?|graphics?|illustrations?)\b/i,
 ];
 
 const router = Router();

@@ -1,0 +1,166 @@
+Before we start coding the full Agentic AI Builder upgrade, I need you to audit the existing MustaFlow AI Builder Mode.
+
+Do not build a new mode yet.
+
+The first goal is to understand what is already built, what is real, what is mock/demo, and what can be reused.
+
+My preferred direction is to convert the existing AI Builder Mode into the main Agentic AI Builder for MustaFlow, because we already have important pieces in place such as the AI Builder chat, preview page, workspace layout, project system direction, model tiers, Plan Mode direction, publishing direction, and Knowledge Vault direction.
+
+However, before we decide 100%, I need you to inspect the codebase and answer whether the current AI Builder is strong enough to reorganize into the main Agentic Builder, or whether we need to build a new backend agent layer behind the existing UI.
+
+Important:
+The user-facing experience should probably remain one main AI Builder, not multiple confusing modes.
+
+If a new system is needed, it should preferably be a hidden backend Agent Orchestrator behind the existing AI Builder UI, not a totally separate user-facing mode unless absolutely necessary.
+
+Please audit and answer:
+
+1. Where is the current AI Builder Mode located?
+
+* Route/page path
+* Main frontend components
+* Backend endpoints used
+* Any related hooks/state management
+
+2. Where is the current preview page located?
+
+* Route/page path
+* Is it iframe-based?
+* Does it load real generated project code?
+* Is it static/mock/demo?
+* Can it refresh after changes?
+* Can it capture errors?
+
+3. What does the current AI Builder actually do?
+   Please clearly separate:
+
+* Real working features
+* UI-only features
+* Mock/demo features
+* Partially built features
+* Broken or disconnected features
+
+4. Does AI Builder currently write real files?
+
+* Can it create project files?
+* Can it edit project files?
+* Where are generated files stored?
+* Are files project-specific?
+* Is there version tracking?
+
+5. Does AI Builder currently run real commands?
+
+* Can it run build commands?
+* Can it run typecheck?
+* Can it run tests?
+* Can it install packages?
+* Can it read command output/logs?
+
+6. Does AI Builder currently support a real agent task system?
+
+* Are build tasks stored in the database?
+* Are task steps stored?
+* Are logs stored?
+* Is task progress streamed to the chat?
+* Is there polling, SSE, WebSocket, or another progress system?
+
+7. Does the chat control real work?
+
+* Does a user prompt only generate text?
+* Or does it trigger real project actions?
+* Can the chat ask the agent to build, test, fix, and update preview?
+
+8. Is Plan Mode real or only UI?
+
+* Does Plan Mode create structured plans?
+* Does it block risky changes?
+* Can it transition into Build Mode?
+
+9. Are Lite/Eco/Power/Pro real?
+
+* Are they wired to different models/tool permissions/cost levels?
+* Or are they only labels in the UI?
+
+10. Is there a real preview/testing environment?
+
+* Can the user test the actual generated app before deployment?
+* Can forms/buttons/navigation/API calls/database actions work in preview?
+* Can the agent read preview errors and fix them?
+* Is preview separated from production?
+
+11. Is there backend generation?
+
+* Can AI Builder create API routes?
+* Can it create server logic?
+* Can it connect frontend to backend?
+
+12. Is there database generation?
+
+* Can it create tables/schema/migrations?
+* Can it seed test data?
+* Can it connect generated apps to the database?
+* Is there project-level database isolation?
+* Is preview/staging database separate from production?
+
+13. Is there deployment/publishing logic?
+
+* Can projects be deployed?
+* Is there platform subdomain logic?
+* Is custom domain logic started?
+* Is deployment gated by build/test/preview checks?
+
+14. Is there a Knowledge Vault/project memory system?
+
+* Are decisions saved?
+* Are fixes saved?
+* Are task results saved?
+* Are previous errors and solutions saved?
+* Can the agent use this memory later?
+
+15. Is there checkpoint/rollback?
+
+* Are file snapshots saved?
+* Can users rollback?
+* Are package/config/database states included?
+* Are checkpoints created before risky changes?
+
+16. Is there safe approval control?
+
+* Does the system ask before deleting files?
+* Does it ask before destructive database changes?
+* Does it ask before production deployment?
+* Does it ask before auth/payment/security changes?
+* Does it ask before changing secrets/env vars?
+
+17. What is the recommended technical path?
+    After the audit, tell me which option is best:
+
+Option A — Reorganize and upgrade existing AI Builder Mode into Agentic AI Builder.
+This is preferred if the current AI Builder already has useful real foundations.
+
+Option B — Keep the current AI Builder UI, but build a new backend Agent Orchestrator behind it.
+This is preferred if the UI is good but the current backend is not truly agentic.
+
+Option C — Build a new Agentic Builder Mode from scratch.
+Only recommend this if the current AI Builder is mostly mock/demo, too fragile, or too hard to safely upgrade.
+
+18. What is the smallest safe first phase?
+    Do not propose a huge rebuild first.
+
+Recommend the smallest first phase that proves the real agentic loop:
+
+User prompt
+→ Agent creates task
+→ Agent reads project
+→ Agent writes/edits real files
+→ Agent runs check
+→ Preview updates with real app
+→ Errors are captured
+→ Agent fixes error
+→ Chat reports progress
+→ Checkpoint/history is saved
+
+Final instruction:
+Please do this audit first before coding major changes.
+
+The goal is to make the existing AI Builder become the main MustaFlow Agentic Builder if possible. We only build a new user-facing mode if the audit proves the existing AI Builder cannot be safely upgraded.
