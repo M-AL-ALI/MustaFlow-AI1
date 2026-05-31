@@ -54,6 +54,7 @@ import { INDUSTRY_PERSONAS } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 import { DemoAnimation } from "@/components/demo-animation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { TechnologyEcosystemBanner } from "@/components/technology-ecosystem-banner";
 import { Show } from "@clerk/react";
 import { OraPanel } from "@/components/ora-panel";
 import { OraBubble } from "@/components/ora-bubble";
@@ -589,6 +590,11 @@ export default function HomePage() {
               </span>
             ))}
           </div>
+        </div>
+
+        {/* Technology ecosystem ticker */}
+        <div className="border-t border-border bg-muted/10">
+          <TechnologyEcosystemBanner />
         </div>
 
         {/* Developer features section */}
