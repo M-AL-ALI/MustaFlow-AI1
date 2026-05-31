@@ -1,0 +1,125 @@
+Thank you. Phase 8B-3A is accepted as code-complete.
+
+Accepted commit:
+
+441038cdd71c9b87c5743d0792072f8762d4fe63
+
+Accepted scope:
+
+* User-approved Knowledge-Aware Report Generation
+* 3-step Knowledge Report flow:
+    * Find
+    * Select
+    * Report
+* Relevant Knowledge suggestion cards
+* User-selected vault entries only
+* Approved context builder
+* Sanitized context preview
+* Report generation from selected entries only
+* Knowledge Vault References Used section
+* Audit trail through knowledge_usage_events
+* OpenAPI/client updates
+* Frontend Knowledge Report panel
+* No automatic RAG
+* No hidden AI memory
+* No automatic vault injection
+
+Accepted backend work:
+
+* vault-knowledge-service.ts
+* vault-knowledge.ts
+* knowledge_usage_events migration
+* startup migration step #82
+* OpenAPI updates
+* generated client/Zod updates
+
+Accepted frontend work:
+
+* knowledge-suggestion-card.tsx
+* knowledge-report-panel.tsx
+* Generate report button on the Vault page
+* Find / Select / Report panel workflow
+* Copy report button
+* safe empty/error states
+
+Accepted security and privacy proof:
+
+* authenticated routes only
+* ownership checks enforced
+* selected entries re-checked server-side
+* archived entries skipped
+* sensitive content skipped or sanitized
+* raw vectors never returned
+* raw vectors never sent to AI
+* unselected entries are not used
+* public Ora cannot access this feature
+* Builder does not automatically use vault knowledge
+
+Accepted boundary proof:
+
+Phase 8B-3A did NOT implement:
+
+* automatic RAG
+* hidden prompt injection
+* automatic vault use in every Ora answer
+* automatic Builder vault usage
+* automatic report modification
+* AI memory
+* auto-learning
+* background recommendations
+* cross-project intelligence
+* Web Search
+* Image Generation
+* Advanced Charts
+
+Accepted audit proof:
+
+* knowledge_usage_events table created
+* selected entry IDs stored
+* selected entry versions stored
+* report type stored
+* timestamp stored
+* full report content is not stored
+
+Accepted quality proof:
+
+* typecheck passed
+* lint passed
+* format passed
+* codegen drift passed
+* migration passed
+* API server running
+* frontend running
+
+Unrelated task isolation accepted:
+
+The premium scrolling technology ecosystem brand ticker was a separate task and separate commit. It did not modify vault files, API routes, migrations, OpenAPI, Knowledge Vault UI, or Phase 8B-3A files.
+
+Production readiness note:
+
+Phase 8B-3A is accepted as code-complete, but not fully production-ready until live authenticated browser validation is completed with real vault entries and embeddings.
+
+Required manual validation before production release:
+
+1. Sign in with a real user.
+2. Confirm vault entries exist and are indexed.
+3. Open Knowledge Vault.
+4. Click Generate Report.
+5. Search for relevant knowledge.
+6. Confirm suggestions appear.
+7. Select entries.
+8. Generate a report.
+9. Confirm only selected entries are used.
+10. Confirm unselected entries are not used.
+11. Confirm skipped sensitive entries behavior.
+12. Confirm Knowledge Vault References Used appears.
+13. Confirm audit event is created.
+14. Confirm copy report button works.
+15. Confirm rollback is not needed.
+
+Current acceptance status:
+
+* Phase 8B-3A: Code-complete accepted
+* Production-ready: pending live authenticated validation
+
+Do not start Phase 8B-3B, automatic RAG, AI memory, automatic recommendations, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until I explicitly approve.
