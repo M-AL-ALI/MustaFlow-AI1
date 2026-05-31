@@ -1,0 +1,59 @@
+Thank you for identifying the real blocker.
+
+I understand the current status:
+
+* The Replit AI proxy does not support /embeddings.
+* The code was updated to use direct OpenAI embeddings through OPENAI_API_KEY.
+* The silent false-success bug was fixed.
+* generateEmbedding() now fails honestly instead of returning null.
+* vault-embedding-service.ts no longer reports entries as indexed when no vector is stored.
+* Typecheck, lint, format, and codegen are passing.
+* However, the current OPENAI_API_KEY has no usable quota or billing credit.
+* OpenAI returns insufficient_quota.
+* Therefore, real embeddings cannot be generated yet.
+
+Decision:
+
+Keep Phase 8B-1 and Phase 8B-2 open as code-fixed but not production-validated until the OpenAI API account has active billing or a working API key with quota.
+
+Please do not close Phase 8B-1 or Phase 8B-2 as production-ready until real vectors are generated and semantic search returns actual results.
+
+Next action from my side:
+
+I will either:
+
+1. Add billing/credits to the OpenAI API account connected to this key, or
+2. Replace OPENAI_API_KEY in Replit Secrets with a different OpenAI API key that already has active billing/quota.
+
+After I confirm the key has quota, please rerun the full validation:
+
+1. Restart the API server.
+2. Create 4–10 vault entries.
+3. Run POST /api/vault/reindex.
+4. Confirm the reindex response honestly reports indexed/failed counts.
+5. Run this DB check:
+
+SELECT COUNT(*) FROM vault_embeddings WHERE embedding IS NOT NULL;
+
+Expected result:
+
+* count must be greater than 0
+
+6. Run semantic search.
+7. Confirm results appear.
+8. Confirm similarity score displays.
+9. Confirm chunk preview displays.
+10. Confirm clicking a result opens the entry viewer.
+11. Confirm raw vectors are not returned.
+12. Confirm chunk text and query text are not logged.
+13. Confirm no RAG, AI memory, prompt injection, or knowledge-aware reporting was started.
+
+Important:
+
+Do not start Phase 8B-3, RAG, AI memory, knowledge-aware reporting, automatic recommendations, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until this validation passes.
+
+Current status should be recorded as:
+
+* Phase 8B-1: code fixed, pending live embedding validation
+* Phase 8B-2: code complete, pending live semantic search validation
+* Production readiness: blocked by OpenAI API billing/quota

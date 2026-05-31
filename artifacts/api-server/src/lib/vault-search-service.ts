@@ -22,6 +22,14 @@ const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 30;
 /** Characters of chunk text returned as a preview (no raw vector). */
 const CHUNK_PREVIEW_CHARS = 300;
+/**
+ * Minimum cosine similarity (0–100) required to include a result.
+ * Results below this threshold are omitted — they are not semantically
+ * relevant even if they are the "nearest" neighbours in the index.
+ * 25 = 25% cosine similarity; tuned to reject fully off-topic queries
+ * while keeping results for queries with genuine semantic overlap.
+ */
+const MIN_SIMILARITY_SCORE = 25;
 
 // ── Per-user rate limiter (in-memory, sliding window) ─────────────────────────
 const searchThrottle = new Map<string, number[]>();
@@ -128,9 +136,13 @@ export async function semanticSearchVault(
 
   // 2. Embed the user query. Only the query goes to the model —
   //    vault entry chunks were already embedded in Phase 8B-1.
-  const queryVec = await generateEmbedding(params.query.slice(0, 1000));
-  if (!queryVec) {
-    logger.warn({ userId }, "vault-search: query embedding generation failed");
+  //    generateEmbedding() now throws on any failure; never returns null.
+  let queryVec: number[];
+  try {
+    queryVec = await generateEmbedding(params.query.slice(0, 1000));
+  } catch (err) {
+    // Log only safe metadata — never log query text
+    logger.warn({ userId, error: String(err) }, "vault-search: query embedding generation failed");
     return { ...base, embeddingError: true };
   }
 
@@ -228,21 +240,41 @@ export async function semanticSearchVault(
     return base;
   }
 
-  // 6. Shape results — chunk preview truncated, score clamped, no raw vectors
-  const results: SemanticSearchResult[] = rows.map((row) => ({
-    entryId: row.entryId,
-    title: row.title,
-    category: row.category,
-    department: row.department ?? null,
-    summary: row.summary,
-    tags: Array.isArray(row.tags) ? row.tags : [],
-    status: row.status,
-    version: row.version,
-    chunkIndex: row.chunkIndex,
-    chunkPreview: (row.chunkText ?? "").slice(0, CHUNK_PREVIEW_CHARS),
-    similarityScore: Math.min(100, Math.max(0, Number(row.similarityScore) || 0)),
-    updatedAt: row.updatedAt ?? new Date().toISOString(),
-  }));
+  // 6. Shape results — chunk preview truncated, score clamped, no raw vectors.
+  //    Apply minimum similarity threshold: results below MIN_SIMILARITY_SCORE
+  //    are omitted so that off-topic queries produce an empty result set
+  //    rather than low-relevance matches.
+  const results: SemanticSearchResult[] = rows
+    .map((row) => ({
+      entryId: row.entryId,
+      title: row.title,
+      category: row.category,
+      department: row.department ?? null,
+      summary: row.summary,
+      tags: Array.isArray(row.tags) ? row.tags : [],
+      status: row.status,
+      version: row.version,
+      chunkIndex: row.chunkIndex,
+      chunkPreview: (row.chunkText ?? "").slice(0, CHUNK_PREVIEW_CHARS),
+      similarityScore: Math.min(100, Math.max(0, Number(row.similarityScore) || 0)),
+      updatedAt: row.updatedAt ?? new Date().toISOString(),
+    }))
+    .filter((r) => r.similarityScore >= MIN_SIMILARITY_SCORE);
+
+  // If threshold filtering emptied the results, check whether there are any
+  // embeddings at all so the client can show the right empty state.
+  if (results.length === 0) {
+    const countResult = await db.execute<{ cnt: number }>(sql`
+      SELECT COUNT(*)::int AS cnt
+      FROM vault_embeddings
+      WHERE user_id = ${userId} AND embedding IS NOT NULL
+    `);
+    const cnt = countResult.rows[0]?.cnt ?? 0;
+    if (cnt === 0) {
+      return { ...base, noEmbeddingsExist: true };
+    }
+    return { query: params.query, results: [], remaining: rateCheck.remaining };
+  }
 
   logger.info(
     { userId, resultCount: results.length, remaining: rateCheck.remaining },
