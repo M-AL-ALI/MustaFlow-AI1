@@ -1,0 +1,233 @@
+Thank you. Phase 9A-2 appears implemented, but I cannot accept it yet without a complete validation report and live proof.
+
+The current summary says:
+
+* upload button was added
+* edit modal was added
+* Ora inline image cards now have Edit
+* codegen/typecheck/format were fixed
+* task was merged
+
+That is not enough for acceptance.
+
+Please provide a full Phase 9A-2 validation report.
+
+Required report:
+
+1. Final commit hash
+
+Provide the exact final commit hash for Phase 9A-2.
+
+2. Final affected files
+
+List every file changed, including:
+
+* backend routes
+* image provider
+* image storage
+* image job service
+* DB migration
+* OpenAPI spec
+* generated client/Zod files
+* Image Studio page
+* Ora chat image card files
+* any schema/index files
+* any config/tsconfig changes
+
+3. DB migration proof
+
+Confirm:
+
+* `parent_image_id` was added
+* FK relationship works
+* original image is preserved
+* edited image creates a new row
+* parent-child lineage is stored
+* upload-created rows are stored correctly
+* no base64 image data is stored in DB
+
+Also confirm whether these fields were added:
+
+* `source_type`
+* `edit_instruction`
+* `root_image_id`
+
+If not added, explain why.
+
+4. Upload proof
+
+Run a live upload validation with an authenticated user.
+
+Confirm:
+
+* PNG upload works
+* JPG/JPEG upload works
+* WEBP upload works
+* unsupported type is rejected
+* file over 10 MB is rejected
+* MIME type is checked
+* magic-byte validation is checked
+* image is converted/stored as WebP
+* thumbnail is created
+* upload creates a DB row
+* upload is free / no credits deducted
+* upload is user-owned
+
+5. R2 storage proof
+
+Confirm uploaded and edited images go to R2, not `/tmp`, when R2 env vars are configured.
+
+Required proof:
+
+* R2 object key
+* `fileUrl`
+* `thumbnailUrl`
+* HEAD verification for uploaded image
+* HEAD verification for edited image
+* no base64 in database
+
+6. Edit generated image proof
+
+Use an existing generated image.
+
+Run:
+
+* click Edit
+* enter instruction
+* submit edit
+* job starts
+* edited result completes
+* edited image appears in Image Studio
+* edited image has `parent_image_id`
+* original image remains unchanged
+* edited image is labelled “Edited”
+
+7. Edit uploaded image proof
+
+Upload a user image, then edit it.
+
+Confirm:
+
+* upload succeeds
+* edit job succeeds
+* edited result completes
+* parent image is the uploaded image
+* original uploaded image remains unchanged
+* edited image appears in UI
+
+8. Ora inline edit proof
+
+From an Ora image result card:
+
+* click Edit
+* inline edit prompt opens
+* submit edit instruction
+* edit job starts
+* user sees “Edit queued” or pending state
+* edited result appears or is visible in Image Studio
+* ownership is enforced
+
+9. Credit proof
+
+Confirm:
+
+* upload is free
+* standard edit costs 3 credits
+* high edit costs 6 credits
+* safety-blocked edit deducts no credits
+* provider/system failure refunds credits
+* deleting successful edited image does not refund credits
+
+10. Safety proof
+
+Confirm safety validation runs before provider call and credit deduction.
+
+Test safely:
+
+* blocked edit instruction returns a safe error
+* no provider call
+* no credit deduction
+* no unsafe content saved
+
+11. Auth and ownership proof
+
+Confirm:
+
+* anonymous user cannot upload
+* anonymous user cannot edit
+* user cannot edit another user’s image
+* user cannot download another user’s image
+* user cannot delete another user’s image
+* source image ownership is checked before edit
+
+12. OpenAPI/codegen proof
+
+Confirm:
+
+* `/api/images/upload` exists in OpenAPI
+* `/api/images/:id/edit` exists in OpenAPI
+* codegen ran
+* generated clients/Zod schemas are clean
+* no codegen drift
+
+13. UI proof
+
+Confirm Image Studio shows:
+
+* upload button
+* upload preview or selected file state
+* edit button on image cards
+* edit modal
+* source image thumbnail
+* instruction textarea
+* quality selector
+* pending placeholder
+* edited result
+* edited label
+* parent/original indicator if implemented
+
+14. Non-interference proof
+
+Confirm no changes to:
+
+* Builder pipelines
+* Developer Mode
+* Plan Mode
+* project file mutation routes
+* deployment routes
+* Knowledge Vault / Phase 8B
+* RAG / AI memory
+* Web Search
+* Advanced Charts
+
+Also confirm “Use in Project” remains disabled and does not call any API.
+
+15. Quality gates
+
+Provide final status:
+
+* typecheck
+* lint
+* format
+* codegen drift
+* API server running
+* frontend running
+
+16. Rollback plan
+
+Explain how to roll back Phase 9A-2 while preserving:
+
+* Phase 9A-1 text-to-image
+* generated images table
+* existing generated images
+* R2 storage
+* Image Studio generation
+* Ora image generation
+
+Current decision:
+
+Phase 9A-2 is not accepted yet.
+
+It may be code-complete, but it is not validation-complete until upload, edit, R2, lineage, credits, safety, ownership, and UI flows are proven.
+
+Do not start Phase 9A-3, project insertion, brand kit, prompt assistant, upscale, background removal, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work until Phase 9A-2 is validated and accepted.
