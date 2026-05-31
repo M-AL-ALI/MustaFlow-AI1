@@ -15,7 +15,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { logger } from "./logger";
 
@@ -232,10 +232,15 @@ export async function storeEditedImage(openaiUrl: string, imageId: number): Prom
 
 /**
  * Retrieve the raw image bytes for an existing DB image record.
- * In R2 mode: fetches from the public fileUrl.
- * In dev mode: reads from the OS temp-dir storageKey.
+ *
+ * Priority order:
+ *   1. Dev-mode tmpdir path  (fileUrl starts with /api/images/)
+ *   2. R2 authenticated GetObject (storageKey present + R2 configured)
+ *      Works with both public and private R2 buckets.
+ *   3. Public HTTPS fetch fallback (storageKey absent or R2 not configured)
  */
 export async function getImageBuffer(storageKey: string | null, fileUrl: string): Promise<Buffer> {
+  // 1. Dev mode: read from OS temp dir
   if (fileUrl.startsWith("/api/images/")) {
     if (!storageKey) {
       throw new Error("No storageKey available for dev-mode image retrieval");
@@ -246,7 +251,21 @@ export async function getImageBuffer(storageKey: string | null, fileUrl: string)
     }
     return readFile(storageKey);
   }
-  // R2 public URL or any HTTPS URL
+
+  // 2. R2 authenticated GetObject — works with private buckets
+  if (storageKey) {
+    const r2 = getR2Config();
+    if (r2) {
+      const cmd = new GetObjectCommand({ Bucket: r2.bucket, Key: storageKey });
+      const obj = await r2.client.send(cmd);
+      if (!obj.Body) {
+        throw new Error("R2 GetObject returned an empty body");
+      }
+      return Buffer.from(await obj.Body.transformToByteArray());
+    }
+  }
+
+  // 3. Fallback: public HTTPS URL (dall-e-3 CDN URLs, custom public buckets)
   const res = await fetch(fileUrl, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) {
     throw new Error(`Failed to fetch image from storage: HTTP ${res.status}`);

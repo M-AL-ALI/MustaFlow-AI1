@@ -38,7 +38,7 @@ const router: IRouter = Router();
 
 // ── Multer for image uploads ──────────────────────────────────────────────────
 
-const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_DIMENSION_PX = 4096;
 
@@ -50,7 +50,7 @@ const uploadMiddleware = multer({
       cb(null, true);
     } else {
       cb(
-        Object.assign(new Error("Unsupported file type. Allowed: JPEG, PNG, WebP, GIF"), {
+        Object.assign(new Error("Unsupported file type. Allowed: JPEG, PNG, WebP"), {
           code: "UNSUPPORTED_FILE_TYPE",
         }),
       );
