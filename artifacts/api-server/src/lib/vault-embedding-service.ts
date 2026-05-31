@@ -3,7 +3,14 @@
 //
 // Manual-only. No RAG, no prompt injection, no automatic learning.
 // Chunks vault entries, generates embeddings, stores them per-chunk.
-// Embeddings are used for semantic retrieval in a future phase.
+// Embeddings are used for semantic retrieval in Phase 8B-2.
+//
+// Correctness invariants:
+//  - An entry is counted "indexed" only when ≥1 non-null vector was stored.
+//  - An entry is counted "failed" when embedding generation throws or returns
+//    no valid vector for every chunk that needed re-embedding.
+//  - vault_embeddings rows with embedding IS NULL are never inserted.
+//  - Chunk text and query text are never logged (privacy requirement).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import crypto from "crypto";
@@ -18,7 +25,7 @@ import {
   VAULT_MAX_ENTRY_CHARS,
   type VaultEntry,
 } from "@workspace/db";
-import { generateEmbedding } from "./embeddings";
+import { generateEmbedding, EmbeddingProviderError, EmbeddingApiError } from "./embeddings";
 import { detectSensitiveContent, sanitizeText } from "./vault-sanitizer";
 import { logger } from "./logger";
 
@@ -89,14 +96,13 @@ function splitIntoChunks(text: string): string[] {
       chunks.push(remaining);
       break;
     }
-    // Find best split point within the target window
     const window = VAULT_CHUNK_TARGET_CHARS;
     const half = Math.floor(window * 0.5);
     const para = remaining.lastIndexOf("\n\n", window);
     const nl = remaining.lastIndexOf("\n", window);
     const sp = remaining.lastIndexOf(" ", window);
     let splitAt = para >= half ? para : nl >= half ? nl : sp > 0 ? sp : window;
-    splitAt = Math.max(1, splitAt); // never infinite loop on very long words
+    splitAt = Math.max(1, splitAt);
     chunks.push(remaining.slice(0, splitAt).trim());
     remaining = remaining.slice(splitAt).trim();
   }
@@ -142,6 +148,7 @@ export async function getEmbeddingStatus(
     .where(and(eq(vaultEntriesTable.id, entryId), eq(vaultEntriesTable.userId, userId)));
   if (!entry) return base;
 
+  // Only count rows that have a real (non-null) embedding vector
   const rows = await db
     .select({
       chunkCount: sql<number>`count(*)::int`,
@@ -150,7 +157,13 @@ export async function getEmbeddingStatus(
       maxUpdatedAt: sql<string>`max(updated_at)::text`,
     })
     .from(vaultEmbeddingsTable)
-    .where(and(eq(vaultEmbeddingsTable.entryId, entryId), eq(vaultEmbeddingsTable.userId, userId)))
+    .where(
+      and(
+        eq(vaultEmbeddingsTable.entryId, entryId),
+        eq(vaultEmbeddingsTable.userId, userId),
+        sql`${vaultEmbeddingsTable.embedding} IS NOT NULL`,
+      ),
+    )
     .groupBy(vaultEmbeddingsTable.embeddingModel);
 
   if (rows.length === 0) return base;
@@ -235,6 +248,8 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
 
   let chunksUpserted = 0;
   let chunksSkipped = 0;
+  let chunksFailed = 0;
+  let providerError: string | undefined;
 
   for (let i = 0; i < textChunks.length; i++) {
     const chunkText = textChunks[i]!;
@@ -242,9 +257,8 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
     const existingHash = existingByIndex.get(i);
 
     if (existingHash === chunkHash) {
-      // Hash unchanged — update sourceVersion only if it differs (entry edited after indexing)
+      // Hash unchanged — bump sourceVersion only (no re-embedding needed)
       chunksSkipped++;
-      // Still bump sourceVersion so out_of_date detection stays accurate
       await db
         .update(vaultEmbeddingsTable)
         .set({ sourceVersion: entry.version, updatedAt: new Date() })
@@ -258,13 +272,38 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
       continue;
     }
 
-    // Generate embedding for changed or new chunk
-    const vec = await generateEmbedding(chunkText);
-    if (vec === null) {
-      logger.warn({ entryId, chunkIndex: i }, "vault-embedding: embedding generation failed");
-      // Continue — other chunks may succeed; status will remain out_of_date
+    // Generate embedding for changed or new chunk — never silently skip on error
+    let vec: number[];
+    try {
+      vec = await generateEmbedding(chunkText);
+    } catch (err) {
+      chunksFailed++;
+      // Log only safe metadata — never log chunk text or query text
+      if (err instanceof EmbeddingProviderError) {
+        providerError = err.message;
+        logger.warn(
+          { entryId, chunkIndex: i, error: err.message },
+          "vault-embedding: provider not configured",
+        );
+        // Provider missing — no point continuing; all chunks will fail
+        break;
+      } else if (err instanceof EmbeddingApiError) {
+        logger.warn(
+          { entryId, chunkIndex: i, status: err.statusCode },
+          "vault-embedding: API error generating embedding",
+        );
+        // Continue to try remaining chunks on non-fatal API errors
+        continue;
+      } else {
+        logger.warn(
+          { entryId, chunkIndex: i, error: String(err) },
+          "vault-embedding: unexpected error generating embedding",
+        );
+        continue;
+      }
     }
 
+    // Only insert rows with a real (non-null) embedding vector
     await db
       .insert(vaultEmbeddingsTable)
       .values({
@@ -273,7 +312,6 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
         chunkIndex: i,
         chunkText,
         chunkHash,
-        // drizzle-orm vector column accepts number[] | null directly
         embedding: vec,
         embeddingModel: VAULT_EMBEDDING_MODEL,
         sourceVersion: entry.version,
@@ -294,7 +332,7 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
     chunksUpserted++;
   }
 
-  // Delete stale chunks (chunks that no longer exist in current text)
+  // Delete stale chunks (indexes that no longer exist in current text)
   const staleIndexes = [...existingByIndex.keys()].filter((idx) => !newIndexSet.has(idx));
   let chunksDeleted = 0;
   if (staleIndexes.length > 0) {
@@ -308,6 +346,18 @@ export async function reindexVaultEntry(entryId: number, userId: string): Promis
         ),
       );
     chunksDeleted = staleIndexes.length;
+  }
+
+  // If embedding failed for every chunk that needed (re-)embedding and none were
+  // skipped (i.e. no pre-existing valid vectors), surface the error clearly.
+  if (chunksFailed > 0 && chunksUpserted === 0) {
+    const errorMsg =
+      providerError ?? `Embedding generation failed for all ${chunksFailed} chunk(s)`;
+    logger.warn(
+      { entryId, chunksFailed, chunksSkipped },
+      "vault-embedding: reindex failed — no vectors stored",
+    );
+    return { ...base, error: errorMsg };
   }
 
   const finalStatus = await getEmbeddingStatus(entryId, userId);
@@ -336,6 +386,7 @@ export interface ReindexAllResult {
   rateLimited: boolean;
   retryAfterSec: number;
   remaining: number;
+  providerError?: string;
 }
 
 export async function reindexAllVaultEntries(userId: string): Promise<ReindexAllResult> {
@@ -362,19 +413,29 @@ export async function reindexAllVaultEntries(userId: string): Promise<ReindexAll
   let indexed = 0;
   let skipped = 0;
   let failed = 0;
+  let providerError: string | undefined;
 
   for (const { id } of entries) {
     try {
       const result = await reindexVaultEntry(id, userId);
       if (result.error) {
         failed++;
-      } else if (result.chunksUpserted === 0) {
+        // Capture provider error and abort early — all remaining entries will
+        // fail with the same root cause
+        if (result.error.includes("not configured") || result.error.includes("OPENAI_API_KEY")) {
+          providerError = result.error;
+          // Count remaining entries as failed too
+          failed += entries.length - failed - indexed - skipped - 1;
+          break;
+        }
+      } else if (result.chunksUpserted === 0 && result.chunksSkipped > 0) {
+        // All chunks unchanged — already indexed, nothing to do
         skipped++;
       } else {
         indexed++;
       }
     } catch (err) {
-      logger.warn({ entryId: id, err }, "vault-embedding: reindex-all entry failed");
+      logger.warn({ entryId: id, error: String(err) }, "vault-embedding: reindex-all entry failed");
       failed++;
     }
   }
@@ -387,6 +448,7 @@ export async function reindexAllVaultEntries(userId: string): Promise<ReindexAll
     rateLimited: false,
     retryAfterSec: 0,
     remaining: rateCheck.remaining,
+    ...(providerError ? { providerError } : {}),
   };
 }
 
