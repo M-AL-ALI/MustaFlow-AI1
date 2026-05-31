@@ -195,21 +195,78 @@ router.post("/vault/generate-report", async (req, res): Promise<void> => {
         "\n\nNote: No Knowledge Vault context was selected for this report. Generate based on general knowledge only.";
     }
 
-    // 3. Call AI
-    const model = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
-    const aiResult = await createChatCompletion({
-      provider: "openai",
-      model,
-      messages: [
-        { role: "system", content: REPORT_SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-      response_format: { type: "text" },
-      max_completion_tokens: 2000,
-    });
+    // 3. Call AI — retry once on empty content (proxy can transiently return null content)
+    const model = process.env.ORA_PREMIUM_MODEL ?? "gpt-5-mini";
+    let reportText = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      logger.info(
+        {
+          userId,
+          model,
+          attempt,
+          entryCount: activeEntries.length,
+          userContentLen: userContent.length,
+          hasPromptBlock: !!context.promptBlock,
+        },
+        "vault-generate-report: calling AI",
+      );
+      let aiResult;
+      try {
+        aiResult = await createChatCompletion({
+          provider: "openai",
+          model,
+          messages: [
+            { role: "system", content: REPORT_SYSTEM_PROMPT },
+            { role: "user", content: userContent },
+          ],
+          max_completion_tokens: 2000,
+        });
+      } catch (aiErr) {
+        const e = aiErr as Record<string, unknown>;
+        logger.error(
+          {
+            userId,
+            model,
+            attempt,
+            errMessage: typeof e.message === "string" ? e.message : String(aiErr),
+            errStatus: e.status,
+            errCode: e.code,
+            errName: e.name,
+          },
+          "vault-generate-report: AI call threw",
+        );
+        if (attempt < 2) {
+          await new Promise<void>((r) => setTimeout(r, 1500));
+          continue;
+        }
+        res.status(502).json({ error: "Report generation failed. Please try again." });
+        return;
+      }
 
-    const reportText = aiResult.choices[0]?.message?.content?.trim() ?? "";
+      const choice = aiResult.choices?.[0];
+      const candidate = choice?.message?.content?.trim() ?? "";
+      if (candidate) {
+        reportText = candidate;
+        break;
+      }
+      logger.warn(
+        {
+          userId,
+          model,
+          attempt,
+          finishReason: choice?.finish_reason,
+          choicesLen: aiResult.choices?.length,
+          hasContent: !!choice?.message?.content,
+        },
+        "vault-generate-report: AI returned empty content",
+      );
+      if (attempt < 2) {
+        await new Promise<void>((r) => setTimeout(r, 1500));
+      }
+    }
+
     if (!reportText) {
+      logger.error({ userId, model }, "vault-generate-report: all attempts returned empty content");
       res.status(502).json({ error: "Report generation failed. Please try again." });
       return;
     }

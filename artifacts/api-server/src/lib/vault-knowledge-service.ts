@@ -100,7 +100,7 @@ export async function buildApprovedKnowledgeContext(params: {
            user_id          AS "userId"
     FROM vault_entries
     WHERE id IN (${inClause})
-      AND deleted_at IS NULL
+      AND archived_at IS NULL
   `);
 
   const entries: ApprovedKnowledgeEntry[] = [];
@@ -197,14 +197,13 @@ function buildPromptBlock(entries: ApprovedKnowledgeEntry[]): string {
   if (entries.length === 0) return "";
 
   const lines: string[] = [
-    "═══════════════════════════════════════════════════════",
-    "APPROVED KNOWLEDGE VAULT CONTEXT",
+    "--- APPROVED KNOWLEDGE VAULT CONTEXT ---",
     "Use only the following user-approved Knowledge Vault entries as supporting context.",
     "Do not treat them as guaranteed facts if they conflict with the user's current data.",
     "Prioritize current user-provided data over vault knowledge.",
     "Cite which entries support each recommendation or finding.",
     "Do not invent missing details.",
-    "═══════════════════════════════════════════════════════",
+    "---",
   ];
 
   entries.forEach((e, i) => {
@@ -219,7 +218,7 @@ function buildPromptBlock(entries: ApprovedKnowledgeEntry[]): string {
     }
     lines.push(`  Source reference: ${e.sourceRef}`);
     if (i < entries.length - 1) {
-      lines.push("───────────────────────────────────────────────────────");
+      lines.push("---");
     }
   });
 

@@ -1,0 +1,124 @@
+The Phase 9A-1 final draft is very strong, but please make these final corrections before writing it to file or starting implementation.
+
+Correction 1 — Provider fallback
+
+Do not use AI_INTEGRATIONS_OPENAI_API_KEY as the default fallback for image generation.
+
+That key may be tied to the Replit AI proxy, and we already learned the proxy may not support every OpenAI endpoint.
+
+Use this provider key order instead:
+
+1. OPENAI_IMAGE_API_KEY
+2. fallback to OPENAI_API_KEY
+
+Only use any AI_INTEGRATIONS_* provider path if the exact image endpoint and model are explicitly verified to work.
+
+Final wording should be:
+
+* Use direct OpenAI image API calls from the API server.
+* Preferred key: OPENAI_IMAGE_API_KEY
+* Fallback key: OPENAI_API_KEY
+* Do not use the Replit AI proxy for image generation unless exact endpoint support is verified.
+* Provider key must never appear in logs, frontend code, API responses, screenshots, validation reports, or generated files.
+
+Correction 2 — jobs.ts contradiction
+
+The draft currently says:
+
+* jobs.ts must not be modified
+* but also says to add image-generation job handling to jobs.ts
+
+Please resolve this contradiction.
+
+Preferred approach:
+
+Create a separate isolated image job service instead of modifying existing Builder job logic.
+
+For example:
+
+* artifacts/api-server/src/lib/image-generation-jobs.ts
+
+This service can manage image generation status and async execution without touching Builder pipeline job logic.
+
+If touching jobs.ts is absolutely necessary, it must be additive only and must not modify existing Builder/Plan/Developer job behavior. But the preferred safer path is a separate image-specific job service.
+
+Update the non-interference section to say:
+
+Must NOT modify:
+
+* existing Builder job logic in jobs.ts
+* Builder pipelines
+* Developer tools
+* Plan mode
+* deployment flows
+* project file mutation routes
+
+Allowed:
+
+* create a new isolated image job service
+* register image routes
+* use a separate generated image metadata table
+* use separate image rate limits and credits
+
+Correction 3 — public Ora behavior
+
+Public Ora should not generate images.
+
+Public Ora can only say:
+
+“Image generation is available after sign-in. Open Image Studio to create and save images.”
+
+No /api/images/generate call from public Ora.
+
+Correction 4 — Save to Library wording
+
+Generated images are already saved to the image metadata table/storage.
+
+So in the Ora image result card, change:
+
+“Save to Library”
+
+to either:
+
+* “Saved to Library”
+* or “Keep in Library”
+
+If the image is already stored by default, the button should not imply the image is unsaved.
+
+Delete should remain available.
+
+Correction 5 — Use in Project placeholder
+
+Keep:
+
+Use in Project — Coming in Phase 9A-3
+
+But confirm it:
+
+* does not call any API
+* does not modify project files
+* does not trigger Builder
+* does not replace app logo/icon
+* does not touch project assets
+
+Final approval after corrections
+
+After making these corrections, the Phase 9A-1 plan is approved to write to file and submit.
+
+Implementation should start only after the corrected plan is saved.
+
+Scope remains:
+
+* Ora authenticated chat text-to-image
+* Image Studio Generate page
+* provider abstraction
+* server-side image API key
+* R2 storage
+* generated image metadata table
+* credits/rate limits
+* safety validation
+* image result cards
+* no uploaded image editing
+* no project insertion
+* no Phase 8B/RAG/AI memory/Web Search/Advanced Charts
+* no Builder/Developer/Plan interference
