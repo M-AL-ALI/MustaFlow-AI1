@@ -1,0 +1,127 @@
+Please proceed with Phase 9A-1 production-release validation only.
+
+Do not start Phase 9A-2, image editing, uploaded image modification, project insertion, brand kit, prompt assistant, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work.
+
+Current status:
+
+* Phase 8B-3A is accepted as production-ready.
+* Phase 9A-1 is accepted as implementation-complete and dev/staging validated.
+* Phase 9A-1 is not fully production-release ready until the two remaining validation items are completed.
+
+Required validation item 1 — R2 storage validation
+
+Please validate production-style image storage with Cloudflare R2.
+
+Required env/secrets to confirm:
+
+* CF_R2_ACCESS_KEY_ID
+* CF_R2_SECRET_ACCESS_KEY
+* CF_R2_BUCKET
+* CF_ACCOUNT_ID
+* EDGE_SERVING_ENABLED=true
+
+Also confirm if any additional existing R2/public URL env var is required by the codebase.
+
+Validation steps:
+
+1. Restart API server after R2 env vars are set.
+2. Generate an image through the existing Phase 9A-1 image pipeline.
+3. Confirm image generation reaches status = completed.
+4. Confirm image is stored in R2, not /tmp.
+5. Confirm storageKey is an R2 object key.
+6. Confirm fileUrl resolves correctly.
+7. Confirm thumbnailUrl resolves correctly if thumbnail is supported.
+8. Confirm no base64 image data is stored in the database.
+9. Confirm DB stores only metadata, URL, storage key, and thumbnail URL.
+10. Confirm production mode would hard-fail clearly if R2 is missing.
+11. Confirm download works from the R2-backed URL.
+12. Confirm delete soft-deletes the DB row and does not refund credits.
+
+Please report:
+
+* imageId tested
+* provider/model used
+* storageKey
+* fileUrl
+* thumbnailUrl
+* whether R2 or temp storage was used
+* DB row status
+* download result
+* any provider/storage errors
+
+Required validation item 2 — Ora inline image card browser screenshot
+
+Please run one authenticated browser validation after Clerk throttle clears.
+
+Validation steps:
+
+1. Sign in with a real/test authenticated user.
+2. Open or create a project workspace.
+3. Dismiss onboarding/tour overlay if it appears.
+4. In the normal workspace chat input, type exactly:
+
+Create a logo for my mechanic app
+
+5. Send with Enter or the normal send button.
+6. Do not click builder suggestion chips.
+7. Confirm intent routes to image_generate.
+8. Confirm pending image card appears.
+9. Wait until the image completes.
+10. Confirm completed inline image card appears in chat.
+11. Confirm preview image loads.
+12. Confirm Download button works.
+13. Confirm disabled Use in Project — Coming in Phase 9A-3 does not call any API.
+14. Confirm normal Builder prompt still routes to Builder:
+
+Build me a todo app
+
+15. Confirm public Ora still only shows sign-in CTA and does not generate images.
+
+Please provide screenshot or clear proof showing:
+
+* pending image card
+* completed image card
+* image preview
+* Download button
+* disabled Use in Project button
+
+Non-interference confirmation
+
+Please confirm again:
+
+* Builder Mode still works.
+* Developer Mode still works.
+* Plan Mode still works.
+* project file mutation routes are untouched.
+* deployment routes are untouched.
+* Knowledge Vault / Phase 8B files are untouched.
+* RAG / AI memory files are untouched.
+* normal Builder prompts do not trigger image generation.
+* public Ora cannot generate images without auth.
+
+Quality gates
+
+After validation, provide final results for:
+
+* typecheck
+* lint
+* format
+* codegen drift
+* API server running
+* frontend running
+
+Final output requested
+
+Please provide a final Phase 9A-1 production-release validation report with:
+
+1. Final commit hash being validated
+2. R2 validation proof
+3. Ora inline image card screenshot/proof
+4. Download proof
+5. Delete proof
+6. Public Ora guard proof
+7. Builder prompt non-interference proof
+8. Quality gate results
+9. Any remaining production blockers
+
+Do not start any new feature phase until I accept this validation report.
