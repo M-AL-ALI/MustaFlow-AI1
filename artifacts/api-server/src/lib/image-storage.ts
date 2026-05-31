@@ -76,7 +76,7 @@ async function uploadToR2(
   return `${r2.publicBaseUrl}/${key}`;
 }
 
-// ── Download from provider URL ────────────────────────────────────────────────
+// ── Download from provider URL or decode data URI ────────────────────────────
 
 async function downloadBuffer(url: string): Promise<Buffer> {
   const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
@@ -86,15 +86,35 @@ async function downloadBuffer(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
+/**
+ * Resolve the raw image buffer from either:
+ *   - An HTTPS/HTTP URL  (dall-e-3 default response)
+ *   - A data URI         (gpt-image-1 / proxy responses that return b64_json)
+ */
+async function resolveRawBuffer(openaiUrlOrData: string): Promise<Buffer> {
+  if (openaiUrlOrData.startsWith("data:")) {
+    // data:<mime>;base64,<data>
+    const commaIdx = openaiUrlOrData.indexOf(",");
+    if (commaIdx === -1) throw new Error("Malformed data URI from image provider");
+    const b64 = openaiUrlOrData.slice(commaIdx + 1);
+    return Buffer.from(b64, "base64");
+  }
+  return downloadBuffer(openaiUrlOrData);
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function storeGeneratedImage(
   openaiUrl: string,
   imageId: number,
 ): Promise<StorageResult> {
-  logger.info({ imageId }, "image-storage: downloading from provider");
+  const isDataUri = openaiUrl.startsWith("data:");
+  logger.info(
+    { imageId, source: isDataUri ? "base64-data-uri" : "remote-url" },
+    "image-storage: resolving image from provider",
+  );
 
-  const rawBuffer = await downloadBuffer(openaiUrl);
+  const rawBuffer = await resolveRawBuffer(openaiUrl);
 
   logger.info({ imageId, rawBytes: rawBuffer.length }, "image-storage: converting to WebP");
 

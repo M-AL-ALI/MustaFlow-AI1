@@ -31,6 +31,7 @@ import {
   IMAGE_RATE_LIMIT_PER_HOUR,
   IMAGE_DAILY_LIMIT,
 } from "../routes/image-credits";
+import { CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
 import { logger } from "./logger";
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
@@ -217,7 +218,7 @@ export async function enqueueImageJob(
 
   // Step 3: Resolve provider / model info
   const providerName = "openai";
-  const modelName = process.env.IMAGE_MODEL ?? "dall-e-3";
+  const modelName = process.env.IMAGE_MODEL ?? "gpt-image-1";
   const creditCost = IMAGE_CREDIT_COSTS[quality] ?? 3;
 
   // Step 4: Create DB row with status=pending
@@ -279,8 +280,10 @@ export async function enqueueImageJob(
   };
   jobs.set(jobId, job);
 
-  // Kick off background processing (fire-and-forget, errors handled internally)
-  void runImageJob(job, opts, creditCost);
+  // Kick off background processing (fire-and-forget, errors handled internally).
+  // creditsWereDeducted is false when CREDITS_ENFORCEMENT_ENABLED is off so that
+  // refundCredits is not called unconditionally (which would create free credits).
+  void runImageJob(job, opts, creditCost, CREDITS_ENFORCEMENT_ENABLED);
 
   return { jobId, imageId };
 }
@@ -289,6 +292,7 @@ async function runImageJob(
   job: ImageJob,
   opts: EnqueueImageJobOpts,
   creditCost: number,
+  creditsWereDeducted: boolean,
 ): Promise<void> {
   const { jobId, imageId, userId } = job;
   const {
@@ -367,9 +371,11 @@ async function runImageJob(
       })
       .where(eq(generatedImagesTable.id, imageId));
 
-    await refundCredits(userId, creditCost, {
-      description: `Image generation failed — image #${imageId}: ${message.slice(0, 100)}`,
-    });
+    if (creditsWereDeducted) {
+      await refundCredits(userId, creditCost, {
+        description: `Image generation failed — image #${imageId}: ${message.slice(0, 100)}`,
+      });
+    }
 
     job.status = "failed";
     job.error = message;

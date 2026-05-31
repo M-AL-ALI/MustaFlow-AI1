@@ -1,0 +1,125 @@
+I would accept Phase 9A-1 as code-complete, but not production-ready yet because there is no live proof that an actual generated image completed and rendered/downloaded successfully.
+
+Send this to Replit:
+
+Thank you for the full Phase 9A-1 validation report.
+
+I accept Phase 9A-1 as code-complete, but I cannot mark it production-ready yet because the report does not include a completed live image generation proof.
+
+Accepted code-complete commit:
+
+59b701366dfc516e784f79f0f6b45b478e830d5f
+
+Current HEAD:
+
+24ce450d0668c52a3422ef3424a6d95dea8370cd
+
+Confirmed: current HEAD only changed .agents/memory/ files and did not modify production code.
+
+Accepted as code-complete:
+
+* generated_images table created
+* image provider abstraction exists
+* direct OpenAI provider path exists
+* provider key remains server-side
+* public Ora guard exists
+* authenticated Ora image intent path exists
+* Image Studio page exists
+* image safety validation exists
+* safety runs before credit deduction
+* credits/refund logic exists
+* rate limits are enforced
+* OpenAPI/codegen exists
+* image routes are registered
+* Image Studio controls exist
+* delete works from Image Studio
+* download path exists
+* Builder/Developer/Plan non-interference is confirmed
+* public Ora cannot generate images
+* all quality gates passed
+
+Important correction accepted:
+
+The commit message had errors, but the actual code is better than the message:
+
+* images are not stored as base64 in Postgres
+* rate limits are actually enforced
+
+Production-readiness blocker:
+
+There is still no completed live proof that:
+
+1. authenticated Ora generated a real image
+2. Image Studio generated a real image
+3. provider returned image data
+4. image was stored successfully
+5. generated image row reached completed
+6. fileUrl/thumbnailUrl work
+7. image preview rendered in the UI
+8. download works with the completed image
+9. delete works on a completed image
+10. credits were deducted and/or refunded correctly in a real provider run
+
+The Playwright timeout issue is understandable, but we need at least one completed live validation outside the Playwright notebook ceiling if necessary.
+
+Please run a targeted backend/API validation or manual browser validation that waits long enough for image generation to complete.
+
+Required final live validation:
+
+1. Use an authenticated user.
+2. Trigger image generation from authenticated Ora using:
+
+Create a logo for my mechanic app
+
+3. Wait until the image job reaches completed or failed.
+4. If completed, confirm:
+    * generated_images row status = completed
+    * providerName and modelName are populated
+    * fileUrl is populated
+    * thumbnailUrl is populated if supported
+    * storageKey is populated
+    * no base64 image data is stored in DB
+    * image card appears in Ora chat
+    * preview displays
+    * download works
+5. Trigger image generation from /image-studio.
+6. Confirm:
+    * form controls work
+    * generation starts
+    * status changes pending/generating/completed
+    * result grid shows image
+    * download works
+    * delete soft-deletes the image
+7. Confirm safety block:
+    * blocked prompt returns 422
+    * no provider call
+    * no credit deduction
+8. Confirm normal Builder prompt still routes to Builder:
+
+Build me a todo app
+
+This must not trigger image generation.
+
+9. Confirm public Ora image request only shows sign-in CTA and does not call /api/images/generate.
+10. Confirm quality gates remain clean:
+
+* typecheck
+* lint
+* format
+* codegen drift
+* API server running
+* frontend running
+
+Also please clearly report:
+
+* whether R2 was used or dev local temp storage was used
+* whether OPENAI_IMAGE_API_KEY is set or fallback OPENAI_API_KEY is being used
+* whether any provider errors occurred
+* whether generated images survive server restart in the current environment
+
+Current acceptance status:
+
+* Phase 9A-1: code-complete accepted
+* Phase 9A-1 production-ready: pending completed live image generation validation
+
+Do not start Phase 9A-2, uploaded image editing, project insertion, brand kit, prompt assistant, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work until this final live image validation is complete and accepted.

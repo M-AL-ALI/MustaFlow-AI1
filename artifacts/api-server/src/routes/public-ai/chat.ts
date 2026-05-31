@@ -22,7 +22,7 @@ const IMAGE_GENERATE_CTA =
   "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including the Image Studio with quality presets, aspect ratios, and style controls.";
 
 const ORA_IMAGE_PATTERNS: RegExp[] = [
-  /\b(generate|create|make|draw|render|produce|design)\s+(a[n]?\s+)?(image|photo|picture|illustration|artwork|graphic|logo|banner|icon|thumbnail)\b/i,
+  /\b(generate|create|make|draw|render|produce|design)\s+(?:(?:me|us|my|you)\s+)?(?:a[n]?\s+)?(image|photo|picture|illustration|artwork|graphic|logo|banner|icon|thumbnail)\b/i,
   /\b(image|photo|picture|illustration|artwork)\s+(of|showing|depicting|with)\b/i,
   /\bimage\s+(generation|studio|ai)\b/i,
   /\b(dall-?e|stable\s+diffusion|midjourney|ai\s+art)\b/i,

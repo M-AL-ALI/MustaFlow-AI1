@@ -12,3 +12,4 @@
 - [Orval operationId collision overwrites generated body schema](orval-operationid-collision.md) — duplicate operationIds silently overwrite each other's generated body schema; each endpoint must have a globally unique operationId.
 - [Playwright JWT redaction blocks direct API tests](playwright-jwt-redaction.md) — Playwright testing tool aborts when Clerk session JWTs appear in captured output; use UI-only flows (no raw fetch) or testClerkAuth with browser navigation only.
 - [AI proxy intermittent empty content](ai-proxy-empty-content.md) — OpenAI proxy occasionally returns choices[0].message.content = null; retry once (1.5 s gap) before failing; also replace Unicode box-drawing chars in prompts with plain ASCII.
+- [OpenAI image model family differences](openai-image-model-families.md) — gpt-image-1 vs dall-e-3 have incompatible quality/size params and response formats; default to gpt-image-1 for broader API key compatibility.
