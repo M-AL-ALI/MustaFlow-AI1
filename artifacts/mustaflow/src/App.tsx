@@ -47,6 +47,7 @@ import OrgSettingsPage from "./pages/org-settings";
 import OrgNewPage from "./pages/org-new";
 import OrgInviteAcceptPage from "./pages/org-invite-accept";
 import GalleryPage from "./pages/gallery";
+import ImageStudioPage from "./pages/image-studio";
 import ExtensionsPage from "./pages/extensions";
 import CommunityPage from "./pages/community";
 import UserProfilePage from "./pages/u";
@@ -522,6 +523,13 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 <Protected>
                   <AppLayout>
                     <BillingPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/image-studio">
+                <Protected>
+                  <AppLayout>
+                    <ImageStudioPage />
                   </AppLayout>
                 </Protected>
               </Route>

@@ -13,6 +13,7 @@ import {
   Zap,
   AlertTriangle,
   LayoutDashboard,
+  ImagePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -20,6 +21,7 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 const NAV_ITEMS = [
   { name: "Projects", href: "/projects", icon: FolderKanban },
+  { name: "Image Studio", href: "/image-studio", icon: ImagePlus },
   { name: "Knowledge Vault", href: "/vault", icon: BookOpen },
   { name: "Billing", href: "/billing", icon: CreditCard },
   { name: "Settings", href: "/settings", icon: Settings },

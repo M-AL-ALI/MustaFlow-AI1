@@ -90,6 +90,7 @@ import type {
   DbSnapshotRestoreResult,
   DeleteAgentInboxItem200,
   DeleteDbSnapshot200,
+  DeleteGeneratedImage200,
   DeleteKnowledge200,
   DeleteProjectDomainDnsRecord200,
   DeleteProjectFile200,
@@ -113,6 +114,7 @@ import type {
   FileSearchResult,
   GenerateImageInput,
   GenerateImageResponse,
+  GeneratedImage,
   GetAccountSecurityFindingsParams,
   GetAdminAuditLogParams,
   GetAdminEvalResults200,
@@ -145,6 +147,10 @@ import type {
   GithubSyncStatusResult,
   GrantAdminRole200,
   HealthStatus,
+  ImageGenerateRequest,
+  ImageGenerateResponse,
+  ImageListResponse,
+  ImageStatusResponse,
   ImportKnowledge201,
   ImportKnowledgeBody,
   InferStyleMemory200,
@@ -165,6 +171,7 @@ import type {
   ListGithubBranches200,
   ListGithubCommitsParams,
   ListGithubRepositoriesParams,
+  ListImagesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
   ListProjectDomainDnsRecords200,
@@ -19540,5 +19547,384 @@ export const useBrainstormResolve = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getBrainstormResolveMutationOptions(options));
+    }
+
+export const getEnqueueImageGenerationUrl = () => {
+
+
+
+
+  return `/api/images/generate`
+}
+
+/**
+ * @summary Enqueue an async image generation job
+ */
+export const enqueueImageGeneration = async (imageGenerateRequest: ImageGenerateRequest, options?: RequestInit): Promise<ImageGenerateResponse> => {
+
+  return customFetch<ImageGenerateResponse>(getEnqueueImageGenerationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      imageGenerateRequest,)
+  }
+);}
+
+
+
+
+export const getEnqueueImageGenerationMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enqueueImageGeneration>>, TError,{data: BodyType<ImageGenerateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof enqueueImageGeneration>>, TError,{data: BodyType<ImageGenerateRequest>}, TContext> => {
+
+const mutationKey = ['enqueueImageGeneration'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof enqueueImageGeneration>>, {data: BodyType<ImageGenerateRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  enqueueImageGeneration(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EnqueueImageGenerationMutationResult = NonNullable<Awaited<ReturnType<typeof enqueueImageGeneration>>>
+    export type EnqueueImageGenerationMutationBody = BodyType<ImageGenerateRequest>
+    export type EnqueueImageGenerationMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Enqueue an async image generation job
+ */
+export const useEnqueueImageGeneration = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enqueueImageGeneration>>, TError,{data: BodyType<ImageGenerateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof enqueueImageGeneration>>,
+        TError,
+        {data: BodyType<ImageGenerateRequest>},
+        TContext
+      > => {
+      return useMutation(getEnqueueImageGenerationMutationOptions(options));
+    }
+
+export const getGetImageJobStatusUrl = (jobId: string,) => {
+
+
+
+
+  return `/api/images/status/${jobId}`
+}
+
+/**
+ * @summary Poll image generation job status
+ */
+export const getImageJobStatus = async (jobId: string, options?: RequestInit): Promise<ImageStatusResponse> => {
+
+  return customFetch<ImageStatusResponse>(getGetImageJobStatusUrl(jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImageJobStatusQueryKey = (jobId: string,) => {
+    return [
+    `/api/images/status/${jobId}`
+    ] as const;
+    }
+
+
+export const getGetImageJobStatusQueryOptions = <TData = Awaited<ReturnType<typeof getImageJobStatus>>, TError = ErrorType<ApiError>>(jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImageJobStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImageJobStatusQueryKey(jobId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImageJobStatus>>> = ({ signal }) => getImageJobStatus(jobId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(jobId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImageJobStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImageJobStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getImageJobStatus>>>
+export type GetImageJobStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Poll image generation job status
+ */
+
+export function useGetImageJobStatus<TData = Awaited<ReturnType<typeof getImageJobStatus>>, TError = ErrorType<ApiError>>(
+ jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImageJobStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImageJobStatusQueryOptions(jobId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListImagesUrl = (params?: ListImagesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/images?${stringifiedParams}` : `/api/images`
+}
+
+/**
+ * @summary List the authenticated user's generated images
+ */
+export const listImages = async (params?: ListImagesParams, options?: RequestInit): Promise<ImageListResponse> => {
+
+  return customFetch<ImageListResponse>(getListImagesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListImagesQueryKey = (params?: ListImagesParams,) => {
+    return [
+    `/api/images`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListImagesQueryOptions = <TData = Awaited<ReturnType<typeof listImages>>, TError = ErrorType<unknown>>(params?: ListImagesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImagesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImages>>> = ({ signal }) => listImages(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImages>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListImagesQueryResult = NonNullable<Awaited<ReturnType<typeof listImages>>>
+export type ListImagesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the authenticated user's generated images
+ */
+
+export function useListImages<TData = Awaited<ReturnType<typeof listImages>>, TError = ErrorType<unknown>>(
+ params?: ListImagesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImages>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListImagesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetGeneratedImageUrl = (id: number,) => {
+
+
+
+
+  return `/api/images/${id}`
+}
+
+/**
+ * @summary Get a single generated image by ID
+ */
+export const getGeneratedImage = async (id: number, options?: RequestInit): Promise<GeneratedImage> => {
+
+  return customFetch<GeneratedImage>(getGetGeneratedImageUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGeneratedImageQueryKey = (id: number,) => {
+    return [
+    `/api/images/${id}`
+    ] as const;
+    }
+
+
+export const getGetGeneratedImageQueryOptions = <TData = Awaited<ReturnType<typeof getGeneratedImage>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGeneratedImage>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGeneratedImageQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGeneratedImage>>> = ({ signal }) => getGeneratedImage(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGeneratedImage>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGeneratedImageQueryResult = NonNullable<Awaited<ReturnType<typeof getGeneratedImage>>>
+export type GetGeneratedImageQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get a single generated image by ID
+ */
+
+export function useGetGeneratedImage<TData = Awaited<ReturnType<typeof getGeneratedImage>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGeneratedImage>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGeneratedImageQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getDeleteGeneratedImageUrl = (id: number,) => {
+
+
+
+
+  return `/api/images/${id}`
+}
+
+/**
+ * @summary Soft-delete a generated image
+ */
+export const deleteGeneratedImage = async (id: number, options?: RequestInit): Promise<DeleteGeneratedImage200> => {
+
+  return customFetch<DeleteGeneratedImage200>(getDeleteGeneratedImageUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteGeneratedImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGeneratedImage>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteGeneratedImage>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteGeneratedImage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteGeneratedImage>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteGeneratedImage(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteGeneratedImageMutationResult = NonNullable<Awaited<ReturnType<typeof deleteGeneratedImage>>>
+
+    export type DeleteGeneratedImageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Soft-delete a generated image
+ */
+export const useDeleteGeneratedImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGeneratedImage>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteGeneratedImage>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteGeneratedImageMutationOptions(options));
     }
 

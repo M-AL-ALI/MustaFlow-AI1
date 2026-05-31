@@ -93,6 +93,8 @@
     "migrate-vault-phase81": "tsx ./src/migrate-vault-phase81.ts",
     "migrate-vault-embeddings": "tsx ./src/migrate-vault-embeddings.ts",
     "migrate-knowledge-usage-events": "tsx ./src/migrate-knowledge-usage-events.ts",
+    "migrate-image-studio": "tsx ./src/migrate-image-studio.ts",
+    "migrate-image-studio-v2": "tsx ./src/migrate-image-studio-v2.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

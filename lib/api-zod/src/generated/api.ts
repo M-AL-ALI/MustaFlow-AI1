@@ -6894,3 +6894,140 @@ export const BrainstormResolveResponse = zod.object({
 })
 
 
+/**
+ * @summary Enqueue an async image generation job
+ */
+export const enqueueImageGenerationBodyPromptMax = 4000;
+
+export const enqueueImageGenerationBodyNegativePromptMax = 2000;
+
+export const enqueueImageGenerationBodyQualityDefault = `standard`;
+export const enqueueImageGenerationBodyAspectRatioDefault = `1:1`;
+export const enqueueImageGenerationBodyStyleDefault = `vivid`;
+export const enqueueImageGenerationBodyTransparentBackgroundDefault = false;
+export const enqueueImageGenerationBodyVariationCountDefault = 1;
+
+export const EnqueueImageGenerationBody = zod.object({
+  "prompt": zod.string().min(1).max(enqueueImageGenerationBodyPromptMax),
+  "negativePrompt": zod.string().max(enqueueImageGenerationBodyNegativePromptMax).optional(),
+  "quality": zod.enum(['draft', 'standard', 'high']).default(enqueueImageGenerationBodyQualityDefault),
+  "aspectRatio": zod.enum(['1:1', '16:9', '9:16', '4:3', '3:4']).default(enqueueImageGenerationBodyAspectRatioDefault),
+  "style": zod.enum(['vivid', 'natural']).default(enqueueImageGenerationBodyStyleDefault),
+  "purpose": zod.enum(['general', 'marketing', 'avatar', 'illustration', 'background', 'product']).optional(),
+  "transparentBackground": zod.boolean().default(enqueueImageGenerationBodyTransparentBackgroundDefault),
+  "variationCount": zod.union([zod.literal(1),zod.literal(2),zod.literal(4)]).default(enqueueImageGenerationBodyVariationCountDefault),
+  "projectId": zod.number().optional()
+})
+
+
+/**
+ * @summary Poll image generation job status
+ */
+export const GetImageJobStatusParams = zod.object({
+  "jobId": zod.coerce.string()
+})
+
+export const GetImageJobStatusResponse = zod.object({
+  "jobId": zod.string(),
+  "imageId": zod.number(),
+  "status": zod.enum(['pending', 'generating', 'completed', 'failed']),
+  "fileUrl": zod.string().nullish(),
+  "thumbnailUrl": zod.string().nullish(),
+  "error": zod.string().nullish()
+})
+
+
+/**
+ * @summary List the authenticated user's generated images
+ */
+export const listImagesQueryLimitDefault = 20;
+export const listImagesQueryLimitMax = 50;
+
+export const listImagesQueryOffsetDefault = 0;
+
+export const ListImagesQueryParams = zod.object({
+  "limit": zod.coerce.number().max(listImagesQueryLimitMax).default(listImagesQueryLimitDefault),
+  "offset": zod.coerce.number().default(listImagesQueryOffsetDefault),
+  "projectId": zod.coerce.number().optional()
+})
+
+export const ListImagesResponse = zod.object({
+  "images": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "projectId": zod.number().nullish(),
+  "prompt": zod.string(),
+  "negativePrompt": zod.string().nullish(),
+  "revisedPrompt": zod.string().nullish(),
+  "style": zod.string().nullish(),
+  "purpose": zod.string().nullish(),
+  "quality": zod.enum(['draft', 'standard', 'high']),
+  "aspectRatio": zod.string(),
+  "transparentBackground": zod.boolean(),
+  "providerName": zod.string(),
+  "modelName": zod.string().nullish(),
+  "status": zod.enum(['pending', 'generating', 'completed', 'failed']),
+  "fileUrl": zod.string().nullish(),
+  "thumbnailUrl": zod.string().nullish(),
+  "storageKey": zod.string().nullish(),
+  "safetyStatus": zod.string(),
+  "creditCost": zod.number(),
+  "errorMessage": zod.string().nullish(),
+  "errorCategory": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "deletedAt": zod.coerce.date().nullish()
+})),
+  "total": zod.number(),
+  "limit": zod.number(),
+  "offset": zod.number()
+})
+
+
+/**
+ * @summary Get a single generated image by ID
+ */
+export const GetGeneratedImageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGeneratedImageResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "projectId": zod.number().nullish(),
+  "prompt": zod.string(),
+  "negativePrompt": zod.string().nullish(),
+  "revisedPrompt": zod.string().nullish(),
+  "style": zod.string().nullish(),
+  "purpose": zod.string().nullish(),
+  "quality": zod.enum(['draft', 'standard', 'high']),
+  "aspectRatio": zod.string(),
+  "transparentBackground": zod.boolean(),
+  "providerName": zod.string(),
+  "modelName": zod.string().nullish(),
+  "status": zod.enum(['pending', 'generating', 'completed', 'failed']),
+  "fileUrl": zod.string().nullish(),
+  "thumbnailUrl": zod.string().nullish(),
+  "storageKey": zod.string().nullish(),
+  "safetyStatus": zod.string(),
+  "creditCost": zod.number(),
+  "errorMessage": zod.string().nullish(),
+  "errorCategory": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "deletedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Soft-delete a generated image
+ */
+export const DeleteGeneratedImageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGeneratedImageResponse = zod.object({
+  "success": zod.boolean()
+})
+
+

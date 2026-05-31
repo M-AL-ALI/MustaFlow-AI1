@@ -15,6 +15,7 @@ export { PatchVersionParams } from "./generated/api";
 export { GetContainerLogsParams } from "./generated/api";
 export { ListGithubRepositoriesParams } from "./generated/api";
 export { ListGithubCommitsParams } from "./generated/api";
+export { GetImageJobStatusResponse } from "./generated/api";
 export { GenerateImageResponse } from "./generated/api";
 export { GetCheckRunsParams } from "./generated/api";
 export { GetCheckRunTrendsParams } from "./generated/api";

@@ -54,6 +54,8 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-provisioning-steps` — adds `provisioning_step` and `provisioning_started_at` to `projects` (Task #988; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-agent-tool-calls` — creates `agent_tool_calls` table and adds `tool_call_rate_cap_per_hour` to `projects` (Task #993; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-knowledge-usage-events` — creates `knowledge_usage_events` table (Phase 8B-3A; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-image-studio` — creates `generated_images` table (Task #1178 Phase 9A-1; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-image-studio-v2` — adds negativePrompt, purpose, providerName, modelName, thumbnailUrl columns to `generated_images` (Phase 9A-1 completion; run before deploy)
 
 ## Stack
 
@@ -107,6 +109,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **Billing/Credits**: starter 100 credits per new user. Costs: lite=1, eco=2, power=5, pro=10. Pre-flight check fails task if balance < cost.
 - **Admin**: `/admin` page gated by `requireAdmin` middleware + `user_roles` table. Bootstrap via `ADMIN_USER_IDS` env.
 - **Ecosystem**: `/gallery` (template gallery), `/extensions` (marketplace), `/community` + `/u/:username` (public profiles).
+- **Image Studio** (`pages/image-studio.tsx`): standalone `/image-studio` page for async AI image generation (draft/standard/high quality, 1:1/16:9/9:16 aspect ratios, vivid/natural styles). Images stored as WebP base64 data URIs in `generated_images`. Sidebar link added. Ora chat also detects image generation intents via `IMAGE_GENERATE_PATTERNS` and generates inline via the same provider, rendering an `InlineImageResultCard` in the chat bubble. Credit costs: draft=1, standard=3, high=6.
 - **Collaboration** (orgs): personal org auto-created per user; team orgs with `owner|admin|editor|viewer` roles; threaded comments; share links; notifications inbox; activity log.
 
 ## User preferences

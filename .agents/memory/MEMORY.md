@@ -9,5 +9,6 @@
 - [Flex scroll container with max-height](flex-scroll-max-height.md) — h-full on a child of flex-1 fails when ancestor only has max-height; put overflow-y-auto directly on the flex-1 min-h-0 item instead.
 - [Scripts package uses @workspace/db pool not pg](scripts-pg-pattern.md) — migration scripts in scripts/src/ must import `pool` from `@workspace/db`, not `import { Pool } from "pg"` (pg is not a direct dep of scripts).
 - [vault_entries uses archived_at not deleted_at](vault-archived-at.md) — vault_entries has no deleted_at column; soft-delete uses archived_at. Queries must filter archived_at IS NULL, not deleted_at IS NULL.
+- [Orval operationId collision overwrites generated body schema](orval-operationid-collision.md) — duplicate operationIds silently overwrite each other's generated body schema; each endpoint must have a globally unique operationId.
 - [Playwright JWT redaction blocks direct API tests](playwright-jwt-redaction.md) — Playwright testing tool aborts when Clerk session JWTs appear in captured output; use UI-only flows (no raw fetch) or testClerkAuth with browser navigation only.
 - [AI proxy intermittent empty content](ai-proxy-empty-content.md) — OpenAI proxy occasionally returns choices[0].message.content = null; retry once (1.5 s gap) before failing; also replace Unicode box-drawing chars in prompts with plain ASCII.

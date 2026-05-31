@@ -61,7 +61,15 @@ import {
   useRestoreCheckpoint,
 } from "@workspace/api-client-react";
 import { unifiedDiff } from "@/lib/line-diff";
-import { Download, FileBox, GitCompare, BookOpen, Minus, Info } from "lucide-react";
+import {
+  Download,
+  FileBox,
+  GitCompare,
+  BookOpen,
+  Minus,
+  Info,
+  Image as ImageIcon,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type TaskReport = {
@@ -1986,6 +1994,342 @@ function FeedbackModal({ projectId, onClose }: { projectId: number; onClose: () 
   );
 }
 
+// ── Image pending payload + pending card (async image generation) ─────────────
+
+interface ImagePendingPayload {
+  kind: "image_pending";
+  jobId: string;
+  imageId: number;
+  prompt?: string;
+  creditsCost?: number;
+  quality?: string;
+  aspectRatio?: string;
+  style?: string;
+  purpose?: string;
+}
+
+interface ImagePendingStatus {
+  jobId: string;
+  imageId: number;
+  status: "pending" | "generating" | "completed" | "failed";
+  fileUrl?: string | null;
+  thumbnailUrl?: string | null;
+  error?: string | null;
+}
+
+function InlineImagePendingCard({
+  payload,
+  onSendMessage,
+}: {
+  payload: ImagePendingPayload;
+  onSendMessage?: (text: string) => void;
+}) {
+  const {
+    jobId,
+    imageId,
+    prompt = "",
+    quality = "standard",
+    aspectRatio = "1:1",
+    style = "vivid",
+    purpose,
+  } = payload;
+  const [pollStatus, setPollStatus] = useState<ImagePendingStatus | null>(null);
+  const [downloaded, setDownloaded] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    let stopped = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/images/status/${jobId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as ImagePendingStatus;
+        if (!stopped) {
+          setPollStatus(data);
+          if (data.status === "completed" || data.status === "failed") {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+          }
+        }
+      } catch {
+        // ignore transient errors
+      }
+    };
+
+    void poll();
+    intervalRef.current = setInterval(() => void poll(), 2000);
+
+    return () => {
+      stopped = true;
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [jobId]);
+
+  const handleDownload = () => {
+    const url = pollStatus?.fileUrl;
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ora-image-${imageId}.webp`;
+    a.click();
+    setDownloaded(true);
+    setTimeout(() => setDownloaded(false), 2000);
+  };
+
+  const handleRegenerate = () => {
+    if (onSendMessage && prompt) onSendMessage(prompt);
+  };
+
+  // Still processing
+  if (!pollStatus || pollStatus.status === "pending" || pollStatus.status === "generating") {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/30 p-4 max-w-xs">
+        <div className="flex items-center gap-2.5 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          <div>
+            <p className="text-[11px] font-medium text-foreground/80">Generating image…</p>
+            <p className="text-[10px]">
+              {pollStatus?.status === "generating"
+                ? "Processing with AI…"
+                : "Queued, starting soon…"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Failed
+  if (pollStatus.status === "failed") {
+    return (
+      <div className="mt-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 max-w-xs">
+        <p className="text-[11px] text-destructive font-medium">Image generation failed</p>
+        {pollStatus.error && (
+          <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2">{pollStatus.error}</p>
+        )}
+        <p className="text-[10px] text-muted-foreground mt-1">Credits have been refunded.</p>
+        <button
+          onClick={handleRegenerate}
+          className="mt-2 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  // Completed — render full result card
+  const fileUrl = pollStatus.fileUrl;
+  if (!fileUrl) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/50 p-3 text-[11px] text-muted-foreground max-w-xs">
+        Image could not be loaded.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2 max-w-xs">
+      <img
+        src={pollStatus.thumbnailUrl ?? fileUrl}
+        alt={prompt}
+        className="w-full rounded-lg border border-border object-cover"
+        loading="lazy"
+      />
+      {/* Labels */}
+      <div className="flex flex-wrap gap-1">
+        <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+          {quality}
+        </span>
+        <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+          {aspectRatio}
+        </span>
+        <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+          {style}
+        </span>
+        {purpose && (
+          <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+            {purpose}
+          </span>
+        )}
+      </div>
+      {/* Saved indicator */}
+      <div className="flex items-center gap-1 text-[10px] text-emerald-500/80">
+        <CheckCircle2 className="h-3 w-3" />
+        <span>Saved to Image Studio</span>
+      </div>
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={handleDownload}
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <Download className="h-3 w-3" />
+          {downloaded ? "Downloaded" : "Download"}
+        </button>
+        <button
+          onClick={handleRegenerate}
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Regenerate
+        </button>
+        <a
+          href="/image-studio"
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <ImageIcon className="h-3 w-3" />
+          Image Studio
+        </a>
+        <button
+          disabled
+          title="Use in Project — Coming soon"
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground/40 cursor-not-allowed"
+        >
+          Use in Project — Coming soon
+        </button>
+      </div>
+      {/* Commercial-use notice */}
+      <p className="text-[9px] text-muted-foreground/60 leading-snug">
+        Generated images may be used for commercial purposes. You are responsible for ensuring your
+        prompt complies with applicable laws and third-party rights.
+      </p>
+    </div>
+  );
+}
+
+// ── Image result payload + card (legacy synchronous result) ───────────────────
+
+interface ImageResultPayload {
+  kind: "image_result";
+  prompt?: string;
+  revisedPrompt?: string | null;
+  imageUrl?: string | null;
+  imageId?: number | null;
+  creditsCost?: number;
+  quality?: string;
+  aspectRatio?: string;
+  style?: string;
+  purpose?: string;
+}
+
+function InlineImageResultCard({
+  payload,
+  onSendMessage,
+}: {
+  payload: ImageResultPayload;
+  onSendMessage?: (text: string) => void;
+}) {
+  const [downloaded, setDownloaded] = useState(false);
+  const {
+    imageUrl,
+    prompt = "",
+    revisedPrompt,
+    imageId,
+    quality = "standard",
+    aspectRatio = "1:1",
+    style = "vivid",
+    purpose,
+  } = payload;
+
+  const handleDownload = () => {
+    if (!imageUrl) return;
+    const a = document.createElement("a");
+    a.href = imageUrl;
+    a.download = `ora-image-${imageId ?? "result"}.webp`;
+    a.click();
+    setDownloaded(true);
+    setTimeout(() => setDownloaded(false), 2000);
+  };
+
+  const handleRegenerate = () => {
+    if (onSendMessage && prompt) onSendMessage(prompt);
+  };
+
+  if (!imageUrl) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/50 p-3 text-[11px] text-muted-foreground max-w-xs">
+        Image could not be loaded.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2 max-w-xs">
+      <img
+        src={imageUrl}
+        alt={revisedPrompt ?? prompt}
+        className="w-full rounded-lg border border-border object-cover"
+        loading="lazy"
+      />
+      {revisedPrompt && revisedPrompt !== prompt && (
+        <p className="text-[10px] text-muted-foreground italic leading-snug">
+          Enhanced: {revisedPrompt.slice(0, 120)}
+          {revisedPrompt.length > 120 ? "…" : ""}
+        </p>
+      )}
+      {/* Labels */}
+      <div className="flex flex-wrap gap-1">
+        <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+          {quality}
+        </span>
+        <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+          {aspectRatio}
+        </span>
+        <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+          {style}
+        </span>
+        {purpose && (
+          <span className="text-[9px] text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+            {purpose}
+          </span>
+        )}
+      </div>
+      {/* Saved indicator */}
+      <div className="flex items-center gap-1 text-[10px] text-emerald-500/80">
+        <CheckCircle2 className="h-3 w-3" />
+        <span>Saved to Image Studio</span>
+      </div>
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={handleDownload}
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <Download className="h-3 w-3" />
+          {downloaded ? "Downloaded" : "Download"}
+        </button>
+        <button
+          onClick={handleRegenerate}
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Regenerate
+        </button>
+        <a
+          href="/image-studio"
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+        >
+          <ImageIcon className="h-3 w-3" />
+          Image Studio
+        </a>
+        <button
+          disabled
+          title="Use in Project — Coming soon"
+          className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground/40 cursor-not-allowed"
+        >
+          Use in Project — Coming soon
+        </button>
+      </div>
+      {/* Commercial-use notice */}
+      <p className="text-[9px] text-muted-foreground/60 leading-snug">
+        Generated images may be used for commercial purposes. You are responsible for ensuring your
+        prompt complies with applicable laws and third-party rights.
+      </p>
+    </div>
+  );
+}
+
 function MessageRow({
   msg,
   searchQuery,
@@ -2026,6 +2370,8 @@ function MessageRow({
   const isPlanCard =
     msg.planMode && msg.role === "assistant" && !isReport && planPayload && payloadKind !== "error";
   const structuredPlan = isPlanCard ? (planPayload as StructuredPlan) : null;
+  const isImageResult = payloadKind === "image_result" && msg.role === "assistant";
+  const isImagePending = payloadKind === "image_pending" && msg.role === "assistant";
 
   const isUser = msg.role === "user";
   const ts = format(new Date(msg.createdAt), "HH:mm");
@@ -2093,6 +2439,22 @@ function MessageRow({
           <div className="whitespace-pre-wrap leading-relaxed">
             {highlightText(msg.content, searchQuery)}
           </div>
+        )}
+
+        {/* Async image pending card — polls status until completed/failed */}
+        {isImagePending && (
+          <InlineImagePendingCard
+            payload={planPayload as unknown as ImagePendingPayload}
+            onSendMessage={onSendMessage}
+          />
+        )}
+
+        {/* Inline image result card (legacy synchronous path) */}
+        {isImageResult && (
+          <InlineImageResultCard
+            payload={planPayload as unknown as ImageResultPayload}
+            onSendMessage={onSendMessage}
+          />
         )}
 
         {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (

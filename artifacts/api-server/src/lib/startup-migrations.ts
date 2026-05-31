@@ -3004,6 +3004,64 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-image-studio ─────────────────────────────────────────────────
+  {
+    name: "migrate-image-studio",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS generated_images (
+          id                     SERIAL PRIMARY KEY,
+          user_id                TEXT NOT NULL,
+          project_id             INTEGER,
+          prompt                 TEXT NOT NULL,
+          revised_prompt         TEXT,
+          style                  TEXT,
+          quality                TEXT NOT NULL DEFAULT 'standard',
+          aspect_ratio           TEXT NOT NULL DEFAULT '1:1',
+          transparent_background BOOLEAN NOT NULL DEFAULT false,
+          status                 TEXT NOT NULL DEFAULT 'pending',
+          file_url               TEXT,
+          storage_key            TEXT,
+          safety_status          TEXT NOT NULL DEFAULT 'pending',
+          credit_cost            INTEGER NOT NULL DEFAULT 3,
+          error_message          TEXT,
+          error_category         TEXT,
+          created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+          deleted_at             TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_generated_images_user_id ON generated_images (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_generated_images_created_at ON generated_images (created_at DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_generated_images_status ON generated_images (status) WHERE deleted_at IS NULL`,
+      );
+      await client.query("COMMIT");
+    },
+  },
+
+  // ── migrate-image-studio-v2 ───────────────────────────────────────────────
+  {
+    name: "migrate-image-studio-v2",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        ALTER TABLE generated_images
+          ADD COLUMN IF NOT EXISTS negative_prompt TEXT,
+          ADD COLUMN IF NOT EXISTS purpose         TEXT,
+          ADD COLUMN IF NOT EXISTS provider_name   TEXT NOT NULL DEFAULT 'openai',
+          ADD COLUMN IF NOT EXISTS model_name      TEXT,
+          ADD COLUMN IF NOT EXISTS thumbnail_url   TEXT
+      `);
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

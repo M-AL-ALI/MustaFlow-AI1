@@ -4166,6 +4166,153 @@ export interface VaultGenerateReportResponse {
   usedEntryIds: number[];
 }
 
+export type GeneratedImageQuality = typeof GeneratedImageQuality[keyof typeof GeneratedImageQuality];
+
+
+export const GeneratedImageQuality = {
+  draft: 'draft',
+  standard: 'standard',
+  high: 'high',
+} as const;
+
+export type GeneratedImageStatus = typeof GeneratedImageStatus[keyof typeof GeneratedImageStatus];
+
+
+export const GeneratedImageStatus = {
+  pending: 'pending',
+  generating: 'generating',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export interface GeneratedImage {
+  id: number;
+  userId: string;
+  projectId?: number | null;
+  prompt: string;
+  negativePrompt?: string | null;
+  revisedPrompt?: string | null;
+  style?: string | null;
+  purpose?: string | null;
+  quality: GeneratedImageQuality;
+  aspectRatio: string;
+  transparentBackground: boolean;
+  providerName: string;
+  modelName?: string | null;
+  status: GeneratedImageStatus;
+  fileUrl?: string | null;
+  thumbnailUrl?: string | null;
+  storageKey?: string | null;
+  safetyStatus: string;
+  creditCost: number;
+  errorMessage?: string | null;
+  errorCategory?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export type ImageGenerateRequestQuality = typeof ImageGenerateRequestQuality[keyof typeof ImageGenerateRequestQuality];
+
+
+export const ImageGenerateRequestQuality = {
+  draft: 'draft',
+  standard: 'standard',
+  high: 'high',
+} as const;
+
+export type ImageGenerateRequestAspectRatio = typeof ImageGenerateRequestAspectRatio[keyof typeof ImageGenerateRequestAspectRatio];
+
+
+export const ImageGenerateRequestAspectRatio = {
+  '1:1': '1:1',
+  '16:9': '16:9',
+  '9:16': '9:16',
+  '4:3': '4:3',
+  '3:4': '3:4',
+} as const;
+
+export type ImageGenerateRequestStyle = typeof ImageGenerateRequestStyle[keyof typeof ImageGenerateRequestStyle];
+
+
+export const ImageGenerateRequestStyle = {
+  vivid: 'vivid',
+  natural: 'natural',
+} as const;
+
+export type ImageGenerateRequestPurpose = typeof ImageGenerateRequestPurpose[keyof typeof ImageGenerateRequestPurpose];
+
+
+export const ImageGenerateRequestPurpose = {
+  general: 'general',
+  marketing: 'marketing',
+  avatar: 'avatar',
+  illustration: 'illustration',
+  background: 'background',
+  product: 'product',
+} as const;
+
+export type ImageGenerateRequestVariationCount = typeof ImageGenerateRequestVariationCount[keyof typeof ImageGenerateRequestVariationCount];
+
+
+export const ImageGenerateRequestVariationCount = {
+  NUMBER_1: 1,
+  NUMBER_2: 2,
+  NUMBER_4: 4,
+} as const;
+
+export interface ImageGenerateRequest {
+  /**
+     * @minLength 1
+     * @maxLength 4000
+     */
+  prompt: string;
+  /** @maxLength 2000 */
+  negativePrompt?: string;
+  quality?: ImageGenerateRequestQuality;
+  aspectRatio?: ImageGenerateRequestAspectRatio;
+  style?: ImageGenerateRequestStyle;
+  purpose?: ImageGenerateRequestPurpose;
+  transparentBackground?: boolean;
+  variationCount?: ImageGenerateRequestVariationCount;
+  projectId?: number;
+}
+
+export interface ImageGenerateResponse {
+  jobId: string;
+  imageId: number;
+  creditCost: number;
+  status: string;
+  jobIds?: string[];
+  imageIds?: number[];
+}
+
+export type ImageStatusResponseStatus = typeof ImageStatusResponseStatus[keyof typeof ImageStatusResponseStatus];
+
+
+export const ImageStatusResponseStatus = {
+  pending: 'pending',
+  generating: 'generating',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export interface ImageStatusResponse {
+  jobId: string;
+  imageId: number;
+  status: ImageStatusResponseStatus;
+  fileUrl?: string | null;
+  thumbnailUrl?: string | null;
+  error?: string | null;
+}
+
+export interface ImageListResponse {
+  images: GeneratedImage[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;
@@ -5154,5 +5301,18 @@ export type V1CancelBuild200 = {
 export type V1ListFiles200 = {
   files?: V1FileMeta[];
   total?: number;
+};
+
+export type ListImagesParams = {
+/**
+ * @maximum 50
+ */
+limit?: number;
+offset?: number;
+projectId?: number;
+};
+
+export type DeleteGeneratedImage200 = {
+  success: boolean;
 };
 

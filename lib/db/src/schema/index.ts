@@ -67,3 +67,4 @@ export * from "./agent-tool-calls";
 export * from "./ora-transcripts";
 export * from "./vault";
 export * from "./vault-embeddings";
+export * from "./generated-images";

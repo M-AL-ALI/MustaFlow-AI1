@@ -48,6 +48,7 @@ import packagesRouter from "./packages";
 import databaseRouter from "./database";
 import storageRouter from "./storage";
 import imagesRouter from "./images";
+import imageGenRouter from "./image-gen";
 import preferencesRouter from "./preferences";
 import checkRunsRouter from "./check-runs";
 import securityRouter from "./security";
@@ -195,6 +196,7 @@ const KNOWN_PREFIXES = [
   "/public-ai",
   "/ora",
   "/builder",
+  "/images",
 ];
 
 router.use((req, res, next) => {
@@ -276,6 +278,7 @@ router.use(packagesRouter);
 router.use(databaseRouter);
 router.use(storageRouter);
 router.use(imagesRouter);
+router.use(imageGenRouter);
 router.use(preferencesRouter);
 router.use(checkRunsRouter);
 router.use(securityRouter);

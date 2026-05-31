@@ -8,6 +8,7 @@ import {
   agentTasksTable,
   taskEventsTable,
   knowledgeEntriesTable,
+  generatedImagesTable,
 } from "@workspace/db";
 import {
   ListMessagesParams,
@@ -34,7 +35,12 @@ import {
   CREDIT_COST,
   backgroundWallClockFor,
 } from "../lib/jobs";
-import { deductCreditsAtomic, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
+import {
+  deductCreditsAtomic,
+  refundCredits,
+  getOrCreateCredits,
+  CREDITS_ENFORCEMENT_ENABLED,
+} from "./credits";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";
@@ -221,7 +227,33 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
   // Intent detection — resolve the routing intent for this message.
   // Priority: image attachments (always build) > explicit agentIntent override > planMode > classifier.
-  type ResolvedIntent = "converse" | "plan" | "build" | "debug" | "refactor" | "review" | "explain";
+  type ResolvedIntent =
+    | "converse"
+    | "plan"
+    | "build"
+    | "debug"
+    | "refactor"
+    | "review"
+    | "explain"
+    | "image_generate";
+
+  // Pattern for detecting explicit image generation requests in Ora chat.
+  // Only fires when there is no explicit agentIntent override and planMode is off.
+  //
+  // Uses three gated paths to avoid misrouting builder/developer prompts:
+  //   Path A — strong image-generation verbs (generate/draw/render/produce) with any
+  //             visual-asset noun; or weaker verbs (create/make/design) with the same
+  //             nouns, guarded by a negative lookahead that blocks code-object suffixes
+  //             ("component", "element", "widget", "function", "hook", etc.) so that
+  //             "create an icon component" stays a builder intent.
+  //   Path B — weaker verbs (create/make/design) only when followed by an explicit
+  //             content-describing image noun AND a subject preposition
+  //             ("of/showing/depicting/featuring").
+  //   Path C — purely visual real-world artifact nouns (painting/portrait/watercolor/…)
+  //             that never appear in a code-writing task, regardless of verb.
+  const IMAGE_GENERATE_PATTERNS =
+    /\b(?:generate|draw|render|produce|create|make|design)\s+(?:(?:a|an|me|us|some|my)\s+)?(?:logo|banner|icon|thumbnail|avatar|hero\s+image|image|picture|illustration|photo|wallpaper|background\s+image|cover\s+(?:art|image)|mockup|poster|flyer|badge)\b(?!\s+(?:component|element|widget|button|tab|panel|section|function|class|style|color|handler|hook|hooks|template|route|page|view|modal|menu|form|input|type|types|prop|props|state|util|utils|helper|helpers|module|library|lib|file|folder|dir|container|context|provider|reducer|action|slice|store|service|controller|model|schema|interface|enum|const|var|let))|\b(?:create|make|design)\s+(?:(?:a|an|me|us|some|my)\s+)?(?:image|photo|picture|illustration)\s+(?:of|showing|depicting|featuring)\b|\b(?:create|make|generate|design)\s+(?:(?:a|an|me|us|some|my)\s+)?(?:painting|portrait|mural|watercolor|sketch|photorealistic\s+image|ai\s+art)\b/i;
+
   let resolvedIntent: ResolvedIntent = "build";
   let intentConfidence = 1.0;
 
@@ -246,20 +278,30 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   } else if (planMode) {
     resolvedIntent = "plan";
   } else {
-    // Run lightweight auto-classifier (gpt-5-nano) to detect intent
-    const hasFiles = currentProjectFiles.length > 0;
-    try {
-      const classified = await runIntentClassifierPipeline(content, conversationHistory, hasFiles);
-      resolvedIntent = classified.intent;
-      intentConfidence = classified.confidence;
-    } catch (err) {
-      logger.warn({ err }, "Intent classifier failed, defaulting to build");
-      resolvedIntent = hasFiles ? "build" : "converse";
-    }
-    // Route ALL ambiguous requests to the clarifying pipeline regardless of primary intent.
-    // This prevents accidental build/plan runs when the user's meaning is unclear.
-    if (intentConfidence < 0.7) {
-      resolvedIntent = "converse"; // will be handled with isAmbiguous=true
+    // Check for explicit image generation requests before the general classifier.
+    // This prevents image prompts from being misrouted to build/refine.
+    if (IMAGE_GENERATE_PATTERNS.test(content)) {
+      resolvedIntent = "image_generate";
+    } else {
+      // Run lightweight auto-classifier (gpt-5-nano) to detect intent
+      const hasFiles = currentProjectFiles.length > 0;
+      try {
+        const classified = await runIntentClassifierPipeline(
+          content,
+          conversationHistory,
+          hasFiles,
+        );
+        resolvedIntent = classified.intent;
+        intentConfidence = classified.confidence;
+      } catch (err) {
+        logger.warn({ err }, "Intent classifier failed, defaulting to build");
+        resolvedIntent = hasFiles ? "build" : "converse";
+      }
+      // Route ALL ambiguous requests to the clarifying pipeline regardless of primary intent.
+      // This prevents accidental build/plan runs when the user's meaning is unclear.
+      if (intentConfidence < 0.7) {
+        resolvedIntent = "converse"; // will be handled with isAmbiguous=true
+      }
     }
   }
 
@@ -398,6 +440,70 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       }
       assistantContent = `I wasn't able to answer that: ${msg}`;
       plan = { kind: "error", message: msg } as unknown as Record<string, unknown>;
+    }
+  } else if (resolvedIntent === "image_generate") {
+    // ── Async image generation via job queue ──────────────────────────────────
+    // ISOLATION: uses dynamic imports to avoid coupling to the builder pipeline.
+    // enqueueImageJob handles: safety check → rate limit check → credit deduction
+    // → async generation (fire-and-forget) → R2 storage.
+    // We return an image_pending card; the frontend polls GET /images/status/:jobId
+    // every 2s until completed or failed.
+    const imageCreditCost = 3; // standard quality for chat inline
+
+    if (!req.userId) {
+      // Unauthenticated visitor — return a static sign-up CTA instead of generating.
+      // Never use project.ownerId as a credit source for anonymous users.
+      assistantContent =
+        "Image generation is available to registered users. Sign up for free to start creating images with Ora.";
+      plan = { kind: "converse", taskId: 0 } as unknown as Record<string, unknown>;
+    } else {
+      const imageOwner = req.userId;
+      const { isImageProviderConfigured } = await import("../lib/image-provider");
+      if (!isImageProviderConfigured()) {
+        assistantContent = "Image generation is not currently available on this server.";
+        plan = { kind: "converse", taskId: 0 } as unknown as Record<string, unknown>;
+      } else {
+        try {
+          const { enqueueImageJob } = await import("../lib/image-generation-jobs");
+          const { jobId, imageId } = await enqueueImageJob({
+            userId: imageOwner,
+            prompt: content,
+            quality: "standard",
+            aspectRatio: "1:1",
+            style: "vivid",
+            projectId: project.id,
+          });
+
+          assistantContent = "Your image is being generated. It will appear here once ready.";
+          plan = {
+            kind: "image_pending",
+            jobId,
+            imageId,
+            prompt: content,
+            creditsCost: imageCreditCost,
+          } as unknown as Record<string, unknown>;
+        } catch (err) {
+          const e = err as { code?: string; message?: string; balance?: number };
+          if (e.code === "INSUFFICIENT_CREDITS") {
+            res.status(402).json({
+              error: "Insufficient credits for image generation. Top up in Billing to continue.",
+            });
+            return;
+          }
+          if (e.code === "SAFETY_BLOCKED") {
+            assistantContent = `I can't generate that image: ${e.message ?? "the prompt failed safety validation"}.`;
+            plan = { kind: "converse", taskId: 0 } as unknown as Record<string, unknown>;
+          } else if (e.code === "RATE_LIMITED") {
+            assistantContent =
+              "Image generation rate limit reached. Please try again in a little while.";
+            plan = { kind: "converse", taskId: 0 } as unknown as Record<string, unknown>;
+          } else {
+            logger.warn({ err }, "messages: image job enqueue failed");
+            assistantContent = "Image generation failed unexpectedly. Please try again.";
+            plan = { kind: "converse", taskId: 0 } as unknown as Record<string, unknown>;
+          }
+        }
+      }
     }
   } else if (resolvedIntent === "plan") {
     // Create a task row so plan mode is tracked in Build History with live events
