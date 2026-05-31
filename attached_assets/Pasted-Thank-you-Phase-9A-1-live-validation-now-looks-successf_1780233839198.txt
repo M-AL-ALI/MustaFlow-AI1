@@ -1,0 +1,67 @@
+Thank you. Phase 9A-1 live validation now looks successful.
+
+Before I officially accept Phase 9A-1 as production-ready, please provide the final commit hash and confirm task isolation.
+
+The live validation confirms:
+
+* real image generation completed
+* gpt-image-1 works with the current API key
+* generated image reached status = completed
+* imageId = 5
+* model = gpt-image-1
+* size = 1024x1024
+* quality = low for draft
+* provider returned base64 image data
+* base64 was decoded to a 1.4 MB image
+* image was converted/stored as WebP
+* dev fallback storage worked
+* fileUrl = /api/images/5/file
+* safety status = passed
+* credit cost = 1
+* all 10 live validation checks passed
+* typecheck passed
+* lint passed
+* format passed
+* codegen drift passed
+
+Accepted fixes from validation:
+
+1. Default model corrected from dall-e-3 to gpt-image-1.
+2. Provider now supports gpt-image-1 model family.
+3. Removed unsupported response_format.
+4. Added/confirmed retry-without-style behavior.
+5. Corrected quality mapping for gpt-image-1.
+6. Corrected landscape/portrait sizes for gpt-image-1.
+7. Added base64 response handling in image-storage.ts.
+8. Fixed public Ora image intent regex for “Make me a banner.”
+9. Credit refund guard confirmed working.
+
+Before final acceptance, please provide:
+
+1. Final commit hash for the Phase 9A-1 validation fixes.
+2. Exact files changed in this final fix.
+3. Confirmation whether the generated image was created through:
+    * authenticated Ora chat
+    * /image-studio
+    * backend validation script only
+4. Confirmation that Image Studio UI was manually or programmatically validated after the provider fixes.
+5. Confirmation that Ora chat image card was manually or programmatically validated after the provider fixes.
+6. Confirmation that download works against /api/images/5/file.
+7. Confirmation that delete soft-delete works on a completed generated image.
+8. Confirmation that public Ora only shows CTA and does not generate images.
+9. Confirmation that normal Builder prompts still do not trigger image generation.
+10. Confirmation that no Builder/Developer/Plan files were modified by Phase 9A-1.
+11. Confirmation that the Developer Mode task that started during this validation is separate and not mixed into the Phase 9A-1 commit.
+12. Final quality gate status:
+    * typecheck
+    * lint
+    * format
+    * codegen drift
+    * API server running
+    * frontend running
+
+Current decision:
+
+* Phase 9A-1 is very close to production-ready.
+* I will accept it as production-ready after the final commit hash and isolation proof are provided.
+* Do not continue Phase 9A-2, image editing, project insertion, brand kit, prompt assistant, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work until Phase 9A-1 is officially accepted.
