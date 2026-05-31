@@ -1,0 +1,146 @@
+Before starting Phase 8B-3, please run a manual live-browser validation cycle for Phase 8B-2 Semantic Search.
+
+Phase 8B-2 is code-complete, but not production-validated yet because the automated environment did not have a live authenticated Clerk session.
+
+Current stable baseline:
+
+* Phase 8A — Vault CRUD, versioning, archive/restore
+* Phase 8A.1 — Tags TEXT[], keyword search optimization
+* Phase 8B-1 — Embedding infrastructure
+* Phase 8B-2 — Semantic Search, code-complete at 70cd8eca
+
+Please validate the full user flow in the real app using a logged-in account.
+
+Required live validation steps:
+
+1. Login
+
+* Sign in with a real authenticated user.
+* Open the Knowledge Vault page.
+* Confirm the page loads without errors.
+
+2. Create or confirm vault entries
+
+* Confirm at least 5–10 vault entries exist.
+* Confirm some entries have useful content, summaries, tags, categories, and departments.
+* If needed, create new entries manually or save dataset analysis results to the vault.
+
+3. Reindex embeddings
+
+* Click “Reindex My Vault” or equivalent.
+* Confirm embeddings are created.
+* Confirm embedding status changes to indexed.
+* Confirm chunk count, model, source version, and last indexed date display correctly.
+
+4. Single-entry reindex
+
+* Open one vault entry.
+* Click “Rebuild Embeddings” for that entry.
+* Confirm the status updates correctly.
+* Confirm no raw vectors are shown.
+
+5. Semantic search
+
+Run multiple semantic searches using meaning-based language, not exact keywords.
+
+Examples:
+
+* “sealing problems on packaging equipment”
+* “downtime root causes”
+* “WBI improvement actions”
+* “quality defects and corrective actions”
+* “maintenance issues causing lost productivity”
+
+Confirm:
+
+* results appear
+* results are relevant
+* similarity scores display
+* best matching chunk preview displays
+* clicking a result opens the existing entry viewer
+
+6. Filtered semantic search
+
+Test semantic search with filters:
+
+* category
+* department
+* tags
+* status
+* include archived / hide archived
+
+Confirm filters actually narrow the results.
+
+7. Empty-state validation
+
+Test with a user or vault state that has no embeddings.
+
+Confirm:
+
+* semantic search shows a clear “Reindex your vault first” message
+* Reindex button appears
+* no silent failure occurs
+
+8. No-results validation
+
+Run a search that should have no meaningful results.
+
+Confirm:
+
+* helpful no-results state appears
+* no crash
+* no raw technical error shown
+
+9. Rate-limit validation
+
+If practical, test the semantic search rate limit.
+
+Confirm:
+
+* 429 response is handled safely
+* user sees a clear message
+* normal vault CRUD still works
+* keyword search still works
+
+10. Privacy / security validation
+
+Confirm:
+
+* raw vectors never appear in UI
+* raw vectors never appear in API response
+* chunk preview is limited
+* query text and chunk text are not logged
+* user cannot see another user’s entries or embeddings
+
+11. Regression validation
+
+Confirm:
+
+* keyword search still works
+* vault create/edit/versioning still works
+* archive/restore still works
+* dataset Save to Vault still works
+* reporting/export stack still works
+* Builder Mode still works
+* Developer Mode still works
+* Plan Mode still works
+* public Ora remains isolated
+
+Deliverable required:
+
+Please provide a manual validation report with:
+
+1. Account/environment used
+2. Number of entries tested
+3. Number of entries indexed
+4. Search queries tested
+5. Screens or notes on relevance
+6. Filter test results
+7. Empty-state result
+8. No-results result
+9. Rate-limit result if tested
+10. Any bugs found
+11. Any UX improvements recommended
+12. Final go/no-go recommendation for moving to Phase 8B-3
+
+Do not start Phase 8B-3, RAG, AI memory, knowledge-aware reporting, automatic recommendations, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until this manual validation report is complete.
