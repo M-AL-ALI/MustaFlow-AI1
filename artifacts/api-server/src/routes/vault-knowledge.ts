@@ -43,7 +43,7 @@ const generateReportSchema = z.object({
 
 // ── System prompt for report generation ──────────────────────────────────────
 
-const REPORT_SYSTEM_PROMPT = `You are Ora, a professional intelligence analyst and report writer.
+const REPORT_SYSTEM_PROMPT = `You are Ora, a professional knowledge analyst and report writer.
 Generate a structured, professional Knowledge Report based on the user's request.
 
 REPORT REQUIREMENTS:
@@ -197,8 +197,10 @@ router.post("/vault/generate-report", async (req, res): Promise<void> => {
 
     // 3. Call AI — retry once on empty content (proxy can transiently return null content)
     const model = process.env.ORA_PREMIUM_MODEL ?? "gpt-5-mini";
+    const MAX_ATTEMPTS = 2;
+    const RETRY_DELAYS_MS = [1000];
     let reportText = "";
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       logger.info(
         {
           userId,
@@ -235,8 +237,8 @@ router.post("/vault/generate-report", async (req, res): Promise<void> => {
           },
           "vault-generate-report: AI call threw",
         );
-        if (attempt < 2) {
-          await new Promise<void>((r) => setTimeout(r, 1500));
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise<void>((r) => setTimeout(r, RETRY_DELAYS_MS[attempt - 1] ?? 2000));
           continue;
         }
         res.status(502).json({ error: "Report generation failed. Please try again." });
@@ -244,7 +246,10 @@ router.post("/vault/generate-report", async (req, res): Promise<void> => {
       }
 
       const choice = aiResult.choices?.[0];
-      const candidate = choice?.message?.content?.trim() ?? "";
+      const msg = choice?.message as
+        | { content?: string | null; refusal?: string | null; role?: string }
+        | undefined;
+      const candidate = msg?.content?.trim() ?? "";
       if (candidate) {
         reportText = candidate;
         break;
@@ -256,12 +261,16 @@ router.post("/vault/generate-report", async (req, res): Promise<void> => {
           attempt,
           finishReason: choice?.finish_reason,
           choicesLen: aiResult.choices?.length,
-          hasContent: !!choice?.message?.content,
+          hasContent: !!msg?.content,
+          contentType: typeof msg?.content,
+          hasRefusal: !!msg?.refusal,
+          refusalSnippet: msg?.refusal ? String(msg.refusal).slice(0, 120) : undefined,
+          role: msg?.role,
         },
         "vault-generate-report: AI returned empty content",
       );
-      if (attempt < 2) {
-        await new Promise<void>((r) => setTimeout(r, 1500));
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise<void>((r) => setTimeout(r, RETRY_DELAYS_MS[attempt - 1] ?? 2000));
       }
     }
 

@@ -1,0 +1,60 @@
+Thank you for the honest report.
+
+I accept the code fixes, but I cannot mark Phase 8B-3A production-ready yet because the final passing Playwright UI test used the “Generate without knowledge” path with entry_count=0.
+
+That means the final UI validation did not fully prove the main Phase 8B-3A requirement:
+
+* find relevant indexed vault entries
+* select entries
+* generate a report using selected knowledge
+* show “Knowledge Vault References Used”
+* create an audit event with selected entry IDs and versions
+
+The API-level tests/events 3–5 are helpful, but I need one clean authenticated UI validation run that exercises the actual knowledge-injection path after embeddings are indexed.
+
+Please run one additional targeted live validation:
+
+1. Create or use a real authenticated Clerk test user.
+2. Create at least two vault entries through the UI or API.
+3. Reindex that user’s vault.
+4. Confirm embeddings exist:
+    * vault_embeddings.embedding IS NOT NULL > 0
+    * entries show indexed status
+5. Open Knowledge Vault in the browser UI.
+6. Click “Generate Report.”
+7. Search for a query that matches the indexed entries.
+8. Confirm suggestion cards appear.
+9. Select at least two entries.
+10. Generate the report using selected entries.
+11. Confirm the generated report is non-empty.
+12. Confirm “Knowledge Vault References Used” appears.
+13. Confirm the references list includes the selected entry titles/versions.
+14. Confirm unselected entries are not used.
+15. Confirm knowledge_usage_events creates a new row with:
+    * selected entry IDs
+    * selected entry versions
+    * entry_count > 0
+    * report type
+    * timestamp
+16. Confirm no report content, vault content, secrets, vectors, or tokens are logged.
+17. Confirm typecheck, lint, format, and codegen drift remain clean.
+
+Please provide:
+
+1. Final commit hash being validated
+2. Test user/environment
+3. Entry IDs created/used
+4. Number of indexed entries
+5. Query used
+6. Screenshot or text proof that suggestion cards appeared
+7. Selected entry IDs
+8. Proof that the report included “Knowledge Vault References Used”
+9. Proof that knowledge_usage_events.entry_count > 0
+10. Final quality gate results
+
+Until that targeted validation passes:
+
+* Phase 8B-3A remains code-complete
+* Phase 8B-3A is not production-ready
+* Phase 9A-1 must not proceed into implementation
+* Phase 8B-3B, automatic RAG, AI memory, Web Search, Image Generation, Advanced Charts, and unrelated roadmap work must remain on hold

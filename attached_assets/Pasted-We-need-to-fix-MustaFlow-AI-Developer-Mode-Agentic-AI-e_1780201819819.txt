@@ -1,0 +1,509 @@
+We need to fix MustaFlow AI Developer Mode / Agentic AI execution. Do not redesign the UI first. The issue is not mainly the visual interface. The main problem is that the Developer Mode agent appears to be built, but when the user asks the agent to do something, nothing reliably happens.
+
+Based on the diagnostic report, the frontend workspace, chat panel, agent loop, tool list, SSE events, preview panel, and database tables exist. However, the real runtime/container layer is not being strictly enforced. The system currently allows the agent to run even when the Fly.io/container workspace is missing or not configured. In that case, container operations silently no-op, so the agent may think it created files or ran commands, but the real workspace, terminal, and preview do not update.
+
+This is not acceptable for a Replit-like app builder.
+
+My goal for MustaFlow Developer Mode is:
+
+Users should be able to create their own projects and develop their own apps inside MustaFlow, similar to Replit, with a real AI developer agent that can make changes, run commands, test, iterate, update live preview, and report verified results.
+
+Developer Mode must behave like a real cloud IDE plus AI agent, not just a chatbot.
+
+The correct rule is:
+
+No real runtime/container = no Developer Mode agent execution.
+
+If the runtime is missing or broken, the system must stop and show a clear visible error. It must never pretend the agent worked.
+
+Please fix this in phases.
+
+PHASE 1 — Remove silent no-op behavior from container/runtime tools
+
+Inspect:
+
+artifacts/api-server/src/lib/container.ts
+artifacts/api-server/src/lib/agent-loop.ts
+artifacts/api-server/src/lib/jobs.ts
+
+Currently, the report says that when FLY_API_TOKEN is missing or container.isConfigured() is false, container operations silently succeed as no-ops.
+
+That must be removed.
+
+Any tool that requires the real workspace/container must throw a clear error if the runtime is unavailable.
+
+Examples of tools that must not silently succeed:
+
+read/write files from real workspace
+writeFileToContainer
+execInContainer
+run_command
+install_package / pkg_install
+run_e2e
+take_screenshot
+preview start/restart
+container logs
+terminal shell
+HMR/live preview update
+
+Required behavior:
+
+If container.isConfigured() is false, throw:
+
+ContainerUnavailableError:
+“Developer Mode runtime is not configured. The agent cannot edit files, run commands, install packages, test, or update preview until the project container is provisioned.”
+
+Do not return success.
+Do not return empty stdout.
+Do not let the agent continue as if the tool worked.
+Do not let the agent finalize successfully.
+
+PHASE 2 — Add a hard runtime preflight before every Developer Mode agent run
+
+Before the agent loop starts, run a Developer Mode runtime preflight.
+
+Add this to the job start path:
+
+artifacts/api-server/src/routes/messages.ts
+artifacts/api-server/src/lib/jobs.ts
+artifacts/api-server/src/lib/container.ts
+artifacts/api-server/src/lib/provisioning.ts
+
+The preflight must check:
+
+1. Is FLY_API_TOKEN present?
+2. Does the project have a valid containerId?
+3. Is the container provisioned?
+4. Can the system start/wake the container?
+5. Can the backend execute pwd inside the project workspace?
+6. Can the backend execute ls inside the project workspace?
+7. Can the backend create a file named .mustaflow-runtime-test?
+8. Can the backend read the test file back?
+9. Can the backend delete the test file?
+10. Is the preview server reachable or startable?
+11. If the project needs database/backend support, is the database connection valid?
+12. Is the project marked developer_ready only after the runtime passes?
+
+If the preflight fails, the agent run must not continue.
+
+The task should be marked failed with a clear user-visible message:
+
+“Developer Mode cannot start because the workspace runtime is not ready.
+Reason: [specific reason].
+Required fix: [specific fix].”
+
+Examples:
+
+Missing FLY_API_TOKEN
+Project has no containerId
+Container failed to start
+Workspace path does not exist
+Cannot write to workspace
+Preview server failed health check
+Database is missing
+Auth/session expired
+
+PHASE 3 — Add Developer Mode readiness gate
+
+Developer Mode projects should not be treated as ready until the real runtime is healthy.
+
+Correct project creation flow should be:
+
+Create project
+→ create workspace record
+→ provision container
+→ create project filesystem
+→ install starter template
+→ install dependencies
+→ start preview server
+→ run runtime preflight
+→ mark project as developer_ready
+→ allow AI agent execution
+
+Add clear statuses in the UI:
+
+Provisioning workspace…
+Creating container…
+Installing starter files…
+Installing dependencies…
+Starting preview…
+Running runtime health check…
+Developer Mode ready.
+
+If setup fails, show:
+
+Workspace setup failed.
+Reason: [specific reason]
+Action needed: [configure Fly.io token / restart provisioning / check logs]
+
+Do not let the user send a Developer Mode build prompt while runtime status is failed, missing, or provisioning unless the prompt is only asking a question and does not require code execution.
+
+PHASE 4 — Make the agent finalization rule strict
+
+The agent must not be allowed to say “done” unless it has proof.
+
+Update:
+
+artifacts/api-server/src/lib/agent-loop.ts
+artifacts/api-server/src/lib/check-profiles.ts
+
+The finalize tool must be blocked unless the agent has verified the work.
+
+For code/build tasks, final success requires:
+
+1. At least one real file read or file tree scan occurred
+2. At least one real file change occurred, if the request asked for code changes
+3. File changes were written to the real workspace/container
+4. Required command/check actually ran, not no-op
+5. Typecheck/build/test result is known
+6. Preview health was checked when UI/route/page changes were made
+7. Final report includes changed files
+8. Final report includes commands/checks run
+9. Final report includes verification status
+
+Bad final response:
+
+“I updated it. It should work now.”
+
+Correct final response:
+
+“I created src/pages/TestAgentPage.tsx, updated src/App.tsx route, ran typecheck, restarted preview, verified the page loads, and the final check passed.”
+
+If verification fails, the agent must either fix the problem and rerun checks or report the failure clearly.
+
+PHASE 5 — Fix task queue / stuck run behavior
+
+Inspect:
+
+artifacts/api-server/src/lib/jobs.ts
+agent_tasks table
+task_events table
+
+The report says a stuck Postgres advisory lock may cause new tasks to stay queued forever.
+
+Add these fields or equivalent tracking:
+
+last_heartbeat_at
+started_at
+finished_at
+failure_reason
+current_step
+lock_owner
+run_attempt
+
+Required behavior:
+
+If a task is queued because another run is active, the UI should show:
+
+“Waiting for previous agent run to finish…”
+
+Show:
+
+current active run
+when it started
+current step
+Cancel button
+Force stop/recover button, if safe
+
+If a run has no heartbeat for more than a safe threshold, mark it as stuck and allow recovery.
+
+Example:
+
+“Agent run appears stuck. No heartbeat for 90 seconds. You can cancel and restart.”
+
+On API server startup, detect orphaned running/queued tasks and mark them failed or recoverable with a clear reason.
+
+Do not let the UI freeze with no explanation.
+
+PHASE 6 — Make live activity mandatory
+
+Inspect:
+
+artifacts/api-server/src/lib/event-bus.ts
+artifacts/api-server/src/routes/events.ts
+artifacts/mustaflow/src/hooks/use-task-event-stream.ts
+artifacts/mustaflow/src/pages/dev-workspace/components/dev-chat-panel.tsx
+
+Every Developer Mode agent run must show a live activity timeline.
+
+Required events:
+
+agent.started
+runtime.preflight.started
+runtime.preflight.passed
+runtime.preflight.failed
+container.starting
+container.ready
+workspace.ready
+tool.started
+tool.output
+tool.failed
+file.read
+file.changed
+command.running
+command.output
+command.failed
+check.running
+check.passed
+check.failed
+preview.starting
+preview.updated
+preview.failed
+agent.iterating
+agent.completed
+agent.failed
+agent.cancelled
+
+The user must see real progress like:
+
+Prompt received
+Runtime preflight started
+Container connected
+Reading project files
+Creating src/pages/TestAgentPage.tsx
+Updating src/App.tsx
+Running typecheck
+Typecheck failed
+Fixing import error
+Running typecheck again
+Typecheck passed
+Refreshing preview
+Preview verified
+Final verification passed
+
+If anything fails, show the exact failure in the activity panel and chat.
+
+No silent failures.
+
+PHASE 7 — Make preview verification real
+
+Inspect:
+
+artifacts/mustaflow/src/pages/dev-workspace/components/preview-pane.tsx
+artifacts/api-server/src/lib/agent-senses.ts
+artifacts/api-server/src/lib/agent-loop.ts
+artifacts/api-server/src/lib/check-profiles.ts
+
+A preview refresh event is not enough.
+
+Correct preview flow:
+
+Agent writes file
+→ real workspace file changes
+→ dev server/HMR detects change
+→ build/HMR succeeds
+→ preview health check confirms page loads
+→ optional screenshot/E2E verifies UI
+→ only then show preview updated
+
+If preview cannot load, show:
+
+Preview failed.
+Reason: [build error / route error / server offline / container offline]
+
+The agent should not say preview is updated unless the preview was actually reachable.
+
+PHASE 8 — Add first-class test/check tools
+
+Right now, the report says run_typecheck and run_tests are not standalone tools and are done through run_command.
+
+Add first-class tools for discoverability and consistency:
+
+run_typecheck
+run_build
+run_tests
+run_e2e_tests
+check_preview_health
+restart_preview
+
+Each tool should:
+
+run inside the real workspace/container
+return structured results
+emit SSE events
+save audit logs
+block finalize if required checks fail
+
+PHASE 9 — Improve auth and frontend error visibility
+
+Inspect:
+
+artifacts/mustaflow/src/pages/dev-workspace/components/dev-chat-panel.tsx
+Orval-generated send message hook
+artifacts/api-server/src/routes/messages.ts
+auth middleware
+
+If POST /api/projects/:id/messages returns 401, 403, or 500, the chat must show the error.
+
+Examples:
+
+401:
+“Your session expired. Please sign in again.”
+
+403:
+“You do not have access to this project.”
+
+500:
+“Agent failed to start. Check server logs.”
+
+Do not clear the input and appear frozen when the request fails.
+
+PHASE 10 — Policy approval gate must not stall silently
+
+Inspect:
+
+artifacts/api-server/src/lib/policy.ts
+artifacts/mustaflow/src/pages/dev-workspace/components/dev-chat-panel.tsx
+
+If the agent attempts a risky command and policy requires approval, the UI must show the approval prompt clearly.
+
+If approval UI does not render, the agent must not wait forever.
+
+Add:
+
+approval.required event
+approval.timeout event
+approval.denied event
+approval.accepted event
+
+If approval is not answered after a configured time, fail or pause the task with a visible message:
+
+“Agent is waiting for approval to run a restricted command.”
+
+PHASE 11 — Add Developer Mode infrastructure status panel
+
+Add a visible status area in Developer Mode showing:
+
+Auth: connected / expired
+Project: loaded / missing
+Runtime: ready / provisioning / failed
+Container: running / stopped / missing
+Workspace: writable / read-only / unavailable
+Terminal: connected / unavailable
+Preview: running / failed
+Database: connected / missing / not required
+Agent: idle / queued / running / failed
+SSE stream: connected / disconnected
+
+This panel will make it easy to know why “nothing happens.”
+
+PHASE 12 — Validate with minimum working tests
+
+After fixes, run this exact test:
+
+Test 1:
+Prompt:
+“Create a file called agent-test.txt with the text: Agent is working.”
+
+Expected result:
+
+1. POST /api/projects/:id/messages returns 200
+2. agent_tasks row is created
+3. task status changes queued → building/running
+4. runtime preflight passes
+5. write_file tool runs
+6. file is created in real workspace/container
+7. file appears in file tree
+8. task_events shows file.changed
+9. final response confirms file created
+10. no silent errors
+
+Test 2:
+Prompt:
+“Create a simple TestAgentPage that says Agent is working, add a route to it, and update the preview.”
+
+Expected result:
+
+1. Agent reads project structure
+2. Agent creates page file
+3. Agent patches route
+4. Typecheck/build runs
+5. Any error is fixed
+6. Preview server updates
+7. Preview health check passes
+8. Final report lists changed files
+9. Final report lists commands/checks run
+10. User can open the new route in preview
+
+Test 3:
+Disable or remove Fly.io runtime config temporarily.
+
+Expected result:
+
+The agent must not pretend to work.
+It must show:
+
+“Developer Mode runtime is not configured. Missing FLY_API_TOKEN or project container. Agent execution is blocked until runtime is ready.”
+
+PHASE 13 — Final expected behavior
+
+After the fix, when the user asks:
+
+“Create a landing page with pricing cards”
+
+Developer Mode should show:
+
+Agent run started
+Runtime preflight passed
+Container connected
+Reading project files
+Creating components
+Updating routes
+Running typecheck
+Fixing errors if needed
+Running build/test
+Updating preview
+Preview verified
+Final report completed
+
+The final report should include:
+
+Changed files
+Commands run
+Test/check results
+Preview status
+Any remaining warnings
+What the agent verified
+
+PHASE 14 — Final rule for MustaFlow Developer Mode
+
+Developer Mode must be treated as a real app development environment.
+
+The AI agent must not be only conversational.
+
+It must be able to:
+
+read files
+write files
+apply patches
+install packages
+run commands
+run typecheck
+run tests
+run E2E
+inspect preview
+fix errors
+iterate
+verify
+report
+
+But all of this must happen in the real project runtime/container.
+
+If the runtime is unavailable, the user must see a clear error. The system must never silently no-op or pretend success.
+
+Final verdict from the diagnostic report:
+
+The Developer Mode architecture is mostly present, but the runtime/container/preview enforcement is broken or degraded. The likely core problem is that Fly.io container configuration is missing or unavailable, and container tools silently no-op. The secondary possible problem is stuck queued runs from advisory locks.
+
+Fix priority:
+
+1. Confirm and configure FLY_API_TOKEN and container provisioning.
+2. Remove all silent no-op behavior from container.ts.
+3. Add hard runtime preflight before every agent run.
+4. Block agent execution if runtime is not ready.
+5. Show all errors visibly in the Developer Mode UI.
+6. Add stuck-run detection and recovery.
+7. Require proof before the agent can finalize.
+8. Validate with file creation and preview page tests.
+
+Do not mark this complete until the two minimum working tests pass and the user can see the agent actually create files, run checks, and update the preview.
