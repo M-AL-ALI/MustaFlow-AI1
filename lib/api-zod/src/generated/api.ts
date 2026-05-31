@@ -480,6 +480,26 @@ export const DismissCveFindingResponse = zod.object({
 
 
 /**
+ * @summary Get the Developer Mode runtime status for a project (env vars, containerId, preflight result).
+ */
+export const GetDeveloperModeRuntimeStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetDeveloperModeRuntimeStatusResponse = zod.object({
+  "flyApiTokenPresent": zod.boolean(),
+  "neonApiKeyPresent": zod.boolean(),
+  "builderMode": zod.string(),
+  "containerId": zod.string().nullish(),
+  "containerStatus": zod.string().nullish(),
+  "provisioningStatus": zod.string(),
+  "provisioningStep": zod.string().nullish(),
+  "preflightOk": zod.boolean(),
+  "preflightMessage": zod.string().nullish()
+})
+
+
+/**
  * @summary Apply the prepared CVE auto-protect patch for a finding. Writes patched files to the project and records a version snapshot.
  */
 export const ApplyCvePatchParams = zod.object({

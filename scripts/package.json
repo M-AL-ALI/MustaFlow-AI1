@@ -97,6 +97,7 @@
     "migrate-image-studio-v2": "tsx ./src/migrate-image-studio-v2.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "validate-developer-mode": "tsx ./src/validate-developer-mode.ts",
+    "verify-developer-mode-runtime": "tsx ./src/verify-developer-mode-runtime.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

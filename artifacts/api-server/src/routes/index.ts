@@ -94,6 +94,7 @@ import publicAiRouter from "./public-ai/index";
 import oraTranscriptRouter from "./ora-transcript";
 import builderHandoffRouter from "./builder-handoff";
 import vaultKnowledgeRouter from "./vault-knowledge";
+import developerModeRouter from "./developer-mode";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -313,6 +314,7 @@ router.use(profilesRouter);
 router.use(gdprRouter); // GET /me/export, DELETE /me
 router.use(tokensRouter); // GET/POST/DELETE /me/tokens
 router.use(oraTranscriptRouter); // GET/POST/DELETE /ora/transcript
+router.use(developerModeRouter); // GET /projects/:id/developer-mode/runtime-status
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
 router.use((_req, res) => {

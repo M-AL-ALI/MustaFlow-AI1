@@ -100,6 +100,7 @@ import type {
   DeployResult,
   DeprovisionDatabase200,
   DestroyContainer200,
+  DeveloperModeRuntimeStatus,
   DisconnectGithub200,
   DnsRecordInput,
   DomainDiagnoseResponse,
@@ -1974,6 +1975,83 @@ export const useDismissCveFinding = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getDismissCveFindingMutationOptions(options));
     }
+
+export const getGetDeveloperModeRuntimeStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/developer-mode/runtime-status`
+}
+
+/**
+ * @summary Get the Developer Mode runtime status for a project (env vars, containerId, preflight result).
+ */
+export const getDeveloperModeRuntimeStatus = async (id: number, options?: RequestInit): Promise<DeveloperModeRuntimeStatus> => {
+
+  return customFetch<DeveloperModeRuntimeStatus>(getGetDeveloperModeRuntimeStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDeveloperModeRuntimeStatusQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/developer-mode/runtime-status`
+    ] as const;
+    }
+
+
+export const getGetDeveloperModeRuntimeStatusQueryOptions = <TData = Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDeveloperModeRuntimeStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>> = ({ signal }) => getDeveloperModeRuntimeStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDeveloperModeRuntimeStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>>
+export type GetDeveloperModeRuntimeStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get the Developer Mode runtime status for a project (env vars, containerId, preflight result).
+ */
+
+export function useGetDeveloperModeRuntimeStatus<TData = Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDeveloperModeRuntimeStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDeveloperModeRuntimeStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getApplyCvePatchUrl = (id: number,) => {
 

@@ -4061,6 +4061,14 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           if (err instanceof ContainerUnavailableError) throw err;
           logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
         }
+      } else if (input.projectMode === "developer") {
+        // Developer Mode requires a live container for every file write.
+        // A missing containerState.id means the container was never provisioned
+        // or the session started before provisioning completed. Throw so the
+        // outer loop catch surfaces a visible error instead of silently writing
+        // to an in-memory workspace that will never reach the real container.
+        const { DEVELOPER_MODE_RUNTIME_NOT_READY } = await import("./errors");
+        throw new ContainerUnavailableError(DEVELOPER_MODE_RUNTIME_NOT_READY);
       }
       return { ok: true, observation: `wrote ${path} (${content.length} bytes)` };
     }

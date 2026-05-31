@@ -4313,6 +4313,18 @@ export interface ImageListResponse {
   offset: number;
 }
 
+export interface DeveloperModeRuntimeStatus {
+  flyApiTokenPresent: boolean;
+  neonApiKeyPresent: boolean;
+  builderMode: string;
+  containerId?: string | null;
+  containerStatus?: string | null;
+  provisioningStatus: string;
+  provisioningStep?: string | null;
+  preflightOk: boolean;
+  preflightMessage?: string | null;
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;

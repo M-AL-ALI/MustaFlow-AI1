@@ -495,6 +495,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /projects/{id}/developer-mode/runtime-status:
+    get:
+      operationId: getDeveloperModeRuntimeStatus
+      tags: [projects]
+      summary: Get the Developer Mode runtime status for a project (env vars, containerId, preflight result).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Runtime status table
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeveloperModeRuntimeStatus"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /security/cve/{id}/apply-patch:
     post:
       operationId: applyCvePatch
@@ -10254,3 +10274,24 @@ components:
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
+
+    DeveloperModeRuntimeStatus:
+      type: object
+      required:
+        [
+          flyApiTokenPresent,
+          neonApiKeyPresent,
+          builderMode,
+          provisioningStatus,
+          preflightOk,
+        ]
+      properties:
+        flyApiTokenPresent: { type: boolean }
+        neonApiKeyPresent: { type: boolean }
+        builderMode: { type: string }
+        containerId: { type: string, nullable: true }
+        containerStatus: { type: string, nullable: true }
+        provisioningStatus: { type: string }
+        provisioningStep: { type: string, nullable: true }
+        preflightOk: { type: boolean }
+        preflightMessage: { type: string, nullable: true }

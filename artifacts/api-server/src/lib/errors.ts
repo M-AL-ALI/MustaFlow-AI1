@@ -18,3 +18,11 @@ export class ContainerUnavailableError extends Error {
     Object.setPrototypeOf(this, ContainerUnavailableError.prototype);
   }
 }
+
+/**
+ * Standard user-facing message for any Developer Mode operation that cannot
+ * reach the project container.  Used in preflight, write_file, syncFilesToContainer,
+ * and any other hard-fail path where the container is absent for an agentic project.
+ */
+export const DEVELOPER_MODE_RUNTIME_NOT_READY =
+  "Developer Mode runtime is not ready. The agent cannot edit files, run commands, test, or update preview until the project container is provisioned.";

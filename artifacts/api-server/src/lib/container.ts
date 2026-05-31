@@ -425,13 +425,27 @@ export async function writeFileToContainer(
 /**
  * Bulk-write all project files to the container's disk.
  * Called on container start to sync DB files → container FS.
+ *
+ * @param throwIfUnconfigured - When true, throws ContainerUnavailableError instead of
+ *   silently returning when FLY_API_TOKEN is absent.  Callers for agentic (Developer Mode)
+ *   projects should pass true so the error surfaces visibly rather than silently no-oping.
+ *   Non-agentic (static-legacy) callers keep the default false to preserve existing behaviour.
  */
 export async function syncFilesToContainer(
   machineId: string,
   projectId: number,
   files: Array<{ path: string; content: string }>,
+  throwIfUnconfigured = false,
 ): Promise<void> {
-  if (!isConfigured()) return;
+  if (!isConfigured()) {
+    if (throwIfUnconfigured) {
+      throw new ContainerUnavailableError(
+        "syncFilesToContainer: FLY_API_TOKEN is not configured. " +
+          "Cannot sync files to a container without Fly.io credentials.",
+      );
+    }
+    return;
+  }
   await writeLog(projectId, "system", `Syncing ${files.length} files to container…`);
 
   for (const file of files) {

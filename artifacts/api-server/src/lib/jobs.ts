@@ -95,19 +95,27 @@ import {
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
 import { encryptionService } from "./encryption";
+import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 
 /**
  * Pre-build gate for agentic projects.
  *
- * 1. Container wake check — if the project has a containerId, wake it and
+ * 1. Hard-fail guard — if builderMode is 'agentic' and containerId is null,
+ *    the container has not been provisioned yet; the agent must not run.
+ *
+ * 2. Container wake check — if the project has a containerId, wake it and
  *    wait up to 30 seconds for it to respond. Emits a narration event so the
  *    user sees "Waking your server…" in the chat.
  *
- * 2. Neon database health check — if the project has a DATABASE_URL secret,
+ * 3. Runtime proof test — after the container wakes, runs pwd / ls /app /
+ *    write+read+delete to prove real container exec is working end-to-end.
+ *    Fails hard if any step does not respond as expected.
+ *
+ * 4. Neon database health check — if the project has a DATABASE_URL secret,
  *    run a `SELECT 1` with 3-retry exponential back-off (1 s, 2 s, 4 s) to
  *    confirm the database is reachable before the agent loop starts.
  *
- * Returns { ok: false, message } when either check fails so the caller can
+ * Returns { ok: false, message } when any check fails so the caller can
  * emit a "failed" event and abort the task instead of crashing mid-loop.
  * Returns { ok: true } when the project has no container (e.g. static-html)
  * or when FLY_API_TOKEN / NEON_API_KEY are not configured (dev-mode).
@@ -117,11 +125,21 @@ async function runAgenticPreflightGate(
   taskId: number,
   containerId: string | null,
   containerUrl: string | null,
+  builderMode?: string | null,
 ): Promise<{ ok: boolean; message?: string }> {
+  // ── 0. Hard-fail: agentic project with no container ──────────────────────
+  // If this project is in Developer Mode (builder_mode = 'agentic') but has
+  // no containerId, the provisioning step has not completed. Running the agent
+  // loop against a phantom container would silently no-op every file write.
+  if (builderMode === "agentic" && !containerId) {
+    await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
+    return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+  }
+
   // ── 1. Container wake check ──────────────────────────────────────────────
   if (containerId) {
     await emitEvent(taskId, "narration", "Waking your server…");
-    const { ensureContainerAwake } = await import("./container");
+    const { ensureContainerAwake, execInContainer } = await import("./container");
     const { ContainerUnavailableError } = await import("./errors");
     let wakeResult: { ok: boolean; message?: string };
     try {
@@ -130,9 +148,7 @@ async function runAgenticPreflightGate(
       if (err instanceof ContainerUnavailableError) {
         return {
           ok: false,
-          message:
-            "Container subsystem is not configured (FLY_API_TOKEN missing). " +
-            "Add the Fly.io API token to the project environment and retry.",
+          message: DEVELOPER_MODE_RUNTIME_NOT_READY,
         };
       }
       throw err;
@@ -152,9 +168,7 @@ async function runAgenticPreflightGate(
         if (err instanceof ContainerUnavailableError) {
           return {
             ok: false,
-            message:
-              "Container subsystem is not configured (FLY_API_TOKEN missing). " +
-              "Add the Fly.io API token to the project environment and retry.",
+            message: DEVELOPER_MODE_RUNTIME_NOT_READY,
           };
         }
         throw err;
@@ -171,7 +185,75 @@ async function runAgenticPreflightGate(
       logger.info({ projectId, taskId, containerId }, "Container awake — proceeding with build");
     }
 
-    // ── 2. Neon database health check ───────────────────────────────────────
+    // ── 2. Runtime proof test ────────────────────────────────────────────────
+    // Verify end-to-end container exec: pwd, ls /app, write → read → delete.
+    // Any step failing here means the container cannot accept file writes and
+    // the agent loop must not start.
+    try {
+      const pwdResult = await execInContainer(containerId, ["pwd"], projectId);
+      if (!pwdResult.ok) {
+        logger.warn({ projectId, taskId, containerId }, "Preflight proof: pwd failed");
+        await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
+        return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+      }
+
+      const lsResult = await execInContainer(containerId, ["ls", "/app"], projectId);
+      if (!lsResult.ok) {
+        logger.warn({ projectId, taskId, containerId }, "Preflight proof: ls /app failed");
+        await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
+        return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+      }
+
+      const writeResult = await execInContainer(
+        containerId,
+        [
+          "/bin/sh",
+          "-c",
+          "printf 'runtime working' > /app/.mustaflow-runtime-test && echo ok",
+        ],
+        projectId,
+      );
+      if (!writeResult.ok) {
+        logger.warn({ projectId, taskId, containerId }, "Preflight proof: write test file failed");
+        await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
+        return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+      }
+
+      const readResult = await execInContainer(
+        containerId,
+        ["cat", "/app/.mustaflow-runtime-test"],
+        projectId,
+      );
+      const readContent = (readResult.stdout ?? readResult.output ?? "").trim();
+      if (!readResult.ok || readContent !== "runtime working") {
+        logger.warn(
+          { projectId, taskId, containerId, readContent },
+          "Preflight proof: read test file content mismatch",
+        );
+        await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
+        return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+      }
+
+      await execInContainer(containerId, ["rm", "-f", "/app/.mustaflow-runtime-test"], projectId);
+
+      logger.info({ projectId, taskId, containerId }, "Preflight proof test passed");
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { err, projectId, taskId, containerId },
+        "Preflight proof test failed with exception",
+      );
+      await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
+      if (err instanceof ContainerUnavailableError) {
+        return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+      }
+      return {
+        ok: false,
+        message: `${DEVELOPER_MODE_RUNTIME_NOT_READY} (${errMsg.slice(0, 120)})`,
+      };
+    }
+
+    // ── 3. Neon database health check ───────────────────────────────────────
     // Only run if the project has a DATABASE_URL secret.
     try {
       const [secretRow] = await db
@@ -2051,15 +2133,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         };
 
         // ── Agentic pre-flight gate ────────────────────────────────────────────
-        // For projects with a provisioned container, ensure the container is
-        // awake and the database is reachable before starting the agent loop.
-        // This avoids mid-build failures due to cold-start or DB connectivity.
-        if (project.containerId) {
+        // Ensures the container is awake, proves real exec works end-to-end,
+        // and confirms the database is reachable before the agent loop starts.
+        // Hard-fails for agentic projects that have no containerId (unprovisioned).
+        if (project.containerId || project.builderMode === "agentic") {
           const preflightResult = await runAgenticPreflightGate(
             projectId,
             taskId,
-            project.containerId,
+            project.containerId ?? null,
             project.containerUrl ?? null,
+            project.builderMode,
           );
           if (!preflightResult.ok) {
             const preflightMsg = preflightResult.message ?? "Pre-flight check failed.";
@@ -2548,12 +2631,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         };
 
         // ── Agentic pre-flight gate (refine path) ────────────────────────────
-        if (project.containerId) {
+        if (project.containerId || project.builderMode === "agentic") {
           const preflightResult = await runAgenticPreflightGate(
             projectId,
             taskId,
-            project.containerId,
+            project.containerId ?? null,
             project.containerUrl ?? null,
+            project.builderMode,
           );
           if (!preflightResult.ok) {
             const preflightMsg = preflightResult.message ?? "Pre-flight check failed.";
@@ -4525,7 +4609,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               .where(eq(projectFilesTable.projectId, projectId));
 
             await emitEvent(taskId, "narration", "Syncing files to container…");
-            await syncFilesToContainer(containerId, projectId, allFiles);
+            await syncFilesToContainer(containerId, projectId, allFiles, true);
 
             // Run npm install if a package.json was written
             const hasPackageJson = allFiles.some((f) => f.path === "package.json");

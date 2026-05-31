@@ -174,6 +174,7 @@ export * from './deploymentLog';
 export * from './deployResult';
 export * from './deprovisionDatabase200';
 export * from './destroyContainer200';
+export * from './developerModeRuntimeStatus';
 export * from './disconnectGithub200';
 export * from './dnsHistoryEntry';
 export * from './dnsRecord';
