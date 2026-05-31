@@ -1,0 +1,192 @@
+Please run the live authenticated browser validation for Phase 8B-3A now.
+
+This is validation only.
+
+Do not start Phase 8B-3B, automatic RAG, AI memory, automatic recommendations, Web Search, Image Generation, Advanced Charts, or any unrelated roadmap work.
+
+Current status:
+
+* Phase 8B-3A is accepted as code-complete.
+* Production readiness is pending live authenticated validation.
+* Accepted commit: 441038cdd71c9b87c5743d0792072f8762d4fe63
+
+Validation goal:
+
+Confirm the full user-approved Knowledge-Aware Report flow works with a real signed-in user, real vault entries, real embeddings, and real generated report output.
+
+Required live validation steps:
+
+1. Sign in with a real authenticated user.
+
+Confirm:
+
+* Knowledge Vault page loads
+* user is authenticated
+* no public/anonymous access is possible
+
+2. Confirm vault entries exist.
+
+Confirm:
+
+* at least 5–10 vault entries exist
+* entries have summaries/content/tags/categories/departments
+* entries are owned by the logged-in user
+
+3. Confirm embeddings exist.
+
+Confirm:
+
+* entries are indexed
+* embedding status shows indexed
+* chunk count displays
+* model displays
+* last indexed date displays
+
+If not indexed, run reindex first and confirm:
+
+* reindex succeeds
+* vault_embeddings.embedding IS NOT NULL > 0
+* no raw vectors are shown
+
+4. Open Knowledge Vault and click “Generate Report.”
+
+Confirm:
+
+* panel opens
+* Step 1 / Find is visible
+* query input works
+
+5. Search for relevant knowledge.
+
+Use examples such as:
+
+* WBI downtime improvement
+* seal failures and corrective actions
+* quality defects root cause
+* operations review for packaging downtime
+* maintenance issues causing lost productivity
+
+Confirm:
+
+* relevant suggestion cards appear
+* similarity scores show
+* chunk previews show
+* title/category/department/tags/summary display
+* raw vectors do not display
+
+6. Select entries.
+
+Confirm:
+
+* checkboxes work
+* selected count updates
+* user can deselect entries
+* unselected entries are not sent forward
+* Generate button is disabled until at least one entry is selected
+
+7. Generate report.
+
+Confirm:
+
+* report generates successfully
+* report uses only selected entries
+* unselected entries are not referenced
+* report includes “Knowledge Vault References Used”
+* references include selected entry title/category/department/version/date
+* report does not expose raw internal IDs or vectors
+* report does not invent unsupported details
+
+8. Continue without vault knowledge.
+
+Test the option to continue without selected knowledge.
+
+Confirm:
+
+* user can continue without vault context
+* no selected entries are injected
+* report behavior is safe and clear
+
+9. Sensitive/skipped entry behavior.
+
+If possible, test with a vault entry containing blocked sensitive content or simulate one safely.
+
+Confirm:
+
+* sensitive entry is skipped
+* skipped count or safe warning is shown
+* sensitive content is not sent to the AI
+* no secrets/tokens/API keys appear in report output
+
+10. Audit trail validation.
+
+Confirm knowledge_usage_events receives an event after report generation.
+
+Verify:
+
+* userId stored
+* selected entry IDs stored
+* selected entry versions stored
+* report type stored
+* timestamp stored
+* full report content is not stored
+* raw vault content is not stored
+* raw vectors are not stored in the audit event
+
+11. Copy report button.
+
+Confirm:
+
+* copy button works
+* copied report includes the references section
+* copied report does not include raw vectors or hidden metadata
+
+12. Ownership/security validation.
+
+Confirm:
+
+* another user’s entries cannot be selected or used
+* selectedEntryIds are ownership-checked server-side
+* public Ora cannot access the feature
+* Builder does not automatically use vault knowledge
+* archived entries are skipped unless explicitly allowed
+
+13. Regression validation.
+
+Confirm no regression to:
+
+* Phase 8A vault CRUD
+* Phase 8A.1 keyword search/tags
+* Phase 8B-1 embeddings/reindex
+* Phase 8B-2 semantic search
+* 7B reporting/export stack
+* Ora chat
+* Ora voice
+* Builder Mode
+* Developer Mode
+* Plan Mode
+* public Ora isolation
+
+Required final report:
+
+Please provide a live validation report with:
+
+1. Final commit hash validated
+2. Test account/environment used
+3. Number of vault entries tested
+4. Number of indexed entries
+5. Queries tested
+6. Suggestion results proof
+7. Selection proof
+8. Report generation proof
+9. Knowledge Vault References Used proof
+10. Unselected entries not used proof
+11. Sensitive/skipped entry proof
+12. Audit event proof
+13. Copy report proof
+14. Ownership/auth proof
+15. Regression proof
+16. Bugs found, if any
+17. Recommended UX improvements, if any
+18. Final production readiness recommendation
+
+Do not start any new feature work until this live validation report is complete.
