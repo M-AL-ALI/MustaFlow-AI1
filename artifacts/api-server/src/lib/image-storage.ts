@@ -215,10 +215,7 @@ export async function storeUploadedImage(
 
 // ── Edited images (result from provider edit API) ─────────────────────────────
 
-export async function storeEditedImage(
-  openaiUrl: string,
-  imageId: number,
-): Promise<StorageResult> {
+export async function storeEditedImage(openaiUrl: string, imageId: number): Promise<StorageResult> {
   logger.info({ imageId }, "image-storage: storing edited image");
   const rawBuffer = await resolveRawBuffer(openaiUrl);
   const webpBuffer = await sharp(rawBuffer).webp({ quality: 85 }).toBuffer();
@@ -238,10 +235,7 @@ export async function storeEditedImage(
  * In R2 mode: fetches from the public fileUrl.
  * In dev mode: reads from the OS temp-dir storageKey.
  */
-export async function getImageBuffer(
-  storageKey: string | null,
-  fileUrl: string,
-): Promise<Buffer> {
+export async function getImageBuffer(storageKey: string | null, fileUrl: string): Promise<Buffer> {
   if (fileUrl.startsWith("/api/images/")) {
     if (!storageKey) {
       throw new Error("No storageKey available for dev-mode image retrieval");

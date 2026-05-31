@@ -274,9 +274,11 @@ export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateRe
 
   // The edit endpoint only supports gpt-image quality values (low/medium/high/standard/auto).
   // Map "hd" (dall-e-3 legacy) → "high" so the call is always valid.
-  const editQuality = (
-    resolvedQuality === "hd" ? "high" : resolvedQuality
-  ) as "low" | "medium" | "high" | "standard";
+  const editQuality = (resolvedQuality === "hd" ? "high" : resolvedQuality) as
+    | "low"
+    | "medium"
+    | "high"
+    | "standard";
 
   const baseParams = {
     image: imageFile,
@@ -293,7 +295,10 @@ export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateRe
   } catch (err) {
     const e = err as { code?: string; param?: string };
     if (e.code === "unknown_parameter" && e.param === "quality") {
-      logger.warn({ model }, "image-provider: 'quality' not supported by edit endpoint — retrying without it");
+      logger.warn(
+        { model },
+        "image-provider: 'quality' not supported by edit endpoint — retrying without it",
+      );
       const { quality: _q, ...paramsWithoutQuality } = baseParams;
       void _q;
       response = (await client.images.edit(

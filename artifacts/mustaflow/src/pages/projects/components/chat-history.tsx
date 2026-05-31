@@ -2250,7 +2250,11 @@ function InlineImagePendingCard({
             disabled={!editInstruction.trim() || editSubmitting}
             className="w-full flex items-center justify-center gap-1 py-1 rounded border border-primary/40 bg-primary/8 text-[10px] font-medium text-primary hover:bg-primary/12 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {editSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+            {editSubmitting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Wand2 className="h-3 w-3" />
+            )}
             {editSubmitting ? "Applying…" : "Apply edit"}
           </button>
         </div>
@@ -2456,7 +2460,11 @@ function InlineImageResultCard({
             disabled={!editInstruction.trim() || editSubmitting}
             className="w-full flex items-center justify-center gap-1 py-1 rounded border border-primary/40 bg-primary/8 text-[10px] font-medium text-primary hover:bg-primary/12 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {editSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+            {editSubmitting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Wand2 className="h-3 w-3" />
+            )}
             {editSubmitting ? "Applying…" : "Apply edit"}
           </button>
         </div>

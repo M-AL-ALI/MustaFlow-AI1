@@ -50,10 +50,9 @@ const uploadMiddleware = multer({
       cb(null, true);
     } else {
       cb(
-        Object.assign(
-          new Error("Unsupported file type. Allowed: JPEG, PNG, WebP, GIF"),
-          { code: "UNSUPPORTED_FILE_TYPE" },
-        ),
+        Object.assign(new Error("Unsupported file type. Allowed: JPEG, PNG, WebP, GIF"), {
+          code: "UNSUPPORTED_FILE_TYPE",
+        }),
       );
     }
   },
@@ -185,7 +184,10 @@ router.post(
 
     const file = req.file;
     if (!file) {
-      res.status(400).json({ error: "No image file provided. Send a multipart/form-data request with field name 'image'." });
+      res.status(400).json({
+        error:
+          "No image file provided. Send a multipart/form-data request with field name 'image'.",
+      });
       return;
     }
 

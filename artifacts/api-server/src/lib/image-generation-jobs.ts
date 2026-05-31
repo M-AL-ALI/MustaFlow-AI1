@@ -394,8 +394,13 @@ async function runImageEditJob(
   creditsWereDeducted: boolean,
 ): Promise<void> {
   const { jobId, imageId, userId } = job;
-  const { parentStorageKey, parentFileUrl, instruction, quality = "standard", parentAspectRatio } =
-    opts;
+  const {
+    parentStorageKey,
+    parentFileUrl,
+    instruction,
+    quality = "standard",
+    parentAspectRatio,
+  } = opts;
 
   try {
     job.status = "generating";
