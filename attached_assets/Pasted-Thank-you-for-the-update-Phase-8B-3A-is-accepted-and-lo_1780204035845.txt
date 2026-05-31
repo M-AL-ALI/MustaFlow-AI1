@@ -1,0 +1,204 @@
+Thank you for the update.
+
+Phase 8B-3A is accepted and locked as production-ready.
+
+However, Phase 9A-1 should NOT be accepted yet just because it merged in the background.
+
+The generated_images table existing with 24 columns proves the migration ran, but it does not prove the full Phase 9A-1 feature is working.
+
+Please provide a full Phase 9A-1 validation report before I accept it.
+
+Required report:
+
+1. Final commit hash for Phase 9A-1
+2. Final affected files
+
+List all created/modified files, including:
+
+* image provider
+* image routes
+* image storage
+* image safety
+* image job/service logic
+* generated_images schema/migration
+* OpenAPI changes
+* generated client/Zod files
+* Ora chat integration files
+* Image Studio page
+* sidebar/App route changes
+
+3. Provider configuration proof
+
+Confirm:
+
+* which provider is used
+* which model is used
+* whether it uses direct OpenAI API or Replit proxy
+* whether OPENAI_IMAGE_API_KEY or OPENAI_API_KEY is present
+* provider key is server-side only
+* provider key is not logged or exposed
+
+4. Ora image generation proof
+
+Test authenticated Ora chat:
+
+User prompt:
+
+“Create a logo for my mechanic app”
+
+Confirm:
+
+* Ora detects image intent
+* normal text/chat path is not used
+* generation starts
+* image result card appears in chat
+* image preview is visible
+* prompt/style/size labels appear
+* download button works
+* delete button works if included
+* disabled “Use in Project — Coming in Phase 9A-3” does not call any API
+
+5. Public Ora proof
+
+Confirm public/unauthenticated Ora does not generate images.
+
+If public Ora receives:
+
+“Create a logo”
+
+It should only show a sign-in / open Image Studio CTA.
+
+6. Image Studio page proof
+
+Confirm /image-studio works for authenticated users.
+
+Test:
+
+* prompt textarea
+* negative prompt
+* style selector
+* purpose selector
+* aspect ratio selector
+* quality selector
+* transparent background toggle
+* variation count
+* cost preview
+* generate button
+* result grid
+* download
+* delete
+
+7. Storage proof
+
+Confirm:
+
+* images are stored correctly
+* only metadata/URLs are stored in DB
+* no base64 image data in DB
+* R2 behavior is correct
+* production fails clearly if R2 is missing
+* development fallback is dev-only, if used
+
+8. Database proof
+
+Confirm generated image rows include:
+
+* userId
+* prompt
+* negativePrompt
+* purpose
+* style
+* aspectRatio
+* quality
+* transparentBackground
+* providerName
+* modelName
+* status
+* fileUrl
+* storageKey
+* thumbnailUrl
+* safetyStatus
+* creditCost
+* errorCategory
+* createdAt
+* updatedAt
+* deletedAt
+
+9. Credit/refund proof
+
+Confirm:
+
+* credits deducted on generation
+* credits refunded on provider/system failure
+* safety-blocked prompts do not deduct credits
+* deleting a successful image does not refund credits
+
+10. Rate-limit proof
+
+Confirm:
+
+* max generations/hour works
+* daily limit works
+* max 4 images/request works
+* 429 response is safe and clear
+
+11. Safety validation proof
+
+Test blocked prompts safely.
+
+Confirm:
+
+* safety runs before provider call
+* safety runs before credit deduction
+* blocked requests return 422
+* blocked reason is user-friendly
+* no provider call is made
+* no credits deducted
+
+12. Non-interference proof
+
+Confirm:
+
+* Builder Mode still works
+* Developer Mode still works
+* Plan Mode still works
+* normal Builder prompts do not trigger image generation
+* Developer Mode commands do not trigger image generation
+* project file mutation routes were not changed
+* deployment routes were not changed
+* no project files are modified by generated images
+* Knowledge Vault / Phase 8B files were not modified
+* RAG / AI memory files were not modified
+
+13. OpenAPI/codegen proof
+
+Confirm:
+
+* OpenAPI has image routes/schemas
+* codegen ran
+* generated clients are clean
+* no codegen drift
+
+14. Quality proof
+
+Confirm:
+
+* typecheck passed
+* lint passed
+* format passed
+* codegen drift passed
+* API server running
+* frontend running
+* no unrelated failures
+
+15. Known gaps
+
+Clearly list anything from the approved Phase 9A-1 plan that was not implemented.
+
+If any approved items are missing, do not call Phase 9A-1 complete. Mark it as partial and provide a completion plan.
+
+Important:
+
+Task #1182 Developer Mode work is separate. Keep it separate from Phase 9A-1. Do not mix Developer Mode fixes with Image Studio validation.
+
+Do not start Phase 9A-2, image editing, project insertion, brand kit, prompt assistant, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work until Phase 9A-1 is validated and accepted.
