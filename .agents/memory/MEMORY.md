@@ -13,3 +13,5 @@
 - [Playwright JWT redaction blocks direct API tests](playwright-jwt-redaction.md) — Playwright testing tool aborts when Clerk session JWTs appear in captured output; use UI-only flows (no raw fetch) or testClerkAuth with browser navigation only.
 - [AI proxy intermittent empty content](ai-proxy-empty-content.md) — OpenAI proxy occasionally returns choices[0].message.content = null; retry once (1.5 s gap) before failing; also replace Unicode box-drawing chars in prompts with plain ASCII.
 - [OpenAI image model family differences](openai-image-model-families.md) — gpt-image-1 vs dall-e-3 have incompatible quality/size params and response formats; default to gpt-image-1 for broader API key compatibility.
+- [Clerk testClerkAuth rate limiting](clerk-testauth-rate-limit.md) — dev-key throttle blocks subagent for whole session; workaround is DevOnlyAuthAdapter swap for API-level proof, then restore.
+- [OpenAPI detectedIntent enum must cover all intents](openapi-detected-intent-enum.md) — missing intent in ChatExchange.detectedIntent causes 500 on response after job already enqueued; add any new intent to the enum and re-run codegen.
