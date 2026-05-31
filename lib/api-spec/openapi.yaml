@@ -7163,7 +7163,7 @@ components:
         assistantMessage: { $ref: "#/components/schemas/ChatMessage" }
         detectedIntent:
           type: string
-          enum: [converse, plan, build]
+          enum: [converse, plan, build, image_generate]
           description: "The intent auto-detected or explicitly provided for this exchange."
 
     ToolCallEventPayload:

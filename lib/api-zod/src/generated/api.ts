@@ -1394,7 +1394,7 @@ export const SendMessageResponse = zod.object({
   "origin": zod.string().nullish().describe('Surface that produced this message. \'zero\' = Zero agent panel; null = main builder chat or other sources.'),
   "createdAt": zod.coerce.date()
 }),
-  "detectedIntent": zod.enum(['converse', 'plan', 'build']).optional().describe('The intent auto-detected or explicitly provided for this exchange.')
+  "detectedIntent": zod.enum(['converse', 'plan', 'build', 'image_generate']).optional().describe('The intent auto-detected or explicitly provided for this exchange.')
 })
 
 

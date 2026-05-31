@@ -1149,6 +1149,7 @@ export const ChatExchangeDetectedIntent = {
   converse: 'converse',
   plan: 'plan',
   build: 'build',
+  image_generate: 'image_generate',
 } as const;
 
 export interface ChatExchange {
