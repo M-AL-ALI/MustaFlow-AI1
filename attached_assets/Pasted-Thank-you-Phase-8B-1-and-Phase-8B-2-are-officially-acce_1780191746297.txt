@@ -1,0 +1,93 @@
+Thank you. Phase 8B-1 and Phase 8B-2 are officially accepted as production-ready.
+
+Accepted final production-ready commit:
+
+5b509915fe8ce0c8310ce344784dac1a00d5b92b
+
+Accepted Phase 8B-1 scope:
+
+* Direct OpenAI embeddings using OPENAI_API_KEY
+* Replit AI proxy removed from the embedding path
+* text-embedding-3-small
+* vault_embeddings table
+* pgvector vector(1536)
+* manual entry reindex
+* manual reindex-all
+* accurate failed/indexed counts
+* no false-success indexing
+* no null-vector inserts
+* embedding status only counts rows where embedding IS NOT NULL
+* retry/backoff for 429 errors
+* hard failure on provider errors
+* safe server-side API key usage only
+
+Accepted Phase 8B-2 scope:
+
+* semantic search route
+* semantic search service
+* query embedding
+* pgvector similarity search
+* semantic result ranking
+* similarity score display
+* chunk preview display
+* metadata filters
+* semantic search UI
+* no-embeddings state
+* no-results state
+* reindex prompt
+* no raw vector exposure
+
+Accepted final fixes:
+
+* embeddings.ts now calls OpenAI directly at https://api.openai.com/v1/embeddings
+* OPENAI_API_KEY is used server-side only
+* Replit proxy is not used for embeddings
+* embedding failures throw typed errors
+* reindex no longer reports success when vectors are not stored
+* MIN_SIMILARITY_SCORE = 25 prevents nonsense semantic matches
+* off-topic searches now show “No matching entries found”
+* dead generateEmbedding() null-check was replaced with proper try/catch
+* semantic search still returns relevant matches with real similarity scores
+
+Accepted live validation proof:
+
+* OpenAI billing/quota active
+* real vectors generated
+* vault_embeddings.embedding IS NOT NULL > 0
+* reindex response accurate
+* semantic search returns real results
+* similarity scores display
+* chunk previews display
+* result click opens entry viewer
+* no raw embedding arrays returned
+* no-results behavior works
+* keyword search unaffected
+* archive/restore confirmed
+* all 41 live validation steps passed
+
+Accepted quality proof:
+
+* typecheck passed
+* lint passed
+* format passed
+* codegen drift passed
+* API server running
+* frontend running
+* no unrelated failures reported
+
+Accepted production readiness decision:
+
+Phase 8B-1 Embedding Infrastructure is production-ready.
+
+Phase 8B-2 Semantic Search is production-ready.
+
+Current stable Knowledge Vault baseline now includes:
+
+* Phase 8A — Vault Foundation
+* Phase 8A.1 — Tags + full-text search optimization
+* Phase 8B-1 — Embedding Infrastructure
+* Phase 8B-2 — Semantic Search
+
+Important boundary:
+
+Do not start Phase 8B-3, RAG, AI memory, knowledge-aware reporting, automatic recommendations, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until I explicitly approve the next phase.
