@@ -53,7 +53,8 @@ import {
   isPolicyStrictness,
   type PolicyStrictness,
 } from "./policy";
-import { db, toolAuditTable, agentToolCallsTable, projectsTable } from "@workspace/db";
+import { db, toolAuditTable, agentToolCallsTable, agentTasksTable, projectsTable } from "@workspace/db";
+import { ContainerUnavailableError } from "./errors";
 import {
   listEnabledSkills,
   loadSkillContent,
@@ -178,7 +179,8 @@ export type AgentLoopReport = {
     | "model-stopped"
     | "aborted"
     | "checks-failed"
-    | "rate_limited";
+    | "rate_limited"
+    | "container-unavailable";
   toolCalls: ToolCallRecord[];
   commandsRun: CommandRecord[];
   checkResults: CheckResultRecord[];
@@ -1720,6 +1722,24 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       break;
     }
 
+    // ── Heartbeat (every 5 steps) ──────────────────────────────────────────
+    // Writes last_heartbeat_at + current_step to agent_tasks so the stuck-run
+    // scheduler can distinguish an actively running build from one that crashed
+    // silently. Fire-and-forget (non-fatal).
+    if (input.taskId && step % 5 === 1) {
+      void (async () => {
+        try {
+          const { eq: eqHb } = await import("drizzle-orm");
+          await db
+            .update(agentTasksTable)
+            .set({ lastHeartbeatAt: new Date(), currentStep: step })
+            .where(eqHb(agentTasksTable.id, input.taskId!));
+        } catch (err) {
+          logger.warn({ err, step }, "agent-loop: heartbeat write failed (non-fatal)");
+        }
+      })();
+    }
+
     // ── Per-project hourly rate limiter ───────────────────────────────────
     // Count tool calls written to agent_tool_calls in the last 60 minutes for
     // this project. This spans all concurrent agent runs so it acts as a hard
@@ -1810,12 +1830,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         break;
       }
       // Circuit breaker open — AI provider is temporarily degraded.
-      // Don't count against consecutiveErrors (it would silently exhaust
-      // REPEATED_ERROR_CAP). Instead break immediately with a clear message.
       if (err instanceof Error && err.constructor.name === "CircuitOpenError") {
         logger.warn({ err, step }, "agent-loop: circuit breaker open — aborting loop");
         terminationReason = "repeated-error";
         finalSummary = "The AI service is temporarily unavailable. Please try again in 30 seconds.";
+        break;
+      }
+      // Container unavailable — thrown by write_file / apply_patch when
+      // FLY_API_TOKEN is absent or the container subsystem is not configured.
+      if (err instanceof ContainerUnavailableError) {
+        logger.warn({ err, step }, "agent-loop: container unavailable — aborting loop");
+        terminationReason = "container-unavailable";
+        finalSummary =
+          "The developer container is not available or not configured. " +
+          "File writes could not sync to the container. " +
+          "Check that FLY_API_TOKEN is set and the project is provisioned, then retry.";
         break;
       }
       logger.warn({ err, step }, "agent-loop: model call failed");
@@ -2216,28 +2245,45 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const name = call.function.name;
       const parsed = parseArgs(call);
       const tStart = Date.now();
-      const result = await executeTool({
-        name,
-        args: parsed,
-        workspace,
-        stack,
-        profile,
-        input,
-        commandsRun,
-        step,
-        containerState,
-        loadedSkills,
-        e2eResults,
-        screenshotBudget,
-        fetchBudget,
-        senseCounts,
-        creativeBudget,
-        creativeCounts,
-        presentedAssets,
-        loopStartedAt: startedAt,
-        loopWallClockMs: wallClockMs,
-        mcpToolsCatalog,
-      });
+      let result: Awaited<ReturnType<typeof executeTool>>;
+      try {
+        result = await executeTool({
+          name,
+          args: parsed,
+          workspace,
+          stack,
+          profile,
+          input,
+          commandsRun,
+          step,
+          containerState,
+          loadedSkills,
+          e2eResults,
+          screenshotBudget,
+          fetchBudget,
+          senseCounts,
+          creativeBudget,
+          creativeCounts,
+          presentedAssets,
+          loopStartedAt: startedAt,
+          loopWallClockMs: wallClockMs,
+          mcpToolsCatalog,
+        });
+      } catch (err) {
+        // ContainerUnavailableError thrown by write_file / apply_patch when
+        // FLY_API_TOKEN is absent — terminate immediately with a clear message.
+        if (err instanceof ContainerUnavailableError) {
+          logger.warn({ err, name, step }, "agent-loop: container unavailable in serial dispatch");
+          terminationReason = "container-unavailable";
+          finalSummary =
+            "The developer container is not available or not configured. " +
+            "File writes could not sync to the container. " +
+            "Check that FLY_API_TOKEN is set and the project is provisioned, then retry.";
+          stepFinalized = true;
+          break;
+        }
+        throw err;
+      }
       const durationMs = Date.now() - tStart;
 
       // Most tool observations are truncated to MAX_OBSERVATION_CHARS (8KB) so
@@ -3856,10 +3902,15 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         after: content,
       });
       if (containerState.id) {
+        const { writeFileToContainer } = await import("./container");
+        // ContainerUnavailableError propagates to the outer loop catch so the
+        // agent loop terminates with a clear error message. All other errors
+        // (network/Fly API) are non-fatal because the file is already written
+        // to the in-memory workspace and will be persisted to the DB on finalize.
         try {
-          const { writeFileToContainer } = await import("./container");
           await writeFileToContainer(containerState.id, path, content, input.projectId);
         } catch (err) {
+          if (err instanceof ContainerUnavailableError) throw err;
           logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
         }
       }
@@ -3894,10 +3945,12 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         after: newText,
       });
       if (containerState.id) {
+        const { writeFileToContainer } = await import("./container");
+        // ContainerUnavailableError propagates to the outer loop catch (same as write_file).
         try {
-          const { writeFileToContainer } = await import("./container");
           await writeFileToContainer(containerState.id, path, next, input.projectId);
         } catch (err) {
+          if (err instanceof ContainerUnavailableError) throw err;
           logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
         }
       }

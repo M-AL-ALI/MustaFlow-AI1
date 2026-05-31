@@ -424,6 +424,15 @@ export const agentTasksTable = pgTable(
     tokenCount: integer("token_count"),
     hasBrainstormContext: boolean("has_brainstorm_context").notNull().default(false),
     brainstormTurnCount: integer("brainstorm_turn_count"),
+    // Developer-mode runtime tracking (Task #1182)
+    // Updated by the agent loop every ~30 s to detect stuck runs.
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+    // Human-readable failure reason written on terminal failure so the frontend
+    // can surface it without parsing the full task report.
+    failureReason: text("failure_reason"),
+    // Current tool step — updated at every tool dispatch so stuck-run detection
+    // can distinguish a genuinely stuck build from one that is just slow.
+    currentStep: integer("current_step"),
   },
   (table) => [
     index("agent_tasks_project_id_created_at_idx").on(table.projectId, table.createdAt),

@@ -30,6 +30,7 @@ import { PreviewPane } from "./components/preview-pane";
 import { DevCanvasTab } from "./components/canvas-tab";
 import { DeploymentPanel } from "./components/deployment-panel";
 import { DevChatPanel } from "./components/dev-chat-panel";
+import { DevRuntimeStatusBar } from "./components/dev-runtime-status-bar";
 
 type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -284,6 +285,13 @@ export default function DevWorkspacePage() {
           onPaneLayout={handlePaneLayout}
           onDeploy={() => setDeployPanelOpen(true)}
           onPanelOpen={handlePanelToggle}
+        />
+
+        {/* Infrastructure status bar — shows container/provisioning state */}
+        <DevRuntimeStatusBar
+          containerStatus={containerStatus}
+          provisioningStatus={(project as { provisioningStatus?: string | null } | undefined)?.provisioningStatus}
+          hasContainer={!!project && !!(project as { containerId?: string | null }).containerId}
         />
 
         {/* Deployment panel slide-over */}

@@ -36,6 +36,7 @@ import {
   getListTaskEventsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -233,6 +234,7 @@ interface DevChatPanelProps {
 
 export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const [prompt, setPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<AgentMode>(loadPersistedMode);
@@ -610,9 +612,16 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
             void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
             void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
           },
-          onError: () => {
+          onError: (err: unknown) => {
             void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
             setPendingStartedAt(null);
+            const apiErr = err as { response?: { data?: { error?: string; code?: string } } };
+            const code = apiErr?.response?.data?.code;
+            const message =
+              code === "workspace_not_ready"
+                ? "Your project workspace is still being set up. Please try again in a moment."
+                : (apiErr?.response?.data?.error ?? "Failed to send message. Please try again.");
+            toast({ title: message, variant: "destructive" });
           },
         },
       );

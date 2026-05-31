@@ -309,6 +309,33 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   // This ensures assistant messages are stored with planMode=true so the plan-card UI renders.
   const effectivePlanMode = planMode || resolvedIntent === "plan";
 
+  // Provisioning gate: prevent build intents on agentic projects that have not
+  // finished provisioning. Conversational intents (converse, plan, debug,
+  // refactor, review, explain) are always allowed — they never write to the
+  // container. We also allow when provisioningStatus is null / 'idle' so that
+  // static and legacy projects are never gated.
+  const needsContainer = resolvedIntent === "build" || runInBackground;
+  if (needsContainer) {
+    const bMode = (project as unknown as { builderMode?: string | null }).builderMode;
+    const pStatus = (project as unknown as { provisioningStatus?: string | null }).provisioningStatus;
+    if (bMode === "agentic" && pStatus != null && pStatus !== "ready" && pStatus !== "idle") {
+      if (idempotencyKey) {
+        idempotencyStore.set(idempotencyKey, {
+          status: "done",
+          result: undefined,
+          timestamp: Date.now(),
+        });
+      }
+      res.status(409).json({
+        error:
+          "Your project workspace is still being set up. Please wait a moment and try again once the provisioning completes.",
+        code: "workspace_not_ready",
+        provisioningStatus: pStatus,
+      });
+      return;
+    }
+  }
+
   // Save user message
   const messageOrigin = typeof origin === "string" && origin.length > 0 ? origin : null;
   const [userMessage] = await db

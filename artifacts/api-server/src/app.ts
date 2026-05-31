@@ -28,6 +28,7 @@ import { runJob, registerJobWorkers } from "./lib/jobs";
 import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
+import { startStuckRunScheduler } from "./lib/stuck-run-scheduler";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -62,6 +63,10 @@ startDomainRenewalScheduler();
 // Kick off the Knowledge Vault auto-promotion scheduler.
 // Every 6 h: promotes project-scoped entries with thumbsUp>=3 and usageCount>=2 to global scope.
 startKnowledgePromotionScheduler();
+
+// Stuck-run sweeper (Task #1182).
+// Every 2 min: marks agent_tasks rows stuck in "building" without a heartbeat as "failed".
+startStuckRunScheduler();
 
 const app: Express = express();
 

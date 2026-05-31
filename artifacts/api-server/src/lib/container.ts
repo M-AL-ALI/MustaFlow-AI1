@@ -21,6 +21,7 @@
 import { db, projectsTable, containerLogsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
+import { ContainerUnavailableError } from "./errors";
 
 export type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
 
@@ -356,13 +357,10 @@ export async function execInContainer(
   exitCode: number;
 }> {
   if (!isConfigured()) {
-    return {
-      ok: false,
-      output: "Container exec not available — FLY_API_TOKEN not configured",
-      stdout: "",
-      stderr: "Container exec not available — FLY_API_TOKEN not configured",
-      exitCode: -1,
-    };
+    throw new ContainerUnavailableError(
+      "Container exec is not available: FLY_API_TOKEN is not configured. " +
+        "Provision the project or add FLY_API_TOKEN to the environment.",
+    );
   }
   try {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
@@ -401,7 +399,12 @@ export async function writeFileToContainer(
   content: string,
   projectId: number,
 ): Promise<boolean> {
-  if (!isConfigured()) return false;
+  if (!isConfigured()) {
+    throw new ContainerUnavailableError(
+      "writeFileToContainer: FLY_API_TOKEN is not configured. " +
+        "Cannot sync files to a container without Fly.io credentials.",
+    );
+  }
   try {
     const b64 = Buffer.from(content, "utf8").toString("base64");
     const dir = filePath.includes("/")
@@ -558,7 +561,12 @@ export async function ensureContainerAwake(
   containerUrl: string | null,
   timeoutSeconds = 30,
 ): Promise<{ ok: boolean; message?: string }> {
-  if (!isConfigured()) return { ok: true };
+  if (!isConfigured()) {
+    throw new ContainerUnavailableError(
+      "ensureContainerAwake: FLY_API_TOKEN is not configured. " +
+        "Cannot wake a container without Fly.io credentials.",
+    );
+  }
 
   // Wake the machine (idempotent — Fly ignores this when already running)
   await startContainer(machineId, projectId);

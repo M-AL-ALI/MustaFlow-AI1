@@ -122,7 +122,21 @@ async function runAgenticPreflightGate(
   if (containerId) {
     await emitEvent(taskId, "narration", "Waking your server…");
     const { ensureContainerAwake } = await import("./container");
-    let wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+    const { ContainerUnavailableError } = await import("./errors");
+    let wakeResult: { ok: boolean; message?: string };
+    try {
+      wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+    } catch (err) {
+      if (err instanceof ContainerUnavailableError) {
+        return {
+          ok: false,
+          message:
+            "Container subsystem is not configured (FLY_API_TOKEN missing). " +
+            "Add the Fly.io API token to the project environment and retry.",
+        };
+      }
+      throw err;
+    }
     if (!wakeResult.ok) {
       // Single automatic retry after 10 s to recover from transient cold-start
       // delays without requiring the user to re-submit their prompt.
@@ -132,7 +146,19 @@ async function runAgenticPreflightGate(
       );
       await emitEvent(taskId, "narration", "Server is slow to wake — retrying in 10 seconds…");
       await new Promise((r) => setTimeout(r, 10_000));
-      wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+      try {
+        wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+      } catch (err) {
+        if (err instanceof ContainerUnavailableError) {
+          return {
+            ok: false,
+            message:
+              "Container subsystem is not configured (FLY_API_TOKEN missing). " +
+              "Add the Fly.io API token to the project environment and retry.",
+          };
+        }
+        throw err;
+      }
       if (!wakeResult.ok) {
         return { ok: false, message: wakeResult.message ?? "Container did not wake in time." };
       }
