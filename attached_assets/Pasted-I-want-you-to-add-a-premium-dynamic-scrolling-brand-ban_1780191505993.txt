@@ -1,0 +1,95 @@
+I want you to add a premium dynamic scrolling brand banner/ticker on the main landing page of www.mustaflow.com.
+
+Goal:
+Create a full-width horizontal scrolling banner that looks like a professional advertising ticker / brand cloud. It should show the logos/names of major technology companies and platforms that MustaFlow AI may integrate with, build for, or support, including:
+
+* OpenAI
+* Google
+* Microsoft
+* Apple / iOS
+* Android
+* GitHub
+* MechConnect, using my existing MechConnect logo if available in the project assets
+* MustaFlow AI, using our own logo/brand
+* Optional additional technology ecosystem logos if appropriate, such as Stripe, Cloudflare, Supabase, Firebase, PostgreSQL, Vercel, Expo, React, Flutter, Figma, or others already relevant to the platform
+
+Important legal/branding requirement:
+Do NOT present these companies as official partners, sponsors, or endorsements unless we have a verified partnership. The text above the banner should say something safe like:
+
+“Build with the technologies and ecosystems your apps already depend on”
+
+or
+
+“Designed to work across leading AI, cloud, mobile, payment, and developer ecosystems”
+
+Do NOT use wording like:
+“Official partners”
+“Sponsors”
+“Trusted by OpenAI, Google, Microsoft, Apple”
+“Backed by these companies”
+
+Logo usage requirement:
+Use official, properly sourced logo assets only where allowed by the brand guidelines. Do not stretch, distort, recolor, crop, rotate, or modify third-party logos. Keep each logo’s original aspect ratio. If a third-party logo cannot be used safely, replace it with a clean text-only brand pill instead of using an unauthorized logo. For our own brands, MustaFlow AI and MechConnect can be highlighted more strongly.
+
+Design requirements:
+
+* Full-width section across the landing page.
+* Place it on the main landing page under the hero section or directly below the main AI prompt area.
+* Use a premium dark glassmorphism style that matches MustaFlow AI.
+* The banner should feel dynamic, futuristic, and high-quality.
+* The logos should scroll horizontally in an infinite seamless loop.
+* Add two scrolling rows if it looks better:
+    * First row moving left
+    * Second row moving right
+* Use subtle gradients/fade masks on the left and right edges so the logos fade in/out smoothly.
+* Each logo should sit inside a clean rounded pill/card.
+* Use soft borders, subtle glow, and smooth hover effects.
+* On hover, pause or slow the animation and slightly brighten the logo card.
+* Must be fully responsive on desktop, tablet, and mobile.
+* On mobile, keep the height smaller and logos readable.
+* Support dark mode and match the current landing page style.
+* Do not make it too loud or cheap-looking. It should look like a premium AI platform, not a spam ad banner.
+
+Accessibility requirements:
+
+* Every logo must have clear alt text, for example: “OpenAI logo”, “GitHub logo”, “MustaFlow AI logo”.
+* Respect prefers-reduced-motion. If the user has reduced motion enabled, stop the auto-scroll and show a static wrapped logo grid instead.
+* Maintain good contrast.
+* Do not use images without labels/alt text.
+
+Performance requirements:
+
+* Use SVG logos where possible.
+* Store logo files locally in the project assets/public folder. Do not hotlink external image URLs.
+* Optimize image sizes.
+* Prevent layout shift by setting fixed logo/card dimensions.
+* The animation should be CSS-based, smooth, and lightweight.
+* Avoid heavy JavaScript animation libraries unless already used in the project.
+
+Implementation suggestion:
+Create a reusable component named something like:
+
+BrandTicker
+LogoTicker
+TechnologyEcosystemBanner
+
+Use a data array like:
+
+[
+{ name: “OpenAI”, logo: “/logos/openai.svg”, url: “https://openai.com” },
+{ name: “Google”, logo: “/logos/google.svg”, url: “https://google.com” },
+{ name: “Microsoft”, logo: “/logos/microsoft.svg”, url: “https://microsoft.com” },
+{ name: “Apple”, logo: “/logos/apple.svg”, url: “https://apple.com” },
+{ name: “Android”, logo: “/logos/android.svg”, url: “https://android.com” },
+{ name: “GitHub”, logo: “/logos/github.svg”, url: “https://github.com” },
+{ name: “MechConnect”, logo: “/logos/mechconnect.svg”, url: “#” },
+{ name: “MustaFlow AI”, logo: “/logos/mustaflow.svg”, url: “/” }
+]
+
+Duplicate the logo array in the rendered markup to create a seamless infinite loop.
+
+Add a small disclaimer below the banner in subtle text:
+“Third-party logos and trademarks belong to their respective owners. Displayed for compatibility and ecosystem reference only.”
+
+Final result:
+The landing page should now have a beautiful dynamic brand ticker that communicates MustaFlow AI is a serious platform connected to modern AI, developer, mobile, cloud, and app-building ecosystems, while staying legally safe and visually premium.
