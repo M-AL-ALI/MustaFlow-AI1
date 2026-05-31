@@ -250,6 +250,7 @@ export * from './githubStatusResult';
 export * from './githubSyncStatusResult';
 export * from './grantAdminRole200';
 export * from './healthStatus';
+export * from './healthStatusContainerSubsystem';
 export * from './imageGenerateRequest';
 export * from './imageGenerateRequestAspectRatio';
 export * from './imageGenerateRequestPurpose';

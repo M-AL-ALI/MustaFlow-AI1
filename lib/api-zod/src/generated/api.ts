@@ -12,7 +12,8 @@ import * as zod from 'zod';
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
+  "status": zod.string(),
+  "containerSubsystem": zod.enum(['ok', 'unconfigured', 'error']).optional().describe('Status of the Fly.io container subsystem. \"ok\" = token is configured and API is reachable. \"unconfigured\" = FLY_API_TOKEN is not set (feature disabled, not an error). \"error\" = token is set but API call failed at startup.\n')
 })
 
 

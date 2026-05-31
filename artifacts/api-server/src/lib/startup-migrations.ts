@@ -3063,6 +3063,33 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-knowledge-usage-events ──────────────────────────────────────
+  {
+    name: "migrate-knowledge-usage-events",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_usage_events (
+          id                      BIGSERIAL   PRIMARY KEY,
+          user_id                 TEXT        NOT NULL,
+          query                   TEXT        NOT NULL,
+          report_type             TEXT        NOT NULL DEFAULT 'knowledge-report',
+          selected_entry_ids      INTEGER[]   NOT NULL DEFAULT '{}',
+          selected_entry_versions INTEGER[]   NOT NULL DEFAULT '{}',
+          entry_count             INTEGER     NOT NULL DEFAULT 0,
+          created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_kue_user_id ON knowledge_usage_events (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_kue_created_at ON knowledge_usage_events (created_at)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
+
   // ── migrate-agent-task-heartbeat (Task #1182) ────────────────────────────
   {
     name: "migrate-agent-task-heartbeat",

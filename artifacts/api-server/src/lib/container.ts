@@ -76,6 +76,136 @@ function isConfigured(): boolean {
   return FLY_TOKEN.length > 0;
 }
 
+// ─── Container subsystem self-check ──────────────────────────────────────────
+
+/** Cached result of the startup connectivity probe. null = not yet run. */
+let _containerSubsystemStatus: "ok" | "unconfigured" | "error" | null = null;
+
+/**
+ * Run a one-time self-check at server startup to verify that the Fly.io
+ * container exec path is working before the server accepts traffic.
+ *
+ * Probe strategy:
+ *   1. If FLY_API_TOKEN is absent → "unconfigured" (graceful no-op).
+ *   2. List machines in the app. If the API call fails → "error".
+ *   3. If any machine is in "started" state, call the `/exec` endpoint with
+ *      `echo OK` to exercise the actual exec path. Failure → "error".
+ *   4. If no started machines exist (e.g. fresh deploy with no projects yet),
+ *      API reachability alone is verified and "ok" is returned with a note.
+ *
+ * The result is cached in-process. The health endpoint reads it without an
+ * additional API call on every request.
+ *
+ * A 10-second timeout is applied to the entire probe so a hung Fly API
+ * never blocks server startup indefinitely.
+ */
+export async function runContainerSelfCheck(): Promise<"ok" | "unconfigured" | "error"> {
+  if (!isConfigured()) {
+    logger.warn(
+      "container subsystem: unconfigured — FLY_API_TOKEN is not set. Container features disabled.",
+    );
+    _containerSubsystemStatus = "unconfigured";
+    return "unconfigured";
+  }
+
+  const PROBE_TIMEOUT_MS = 10_000;
+
+  try {
+    // Use a clearable setTimeout so the timer is cancelled when the probe wins
+    // the race. AbortSignal.timeout + an event listener cannot be cleaned up,
+    // causing false "timed out" log lines even after a successful probe.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<"error">((resolve) => {
+      timeoutHandle = setTimeout(() => {
+        logger.warn(
+          { timeoutMs: PROBE_TIMEOUT_MS },
+          "container subsystem: self-check timed out — marking as error",
+        );
+        resolve("error");
+      }, PROBE_TIMEOUT_MS);
+    });
+
+    const result = await Promise.race([
+      _runContainerProbe().finally(() => clearTimeout(timeoutHandle)),
+      timeoutPromise,
+    ]);
+    _containerSubsystemStatus = result;
+    return result;
+  } catch (err) {
+    logger.warn({ err }, "container subsystem: ERROR — self-check threw unexpectedly");
+    _containerSubsystemStatus = "error";
+    return "error";
+  }
+}
+
+/** Internal implementation — runs the actual Fly.io API probe. */
+async function _runContainerProbe(): Promise<"ok" | "error"> {
+  // Step 1: verify the API is reachable and the token is valid.
+  let listRes: Response;
+  try {
+    listRes = await flyFetch(`/apps/${FLY_APP}/machines`);
+  } catch (err) {
+    logger.warn({ err }, "container subsystem: ERROR — Fly.io API connectivity probe failed");
+    return "error";
+  }
+
+  if (!listRes.ok && listRes.status !== 404) {
+    logger.warn(
+      { status: listRes.status },
+      "container subsystem: ERROR — Fly.io machines list returned unexpected status",
+    );
+    return "error";
+  }
+
+  // Step 2: if there are started machines, verify the exec path directly.
+  if (listRes.ok) {
+    let machines: { id?: string; state?: string }[] = [];
+    try {
+      machines = (await listRes.json()) as { id?: string; state?: string }[];
+    } catch {
+      // JSON parse failure is non-fatal — proceed without exec probe
+    }
+
+    const startedMachine = machines.find((m) => m.state === "started" && m.id);
+    if (startedMachine?.id) {
+      try {
+        const execRes = await flyFetch(`/apps/${FLY_APP}/machines/${startedMachine.id}/exec`, {
+          method: "POST",
+          body: JSON.stringify({ command: ["/bin/sh", "-c", "echo OK"], timeout: 5 }),
+        });
+        if (execRes.ok) {
+          logger.info(
+            { machineId: startedMachine.id },
+            "container subsystem: OK — Fly.io API reachable and exec path verified",
+          );
+          return "ok";
+        }
+        logger.warn(
+          { machineId: startedMachine.id, status: execRes.status },
+          "container subsystem: ERROR — exec probe returned unexpected status",
+        );
+        return "error";
+      } catch (err) {
+        logger.warn({ err }, "container subsystem: ERROR — exec probe threw unexpectedly");
+        return "error";
+      }
+    }
+  }
+
+  // No started machines available (fresh deploy). API token is valid but
+  // exec path is unverified. Log a note and report OK — exec will be
+  // exercised naturally on the first agent task.
+  logger.info(
+    "container subsystem: OK — Fly.io API is reachable (no started machines; exec path will be verified on first task)",
+  );
+  return "ok";
+}
+
+/** Return the cached container subsystem status (set by runContainerSelfCheck at startup). */
+export function getContainerSubsystemStatus(): "ok" | "unconfigured" | "error" | null {
+  return _containerSubsystemStatus;
+}
+
 function flyHeaders(): Record<string, string> {
   return {
     Authorization: `Bearer ${FLY_TOKEN}`,

@@ -6,7 +6,7 @@ import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
 import { createDebugServer } from "./routes/debug";
-import { ensureFlyApp } from "./lib/container";
+import { ensureFlyApp, runContainerSelfCheck } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
 import { startCveScheduler } from "./lib/cve-scheduler";
 import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
@@ -139,11 +139,20 @@ server.on("upgrade", (req, socket, head) => {
 // Task #859 — Run all outstanding schema migrations before accepting traffic.
 // Each step is idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS) so this
 // is safe on every boot and is a no-op when the schema is already current.
+// Task #1194 — After migrations, run the container subsystem self-check to
+// verify Fly.io exec connectivity before the server starts accepting requests.
 void runStartupMigrations()
   .catch((err) => {
     // Non-fatal: log and continue — a partial schema is better than no server.
     logger.error({ err }, "startup-migrations: unexpected error (continuing)");
   })
+  .then(() =>
+    runContainerSelfCheck().catch((err: unknown) => {
+      // Non-fatal: log and continue — a degraded container subsystem is better
+      // than no server. The health endpoint will reflect the error status.
+      logger.warn({ err }, "container subsystem: self-check threw unexpectedly");
+    }),
+  )
   .finally(() => {
     server.listen(port, (err?: Error) => {
       if (err) {

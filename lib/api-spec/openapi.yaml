@@ -6381,6 +6381,14 @@ components:
       type: object
       properties:
         status: { type: string }
+        containerSubsystem:
+          type: string
+          enum: [ok, unconfigured, error]
+          description: >
+            Status of the Fly.io container subsystem.
+            "ok" = token is configured and API is reachable.
+            "unconfigured" = FLY_API_TOKEN is not set (feature disabled, not an error).
+            "error" = token is set but API call failed at startup.
       required: [status]
 
     ApiError:
