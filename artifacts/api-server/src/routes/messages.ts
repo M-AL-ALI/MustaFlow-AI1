@@ -236,6 +236,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     | "review"
     | "explain"
     | "fix_tests"
+    | "fix_types"
+    | "fix_lint"
     | "image_generate";
 
   // Pattern for detecting explicit image generation requests in Ora chat.
@@ -272,7 +274,9 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     explicitAgentIntent === "refactor" ||
     explicitAgentIntent === "review" ||
     explicitAgentIntent === "explain" ||
-    explicitAgentIntent === "fix_tests"
+    explicitAgentIntent === "fix_tests" ||
+    explicitAgentIntent === "fix_types" ||
+    explicitAgentIntent === "fix_lint"
   ) {
     // Explicit client override takes second priority — always honor it,
     // even when the Plan Mode toggle is on (e.g. "Apply to app" must build).
@@ -623,6 +627,41 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         `then fix the implementation (not the tests) using \`apply_patch\` or \`write_file\`. ` +
         `Re-run \`run_tests\` after each fix batch and repeat the loop until all tests pass or the step cap is reached. ` +
         `Finalize with a summary of tests fixed and any remaining failures.\n\n` +
+        (userContext && !/^\[TASK:/i.test(userContext)
+          ? `User context: ${userContext}`
+          : userContext);
+      userPromptWithContext = fixInstruction;
+    }
+
+    // fix_types intent: prepend a structured TypeScript-fix loop instruction so
+    // the agent starts by running tsc rather than guessing what to fix.
+    if (resolvedIntent === "fix_types") {
+      const userContext = userPromptWithContext.trim();
+      const fixInstruction =
+        `[TASK: Fix TypeScript Errors]\n` +
+        `Start by calling \`run_command\` with \`{"command": "npx tsc --noEmit 2>&1 | head -200"}\` (or the project's typecheck script if one exists in package.json) to get the full list of type errors. ` +
+        `Parse the compiler output — each error has the form \`file.ts(line,col): error TSxxxx: message\`. Group errors by file to minimise round-trips. ` +
+        `For each error group: \`read_file\` the affected file, understand the type mismatch, then fix it with \`apply_patch\` or \`write_file\`. Prefer the narrowest change — add a type annotation, fix the contract, or cast — rather than widening to \`any\`. ` +
+        `After each fix batch, re-run \`run_command {"command": "npx tsc --noEmit 2>&1 | head -200"}\` to verify progress. Repeat (run tsc → read errors → patch → run tsc) until the output is empty or the step cap is reached. ` +
+        `Finalize with a count of errors fixed and any remaining errors with their root cause.\n\n` +
+        (userContext && !/^\[TASK:/i.test(userContext)
+          ? `User context: ${userContext}`
+          : userContext);
+      userPromptWithContext = fixInstruction;
+    }
+
+    // fix_lint intent: prepend a structured ESLint-fix loop instruction so the
+    // agent starts by running eslint rather than guessing what to fix.
+    if (resolvedIntent === "fix_lint") {
+      const userContext = userPromptWithContext.trim();
+      const fixInstruction =
+        `[TASK: Fix Lint Violations]\n` +
+        `Start by calling \`run_command\` with \`{"command": "npx eslint . --ext .ts,.tsx,.js,.jsx --max-warnings 0 2>&1 | head -300"}\` (or the project's lint script if one is defined in package.json) to get the full violation list. ` +
+        `Parse the output — each block is \`file path\\n  line:col  severity  rule-id  message\`. Group violations by file. ` +
+        `For each file: \`read_file\` it, understand the violation (check the rule name if unclear), then fix it with \`apply_patch\` or \`write_file\`. Prefer code changes over disable comments — only use \`// eslint-disable-next-line\` when the violation is a false positive or intentional. ` +
+        `After each fix batch, re-run the lint command to verify progress. Repeat until zero warnings/errors or the step cap is reached. ` +
+        `If eslint is not installed, report that clearly in \`finalize\` rather than trying to install it. ` +
+        `Finalize with a count of violations fixed and any remaining violations with their rule IDs.\n\n` +
         (userContext && !/^\[TASK:/i.test(userContext)
           ? `User context: ${userContext}`
           : userContext);
@@ -1204,13 +1243,17 @@ router.post(
       explicitAgentIntent === "refactor" ||
       explicitAgentIntent === "review" ||
       explicitAgentIntent === "explain" ||
-      explicitAgentIntent === "fix_tests"
+      explicitAgentIntent === "fix_tests" ||
+      explicitAgentIntent === "fix_types" ||
+      explicitAgentIntent === "fix_lint"
     ) {
-      // fix_tests is not a converse-family intent — treat it as build so the
-      // streaming route emits a fallback event and the regular endpoint runs
-      // the full agentic loop with the test-fix prompt transformation.
+      // fix_tests / fix_types / fix_lint are not converse-family intents — treat
+      // them as build so the streaming route emits a fallback event and the
+      // regular endpoint runs the full agentic loop with the prompt transformation.
       resolvedIntent =
-        explicitAgentIntent === "fix_tests"
+        explicitAgentIntent === "fix_tests" ||
+        explicitAgentIntent === "fix_types" ||
+        explicitAgentIntent === "fix_lint"
           ? "build"
           : (explicitAgentIntent as StreamResolvedIntent);
     } else if (planMode) {

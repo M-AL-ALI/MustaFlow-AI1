@@ -1088,7 +1088,7 @@ export const ChatMessageInputAgentIdentity = {
 } as const;
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt.
+ * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
@@ -1102,6 +1102,8 @@ export const ChatMessageInputAgentIntent = {
   review: 'review',
   explain: 'explain',
   fix_tests: 'fix_tests',
+  fix_types: 'fix_types',
+  fix_lint: 'fix_lint',
 } as const;
 
 export type ChatMessageInputBrainstormContextItemRole = typeof ChatMessageInputBrainstormContextItemRole[keyof typeof ChatMessageInputBrainstormContextItemRole];
@@ -1125,7 +1127,7 @@ export interface ChatMessageInput {
   background?: boolean;
   /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
   agentIdentity?: ChatMessageInputAgentIdentity;
-  /** Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. */
+  /** Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean. */
   agentIntent?: ChatMessageInputAgentIntent;
   /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
   attachments?: ChatAttachment[];

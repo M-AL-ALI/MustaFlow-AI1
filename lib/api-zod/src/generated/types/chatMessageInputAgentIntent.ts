@@ -7,7 +7,7 @@
  */
 
 /**
- * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt.
+ * Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.
  */
 export type ChatMessageInputAgentIntent = typeof ChatMessageInputAgentIntent[keyof typeof ChatMessageInputAgentIntent];
 
@@ -21,4 +21,6 @@ export const ChatMessageInputAgentIntent = {
   review: 'review',
   explain: 'explain',
   fix_tests: 'fix_tests',
+  fix_types: 'fix_types',
+  fix_lint: 'fix_lint',
 } as const;

@@ -205,7 +205,9 @@ interface QueueComposerProps {
       | "refactor"
       | "review"
       | "explain"
-      | "fix_tests",
+      | "fix_tests"
+      | "fix_types"
+      | "fix_lint",
     attachments?: ComposerAttachment[],
     brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>,
   ) => void;
@@ -2080,6 +2082,32 @@ export function QueueComposer({
             title="Run the test suite, identify failing tests, and automatically fix them — loops until all tests pass · costs build credits"
           >
             <FlaskConical className="h-3 w-3" /> Fix tests
+          </button>
+
+          {/* Fix TypeScript errors — one-shot trigger for the tsc fix loop */}
+          <button
+            disabled={disabled}
+            onClick={() => {
+              if (disabled) return;
+              onSingleSend("Fix all TypeScript type errors in this project", "fix_types");
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-blue-500/20 text-blue-400/70 hover:text-blue-400 hover:border-blue-500/40 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Run tsc --noEmit, read the type errors, and automatically fix them — loops until the project compiles clean · costs build credits"
+          >
+            <Wrench className="h-3 w-3" /> Fix types
+          </button>
+
+          {/* Fix lint violations — one-shot trigger for the eslint fix loop */}
+          <button
+            disabled={disabled}
+            onClick={() => {
+              if (disabled) return;
+              onSingleSend("Fix all ESLint violations in this project", "fix_lint");
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-amber-500/20 text-amber-400/70 hover:text-amber-400 hover:border-amber-500/40 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Run ESLint, read the violations, and automatically fix them — loops until zero warnings · costs build credits"
+          >
+            <CheckSquare className="h-3 w-3" /> Fix lint
           </button>
 
           {/* Template picker + plan history — shown in Planning mode */}
