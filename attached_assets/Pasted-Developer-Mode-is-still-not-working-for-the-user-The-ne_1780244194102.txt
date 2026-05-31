@@ -1,0 +1,301 @@
+Developer Mode is still not working for the user.
+
+The new error handling is now visible, but the real problem is not fixed.
+
+Current screenshot shows:
+
+1. Chat says:
+   “Your project workspace is still being set up. Please wait a moment and try again once provisioning completes.”
+
+2. Preview shows a broken blank page.
+
+3. Toast says:
+   “Container has not been provisioned. Use Provisioning first.”
+
+4. Agent does not build anything.
+
+This confirms the project does not have a provisioned Developer Mode container/workspace. The system is now showing the correct error, but there is no working recovery path for the user.
+
+The project is not truly agentic until the platform creates and connects:
+
+* project containerId
+* real workspace filesystem
+* runtime container
+* terminal
+* preview server
+* package install environment
+* agent tool execution layer
+* file sync
+* preview health
+
+Right now, the user is inside Developer Mode, but the project has no provisioned container. Therefore the agent cannot build, edit files, run commands, or update preview.
+
+This must be fixed as a provisioning problem.
+
+Please implement the following.
+
+1. Add automatic provisioning when Developer Mode project has no container
+
+When the user opens a Developer Mode / agentic project and project.containerId is missing, the UI should not just say “Container has not been provisioned.”
+
+It should automatically start provisioning or show a clear action button:
+
+“Provision Workspace”
+“Repair Workspace”
+“Retry Provisioning”
+
+Required behavior:
+
+If builder_mode = agentic and containerId is null:
+
+* Show status: “Workspace not provisioned”
+* Show button: “Provision Workspace”
+* Disable agent build prompts until provisioning finishes
+* Do not show generic “workspace still being set up” forever
+* Do not allow the preview to stay broken with no recovery path
+
+2. Create a real provisioning endpoint
+
+Add or verify a backend endpoint like:
+
+POST /api/projects/:id/container/provision
+
+or
+
+POST /api/projects/:id/workspace/provision
+
+This endpoint must:
+
+* verify auth/project ownership
+* verify builder_mode = agentic
+* create or repair the Fly.io container
+* assign project.containerId
+* create workspace filesystem
+* install starter files if missing
+* install dependencies if needed
+* start/wake container
+* run workspace proof test
+* start preview server
+* update DB status
+* return structured result
+
+Required DB updates:
+
+When provisioning starts:
+
+* provisioning_status = "provisioning"
+* container_status = "starting"
+* container_error = null
+* developer_ready = false
+
+When provisioning succeeds:
+
+* provisioning_status = "ready"
+* container_status = "running"
+* containerId = created container id
+* developer_ready = true
+* container_ready_at = now()
+* container_error = null
+
+When provisioning fails:
+
+* provisioning_status = "failed"
+* container_status = "failed"
+* developer_ready = false
+* container_error = exact reason
+* container_failed_at = now()
+
+Do not leave status in provisioning/starting forever.
+
+3. Add workspace repair flow
+
+If a project already exists but containerId is missing, the system should treat it as a repairable broken project.
+
+Add a repair flow:
+
+POST /api/projects/:id/workspace/repair
+
+This should:
+
+* detect missing containerId
+* create new container
+* attach it to the project
+* sync existing project files from DB/storage into container
+* verify workspace is writable
+* restart preview
+* mark developer_ready = true
+
+This is critical because existing projects, like the one in the screenshot, are stuck. They need repair, not only new project creation fixes.
+
+4. Update the frontend Developer Mode screen
+
+Files to inspect:
+
+* artifacts/mustaflow/src/pages/dev-workspace/index.tsx
+* artifacts/mustaflow/src/pages/dev-workspace/components/dev-runtime-status-bar.tsx
+* artifacts/mustaflow/src/pages/dev-workspace/components/dev-chat-panel.tsx
+* artifacts/mustaflow/src/pages/dev-workspace/components/preview-pane.tsx
+
+If reason = missing_container_id or code = container_not_configured:
+
+Show this clearly:
+
+“Developer Mode workspace has not been provisioned yet.”
+
+Show actions:
+
+* Provision Workspace
+* Repair Workspace
+* Retry
+* View Logs
+
+Do not only show a toast.
+
+Do not leave the user in a broken screen with a disabled agent.
+
+5. Agent chat behavior while unprovisioned
+
+When the user sends a prompt while the project has no containerId, the chat should not just fail.
+
+It should say:
+
+“Your Developer Mode workspace is not provisioned yet. I cannot build until the workspace container is created. Click Provision Workspace to create the runtime, terminal, and preview environment.”
+
+Optional but recommended:
+
+Offer a button inside the chat message:
+
+“Provision Workspace Now”
+
+Once provisioning succeeds, the same prompt can be retried automatically or the user can click “Retry prompt.”
+
+6. Add create-project provisioning guarantee
+
+When a new Developer Mode project is created, the project should not open into Developer Mode as if ready until provisioning is complete.
+
+Correct flow:
+
+Create project
+→ create DB project row
+→ create workspace/container
+→ save containerId
+→ install starter template
+→ start preview
+→ run runtime proof test
+→ mark developer_ready = true
+→ open Developer Mode
+
+If provisioning fails:
+
+Open Developer Mode in failed setup mode with clear error and Repair Workspace button.
+
+Do not open a project that looks ready but has no container.
+
+7. Add runtime proof test after provisioning
+
+After provisioning or repair, run:
+
+* pwd
+* ls
+* write `.mustaflow-runtime-test`
+* read `.mustaflow-runtime-test`
+* delete `.mustaflow-runtime-test`
+* start preview server
+* check preview health
+
+Only after this passes can the system show:
+
+“Developer Mode ready.”
+
+8. Fix preview behavior when workspace is missing
+
+The preview should not show a broken blank document icon only.
+
+If the workspace is not provisioned, the preview pane should show:
+
+“Preview unavailable because the Developer Mode workspace has not been provisioned.”
+
+Add button:
+
+“Provision Workspace”
+
+If preview fails after provisioning:
+
+Show exact error:
+
+* preview_start_failed
+* container_not_running
+* workspace_not_writable
+* build_failed
+* route_not_found
+
+9. Required validation test for this exact broken project
+
+Use the project from the screenshot: “towing man.”
+
+Run these checks:
+
+* project id
+* builder_mode
+* containerId
+* provisioning_status
+* container_status
+* developer_ready
+* container_error
+
+Then fix the project by provisioning or repairing the workspace.
+
+After repair, verify:
+
+* containerId is present
+* container_status = running
+* provisioning_status = ready
+* developer_ready = true
+* preview loads
+* terminal works
+* agent prompt can start
+
+10. Final proof test
+
+After provisioning/repair is fixed, run this exact test in Developer Mode chat:
+
+Prompt 1:
+“Create a file called agent-test.txt with the text: Agent is working.”
+
+Expected result:
+
+* task is created
+* runtime preflight passes
+* write_file tool runs
+* file appears in real workspace/container
+* file appears in file tree
+* final report confirms verification
+
+Prompt 2:
+“Create a simple TestAgentPage that says Agent is working, add a route to it, and update the preview.”
+
+Expected result:
+
+* page file created
+* route patched
+* typecheck/build runs
+* preview updates
+* preview shows “Agent is working”
+* final report lists changed files and checks
+
+11. Final report required
+
+Return:
+
+* exact reason this project had no containerId
+* whether this was a project creation bug, provisioning bug, or repair flow gap
+* files changed
+* backend endpoints added/updated
+* frontend UI changes
+* DB status behavior
+* provisioning proof result
+* agent file creation proof result
+* preview proof result
+* whether the “towing man” project is now developer_ready
+
+Do not mark complete until the existing broken project can be repaired and the agent can actually build inside it.
