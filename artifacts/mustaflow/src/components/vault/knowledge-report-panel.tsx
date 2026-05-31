@@ -20,10 +20,7 @@ import {
   AlertTriangle,
   BookOpen,
 } from "lucide-react";
-import {
-  KnowledgeSuggestionCard,
-  type KnowledgeSuggestion,
-} from "./knowledge-suggestion-card";
+import { KnowledgeSuggestionCard, type KnowledgeSuggestion } from "./knowledge-suggestion-card";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -256,7 +253,8 @@ export function KnowledgeReportPanel({ open, onOpenChange }: KnowledgeReportPane
                   autoFocus
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Press <kbd className="px-1 py-0.5 rounded bg-muted border text-[10px]">⌘ Enter</kbd> or
+                  Press{" "}
+                  <kbd className="px-1 py-0.5 rounded bg-muted border text-[10px]">⌘ Enter</kbd> or
                   click below to find relevant knowledge.
                 </p>
               </div>
@@ -430,7 +428,8 @@ export function KnowledgeReportPanel({ open, onOpenChange }: KnowledgeReportPane
                       ) : (
                         <>
                           <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                          Generate with {selectedIds.size} {selectedIds.size === 1 ? "entry" : "entries"}
+                          Generate with {selectedIds.size}{" "}
+                          {selectedIds.size === 1 ? "entry" : "entries"}
                         </>
                       )}
                     </Button>
@@ -511,9 +510,7 @@ export function KnowledgeReportPanel({ open, onOpenChange }: KnowledgeReportPane
                       >
                         <p className="text-xs font-medium text-foreground">{ref.title}</p>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] text-muted-foreground">
-                            {ref.category}
-                          </span>
+                          <span className="text-[10px] text-muted-foreground">{ref.category}</span>
                           {ref.department && (
                             <span className="text-[10px] text-muted-foreground/70">
                               {ref.department}
@@ -597,9 +594,7 @@ function ReportText({ text }: { text: string }) {
       if (match) {
         elements.push(
           <div key={i} className="flex gap-2 text-xs text-foreground/90 leading-relaxed pl-1">
-            <span className="text-muted-foreground mt-0.5 shrink-0 tabular-nums">
-              {match[1]}.
-            </span>
+            <span className="text-muted-foreground mt-0.5 shrink-0 tabular-nums">{match[1]}.</span>
             <span>{renderInline(match[2])}</span>
           </div>,
         );

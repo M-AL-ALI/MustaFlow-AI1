@@ -9920,7 +9920,8 @@ components:
 
     ApprovedKnowledgeEntry:
       type: object
-      required: [entryId, title, category, summary, chunkPreview, version, updatedAt, sourceRef, skipped]
+      required:
+        [entryId, title, category, summary, chunkPreview, version, updatedAt, sourceRef, skipped]
       properties:
         entryId: { type: integer }
         title: { type: string }

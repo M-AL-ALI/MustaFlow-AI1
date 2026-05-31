@@ -904,11 +904,7 @@ export default function VaultPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setIsKnowledgeReportOpen(true)}
-            >
+            <Button size="sm" variant="outline" onClick={() => setIsKnowledgeReportOpen(true)}>
               <Sparkles className="h-4 w-4 mr-1.5" />
               Generate report
             </Button>
@@ -1158,10 +1154,7 @@ export default function VaultPage() {
       />
 
       {/* Knowledge Report Panel */}
-      <KnowledgeReportPanel
-        open={isKnowledgeReportOpen}
-        onOpenChange={setIsKnowledgeReportOpen}
-      />
+      <KnowledgeReportPanel open={isKnowledgeReportOpen} onOpenChange={setIsKnowledgeReportOpen} />
     </AppLayout>
   );
 }

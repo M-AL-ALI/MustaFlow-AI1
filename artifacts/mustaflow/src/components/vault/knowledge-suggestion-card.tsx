@@ -54,10 +54,7 @@ export function KnowledgeSuggestionCard({
               {suggestion.title}
             </h4>
             <span
-              className={cn(
-                "text-[10px] font-medium tabular-nums shrink-0 mt-0.5",
-                scoreColor,
-              )}
+              className={cn("text-[10px] font-medium tabular-nums shrink-0 mt-0.5", scoreColor)}
             >
               {score}%
             </span>

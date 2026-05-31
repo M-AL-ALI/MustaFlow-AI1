@@ -231,12 +231,8 @@ function buildPromptBlock(entries: ApprovedKnowledgeEntry[]): string {
 export async function logKnowledgeUsage(event: KnowledgeUsageEvent): Promise<void> {
   try {
     // Validate integer arrays before sql.raw interpolation
-    const safeEntryIds = event.selectedEntryIds.filter(
-      (id) => Number.isInteger(id) && id > 0,
-    );
-    const safeVersions = event.selectedEntryVersions.filter(
-      (v) => Number.isInteger(v) && v >= 0,
-    );
+    const safeEntryIds = event.selectedEntryIds.filter((id) => Number.isInteger(id) && id > 0);
+    const safeVersions = event.selectedEntryVersions.filter((v) => Number.isInteger(v) && v >= 0);
     const idsLiteral = sql.raw(`'{${safeEntryIds.join(",")}}'::integer[]`);
     const versionsLiteral = sql.raw(`'{${safeVersions.join(",")}}'::integer[]`);
 

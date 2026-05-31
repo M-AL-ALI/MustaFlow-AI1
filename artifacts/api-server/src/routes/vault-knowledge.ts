@@ -14,10 +14,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { semanticSearchVault } from "../lib/vault-search-service";
-import {
-  buildApprovedKnowledgeContext,
-  logKnowledgeUsage,
-} from "../lib/vault-knowledge-service";
+import { buildApprovedKnowledgeContext, logKnowledgeUsage } from "../lib/vault-knowledge-service";
 import { createChatCompletion } from "../lib/ai-providers";
 import { logger } from "../lib/logger";
 

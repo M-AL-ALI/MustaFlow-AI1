@@ -4,6 +4,7 @@ description: Migration scripts in scripts/src/ must use pool from @workspace/db,
 ---
 
 ## Rule
+
 Migration scripts in `scripts/src/` must import the shared pool from `@workspace/db`:
 
 ```typescript
