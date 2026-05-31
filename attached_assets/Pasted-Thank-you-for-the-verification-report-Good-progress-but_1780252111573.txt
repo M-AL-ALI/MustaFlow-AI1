@@ -1,0 +1,84 @@
+Thank you for the verification report. Good progress, but I cannot call Phase 1 fully proven yet.
+
+The live E2E test confirmed:
+- New projects now get requireCommandApproval: true.
+- New projects now get builderMode: agentic.
+- SSE narration events work.
+- task_events are written.
+- Quality gate is green.
+
+However, the most important part did not fully run live:
+
+The new agentic projects failed before runAgentLoop because preflightContainerCheck requires the container /healthz endpoint to pass before the first generated app has been built.
+
+This creates a bootstrapping problem:
+
+New project
+→ container exists
+→ but no app has been generated yet
+→ /healthz fails
+→ preflight fails
+→ runAgentLoop never runs
+→ agent cannot generate files
+→ preview cannot become real
+→ file_diff/thinking/check_result/checkpoint events cannot be exercised live
+
+This blocks the real non-technical user workflow.
+
+Please fix the first-build bootstrap logic before adding any new features.
+
+Required fix:
+For brand-new agentic projects or projects with no working app yet, do not require /healthz before runAgentLoop.
+
+The agent must be allowed to perform the first build and create the app before the system expects the app server to answer /healthz.
+
+Recommended logic:
+
+1. Detect first-build / empty-app state
+Use one or more of:
+- no successful project_versions snapshot
+- no package.json / app entry files
+- task type is initial build
+- project has builderMode = agentic but no successful runtime health history
+- provisioning_status ready but app_health_status unknown/uninitialized
+
+2. For first build:
+- Wake/provision the container if needed.
+- Do NOT require app /healthz to pass yet.
+- Run agent-loop.ts.
+- Let the agent write the initial files.
+- Let the agent install packages with approval.
+- Let the agent create the frontend/backend/database files.
+- Then start the dev server.
+- Then run /healthz and preview checks after the app exists.
+
+3. For refinement builds on an existing working app:
+- Keep the normal /healthz preflight.
+- If health fails, try restart/wake.
+- If still failing, pass the error into the agent as context so it can repair the app.
+
+4. For projects without container availability:
+- Use WebContainer or in-process fallback.
+- Clearly show a lightweight runtime badge.
+- Do not fail silently.
+
+5. Add a specific E2E test:
+Create a brand-new project from normal AI Builder UI/API.
+Prompt:
+“Build me a booking app with login, admin dashboard, booking form, customer list, and database test records.”
+
+The test must prove:
+- runAgentLoop starts on a brand-new project.
+- files are written.
+- file_diff events fire live.
+- thinking/progress appears live.
+- check_result events fire live.
+- checkpoint before package install/migration is exercised.
+- preview refreshes.
+- preview shows a real runnable app or clearly reports exact missing runtime/secret.
+- final report shows files changed, checks run, preview status, and blockers.
+
+Do not mark Phase 1 fully complete until this passes on a brand-new project.
+
+This is not a request for new features.
+This is a required fix to make Agentic Default actually work for first-time users.

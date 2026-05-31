@@ -1,4 +1,4 @@
-import { eq, sql, and, inArray, desc, or, asc, isNull } from "drizzle-orm";
+import { eq, sql, and, inArray, desc, or, asc, isNull, count } from "drizzle-orm";
 import {
   db,
   pool,
@@ -138,12 +138,39 @@ async function runAgenticPreflightGate(
 
   // ── 1. Container wake check ──────────────────────────────────────────────
   if (containerId) {
-    await emitEvent(taskId, "narration", "Waking your server…");
+    // Detect first-build: if no project_versions exist the app has never been
+    // successfully built, so /healthz cannot possibly respond. Skip the HTTP
+    // health check and only verify the container OS exec layer is working.
+    const [versionCountRow] = await db
+      .select({ n: count() })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.projectId, projectId));
+    const isFirstBuild = (versionCountRow?.n ?? 0) === 0;
+
+    if (isFirstBuild) {
+      await emitEvent(
+        taskId,
+        "narration",
+        "Starting fresh — waking your container for the first build…",
+      );
+      logger.info(
+        { projectId, taskId, containerId },
+        "First-build detected: skipping /healthz check — no app deployed yet",
+      );
+    } else {
+      await emitEvent(taskId, "narration", "Waking your server…");
+    }
+
+    // For first builds pass null as containerUrl so ensureContainerAwake only
+    // checks that the Fly machine is running (machine-level wake) and does NOT
+    // poll /healthz (which would always fail before the first app is built).
+    const effectiveContainerUrl = isFirstBuild ? null : containerUrl;
+
     const { ensureContainerAwake, execInContainer } = await import("./container");
     const { ContainerUnavailableError } = await import("./errors");
     let wakeResult: { ok: boolean; message?: string };
     try {
-      wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+      wakeResult = await ensureContainerAwake(containerId, projectId, effectiveContainerUrl, 30);
     } catch (err) {
       if (err instanceof ContainerUnavailableError) {
         return {
@@ -163,7 +190,12 @@ async function runAgenticPreflightGate(
       await emitEvent(taskId, "narration", "Server is slow to wake — retrying in 10 seconds…");
       await new Promise((r) => setTimeout(r, 10_000));
       try {
-        wakeResult = await ensureContainerAwake(containerId, projectId, containerUrl, 30);
+        wakeResult = await ensureContainerAwake(
+          containerId,
+          projectId,
+          effectiveContainerUrl,
+          30,
+        );
       } catch (err) {
         if (err instanceof ContainerUnavailableError) {
           return {
@@ -182,7 +214,10 @@ async function runAgenticPreflightGate(
         "Container awake after retry — proceeding with build",
       );
     } else {
-      logger.info({ projectId, taskId, containerId }, "Container awake — proceeding with build");
+      logger.info(
+        { projectId, taskId, containerId, isFirstBuild },
+        "Container awake — proceeding with build",
+      );
     }
 
     // ── 2. Runtime proof test ────────────────────────────────────────────────
