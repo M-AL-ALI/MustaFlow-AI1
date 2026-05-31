@@ -243,8 +243,16 @@ router.post("/projects", async (req, res): Promise<void> => {
       // The frontend mode selector explicitly sets builderMode; default to
       // "agentic" when not provided (preserves backwards compatibility).
       builderMode: requestedBuilderMode ?? "agentic",
+      // Start as 'provisioning' only when both Fly + Neon tokens are present.
+      // Without them the background job degrades to 'idle' anyway, but only
+      // after an async delay — setting 'idle' here avoids the workspace banner
+      // flashing "Your project is being set up" before the job runs.
       provisioningStatus:
-        (requestedBuilderMode ?? "agentic") === "agentic" ? "provisioning" : "idle",
+        (requestedBuilderMode ?? "agentic") === "agentic" &&
+        Boolean(process.env.FLY_API_TOKEN) &&
+        Boolean(process.env.NEON_API_KEY)
+          ? "provisioning"
+          : "idle",
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
       chipLabel: chipLabel ?? null,
       projectMode: mode ?? "builder",
@@ -1259,7 +1267,9 @@ export default function HomeScreen() {
   // static-legacy projects remain idle and never incur provisioning costs.
   // Fire and forget: the response returns immediately and the workspace UI
   // polls `provisioningStatus` to surface progress.
-  if (project.builderMode === "agentic") {
+  // Only enqueue provisioning when tokens are present; otherwise the
+  // project was already stamped 'idle' above and no job is needed.
+  if (project.builderMode === "agentic" && process.env.FLY_API_TOKEN && process.env.NEON_API_KEY) {
     enqueueProvisionProjectJob(project.id);
   }
 

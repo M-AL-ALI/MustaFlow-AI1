@@ -265,11 +265,16 @@ export function auditImageProviderConfig(): {
   const hasProxyBaseUrl = Boolean(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
   const hasProxyKey = Boolean(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
 
-  const activeProviderPath = isProxyConfigured()
-    ? "proxy"
-    : hasOpenAIImageKey || hasImageApiKey || hasOpenAIKey
+  // getClient() resolves the key via getDirectKey() and passes no baseURL —
+  // it always calls api.openai.com directly. The Replit proxy env vars
+  // (AI_INTEGRATIONS_OPENAI_*) are present for text-model calls but are
+  // NOT used by generateImage(). Report "direct" when a direct key is set.
+  const activeProviderPath =
+    hasOpenAIImageKey || hasImageApiKey || hasOpenAIKey
       ? "direct"
-      : "none";
+      : isProxyConfigured()
+        ? "proxy"
+        : "none";
 
   return {
     hasOpenAIImageKey,

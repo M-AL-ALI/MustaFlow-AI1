@@ -1,0 +1,88 @@
+Thank you. I accept the Phase 9A-1 backend image-generation pipeline as live-validated, but I cannot accept full Phase 9A-1 as production-ready yet.
+
+Accepted backend validation:
+
+* final Phase 9A-1 validation commit: b2ff386f
+* real provider call succeeded
+* gpt-image-1 works
+* image was generated successfully
+* image reached status = completed
+* imageId = 5
+* base64 image response was decoded correctly
+* image was stored as WebP
+* DB row was created
+* safety status = passed
+* credit cost = 1
+* soft-delete works
+* public Ora guard works
+* Builder prompts do not trigger image generation
+* typecheck/lint/format/codegen passed
+* API server and frontend are running
+
+However, full Phase 9A-1 is not production-ready yet because these were not validated through the real UI:
+
+1. Authenticated Ora chat image card after generation
+2. Image Studio completed result grid after generation
+3. Browser download of completed generated image
+4. Browser preview rendering
+5. Delete from the completed UI card
+6. Image Studio form flow from prompt → generate → completed image
+7. Ora prompt flow from “Create a logo for my mechanic app” → completed image card
+
+Also, storage is still using dev temp storage because R2 is not configured. That is acceptable for dev validation, but not production readiness.
+
+Production readiness requires either:
+
+* R2 configured and validated, or
+* explicitly mark storage as dev-only and not production-ready.
+
+Important clarification needed:
+
+The report says the API server boot log shows:
+
+image-provider: configured (path=proxy)
+
+But the previous requirement was:
+
+* do not use the Replit proxy unless exact image endpoint/model support is verified
+
+Since the image generation succeeded, please clarify:
+
+1. Was the completed image generated through direct OpenAI API or through the Replit proxy?
+2. If it used the proxy, confirm the exact endpoint/model works reliably.
+3. If it used direct OpenAI API, correct the startup diagnostic label so it does not say path=proxy.
+
+Final status:
+
+* Phase 9A-1 backend pipeline: accepted as live-validated
+* Phase 9A-1 full UI/product flow: pending browser validation
+* Phase 9A-1 production-ready: not yet
+
+Required remaining validation before final acceptance:
+
+1. Use a real authenticated browser session.
+2. In authenticated Ora chat, ask:
+
+Create a logo for my mechanic app
+
+3. Confirm:
+    * image intent triggers
+    * pending card appears
+    * completed image card appears
+    * preview loads
+    * download works
+    * disabled Use in Project button does not call an API
+4. In /image-studio, generate an image.
+5. Confirm:
+    * form controls work
+    * generation starts
+    * result grid shows completed image
+    * preview loads
+    * download works
+    * delete soft-deletes the completed image
+6. Confirm storage behavior:
+    * if dev temp storage: clearly mark as dev-only
+    * if R2: confirm R2 URL/storageKey/thumbnailUrl work
+7. Confirm quality gates still pass.
+
+Do not start Phase 9A-2, uploaded image editing, project insertion, brand kit, prompt assistant, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work until Phase 9A-1 UI validation is complete and accepted.
