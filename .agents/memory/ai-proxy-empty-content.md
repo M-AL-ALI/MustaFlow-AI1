@@ -8,11 +8,13 @@ The Replit AI integration proxy occasionally returns a structurally valid ChatCo
 **Why:** Intermittent proxy-level behavior (possibly content filtering or transient empty flush). Frequency is low but non-zero; happens more with longer structured prompts.
 
 **How to apply:**
+
 1. After calling `createChatCompletion`, check `choices?.[0]?.message?.content` before using it.
 2. Retry once (1–2 s gap) before returning an error. A single retry resolves the issue in practice.
 3. Avoid Unicode box-drawing characters (`═`, `─`, `│`) in prompt strings; replace with plain ASCII (`---`, `|`). These multi-byte chars can cause proxy truncation that yields empty content.
 
 Pattern:
+
 ```typescript
 let reportText = "";
 for (let attempt = 1; attempt <= 2; attempt++) {
