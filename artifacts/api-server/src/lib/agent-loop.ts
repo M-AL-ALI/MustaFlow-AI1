@@ -653,6 +653,29 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "run_tests",
+      description:
+        "Run the project's automated test suite inside the container and return a structured pass/fail summary. The test command is resolved in order: (1) explicit `command` arg, (2) TEST_COMMAND project secret, (3) the `test` script in package.json, (4) `python -m pytest` if a Python project, (5) `go test ./...` if a Go project. Use the result to decide whether to patch code and re-run. Only available for container-backed stacks (not static-html or mobile-cross).",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description:
+              'Override the test command to run (e.g. "npm test", "pytest -x", "vitest run --reporter=verbose"). Omit to auto-resolve from project configuration.',
+          },
+          timeout_ms: {
+            type: "integer",
+            description: "Timeout in milliseconds (default 300 000; max 600 000).",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "report_progress",
       description:
         "Emit a short narrative step shown in the chat (one short sentence). Use sparingly between major actions.",
@@ -1936,6 +1959,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       "read_diagnostics",
       "fetch_prod_logs",
       "run_e2e",
+      "run_tests",
       "finalize",
       "write_file",
       "apply_patch",
@@ -3567,6 +3591,124 @@ function renderE2eObservation(summary: E2eRunSummary): string {
   return [header, ...lines, ...(detail.length > 0 ? ["", ...detail] : [])].join("\n");
 }
 
+type TestRunSummary = {
+  passed: number;
+  failed: number;
+  skipped: number;
+  total: number;
+  failedTests: string[];
+};
+
+/**
+ * Parse common test runner output formats (Jest, Vitest, pytest, Mocha, Go)
+ * into a structured summary. Falls back gracefully when the format is unknown.
+ */
+function parseTestOutput(output: string, exitCode: number): TestRunSummary {
+  const lines = output.split("\n");
+  let passed = 0;
+  let failed = 0;
+  let skipped = 0;
+  const failedTests: string[] = [];
+
+  // Jest / Vitest: "Tests: 3 failed, 10 passed, 13 total"
+  //               "Test Suites: 1 failed, 2 passed, 3 total"
+  const jestTestsLine = lines.find((l) => /^Tests?:/.test(l.trim()));
+  if (jestTestsLine) {
+    const passM = jestTestsLine.match(/(\d+)\s+passed/);
+    const failM = jestTestsLine.match(/(\d+)\s+failed/);
+    const skipM = jestTestsLine.match(/(\d+)\s+(?:skipped|pending|todo)/);
+    if (passM) passed = parseInt(passM[1], 10);
+    if (failM) failed = parseInt(failM[1], 10);
+    if (skipM) skipped = parseInt(skipM[1], 10);
+    // Collect Jest/Vitest failed test names: lines starting with "● " or "✕ " or "✗ " or "FAIL "
+    for (const line of lines) {
+      const m = line.match(/^\s+[●✕✗x×]\s+(.+)/);
+      if (m && failedTests.length < 20) failedTests.push(m[1].trim().slice(0, 120));
+    }
+  }
+
+  // Vitest summary: "✓ 10 tests | ✗ 2 failed" or "10 passed | 2 failed"
+  if (passed === 0 && failed === 0) {
+    for (const line of lines) {
+      const passM = line.match(/(\d+)\s+passed/i);
+      const failM = line.match(/(\d+)\s+failed/i);
+      const skipM = line.match(/(\d+)\s+(?:skipped|pending)/i);
+      if (passM || failM) {
+        if (passM) passed = Math.max(passed, parseInt(passM[1], 10));
+        if (failM) failed = Math.max(failed, parseInt(failM[1], 10));
+        if (skipM) skipped = Math.max(skipped, parseInt(skipM[1], 10));
+      }
+    }
+  }
+
+  // pytest: "3 passed, 2 failed, 1 error in 1.23s" or "5 passed in 0.12s"
+  if (passed === 0 && failed === 0) {
+    const pytestLine = lines.find(
+      (l) => /\d+\s+passed/.test(l) || /\d+\s+failed/.test(l) || /\d+\s+error/.test(l),
+    );
+    if (pytestLine) {
+      const passM = pytestLine.match(/(\d+)\s+passed/);
+      const failM = pytestLine.match(/(\d+)\s+(?:failed|error)/);
+      const skipM = pytestLine.match(/(\d+)\s+(?:skipped|deselected)/);
+      if (passM) passed = parseInt(passM[1], 10);
+      if (failM) failed = parseInt(failM[1], 10);
+      if (skipM) skipped = parseInt(skipM[1], 10);
+    }
+    // pytest FAILED lines: "FAILED tests/test_foo.py::test_bar - AssertionError"
+    for (const line of lines) {
+      const m = line.match(/^FAILED\s+(.+?)(?:\s+-\s+.+)?$/);
+      if (m && failedTests.length < 20) failedTests.push(m[1].trim().slice(0, 120));
+    }
+  }
+
+  // Mocha: "  10 passing (1s)" / "  2 failing"
+  if (passed === 0 && failed === 0) {
+    const passingLine = lines.find((l) => /\d+\s+passing/.test(l));
+    const failingLine = lines.find((l) => /\d+\s+failing/.test(l));
+    const pendingLine = lines.find((l) => /\d+\s+pending/.test(l));
+    if (passingLine) {
+      const m = passingLine.match(/(\d+)\s+passing/);
+      if (m) passed = parseInt(m[1], 10);
+    }
+    if (failingLine) {
+      const m = failingLine.match(/(\d+)\s+failing/);
+      if (m) failed = parseInt(m[1], 10);
+    }
+    if (pendingLine) {
+      const m = pendingLine.match(/(\d+)\s+pending/);
+      if (m) skipped = parseInt(m[1], 10);
+    }
+    // Mocha failing test names: lines like "  1) Suite name it description"
+    for (const line of lines) {
+      const m = line.match(/^\s+\d+\)\s+(.+)/);
+      if (m && failedTests.length < 20) failedTests.push(m[1].trim().slice(0, 120));
+    }
+  }
+
+  // Go test: "ok  github.com/user/pkg    0.123s" / "FAIL github.com/user/pkg"
+  //          "--- FAIL: TestFoo (0.00s)"
+  if (passed === 0 && failed === 0) {
+    const goOkLines = lines.filter((l) => /^ok\s+/.test(l.trim())).length;
+    const goFailLines = lines.filter((l) => /^FAIL\s+/.test(l.trim())).length;
+    if (goOkLines > 0 || goFailLines > 0) {
+      passed = goOkLines;
+      failed = goFailLines;
+    }
+    for (const line of lines) {
+      const m = line.match(/^--- FAIL:\s+(\S+)/);
+      if (m && failedTests.length < 20) failedTests.push(m[1].trim().slice(0, 120));
+    }
+  }
+
+  // Last-resort: if we still have nothing and exitCode is non-zero, mark 1 failure
+  if (passed === 0 && failed === 0 && exitCode !== 0) {
+    failed = 1;
+  }
+
+  const total = passed + failed + skipped;
+  return { passed, failed, skipped, total, failedTests };
+}
+
 /**
  * Run a container exec with a hard timeout. The Fly exec API itself doesn't
  * surface AbortSignal, but we race the promise against a wall-clock and the
@@ -4753,6 +4895,243 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       ctx.e2eResults.push(summary);
       const obs = renderE2eObservation(summary);
       return { ok: summary.failed === 0, observation: obs };
+    }
+    case "run_tests": {
+      if (stack === "static-html" || stack === "mobile-cross") {
+        return {
+          ok: false,
+          observation:
+            "ERROR: run_tests requires a container shell, which this stack does not provide.",
+        };
+      }
+      if (!containerState.id) {
+        const prov = await ensureContainerProvisioned(ctx);
+        if (!prov.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: cannot provision container: ${prov.reason ?? "unknown"}`,
+          };
+        }
+      }
+
+      // ── Command resolution (priority order) ──────────────────────────────
+      // 1. Explicit command from the agent — evaluated through command policy.
+      // 2. .mustaflow.json workspace config (testCommand field) — project settings.
+      // 3. TEST_COMMAND project secret.
+      // 4. Auto-detect from workspace files (package.json / Python / Go).
+      // 5. Final fallback: npm test.
+      //
+      // Source (1) is model-controlled and must pass policy. Sources (2)-(5)
+      // are derived from project-owned files/config and are trusted — they
+      // bypass policy but are constrained to known test runner patterns.
+
+      const modelCommand =
+        typeof args.command === "string" && args.command.trim() ? args.command.trim() : null;
+
+      // Policy check for model-supplied command (same gate as run_command).
+      if (modelCommand !== null) {
+        const strictness = ctx.input.policyStrictness ?? DEFAULT_POLICY_STRICTNESS;
+        const policyArgv = ["sh", "-lc", modelCommand];
+        const check = evaluateRunCommand(policyArgv, strictness, {
+          allowedExactArgvs: ctx.profile.checks.map((c) => c.argv),
+          installCmd: ctx.profile.installCmd,
+        });
+        if (!check.ok) {
+          const reason = check.reason ?? "not allowed";
+          commandsRun.push({
+            step,
+            argv: policyArgv,
+            exitCode: 126,
+            durationMs: 0,
+            stdoutPreview: "",
+            stderrPreview: `BLOCKED: ${reason}`,
+          });
+          return {
+            ok: false,
+            observation: JSON.stringify({
+              blocked: true,
+              reason,
+              policyStrictness: strictness,
+              command: modelCommand,
+            }),
+          };
+        }
+      }
+
+      // Human-in-the-loop approval gate for model-supplied commands.
+      if (modelCommand !== null && input.requireCommandApproval && input.taskId) {
+        const { createPrompt } = await import("./agent-prompts");
+        const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+        const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+        const approvalPayload = {
+          question: `Allow the agent to run tests with this command?\n\`${modelCommand}\``,
+          kind: "boolean" as const,
+          options: [],
+          allowMultiple: false,
+        };
+        const { promptId, promise } = createPrompt({
+          taskId: input.taskId,
+          projectId: input.projectId,
+          kind: "user_query",
+          payload: approvalPayload,
+          signal: input.signal,
+          timeoutMs: promptTimeoutMs,
+        });
+        await safeEvent(
+          input.onEvent,
+          "agent_prompt",
+          JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+        );
+        const resp = await promise;
+        if (resp.canceled) {
+          throw new Error("Task terminated while awaiting test command approval");
+        }
+        const approved =
+          typeof resp.response === "boolean" ? resp.response : resp.response === "true";
+        if (!approved) {
+          return {
+            ok: false,
+            observation: "Test command rejected by user — find an alternative approach",
+          };
+        }
+      }
+
+      // Install deps after approval so no side-effects occur on rejection.
+      await ensureInstalled(ctx, input.signal, step);
+
+      let testCmd: string | null = modelCommand;
+
+      // 2. .mustaflow.json workspace config (project settings)
+      if (!testCmd) {
+        const configFile = workspace.read(".mustaflow.json");
+        if (configFile) {
+          try {
+            const cfg = JSON.parse(configFile.content) as Record<string, unknown>;
+            const tc = cfg.testCommand;
+            if (typeof tc === "string" && tc.trim()) testCmd = tc.trim();
+          } catch {
+            // ignore malformed config
+          }
+        }
+      }
+
+      // 3. TEST_COMMAND project secret
+      if (!testCmd) {
+        try {
+          const { db: _db, secretsTable } = await import("@workspace/db");
+          const { eq, and } = await import("drizzle-orm");
+          const { encryptionService } = await import("./encryption");
+          const secretRows = await _db
+            .select({ valueEncrypted: secretsTable.valueEncrypted })
+            .from(secretsTable)
+            .where(
+              and(
+                eq(secretsTable.projectId, input.projectId),
+                eq(secretsTable.name, "TEST_COMMAND"),
+              ),
+            )
+            .limit(1);
+          if (secretRows[0]) {
+            const v = encryptionService.decrypt(secretRows[0].valueEncrypted);
+            if (v && v.trim()) testCmd = v.trim();
+          }
+        } catch {
+          // ignore — fall through to auto-detect
+        }
+      }
+
+      // 4. Auto-detect from workspace files
+      if (!testCmd) {
+        const pkgFile = workspace.read("package.json");
+        if (pkgFile) {
+          try {
+            const pkg = JSON.parse(pkgFile.content) as Record<string, unknown>;
+            const scripts = pkg.scripts as Record<string, string> | undefined;
+            if (scripts?.test && !scripts.test.includes("no test specified")) {
+              // Prefer non-watch vitest/jest invocations over bare `npm test`
+              if (/vitest/.test(scripts.test)) {
+                testCmd = "npx vitest run";
+              } else if (/jest/.test(scripts.test)) {
+                testCmd = "npx jest --no-coverage";
+              } else {
+                testCmd = "npm test";
+              }
+            } else if (scripts?.["test:run"]) {
+              testCmd = "npm run test:run";
+            }
+          } catch {
+            // ignore malformed package.json
+          }
+        }
+      }
+
+      if (!testCmd) {
+        const hasPython =
+          workspace.read("requirements.txt") ||
+          workspace.read("pyproject.toml") ||
+          workspace.read("setup.py");
+        if (hasPython) testCmd = "python -m pytest";
+      }
+
+      if (!testCmd) {
+        const hasGo = workspace.read("go.mod");
+        if (hasGo) testCmd = "go test ./...";
+      }
+
+      // 5. Final fallback
+      if (!testCmd) testCmd = "npm test";
+
+      const timeoutMs =
+        typeof args.timeout_ms === "number" && args.timeout_ms > 0
+          ? Math.min(args.timeout_ms, PER_CALL_TIMEOUT_CAP_MS)
+          : Math.min(5 * 60_000, PER_CALL_TIMEOUT_CAP_MS);
+
+      await safeEvent(input.onEvent, "narration", `Running tests: ${testCmd}`);
+
+      const argv = ["sh", "-lc", testCmd];
+      const t = Date.now();
+      const r = await execWithTimeout(
+        containerState.id!,
+        argv,
+        input.projectId,
+        timeoutMs,
+        input.signal,
+      );
+      const dur = Date.now() - t;
+      const exitCode = r.timedOut ? 124 : r.exitCode;
+
+      commandsRun.push({
+        step,
+        argv,
+        exitCode,
+        durationMs: dur,
+        stdoutPreview: r.output.slice(0, 400),
+        stderrPreview: "",
+      });
+
+      if (r.aborted) return { ok: false, observation: "ERROR: aborted by user" };
+      if (r.timedOut) {
+        return {
+          ok: false,
+          observation: `ERROR: test run exceeded ${timeoutMs}ms timeout`,
+        };
+      }
+
+      const testSummary = parseTestOutput(r.output, exitCode);
+      return {
+        ok: exitCode === 0,
+        observation: JSON.stringify({
+          command: testCmd,
+          exitCode,
+          passed: testSummary.passed,
+          failed: testSummary.failed,
+          skipped: testSummary.skipped,
+          total: testSummary.total,
+          failedTests: testSummary.failedTests,
+          durationMs: dur,
+          output: r.output.slice(0, MAX_OBSERVATION_CHARS - 512),
+        }),
+      };
     }
     case "take_screenshot": {
       const { takeScreenshot } = await import("./agent-senses");
