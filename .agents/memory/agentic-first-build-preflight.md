@@ -14,6 +14,7 @@ New agentic projects (0 project_versions) must skip the `/healthz` container hea
 ## How to apply
 
 In `jobs.ts` inside `runAgenticPreflightGate`:
+
 1. Query `project_versions` count for the project
 2. `isFirstBuild = count === 0`
 3. `effectiveContainerUrl = isFirstBuild ? null : containerUrl`

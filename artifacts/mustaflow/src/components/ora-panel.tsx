@@ -66,6 +66,7 @@ const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] =
   { value: "xlsx", label: "Excel (.xlsx)", ext: ".xlsx" },
   { value: "docx", label: "Word Document", ext: ".docx" },
   { value: "pdf", label: "PDF Document", ext: ".pdf" },
+  { value: "pptx", label: "PowerPoint (.pptx)", ext: ".pptx" },
 ];
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
@@ -75,6 +76,7 @@ const ACCEPTED_EXTENSIONS = new Set([
   ".txt",
   ".csv",
   ".xlsx",
+  ".pptx",
   ".png",
   ".jpg",
   ".jpeg",
@@ -1089,7 +1091,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
+                    accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
                     className="sr-only"
                     aria-hidden
                     onChange={handleFileChange}
@@ -1102,7 +1104,7 @@ export function OraPanel({ chat }: OraPanelProps) {
                     title={
                       atAllLimits
                         ? "Upload limit reached for this session"
-                        : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, TXT, CSV, XLSX)"
+                        : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX)"
                     }
                     aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
                     className={cn(

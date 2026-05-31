@@ -58,7 +58,6 @@ const BLOCKED_EXTENSIONS = new Set([
   ".xlsm",
   ".xlsb",
   ".ods",
-  ".pptx",
   ".ppt",
   ".odp",
   ".html",
@@ -72,7 +71,7 @@ const BLOCKED_EXTENSIONS = new Set([
   ".sql",
 ]);
 
-export type AllowedFileType = "pdf" | "docx" | "txt" | "csv" | "xlsx";
+export type AllowedFileType = "pdf" | "docx" | "txt" | "csv" | "xlsx" | "pptx";
 
 export type ValidationResult =
   | { ok: true; type: AllowedFileType; sanitizedName: string }
@@ -109,6 +108,16 @@ function hasDocxStructure(buffer: Buffer): boolean {
   const hasWord = raw.includes("word/document.xml") || raw.includes("word/");
   const hasContentTypes = raw.includes("[Content_Types].xml");
   return hasWord && hasContentTypes;
+}
+
+/**
+ * Verify PPTX structure: ZIP must contain ppt/presentation.xml and [Content_Types].xml.
+ */
+function hasPptxStructure(buffer: Buffer): boolean {
+  const raw = buffer.toString("latin1");
+  const hasPresentation = raw.includes("ppt/presentation.xml") || raw.includes("ppt/");
+  const hasContentTypes = raw.includes("[Content_Types].xml");
+  return hasPresentation && hasContentTypes;
 }
 
 /**
@@ -161,7 +170,7 @@ export function validateFile(
     return {
       ok: false,
       statusCode: 415,
-      error: `File type "${ext}" is not supported. Ora accepts PDF, DOCX, TXT, CSV, and XLSX files.`,
+      error: `File type "${ext}" is not supported. Ora accepts PDF, DOCX, PPTX, TXT, CSV, and XLSX files.`,
     };
   }
 
@@ -219,6 +228,26 @@ export function validateFile(
     return { ok: true, type: "xlsx", sanitizedName };
   }
 
+  if (ext === ".pptx") {
+    if (magic !== "zip") {
+      return {
+        ok: false,
+        statusCode: 415,
+        error:
+          "This file does not appear to be a valid PPTX. Please upload a genuine PowerPoint .pptx file.",
+      };
+    }
+    if (!hasPptxStructure(buffer)) {
+      return {
+        ok: false,
+        statusCode: 415,
+        error:
+          "This ZIP file does not contain a valid PowerPoint structure. Please upload a genuine .pptx file.",
+      };
+    }
+    return { ok: true, type: "pptx", sanitizedName };
+  }
+
   if (ext === ".csv") {
     if (magic === "pdf" || magic === "zip") {
       return {
@@ -262,6 +291,6 @@ export function validateFile(
   return {
     ok: false,
     statusCode: 415,
-    error: `Unsupported file type "${ext || "(none)"}". Ora accepts PDF, DOCX, TXT, CSV, and XLSX files.`,
+    error: `Unsupported file type "${ext || "(none)"}". Ora accepts PDF, DOCX, PPTX, TXT, CSV, and XLSX files.`,
   };
 }

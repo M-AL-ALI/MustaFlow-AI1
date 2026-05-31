@@ -190,12 +190,7 @@ async function runAgenticPreflightGate(
       await emitEvent(taskId, "narration", "Server is slow to wake — retrying in 10 seconds…");
       await new Promise((r) => setTimeout(r, 10_000));
       try {
-        wakeResult = await ensureContainerAwake(
-          containerId,
-          projectId,
-          effectiveContainerUrl,
-          30,
-        );
+        wakeResult = await ensureContainerAwake(containerId, projectId, effectiveContainerUrl, 30);
       } catch (err) {
         if (err instanceof ContainerUnavailableError) {
           return {

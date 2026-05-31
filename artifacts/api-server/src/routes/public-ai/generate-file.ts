@@ -20,7 +20,7 @@ const messageItemSchema = z.object({
 const bodySchema = z.object({
   message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
-  format: z.enum(["csv", "xlsx", "docx", "pdf"]),
+  format: z.enum(["csv", "xlsx", "docx", "pdf", "pptx"]),
   language: z.string().max(20).optional(),
 });
 

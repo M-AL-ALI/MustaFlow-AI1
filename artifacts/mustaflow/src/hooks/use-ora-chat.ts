@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 
-export type FileFormat = "csv" | "xlsx" | "docx" | "pdf";
+export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 
 export interface GeneratedFile {
   fileName: string;
@@ -94,7 +94,7 @@ const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 const FILE_LIMIT = 3;
 const IMAGE_LIMIT = 2;
 
-const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx"];
+const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".pptx"];
 const IMAGE_ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
 const ALLOWED_EXTENSIONS = [...DOC_ALLOWED_EXTENSIONS, ...IMAGE_ALLOWED_EXTENSIONS];
 
@@ -413,7 +413,7 @@ export function useOraChat(): UseOraChatReturn {
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
         setUploadState("error");
         setUploadError(
-          `Unsupported file type "${ext}". Please upload a PDF, DOCX, TXT, CSV, XLSX, PNG, JPG, or WEBP file.`,
+          `Unsupported file type "${ext}". Please upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, PNG, JPG, or WEBP file.`,
         );
         return;
       }

@@ -260,7 +260,7 @@ router.post(
         });
       } else {
         res.status(422).json({
-          error: "This file could not be read. Please try another PDF, DOCX, or TXT file.",
+          error: "This file could not be read. Please try another PDF, DOCX, PPTX, or TXT file.",
         });
       }
       return;

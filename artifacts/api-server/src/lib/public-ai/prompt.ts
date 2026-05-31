@@ -7,7 +7,7 @@ export const ORA_SYSTEM_PROMPT = `You are Ora, a premium public AI consultant by
 - Helping visitors think through business ideas, workflows, and technical decisions
 - Translating concepts into actionable next steps
 - Summarizing complex topics and explaining them clearly
-- **Generating files**: You can create CSV, Excel (.xlsx), Word (.docx), and PDF files. When a visitor asks for a spreadsheet, report, document, or data file, tell them to use the file generation button (the spreadsheet icon in the chat toolbar) to select their desired format, then describe what they want — Ora will generate and deliver a downloadable file instantly.
+- **Generating files**: You can create CSV, Excel (.xlsx), Word (.docx), PDF, and PowerPoint (.pptx) files. When a visitor asks for a spreadsheet, report, document, presentation, or data file, tell them to use the file generation button (the spreadsheet icon in the chat toolbar) to select their desired format, then describe what they want — Ora will generate and deliver a downloadable file instantly.
 - **Image generation**: MustaFlow has a full Image Studio for generating images, logos, banners, illustrations, and other visuals using AI. When a visitor asks about generating images or visual content, let them know image generation is available to signed-in MustaFlow users — they can access the Image Studio after signing up, or generate images inline in any project chat. Never say you cannot generate images; instead guide them to sign up to access this feature.
 
 ## Hard boundaries (non-negotiable)
@@ -61,7 +61,7 @@ const INJECTION_PATTERNS: RegExp[] = [
 // Patterns that indicate a request to generate a downloadable file — these
 // are handled by the generate-file route and must NOT be flagged as builder requests.
 const FILE_GENERATION_PATTERNS: RegExp[] = [
-  /\b(csv|spreadsheet|excel|xlsx|xls|word|docx|pdf)\b/i,
+  /\b(csv|spreadsheet|excel|xlsx|xls|word|docx|pdf|pptx|powerpoint|presentation|slides)\b/i,
   /\b(generate|create|make|build|export|produce)\s+(a\s+)?(file|document|report|table|sheet|spreadsheet|doc)\b/i,
   /\b(download|export)\s+(a\s+)?(file|report|spreadsheet|document|csv|excel|pdf|word)\b/i,
 ];
@@ -81,12 +81,13 @@ const BUILDER_PATTERNS: RegExp[] = [
 ];
 
 // File format keywords used to auto-detect the desired output type in chat
-export type FileFormat = "csv" | "xlsx" | "docx" | "pdf";
+export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 const FILE_FORMAT_DETECT: Array<{ pattern: RegExp; format: FileFormat }> = [
   { pattern: /\b(csv|comma.separated)\b/i, format: "csv" },
   { pattern: /\b(excel|xlsx|xls|spreadsheet)\b/i, format: "xlsx" },
   { pattern: /\b(word|docx|doc\b|word\s+doc)/i, format: "docx" },
   { pattern: /\b(pdf)\b/i, format: "pdf" },
+  { pattern: /\b(powerpoint|pptx|ppt\b|presentation|slide\s+deck|slides)\b/i, format: "pptx" },
 ];
 
 export function scanUserInput(text: string): boolean {

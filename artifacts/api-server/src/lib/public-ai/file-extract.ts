@@ -45,6 +45,21 @@ async function extractPdf(buffer: Buffer): Promise<string> {
   }
 }
 
+async function extractPptx(buffer: Buffer): Promise<string> {
+  try {
+    const officeparser = (await import("officeparser")).default;
+    const text = await officeparser.parseOffice(buffer, { outputErrorToConsole: false });
+    const trimmed = (typeof text === "string" ? text : "").trim();
+    if (!trimmed) throw new ExtractionError("no-text");
+    return truncateWithNote(trimmed);
+  } catch (err) {
+    if (err instanceof ExtractionError) throw err;
+    throw new ExtractionError(
+      "This PowerPoint file could not be read. It may be corrupted or use an unsupported format.",
+    );
+  }
+}
+
 async function extractDocx(buffer: Buffer): Promise<string> {
   try {
     const mammoth = (await import("mammoth")).default;
@@ -84,5 +99,7 @@ export async function extractText(
       return extractDocx(buffer);
     case "txt":
       return extractTxt(buffer);
+    case "pptx":
+      return extractPptx(buffer);
   }
 }

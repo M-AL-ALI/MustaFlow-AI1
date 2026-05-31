@@ -6,6 +6,7 @@ description: Background npm process in agentic Fly.io containers blocks agent pk
 ## Rule
 
 Agentic containers consistently fail all `npm install` / `pkg_install` operations with:
+
 ```
 npm error Tracker "idealTree" already exists
 ```

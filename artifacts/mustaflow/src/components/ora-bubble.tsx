@@ -68,6 +68,7 @@ const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] =
   { value: "xlsx", label: "Excel (.xlsx)", ext: ".xlsx" },
   { value: "docx", label: "Word Document", ext: ".docx" },
   { value: "pdf", label: "PDF Document", ext: ".pdf" },
+  { value: "pptx", label: "PowerPoint (.pptx)", ext: ".pptx" },
 ];
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
@@ -77,6 +78,7 @@ const ACCEPTED_EXTENSIONS = new Set([
   ".txt",
   ".csv",
   ".xlsx",
+  ".pptx",
   ".png",
   ".jpg",
   ".jpeg",
@@ -781,7 +783,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               <Upload className="h-7 w-7" />
               <span className="text-sm font-medium">Drop image or file to upload</span>
               <span className="text-xs text-muted-foreground">
-                PNG, JPG, WEBP · PDF, DOCX, TXT · CSV, XLSX
+                PNG, JPG, WEBP · PDF, DOCX, PPTX, TXT · CSV, XLSX
               </span>
             </div>
           </div>
@@ -1016,7 +1018,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                 <p className="text-sm font-medium mb-1">Hi, I&apos;m Ora</p>
                 <p className="text-xs text-muted-foreground max-w-[220px] mx-auto leading-relaxed">
                   Your free AI consultant. Ask me anything about app planning, strategy, or
-                  MustaFlow. Upload a PDF, DOCX, TXT, CSV, or XLSX for analysis.
+                  MustaFlow. Upload a PDF, DOCX, PPTX, TXT, CSV, or XLSX for analysis.
                 </p>
               </div>
             )}
@@ -1327,7 +1329,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".pdf,.docx,.txt,.csv,.xlsx,.png,.jpg,.jpeg,.webp"
+                      accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
                       className="sr-only"
                       aria-hidden
                       onChange={handleFileChange}
@@ -1340,7 +1342,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       title={
                         atAllLimits
                           ? "Upload limit reached for this session"
-                          : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, TXT, CSV, XLSX)"
+                          : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX)"
                       }
                       aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
                       className={cn(
