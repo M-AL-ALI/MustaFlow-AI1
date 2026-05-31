@@ -290,7 +290,9 @@ export default function DevWorkspacePage() {
         {/* Infrastructure status bar — shows container/provisioning state */}
         <DevRuntimeStatusBar
           containerStatus={containerStatus}
-          provisioningStatus={(project as { provisioningStatus?: string | null } | undefined)?.provisioningStatus}
+          provisioningStatus={
+            (project as { provisioningStatus?: string | null } | undefined)?.provisioningStatus
+          }
           hasContainer={!!project && !!(project as { containerId?: string | null }).containerId}
         />
 

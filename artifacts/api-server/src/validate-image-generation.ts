@@ -101,7 +101,9 @@ async function run(): Promise<void> {
     process.env.CF_R2_SECRET_ACCESS_KEY &&
     process.env.CF_R2_BUCKET
   );
-  info(`Storage backend: ${r2Configured ? "Cloudflare R2 (production)" : "OS temp file (dev fallback)"}`);
+  info(
+    `Storage backend: ${r2Configured ? "Cloudflare R2 (production)" : "OS temp file (dev fallback)"}`,
+  );
   info(`Test user: ${TEST_USER_ID}`);
 
   const providerOk = isImageProviderConfigured();
@@ -225,7 +227,8 @@ async function run(): Promise<void> {
   // ── Check 5-9: Full pipeline ──────────────────────────────────────────────
 
   console.log("\n── Check 5-9: Full generation pipeline ──────────────");
-  const imagePrompt = "Create a logo for a mechanic app called SpeedWrench, clean modern design, dark background";
+  const imagePrompt =
+    "Create a logo for a mechanic app called SpeedWrench, clean modern design, dark background";
   const balanceBefore = await getBalance(TEST_USER_ID);
   info(`Balance before generation: ${balanceBefore}`);
   info(`Submitting: "${imagePrompt}"`);
@@ -260,17 +263,25 @@ async function run(): Promise<void> {
   // Credit enforcement is gated by CREDITS_ENFORCEMENT=true env var.
   // In dev (not set) deduction is a no-op; we still verify the balance behaviour.
   const enforcementEnabled = process.env.CREDITS_ENFORCEMENT === "true";
-  info(`CREDITS_ENFORCEMENT: ${enforcementEnabled ? "true (production mode)" : "false (dev mode — deduction is no-op)"}`);
+  info(
+    `CREDITS_ENFORCEMENT: ${enforcementEnabled ? "true (production mode)" : "false (dev mode — deduction is no-op)"}`,
+  );
 
   const balanceAfterEnqueue = await getBalance(TEST_USER_ID);
   if (enforcementEnabled) {
     if (balanceAfterEnqueue === balanceBefore - 1) {
       pass("Credit deducted immediately (1 credit for draft)");
     } else {
-      fail("Credit deduction mismatch", `expected ${balanceBefore - 1}, got ${balanceAfterEnqueue}`);
+      fail(
+        "Credit deduction mismatch",
+        `expected ${balanceBefore - 1}, got ${balanceAfterEnqueue}`,
+      );
     }
   } else {
-    info("Credit deduction skipped in dev mode (CREDITS_ENFORCEMENT not set) — balance unchanged: " + balanceAfterEnqueue);
+    info(
+      "Credit deduction skipped in dev mode (CREDITS_ENFORCEMENT not set) — balance unchanged: " +
+        balanceAfterEnqueue,
+    );
     pass("Credit enforcement bypass correctly returns newBalance=current without deducting");
   }
 
@@ -409,7 +420,9 @@ async function run(): Promise<void> {
     }
   } else {
     if (balanceAfter === balanceBefore) {
-      pass("Dev mode: balance unchanged after generation (enforcement off, no deduction or refund)");
+      pass(
+        "Dev mode: balance unchanged after generation (enforcement off, no deduction or refund)",
+      );
     } else {
       fail("Dev mode: balance changed unexpectedly", `was ${balanceBefore}, now ${balanceAfter}`);
     }
@@ -428,14 +441,23 @@ async function run(): Promise<void> {
         if (resp.ok) {
           const contentType = resp.headers.get("content-type") ?? "";
           const contentLength = resp.headers.get("content-length") ?? "unknown";
-          pass("Download URL is accessible (HTTP 200)", `content-type=${contentType}, size=${contentLength}B`);
+          pass(
+            "Download URL is accessible (HTTP 200)",
+            `content-type=${contentType}, size=${contentLength}B`,
+          );
         } else {
-          info(`Download URL returned HTTP ${resp.status} (API server may not be running in this process)`);
-          info("The /api/images/:id/file route is registered and will serve correctly when the API is running");
+          info(
+            `Download URL returned HTTP ${resp.status} (API server may not be running in this process)`,
+          );
+          info(
+            "The /api/images/:id/file route is registered and will serve correctly when the API is running",
+          );
         }
       } catch {
         info("Download URL curl skipped (not accessible from tsx subprocess — expected)");
-        info("The /api/images/:id/file route is registered and serves via GET /api/images/:id/file");
+        info(
+          "The /api/images/:id/file route is registered and serves via GET /api/images/:id/file",
+        );
       }
     } else {
       pass("R2 URL is the download URL — directly accessible");
@@ -452,7 +474,9 @@ async function run(): Promise<void> {
   const listResult = await db
     .select({ id: generatedImagesTable.id })
     .from(generatedImagesTable)
-    .where(and(eq(generatedImagesTable.userId, TEST_USER_ID), isNull(generatedImagesTable.deletedAt)));
+    .where(
+      and(eq(generatedImagesTable.userId, TEST_USER_ID), isNull(generatedImagesTable.deletedAt)),
+    );
 
   const found = listResult.some((r) => r.id === imageId);
   if (!found) {

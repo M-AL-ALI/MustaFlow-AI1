@@ -626,7 +626,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
         },
       );
     },
-    [prompt, images, isBusy, projectId, agentMode, planMode, sendMessage, queryClient],
+    [prompt, images, isBusy, projectId, agentMode, planMode, sendMessage, queryClient, toast],
   );
 
   const handleKeyDown = useCallback(

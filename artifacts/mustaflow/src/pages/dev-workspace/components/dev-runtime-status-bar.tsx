@@ -17,9 +17,7 @@ export function DevRuntimeStatusBar({
   if (!hasContainer) return null;
 
   const isProvisioning =
-    provisioningStatus != null &&
-    provisioningStatus !== "idle" &&
-    provisioningStatus !== "ready";
+    provisioningStatus != null && provisioningStatus !== "idle" && provisioningStatus !== "ready";
 
   if (!isProvisioning && containerStatus === "stopped") return null;
   if (!isProvisioning && containerStatus === "hibernated") return null;
@@ -44,12 +42,7 @@ export function DevRuntimeStatusBar({
       )}
 
       {!isProvisioning && containerStatus === "running" && (
-        <span
-          className={cn(
-            "flex items-center gap-1",
-            "text-green-400",
-          )}
-        >
+        <span className={cn("flex items-center gap-1", "text-green-400")}>
           <CheckCircle size={10} />
           Container running
         </span>

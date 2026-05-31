@@ -3071,12 +3071,8 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(
         `ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ`,
       );
-      await client.query(
-        `ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS failure_reason TEXT`,
-      );
-      await client.query(
-        `ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS current_step INTEGER`,
-      );
+      await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS failure_reason TEXT`);
+      await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS current_step INTEGER`);
       await client.query(
         `CREATE INDEX IF NOT EXISTS agent_tasks_heartbeat_status_idx
          ON agent_tasks (status, last_heartbeat_at)

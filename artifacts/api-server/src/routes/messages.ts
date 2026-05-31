@@ -317,7 +317,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   const needsContainer = resolvedIntent === "build" || runInBackground;
   if (needsContainer) {
     const bMode = (project as unknown as { builderMode?: string | null }).builderMode;
-    const pStatus = (project as unknown as { provisioningStatus?: string | null }).provisioningStatus;
+    const pStatus = (project as unknown as { provisioningStatus?: string | null })
+      .provisioningStatus;
     if (bMode === "agentic" && pStatus != null && pStatus !== "ready" && pStatus !== "idle") {
       if (idempotencyKey) {
         idempotencyStore.set(idempotencyKey, {

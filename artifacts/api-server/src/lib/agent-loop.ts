@@ -53,7 +53,13 @@ import {
   isPolicyStrictness,
   type PolicyStrictness,
 } from "./policy";
-import { db, toolAuditTable, agentToolCallsTable, agentTasksTable, projectsTable } from "@workspace/db";
+import {
+  db,
+  toolAuditTable,
+  agentToolCallsTable,
+  agentTasksTable,
+  projectsTable,
+} from "@workspace/db";
 import { ContainerUnavailableError } from "./errors";
 import {
   listEnabledSkills,

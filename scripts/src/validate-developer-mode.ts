@@ -37,7 +37,8 @@ const checks: Check[] = [
   },
   {
     name: "container.ts imports ContainerUnavailableError",
-    run: () => read("artifacts/api-server/src/lib/container.ts").includes("ContainerUnavailableError"),
+    run: () =>
+      read("artifacts/api-server/src/lib/container.ts").includes("ContainerUnavailableError"),
   },
   {
     name: "container.ts does not silently return false in writeFileToContainer",
@@ -63,7 +64,7 @@ const checks: Check[] = [
     name: "agent-loop.ts imports ContainerUnavailableError",
     run: () =>
       read("artifacts/api-server/src/lib/agent-loop.ts").includes(
-        'import { ContainerUnavailableError }',
+        "import { ContainerUnavailableError }",
       ),
   },
   {
@@ -78,23 +79,19 @@ const checks: Check[] = [
   },
   {
     name: "agent-loop.ts emits heartbeat",
-    run: () =>
-      read("artifacts/api-server/src/lib/agent-loop.ts").includes("lastHeartbeatAt"),
+    run: () => read("artifacts/api-server/src/lib/agent-loop.ts").includes("lastHeartbeatAt"),
   },
   {
     name: "jobs.ts catches ContainerUnavailableError in preflight",
-    run: () =>
-      read("artifacts/api-server/src/lib/jobs.ts").includes("ContainerUnavailableError"),
+    run: () => read("artifacts/api-server/src/lib/jobs.ts").includes("ContainerUnavailableError"),
   },
   {
     name: "messages.ts has workspace_not_ready provisioning gate",
-    run: () =>
-      read("artifacts/api-server/src/routes/messages.ts").includes("workspace_not_ready"),
+    run: () => read("artifacts/api-server/src/routes/messages.ts").includes("workspace_not_ready"),
   },
   {
     name: "tasks.ts schema has last_heartbeat_at",
-    run: () =>
-      read("lib/db/src/schema/tasks.ts").includes("last_heartbeat_at"),
+    run: () => read("lib/db/src/schema/tasks.ts").includes("last_heartbeat_at"),
   },
   {
     name: "startup-migrations.ts registers migrate-agent-task-heartbeat",
