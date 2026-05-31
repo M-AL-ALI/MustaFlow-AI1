@@ -1210,6 +1210,13 @@ export function OraPanel({ chat }: OraPanelProps) {
                   </button>
                 </div>
 
+                {input.length >= 2000 && (
+                  <p className="text-[10px] text-amber-500 dark:text-amber-400 mt-1.5">
+                    {input.length.toLocaleString()} chars · {input.split("\n").length} lines — very
+                    long messages may reduce response quality
+                  </p>
+                )}
+
                 <div className="flex items-center justify-between mt-2">
                   {dropError ? (
                     <p className="text-[10px] text-destructive">{dropError}</p>

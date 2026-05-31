@@ -1479,6 +1479,18 @@ export function QueueComposer({
             </button>
           )}
 
+          {(() => {
+            const totalChars = rows.reduce((sum, r) => sum + r.text.length, 0);
+            const totalLines = rows.reduce((sum, r) => sum + r.text.split("\n").length, 0);
+            if (totalChars < 2000) return null;
+            return (
+              <p className="mx-3 mt-1 mb-0.5 text-[10px] text-amber-500 dark:text-amber-400">
+                {totalChars.toLocaleString()} chars · {totalLines} lines — very long messages may
+                reduce response quality
+              </p>
+            );
+          })()}
+
           {attachErrors.length > 0 && (
             <div
               className="mx-3 mt-1 mb-0.5 rounded-md px-2 py-1 text-[10px] bg-destructive/10 text-destructive border border-destructive/20"
