@@ -4656,6 +4656,122 @@ export const SemanticSearchVaultResponse = zod.object({
 
 
 /**
+ * @summary Semantic search over the user's Knowledge Vault to find entries relevant to a report query. Returns suggestion cards with no raw vectors. User explicitly reviews and selects entries before any AI use.
+
+ */
+export const getVaultKnowledgeSuggestionsBodyQueryMax = 1000;
+
+export const getVaultKnowledgeSuggestionsBodyLimitDefault = 6;
+export const getVaultKnowledgeSuggestionsBodyLimitMax = 10;
+
+export const getVaultKnowledgeSuggestionsBodyTagsMax = 10;
+
+
+
+export const GetVaultKnowledgeSuggestionsBody = zod.object({
+  "query": zod.string().min(1).max(getVaultKnowledgeSuggestionsBodyQueryMax),
+  "limit": zod.number().min(1).max(getVaultKnowledgeSuggestionsBodyLimitMax).default(getVaultKnowledgeSuggestionsBodyLimitDefault),
+  "category": zod.string().optional(),
+  "department": zod.string().optional(),
+  "tags": zod.array(zod.string()).max(getVaultKnowledgeSuggestionsBodyTagsMax).optional(),
+  "status": zod.enum(['draft', 'approved']).optional()
+})
+
+export const getVaultKnowledgeSuggestionsResponseSuggestionsItemSimilarityScoreMin = 0;
+export const getVaultKnowledgeSuggestionsResponseSuggestionsItemSimilarityScoreMax = 100;
+
+
+
+export const GetVaultKnowledgeSuggestionsResponse = zod.object({
+  "query": zod.string(),
+  "suggestions": zod.array(zod.object({
+  "entryId": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "department": zod.string().nullish(),
+  "summary": zod.string(),
+  "tags": zod.array(zod.string()),
+  "status": zod.string(),
+  "version": zod.number(),
+  "chunkIndex": zod.number().describe('Index of the best-matching chunk within the entry.'),
+  "chunkPreview": zod.string().describe('First 300 characters of the best-matching chunk. Raw vectors are never returned.'),
+  "similarityScore": zod.number().min(getVaultKnowledgeSuggestionsResponseSuggestionsItemSimilarityScoreMin).max(getVaultKnowledgeSuggestionsResponseSuggestionsItemSimilarityScoreMax).describe('Cosine similarity score expressed as 0–100 (100 = identical).'),
+  "updatedAt": zod.string()
+})),
+  "remaining": zod.number().optional(),
+  "noEmbeddingsExist": zod.boolean().optional(),
+  "embeddingError": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Build a sanitized, ownership-verified context preview from a list of user-selected vault entry IDs. Used to show the user exactly what will be sent to the AI before report generation.
+
+ */
+export const buildVaultApprovedContextBodySelectedEntryIdsMax = 8;
+
+
+
+export const BuildVaultApprovedContextBody = zod.object({
+  "selectedEntryIds": zod.array(zod.number()).min(1).max(buildVaultApprovedContextBodySelectedEntryIdsMax)
+})
+
+export const BuildVaultApprovedContextResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "entryId": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "department": zod.string().nullish(),
+  "summary": zod.string(),
+  "chunkPreview": zod.string(),
+  "version": zod.number(),
+  "updatedAt": zod.string(),
+  "sourceRef": zod.string(),
+  "skipped": zod.boolean(),
+  "skipReason": zod.string().optional()
+})),
+  "totalChars": zod.number(),
+  "skippedCount": zod.number()
+})
+
+
+/**
+ * @summary Generate a structured Knowledge Report using only the user-selected, ownership-verified, sanitized vault entries as AI context. Logs an audit trail event. Returns markdown report text with a Knowledge Vault References Used section.
+
+ */
+export const generateVaultKnowledgeReportBodyQueryMax = 2000;
+
+export const generateVaultKnowledgeReportBodySelectedEntryIdsDefault = [];
+export const generateVaultKnowledgeReportBodySelectedEntryIdsMax = 8;
+
+export const generateVaultKnowledgeReportBodyTitleMax = 200;
+
+
+
+export const GenerateVaultKnowledgeReportBody = zod.object({
+  "query": zod.string().min(1).max(generateVaultKnowledgeReportBodyQueryMax),
+  "selectedEntryIds": zod.array(zod.number()).max(generateVaultKnowledgeReportBodySelectedEntryIdsMax).default(generateVaultKnowledgeReportBodySelectedEntryIdsDefault),
+  "title": zod.string().max(generateVaultKnowledgeReportBodyTitleMax).optional()
+})
+
+export const GenerateVaultKnowledgeReportResponse = zod.object({
+  "report": zod.string(),
+  "knowledgeReferences": zod.array(zod.object({
+  "entryId": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "department": zod.string().nullish(),
+  "version": zod.number(),
+  "updatedAt": zod.string(),
+  "sourceRef": zod.string()
+})),
+  "entryCount": zod.number(),
+  "skippedCount": zod.number(),
+  "usedEntryIds": zod.array(zod.number())
+})
+
+
+/**
  * @summary Trigger an EAS cloud build for iOS or Android
  */
 export const TriggerMobileBuildParams = zod.object({

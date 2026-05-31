@@ -7,3 +7,4 @@
 - [PostgreSQL generated column immutability](pg-generated-column-immutability.md) — GENERATED ALWAYS AS STORED requires ALL functions to be IMMUTABLE; array_to_string and subqueries are not. Use functional GIN indexes instead.
 - [PDFKit page numbers with bufferPages](pdfkit-buffer-pages.md) — calling doc.text() inside a pageAdded listener causes infinite recursion; use bufferPages:true then stampall pages with switchToPage() after content is complete.
 - [Flex scroll container with max-height](flex-scroll-max-height.md) — h-full on a child of flex-1 fails when ancestor only has max-height; put overflow-y-auto directly on the flex-1 min-h-0 item instead.
+- [Scripts package uses @workspace/db pool not pg](scripts-pg-pattern.md) — migration scripts in scripts/src/ must import `pool` from `@workspace/db`, not `import { Pool } from "pg"` (pg is not a direct dep of scripts).

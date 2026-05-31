@@ -92,6 +92,7 @@ import apiDocsRouter from "./api-docs";
 import publicAiRouter from "./public-ai/index";
 import oraTranscriptRouter from "./ora-transcript";
 import builderHandoffRouter from "./builder-handoff";
+import vaultKnowledgeRouter from "./vault-knowledge";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -241,6 +242,7 @@ router.use(knowledgeRouter);
 router.use(vaultRouter);
 router.use(vaultEmbeddingsRouter);
 router.use(vaultSearchRouter);
+router.use(vaultKnowledgeRouter);
 router.use(activityRouter);
 router.use(filesRouter);
 router.use(eventsRouter);

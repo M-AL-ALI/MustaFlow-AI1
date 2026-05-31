@@ -92,6 +92,7 @@
     "migrate-ora-transcripts": "tsx ./src/migrate-ora-transcripts.ts",
     "migrate-vault-phase81": "tsx ./src/migrate-vault-phase81.ts",
     "migrate-vault-embeddings": "tsx ./src/migrate-vault-embeddings.ts",
+    "migrate-knowledge-usage-events": "tsx ./src/migrate-knowledge-usage-events.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

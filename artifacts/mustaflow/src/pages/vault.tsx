@@ -37,6 +37,7 @@ import {
   Tag,
   X,
 } from "lucide-react";
+import { KnowledgeReportPanel } from "@/components/vault/knowledge-report-panel";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { VaultSaveDialog } from "@/components/vault-save-dialog";
 
@@ -797,6 +798,7 @@ export default function VaultPage() {
   const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
   const [semanticQuery, setSemanticQuery] = useState("");
   const [openingEntryId, setOpeningEntryId] = useState<number | null>(null);
+  const [isKnowledgeReportOpen, setIsKnowledgeReportOpen] = useState(false);
 
   const queryKey = useMemo(
     () => ["vault", { categoryFilter, statusFilter, showArchived, search }],
@@ -901,10 +903,20 @@ export default function VaultPage() {
               </p>
             </div>
           </div>
-          <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            New entry
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsKnowledgeReportOpen(true)}
+            >
+              <Sparkles className="h-4 w-4 mr-1.5" />
+              Generate report
+            </Button>
+            <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              New entry
+            </Button>
+          </div>
         </div>
 
         {/* Search mode toggle */}
@@ -1143,6 +1155,12 @@ export default function VaultPage() {
           setShowCreateDialog(false);
           handleInvalidate();
         }}
+      />
+
+      {/* Knowledge Report Panel */}
+      <KnowledgeReportPanel
+        open={isKnowledgeReportOpen}
+        onOpenChange={setIsKnowledgeReportOpen}
       />
     </AppLayout>
   );

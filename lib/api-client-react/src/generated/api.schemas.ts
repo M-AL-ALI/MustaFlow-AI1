@@ -4074,6 +4074,98 @@ export interface VaultSemanticSearchResponse {
   embeddingError?: boolean;
 }
 
+export type VaultKnowledgeSuggestionsRequestStatus = typeof VaultKnowledgeSuggestionsRequestStatus[keyof typeof VaultKnowledgeSuggestionsRequestStatus];
+
+
+export const VaultKnowledgeSuggestionsRequestStatus = {
+  draft: 'draft',
+  approved: 'approved',
+} as const;
+
+export interface VaultKnowledgeSuggestionsRequest {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  query: string;
+  /**
+     * @minimum 1
+     * @maximum 10
+     */
+  limit?: number;
+  category?: string;
+  department?: string;
+  /** @maxItems 10 */
+  tags?: string[];
+  status?: VaultKnowledgeSuggestionsRequestStatus;
+}
+
+export interface VaultKnowledgeSuggestionsResponse {
+  query: string;
+  suggestions: VaultSemanticSearchResult[];
+  remaining?: number;
+  noEmbeddingsExist?: boolean;
+  embeddingError?: boolean;
+}
+
+export interface VaultApprovedContextRequest {
+  /**
+     * @minItems 1
+     * @maxItems 8
+     */
+  selectedEntryIds: number[];
+}
+
+export interface ApprovedKnowledgeEntry {
+  entryId: number;
+  title: string;
+  category: string;
+  department?: string | null;
+  summary: string;
+  chunkPreview: string;
+  version: number;
+  updatedAt: string;
+  sourceRef: string;
+  skipped: boolean;
+  skipReason?: string;
+}
+
+export interface VaultApprovedContextResponse {
+  entries: ApprovedKnowledgeEntry[];
+  totalChars: number;
+  skippedCount: number;
+}
+
+export interface VaultGenerateReportRequest {
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  query: string;
+  /** @maxItems 8 */
+  selectedEntryIds?: number[];
+  /** @maxLength 200 */
+  title?: string;
+}
+
+export interface VaultKnowledgeReference {
+  entryId: number;
+  title: string;
+  category: string;
+  department?: string | null;
+  version: number;
+  updatedAt: string;
+  sourceRef: string;
+}
+
+export interface VaultGenerateReportResponse {
+  report: string;
+  knowledgeReferences: VaultKnowledgeReference[];
+  entryCount: number;
+  skippedCount: number;
+  usedEntryIds: number[];
+}
+
 export type RequestProjectUploadUrlBody = {
   name: string;
   contentType?: string;

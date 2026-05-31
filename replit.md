@@ -53,6 +53,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-low-credit-email` — adds `last_low_credit_email_at` to `user_credits` (Task #1003; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-provisioning-steps` — adds `provisioning_step` and `provisioning_started_at` to `projects` (Task #988; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-agent-tool-calls` — creates `agent_tool_calls` table and adds `tool_call_rate_cap_per_hour` to `projects` (Task #993; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-knowledge-usage-events` — creates `knowledge_usage_events` table (Phase 8B-3A; run before deploy)
 
 ## Stack
 

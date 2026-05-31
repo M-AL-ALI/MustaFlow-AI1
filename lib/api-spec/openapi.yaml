@@ -3782,6 +3782,113 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /vault/knowledge-suggestions:
+    post:
+      operationId: getVaultKnowledgeSuggestions
+      tags: [vault]
+      summary: >
+        Semantic search over the user's Knowledge Vault to find entries relevant
+        to a report query. Returns suggestion cards with no raw vectors.
+        User explicitly reviews and selects entries before any AI use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultKnowledgeSuggestionsRequest"
+      responses:
+        "200":
+          description: Suggestion results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultKnowledgeSuggestionsResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: Embedding service unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/approved-context:
+    post:
+      operationId: buildVaultApprovedContext
+      tags: [vault]
+      summary: >
+        Build a sanitized, ownership-verified context preview from a list of
+        user-selected vault entry IDs. Used to show the user exactly what will
+        be sent to the AI before report generation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultApprovedContextRequest"
+      responses:
+        "200":
+          description: Approved context preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultApprovedContextResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /vault/generate-report:
+    post:
+      operationId: generateVaultKnowledgeReport
+      tags: [vault]
+      summary: >
+        Generate a structured Knowledge Report using only the user-selected,
+        ownership-verified, sanitized vault entries as AI context.
+        Logs an audit trail event. Returns markdown report text with a
+        Knowledge Vault References Used section.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultGenerateReportRequest"
+      responses:
+        "200":
+          description: Generated report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultGenerateReportResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: AI generation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /projects/{id}/builds:
     post:
       operationId: triggerMobileBuild
@@ -9759,3 +9866,125 @@ components:
         embeddingError:
           type: boolean
           description: True when the query embedding call failed.
+
+    VaultKnowledgeSuggestionsRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 6
+        category:
+          type: string
+        department:
+          type: string
+        tags:
+          type: array
+          items: { type: string }
+          maxItems: 10
+        status:
+          type: string
+          enum: [draft, approved]
+
+    VaultKnowledgeSuggestionsResponse:
+      type: object
+      required: [query, suggestions]
+      properties:
+        query: { type: string }
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/VaultSemanticSearchResult"
+        remaining:
+          type: integer
+        noEmbeddingsExist:
+          type: boolean
+        embeddingError:
+          type: boolean
+
+    VaultApprovedContextRequest:
+      type: object
+      required: [selectedEntryIds]
+      properties:
+        selectedEntryIds:
+          type: array
+          items: { type: integer }
+          minItems: 1
+          maxItems: 8
+
+    ApprovedKnowledgeEntry:
+      type: object
+      required: [entryId, title, category, summary, chunkPreview, version, updatedAt, sourceRef, skipped]
+      properties:
+        entryId: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        department: { type: string, nullable: true }
+        summary: { type: string }
+        chunkPreview: { type: string }
+        version: { type: integer }
+        updatedAt: { type: string }
+        sourceRef: { type: string }
+        skipped: { type: boolean }
+        skipReason: { type: string }
+
+    VaultApprovedContextResponse:
+      type: object
+      required: [entries, totalChars, skippedCount]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovedKnowledgeEntry"
+        totalChars: { type: integer }
+        skippedCount: { type: integer }
+
+    VaultGenerateReportRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        selectedEntryIds:
+          type: array
+          items: { type: integer }
+          maxItems: 8
+          default: []
+        title:
+          type: string
+          maxLength: 200
+
+    VaultKnowledgeReference:
+      type: object
+      required: [entryId, title, category, version, updatedAt, sourceRef]
+      properties:
+        entryId: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        department: { type: string, nullable: true }
+        version: { type: integer }
+        updatedAt: { type: string }
+        sourceRef: { type: string }
+
+    VaultGenerateReportResponse:
+      type: object
+      required: [report, knowledgeReferences, entryCount, skippedCount, usedEntryIds]
+      properties:
+        report: { type: string }
+        knowledgeReferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/VaultKnowledgeReference"
+        entryCount: { type: integer }
+        skippedCount: { type: integer }
+        usedEntryIds:
+          type: array
+          items: { type: integer }

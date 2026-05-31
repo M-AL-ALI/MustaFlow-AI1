@@ -311,9 +311,15 @@ import type {
   V1ListProjects200,
   V1TriggerBuild202,
   V1TriggerBuildBody,
+  VaultApprovedContextRequest,
+  VaultApprovedContextResponse,
   VaultEmbeddingStatus,
   VaultEntry,
   VaultEntryInput,
+  VaultGenerateReportRequest,
+  VaultGenerateReportResponse,
+  VaultKnowledgeSuggestionsRequest,
+  VaultKnowledgeSuggestionsResponse,
   VaultReindexAllResult,
   VaultSemanticSearchRequest,
   VaultSemanticSearchResponse,
@@ -12303,6 +12309,225 @@ export const useSemanticSearchVault = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getSemanticSearchVaultMutationOptions(options));
+    }
+
+export const getGetVaultKnowledgeSuggestionsUrl = () => {
+
+
+
+
+  return `/api/vault/knowledge-suggestions`
+}
+
+/**
+ * @summary Semantic search over the user's Knowledge Vault to find entries relevant to a report query. Returns suggestion cards with no raw vectors. User explicitly reviews and selects entries before any AI use.
+
+ */
+export const getVaultKnowledgeSuggestions = async (vaultKnowledgeSuggestionsRequest: VaultKnowledgeSuggestionsRequest, options?: RequestInit): Promise<VaultKnowledgeSuggestionsResponse> => {
+
+  return customFetch<VaultKnowledgeSuggestionsResponse>(getGetVaultKnowledgeSuggestionsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      vaultKnowledgeSuggestionsRequest,)
+  }
+);}
+
+
+
+
+export const getGetVaultKnowledgeSuggestionsMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getVaultKnowledgeSuggestions>>, TError,{data: BodyType<VaultKnowledgeSuggestionsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getVaultKnowledgeSuggestions>>, TError,{data: BodyType<VaultKnowledgeSuggestionsRequest>}, TContext> => {
+
+const mutationKey = ['getVaultKnowledgeSuggestions'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getVaultKnowledgeSuggestions>>, {data: BodyType<VaultKnowledgeSuggestionsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  getVaultKnowledgeSuggestions(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetVaultKnowledgeSuggestionsMutationResult = NonNullable<Awaited<ReturnType<typeof getVaultKnowledgeSuggestions>>>
+    export type GetVaultKnowledgeSuggestionsMutationBody = BodyType<VaultKnowledgeSuggestionsRequest>
+    export type GetVaultKnowledgeSuggestionsMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Semantic search over the user's Knowledge Vault to find entries relevant to a report query. Returns suggestion cards with no raw vectors. User explicitly reviews and selects entries before any AI use.
+
+ */
+export const useGetVaultKnowledgeSuggestions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getVaultKnowledgeSuggestions>>, TError,{data: BodyType<VaultKnowledgeSuggestionsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getVaultKnowledgeSuggestions>>,
+        TError,
+        {data: BodyType<VaultKnowledgeSuggestionsRequest>},
+        TContext
+      > => {
+      return useMutation(getGetVaultKnowledgeSuggestionsMutationOptions(options));
+    }
+
+export const getBuildVaultApprovedContextUrl = () => {
+
+
+
+
+  return `/api/vault/approved-context`
+}
+
+/**
+ * @summary Build a sanitized, ownership-verified context preview from a list of user-selected vault entry IDs. Used to show the user exactly what will be sent to the AI before report generation.
+
+ */
+export const buildVaultApprovedContext = async (vaultApprovedContextRequest: VaultApprovedContextRequest, options?: RequestInit): Promise<VaultApprovedContextResponse> => {
+
+  return customFetch<VaultApprovedContextResponse>(getBuildVaultApprovedContextUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      vaultApprovedContextRequest,)
+  }
+);}
+
+
+
+
+export const getBuildVaultApprovedContextMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof buildVaultApprovedContext>>, TError,{data: BodyType<VaultApprovedContextRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof buildVaultApprovedContext>>, TError,{data: BodyType<VaultApprovedContextRequest>}, TContext> => {
+
+const mutationKey = ['buildVaultApprovedContext'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof buildVaultApprovedContext>>, {data: BodyType<VaultApprovedContextRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  buildVaultApprovedContext(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BuildVaultApprovedContextMutationResult = NonNullable<Awaited<ReturnType<typeof buildVaultApprovedContext>>>
+    export type BuildVaultApprovedContextMutationBody = BodyType<VaultApprovedContextRequest>
+    export type BuildVaultApprovedContextMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Build a sanitized, ownership-verified context preview from a list of user-selected vault entry IDs. Used to show the user exactly what will be sent to the AI before report generation.
+
+ */
+export const useBuildVaultApprovedContext = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof buildVaultApprovedContext>>, TError,{data: BodyType<VaultApprovedContextRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof buildVaultApprovedContext>>,
+        TError,
+        {data: BodyType<VaultApprovedContextRequest>},
+        TContext
+      > => {
+      return useMutation(getBuildVaultApprovedContextMutationOptions(options));
+    }
+
+export const getGenerateVaultKnowledgeReportUrl = () => {
+
+
+
+
+  return `/api/vault/generate-report`
+}
+
+/**
+ * @summary Generate a structured Knowledge Report using only the user-selected, ownership-verified, sanitized vault entries as AI context. Logs an audit trail event. Returns markdown report text with a Knowledge Vault References Used section.
+
+ */
+export const generateVaultKnowledgeReport = async (vaultGenerateReportRequest: VaultGenerateReportRequest, options?: RequestInit): Promise<VaultGenerateReportResponse> => {
+
+  return customFetch<VaultGenerateReportResponse>(getGenerateVaultKnowledgeReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      vaultGenerateReportRequest,)
+  }
+);}
+
+
+
+
+export const getGenerateVaultKnowledgeReportMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateVaultKnowledgeReport>>, TError,{data: BodyType<VaultGenerateReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateVaultKnowledgeReport>>, TError,{data: BodyType<VaultGenerateReportRequest>}, TContext> => {
+
+const mutationKey = ['generateVaultKnowledgeReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateVaultKnowledgeReport>>, {data: BodyType<VaultGenerateReportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateVaultKnowledgeReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateVaultKnowledgeReportMutationResult = NonNullable<Awaited<ReturnType<typeof generateVaultKnowledgeReport>>>
+    export type GenerateVaultKnowledgeReportMutationBody = BodyType<VaultGenerateReportRequest>
+    export type GenerateVaultKnowledgeReportMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Generate a structured Knowledge Report using only the user-selected, ownership-verified, sanitized vault entries as AI context. Logs an audit trail event. Returns markdown report text with a Knowledge Vault References Used section.
+
+ */
+export const useGenerateVaultKnowledgeReport = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateVaultKnowledgeReport>>, TError,{data: BodyType<VaultGenerateReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateVaultKnowledgeReport>>,
+        TError,
+        {data: BodyType<VaultGenerateReportRequest>},
+        TContext
+      > => {
+      return useMutation(getGenerateVaultKnowledgeReportMutationOptions(options));
     }
 
 export const getTriggerMobileBuildUrl = (id: number,) => {

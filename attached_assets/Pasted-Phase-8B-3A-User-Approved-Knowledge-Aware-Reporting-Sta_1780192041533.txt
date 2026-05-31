@@ -1,0 +1,426 @@
+Phase 8B-3A — User-Approved Knowledge-Aware Reporting
+
+Status: Approved to Begin Carefully
+
+Goal
+
+Connect Knowledge Vault Semantic Search to Ora reporting in a safe, controlled, user-approved way.
+
+This phase should allow Ora to find relevant Knowledge Vault entries and let the user choose which entries should be used in a report.
+
+This is not fully automatic RAG yet.
+
+This is not uncontrolled AI memory.
+
+This is not background learning.
+
+This phase must be approval-based, auditable, and reversible.
+
+⸻
+
+Current Stable Baseline
+
+Already accepted:
+
+* Phase 8A — Knowledge Vault Foundation
+* Phase 8A.1 — Tags and full-text search optimization
+* Phase 8B-1 — Real OpenAI embedding infrastructure
+* Phase 8B-2 — Semantic search with real results
+* Final production-ready commit: 5b509915fe8ce0c8310ce344784dac1a00d5b92b
+
+Use this as the foundation.
+
+⸻
+
+Core Principle
+
+Ora must not automatically inject Knowledge Vault content into reports without user approval.
+
+The correct flow is:
+
+1. User requests a report or analysis.
+2. Ora searches the Knowledge Vault for relevant entries.
+3. Ora shows the user the matching entries.
+4. User selects which entries to use.
+5. Ora generates the report using only the selected/approved entries.
+6. The system records which entries were used.
+
+No hidden memory.
+
+No silent context injection.
+
+No automatic use of old reports.
+
+⸻
+
+In Scope
+
+Build the first controlled knowledge-aware reporting workflow.
+
+Required:
+
+1. Knowledge search suggestion during reporting
+2. “Relevant Knowledge Found” panel
+3. User selection/approval of vault entries
+4. Selected knowledge context builder
+5. Report generation using selected entries only
+6. Audit trail showing which entries were used
+7. Safe source citations inside report output
+8. Clear UI indicators when vault knowledge is used
+9. Full validation report
+
+⸻
+
+Out of Scope
+
+Do NOT implement yet:
+
+* automatic RAG
+* automatic vault injection into every Ora answer
+* auto-learning
+* AI memory
+* background recommendations
+* autonomous report changes
+* cross-project intelligence
+* hidden context usage
+* public Ora vault access
+* Builder automatic vault usage
+* Web Search
+* Image Generation
+* Advanced Charts
+* unrelated roadmap work
+
+⸻
+
+User Flow
+
+Step 1 — User asks for a report
+
+Example:
+
+“Create an operations review for WBI downtime.”
+
+Ora should detect that this is a reporting request that could benefit from Knowledge Vault context.
+
+⸻
+
+Step 2 — Ora searches the vault
+
+The system uses the existing Phase 8B-2 semantic search service to find relevant entries.
+
+Search should be scoped to:
+
+* authenticated user
+* user’s own Knowledge Vault entries
+* allowed filters if available
+* non-archived entries by default
+
+⸻
+
+Step 3 — Show relevant matches
+
+Display a panel or card:
+
+“Relevant Knowledge Found”
+
+Each result should show:
+
+* title
+* category
+* department
+* tags
+* summary
+* similarity score
+* matching chunk preview
+* updated date
+* checkbox/select button
+
+User actions:
+
+* Select entry
+* Deselect entry
+* Open full entry
+* Continue without vault knowledge
+* Use selected knowledge
+
+⸻
+
+Step 4 — User approves selected entries
+
+Only selected entries may be used in the report prompt.
+
+Do not use unselected search results.
+
+Do not silently use hidden entries.
+
+Do not auto-select everything unless the user confirms.
+
+⸻
+
+Step 5 — Build safe context
+
+Create a safe context builder function.
+
+Suggested service:
+
+buildApprovedKnowledgeContext({
+  userId,
+  selectedEntryIds,
+  maxEntries,
+  maxChars
+})
+
+Rules:
+
+* load only entries owned by the authenticated user
+* reject entries not owned by user
+* exclude archived entries unless explicitly allowed
+* sanitize content before prompt use
+* cap total context size
+* include title, category, department, summary, selected chunk preview, and source id
+* do not include raw vectors
+* do not include internal IDs beyond safe entry reference
+* do not include secrets/tokens/base64/file refs/image refs/dataset refs
+
+⸻
+
+Report Generation Behavior
+
+When selected knowledge is used, the report prompt should include a clearly separated section:
+
+APPROVED KNOWLEDGE VAULT CONTEXT
+Use only the following user-approved Knowledge Vault entries as supporting context.
+Do not treat them as guaranteed facts if they conflict with the uploaded/current data.
+Prioritize the current user-provided data.
+Mention when a recommendation is supported by prior vault knowledge.
+Do not invent missing details.
+Entry 1:
+Title:
+Category:
+Department:
+Summary:
+Relevant excerpt:
+Source reference:
+Entry 2:
+...
+
+Important:
+
+Current uploaded data or current user input must remain the primary source.
+
+Vault knowledge is supporting context, not a replacement for current data.
+
+⸻
+
+Report Output Requirements
+
+When knowledge is used, the report should include a section:
+
+Knowledge Vault References Used
+
+For each selected entry:
+
+* title
+* category
+* department
+* version
+* updated date
+
+The report should say things like:
+
+“Supported by prior Knowledge Vault entry: [Title]”
+
+Do not expose raw internal IDs to the user unless they are safe display IDs.
+
+⸻
+
+UI Requirements
+
+Add a controlled UX, not hidden behavior.
+
+Possible UI pattern:
+
+1. User submits report request.
+2. Ora replies:
+
+“I found related Knowledge Vault entries that may improve this report.”
+
+3. Show cards with checkboxes:
+
+* Entry title
+* similarity score
+* summary
+* matching excerpt
+* “View” button
+* checkbox
+
+4. Buttons:
+
+* “Use Selected Knowledge”
+* “Continue Without Vault Knowledge”
+* “Search Again”
+
+⸻
+
+Audit Trail
+
+Create an audit trail whenever vault knowledge is used.
+
+Suggested table:
+
+knowledge_usage_events {
+  id: string;
+  userId: string;
+  reportType: string;
+  requestId?: string;
+  selectedEntryIds: number[];
+  selectedEntryVersions: number[];
+  createdAt: Date;
+}
+
+If creating a new table is too large for this phase, at minimum log safe structured metadata server-side without content:
+
+* userId hash or userId if current logging standard allows
+* selected entry ids
+* versions
+* report type
+* timestamp
+
+Do not log full content.
+
+⸻
+
+API Requirements
+
+Add authenticated route(s) only.
+
+Possible routes:
+
+POST /api/vault/knowledge-suggestions
+POST /api/vault/approved-context
+
+Or integrate into existing reporting route only if cleaner.
+
+All routes must:
+
+* require authentication
+* enforce ownership
+* never expose another user’s entries
+* never expose raw vectors
+* never expose secrets
+* never use public Ora unauthenticated routes
+
+⸻
+
+Security Requirements
+
+Before any Knowledge Vault content is sent into a model prompt:
+
+* run sanitizer
+* block secrets
+* block tokens
+* block API keys
+* block connection strings
+* block base64
+* block fileRef
+* block imageRef
+* block datasetRef
+* block internal deployment IDs
+* cap context length
+* enforce ownership
+
+If an entry contains sensitive content, skip it and show a safe warning:
+
+“This entry could not be used because it contains sensitive content.”
+
+⸻
+
+Privacy Requirements
+
+* User must approve entries before use.
+* Raw vectors must never be returned.
+* Raw vectors must never be sent to AI.
+* Unselected entries must not be used.
+* Archived entries must not be used by default.
+* Public Ora visitors must not access Knowledge Vault.
+* Builder must not automatically use vault knowledge in this phase.
+
+⸻
+
+Model Behavior Rules
+
+When generating reports with selected vault knowledge:
+
+Ora must:
+
+* prioritize current uploaded/current user data
+* use selected vault entries only as supporting context
+* avoid overclaiming
+* cite the selected entries in a “Knowledge Vault References Used” section
+* say when there is not enough evidence
+* avoid fabricating financial impact or operational impact
+* preserve the existing 7B-4B reporting intelligence rules
+
+⸻
+
+Validation Required
+
+After implementation, provide a full validation report with:
+
+1. Final commit hash
+2. Final affected files
+3. API route proof
+4. Auth/ownership proof
+5. Semantic suggestion proof
+6. User selection proof
+7. Approved-context builder proof
+8. Sanitization proof
+9. Prompt-injection boundary proof
+10. Audit trail proof
+11. Report output proof
+12. Knowledge Vault references section proof
+13. No automatic RAG proof
+14. No hidden memory proof
+15. No public Ora access proof
+16. No Builder auto-use proof
+17. Regression proof for Phase 8A
+18. Regression proof for Phase 8A.1
+19. Regression proof for Phase 8B-1
+20. Regression proof for Phase 8B-2
+21. Regression proof for 7B reporting/export stack
+22. Typecheck result
+23. Lint result
+24. Format result
+25. Codegen drift result
+26. API server workflow status
+27. Frontend workflow status
+28. Rollback plan
+
+⸻
+
+Acceptance Criteria
+
+Phase 8B-3A is complete only when:
+
+* Ora can find relevant vault entries for a reporting request
+* user can review the entries before use
+* user can approve selected entries
+* only selected entries are used
+* generated report clearly shows when vault knowledge was used
+* report includes Knowledge Vault References Used
+* ownership checks are enforced
+* sensitive entries are blocked or skipped
+* no automatic RAG is implemented
+* no hidden memory is implemented
+* no public Ora vault access is implemented
+* all quality gates pass
+
+⸻
+
+Important Boundary
+
+This phase is not full AI memory.
+
+This phase is user-approved knowledge-aware reporting only.
+
+Do not start Phase 8B-3B, automatic RAG, AI memory, autonomous recommendations, Web Search, Image Generation, Advanced Charts, or unrelated roadmap work until this phase is validated and accepted.
