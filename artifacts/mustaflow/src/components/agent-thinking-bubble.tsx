@@ -47,6 +47,7 @@ import {
   Eye,
   SendHorizonal,
   Gauge,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -141,6 +142,8 @@ const STEP_ICON: Record<string, React.ElementType> = {
   command_output: TerminalSquare,
   thinking: BrainCircuit,
   tool_call: Wrench,
+  check_result: ShieldCheck,
+  agent_prompt: ShieldAlert,
 };
 
 const STEP_COLOR: Record<string, string> = {
@@ -171,6 +174,8 @@ const STEP_COLOR: Record<string, string> = {
   command_output: "text-cyan-400",
   thinking: "text-violet-300",
   tool_call: "text-amber-300",
+  check_result: "text-cyan-300",
+  agent_prompt: "text-amber-400",
 };
 
 /**
@@ -424,13 +429,68 @@ function humanizeTool(tool: string, args: Record<string, unknown>): string {
       return "Generating audio";
     case "remove_image_background":
       return "Removing image background";
+    case "pkg_install":
+      return `Installing ${str("pkg") ?? "package"}`;
+    case "install_dep":
+      return `Installing ${str("pkg") ?? str("package") ?? "dependency"}`;
+    case "run_command":
+      return `Running ${str("command") ?? str("cmd") ?? "command"}`;
     default:
       return tool.replace(/_/g, " ");
   }
 }
 
+/** Parses a check_result event message into a list of check records. */
+function parseCheckResultsFromEvent(
+  message: string,
+): Array<{ id: string; label: string; passed: boolean }> {
+  if (!message || !message.startsWith("[")) return [];
+  try {
+    const arr = JSON.parse(message) as Array<{ id?: string; label?: string; passed?: boolean }>;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((c) => typeof c === "object" && c !== null)
+      .map((c) => ({
+        id: String(c.id ?? "check"),
+        label: String(c.label ?? c.id ?? "Check"),
+        passed: Boolean(c.passed),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Extracts the user-facing question from an agent_prompt event message. */
+function parseAgentPromptPayload(message: string): { question: string } | null {
+  if (!message || !message.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(message) as { payload?: { question?: string } };
+    if (typeof obj.payload?.question === "string") {
+      return { question: obj.payload.question };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Returns a human-readable single-line label for any step event. */
 function getStepLabel(step: StepEvent): string {
+  if (step.eventType === "agent_prompt") {
+    const parsed = parseAgentPromptPayload(step.message);
+    if (parsed) {
+      return parsed.question.replace(/^Allow the agent to /, "Approval needed: ");
+    }
+    return "Waiting for your approval";
+  }
+  if (step.eventType === "check_result") {
+    const checks = parseCheckResultsFromEvent(step.message);
+    if (checks.length > 0) {
+      const passed = checks.filter((c) => c.passed).length;
+      return `Checks: ${passed}/${checks.length} passed`;
+    }
+    return "Running checks";
+  }
   if (step.eventType === "tool_call") {
     const tool = parseToolCall(step.eventType, step.message);
     if (tool) return humanizeTool(tool.tool, tool.args);
@@ -453,6 +513,34 @@ function getStepLabel(step: StepEvent): string {
   // Generic label from message
   const msg = step.message;
   return msg.length > 70 ? msg.slice(0, 70) + "…" : msg;
+}
+
+/** Inline pass/fail chips for a check_result step — shown inside the step list. */
+function CheckResultsInlineRow({ message }: { message: string }) {
+  const checks = parseCheckResultsFromEvent(message);
+  if (checks.length === 0) {
+    return (
+      <span className="text-[10px] text-muted-foreground/80 italic">Running checks…</span>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-0.5 mt-0.5">
+      {checks.map((c) => (
+        <span
+          key={c.id}
+          className={cn(
+            "inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded",
+            c.passed
+              ? "bg-green-500/10 text-green-400 border border-green-500/20"
+              : "bg-red-500/10 text-red-400 border border-red-500/20",
+          )}
+        >
+          {c.passed ? <Check className="h-2 w-2" /> : <X className="h-2 w-2" />}
+          {c.label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function ToolCallCard({ data }: { data: ToolCallPayload }) {
@@ -1063,6 +1151,59 @@ function LiveStepRow({
   const color = getStepColor(step.eventType);
   const label = getStepLabel(step);
   const isActiveStep = isLast && !isTerminal;
+
+  // agent_prompt — "Waiting for approval" step with pulsing amber treatment
+  if (step.eventType === "agent_prompt") {
+    return (
+      <div className="flex items-start gap-1.5 text-[10px] py-0.5 min-w-0 group">
+        <ShieldAlert
+          className={cn("h-3 w-3 shrink-0 text-amber-400", isActiveStep && "animate-pulse")}
+        />
+        <span
+          className={cn(
+            "leading-tight flex-1",
+            isActiveStep ? "text-amber-400 font-medium" : "text-muted-foreground/80",
+          )}
+        >
+          {label}
+        </span>
+        {isActiveStep && (
+          <span className="shrink-0 text-[9px] text-amber-400/60 font-medium animate-pulse">
+            waiting
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // check_result — show pass/fail chips inline
+  if (step.eventType === "check_result") {
+    const checks = parseCheckResultsFromEvent(step.message);
+    return (
+      <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
+        <div className="flex items-center gap-1.5 text-[10px]">
+          {isActiveStep ? (
+            <Loader2 className="h-3 w-3 shrink-0 animate-spin text-cyan-300" />
+          ) : (
+            <ShieldCheck className="h-3 w-3 shrink-0 text-cyan-300/65" />
+          )}
+          <span
+            className={cn(
+              "leading-tight",
+              isActiveStep ? "text-foreground/90 font-medium" : "text-muted-foreground/80",
+            )}
+          >
+            {label}
+          </span>
+        </div>
+        {!isActiveStep && checks.length > 0 && (
+          <div className="ml-4.5">
+            <CheckResultsInlineRow message={step.message} />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-1.5 text-[10px] py-0.5 min-w-0 group">

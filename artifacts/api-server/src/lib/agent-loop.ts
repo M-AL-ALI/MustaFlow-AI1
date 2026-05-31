@@ -3889,6 +3889,17 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   const argv = ctx.profile.installCmd;
   await safeEvent(ctx.input.onEvent, "narration", "Installing dependencies…");
   const t = Date.now();
+  // Clear stale npm lock files before installing — prevents "Tracker 'idealTree' already exists"
+  // errors that occur when a previous npm run was interrupted and left lock files behind.
+  if (argv[0] === "npm" || argv[0] === "npx") {
+    await execWithTimeout(
+      ctx.containerState.id,
+      ["sh", "-c", "rm -f /root/.npm/_locks/* 2>/dev/null; true"],
+      ctx.input.projectId,
+      5_000,
+      signal,
+    ).catch(() => {});
+  }
   const r = await execWithTimeout(
     ctx.containerState.id,
     argv,
@@ -4776,6 +4787,17 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         `Installing ${decision.pkg}${decision.version ? `@${decision.version}` : ""} via ${decision.manager}…`,
       );
       const t = Date.now();
+      // Clear stale npm lock files before installing — prevents "Tracker 'idealTree' already exists"
+      // errors caused by interrupted previous npm runs leaving lock files in /root/.npm/_locks/.
+      if (decision.manager === "npm") {
+        await execWithTimeout(
+          containerState.id!,
+          ["sh", "-c", "rm -f /root/.npm/_locks/* 2>/dev/null; true"],
+          input.projectId,
+          5_000,
+          input.signal,
+        ).catch(() => {});
+      }
       const r = await execWithTimeout(
         containerState.id!,
         decision.argv,
