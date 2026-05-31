@@ -18,11 +18,7 @@ import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { db, generatedImagesTable, pool, userCreditsTable } from "@workspace/db";
 import { validateImagePrompt } from "./lib/image-safety.js";
 import { storeUploadedImage } from "./lib/image-storage.js";
-import {
-  enqueueImageEditJob,
-  getJob,
-  type ImageJob,
-} from "./lib/image-generation-jobs.js";
+import { enqueueImageEditJob, getJob, type ImageJob } from "./lib/image-generation-jobs.js";
 import { isImageProviderConfigured } from "./lib/image-provider.js";
 
 // Suppress unused import warning
@@ -81,10 +77,7 @@ async function makeWebp(): Promise<Buffer> {
 
 // ── Poll job until terminal state ─────────────────────────────────────────────
 
-async function waitForJob(
-  jobId: string,
-  timeoutMs = 120_000,
-): Promise<ImageJob> {
+async function waitForJob(jobId: string, timeoutMs = 120_000): Promise<ImageJob> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const job = getJob(jobId);
@@ -131,7 +124,8 @@ async function headR2(
           await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: storageKey }));
           return { ok: true, status: 200, via: "s3-head" };
         } catch (e: unknown) {
-          const status = (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? 0;
+          const status =
+            (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? 0;
           return { ok: false, status, via: "s3-head" };
         }
       }
@@ -208,10 +202,7 @@ async function main() {
   if (providerConfigured) {
     pass("Image provider configured", "OPENAI_API_KEY (or alias) is present");
   } else {
-    fail(
-      "Image provider configured",
-      "No image API key found — edit tests will be skipped",
-    );
+    fail("Image provider configured", "No image API key found — edit tests will be skipped");
   }
 
   // ── §2: Safety validator (zero-cost, zero-network) ─────────────────────────
@@ -232,9 +223,7 @@ async function main() {
     if (gotBlocked === t.expectBlocked) {
       pass(
         `safety: ${t.label}`,
-        t.expectBlocked
-          ? `blocked (${result.category}: ${result.reason})`
-          : "allowed",
+        t.expectBlocked ? `blocked (${result.category}: ${result.reason})` : "allowed",
       );
     } else {
       fail(
@@ -289,7 +278,8 @@ async function main() {
     .from(generatedImagesTable)
     .where(eq(generatedImagesTable.id, pngImageId));
 
-  if (pngDbRow?.status === "completed") pass("PNG upload: status=completed", `imageId=${pngImageId}`);
+  if (pngDbRow?.status === "completed")
+    pass("PNG upload: status=completed", `imageId=${pngImageId}`);
   else fail("PNG upload: status=completed", `got: ${pngDbRow?.status}`);
 
   if (pngDbRow?.sourceType === "uploaded") pass("PNG upload: source_type=uploaded", "✓");
@@ -311,20 +301,23 @@ async function main() {
 
   // R2 / dev HEAD check (authenticated S3 HEAD — works with private buckets)
   const pngHead = await headR2(pngDbRow?.fileUrl ?? "", pngDbRow?.storageKey);
-  if (pngHead.ok) pass("PNG upload: fileUrl resolves (HEAD)", `HTTP ${pngHead.status} via ${pngHead.via}`);
+  if (pngHead.ok)
+    pass("PNG upload: fileUrl resolves (HEAD)", `HTTP ${pngHead.status} via ${pngHead.via}`);
   else fail("PNG upload: fileUrl resolves", `HTTP ${pngHead.status} via ${pngHead.via}`);
 
   const pngThumbKey = pngDbRow?.storageKey?.replace("full.webp", "thumb.webp") ?? null;
   if (pngDbRow?.thumbnailUrl) {
     const thumbHead = await headR2(pngDbRow.thumbnailUrl, pngThumbKey);
-    if (thumbHead.ok) pass("PNG upload: thumbnailUrl resolves", `HTTP ${thumbHead.status} via ${thumbHead.via}`);
+    if (thumbHead.ok)
+      pass("PNG upload: thumbnailUrl resolves", `HTTP ${thumbHead.status} via ${thumbHead.via}`);
     else fail("PNG upload: thumbnailUrl resolves", `HTTP ${thumbHead.status} via ${thumbHead.via}`);
   } else {
     pass("PNG upload: thumbnailUrl", "null in dev-mode (expected when R2 not writing thumb)");
   }
 
   // Storage key check
-  if (pngDbRow?.storageKey) pass("PNG upload: storageKey populated", pngDbRow.storageKey.slice(0, 60));
+  if (pngDbRow?.storageKey)
+    pass("PNG upload: storageKey populated", pngDbRow.storageKey.slice(0, 60));
   else fail("PNG upload: storageKey populated", "null");
 
   // ── §5: Upload — JPEG ──────────────────────────────────────────────────────
@@ -352,14 +345,25 @@ async function main() {
     .set({ status: "completed", ...jpegStorage, updatedAt: sql`now()` })
     .where(eq(generatedImagesTable.id, jpegImageId));
 
-  const [jpegDbRow] = await db.select().from(generatedImagesTable).where(eq(generatedImagesTable.id, jpegImageId));
-  if (jpegDbRow?.status === "completed" && jpegDbRow.sourceType === "uploaded" && jpegDbRow.creditCost === 0) {
+  const [jpegDbRow] = await db
+    .select()
+    .from(generatedImagesTable)
+    .where(eq(generatedImagesTable.id, jpegImageId));
+  if (
+    jpegDbRow?.status === "completed" &&
+    jpegDbRow.sourceType === "uploaded" &&
+    jpegDbRow.creditCost === 0
+  ) {
     pass("JPEG upload: completed, sourceType=uploaded, free", `imageId=${jpegImageId}`);
   } else {
-    fail("JPEG upload", `status=${jpegDbRow?.status} sourceType=${jpegDbRow?.sourceType} cost=${jpegDbRow?.creditCost}`);
+    fail(
+      "JPEG upload",
+      `status=${jpegDbRow?.status} sourceType=${jpegDbRow?.sourceType} cost=${jpegDbRow?.creditCost}`,
+    );
   }
   const jpegHead = await headR2(jpegDbRow?.fileUrl ?? "", jpegDbRow?.storageKey);
-  if (jpegHead.ok) pass("JPEG upload: fileUrl resolves", `HTTP ${jpegHead.status} via ${jpegHead.via}`);
+  if (jpegHead.ok)
+    pass("JPEG upload: fileUrl resolves", `HTTP ${jpegHead.status} via ${jpegHead.via}`);
   else fail("JPEG upload: fileUrl resolves", `HTTP ${jpegHead.status} via ${jpegHead.via}`);
 
   // ── §6: Upload — WebP ──────────────────────────────────────────────────────
@@ -387,7 +391,10 @@ async function main() {
     .set({ status: "completed", ...webpStorage, updatedAt: sql`now()` })
     .where(eq(generatedImagesTable.id, webpImageId));
 
-  const [webpDbRow] = await db.select().from(generatedImagesTable).where(eq(generatedImagesTable.id, webpImageId));
+  const [webpDbRow] = await db
+    .select()
+    .from(generatedImagesTable)
+    .where(eq(generatedImagesTable.id, webpImageId));
   if (webpDbRow?.status === "completed" && webpDbRow.sourceType === "uploaded") {
     pass("WebP upload: completed, sourceType=uploaded", `imageId=${webpImageId}`);
   } else {
@@ -582,8 +589,7 @@ async function main() {
             .from(generatedImagesTable)
             .where(eq(generatedImagesTable.id, editImageId));
 
-          if (editRow?.sourceType === "edited")
-            pass("Edit row: source_type=edited", "✓");
+          if (editRow?.sourceType === "edited") pass("Edit row: source_type=edited", "✓");
           else fail("Edit row: source_type", `got: ${editRow?.sourceType}`);
 
           if (editRow?.parentImageId === editParentId)
@@ -598,8 +604,7 @@ async function main() {
             pass("Edit row: fileUrl is URL (not base64)", editRow.fileUrl.slice(0, 80));
           else fail("Edit row: fileUrl not base64", `got: ${editRow?.fileUrl?.slice(0, 40)}`);
 
-          if (editRow?.status === "completed")
-            pass("Edit row: status=completed", "✓");
+          if (editRow?.status === "completed") pass("Edit row: status=completed", "✓");
           else fail("Edit row: status", `got: ${editRow?.status}`);
 
           // Verify original image unchanged
@@ -607,10 +612,7 @@ async function main() {
             .select()
             .from(generatedImagesTable)
             .where(eq(generatedImagesTable.id, editParentId));
-          if (
-            originalAfter?.status === "completed" &&
-            originalAfter.fileUrl === parent.fileUrl
-          ) {
+          if (originalAfter?.status === "completed" && originalAfter.fileUrl === parent.fileUrl) {
             pass("Original image: unchanged after edit", `imageId=${editParentId} fileUrl intact`);
           } else {
             fail("Original image: unchanged", `fileUrl changed or status wrong`);
@@ -625,22 +627,31 @@ async function main() {
           // R2/dev HEAD for edited image (authenticated S3 HEAD)
           const editHead = await headR2(editRow?.fileUrl ?? "", editRow?.storageKey);
           if (editHead.ok)
-            pass("Edit row: fileUrl resolves (HEAD)", `HTTP ${editHead.status} via ${editHead.via}`);
+            pass(
+              "Edit row: fileUrl resolves (HEAD)",
+              `HTTP ${editHead.status} via ${editHead.via}`,
+            );
           else fail("Edit row: fileUrl resolves", `HTTP ${editHead.status} via ${editHead.via}`);
 
           if (editRow?.thumbnailUrl) {
             const editThumbKey = editRow.storageKey?.replace("full.webp", "thumb.webp") ?? null;
             const editThumbHead = await headR2(editRow.thumbnailUrl, editThumbKey);
             if (editThumbHead.ok)
-              pass("Edit row: thumbnailUrl resolves", `HTTP ${editThumbHead.status} via ${editThumbHead.via}`);
-            else fail("Edit row: thumbnailUrl resolves", `HTTP ${editThumbHead.status} via ${editThumbHead.via}`);
+              pass(
+                "Edit row: thumbnailUrl resolves",
+                `HTTP ${editThumbHead.status} via ${editThumbHead.via}`,
+              );
+            else
+              fail(
+                "Edit row: thumbnailUrl resolves",
+                `HTTP ${editThumbHead.status} via ${editThumbHead.via}`,
+              );
           }
 
           // base64 check
           const editBase64Check = editRow?.fileUrl?.startsWith("data:");
           if (!editBase64Check) pass("Edit row: no base64 in DB", "✓");
           else fail("Edit row: no base64 in DB", "fileUrl is a data URI");
-
         } else {
           fail("Edit job: completed", `status=${completedJob.status} error=${completedJob.error}`);
         }
@@ -734,7 +745,10 @@ async function main() {
   // ── §13: R2 key patterns ───────────────────────────────────────────────────
   section("§13  R2 key patterns");
 
-  const [pngFinal] = await db.select({ fileUrl: generatedImagesTable.fileUrl, storageKey: generatedImagesTable.storageKey }).from(generatedImagesTable).where(eq(generatedImagesTable.id, pngImageId));
+  const [pngFinal] = await db
+    .select({ fileUrl: generatedImagesTable.fileUrl, storageKey: generatedImagesTable.storageKey })
+    .from(generatedImagesTable)
+    .where(eq(generatedImagesTable.id, pngImageId));
   const isR2 = pngFinal?.fileUrl && !pngFinal.fileUrl.startsWith("/api/");
 
   if (isR2) {
@@ -745,13 +759,20 @@ async function main() {
     else pass("Upload key pattern", key.slice(0, 60));
 
     if (editImageId) {
-      const [editFinal] = await db.select({ storageKey: generatedImagesTable.storageKey }).from(generatedImagesTable).where(eq(generatedImagesTable.id, editImageId));
+      const [editFinal] = await db
+        .select({ storageKey: generatedImagesTable.storageKey })
+        .from(generatedImagesTable)
+        .where(eq(generatedImagesTable.id, editImageId));
       const editKey = editFinal?.storageKey ?? "";
-      if (editKey.startsWith("edited-images/")) pass("Edit key pattern: edited-images/{id}/", editKey);
+      if (editKey.startsWith("edited-images/"))
+        pass("Edit key pattern: edited-images/{id}/", editKey);
       else pass("Edit key pattern", editKey.slice(0, 60));
     }
   } else {
-    pass("Dev-mode storage", "R2 env vars present but dev-mode path returned — check CF_R2_PUBLIC_URL");
+    pass(
+      "Dev-mode storage",
+      "R2 env vars present but dev-mode path returned — check CF_R2_PUBLIC_URL",
+    );
     pass("Dev storageKey", pngFinal?.storageKey?.slice(0, 60) ?? "null");
   }
 
@@ -760,7 +781,10 @@ async function main() {
   pass("builder.ts untouched", "last changed in Task #791 (pre Phase 9A-2)");
   pass("ai.ts untouched", "last changed in Task #791 (pre Phase 9A-2)");
   pass("build.ts untouched", "no Phase 9A-2 changes");
-  pass("ISOLATION comment present", "all 4 Phase 9A-2 files carry the MUST NOT import from builder.ts guard");
+  pass(
+    "ISOLATION comment present",
+    "all 4 Phase 9A-2 files carry the MUST NOT import from builder.ts guard",
+  );
   pass("Use in Project: disabled", "disabled attribute + title='Coming soon' — no API call");
 
   // ── §15: Quality gates ─────────────────────────────────────────────────────
