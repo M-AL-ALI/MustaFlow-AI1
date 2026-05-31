@@ -1,0 +1,67 @@
+Thank you. Phase 9A-2 is accepted as validated, pending one final record item: please provide the final commit hash after the live-validation fixes.
+
+Accepted validation proof:
+
+* 69/69 validation checks passed
+* PNG upload passed
+* JPEG upload passed
+* WebP upload passed
+* corrupt upload rejected
+* GIF rejected, keeping Phase 9A-2 scope aligned with PNG/JPG/WEBP only
+* oversized upload rejected
+* anonymous upload rejected
+* cross-user ownership isolation passed
+* upload is free
+* upload creates `source_type = uploaded`
+* edit of generated image passed with real OpenAI edit call
+* edit of uploaded image passed with real OpenAI edit call
+* edited rows use `source_type = edited`
+* edited rows have `parent_image_id`
+* original images remain preserved
+* `edit_instruction` is stored
+* DB distribution now proves real usage:
+
+  * uploaded = 3
+  * edited = 2
+  * with_parent = 2
+  * base64 = 0
+* R2 storage passed
+* R2 object HEAD verification passed through authenticated S3 HEAD
+* uploaded image key pattern confirmed:
+
+  * `uploaded-images/14/full.webp`
+* edited image key pattern confirmed:
+
+  * `edited-images/18/full.webp`
+* no base64 image data is stored in DB
+* safety validation passed
+* credit cost/refund behavior passed
+* parent-child lineage passed
+* non-interference passed
+* quality gates passed:
+
+  * typecheck
+  * lint
+  * format
+  * codegen drift
+
+Accepted bug fix:
+
+`getImageBuffer()` previously tried plain HTTP fetch against the R2 URL, which failed for private buckets. It now correctly uses authenticated S3 `GetObjectCommand` when `storageKey` is present. This is the correct production-safe design because R2 buckets may be private.
+
+Acceptance status:
+
+* Phase 9A-2 upload: accepted
+* Phase 9A-2 edit generated image: accepted
+* Phase 9A-2 edit uploaded image: accepted
+* Phase 9A-2 R2 storage: accepted
+* Phase 9A-2 parent lineage: accepted
+* Phase 9A-2 credits/safety/ownership: accepted
+* Phase 9A-2 non-interference: accepted
+* Phase 9A-2 quality gates: accepted
+
+Please provide the final commit hash for the merged Phase 9A-2 live-validation fixes so I can record the stable rollback point.
+
+After that, Phase 9A-2 can be considered closed.
+
+Do not start Phase 9A-3, project insertion, brand kit, prompt assistant, upscale, background removal, RAG, AI memory, Web Search, Advanced Charts, or unrelated roadmap work until I explicitly approve the next phase.
