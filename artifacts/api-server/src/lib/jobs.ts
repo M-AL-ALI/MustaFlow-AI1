@@ -2188,6 +2188,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
                   requireCommandApproval: project.requireCommandApproval ?? false,
+                  onBeforeRiskyOp: async (reason: string) => {
+                    try {
+                      const snap = await snapshotFilesForVersion(projectId);
+                      await db.insert(projectVersionsTable).values({
+                        projectId,
+                        label: `Checkpoint: ${reason.slice(0, 60)}`,
+                        note: `Auto-checkpoint before: ${reason}`,
+                        changelogEntry: `Auto-checkpoint before risky operation: ${reason.slice(0, 80)}`,
+                        filesSnapshot: snap,
+                      });
+                    } catch (err) {
+                      logger.warn(
+                        { err, projectId },
+                        "onBeforeRiskyOp: auto-checkpoint failed (non-fatal)",
+                      );
+                    }
+                  },
                   taskId,
                   wallClockMs: input.wallClockCapMs,
                   previewUrl: project.containerUrl ?? null,
@@ -2681,6 +2698,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                     null,
                   requireCommandApproval: project.requireCommandApproval ?? false,
+                  onBeforeRiskyOp: async (reason: string) => {
+                    try {
+                      const snap = await snapshotFilesForVersion(projectId);
+                      await db.insert(projectVersionsTable).values({
+                        projectId,
+                        label: `Checkpoint: ${reason.slice(0, 60)}`,
+                        note: `Auto-checkpoint before: ${reason}`,
+                        changelogEntry: `Auto-checkpoint before risky operation: ${reason.slice(0, 80)}`,
+                        filesSnapshot: snap,
+                      });
+                    } catch (err) {
+                      logger.warn(
+                        { err, projectId },
+                        "onBeforeRiskyOp: auto-checkpoint failed (non-fatal)",
+                      );
+                    }
+                  },
                   taskId,
                   wallClockMs: input.wallClockCapMs,
                   previewUrl: project.containerUrl ?? null,
@@ -2986,6 +3020,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
                   null,
                 requireCommandApproval: project.requireCommandApproval ?? false,
+                onBeforeRiskyOp: async (reason: string) => {
+                  try {
+                    const snap = await snapshotFilesForVersion(projectId);
+                    await db.insert(projectVersionsTable).values({
+                      projectId,
+                      label: `Checkpoint: ${reason.slice(0, 60)}`,
+                      note: `Auto-checkpoint before: ${reason}`,
+                      changelogEntry: `Auto-checkpoint before risky operation: ${reason.slice(0, 80)}`,
+                      filesSnapshot: snap,
+                    });
+                  } catch (err) {
+                    logger.warn(
+                      { err, projectId },
+                      "onBeforeRiskyOp: auto-checkpoint failed (non-fatal)",
+                    );
+                  }
+                },
                 taskId,
                 wallClockMs: input.wallClockCapMs,
                 previewUrl: project.containerUrl ?? null,

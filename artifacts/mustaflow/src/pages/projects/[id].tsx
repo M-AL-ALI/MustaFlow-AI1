@@ -172,6 +172,11 @@ import { WorkspaceTour } from "./components/workspace-tour";
 import { MemoryIndicator } from "./components/memory-indicator";
 import { BrandPill } from "./components/brand-pill";
 import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-prompt-cards";
+import {
+  LiveAgentProgress,
+  type LiveFileDiff,
+  type LiveCheckResult,
+} from "./components/live-agent-progress";
 import { CommentsPanel } from "./components/comments-panel";
 import { ActivityLogTab } from "./components/activity-log-tab";
 import { NotificationsBell } from "@/components/notifications-bell";
@@ -1069,6 +1074,8 @@ export default function ProjectWorkspacePage() {
   // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
   // though that value is computed further down the component body.
   const pendingFeedTaskIdRef = useRef<number | null>(null);
+  // Debounce timer for mid-run preview refresh triggered by file_diff events.
+  const livePreviewRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Banner shown when a build is blocked by a pre-flight container/DB failure
   const [preflightBanner, setPreflightBanner] = useState<{
     message: string;
@@ -1107,6 +1114,12 @@ export default function ProjectWorkspacePage() {
 
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [buildRefreshCount, setBuildRefreshCount] = useState(0);
+  const [liveNarrations, setLiveNarrations] = useState<string[]>([]);
+  const [liveThought, setLiveThought] = useState<string | null>(null);
+  const [liveFileDiffs, setLiveFileDiffs] = useState<LiveFileDiff[]>([]);
+  const [liveCheckResults, setLiveCheckResults] = useState<LiveCheckResult[]>([]);
+  const [steeringText, setSteeringText] = useState("");
+  const [isSendingSteer, setIsSendingSteer] = useState(false);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const valid = WORKSPACE_TABS.map((t) => t.value);
@@ -1827,6 +1840,10 @@ export default function ProjectWorkspacePage() {
     seenPageMapEventIdsRef.current = new Set();
     setAgentPrompts([]);
     setLiveCodeBuffer("");
+    setLiveNarrations([]);
+    setLiveThought(null);
+    setLiveFileDiffs([]);
+    setLiveCheckResults([]);
     const seenPromptIds = new Set<string>();
     const es = new EventSource(`/api/projects/${projectId}/tasks/${activeTaskId}/events/stream`);
     taskEventSourceRef.current = es;
@@ -1868,6 +1885,36 @@ export default function ProjectWorkspacePage() {
           } catch {
             /* malformed prompt frame */
           }
+        } else if (event.eventType === "narration" && event.message) {
+          setLiveNarrations((prev) => [...prev.slice(-19), event.message!]);
+          setLiveThought(null);
+        } else if (event.eventType === "thinking" && event.message) {
+          setLiveThought(event.message.slice(0, 800));
+        } else if (event.eventType === "file_diff" && event.message) {
+          try {
+            const diff = JSON.parse(event.message) as {
+              path: string;
+              op: "write" | "patch" | "delete";
+            };
+            setLiveFileDiffs((prev) => {
+              if (prev.some((f) => f.path === diff.path && f.op === diff.op)) return prev;
+              return [...prev, { path: diff.path, op: diff.op }];
+            });
+            if (livePreviewRefreshTimerRef.current)
+              clearTimeout(livePreviewRefreshTimerRef.current);
+            livePreviewRefreshTimerRef.current = setTimeout(() => {
+              setBuildRefreshCount((n) => n + 1);
+            }, 3500);
+          } catch {
+            /* ignore malformed file_diff */
+          }
+        } else if (event.eventType === "check_result" && event.message) {
+          try {
+            const checks = JSON.parse(event.message) as LiveCheckResult[];
+            setLiveCheckResults(checks);
+          } catch {
+            /* ignore malformed check_result */
+          }
         } else if (event.eventType === "preflight_error" && event.message) {
           setPreflightBanner({
             message: event.message,
@@ -1881,6 +1928,7 @@ export default function ProjectWorkspacePage() {
           // Drop any unanswered prompts and clear the live code buffer when task ends.
           setAgentPrompts([]);
           setLiveCodeBuffer("");
+          setLiveThought(null);
           // Reload the preview iframe so the freshly-built files are visible.
           if (event.eventType === "completed") {
             setBuildRefreshCount((n) => n + 1);
@@ -1895,12 +1943,35 @@ export default function ProjectWorkspacePage() {
       es.close();
       taskEventSourceRef.current = null;
       setLiveCodeBuffer("");
+      if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
     };
   }, [activeTaskId, projectId, queryClient]);
 
   const dismissAgentPrompt = useCallback((promptId: string) => {
     setAgentPrompts((prev) => prev.filter((p) => p.promptId !== promptId));
   }, []);
+
+  const handleSendSteer = useCallback(async () => {
+    if (!steeringText.trim() || !activeTaskId || isSendingSteer) return;
+    const hint = steeringText.trim();
+    setSteeringText("");
+    setIsSendingSteer(true);
+    try {
+      await fetch(`/api/projects/${projectId}/tasks/${activeTaskId}/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hint }),
+      });
+      setLiveNarrations((prev) => [
+        ...prev.slice(-19),
+        `Steering hint sent: "${hint.slice(0, 50)}"`,
+      ]);
+    } catch {
+      /* non-fatal */
+    } finally {
+      setIsSendingSteer(false);
+    }
+  }, [steeringText, activeTaskId, projectId, isSendingSteer]);
 
   // Auto-generate a plan analysis when a project opens with no messages yet
   useEffect(() => {
@@ -3740,6 +3811,24 @@ export default function ProjectWorkspacePage() {
                         });
                       })()}
 
+                      {/* Live agent progress: narrations, thinking, file changes, check results */}
+                      {activeTaskId !== null &&
+                        (liveNarrations.length > 0 ||
+                          liveThought !== null ||
+                          liveFileDiffs.length > 0 ||
+                          liveCheckResults.length > 0) && (
+                          <div className="flex justify-start w-full px-0.5">
+                            <div className="max-w-[92%] w-full">
+                              <LiveAgentProgress
+                                narrations={liveNarrations}
+                                thought={liveThought}
+                                fileDiffs={liveFileDiffs}
+                                checkResults={liveCheckResults}
+                              />
+                            </div>
+                          </div>
+                        )}
+
                       {/* Task #532: human-in-the-loop prompts from the agent loop */}
                       <AgentPromptCardsList
                         projectId={projectId}
@@ -3894,6 +3983,30 @@ export default function ProjectWorkspacePage() {
                               switchLeftPanel("history");
                             }}
                           />
+                          {liveNarrations.length > 0 && (
+                            <div className="flex items-center gap-1.5 px-1">
+                              <input
+                                type="text"
+                                value={steeringText}
+                                onChange={(e) => setSteeringText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && steeringText.trim())
+                                    void handleSendSteer();
+                                }}
+                                placeholder="Steer the build… e.g. keep it simple, skip payments"
+                                className="flex-1 text-[11px] bg-muted/50 border border-border/60 rounded-lg px-2.5 py-1.5 text-foreground placeholder:text-muted-foreground/45 focus:outline-none focus:ring-1 focus:ring-primary/30 min-w-0"
+                                disabled={isSendingSteer}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void handleSendSteer()}
+                                disabled={!steeringText.trim() || isSendingSteer}
+                                className="text-[11px] px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                              >
+                                Steer
+                              </button>
+                            </div>
+                          )}
                           {liveCodeBuffer.length > 0 && (
                             <div className="flex justify-start animate-in fade-in duration-150">
                               <div className="max-w-[92%] w-full rounded-xl bg-muted/60 border border-border text-[10px] font-mono text-muted-foreground overflow-hidden">

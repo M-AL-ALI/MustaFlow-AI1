@@ -256,6 +256,7 @@ router.post("/projects", async (req, res): Promise<void> => {
       lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
       chipLabel: chipLabel ?? null,
       projectMode: mode ?? "builder",
+      requireCommandApproval: true,
     })
     .returning();
 

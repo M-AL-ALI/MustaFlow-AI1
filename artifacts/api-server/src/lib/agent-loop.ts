@@ -143,6 +143,13 @@ export interface AgentLoopInput {
     credits: number,
     tool: "generate_image" | "generate_video" | "generate_audio" | "remove_image_background",
   ) => void;
+  /**
+   * Optional hook invoked just before a risky operation (package install or a
+   * shell command matching a migration/destructive pattern) so the caller can
+   * save an interim rollback checkpoint. Fire-and-forget; failures are
+   * non-fatal and must not propagate.
+   */
+  onBeforeRiskyOp?: (reason: string) => Promise<void>;
 }
 
 export type ToolCallRecord = {
@@ -2518,6 +2525,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           containerState,
           profile.installCmd,
         );
+        await safeEvent(
+          input.onEvent,
+          "check_result",
+          JSON.stringify(
+            verifyRun.map((c) => ({
+              id: c.id,
+              label: c.label,
+              passed: c.passed,
+              message: (c.message ?? "").slice(0, 200),
+            })),
+          ),
+        );
         const verifyFailed = profile.checks.filter(
           (c) => c.required && !verifyRun.find((r) => r.id === c.id)?.passed,
         );
@@ -2571,6 +2590,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         { ...input, containerId: containerState.id },
         containerState,
         profile.installCmd,
+      );
+      await safeEvent(
+        input.onEvent,
+        "check_result",
+        JSON.stringify(
+          turnChecks.map((c) => ({
+            id: c.id,
+            label: c.label,
+            passed: c.passed,
+            message: (c.message ?? "").slice(0, 200),
+          })),
+        ),
       );
       const turnFailed = profile.checks.filter(
         (c) => c.required && !turnChecks.find((r) => r.id === c.id)?.passed,
@@ -2665,6 +2696,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     { ...input, containerId: containerState.id },
     containerState,
     profile.installCmd,
+  );
+  await safeEvent(
+    input.onEvent,
+    "check_result",
+    JSON.stringify(
+      checkRun.map((c) => ({
+        id: c.id,
+        label: c.label,
+        passed: c.passed,
+        message: (c.message ?? "").slice(0, 200),
+      })),
+    ),
   );
   checkResults.push(...checkRun);
   const requiredFailed = profile.checks.some(
@@ -4376,6 +4419,23 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         }
       }
 
+      // Checkpoint before risky shell operations (migrations, destructive ops, deploys)
+      {
+        const cmdStr = argv.join(" ");
+        const RISKY_CMD_RE =
+          /\b(migrate|migration|drizzle-kit\s+push|prisma\s+migrate|alembic\s+upgrade|flask\s+db\s+upgrade|fly\s+deploy|git\s+push)\b|\brm\s+-rf\b/i;
+        if (RISKY_CMD_RE.test(cmdStr) && input.onBeforeRiskyOp) {
+          await safeEvent(
+            input.onEvent,
+            "narration",
+            "Saving checkpoint before risky operation…",
+          );
+          try {
+            await input.onBeforeRiskyOp(`run_command: ${cmdStr.slice(0, 80)}`);
+          } catch {}
+        }
+      }
+
       // Install deps on first shell use (after approval so no side-effects on rejection)
       await ensureInstalled(ctx, input.signal, step);
 
@@ -4706,6 +4766,14 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         }
       }
 
+      // Checkpoint before package install — modifies node_modules and lockfile
+      if (input.onBeforeRiskyOp) {
+        try {
+          await input.onBeforeRiskyOp(
+            `pkg_install: ${decision.manager} ${decision.pkg}${decision.version ? `@${decision.version}` : ""}`,
+          );
+        } catch {}
+      }
       await safeEvent(
         input.onEvent,
         "narration",

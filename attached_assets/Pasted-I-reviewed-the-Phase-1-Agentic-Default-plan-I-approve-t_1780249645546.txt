@@ -1,0 +1,173 @@
+I reviewed the Phase 1 Agentic Default plan. I approve the direction, but I want the implementation to be controlled and safe.
+
+Decision:
+Do NOT build a new user-facing mode.
+
+Keep the existing AI Builder UI as the main MustaFlow Builder experience and upgrade it into the default Agentic Builder.
+
+The audit confirms that a lot is already built:
+
+* AI Builder workspace already exists
+* Preview iframe already exists
+* agent-loop.ts already exists
+* Agent prompt cards already exist
+* user_query and request_secret are already wired
+* SSE progress already exists
+* Plan Mode already exists
+* Provisioning already exists
+* Checkpoints already exist
+* Quality checks already exist
+* Developer Mode already exists as advanced surface
+
+So this should not be a rebuild. This is a routing, default behavior, and Builder chat surfacing upgrade.
+
+Approved direction:
+Phase 1 = Agentic Default for AI Builder.
+
+But implement it carefully in this sequence:
+
+1. Turn command approval ON safely
+   Enable approval prompts for risky commands and package installs in normal AI Builder chat.
+
+The user must see Approve / Deny cards before risky actions.
+
+Important:
+Do not make the experience annoying for harmless internal actions.
+Approval should focus on:
+
+* run_command
+* pkg_install
+* database migrations
+* destructive file operations
+* deployment actions
+* secrets/env changes
+* auth/payment/security changes
+
+2. Add live narration timeline in Builder chat
+   The user should see what the agent is doing while it works.
+
+Examples:
+
+* Reading project files
+* Creating frontend pages
+* Installing package
+* Creating backend API
+* Running TypeScript check
+* Fixing preview error
+* Saving checkpoint
+* Refreshing preview
+
+Do not hide this only in Developer Mode.
+
+3. Add thinking/progress bubble in Builder chat
+   If thinking events are already emitted, show them in the main Builder chat using the existing AgentThinkingBubble component or equivalent.
+
+Keep it simple for non-technical users.
+
+4. Add live file-change cards
+   When the agent writes/edits files, show a compact “Files changed” card during the task.
+
+The card should be collapsible and plain-English friendly.
+
+Example:
+Files changed:
+
+* src/App.tsx
+* src/components/BookingForm.tsx
+* server/routes/bookings.ts
+* db/schema.ts
+
+5. Refresh preview during the build, not only at the end
+   When the agent commits meaningful file changes, refresh the preview with debounce.
+
+The user should see the app evolving in real time.
+
+But do not refresh too aggressively and break the user experience.
+
+6. Show inline quality/check results
+   Surface check results while the loop is running, not only at the final report.
+
+Show:
+
+* TypeScript passed/failed
+* ESLint passed/failed
+* Smoke test passed/failed
+* Secret scan passed/failed
+* Preview error found/fixed
+
+The agent should not say “done” until the checks pass or clearly explain what remains blocked.
+
+7. Add mid-run steering input
+   When a task is running, allow the user to steer the build from the Builder chat.
+
+Examples:
+
+* Make it more professional
+* Do not add payments yet
+* Keep the current dashboard
+* Use a simpler design
+* Stop and show me what changed
+* Make it mobile first
+
+The steering route already exists, so expose it in the normal Builder UI.
+
+8. Add checkpoints before risky mid-loop operations
+   Before package installs, migrations, destructive changes, large overwrites, or risky operations, save a checkpoint.
+
+The user needs rollback protection before the agent makes major changes.
+
+9. Only after the above, switch new non-trivial AI Builder projects to agentic default
+   This is the biggest change and must come last.
+
+For new real app/web projects:
+
+* Use builder_mode = agentic
+* Auto-provision Fly.io + Neon when keys are available
+* Use WebContainer/in-process fallback when infrastructure keys are missing
+* Show a clear lightweight-mode badge when running without full infrastructure
+
+Keep static-legacy only for project types that truly do not need full agentic runtime, such as simple animation, slides, or very basic static pages.
+
+Important requirements:
+
+* Do not break existing projects.
+* Existing projects should not be force-migrated without a migration plan.
+* New projects can default to agentic after safety/UI pieces are complete.
+* If infra keys are missing, fallback must be clear and stable.
+* Do not create a new mode unless this path fails.
+
+Implementation rules:
+
+* Work in small commits.
+* Run typecheck/lint/build checks after each task.
+* Do not touch unrelated features.
+* Preserve Developer Mode as advanced workspace.
+* Keep AI Builder as the main user-facing experience.
+* Keep Ora separate as public consultant.
+* Keep preview real, not fake.
+* Keep deployment gated by testing and user approval.
+
+Final success criteria:
+A normal non-technical user can stay inside AI Builder chat and say:
+
+“Build me a booking app with login, admin dashboard, and database.”
+
+Then MustaFlow should:
+
+1. Create an agent task.
+2. Use agent-loop.ts.
+3. Auto-provision runtime or use fallback.
+4. Write real files.
+5. Ask approval for risky package/command actions.
+6. Build frontend/backend/database.
+7. Refresh real preview.
+8. Capture preview/build errors.
+9. Fix defects automatically when safe.
+10. Show progress in chat.
+11. Allow user steering mid-task.
+12. Show check results.
+13. Save checkpoint.
+14. Let the user test the real app before deployment.
+15. Deploy only after approval.
+
+Please start with T1, T2, T4, T5, T7, and T8 first, then do T3, and keep T6 last.
