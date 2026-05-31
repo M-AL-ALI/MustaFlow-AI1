@@ -4,11 +4,13 @@ description: testClerkAuth:true in runTest hits Clerk dev-key rate limits; once 
 ---
 
 ## Rule
+
 `testClerkAuth: true` in `runTest()` creates real Clerk test users against the dev key. Clerk dev keys have strict usage limits. After several test runs in one session the subagent records a "blocked" state that persists for the remainder of the notebook session — even after `restart: true`.
 
 **Why:** Clerk dev keys throttle test-user creation. The testing subagent treats repeated auth failures as a signal that the entire test environment is auth-blocked and refuses to proceed.
 
 **How to apply:**
+
 - Space Playwright auth tests — avoid rapid-fire retries within the same session.
 - If blocked, the backend can be validated via `DevOnlyAuthAdapter` as a temporary swap in `artifacts/api-server/src/lib/auth.ts` (line 72), restored immediately after testing.
 - DevOnlyAuthAdapter sets `req.userId = "demo-user"` for all requests; it hard-fails in production (`NODE_ENV=production`).
