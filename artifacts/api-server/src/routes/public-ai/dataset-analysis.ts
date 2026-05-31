@@ -20,12 +20,12 @@ const router = Router();
 
 const messageItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().max(40000),
+  content: z.string(),
 });
 
 const bodySchema = z.object({
   fileRef: z.string().uuid(),
-  message: z.string().min(1).max(4000),
+  message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
 });
