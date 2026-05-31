@@ -2,8 +2,7 @@
  * Image generation provider abstraction — Phase 9A-1.
  *
  * ISOLATION: this file MUST NOT import from builder.ts, ai.ts, or any
- * builder pipeline module. It is the sole entry point for image generation
- * and uses direct OpenAI SDK calls (not the Replit AI integration proxy).
+ * builder pipeline module. It is the sole entry point for image generation.
  *
  * Required env:
  *   OPENAI_IMAGE_API_KEY — direct OpenAI API key for image models (preferred)
@@ -37,6 +36,11 @@ export interface ImageGenerateOptions {
 }
 
 export interface ImageGenerateResult {
+  /**
+   * Either a temporary OpenAI CDN URL (dall-e-3 default) or a data URI
+   * (`data:image/png;base64,...`) when gpt-image-1 returns b64_json.
+   * image-storage.ts handles both transparently.
+   */
   openaiUrl: string;
   revisedPrompt: string | null;
   width: number;
@@ -117,14 +121,27 @@ function sizeToPixels(size: AnySize): { width: number; height: number } {
   return { width: w!, height: h! };
 }
 
-// ── API client ────────────────────────────────────────────────────────────────
+// ── Key helpers (used by isImageProviderConfigured + auditImageProviderConfig) ─
 
-function getClient(): OpenAI {
-  const apiKey =
+function isProxyConfigured(): boolean {
+  return Boolean(
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL && process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  );
+}
+
+function getDirectKey(): string {
+  return (
     process.env.OPENAI_IMAGE_API_KEY ??
     process.env.IMAGE_API_KEY ??
     process.env.OPENAI_API_KEY ??
-    "";
+    ""
+  );
+}
+
+// ── API client ────────────────────────────────────────────────────────────────
+
+function getClient(): OpenAI {
+  const apiKey = getDirectKey();
   if (!apiKey) {
     throw new Error("Image generation not configured: set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY");
   }
@@ -226,7 +243,40 @@ export async function generateImage(opts: ImageGenerateOptions): Promise<ImageGe
 }
 
 export function isImageProviderConfigured(): boolean {
-  return Boolean(
-    process.env.OPENAI_IMAGE_API_KEY ?? process.env.IMAGE_API_KEY ?? process.env.OPENAI_API_KEY,
-  );
+  return isProxyConfigured() || Boolean(getDirectKey());
+}
+
+/**
+ * Returns a structured audit of which image provider keys are present.
+ * Values are NEVER included — only boolean presence flags.
+ * Safe to log at server startup.
+ */
+export function auditImageProviderConfig(): {
+  hasOpenAIImageKey: boolean;
+  hasImageApiKey: boolean;
+  hasOpenAIKey: boolean;
+  hasProxyBaseUrl: boolean;
+  hasProxyKey: boolean;
+  activeProviderPath: "proxy" | "direct" | "none";
+} {
+  const hasOpenAIImageKey = Boolean(process.env.OPENAI_IMAGE_API_KEY);
+  const hasImageApiKey = Boolean(process.env.IMAGE_API_KEY);
+  const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
+  const hasProxyBaseUrl = Boolean(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+  const hasProxyKey = Boolean(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+
+  const activeProviderPath = isProxyConfigured()
+    ? "proxy"
+    : hasOpenAIImageKey || hasImageApiKey || hasOpenAIKey
+      ? "direct"
+      : "none";
+
+  return {
+    hasOpenAIImageKey,
+    hasImageApiKey,
+    hasOpenAIKey,
+    hasProxyBaseUrl,
+    hasProxyKey,
+    activeProviderPath,
+  };
 }

@@ -16,6 +16,7 @@ import { startContainerLogRetentionScheduler } from "./lib/container-log-retenti
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 import { runStartupMigrations } from "./lib/startup-migrations";
 import { isOraSecretConfigured } from "./lib/public-ai/session";
+import { auditImageProviderConfig } from "./lib/image-provider";
 
 const execFileAsync = promisify(execFile);
 
@@ -51,6 +52,20 @@ if (isOraSecretConfigured()) {
   logger.warn(
     "ORA_SESSION_SECRET is not set — Ora public-AI endpoints will return 503. Set this secret to enable them.",
   );
+}
+
+// Log image provider configuration at startup (presence only — no values).
+{
+  const imgAudit = auditImageProviderConfig();
+  if (imgAudit.activeProviderPath === "none") {
+    logger.warn(
+      imgAudit,
+      "image-provider: no image provider configured — Ora image generation disabled. " +
+        "Set OPENAI_IMAGE_API_KEY (preferred) or OPENAI_API_KEY to enable it.",
+    );
+  } else {
+    logger.info(imgAudit, `image-provider: configured (path=${imgAudit.activeProviderPath})`);
+  }
 }
 
 // Ensure the Fly.io app exists for container infrastructure (best-effort)

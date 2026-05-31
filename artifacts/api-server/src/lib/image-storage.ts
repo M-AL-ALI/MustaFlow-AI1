@@ -79,6 +79,14 @@ async function uploadToR2(
 // ── Download from provider URL or decode data URI ────────────────────────────
 
 async function downloadBuffer(url: string): Promise<Buffer> {
+  if (url.startsWith("data:")) {
+    // data:<mime>;base64,<payload>  — proxy path returns base64 data URIs
+    const commaIdx = url.indexOf(",");
+    if (commaIdx === -1) {
+      throw new Error("Invalid data URI: missing comma separator");
+    }
+    return Buffer.from(url.slice(commaIdx + 1), "base64");
+  }
   const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) {
     throw new Error(`Failed to download image: HTTP ${res.status}`);
