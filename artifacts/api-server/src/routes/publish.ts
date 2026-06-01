@@ -34,7 +34,7 @@ function detectSchemaMigrations(files: Array<{ path: string; content: string | n
   }
   return violations;
 }
-import { eq, sql, isNull, and } from "drizzle-orm";
+import { eq, sql, isNull, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import {
   db,
@@ -213,6 +213,38 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         })),
       });
       return;
+    }
+  }
+
+  // ── Validation gate: block production publish on completed_with_errors ──────
+  // When the latest build snapshot has validation_status="completed_with_errors"
+  // the agentic repair loop exhausted all attempts. Require explicit opt-in via
+  // forcePublishWithErrors=true to allow publishing with known TypeScript errors.
+  if (env === "production" && !publishVersionId) {
+    try {
+      const [latestVersion] = await db
+        .select({ validationStatus: projectVersionsTable.validationStatus })
+        .from(projectVersionsTable)
+        .where(eq(projectVersionsTable.projectId, projectId))
+        .orderBy(desc(projectVersionsTable.createdAt))
+        .limit(1);
+      if (latestVersion?.validationStatus === "completed_with_errors") {
+        const force =
+          (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
+        if (!force) {
+          res.status(422).json({
+            error:
+              "The latest build completed with TypeScript errors that could not be auto-repaired. Fix the errors before publishing to production, or pass forcePublishWithErrors=true to override.",
+            code: "completed_with_errors",
+          });
+          return;
+        }
+      }
+    } catch (validationGateErr) {
+      req.log.warn(
+        { err: validationGateErr, projectId },
+        "Validation gate check failed (non-fatal) — proceeding with publish",
+      );
     }
   }
 

@@ -219,6 +219,20 @@ type TaskReport = {
    */
   allChecksPassed?: boolean | null;
   /**
+   * Populated when the repair loop ran after a check-failed build/refine.
+   * Null when not triggered.
+   */
+  repairLoop?: {
+    totalAttempts: number;
+    maxAttempts: number;
+    finalStatus: "passed" | "exhausted";
+  } | null;
+  /**
+   * True when the task completed but the TypeScript repair loop was exhausted.
+   * Snapshot was saved with remaining validation errors.
+   */
+  completedWithErrors?: boolean | null;
+  /**
    * Lightweight pre-review checks (JSON syntax, import resolution, E2E spec
    * detection) run server-side before the staging snapshot reaches "needs_review".
    */
@@ -3474,6 +3488,22 @@ function TaskReviewCard({
           {(report.qualityGate?.checks ?? []).length > 0 && (
             <span className="text-[9px] text-emerald-400/70 ml-1">
               {report.qualityGate!.checks.map((c) => c.label).join(" · ")}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Repair loop exhausted — completed with TypeScript errors */}
+      {report.completedWithErrors && (
+        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-amber-500/10 border-b border-amber-500/30 text-amber-400">
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          <span className="text-[10px] font-semibold">
+            Build complete — TypeScript errors remain
+          </span>
+          {report.repairLoop && (
+            <span className="text-[9px] text-amber-400/70 ml-1">
+              Repair exhausted after {report.repairLoop.totalAttempts} attempt
+              {report.repairLoop.totalAttempts !== 1 ? "s" : ""}
             </span>
           )}
         </div>

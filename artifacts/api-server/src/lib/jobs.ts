@@ -407,6 +407,49 @@ const ESCALATION_MAP: Partial<Record<AgentMode, AgentMode>> = {
 };
 
 /**
+ * Maximum repair-loop attempts per agent mode (Phase 2A — TypeScript repair).
+ * Higher modes get more attempts; lite is single-shot to keep costs predictable.
+ */
+function repairLoopMaxAttempts(mode: AgentMode): number {
+  if (mode === "lite") return 1;
+  if (mode === "pro") return 3;
+  return 2; // eco, power
+}
+
+/**
+ * Build a focused repair prompt from failed quality-gate check results.
+ * Keeps error context front-and-centre with minimal instruction so the repair
+ * agent makes targeted, minimal-safe-patch changes only.
+ */
+function buildRepairPrompt(
+  failedChecks: Array<{ label: string; output: string }>,
+  recentlyChangedPaths: string[],
+): string {
+  const errorDetail = failedChecks
+    .map((c) => `### ${c.label}\n${c.output.slice(0, 1500)}`)
+    .join("\n\n");
+  const fileHint =
+    recentlyChangedPaths.length > 0
+      ? `\nRecently changed files (most likely sources of errors):\n${recentlyChangedPaths.map((p) => `- ${p}`).join("\n")}`
+      : "";
+  return [
+    "[REPAIR] TypeScript errors were detected after the last change.",
+    "Fix ONLY the TypeScript errors listed below.",
+    "Rules:",
+    "- Fix only the files involved in the errors",
+    "- Do NOT use `any` or `@ts-ignore` to bypass errors",
+    "- Do NOT disable strict TypeScript checks",
+    "- Do NOT remove working features to make errors disappear",
+    "- Make the smallest safe change that resolves each listed error",
+    "- Preserve all existing UI and behavior",
+    "",
+    "ERRORS TO FIX:",
+    errorDetail,
+    fileHint,
+  ].join("\n");
+}
+
+/**
  * In-memory per-project advisory lock.
  * Prevents concurrent runJob calls for the same project within this Node.js process.
  * The route-level conflict check is the primary guard; this is a safety net.
@@ -1604,9 +1647,15 @@ export async function runJob(input: JobInput): Promise<void> {
   let analyticsErrorCategory: string | null = null;
   let analyticsCorrectionPasses = 0;
   // Persisted validation status for the version snapshot written by this job.
-  // Default "passed"; flipped to "failed" only when agentic builder mode chooses
-  // to persist a snapshot despite required-check failures (see hard-gate blocks).
-  let versionValidationStatus: "passed" | "failed" = "passed";
+  // "passed" = all checks OK; "failed" = legacy hard-gate failure (no container);
+  // "completed_with_errors" = repair loop exhausted after agentic check failures.
+  let versionValidationStatus: "passed" | "failed" | "completed_with_errors" = "passed";
+  // Populated by the correctionFailed handlers in the build/refine paths when the
+  // agentic loop terminates with check failures. The repair loop (below, after the
+  // build/refine blocks) drains this to attempt targeted TypeScript fixes before
+  // falling back to "completed_with_errors".
+  let _pendingRepairChecks: Array<{ label: string; output: string }> = [];
+  let _pendingRepairChangedPaths: string[] = [];
   // Keepalive handle — cleared in the outer finally block.
   let stopContainerKeepalive: (() => void) | null = null;
   // Machine ID whose autostop was patched to "off" — restored in the outer finally.
@@ -2490,16 +2539,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
         }
         if (result.correctionFailed && USE_AGENT_LOOP_BUILD) {
-          await emitEvent(
-            taskId,
-            "generating_code",
-            "Required checks failed — saving snapshot with failed status so you can inspect.",
-          );
-          result.report.warnings = [
-            "Required checks failed — snapshot saved with validation_status=failed. Review report.agentLoop.checkResults.",
-            ...(result.report.warnings ?? []),
-          ];
-          versionValidationStatus = "failed";
+          // Defer final status — the repair loop (after build/refine blocks) will
+          // attempt targeted TypeScript fixes before committing with an error status.
+          const agentBuildChecks = result.report.agentLoop?.checkResults ?? [];
+          _pendingRepairChecks = agentBuildChecks
+            .filter((c) => !c.passed)
+            .map((c) => ({ label: c.label, output: c.message ?? "" }));
+          _pendingRepairChangedPaths = (result.files ?? []).map((f) => f.path);
           result.correctionFailed = false;
         }
 
@@ -3023,16 +3069,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
         }
         if (refineResult.correctionFailed && USE_AGENT_LOOP_REFINE) {
-          await emitEvent(
-            taskId,
-            "generating_code",
-            "Required checks failed — saving refine snapshot with failed status so you can inspect.",
-          );
-          refineResult.report.warnings = [
-            "Required checks failed — snapshot saved with validation_status=failed. Review report.agentLoop.checkResults.",
-            ...(refineResult.report.warnings ?? []),
-          ];
-          versionValidationStatus = "failed";
+          // Defer final status — the repair loop (after build/refine blocks) will
+          // attempt targeted TypeScript fixes before committing with an error status.
+          const agentRefineChecks = refineResult.report.agentLoop?.checkResults ?? [];
+          _pendingRepairChecks = agentRefineChecks
+            .filter((c) => !c.passed)
+            .map((c) => ({ label: c.label, output: c.message ?? "" }));
+          _pendingRepairChangedPaths = refineResult.changedFiles.map((f) => f.path);
           refineResult.correctionFailed = false;
         }
 
@@ -3371,6 +3414,183 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         nextVersionLabel = userPrompt.slice(0, 40) || "Refinement";
         filesToSmellScan = result.changedFiles;
       }
+
+      // ── TypeScript Repair Loop (Phase 2A) ─────────────────────────────────────
+      // Triggered when the agentic build/refine loop terminates with check failures.
+      // Attempts up to N targeted repair passes with error-focused prompts before
+      // falling back to "completed_with_errors". Only runs for agentic projects that
+      // have a container (needed to re-verify TypeScript after each repair pass).
+      if (_pendingRepairChecks.length > 0 && project.containerId && agentIdentity !== "task") {
+        const maxRepairAttempts = repairLoopMaxAttempts(agentMode);
+        const repairAttemptRecords: Array<{
+          attempt: number;
+          succeeded: boolean;
+          filesChanged: string[];
+        }> = [];
+        let repairSucceeded = false;
+        let currentFailedChecks = _pendingRepairChecks;
+        let currentChangedPaths = _pendingRepairChangedPaths;
+
+        const { runAgentLoop: runRepairAgentLoop } = await import("./agent-loop");
+
+        for (
+          let repairAttempt = 1;
+          repairAttempt <= maxRepairAttempts && !repairSucceeded;
+          repairAttempt++
+        ) {
+          await emitEvent(
+            taskId,
+            "check_result",
+            JSON.stringify(
+              currentFailedChecks.map((c, i) => ({
+                id: `repair-fail-${repairAttempt}-${i}`,
+                label: c.label,
+                passed: false,
+              })),
+            ),
+          );
+          await emitEvent(
+            taskId,
+            "narration",
+            `TypeScript errors found — attempting repair (${repairAttempt}/${maxRepairAttempts})…`,
+          );
+
+          const repairPrompt = buildRepairPrompt(currentFailedChecks, currentChangedPaths);
+          const filesForRepair = await loadFiles(projectId);
+
+          let repairLoopResult: Awaited<ReturnType<typeof runRepairAgentLoop>> | null = null;
+          try {
+            repairLoopResult = await runRepairAgentLoop({
+              mode: "refine",
+              projectId,
+              projectName: project.name,
+              projectKind: project.kind,
+              projectFormat: project.projectFormat ?? null,
+              stack: project.stack ?? null,
+              projectMode: project.projectMode ?? null,
+              userPrompt: repairPrompt,
+              agentMode,
+              conversationHistory: [],
+              knowledgeContext: undefined,
+              planContext: null,
+              existingFiles: filesForRepair,
+              containerId: project.containerId,
+              policyStrictness:
+                (project.policyStrictness as "safe" | "standard" | "permissive" | undefined) ??
+                null,
+              requireCommandApproval: false,
+              onBeforeRiskyOp: async () => {},
+              taskId,
+              wallClockMs: 3 * 60_000,
+              previewUrl: project.containerUrl ?? null,
+              e2eEnabled: false,
+              onEvent: async (t: string, m: string) => emitEvent(taskId, t, m),
+              signal,
+            });
+          } catch (repairErr) {
+            logger.warn(
+              { err: repairErr, taskId, projectId, repairAttempt },
+              "Repair loop agent call failed (non-fatal)",
+            );
+          }
+
+          const repairChangedPaths: string[] = [];
+
+          if (repairLoopResult) {
+            if (repairLoopResult.changedFiles.length > 0) {
+              await writeFiles(projectId, repairLoopResult.changedFiles, false);
+              repairChangedPaths.push(...repairLoopResult.changedFiles.map((f) => f.path));
+              filesToSmellScan = repairLoopResult.changedFiles;
+              for (const f of repairLoopResult.changedFiles) {
+                await emitEvent(taskId, "editing_files", `Repairing ${f.path}`, f.path);
+              }
+            }
+
+            if (!repairLoopResult.checksFailed) {
+              repairSucceeded = true;
+              await emitEvent(
+                taskId,
+                "check_result",
+                JSON.stringify([
+                  {
+                    id: `repair-passed-${repairAttempt}`,
+                    label: "TypeScript",
+                    passed: true,
+                  },
+                ]),
+              );
+              await emitEvent(
+                taskId,
+                "narration",
+                `TypeScript errors repaired on attempt ${repairAttempt}.`,
+              );
+            } else {
+              const newFailed = repairLoopResult.loopReport.checkResults
+                .filter((c) => !c.passed)
+                .map((c) => ({ label: c.label, output: c.message }));
+              if (newFailed.length > 0) currentFailedChecks = newFailed;
+              currentChangedPaths =
+                repairChangedPaths.length > 0 ? repairChangedPaths : currentChangedPaths;
+              if (repairAttempt < maxRepairAttempts) {
+                await emitEvent(
+                  taskId,
+                  "narration",
+                  `Repair attempt ${repairAttempt} incomplete — retrying…`,
+                );
+              }
+            }
+          }
+
+          repairAttemptRecords.push({
+            attempt: repairAttempt,
+            succeeded: repairSucceeded,
+            filesChanged: repairChangedPaths,
+          });
+        }
+
+        report.repairLoop = {
+          attempts: repairAttemptRecords,
+          totalAttempts: repairAttemptRecords.length,
+          maxAttempts: maxRepairAttempts,
+          finalStatus: repairSucceeded ? "passed" : "exhausted",
+        };
+
+        if (!repairSucceeded) {
+          await emitEvent(
+            taskId,
+            "check_result",
+            JSON.stringify(
+              currentFailedChecks.map((c, i) => ({
+                id: `repair-exhausted-${i}`,
+                label: c.label,
+                passed: false,
+              })),
+            ),
+          );
+          await emitEvent(
+            taskId,
+            "narration",
+            `Repair attempts exhausted after ${repairAttemptRecords.length} attempt${repairAttemptRecords.length !== 1 ? "s" : ""} — committing with validation errors. User review needed.`,
+          );
+          versionValidationStatus = "completed_with_errors";
+          report.completedWithErrors = true;
+          report.warnings = [
+            `TypeScript repair loop exhausted after ${repairAttemptRecords.length} attempt${repairAttemptRecords.length !== 1 ? "s" : ""}. Snapshot saved with completed_with_errors status.`,
+            ...(report.warnings ?? []),
+          ];
+        } else {
+          report.completedWithErrors = false;
+        }
+      } else if (_pendingRepairChecks.length > 0 && agentIdentity !== "task") {
+        // Fallback when no container is available: use the legacy failed status
+        // so the snapshot is still saved but clearly flagged for review.
+        versionValidationStatus = "failed";
+        report.warnings = [
+          "Required checks failed — no container available for automated repair. Snapshot saved with validation_status=failed.",
+          ...(report.warnings ?? []),
+        ];
+      }
+      // ── End TypeScript Repair Loop ─────────────────────────────────────────────
 
       // ── Ensure primary artifact kind matches the specialised pipeline ────────
       // Unconditional upsert so refine passes (and any build that skips the
@@ -4931,7 +5151,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End Browser QA ─────────────────────────────────────────────────────
 
-      await emitEvent(taskId, "completed", "Task completed.");
+      await emitEvent(
+        taskId,
+        "completed",
+        versionValidationStatus === "completed_with_errors"
+          ? "Build complete — TypeScript repair exhausted. Preview may have issues. Review the report for details."
+          : "Task completed.",
+      );
 
       // Notify project owner of build completion (fire-and-forget)
       if (project.ownerId) {

@@ -314,6 +314,26 @@ export type TaskReport = {
    */
   allChecksPassed?: boolean | null;
   /**
+   * Populated when the agentic repair loop (Phase 2A) attempted to fix TypeScript
+   * errors after a check-failed build/refine. Null when not triggered.
+   */
+  repairLoop?: {
+    attempts: Array<{
+      attempt: number;
+      succeeded: boolean;
+      filesChanged: string[];
+    }>;
+    totalAttempts: number;
+    maxAttempts: number;
+    /** "passed" = all errors fixed before the limit; "exhausted" = gave up. */
+    finalStatus: "passed" | "exhausted";
+  } | null;
+  /**
+   * True when the task completed but the TypeScript repair loop was exhausted —
+   * the snapshot was saved with remaining validation errors. UI shows amber warning.
+   */
+  completedWithErrors?: boolean | null;
+  /**
    * Lightweight pre-review checks that run server-side on the staging snapshot
    * before the task reaches "needs_review". Checks JSON syntax, relative import
    * resolution, and E2E spec presence. Does not require a container.

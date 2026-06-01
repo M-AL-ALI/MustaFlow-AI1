@@ -34,6 +34,7 @@ import {
   Palette,
   Sparkles,
   AlertCircle,
+  AlertTriangle,
   Timer,
   Bookmark,
   Pencil,
@@ -2005,6 +2006,8 @@ export function AgentThinkingBubble({
     | {
         versionId?: number | null;
         knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
+        completedWithErrors?: boolean | null;
+        repairLoop?: { totalAttempts: number; maxAttempts: number; finalStatus: "passed" | "exhausted" } | null;
       }
     | null
     | undefined;
@@ -2122,7 +2125,11 @@ export function AgentThinkingBubble({
         <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
           {isTerminal ? (
             isDone ? (
-              <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+              completedReport?.completedWithErrors ? (
+                <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+              )
             ) : isCancelled ? (
               <Square className="h-3 w-3 text-muted-foreground shrink-0" />
             ) : (
@@ -2151,7 +2158,9 @@ export function AgentThinkingBubble({
             )}
           >
             {isDone
-              ? "Build complete"
+              ? completedReport?.completedWithErrors
+                ? "Build complete — errors found"
+                : "Build complete"
               : isCancelled
                 ? "Cancelled"
                 : isFailed

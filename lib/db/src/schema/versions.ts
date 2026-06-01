@@ -55,7 +55,7 @@ export const projectVersionsTable = pgTable("project_versions", {
   // checks succeeded; "failed" = produced by the agentic builder with one or
   // more required checks failing (snapshot saved anyway for inspection).
   // Null = legacy snapshots written before this column existed.
-  validationStatus: text("validation_status").$type<"passed" | "failed">(),
+  validationStatus: text("validation_status").$type<"passed" | "failed" | "completed_with_errors">(),
   // ogImageUrl: URL of the generated Open Graph image for this snapshot.
   // Set at publish time; served via the public route's <head> injection.
   ogImageUrl: text("og_image_url"),
