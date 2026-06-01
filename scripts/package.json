@@ -100,6 +100,7 @@
     "validate-developer-mode": "tsx ./src/validate-developer-mode.ts",
     "verify-developer-mode-runtime": "tsx ./src/verify-developer-mode-runtime.ts",
     "verify-write-file": "tsx ./src/verify-write-file.ts",
+    "verify-large-critique": "tsx ./src/verify-large-critique.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

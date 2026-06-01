@@ -1995,13 +1995,22 @@ async function runCritiquePass(
   mode: AgentMode,
   label: string,
   systemPrompt: string = CRITIQUE_SYSTEM_PROMPT,
-): Promise<{ issues: string[]; fixedFiles: BuilderFile[] | null }> {
+): Promise<{
+  issues: string[];
+  fixedFiles: BuilderFile[] | null;
+  critiqueFailed?: boolean;
+  critiqueFailureReason?: string;
+}> {
   try {
-    // Build a compact manifest for the critique (cap at 14k chars to stay within context)
+    // Build a compact manifest for the critique.
+    // Hard cap at 10k chars — keeps total prompt under ~12k chars so Anthropic
+    // streaming-accumulation path kicks in reliably and the response stays within
+    // the 10k max_tokens output budget. (makeCompactManifest already smart-truncates
+    // above 20k; this is a secondary safety cap on the final string.)
     const manifest = makeCompactManifest(files);
     const manifestTruncated =
-      manifest.length > 14000
-        ? manifest.slice(0, 14000) + "\n…(file manifest truncated for review)"
+      manifest.length > 10000
+        ? manifest.slice(0, 10000) + "\n…(file manifest truncated for review)"
         : manifest;
 
     const issueBlock =
@@ -2017,7 +2026,22 @@ async function runCritiquePass(
       },
     ];
 
-    const corrected = await callWithRetry(critiqueMessages, modelFor(mode), 16000, label);
+    // Explicit 90-second timeout per critique call.
+    // This keeps us well under the stuck-run-scheduler's 5-minute kill and
+    // ensures a clear AbortError rather than a silent 10-minute hang.
+    const critiqueTimeoutSignal = AbortSignal.timeout(90_000);
+
+    // Cap output tokens at 10k — critique JSON (issues list + patched files)
+    // does not need the full 16k budget, and smaller budgets reduce latency.
+    const corrected = await callWithRetry(
+      critiqueMessages,
+      modelFor(mode),
+      10000,
+      label,
+      critiqueTimeoutSignal,
+      "build",
+      mode,
+    );
 
     const verdict = typeof corrected.verdict === "string" ? corrected.verdict : "ok";
     const issues = Array.isArray(corrected.issues)
@@ -2075,8 +2099,20 @@ async function runCritiquePass(
 
     return { issues, fixedFiles: mergedFiles };
   } catch (err) {
-    logger.warn({ err, label }, "Critique pass threw — skipping (non-fatal)");
-    return { issues: [], fixedFiles: null };
+    // Surface the failure instead of silently returning "no issues found".
+    // This prevents critique failures from being indistinguishable from a clean
+    // critique run, which would cause the task to incorrectly report success.
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === "TimeoutError" ||
+        err.name === "AbortError" ||
+        /timeout|timed out/i.test(err.message));
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { err, label, isTimeout },
+      "Critique pass threw — surfacing as unavailable warning",
+    );
+    return { issues: [], fixedFiles: null, critiqueFailed: true, critiqueFailureReason: reason };
   }
 }
 
@@ -2719,7 +2755,12 @@ export async function runBuildPipeline(args: {
   let critiqueMeta: TaskReport["critiquePass"] = null;
   if ((agentMode === "power" || agentMode === "pro") && !correctionFailed) {
     await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
-    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+    const {
+      issues: critiqueIssues,
+      fixedFiles: critiqueFixed,
+      critiqueFailed,
+      critiqueFailureReason,
+    } = await runCritiquePass(
       messages,
       files,
       userPrompt,
@@ -2728,7 +2769,17 @@ export async function runBuildPipeline(args: {
       "build-critique",
     );
 
-    if (critiqueFixed !== null) {
+    if (critiqueFailed) {
+      const unavailableMsg = `[critique_unavailable] QA auto-fix could not complete — ${critiqueFailureReason ?? "model error"}.`;
+      logger.warn({ label: "build-critique", reason: critiqueFailureReason }, unavailableMsg);
+      postCorrectionWarnings = [...postCorrectionWarnings, unavailableMsg];
+      critiqueMeta = {
+        issuesFound: [],
+        autoFixed: false,
+        critiqueFailed: true,
+        critiqueFailureReason,
+      };
+    } else if (critiqueFixed !== null) {
       // Revalidate critique output before accepting — never accept broken patches
       const critiqueValidateStructural = validateWebStructure(critiqueFixed);
       const critiqueValidatePerFile = await validateFiles(
@@ -3215,7 +3266,12 @@ export async function runRefinePipeline(args: {
       ...changedFiles,
     ];
 
-    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+    const {
+      issues: critiqueIssues,
+      fixedFiles: critiqueFixed,
+      critiqueFailed,
+      critiqueFailureReason,
+    } = await runCritiquePass(
       messages,
       fullProjectForCritique,
       userPrompt,
@@ -3224,7 +3280,17 @@ export async function runRefinePipeline(args: {
       "refine-critique",
     );
 
-    if (critiqueFixed !== null) {
+    if (critiqueFailed) {
+      const unavailableMsg = `[critique_unavailable] QA auto-fix could not complete — ${critiqueFailureReason ?? "model error"}.`;
+      logger.warn({ label: "refine-critique", reason: critiqueFailureReason }, unavailableMsg);
+      validationWarnings = [...validationWarnings, unavailableMsg];
+      refineCritiqueMeta = {
+        issuesFound: [],
+        autoFixed: false,
+        critiqueFailed: true,
+        critiqueFailureReason,
+      };
+    } else if (critiqueFixed !== null) {
       // Keep only the files that the critique actually changed (those in changedFiles or new)
       const originalPaths = new Set(existingFiles.map((f) => f.path));
       const critiqueChanges = critiqueFixed.filter((f) => {
@@ -5940,7 +6006,12 @@ export async function runMobileBuildPipeline(args: {
   let mobileBuildCritiqueMeta: TaskReport["critiquePass"] = null;
   if ((agentMode === "power" || agentMode === "pro") && !mobileStructureFailed && !tsCheckFailed) {
     await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
-    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+    const {
+      issues: critiqueIssues,
+      fixedFiles: critiqueFixed,
+      critiqueFailed,
+      critiqueFailureReason,
+    } = await runCritiquePass(
       messages,
       files,
       userPrompt,
@@ -5950,7 +6021,20 @@ export async function runMobileBuildPipeline(args: {
       MOBILE_CRITIQUE_SYSTEM_PROMPT,
     );
 
-    if (critiqueFixed !== null) {
+    if (critiqueFailed) {
+      const unavailableMsg = `[critique_unavailable] QA auto-fix could not complete — ${critiqueFailureReason ?? "model error"}.`;
+      logger.warn(
+        { label: "mobile-build-critique", reason: critiqueFailureReason },
+        unavailableMsg,
+      );
+      mobileBuildWarnings = [...mobileBuildWarnings, unavailableMsg];
+      mobileBuildCritiqueMeta = {
+        issuesFound: [],
+        autoFixed: false,
+        critiqueFailed: true,
+        critiqueFailureReason,
+      };
+    } else if (critiqueFixed !== null) {
       // Revalidate critique output against Expo structure before accepting
       const critiqueRevalidation = validateMobileFiles(critiqueFixed);
       if (!critiqueRevalidation.passed) {
@@ -6311,7 +6395,12 @@ export async function runMobileRefinePipeline(args: {
   let mobileRefineCritiqueMeta: TaskReport["critiquePass"] = null;
   if ((agentMode === "power" || agentMode === "pro") && !tsCheckFailed) {
     await onEvent?.("validating_output", "Running quality critique (Power/Pro)…");
-    const { issues: critiqueIssues, fixedFiles: critiqueFixed } = await runCritiquePass(
+    const {
+      issues: critiqueIssues,
+      fixedFiles: critiqueFixed,
+      critiqueFailed,
+      critiqueFailureReason,
+    } = await runCritiquePass(
       messages,
       mergedFiles,
       userPrompt,
@@ -6321,7 +6410,20 @@ export async function runMobileRefinePipeline(args: {
       MOBILE_CRITIQUE_SYSTEM_PROMPT,
     );
 
-    if (critiqueFixed !== null) {
+    if (critiqueFailed) {
+      const unavailableMsg = `[critique_unavailable] QA auto-fix could not complete — ${critiqueFailureReason ?? "model error"}.`;
+      logger.warn(
+        { label: "mobile-refine-critique", reason: critiqueFailureReason },
+        unavailableMsg,
+      );
+      refineWarnings = [...refineWarnings, unavailableMsg];
+      mobileRefineCritiqueMeta = {
+        issuesFound: [],
+        autoFixed: false,
+        critiqueFailed: true,
+        critiqueFailureReason,
+      };
+    } else if (critiqueFixed !== null) {
       // Keep only the files the critique actually changed (existing changedFiles or net-new)
       const originalPaths = new Set(existingFiles.map((f) => f.path));
       const tentativeChangedMap = new Map(changedFiles.map((f) => [f.path, f]));

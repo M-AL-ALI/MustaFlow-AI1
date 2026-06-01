@@ -129,6 +129,10 @@ export type TaskReport = {
     issuesFound: string[];
     /** True if the critique returned patched files that were applied */
     autoFixed: boolean;
+    /** True when the critique call itself failed (timeout, API error, context overflow) */
+    critiqueFailed?: boolean;
+    /** Human-readable reason the critique failed, if it failed */
+    critiqueFailureReason?: string;
   } | null;
   /**
    * Structured record of the structural/per-file validation cycle.

@@ -31,6 +31,20 @@ import type { AgentMode } from "./ai";
 
 export type Provider = "openai" | "anthropic" | "gemini";
 
+/**
+ * Total message-content character count above which we route tool-free Anthropic
+ * calls through the streaming-accumulation path instead of the non-streaming path.
+ *
+ * Rationale: the Anthropic SDK's non-streaming `messages.create()` has a built-in
+ * 10-minute guard (600 s) that fires on slow large-context completions. The
+ * streaming path has no such hard cut-off — it streams tokens as they arrive, so
+ * the HTTP connection stays alive the whole time. For calls that exceed this
+ * threshold we stream and accumulate the full response in memory, then return a
+ * standard ChatCompletion-shaped object. Tool calls stay on the non-streaming path
+ * because tool_use blocks arrive only at the end of the stream.
+ */
+export const ANTHROPIC_STREAM_THRESHOLD_CHARS = 15_000;
+
 export type Stage = "build" | "refine" | "plan" | "architect" | "intent" | "converse";
 
 /** Vision-capable model per provider — used by the screenshot tool path. */
@@ -276,6 +290,31 @@ export async function createChatCompletion(
           );
         }
         if (params.provider === "anthropic") {
+          // Route large tool-free calls through the streaming-accumulation path to
+          // avoid the SDK's built-in 10-minute non-streaming guard. Tool-call paths
+          // stay on non-streaming because tool_use blocks arrive at end of stream.
+          const hasTools = (params.tools?.length ?? 0) > 0;
+          if (!hasTools) {
+            const totalChars = params.messages.reduce(
+              (sum, m) =>
+                sum +
+                (typeof m.content === "string"
+                  ? m.content.length
+                  : JSON.stringify(m.content).length),
+              0,
+            );
+            if (totalChars >= ANTHROPIC_STREAM_THRESHOLD_CHARS) {
+              logger.info(
+                {
+                  chars: totalChars,
+                  threshold: ANTHROPIC_STREAM_THRESHOLD_CHARS,
+                  model: params.model,
+                },
+                "anthropic: large context detected — routing through streaming-accumulation path",
+              );
+              return callAnthropicAccumulated(params);
+            }
+          }
           return callAnthropic(params);
         }
         return callGemini(params);
@@ -590,6 +629,62 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
     finishReason: res.stop_reason === "tool_use" ? "tool_calls" : "stop",
     promptTokens: res.usage?.input_tokens ?? 0,
     completionTokens: res.usage?.output_tokens ?? 0,
+  });
+}
+
+/**
+ * Streaming-accumulation path for large Anthropic calls.
+ *
+ * Streams the response token-by-token (no 10-min HTTP guard) and collects the
+ * full text before returning a standard ChatCompletion-shaped object.
+ *
+ * Handles `response_format: json_object` by injecting the JSON shim into the
+ * system message — the native Anthropic streaming API has no response_format
+ * parameter, so the shim is the only way to enforce JSON output.
+ *
+ * Tool calls are NOT supported here (callers route tool calls to callAnthropic).
+ */
+async function callAnthropicAccumulated(
+  params: CreateChatCompletionParams,
+): Promise<ChatCompletion> {
+  // Inject JSON-mode shim into messages when response_format: json_object.
+  // Mirror the identical shim in callAnthropic so JSON output is consistent.
+  const JSON_SHIM =
+    "You MUST respond with a single valid JSON object only — no prose, no markdown fences. Begin your response with `{` and end it with `}`.";
+
+  let messages: ChatCompletionMessageParam[] = params.messages;
+  if (params.response_format?.type === "json_object") {
+    const hasSystem = messages.some((m) => m.role === "system");
+    if (hasSystem) {
+      messages = messages.map((m) =>
+        m.role === "system" && typeof m.content === "string"
+          ? { ...m, content: m.content + "\n\n" + JSON_SHIM }
+          : m,
+      );
+    } else {
+      messages = [{ role: "system", content: JSON_SHIM }, ...messages];
+    }
+  }
+
+  let fullText = "";
+  for await (const delta of streamChatCompletion({
+    provider: "anthropic",
+    model: params.model,
+    messages,
+    max_completion_tokens: params.max_completion_tokens,
+    signal: params.signal,
+  })) {
+    fullText += delta;
+  }
+
+  return synthesizeChatCompletion({
+    model: params.model,
+    content: fullText,
+    toolCalls: [],
+    finishReason: "stop",
+    // Token counts are not available from the streaming path; default to 0.
+    promptTokens: 0,
+    completionTokens: 0,
   });
 }
 
