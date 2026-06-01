@@ -43,10 +43,9 @@ async function main(): Promise<void> {
      WHERE user_id = $1`,
     [OWNER_ID],
   );
-  const creditsRow = await pool.query(
-    `SELECT balance FROM user_credits WHERE user_id = $1`,
-    [OWNER_ID],
-  );
+  const creditsRow = await pool.query(`SELECT balance FROM user_credits WHERE user_id = $1`, [
+    OWNER_ID,
+  ]);
   console.log(`[SETUP] Credits: ${creditsRow.rows[0]?.balance ?? "?"}`);
 
   // ── Step 2: Resolve workspace ─────────────────────────────────────────────
@@ -140,10 +139,7 @@ async function main(): Promise<void> {
     await sleep(POLL_MS);
 
     // Task status
-    const tRow = await pool.query(
-      `SELECT status, report FROM agent_tasks WHERE id = $1`,
-      [taskId],
-    );
+    const tRow = await pool.query(`SELECT status, report FROM agent_tasks WHERE id = $1`, [taskId]);
     const task = tRow.rows[0] as
       | { status: string; report: Record<string, unknown> | null }
       | undefined;
@@ -164,9 +160,7 @@ async function main(): Promise<void> {
         const e = evRows.rows[i] as { event_type: string; message: string };
         if (!seenEvents.has(e.event_type)) {
           seenEvents.set(e.event_type, e.message);
-          console.log(
-            `  [EVT] ${e.event_type}: ${(e.message ?? "").slice(0, 90)}`,
-          );
+          console.log(`  [EVT] ${e.event_type}: ${(e.message ?? "").slice(0, 90)}`);
         }
       }
       prevEventCount = evRows.rows.length;
@@ -182,10 +176,7 @@ async function main(): Promise<void> {
 
   // Handle timeout
   if (!finalStatus) {
-    const tRow = await pool.query(
-      `SELECT status, report FROM agent_tasks WHERE id = $1`,
-      [taskId],
-    );
+    const tRow = await pool.query(`SELECT status, report FROM agent_tasks WHERE id = $1`, [taskId]);
     finalStatus = tRow.rows[0]?.status ?? "timeout";
     finalReport = tRow.rows[0]?.report ?? null;
     console.log(`\n[TIMEOUT] 25m cap reached — task is currently: ${finalStatus}`);
@@ -196,17 +187,13 @@ async function main(): Promise<void> {
 
   // ── Step 7: Gather verification data ─────────────────────────────────────
   // pg-boss job final state
-  const pgRow = await pool.query(
-    `SELECT state FROM pgboss.job WHERE id = $1`,
-    [jobId],
-  );
+  const pgRow = await pool.query(`SELECT state FROM pgboss.job WHERE id = $1`, [jobId]);
   const pgState: string = pgRow.rows[0]?.state ?? "not found";
 
   // Files written
-  const fRow = await pool.query(
-    `SELECT count(*) AS cnt FROM project_files WHERE project_id = $1`,
-    [project.id],
-  );
+  const fRow = await pool.query(`SELECT count(*) AS cnt FROM project_files WHERE project_id = $1`, [
+    project.id,
+  ]);
   const fileCount = parseInt(String(fRow.rows[0]?.cnt ?? "0"));
 
   // Stale active tasks in the queue (should be zero)
@@ -282,11 +269,10 @@ async function main(): Promise<void> {
           seenEvents.has("validating_output") ||
           seenEvents.has("check_result") ||
           seenEvents.has("saving_files"),
-        note: [...seenEvents.keys()]
-          .filter((k) =>
-            ["validating_output", "check_result", "saving_files"].includes(k),
-          )
-          .join(", ") || "none of the check events seen",
+        note:
+          [...seenEvents.keys()]
+            .filter((k) => ["validating_output", "check_result", "saving_files"].includes(k))
+            .join(", ") || "none of the check events seen",
       },
     ],
     [
@@ -320,14 +306,12 @@ async function main(): Promise<void> {
     [
       "C10 preview_server_reachable or preview_unreachable_503",
       {
-        pass:
-          hasPreviewReachable || hasPreviewUnreachable ? true : null,
-        note:
-          hasPreviewReachable
-            ? "preview_server_reachable seen"
-            : hasPreviewUnreachable
-              ? "preview_unreachable_503 seen"
-              : "N/A — static-legacy project (no containerUrl)",
+        pass: hasPreviewReachable || hasPreviewUnreachable ? true : null,
+        note: hasPreviewReachable
+          ? "preview_server_reachable seen"
+          : hasPreviewUnreachable
+            ? "preview_unreachable_503 seen"
+            : "N/A — static-legacy project (no containerUrl)",
       },
     ],
     [
@@ -342,9 +326,7 @@ async function main(): Promise<void> {
     [
       "C12 previewUpdated=false if unreachable",
       {
-        pass: hasPreviewUnreachable
-          ? rep.previewUpdated === false
-          : null,
+        pass: hasPreviewUnreachable ? rep.previewUpdated === false : null,
         note: hasPreviewUnreachable
           ? `previewUpdated=${rep.previewUpdated}`
           : "N/A — preview was reachable or static",
@@ -440,8 +422,7 @@ async function main(): Promise<void> {
 
   console.log(`\n  Summary: ${passed} PASS | ${failed} FAIL | ${na} N/A`);
 
-  const overallVerdict =
-    failed === 0 ? "PASS" : `FAIL (${failed} checkpoint(s) failed)`;
+  const overallVerdict = failed === 0 ? "PASS" : `FAIL (${failed} checkpoint(s) failed)`;
   console.log(`\n${"─".repeat(72)}`);
   console.log(`Phase 2C Full Builder Trust Verification: ${overallVerdict}`);
 
