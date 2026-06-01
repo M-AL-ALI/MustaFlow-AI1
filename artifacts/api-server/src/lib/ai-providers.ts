@@ -635,8 +635,19 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
 /**
  * Streaming-accumulation path for large Anthropic calls.
  *
- * Streams the response token-by-token (no 10-min HTTP guard) and collects the
- * full text before returning a standard ChatCompletion-shaped object.
+ * Drives `anthropic.messages.stream()` directly (bypassing the generic
+ * `streamChatCompletion` wrapper) so it can intercept the usage metadata events
+ * that the Anthropic streaming API emits:
+ *
+ *   • `message_start`  → `event.message.usage.input_tokens`  (prompt tokens)
+ *   • `message_delta`  → `event.usage.output_tokens`          (completion tokens)
+ *
+ * This resolves the Phase 2B-1 gap where `promptTokens` and `completionTokens`
+ * were hardcoded to 0. Token counts are now captured from the stream and
+ * forwarded to `synthesizeChatCompletion` so post-call logs are complete.
+ *
+ * If `input_tokens` is absent from the stream (e.g. the provider omits it),
+ * we fall back to 0 and log a warning rather than faking a value.
  *
  * Handles `response_format: json_object` by injecting the JSON shim into the
  * system message — the native Anthropic streaming API has no response_format
@@ -647,34 +658,98 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
 async function callAnthropicAccumulated(
   params: CreateChatCompletionParams,
 ): Promise<ChatCompletion> {
-  // Inject JSON-mode shim into messages when response_format: json_object.
-  // Mirror the identical shim in callAnthropic so JSON output is consistent.
+  const { anthropic } = await import("@workspace/integrations-anthropic-ai");
+
+  // ── 1. Build system parts + turns (mirrors callAnthropic / streamAnthropic) ─
+
   const JSON_SHIM =
     "You MUST respond with a single valid JSON object only — no prose, no markdown fences. Begin your response with `{` and end it with `}`.";
 
-  let messages: ChatCompletionMessageParam[] = params.messages;
+  const systemParts: string[] = [];
+  const turns: Array<{ role: "user" | "assistant"; content: unknown }> = [];
+
+  for (const msg of params.messages) {
+    if (msg.role === "system") {
+      if (typeof msg.content === "string") systemParts.push(msg.content);
+      continue;
+    }
+    if (msg.role === "user") {
+      if (Array.isArray(msg.content)) {
+        turns.push({ role: "user", content: openAiContentToAnthropicBlocks(msg.content) });
+      } else {
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        turns.push({ role: "user", content });
+      }
+      continue;
+    }
+    if (msg.role === "assistant") {
+      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      turns.push({ role: "assistant", content });
+    }
+    // tool messages are not expected here — callAnthropicAccumulated is only
+    // called for tool-free paths (checked by the caller before routing).
+  }
+
+  // Inject JSON-mode shim when response_format: json_object is requested.
   if (params.response_format?.type === "json_object") {
-    const hasSystem = messages.some((m) => m.role === "system");
-    if (hasSystem) {
-      messages = messages.map((m) =>
-        m.role === "system" && typeof m.content === "string"
-          ? { ...m, content: m.content + "\n\n" + JSON_SHIM }
-          : m,
-      );
-    } else {
-      messages = [{ role: "system", content: JSON_SHIM }, ...messages];
+    systemParts.push(JSON_SHIM);
+  }
+
+  const defaultMaxTokens = /haiku/i.test(params.model) ? 8192 : 16000;
+
+  // ── 2. Open the stream and accumulate text + usage metadata ──────────────────
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await anthropic.messages.stream(
+    {
+      model: params.model,
+      max_tokens: params.max_completion_tokens ?? defaultMaxTokens,
+      system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
+      messages: turns,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
+    { signal: params.signal },
+  );
+
+  let fullText = "";
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let promptTokensCaptured = false;
+
+  for await (const event of stream) {
+    if (params.signal?.aborted) break;
+
+    // message_start carries the prompt (input) token count.
+    if (event?.type === "message_start") {
+      const inputTokens = event?.message?.usage?.input_tokens;
+      if (typeof inputTokens === "number") {
+        promptTokens = inputTokens;
+        promptTokensCaptured = true;
+      }
+      continue;
+    }
+
+    // content_block_delta carries incremental text.
+    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+      const text = event.delta.text;
+      if (typeof text === "string" && text.length > 0) fullText += text;
+      continue;
+    }
+
+    // message_delta carries the completion (output) token count.
+    if (event?.type === "message_delta") {
+      const outputTokens = event?.usage?.output_tokens;
+      if (typeof outputTokens === "number") {
+        completionTokens = outputTokens;
+      }
     }
   }
 
-  let fullText = "";
-  for await (const delta of streamChatCompletion({
-    provider: "anthropic",
-    model: params.model,
-    messages,
-    max_completion_tokens: params.max_completion_tokens,
-    signal: params.signal,
-  })) {
-    fullText += delta;
+  if (!promptTokensCaptured) {
+    logger.warn(
+      { model: params.model },
+      "anthropic streaming-accumulation: message_start usage.input_tokens absent — prompt token count unavailable, defaulting to 0",
+    );
   }
 
   return synthesizeChatCompletion({
@@ -682,9 +757,8 @@ async function callAnthropicAccumulated(
     content: fullText,
     toolCalls: [],
     finishReason: "stop",
-    // Token counts are not available from the streaming path; default to 0.
-    promptTokens: 0,
-    completionTokens: 0,
+    promptTokens,
+    completionTokens,
   });
 }
 
