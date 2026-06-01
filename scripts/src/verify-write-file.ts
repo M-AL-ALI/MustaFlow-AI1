@@ -63,11 +63,7 @@ async function execInMachine(
 }
 
 // writeFileToContainer logic inline (same as container.ts)
-async function writeFileTo(
-  machineId: string,
-  filePath: string,
-  content: string,
-): Promise<boolean> {
+async function writeFileTo(machineId: string, filePath: string, content: string): Promise<boolean> {
   if (!FLY_TOKEN) return false;
   try {
     const b64 = Buffer.from(content, "utf8").toString("base64");
@@ -75,11 +71,7 @@ async function writeFileTo(
       ? `/app/${filePath.split("/").slice(0, -1).join("/")}`
       : "/app";
     const fullPath = `/app/${filePath}`;
-    const cmd = [
-      "/bin/sh",
-      "-c",
-      `mkdir -p "${dir}" && echo "${b64}" | base64 -d > "${fullPath}"`,
-    ];
+    const cmd = ["/bin/sh", "-c", `mkdir -p "${dir}" && echo "${b64}" | base64 -d > "${fullPath}"`];
     const res = await execInMachine(machineId, cmd);
     return res.ok;
   } catch {
@@ -129,7 +121,10 @@ if (!canExec) {
   if (readBack.ok && got === TEST_CONTENT) {
     pass("1b container read-back matches written content", `"${got}"`);
   } else if (!readBack.ok) {
-    fail("1b container read-back exec failed", `exit=${readBack.exitCode} ${readBack.stderr.slice(0, 80)}`);
+    fail(
+      "1b container read-back exec failed",
+      `exit=${readBack.exitCode} ${readBack.stderr.slice(0, 80)}`,
+    );
   } else {
     fail("1b content mismatch", `expected "${TEST_CONTENT}" got "${got}"`);
   }
@@ -186,7 +181,8 @@ previewSrc.includes("refreshTrigger")
   : fail("2d PreviewPane refreshTrigger not found");
 
 // refreshTrigger is wired to a useEffect that reloads the iframe
-previewSrc.includes("prevRefreshTriggerRef") && previewSrc.includes("refreshTrigger !== prevRefreshTriggerRef.current")
+previewSrc.includes("prevRefreshTriggerRef") &&
+previewSrc.includes("refreshTrigger !== prevRefreshTriggerRef.current")
   ? pass("2e refreshTrigger change detection fires iframe reload")
   : fail("2e refreshTrigger change detection not found");
 
@@ -220,7 +216,8 @@ agentSrc.includes("Blocked: file write to container failed repeatedly")
   : fail("3d Blocked: narration for repeated-error not found");
 
 // Agent does not continue past a failed write (ok:false short-circuits tool handler)
-agentSrc.includes("if (syncFailed)") && agentSrc.includes("return {") &&
+agentSrc.includes("if (syncFailed)") &&
+agentSrc.includes("return {") &&
 agentSrc.includes("Do NOT keep editing other files")
   ? pass("3e agent stops editing other files when sync fails (instruction in observation)")
   : fail("3e stop-editing instruction missing from sync-failed observation");
