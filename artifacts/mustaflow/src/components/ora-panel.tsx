@@ -1020,6 +1020,7 @@ export function OraPanel({ chat }: OraPanelProps) {
             onClick={() => {
               setEditingFromIdx(null);
               setInput("");
+              setTimeout(() => textareaRef.current?.focus(), 0);
             }}
             className="shrink-0 opacity-60 hover:opacity-100"
             aria-label="Cancel edit"

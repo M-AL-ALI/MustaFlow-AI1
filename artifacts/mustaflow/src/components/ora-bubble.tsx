@@ -563,6 +563,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     const text = input.trim();
     if (!text || isLoading || atLimit || uploadState === "uploading") return;
     setInput("");
+    setTimeout(() => textareaRef.current?.focus(), 0);
     if (selectedFormat) {
       const fmt = selectedFormat;
       setSelectedFormat(null);
@@ -1174,6 +1175,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   onClick={() => {
                     setEditingFromIdx(null);
                     setInput("");
+                    setTimeout(() => textareaRef.current?.focus(), 0);
                   }}
                   className="shrink-0 opacity-60 hover:opacity-100"
                   aria-label="Cancel edit"

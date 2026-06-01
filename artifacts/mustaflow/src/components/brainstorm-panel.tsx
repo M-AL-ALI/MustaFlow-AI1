@@ -126,6 +126,7 @@ export function BrainstormPanel({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -180,6 +181,7 @@ export function BrainstormPanel({
     const text = input.trim();
     if (!text || chatMutation.isPending) return;
     setInput("");
+    setTimeout(() => inputRef.current?.focus(), 0);
 
     const chatMessages = messages.filter((m) => !isOpeningMessage(m));
     const newMessages: Message[] = [...messages, { role: "user", content: text }];
@@ -436,6 +438,7 @@ export function BrainstormPanel({
         {!resolvedSpec && (
           <div className="flex items-end gap-2 px-3 pb-3 pt-2 border-t border-border">
             <textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}

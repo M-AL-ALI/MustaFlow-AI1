@@ -2500,6 +2500,7 @@ export default function ProjectWorkspacePage() {
   const _handleSend = () => {
     const currentPrompt = prompt;
     setPrompt("");
+    setTimeout(() => promptInputRef.current?.focus(), 0);
     send(currentPrompt);
   };
 
