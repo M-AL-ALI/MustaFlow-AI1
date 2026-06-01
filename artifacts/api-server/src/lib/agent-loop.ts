@@ -1651,6 +1651,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       : WALL_CLOCK_MS;
   let lastError = "";
   let consecutiveErrors = 0;
+  // Per-path consecutive check-failure counts. Tracks how many consecutive
+  // turns ended with checks still failing after writing/patching the same path.
+  // Used for strategy-change steering when the agent is stuck on a single file.
+  const pathConsecutiveCheckFails = new Map<string, number>();
   let terminationReason: AgentLoopReport["terminationReason"] = "model-stopped";
   let finalSummary = "";
   let finalWarnings: string[] = [];
@@ -1999,6 +2003,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     let stepFinalized = false;
     let mutatedThisTurn = false;
+    // Paths written/patched this turn — used for per-path stuck detection.
+    let mutatedPathsThisTurn: string[] = [];
 
     // Task #531: tools that mutate container/workspace state, run shell
     // commands, hit credit-metered async budgets, or must terminate the loop
@@ -2168,6 +2174,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       ) {
         mutatedThisTurn = true;
         totalMutations++;
+        const _mutPath = String(parsed.path ?? "");
+        if (_mutPath) mutatedPathsThisTurn.push(_mutPath);
         await safeEvent(
           input.onEvent,
           "generating_code",
@@ -2473,10 +2481,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       } else if (name === "write_file" || name === "apply_patch" || name === "delete_file") {
         mutatedThisTurn = true;
         totalMutations++;
+        const _mutPathSerial = String(parsed.path ?? "");
+        if (_mutPathSerial) mutatedPathsThisTurn.push(_mutPathSerial);
         await safeEvent(
           input.onEvent,
           "generating_code",
-          `${name.replace("_", " ")} → ${String(parsed.path ?? "")}`.slice(0, 220),
+          `${name.replace("_", " ")} → ${_mutPathSerial}`.slice(0, 220),
         );
       } else if (name === "run_command") {
         await safeEvent(
@@ -2638,6 +2648,28 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         (c) => c.required && !turnChecks.find((r) => r.id === c.id)?.passed,
       );
       if (turnFailed.length > 0) {
+        // Per-path stuck detection: if the agent keeps writing the same path
+        // and checks keep failing, increment per-path counters and inject a
+        // strategy-change hint after 2 consecutive failure turns on that path.
+        for (const p of mutatedPathsThisTurn) {
+          pathConsecutiveCheckFails.set(p, (pathConsecutiveCheckFails.get(p) ?? 0) + 1);
+        }
+        const stuckPaths = mutatedPathsThisTurn.filter(
+          (p) => (pathConsecutiveCheckFails.get(p) ?? 0) >= 2,
+        );
+        let strategyHint = "";
+        if (stuckPaths.length > 0) {
+          strategyHint =
+            `\n\nSTRATEGY CHANGE REQUIRED: You have edited ${stuckPaths.map((p) => `"${p}"`).join(", ")} ` +
+            `${pathConsecutiveCheckFails.get(stuckPaths[0])} times and checks are still failing. ` +
+            `Do NOT keep repeating the same edit. Instead try ONE of:\n` +
+            `  A) read_file the failing file and inspect what is actually on disk\n` +
+            `  B) read_file related imported modules to check for contract mismatches\n` +
+            `  C) write_file the entire file from scratch with a minimal working version\n` +
+            `  D) revert your changes to the last known-good state\n` +
+            `  E) if TypeScript types are the blocker, widen the type or add an explicit cast as a temporary fix\n` +
+            `Pick a DIFFERENT strategy from what you just tried.`;
+        }
         const summary =
           `[auto-check] required checks failing after your edits:\n` +
           turnFailed
@@ -2646,14 +2678,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               return `- ${c.id}: ${(r?.message ?? "failed").slice(0, 200)}`;
             })
             .join("\n") +
-          `\nFix and continue, then call finalize.`;
+          `\nFix and continue, then call finalize.${strategyHint}`;
         messages.push({ role: "system", content: summary.slice(0, MAX_OBSERVATION_CHARS) });
       } else {
+        // Checks passed — reset per-path failure counts for paths fixed this turn.
+        for (const p of mutatedPathsThisTurn) {
+          pathConsecutiveCheckFails.delete(p);
+        }
         messages.push({
           role: "system",
           content: "[auto-check] all required checks passing. You may call finalize.",
         });
       }
+      // Reset turn-level path accumulator for the next turn.
+      mutatedPathsThisTurn = [];
     }
   }
 
@@ -2666,7 +2704,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // bubble gives the user actionable context instead of just going silent.
   if (!input.signal.aborted) {
     const changedCount = workspace.diff().changed.length;
-    if (terminationReason === "step-cap") {
+    if (terminationReason === "repeated-error") {
+      // Emit a visible "blocked" narration so the timeline shows the real state
+      // instead of going silent or showing "Working…" on a stuck build.
+      const blockedNote =
+        lastError.includes("container sync FAILED") || lastError.includes("BLOCKED: write_file")
+          ? "Blocked: file write to container failed repeatedly. " +
+            "The dev server may be unhealthy — try re-syncing or rebuilding from scratch."
+          : lastError.includes("BLOCKED: apply_patch")
+            ? "Blocked: patch sync to container failed repeatedly. " +
+              "Try switching to write_file for a full file replacement."
+            : `Blocked: the same failure repeated ${REPEATED_ERROR_CAP} times. ` +
+              "A different approach is needed — try rephrasing your request or switching agent mode.";
+      await safeEvent(input.onEvent, "narration", blockedNote);
+    } else if (terminationReason === "step-cap") {
       const fileNote =
         changedCount > 0
           ? ` — ${changedCount} file${changedCount !== 1 ? "s" : ""} were created or modified`
@@ -4191,15 +4242,38 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       });
       if (containerState.id) {
         const { writeFileToContainer } = await import("./container");
-        // ContainerUnavailableError propagates to the outer loop catch so the
-        // agent loop terminates with a clear error message. All other errors
-        // (network/Fly API) are non-fatal because the file is already written
-        // to the in-memory workspace and will be persisted to the DB on finalize.
+        // Verify container sync: if writeFileToContainer returns false or throws
+        // (non-ContainerUnavailableError), the dev server won't see the change.
+        // Return ok:false with a diagnostic so consecutiveErrors increments and
+        // the loop terminates instead of looping blindly on stale-file errors.
+        let syncFailed = false;
+        let syncErrDetail = "";
         try {
-          await writeFileToContainer(containerState.id, path, content, input.projectId);
+          const synced = await writeFileToContainer(
+            containerState.id,
+            path,
+            content,
+            input.projectId,
+          );
+          if (!synced) {
+            syncFailed = true;
+            syncErrDetail = "container exec returned non-zero exit";
+          }
         } catch (err) {
           if (err instanceof ContainerUnavailableError) throw err;
-          logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
+          syncFailed = true;
+          syncErrDetail = err instanceof Error ? err.message.slice(0, 120) : "unknown error";
+          logger.warn({ err, path }, "agent-loop: container write failed");
+        }
+        if (syncFailed) {
+          return {
+            ok: false,
+            observation:
+              `BLOCKED: write_file workspace save succeeded but container sync FAILED for "${path}" — ${syncErrDetail}. ` +
+              `The dev server does NOT have this change. Do NOT keep editing other files. ` +
+              `Options: (1) retry writing this file, (2) run_command ["cat","/app/${path}"] to verify current container state, ` +
+              `(3) run_command ["ls","/app"] to inspect container layout, then re-attempt.`,
+          };
         }
       } else if (input.projectMode === "developer") {
         // Developer Mode requires a live container for every file write.
@@ -4242,12 +4316,29 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       });
       if (containerState.id) {
         const { writeFileToContainer } = await import("./container");
-        // ContainerUnavailableError propagates to the outer loop catch (same as write_file).
+        // Same container-sync verification as write_file: return ok:false if
+        // the exec fails so the agent doesn't loop on stale container state.
+        let patchSyncFailed = false;
+        let patchSyncErrDetail = "";
         try {
-          await writeFileToContainer(containerState.id, path, next, input.projectId);
+          const synced = await writeFileToContainer(containerState.id, path, next, input.projectId);
+          if (!synced) {
+            patchSyncFailed = true;
+            patchSyncErrDetail = "container exec returned non-zero exit";
+          }
         } catch (err) {
           if (err instanceof ContainerUnavailableError) throw err;
-          logger.warn({ err, path }, "agent-loop: container write failed (non-fatal)");
+          patchSyncFailed = true;
+          patchSyncErrDetail = err instanceof Error ? err.message.slice(0, 120) : "unknown error";
+          logger.warn({ err, path }, "agent-loop: container patch-sync failed");
+        }
+        if (patchSyncFailed) {
+          return {
+            ok: false,
+            observation:
+              `BLOCKED: apply_patch workspace save succeeded but container sync FAILED for "${path}" — ${patchSyncErrDetail}. ` +
+              `The dev server does NOT have this change. Retry or use write_file to replace the full file.`,
+          };
         }
       }
       return { ok: true, observation: `patched ${path}` };

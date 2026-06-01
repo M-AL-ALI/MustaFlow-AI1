@@ -1,0 +1,145 @@
+I noticed two important issues during the current Builder run, and I want these addressed before moving to the next phase.
+
+The screenshots show the agent looping around file work, including this type of message:
+
+“The write_file call reported success but the file did not appear…”
+
+Also, the preview still does not update reliably.
+
+Please treat this as a real blocker, not just a cosmetic issue.
+
+Important clarification:
+Phase 2A TypeScript Repair Loop is useful, but the current problem appears bigger than TypeScript errors. The agent is getting stuck in the build loop and not changing strategy when a tool/file/preview issue repeats.
+
+Please pause new phase work and audit/fix these specific issues.
+
+1. File-write verification issue
+    If write_file reports success, the system must immediately verify the file exists in the same source of truth used by the preview and quality gate.
+
+Verify:
+
+* Was the file written to the container?
+* Was the file written to project_files?
+* Was the file written to the correct project ID?
+* Was the path sanitized or changed?
+* Was the file written to /app but not persisted to DB?
+* Was the file written to DB but not synced to /app?
+* Was the preview reading an older version/snapshot?
+
+If write_file says success but the file cannot be read back, the agent should not keep going blindly.
+
+Required behavior:
+
+* Read the file back immediately after write.
+* If missing, retry once.
+* If still missing, stop the task with a clear blocker:
+    “File write verification failed.”
+* Show the exact path and source that failed.
+* Do not continue looping.
+
+2. Agent stuck-loop detection
+    The agent should not repeat the same failing action over and over.
+
+Add stuck-loop detection for:
+
+* same file path
+* same failed tool
+* same TypeScript error
+* same preview error
+* same command failure
+* same “file did not appear” message
+* same failed repair attempt
+
+Suggested rule:
+If the same failure happens 2 or 3 times, the agent must change strategy.
+
+Possible strategy changes:
+
+* Re-read the file tree.
+* Re-sync project_files to container.
+* Rebuild the file from scratch.
+* Revert to last checkpoint and apply a smaller patch.
+* Switch from patch editing to full-file replacement.
+* Ask the user for approval or clarification.
+* Stop and report “blocked” instead of looping.
+
+3. Repair loop must try different directions
+    The TypeScript repair loop should not just send the same error back to the agent and hope it fixes it.
+
+If repair attempt 1 fails:
+
+* summarize what changed
+* compare old error vs new error
+* identify whether the error improved, changed, or stayed the same
+
+If the same error remains:
+
+* try a different repair strategy
+* do not repeat the same patch style
+* consider reverting the bad file
+* inspect imports/exports/types
+* inspect related files, not only the file named in the error
+
+If repair attempts are exhausted:
+
+* mark the task as completed_with_errors or failed
+* show the user the real blocker
+* do not show clean success
+
+4. Preview update reliability
+    Preview update was supposed to be part of Phase 1. If preview still does not update, treat this as a blocker.
+
+Please verify the full preview chain:
+
+* file_diff event emitted
+* project_files updated
+* project_version saved when needed
+* preview refresh event emitted
+* frontend receives SSE event
+* refreshTrigger increments
+* PreviewPane iframe key changes
+* preview URL has cache-busting version/timestamp
+* iframe reloads
+* preview reads the latest files, not an old snapshot
+* runtime/container has the latest files
+* consoleBridge reports any preview errors
+
+Add a simple test:
+Change visible text in one file, such as “Preview Update Test 123”.
+Confirm:
+
+* file_diff appears
+* preview refresh event appears
+* iframe reloads
+* the new text appears in preview
+
+If this does not happen, the preview refresh system is still broken.
+
+5. Build timeline should show real blocker state
+    If the agent is stuck, the timeline should show:
+
+“Blocked: file write verification failed”
+or
+“Blocked: preview did not refresh”
+or
+“Repair attempts exhausted”
+
+Do not keep showing only “Working…” or “Zero is thinking…” when the system is stuck.
+
+6. Do not call this complete until proven
+    Before moving to Anthropic streaming or other Phase 2B work, please prove:
+
+* write_file success can be read back
+* file_diff events happen
+* preview refreshes with a visible UI change
+* TypeScript repair loop changes strategy after repeated failure
+* stuck tasks stop cleanly instead of looping
+* final report clearly says passed, completed_with_errors, failed, or blocked
+
+Please provide:
+
+* root cause of the write_file success/missing-file issue
+* root cause of preview not updating
+* files changed
+* one small verification test result
+* whether this is now fixed or still blocked

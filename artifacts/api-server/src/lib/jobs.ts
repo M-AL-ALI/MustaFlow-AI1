@@ -418,12 +418,14 @@ function repairLoopMaxAttempts(mode: AgentMode): number {
 
 /**
  * Build a focused repair prompt from failed quality-gate check results.
- * Keeps error context front-and-centre with minimal instruction so the repair
- * agent makes targeted, minimal-safe-patch changes only.
+ * When previousErrors is provided, the prompt also explains how errors changed
+ * between attempts so the agent can pick a different strategy when stuck.
  */
 function buildRepairPrompt(
   failedChecks: Array<{ label: string; output: string }>,
   recentlyChangedPaths: string[],
+  attemptNumber = 1,
+  previousErrors: Array<{ label: string; output: string }> = [],
 ): string {
   const errorDetail = failedChecks
     .map((c) => `### ${c.label}\n${c.output.slice(0, 1500)}`)
@@ -432,8 +434,42 @@ function buildRepairPrompt(
     recentlyChangedPaths.length > 0
       ? `\nRecently changed files (most likely sources of errors):\n${recentlyChangedPaths.map((p) => `- ${p}`).join("\n")}`
       : "";
+
+  // On attempt 2+, compare against previous errors so the agent understands
+  // whether it made progress and should try a different approach.
+  let progressSection = "";
+  if (attemptNumber >= 2 && previousErrors.length > 0) {
+    const prevLabels = new Set(previousErrors.map((e) => e.label));
+    const currLabels = new Set(failedChecks.map((e) => e.label));
+    const fixed = [...prevLabels].filter((l) => !currLabels.has(l));
+    const newlyBroken = [...currLabels].filter((l) => !prevLabels.has(l));
+    const unchanged = [...currLabels].filter((l) => prevLabels.has(l));
+
+    const progressLines: string[] = [];
+    if (fixed.length > 0) progressLines.push(`  FIXED: ${fixed.join(", ")}`);
+    if (newlyBroken.length > 0)
+      progressLines.push(
+        `  NEW errors introduced: ${newlyBroken.join(", ")} — do NOT introduce new failures`,
+      );
+    if (unchanged.length > 0)
+      progressLines.push(`  UNCHANGED (still failing): ${unchanged.join(", ")}`);
+
+    progressSection =
+      `\n[PROGRESS SINCE LAST ATTEMPT]\n` +
+      progressLines.join("\n") +
+      (unchanged.length > 0
+        ? `\n\nIMPORTANT: The same checks are still failing after attempt ${attemptNumber - 1}. ` +
+          `Your previous patch did not resolve them. Try a DIFFERENT strategy:\n` +
+          `  - Read the file(s) again to check what actually landed on disk\n` +
+          `  - Check imports/exports in related modules for contract mismatches\n` +
+          `  - Replace the whole failing module with a minimal correct version\n` +
+          `  - Add an explicit type annotation or cast instead of restructuring logic\n` +
+          `Do NOT repeat the same patch approach.`
+        : "");
+  }
+
   return [
-    "[REPAIR] TypeScript errors were detected after the last change.",
+    `[REPAIR attempt ${attemptNumber}] TypeScript errors were detected after the last change.`,
     "Fix ONLY the TypeScript errors listed below.",
     "Rules:",
     "- Fix only the files involved in the errors",
@@ -442,11 +478,14 @@ function buildRepairPrompt(
     "- Do NOT remove working features to make errors disappear",
     "- Make the smallest safe change that resolves each listed error",
     "- Preserve all existing UI and behavior",
+    progressSection,
     "",
     "ERRORS TO FIX:",
     errorDetail,
     fileHint,
-  ].join("\n");
+  ]
+    .filter((s) => s !== "")
+    .join("\n");
 }
 
 /**
@@ -3455,7 +3494,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             `TypeScript errors found — attempting repair (${repairAttempt}/${maxRepairAttempts})…`,
           );
 
-          const repairPrompt = buildRepairPrompt(currentFailedChecks, currentChangedPaths);
+          const repairPrompt = buildRepairPrompt(
+            currentFailedChecks,
+            currentChangedPaths,
+            repairAttempt,
+            repairAttempt > 1 ? currentFailedChecks : [],
+          );
           const filesForRepair = await loadFiles(projectId);
 
           let repairLoopResult: Awaited<ReturnType<typeof runRepairAgentLoop>> | null = null;
