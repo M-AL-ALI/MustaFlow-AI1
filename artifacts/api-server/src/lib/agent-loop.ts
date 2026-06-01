@@ -3953,12 +3953,17 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   // Use background+poll approach so npm install survives Fly autostop.
   // onMachineRestarted re-syncs workspace files when the machine's writable
   // layer resets between retries — without it, npm runs against an empty /app.
-  const { npmInstallInBackground: bgInstall, startContainerHealthServer } = await import("./container");
+  const { npmInstallInBackground: bgInstall, startContainerHealthServer } =
+    await import("./container");
   const installResult = await bgInstall(ctx.containerState.id, ctx.input.projectId, {
     onMachineRestarted: async () => {
       const refreshedFiles = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
       if (refreshedFiles.length > 0) {
-        await syncFilesToContainer(ctx.containerState.id!, ctx.input.projectId, refreshedFiles).catch(() => {});
+        await syncFilesToContainer(
+          ctx.containerState.id!,
+          ctx.input.projectId,
+          refreshedFiles,
+        ).catch(() => {});
       }
       // Restart the health server so Fly keepalive pings work after machine wake.
       await startContainerHealthServer(ctx.containerState.id!, ctx.input.projectId);
@@ -4458,7 +4463,10 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           );
         } else {
           const { createPrompt } = await import("./agent-prompts");
-          const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+          const remainingMs = Math.max(
+            1_000,
+            ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt),
+          );
           const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
           const approvalPayload = {
             question: `Allow the agent to run this command?\n\`${fullCmd}\``,
@@ -4827,7 +4835,10 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           );
         } else {
           const { createPrompt } = await import("./agent-prompts");
-          const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+          const remainingMs = Math.max(
+            1_000,
+            ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt),
+          );
           const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
           const approvalPayload = {
             question: `Allow the agent to install package \`${pkgLabel}\` via ${decision.manager}?`,
@@ -5191,7 +5202,10 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           );
         } else {
           const { createPrompt } = await import("./agent-prompts");
-          const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+          const remainingMs = Math.max(
+            1_000,
+            ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt),
+          );
           const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
           const approvalPayload = {
             question: `Allow the agent to run tests with this command?\n\`${modelCommand}\``,

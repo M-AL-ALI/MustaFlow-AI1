@@ -229,8 +229,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         .orderBy(desc(projectVersionsTable.createdAt))
         .limit(1);
       if (latestVersion?.validationStatus === "completed_with_errors") {
-        const force =
-          (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
+        const force = (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
         if (!force) {
           res.status(422).json({
             error:

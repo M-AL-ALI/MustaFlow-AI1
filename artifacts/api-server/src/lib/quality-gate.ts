@@ -138,7 +138,10 @@ export async function runQualityGate(
           projectId,
           allFilesForSync.map((f) => ({ path: f.path, content: f.content })),
         ).catch((e: unknown) =>
-          logger.warn({ projectId, err: e }, "Quality gate pre-flight: syncFilesToContainer failed (non-fatal)"),
+          logger.warn(
+            { projectId, err: e },
+            "Quality gate pre-flight: syncFilesToContainer failed (non-fatal)",
+          ),
         );
         // Re-run npm install using the background+poll approach.
         // Direct exec holds an open HTTP connection for ~90 s which gets cut by
@@ -172,7 +175,10 @@ export async function runQualityGate(
           },
         });
         if (installResult.ok) {
-          logger.info({ projectId, containerId }, "Quality gate pre-flight: re-sync + install complete");
+          logger.info(
+            { projectId, containerId },
+            "Quality gate pre-flight: re-sync + install complete",
+          );
         } else {
           logger.warn(
             { projectId, containerId, output: installResult.output.slice(0, 500) },

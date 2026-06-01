@@ -2007,7 +2007,11 @@ export function AgentThinkingBubble({
         versionId?: number | null;
         knowledgeApplied?: Array<{ id: number; title: string; category: string }>;
         completedWithErrors?: boolean | null;
-        repairLoop?: { totalAttempts: number; maxAttempts: number; finalStatus: "passed" | "exhausted" } | null;
+        repairLoop?: {
+          totalAttempts: number;
+          maxAttempts: number;
+          finalStatus: "passed" | "exhausted";
+        } | null;
       }
     | null
     | undefined;

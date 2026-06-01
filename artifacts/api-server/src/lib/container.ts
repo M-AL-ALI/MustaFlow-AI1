@@ -552,7 +552,14 @@ export async function execInContainer(
     if (!res.ok) {
       const errText = text ?? (await res.text());
       logger.warn({ machineId, projectId, command, body: errText }, "Exec failed");
-      return { ok: false, output: errText, stdout: "", stderr: errText, exitCode: -1, machineWoken };
+      return {
+        ok: false,
+        output: errText,
+        stdout: "",
+        stderr: errText,
+        exitCode: -1,
+        machineWoken,
+      };
     }
 
     const data = (await res.json()) as { stdout?: string; stderr?: string; exit_code?: number };
@@ -632,13 +639,19 @@ export async function npmInstallInBackground(
     );
 
     if (!launch.ok || launch.machineWoken) {
-      logger.warn({ machineId, projectId, attempt }, "npmInstallInBackground: launch exec failed — retrying");
+      logger.warn(
+        { machineId, projectId, attempt },
+        "npmInstallInBackground: launch exec failed — retrying",
+      );
       // Machine restarted → /app is empty. Re-sync files before next launch.
       if (launch.machineWoken && onMachineRestarted) {
         try {
           await onMachineRestarted();
         } catch (e) {
-          logger.warn({ machineId, projectId, attempt, err: e }, "npmInstallInBackground: onMachineRestarted callback failed");
+          logger.warn(
+            { machineId, projectId, attempt, err: e },
+            "npmInstallInBackground: onMachineRestarted callback failed",
+          );
         }
       }
       await new Promise((r) => setTimeout(r, 5_000));
@@ -670,7 +683,10 @@ export async function npmInstallInBackground(
           try {
             await onMachineRestarted();
           } catch (e) {
-            logger.warn({ machineId, projectId, attempt, poll, err: e }, "npmInstallInBackground: onMachineRestarted callback failed");
+            logger.warn(
+              { machineId, projectId, attempt, poll, err: e },
+              "npmInstallInBackground: onMachineRestarted callback failed",
+            );
           }
         }
         break; // break polling loop → outer attempt loop will relaunch
@@ -681,7 +697,10 @@ export async function npmInstallInBackground(
         const exitCode = parseInt(m[1], 10);
         const installOutput = check.output.replace(/__EXIT_\d+__\n?/, "");
         if (exitCode === 0) {
-          logger.info({ machineId, projectId, attempt, poll }, "npmInstallInBackground: npm install succeeded");
+          logger.info(
+            { machineId, projectId, attempt, poll },
+            "npmInstallInBackground: npm install succeeded",
+          );
           return { ok: true, output: installOutput };
         }
         logger.warn(
@@ -1413,7 +1432,10 @@ export async function patchMachineAutostop(
     // GET current machine config so we can merge the autostop change.
     const getRes = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`);
     if (!getRes.ok) {
-      logger.warn({ machineId, projectId, status: getRes.status }, "patchMachineAutostop: GET failed");
+      logger.warn(
+        { machineId, projectId, status: getRes.status },
+        "patchMachineAutostop: GET failed",
+      );
       return;
     }
     const machine = (await getRes.json()) as {
@@ -1435,7 +1457,10 @@ export async function patchMachineAutostop(
     });
     if (!updateRes.ok) {
       const text = await updateRes.text();
-      logger.warn({ machineId, projectId, autostop, body: text }, "patchMachineAutostop: POST failed");
+      logger.warn(
+        { machineId, projectId, autostop, body: text },
+        "patchMachineAutostop: POST failed",
+      );
     } else {
       logger.info({ machineId, projectId, autostop }, "Machine autostop patched");
       // Fly may restart a RUNNING machine to apply the new config, causing a brief
@@ -1445,9 +1470,15 @@ export async function patchMachineAutostop(
       if (wasRunning) {
         const ready = await waitForMachineReady(machineId, 30);
         if (!ready) {
-          logger.warn({ machineId, projectId }, "patchMachineAutostop: machine did not return to running within 30 s after config update");
+          logger.warn(
+            { machineId, projectId },
+            "patchMachineAutostop: machine did not return to running within 30 s after config update",
+          );
         } else {
-          logger.info({ machineId, projectId }, "patchMachineAutostop: machine running again after config update");
+          logger.info(
+            { machineId, projectId },
+            "patchMachineAutostop: machine running again after config update",
+          );
         }
       }
     }
@@ -1506,7 +1537,10 @@ export async function startContainerHealthServer(
       // state API and exec availability).
       const ready = await waitForMachineReady(machineId, 15);
       if (!ready) {
-        logger.warn({ machineId, projectId, attempt }, "startContainerHealthServer: machine not ready before exec attempt");
+        logger.warn(
+          { machineId, projectId, attempt },
+          "startContainerHealthServer: machine not ready before exec attempt",
+        );
         if (attempt < MAX_ATTEMPTS) {
           await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
           continue;
@@ -1521,8 +1555,12 @@ export async function startContainerHealthServer(
 
       if (!res.ok) {
         const t = await res.text();
-        const isMachineNotRunning = t.includes("machine not running") || t.includes("failed_precondition");
-        logger.warn({ machineId, projectId, attempt, body: t }, "startContainerHealthServer: exec failed");
+        const isMachineNotRunning =
+          t.includes("machine not running") || t.includes("failed_precondition");
+        logger.warn(
+          { machineId, projectId, attempt, body: t },
+          "startContainerHealthServer: exec failed",
+        );
         if (isMachineNotRunning && attempt < MAX_ATTEMPTS) {
           await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
           continue;
@@ -1533,7 +1571,10 @@ export async function startContainerHealthServer(
       logger.info({ machineId, projectId, attempt }, "Container health server started");
       return;
     } catch (err) {
-      logger.warn({ err, machineId, projectId, attempt }, "startContainerHealthServer: error (non-fatal)");
+      logger.warn(
+        { err, machineId, projectId, attempt },
+        "startContainerHealthServer: error (non-fatal)",
+      );
       if (attempt < MAX_ATTEMPTS) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       }
@@ -1580,10 +1621,7 @@ export async function stopContainerHealthServer(
  */
 const KEEPALIVE_INTERVAL_MS = 5_000; // 5 s — shorter than any observed autostop grace period
 
-export function startContainerKeepalive(
-  containerUrl: string,
-  projectId: number,
-): () => void {
+export function startContainerKeepalive(containerUrl: string, projectId: number): () => void {
   // Extract the machine ID from the proxy URL path (last path segment).
   // URL format: https://<app>.fly.dev/container/<machineId>
   const machineId = containerUrl.split("/").pop() ?? "";
