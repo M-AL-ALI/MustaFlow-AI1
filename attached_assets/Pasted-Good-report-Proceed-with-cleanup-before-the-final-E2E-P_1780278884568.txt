@@ -1,0 +1,63 @@
+Good report. Proceed with cleanup before the final E2E.
+
+Please do these items only:
+
+1. Delete or exclude the temporary test scripts:
+
+* test-autostop-prevention.ts
+* diag-machine.ts
+
+They should not remain as shipping source unless intentionally placed under a scripts/dev-only folder and clearly documented.
+
+2. Keep patchMachineAutostop as the primary runtime protection.
+    The small test proved that POST successfully sets autostop:false and the machine remains running.
+
+For active agent tasks:
+
+* Disable autostop before long agent/build work.
+* Run the task.
+* Restore autostop in the final cleanup path whether the task completes, fails, or is cancelled.
+
+3. Do not rely on keepalive/health-server from Replit.
+    Since mustaflow-containers.fly.dev does not resolve from the Replit environment, keepalive is not useful for this test environment.
+
+Either:
+
+* remove the keepalive/health-server code, or
+* keep it only as environment-dependent fallback with clear comments and do not treat it as required for E2E success.
+
+4. Keep the health-server retry loop only if it is harmless and clearly documented.
+    But the final E2E should pass based on autostop:false, not based on keepalive.
+5. Confirm:
+
+* task 275 remains failed
+* no stale pg-boss blockers
+* typecheck clean
+* server healthz 200
+* test machine autostop restored before the E2E starts
+
+After cleanup, run one final controlled E2E.
+
+Hard rules for final E2E:
+
+* One run only
+* 25-minute hard limit
+* No automatic new fixes during the run
+* Stop and report if it fails
+* Restore autostop after the run
+* Use the normal queue path as much as possible
+
+Final E2E must prove:
+
+1. autostop disables at task start
+2. npm install completes
+3. real TypeScript check runs
+4. Vite/build check reaches the configured timeout path if needed
+5. file_diff events appear
+6. check_result chips appear
+7. preview refreshes
+8. real app loads in preview
+9. task completes without manual queue repair
+10. autostop is restored after completion/failure/cancel
+
+Do not call Phase 1 complete unless this final test passes.

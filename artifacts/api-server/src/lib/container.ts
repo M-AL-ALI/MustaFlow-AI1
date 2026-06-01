@@ -1459,13 +1459,22 @@ export async function patchMachineAutostop(
 /**
  * Start a minimal HTTP health-server on the machine's service port.
  *
- * The server runs in the background (nohup + &) and responds 200 to any
- * request.  This gives the keepalive loop something to TCP-connect to, which
- * resets Fly's autostop idle counter every 5 s.
+ * ENVIRONMENT NOTE: This is an optional belt-and-suspenders measure.
+ * The primary autostop-prevention mechanism is patchMachineAutostop("off"),
+ * which sets autostop:false persistently in Fly's machine config.  When
+ * autostop:false, the machine stays alive regardless of connection count, so
+ * this health server is not required for correctness.
+ *
+ * This server is useful in environments where the Fly app URL
+ * (https://<app>.fly.dev) is reachable and the keepalive loop can establish
+ * TCP connections.  In sandboxed environments where fly.dev DNS does not
+ * resolve, this server runs inside the machine but is unreachable externally,
+ * and the keepalive loop silently no-ops.  In those environments autostop:false
+ * alone is sufficient.
  *
  * The process is tagged with the sentinel string "fly-health-server" so it can
  * be killed cleanly (pkill -f fly-health-server) before the user's own app
- * server starts.
+ * server starts on the same port.
  *
  * Uses only POSIX sh constructs (no bash-isms) so it works on Alpine Linux.
  */
@@ -1555,14 +1564,19 @@ export async function stopContainerHealthServer(
 }
 
 /**
- * Belt-and-suspenders keepalive: pings the container's /healthz through Fly's
- * proxy every KEEPALIVE_INTERVAL_MS.
+ * Optional environment-dependent keepalive: pings the container's /healthz
+ * through Fly's proxy every KEEPALIVE_INTERVAL_MS.
  *
- * The `fly-force-instance-id` header routes each ping to the SPECIFIC machine
- * (not a random instance in the app's load-balancer pool), so the target
- * machine's idle counter is actually reset.  This layer complements
- * patchMachineAutostop — if the PATCH hasn't propagated yet or gets reverted,
- * the pings act as a fallback to keep the machine from idling out.
+ * ENVIRONMENT NOTE: This is NOT the primary autostop-prevention mechanism.
+ * patchMachineAutostop("off") sets autostop:false in the Fly machine config,
+ * which is the sole required mechanism.  In sandboxed environments where
+ * <app>.fly.dev DNS does not resolve (e.g. the Replit dev environment), every
+ * ping fails silently with a DNS error and this loop is a no-op.  That is
+ * expected and safe — autostop:false keeps the machine alive regardless.
+ *
+ * In environments where the Fly app URL is reachable, this provides an extra
+ * layer: each TCP connection from the ping resets Fly's service-level idle
+ * timer on the exact target machine (fly-force-instance-id header).
  */
 const KEEPALIVE_INTERVAL_MS = 5_000; // 5 s — shorter than any observed autostop grace period
 
