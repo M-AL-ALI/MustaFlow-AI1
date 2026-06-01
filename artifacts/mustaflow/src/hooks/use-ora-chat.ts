@@ -85,6 +85,8 @@ export interface UseOraChatReturn {
   clearUploadError: () => void;
   oraStatus: OraStatus;
   clearConversation: () => Promise<void>;
+  sessionExpired: boolean;
+  dismissSessionExpired: () => void;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -303,6 +305,7 @@ export function useOraChat(): UseOraChatReturn {
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [pendingImageAnalysis, setPendingImageAnalysis] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const sessionInitRef = useRef(false);
   const transcriptRestoredRef = useRef(false);
@@ -361,6 +364,10 @@ export function useOraChat(): UseOraChatReturn {
             // Clear only the expired session ID — the transcript is still valid
             // and will be shown from sessionStorage while the new session is created.
             clearStoredSessionId();
+            // Notify the UI so it can warn non-signed-in users that their
+            // session expired and they should sign in to keep their history.
+            // The panel gates display on !isSignedIn so this is safe for guests only.
+            setSessionExpired(true);
           }
         }
       }
@@ -996,5 +1003,7 @@ export function useOraChat(): UseOraChatReturn {
     clearUploadError: () => setUploadError(null),
     oraStatus,
     clearConversation,
+    sessionExpired,
+    dismissSessionExpired: () => setSessionExpired(false),
   };
 }

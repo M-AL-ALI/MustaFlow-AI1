@@ -17,6 +17,7 @@ import {
   Upload,
   FileSpreadsheet,
   Download,
+  LogIn,
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
@@ -211,6 +212,8 @@ export function OraPanel({ chat }: OraPanelProps) {
     session,
     oraStatus,
     clearConversation,
+    sessionExpired,
+    dismissSessionExpired,
   } = chat;
 
   const { isSignedIn } = useUser();
@@ -975,6 +978,34 @@ export function OraPanel({ chat }: OraPanelProps) {
             className="shrink-0 opacity-60 hover:opacity-100"
           >
             <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Session-expired nudge — only shown to guests whose anonymous session timed out */}
+      {sessionExpired && !isSignedIn && (
+        <div className="mx-4 mb-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-3.5 py-2.5 text-xs flex items-start justify-between gap-2">
+          <div className="flex items-start gap-2 min-w-0">
+            <LogIn className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <span className="text-amber-800 dark:text-amber-300 leading-snug">
+              Your session expired — your conversation is still visible, but will be lost when you
+              leave.{" "}
+              <button
+                type="button"
+                onClick={() => setLocation("/sign-up")}
+                className="font-medium underline underline-offset-2 hover:no-underline"
+              >
+                Sign in to save it permanently.
+              </button>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={dismissSessionExpired}
+            className="shrink-0 opacity-60 hover:opacity-100 transition-opacity mt-0.5"
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
           </button>
         </div>
       )}
