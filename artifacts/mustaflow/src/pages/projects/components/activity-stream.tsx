@@ -25,6 +25,7 @@ import {
   Zap,
   Navigation,
   Layers,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,10 @@ type EventType =
   | "qa_step"
   | "qa_done"
   | "qa_timeout"
+  | "preview_refresh_requested"
+  | "preview_server_reachable"
+  | "preview_unreachable_503"
+  | "preview_ready"
   | "completed"
   | "failed";
 
@@ -62,7 +67,7 @@ const EVENT_META: Record<
     icon: React.ElementType;
     color: string;
     label: string;
-    pillStyle: "terminal" | "brain" | "check" | "save" | "done" | "fail" | "narrate";
+    pillStyle: "terminal" | "brain" | "check" | "save" | "done" | "fail" | "narrate" | "warn";
   }
 > = {
   queued: { icon: Clock, color: "text-muted-foreground", label: "Queued", pillStyle: "narrate" },
@@ -165,6 +170,30 @@ const EVENT_META: Record<
     label: "QA timeout",
     pillStyle: "narrate",
   },
+  preview_refresh_requested: {
+    icon: RefreshCw,
+    color: "text-sky-400",
+    label: "Checking preview",
+    pillStyle: "save",
+  },
+  preview_server_reachable: {
+    icon: CheckCircle2,
+    color: "text-green-400",
+    label: "Preview reachable",
+    pillStyle: "done",
+  },
+  preview_unreachable_503: {
+    icon: WifiOff,
+    color: "text-amber-400",
+    label: "Preview unreachable",
+    pillStyle: "warn",
+  },
+  preview_ready: {
+    icon: CheckCircle2,
+    color: "text-green-400",
+    label: "Preview ready",
+    pillStyle: "done",
+  },
   completed: { icon: CheckCircle2, color: "text-green-400", label: "Completed", pillStyle: "done" },
   failed: { icon: XCircle, color: "text-destructive", label: "Failed", pillStyle: "fail" },
 };
@@ -177,6 +206,7 @@ const PILL_STYLE_CLASSES: Record<string, string> = {
   done: "bg-green-500/10 border-green-500/20 text-green-400",
   fail: "bg-destructive/10 border-destructive/20 text-destructive",
   narrate: "bg-muted/40 border-border text-muted-foreground",
+  warn: "bg-amber-500/10 border-amber-500/20 text-amber-400",
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);

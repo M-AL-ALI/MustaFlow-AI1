@@ -145,6 +145,10 @@ const STEP_ICON: Record<string, React.ElementType> = {
   tool_call: Wrench,
   check_result: ShieldCheck,
   agent_prompt: ShieldAlert,
+  preview_refresh_requested: RefreshCw,
+  preview_server_reachable: CheckCircle2,
+  preview_unreachable_503: AlertTriangle,
+  preview_ready: CheckCircle2,
 };
 
 const STEP_COLOR: Record<string, string> = {
@@ -177,6 +181,10 @@ const STEP_COLOR: Record<string, string> = {
   tool_call: "text-amber-300",
   check_result: "text-cyan-300",
   agent_prompt: "text-amber-400",
+  preview_refresh_requested: "text-sky-400",
+  preview_server_reachable: "text-green-400",
+  preview_unreachable_503: "text-amber-400",
+  preview_ready: "text-green-400",
 };
 
 /**

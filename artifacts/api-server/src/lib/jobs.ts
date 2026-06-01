@@ -601,6 +601,88 @@ async function emitEvent(
   }
 }
 
+// ── Preview reachability verification ─────────────────────────────────────────
+/**
+ * After a preview refresh is triggered (updating_preview event), poll the
+ * container's /healthz endpoint to verify the server is actually serving
+ * before marking previewUpdated: true in the task report.
+ *
+ * Emits granular events so the Builder timeline shows real reachability state
+ * instead of optimistically reporting success.
+ *
+ * Event sequence on success:
+ *   preview_refresh_requested → preview_server_reachable → preview_ready
+ *
+ * Event sequence on timeout/failure:
+ *   preview_refresh_requested → preview_unreachable_503
+ *
+ * @param taskId       - Task ID for emitting events
+ * @param containerUrl - Base URL of the container (e.g. https://project-83.fly.dev)
+ * @param opts         - maxWaitMs (default 75 s), intervalMs (default 5 s), signal
+ */
+async function pollPreviewReachability(
+  taskId: number,
+  containerUrl: string,
+  opts: { maxWaitMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
+): Promise<{ reachable: boolean; httpStatus: number | null }> {
+  const maxWaitMs = opts.maxWaitMs ?? 75_000; // 75-second ceiling
+  const intervalMs = opts.intervalMs ?? 5_000; // check every 5 s
+  const signal = opts.signal;
+  const deadline = Date.now() + maxWaitMs;
+
+  await emitEvent(
+    taskId,
+    "preview_refresh_requested",
+    "Preview refresh requested, verifying server is reachable…",
+  );
+
+  const healthzUrl = containerUrl.replace(/\/$/, "") + "/healthz";
+  let lastHttpStatus: number | null = null;
+
+  while (Date.now() < deadline) {
+    if (signal?.aborted) break;
+
+    try {
+      const res = await fetch(healthzUrl, {
+        signal: AbortSignal.timeout(4_000),
+        headers: { "User-Agent": "mustaflow-preview-check/1.0" },
+      });
+      lastHttpStatus = res.status;
+
+      if (res.status === 200) {
+        logger.info({ taskId, containerUrl, httpStatus: 200 }, "Preview server reachable");
+        await emitEvent(taskId, "preview_server_reachable", "Preview server responded (HTTP 200).");
+        await emitEvent(taskId, "preview_ready", "Preview is ready.");
+        return { reachable: true, httpStatus: 200 };
+      }
+
+      logger.debug(
+        { taskId, containerUrl, httpStatus: res.status },
+        "Preview poll: non-200, retrying…",
+      );
+    } catch {
+      // Network timeout or DNS failure — keep polling
+    }
+
+    // Only sleep if we still have budget left
+    if (Date.now() + intervalMs < deadline) {
+      await new Promise<void>((r) => setTimeout(r, intervalMs));
+    }
+  }
+
+  const statusLabel = lastHttpStatus !== null ? `HTTP ${lastHttpStatus}` : "no response";
+  logger.warn(
+    { taskId, containerUrl, lastHttpStatus, maxWaitMs },
+    "Preview server not reachable within cap — marking preview as unreachable",
+  );
+  await emitEvent(
+    taskId,
+    "preview_unreachable_503",
+    `Preview is not yet reachable (${statusLabel}). Files were saved — the preview will load once your server starts.`,
+  );
+  return { reachable: false, httpStatus: lastHttpStatus };
+}
+
 // ── Per-task LLM token counter ────────────────────────────────────────────────
 // Accumulates an approximate token count (chars / 4) from streaming deltas.
 // Written to agent_tasks.token_count on task completion and then cleared.
@@ -4302,6 +4384,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       await emitEvent(taskId, "updating_preview", "Refreshing preview…");
+
+      // ── Preview reachability verification ───────────────────────────────────
+      // For agentic projects the preview is served by a live container — verify
+      // the server is actually responding before marking previewUpdated: true.
+      // Static projects serve from the DB and are always reachable; skip them.
+      if (project.containerUrl) {
+        const previewCheck = await pollPreviewReachability(taskId, project.containerUrl, {
+          signal,
+          maxWaitMs: 75_000,
+          intervalMs: 5_000,
+        });
+        if (!previewCheck.reachable) {
+          report.previewUpdated = false;
+          report.warnings = [
+            ...(report.warnings ?? []),
+            `Preview refresh requested but app server is not yet reachable (${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}). Files were saved — the preview will load once your server starts.`,
+          ];
+        }
+      }
+      // ── End preview reachability verification ────────────────────────────────
 
       // ── Synchronous Drizzle migration (before task completion) ─────────────
       // Delegated to runPostWriteMigrationSync — see function definition below
