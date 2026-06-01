@@ -512,6 +512,7 @@ export function OraPanel({ chat }: OraPanelProps) {
     const text = input.trim();
     if (!text || isLoading || atLimit || uploadState === "uploading") return;
     setInput("");
+    setTimeout(() => textareaRef.current?.focus(), 0);
     if (selectedFormat) {
       const fmt = selectedFormat;
       setSelectedFormat(null);
