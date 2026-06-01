@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useAuth } from "@clerk/react";
 import {
   Search,
   Puzzle,
@@ -278,6 +279,7 @@ interface ProjectListItem {
 
 export default function ExtensionsPage() {
   const { toast } = useToast();
+  const { isSignedIn } = useAuth();
   const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [extensions, setExtensions] = useState<Extension[]>([]);
@@ -300,8 +302,9 @@ export default function ExtensionsPage() {
   // Which extension slug is currently mid-install (to show spinner on that card only)
   const [installingSlug, setInstallingSlug] = useState<string | null>(null);
 
-  // Fetch user's projects once on mount so the install picker is ready
+  // Fetch user's projects once signed-in so the install picker is ready
   useEffect(() => {
+    if (!isSignedIn) return;
     fetch("/api/projects", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: unknown) => {
@@ -311,7 +314,7 @@ export default function ExtensionsPage() {
       .catch(() => {
         /* projects unavailable — install buttons stay disabled */
       });
-  }, []);
+  }, [isSignedIn]);
 
   // One-click install handler wired to ExtensionCard
   const handleInstall = async (extSlug: string, projectId: number): Promise<void> => {

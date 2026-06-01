@@ -5,6 +5,7 @@ import {
   getListWorkspacesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/react";
 
 export type WorkspaceItem = {
   id: number;
@@ -37,8 +38,9 @@ const WorkspaceContext = createContext<WorkspaceContextValue>({
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const { isSignedIn } = useAuth();
   const { data: workspaces = [], isLoading } = useListWorkspaces({
-    query: { queryKey: getListWorkspacesQueryKey() },
+    query: { queryKey: getListWorkspacesQueryKey(), enabled: !!isSignedIn },
   });
   const createWsMutation = useCreateWorkspace();
 

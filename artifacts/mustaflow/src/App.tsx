@@ -294,8 +294,9 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 // existing localStorage entry intact so users who previously chose a language
 // locally are not silently reverted.
 function VoiceLangSyncer() {
+  const { isSignedIn } = useAuth();
   const prefsQuery = useGetMyPreferences({
-    query: { queryKey: ["/api/me/preferences"], staleTime: Infinity },
+    query: { queryKey: ["/api/me/preferences"], staleTime: Infinity, enabled: !!isSignedIn },
   });
 
   useEffect(() => {
