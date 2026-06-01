@@ -6,11 +6,23 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
+const generatedFileSchema = z.object({
+  fileName: z.string(),
+  fileData: z.string(),
+  mimeType: z.string(),
+  format: z.string(),
+});
+
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().max(8000),
+  content: z.string().max(32000),
   handoffCta: z.boolean().optional(),
   datasetResult: z.unknown().optional(),
+  messageKind: z.enum(["image-analysis", "document-analysis"]).optional(),
+  suggestions: z.array(z.string()).optional(),
+  generatedFile: generatedFileSchema.optional(),
+  hadAttachment: z.boolean().optional(),
+  editedFrom: z.boolean().optional(),
 });
 
 const saveBodySchema = z.object({

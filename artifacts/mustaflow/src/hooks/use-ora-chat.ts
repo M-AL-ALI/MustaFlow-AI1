@@ -272,19 +272,23 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   content: string;
   handoffCta?: boolean;
   messageKind?: string;
+  suggestions?: string[];
   hadAttachment?: boolean;
   editedFrom?: boolean;
   generatedFile?: GeneratedFile;
+  datasetResult?: DatasetAnalysisResult;
 }> {
   return messages.map((m) => ({
     role: m.role,
     content: m.content,
     ...(m.handoffCta !== undefined ? { handoffCta: m.handoffCta } : {}),
     ...(m.messageKind !== undefined ? { messageKind: m.messageKind } : {}),
+    ...(m.suggestions && m.suggestions.length > 0 ? { suggestions: m.suggestions } : {}),
     ...(m.hadAttachment ? { hadAttachment: true } : {}),
     ...(m.editedFrom ? { editedFrom: true } : {}),
     // Include generatedFile so the download card persists across re-renders
     ...(m.generatedFile ? { generatedFile: m.generatedFile } : {}),
+    ...(m.datasetResult !== undefined ? { datasetResult: m.datasetResult } : {}),
   }));
 }
 
@@ -354,13 +358,17 @@ export function useOraChat(): UseOraChatReturn {
         } catch (err: unknown) {
           const status = (err as { status?: number }).status;
           if (status === 401) {
+            // Clear only the expired session ID — the transcript is still valid
+            // and will be shown from sessionStorage while the new session is created.
             clearStoredSessionId();
-            clearStoredTranscript();
           }
         }
       }
 
-      // No valid session — create one
+      // No valid session — create one.
+      // Also restore any prior transcript: it may exist because the session
+      // JWT expired (inactivity) while the conversation history is still in
+      // sessionStorage and completely valid.
       try {
         const data = await apiPost<{
           sessionId: string;
@@ -377,6 +385,10 @@ export function useOraChat(): UseOraChatReturn {
           fileCount: data.fileCount ?? 0,
           fileLimit: data.fileLimit ?? FILE_LIMIT,
         });
+        const stored = getStoredTranscript();
+        if (stored.length > 0) {
+          setMessages(stored);
+        }
       } catch (err: unknown) {
         const msg = (err as Error).message ?? "Could not start Ora session.";
         setError(msg);
@@ -592,9 +604,9 @@ export function useOraChat(): UseOraChatReturn {
       setIsLoading(true);
       setError(null);
 
-      try {
-        const history = baseMessages.slice(-20).map((m) => ({ role: m.role, content: m.content }));
+      const history = baseMessages.slice(-20).map((m) => ({ role: m.role, content: m.content }));
 
+      const executeApiCall = async (): Promise<void> => {
         if (currentAttachment) {
           setAttachedFile(null);
           setUploadState("idle");
@@ -608,7 +620,6 @@ export function useOraChat(): UseOraChatReturn {
           }
 
           if (currentAttachment.isImage) {
-            // Mark as analyzing-image for status display BEFORE async call
             setPendingImageAnalysis(true);
             body.imageRef = currentAttachment.fileRef;
 
@@ -764,14 +775,42 @@ export function useOraChat(): UseOraChatReturn {
                 },
           );
         }
+      };
+
+      try {
+        await executeApiCall();
       } catch (err: unknown) {
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;
         if (status === 429) {
           setError(msg ?? "You have reached the message limit for this session.");
         } else if (status === 401) {
+          // Clear the expired session ID but keep the transcript — the conversation
+          // history is still valid and will be re-sent with the new session.
           clearStoredSessionId();
-          clearStoredTranscript();
+          try {
+            const data = await apiPost<{
+              sessionId: string;
+              msgCount: number;
+              msgLimit: number;
+              fileCount?: number;
+              fileLimit?: number;
+            }>("/api/public-ai/session", {});
+            storeSessionId(data.sessionId);
+            setSession({
+              sessionId: data.sessionId,
+              msgCount: data.msgCount,
+              msgLimit: data.msgLimit,
+              fileCount: data.fileCount ?? 0,
+              fileLimit: data.fileLimit ?? FILE_LIMIT,
+            });
+            // Retry with the fresh session — return early so the user message
+            // stays in state and no error is shown.
+            await executeApiCall();
+            return;
+          } catch {
+            // Retry failed; fall through to show error and remove user message.
+          }
           setError(
             "Your session has expired. Please refresh the page to start a new conversation.",
           );
@@ -870,8 +909,8 @@ export function useOraChat(): UseOraChatReturn {
         if (status === 429) {
           setError(msg ?? "You have reached the message limit for this session.");
         } else if (status === 401) {
+          // Keep the transcript — only clear the expired session token.
           clearStoredSessionId();
-          clearStoredTranscript();
           setError(
             "Your session has expired. Please refresh the page to start a new conversation.",
           );
