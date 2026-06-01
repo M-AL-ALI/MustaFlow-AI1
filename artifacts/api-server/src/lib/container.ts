@@ -1417,8 +1417,12 @@ export async function patchMachineAutostop(
       return;
     }
     const machine = (await getRes.json()) as {
+      state?: string;
       config?: { services?: Array<Record<string, unknown>>; [key: string]: unknown };
     };
+    // Capture whether the machine was running BEFORE the update so we know
+    // whether to wait for it to restart after the config POST.
+    const wasRunning = machine.state === "started";
     const existingConfig = machine.config ?? {};
     const services = (existingConfig.services ?? []) as Array<Record<string, unknown>>;
     const updatedServices = services.map((s) => ({ ...s, autostop }));
@@ -1434,6 +1438,18 @@ export async function patchMachineAutostop(
       logger.warn({ machineId, projectId, autostop, body: text }, "patchMachineAutostop: POST failed");
     } else {
       logger.info({ machineId, projectId, autostop }, "Machine autostop patched");
+      // Fly may restart a RUNNING machine to apply the new config, causing a brief
+      // "not running" window.  Only wait for it to come back if the machine was
+      // running before the update.  A hibernated/stopped machine won't start on its
+      // own from a config POST, so waiting would just add 30 s of dead time.
+      if (wasRunning) {
+        const ready = await waitForMachineReady(machineId, 30);
+        if (!ready) {
+          logger.warn({ machineId, projectId }, "patchMachineAutostop: machine did not return to running within 30 s after config update");
+        } else {
+          logger.info({ machineId, projectId }, "patchMachineAutostop: machine running again after config update");
+        }
+      }
     }
   } catch (err) {
     logger.warn({ err, machineId, projectId, autostop }, "patchMachineAutostop: error (non-fatal)");
@@ -1467,19 +1483,52 @@ export async function startContainerHealthServer(
     // The sentinel comment "fly-health-server" makes it pkill-able later.
     `nohup node -e "/*fly-health-server*/${nodeOneLiner}" >/dev/null 2>&1 </dev/null & echo health-server-ok`,
   ];
-  try {
-    const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
-      method: "POST",
-      body: JSON.stringify({ command: cmd, timeout: 10 }),
-    });
-    if (!res.ok) {
-      const t = await res.text();
-      logger.warn({ machineId, projectId, body: t }, "startContainerHealthServer: exec failed");
-    } else {
-      logger.info({ machineId, projectId }, "Container health server started");
+
+  // Retry loop: after patchMachineAutostop the machine restarts briefly.
+  // patchMachineAutostop already waits for the machine to return to "running",
+  // but exec may still fail if Fly's exec gRPC path lags behind the state API.
+  // Retry up to MAX_ATTEMPTS times with RETRY_DELAY_MS backoff.
+  const MAX_ATTEMPTS = 4;
+  const RETRY_DELAY_MS = 5_000;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      // Ensure machine is running before attempting exec (handles lag between
+      // state API and exec availability).
+      const ready = await waitForMachineReady(machineId, 15);
+      if (!ready) {
+        logger.warn({ machineId, projectId, attempt }, "startContainerHealthServer: machine not ready before exec attempt");
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        return;
+      }
+
+      const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
+        method: "POST",
+        body: JSON.stringify({ command: cmd, timeout: 10 }),
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        const isMachineNotRunning = t.includes("machine not running") || t.includes("failed_precondition");
+        logger.warn({ machineId, projectId, attempt, body: t }, "startContainerHealthServer: exec failed");
+        if (isMachineNotRunning && attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        return;
+      }
+
+      logger.info({ machineId, projectId, attempt }, "Container health server started");
+      return;
+    } catch (err) {
+      logger.warn({ err, machineId, projectId, attempt }, "startContainerHealthServer: error (non-fatal)");
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      }
     }
-  } catch (err) {
-    logger.warn({ err, machineId, projectId }, "startContainerHealthServer: error (non-fatal)");
   }
 }
 
