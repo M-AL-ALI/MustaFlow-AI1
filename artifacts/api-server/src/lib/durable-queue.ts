@@ -87,6 +87,12 @@ export async function startDurableQueue(
         retryLimit: RETRY_LIMIT,
         retryDelay: RETRY_DELAY_SECONDS,
         retryBackoff: true,
+        // Build and refine jobs can legitimately run for 30+ minutes (npm install,
+        // tsc checks, AI loops). Set a generous 2-hour expiry so pg-boss does not
+        // mark the job as expired/failed while the handler is still running —
+        // which would cause the job row to show "failed" even though the handler
+        // later writes "completed" to agent_tasks, leaving a split-brain state.
+        expireInSeconds: 7200,
       });
 
       // Process one job at a time — single-job handler gives pg-boss
@@ -189,6 +195,7 @@ export async function durableEnqueue(
       retryLimit: RETRY_LIMIT,
       retryDelay: RETRY_DELAY_SECONDS,
       retryBackoff: true,
+      expireInSeconds: 7200, // 2 hours — consistent with createQueue setting
     });
     jobQueueDepth.inc();
     logger.info({ queue, jobId: id, taskId: payload.taskId }, "Job enqueued in durable queue");

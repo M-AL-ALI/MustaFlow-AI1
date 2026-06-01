@@ -1730,14 +1730,16 @@ export async function runJob(input: JobInput): Promise<void> {
 
     await emitEvent(taskId, "queued", "Task received, starting pipeline…");
 
-    // Atomically transition queued/planning → building/planning.
+    // Atomically transition queued/planning → building.
     // Tasks are created with status "queued" (background) or "planning" (immediate foreground).
     // Using WHERE status IN ('queued','planning') makes the check+update a single round-trip,
     // eliminating the TOCTOU window. If the user dismissed (canceled) the task while we were
     // waiting for the advisory lock, status = 'canceled' so 0 rows are updated → abort cleanly.
+    // Both build and refine tasks transition to "building" so the frontend never shows a refine
+    // task stuck on "planning" while the pipeline is actively running.
     const transitioned = await db
       .update(agentTasksTable)
-      .set({ status: kind === "build" ? "building" : "planning", startedAt: sql`now()` })
+      .set({ status: "building", startedAt: sql`now()` })
       .where(
         and(
           eq(agentTasksTable.id, taskId),
@@ -2293,6 +2295,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
             await import("./container");
           keepaliveMachineId = project.containerId;
+          logger.info(
+            { taskId, projectId, machineId: project.containerId },
+            "Build task: disabling autostop + setting min_machines_running=1",
+          );
           await patchMachineAutostop(project.containerId, projectId, "off");
           await startContainerHealthServer(project.containerId, projectId);
           stopContainerKeepalive = startContainerKeepalive(project.containerUrl, projectId);
@@ -2814,6 +2820,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
             await import("./container");
           keepaliveMachineId = project.containerId;
+          logger.info(
+            { taskId, projectId, machineId: project.containerId },
+            "Refine task: disabling autostop + setting min_machines_running=1",
+          );
           await patchMachineAutostop(project.containerId, projectId, "off");
           await startContainerHealthServer(project.containerId, projectId);
           stopContainerKeepalive = startContainerKeepalive(project.containerUrl, projectId);
@@ -5715,8 +5725,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     // idle-stop normally once the task is done.
     stopContainerKeepalive?.();
     if (keepaliveMachineId) {
-      const { patchMachineAutostop } = await import("./container");
-      await patchMachineAutostop(keepaliveMachineId, projectId, "stop");
+      logger.info(
+        { taskId, projectId, machineId: keepaliveMachineId },
+        "Task complete: restoring autostop + setting min_machines_running=0",
+      );
+      try {
+        const { patchMachineAutostop } = await import("./container");
+        await patchMachineAutostop(keepaliveMachineId, projectId, "stop");
+      } catch (restoreErr) {
+        logger.warn(
+          { restoreErr, taskId, projectId, machineId: keepaliveMachineId },
+          "Autostop restore failed — machine may remain always-on; manual fix needed",
+        );
+      }
     }
 
     // Always release the advisory lock and pool client, and clear the in-memory guard.

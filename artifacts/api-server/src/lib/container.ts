@@ -586,6 +586,20 @@ export type NpmInstallOptions = {
    */
   maxAttempts?: number;
   /**
+   * Hard wall-clock cap in milliseconds (default 10 min = 600_000).
+   * Once exceeded the function returns immediately with ok:false and a
+   * "BLOCKED: dependency install exceeded time limit" message regardless of
+   * how many attempts remain. This prevents a stuck npm install from holding
+   * the task handler open for the full 5×6-min = 30-min window.
+   */
+  wallClockCapMs?: number;
+  /**
+   * Optional AbortSignal. When aborted the function returns immediately with
+   * ok:false so the caller's cancel path is honoured without waiting for the
+   * current poll cycle to time out.
+   */
+  signal?: AbortSignal;
+  /**
    * Called before every retry that was triggered by a machine restart.
    * Use this to re-sync project files to the container — when the Fly machine
    * autostops, its writable layer is reset, so /app files (including
@@ -621,9 +635,27 @@ export async function npmInstallInBackground(
   opts?: NpmInstallOptions,
 ): Promise<{ ok: boolean; output: string }> {
   const maxAttempts = opts?.maxAttempts ?? 5;
+  const wallClockCapMs = opts?.wallClockCapMs ?? 10 * 60 * 1000; // 10-minute hard cap
+  const signal = opts?.signal;
   const onMachineRestarted = opts?.onMachineRestarted;
+  const deadline = Date.now() + wallClockCapMs;
+
+  const capMinutes = Math.round(wallClockCapMs / 60_000);
+  const blockedMsg = `BLOCKED: dependency install exceeded time limit (${capMinutes} min cap). The npm install process did not finish within the allowed window. Check package.json for heavy or broken dependencies.`;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) {
+      logger.info({ machineId, projectId, attempt }, "npmInstallInBackground: aborted via signal");
+      return { ok: false, output: "npmInstallInBackground: aborted" };
+    }
+    if (Date.now() >= deadline) {
+      logger.warn(
+        { machineId, projectId, attempt, wallClockCapMs },
+        "npmInstallInBackground: wall-clock cap exceeded — aborting before attempt",
+      );
+      return { ok: false, output: blockedMsg };
+    }
+
     // Launch npm install detached from the exec HTTP connection so it survives EOF/autostop.
     // rm the sentinel files first so stale state from a previous run doesn't confuse polling.
     const launch = await execInContainer(
@@ -660,7 +692,21 @@ export async function npmInstallInBackground(
 
     // Poll for /tmp/.npm-done, written by the background shell when npm exits.
     for (let poll = 0; poll < 72; poll++) {
-      // 72 × 5 s = 6 min ceiling
+      // 72 × 5 s = 6 min ceiling per attempt; hard wall-clock deadline checked first.
+      if (signal?.aborted) {
+        logger.info(
+          { machineId, projectId, attempt, poll },
+          "npmInstallInBackground: aborted via signal during poll",
+        );
+        return { ok: false, output: "npmInstallInBackground: aborted" };
+      }
+      if (Date.now() >= deadline) {
+        logger.warn(
+          { machineId, projectId, attempt, poll, wallClockCapMs },
+          "npmInstallInBackground: wall-clock cap exceeded during poll — aborting",
+        );
+        return { ok: false, output: blockedMsg };
+      }
       await new Promise((r) => setTimeout(r, 5_000));
 
       const check = await execInContainer(
@@ -1447,7 +1493,15 @@ export async function patchMachineAutostop(
     const wasRunning = machine.state === "started";
     const existingConfig = machine.config ?? {};
     const services = (existingConfig.services ?? []) as Array<Record<string, unknown>>;
-    const updatedServices = services.map((s) => ({ ...s, autostop }));
+    // When disabling autostop ("off"), also set min_machines_running: 1 so Fly cannot
+    // reclaim the machine while a long build is running. Restore to 0 when re-enabling
+    // autostop ("stop") so the machine can idle-scale back to zero after the task.
+    const minMachines = autostop === "off" ? 1 : 0;
+    const updatedServices = services.map((s) => ({
+      ...s,
+      autostop,
+      min_machines_running: minMachines,
+    }));
 
     // Fly Machines API uses POST (not PATCH) to update a machine's configuration.
     // We pass the full merged config so other fields (env, init, guest, …) are preserved.
@@ -1458,11 +1512,11 @@ export async function patchMachineAutostop(
     if (!updateRes.ok) {
       const text = await updateRes.text();
       logger.warn(
-        { machineId, projectId, autostop, body: text },
+        { machineId, projectId, autostop, minMachines, body: text },
         "patchMachineAutostop: POST failed",
       );
     } else {
-      logger.info({ machineId, projectId, autostop }, "Machine autostop patched");
+      logger.info({ machineId, projectId, autostop, minMachines }, "Machine autostop patched");
       // Fly may restart a RUNNING machine to apply the new config, causing a brief
       // "not running" window.  Only wait for it to come back if the machine was
       // running before the update.  A hibernated/stopped machine won't start on its

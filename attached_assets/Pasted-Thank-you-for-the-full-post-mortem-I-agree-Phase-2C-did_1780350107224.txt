@@ -1,0 +1,122 @@
+Thank you for the full post-mortem. I agree: Phase 2C did not pass.
+
+Before doing anything else, immediately restore autostop on machine d895e15f0345e8.
+
+That is urgent because the report says the machine is still started with autostop:false.
+
+Please do this first:
+
+1. Restore autostop to stop on machine d895e15f0345e8.
+2. Confirm by Fly GET that autostop: stop is active.
+3. Confirm no active/stale pg-boss jobs are blocking the queue.
+4. Confirm API server healthz is 200.
+5. Confirm ClerkAuthAdapter is restored.
+6. Do not run another E2E yet.
+
+After that, fix the Phase 2C blockers in a controlled small phase:
+
+Phase 2C-1 — Builder Trust Blocker Fixes
+
+Fix 1 — Dependency install must have a hard cap
+npmInstallInBackground cannot retry for 24–30 minutes.
+
+Add:
+
+* hard wall-clock cap
+* AbortSignal support if possible
+* max restart count
+* clear blocked status if install exceeds the cap
+
+Expected behavior:
+If dependency install fails repeatedly because the machine restarts, stop and report:
+
+“Blocked: dependency install exceeded time limit because the runtime restarted repeatedly.”
+
+Do not keep retrying silently.
+
+Fix 2 — Task status must reflect reality
+The task cannot show planning while the agent is building, installing, checking, and repairing.
+
+Fix:
+
+* build and refine should both transition to building
+* Add intermediate statuses or progress labels:
+    * planning
+    * building
+    * installing_dependencies
+    * checking
+    * repairing
+    * updating_preview
+    * completed
+    * completed_with_errors
+    * failed
+    * blocked
+
+At minimum, the UI/API must not remain stuck on planning during the build.
+
+Fix 3 — pg-boss job and task status consistency
+The pg-boss job marked failed while the Node handler continued and later wrote agent_tasks.status = completed.
+
+That is dangerous.
+
+Please fix:
+
+* extend heartbeat/expire window for long-running agentic tasks, or
+* keep heartbeat alive during long installs/repair loops, or
+* stop the handler when pg-boss job expires, or
+* ensure task/job state cannot disagree
+
+The product should not have job = failed while task = completed unless explicitly reconciled.
+
+Fix 4 — Autostop restore must be guaranteed
+If autostop is disabled at task start, it must be restored in finally for every path:
+
+* completed
+* completed_with_errors
+* failed
+* blocked
+* cancelled
+* timeout
+* uncaught exception
+
+Add logging:
+
+* autostop disabled at start
+* autostop restored at end
+* restore failed, if it fails
+
+Fix 5 — Machine stability during active task
+autostop:false alone was not fully sufficient because min_machines_running = 0 and no listener existed on port 3000 during first build.
+
+Please decide the safest fix:
+
+* set min_machines_running: 1 while active task is running and restore after, or
+* use a reliable active-task worker/runtime that does not depend on preview HTTP service, or
+* fail fast when Fly keeps reclaiming the machine
+
+Do not rely on keepalive if there is no listener.
+
+Fix 6 — Preview verification should wait until runtime is actually serving
+The report says updating_preview fired and previewUpdated: true, but live polling returned 503.
+
+That means “previewUpdated” does not necessarily mean “preview loaded.”
+
+Please separate:
+
+* preview refresh event emitted
+* preview iframe reloaded
+* preview server reachable
+* preview app loaded successfully
+
+Final Phase 2C retry should only happen after these fixes.
+
+Do not run another full E2E until:
+
+* autostop is restored
+* install cap/fail-fast is implemented
+* task status transitions are fixed
+* pg-boss/task status consistency is fixed
+* autostop restore path is verified
+* preview status is more honest
+
+After the fixes, run one final controlled E2E with a hard cap and report pass/fail.
