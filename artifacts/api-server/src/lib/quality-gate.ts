@@ -166,6 +166,9 @@ export async function runQualityGate(
                 "Quality gate pre-flight: re-sync on restart failed (non-fatal)",
               ),
             );
+            // Restart the health server so keepalive pings keep the machine alive.
+            const { startContainerHealthServer } = await import("./container");
+            await startContainerHealthServer(containerId, projectId);
           },
         });
         if (installResult.ok) {

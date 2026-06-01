@@ -1385,3 +1385,169 @@ export async function deployProductionContainer(
     status: "running",
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Container autostop management + keepalive (belt-and-suspenders)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Patch the Fly machine's services[].autostop field via the Machines API.
+ *
+ * Called with "off" before a build task starts and "stop" in the outer finally
+ * block.  This is the primary defence against Fly autostop killing long-running
+ * inline execs (npm install, tsc, vite build).
+ *
+ * Fly's PATCH endpoint merges config fields, but services must be provided in
+ * full because Fly replaces the services array rather than merging items.  We
+ * therefore GET the current config first, patch autostop on each service entry,
+ * then PATCH back.  Best-effort — failures are logged but never propagated to
+ * the caller so a broken Fly API call never blocks the build.
+ */
+export async function patchMachineAutostop(
+  machineId: string,
+  projectId: number,
+  autostop: "stop" | "off",
+): Promise<void> {
+  if (!isConfigured()) return;
+  try {
+    // GET current machine config so we can merge the autostop change.
+    const getRes = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`);
+    if (!getRes.ok) {
+      logger.warn({ machineId, projectId, status: getRes.status }, "patchMachineAutostop: GET failed");
+      return;
+    }
+    const machine = (await getRes.json()) as {
+      config?: { services?: Array<Record<string, unknown>>; [key: string]: unknown };
+    };
+    const existingConfig = machine.config ?? {};
+    const services = (existingConfig.services ?? []) as Array<Record<string, unknown>>;
+    const updatedServices = services.map((s) => ({ ...s, autostop }));
+
+    // Fly Machines API uses POST (not PATCH) to update a machine's configuration.
+    // We pass the full merged config so other fields (env, init, guest, …) are preserved.
+    const updateRes = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}`, {
+      method: "POST",
+      body: JSON.stringify({ config: { ...existingConfig, services: updatedServices } }),
+    });
+    if (!updateRes.ok) {
+      const text = await updateRes.text();
+      logger.warn({ machineId, projectId, autostop, body: text }, "patchMachineAutostop: POST failed");
+    } else {
+      logger.info({ machineId, projectId, autostop }, "Machine autostop patched");
+    }
+  } catch (err) {
+    logger.warn({ err, machineId, projectId, autostop }, "patchMachineAutostop: error (non-fatal)");
+  }
+}
+
+/**
+ * Start a minimal HTTP health-server on the machine's service port.
+ *
+ * The server runs in the background (nohup + &) and responds 200 to any
+ * request.  This gives the keepalive loop something to TCP-connect to, which
+ * resets Fly's autostop idle counter every 5 s.
+ *
+ * The process is tagged with the sentinel string "fly-health-server" so it can
+ * be killed cleanly (pkill -f fly-health-server) before the user's own app
+ * server starts.
+ *
+ * Uses only POSIX sh constructs (no bash-isms) so it works on Alpine Linux.
+ */
+export async function startContainerHealthServer(
+  machineId: string,
+  projectId: number,
+): Promise<void> {
+  if (!isConfigured()) return;
+  const nodeOneLiner =
+    "require('http').createServer(function(q,r){r.writeHead(200);r.end('ok')}).listen(parseInt(process.env.PORT)||3000)";
+  const cmd = [
+    "sh",
+    "-c",
+    // nohup + redirect + </dev/null detaches the process from this exec session.
+    // The sentinel comment "fly-health-server" makes it pkill-able later.
+    `nohup node -e "/*fly-health-server*/${nodeOneLiner}" >/dev/null 2>&1 </dev/null & echo health-server-ok`,
+  ];
+  try {
+    const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
+      method: "POST",
+      body: JSON.stringify({ command: cmd, timeout: 10 }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      logger.warn({ machineId, projectId, body: t }, "startContainerHealthServer: exec failed");
+    } else {
+      logger.info({ machineId, projectId }, "Container health server started");
+    }
+  } catch (err) {
+    logger.warn({ err, machineId, projectId }, "startContainerHealthServer: error (non-fatal)");
+  }
+}
+
+/**
+ * Kill the background health server started by startContainerHealthServer.
+ * Call this before starting the user's own app server to avoid port conflicts.
+ */
+export async function stopContainerHealthServer(
+  machineId: string,
+  projectId: number,
+): Promise<void> {
+  if (!isConfigured()) return;
+  try {
+    await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
+      method: "POST",
+      body: JSON.stringify({
+        command: ["sh", "-c", "pkill -f fly-health-server; echo health-server-killed"],
+        timeout: 5,
+      }),
+    });
+  } catch {
+    // Best-effort — if the server is already gone, that's fine.
+  }
+}
+
+/**
+ * Belt-and-suspenders keepalive: pings the container's /healthz through Fly's
+ * proxy every KEEPALIVE_INTERVAL_MS.
+ *
+ * The `fly-force-instance-id` header routes each ping to the SPECIFIC machine
+ * (not a random instance in the app's load-balancer pool), so the target
+ * machine's idle counter is actually reset.  This layer complements
+ * patchMachineAutostop — if the PATCH hasn't propagated yet or gets reverted,
+ * the pings act as a fallback to keep the machine from idling out.
+ */
+const KEEPALIVE_INTERVAL_MS = 5_000; // 5 s — shorter than any observed autostop grace period
+
+export function startContainerKeepalive(
+  containerUrl: string,
+  projectId: number,
+): () => void {
+  // Extract the machine ID from the proxy URL path (last path segment).
+  // URL format: https://<app>.fly.dev/container/<machineId>
+  const machineId = containerUrl.split("/").pop() ?? "";
+  let stopped = false;
+
+  const ping = async () => {
+    if (stopped) return;
+    try {
+      await fetch(`${containerUrl}/healthz`, {
+        signal: AbortSignal.timeout(4_000),
+        headers: machineId ? { "fly-force-instance-id": machineId } : {},
+      });
+    } catch {
+      // Ignore — machine may be momentarily starting; next tick will retry.
+    }
+  };
+
+  // Fire immediately so the first connection is established before any exec starts.
+  void ping();
+  const handle = setInterval(() => void ping(), KEEPALIVE_INTERVAL_MS);
+
+  logger.info({ projectId, containerUrl, machineId }, "Container keepalive started");
+
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(handle);
+    logger.info({ projectId }, "Container keepalive stopped");
+  };
+}

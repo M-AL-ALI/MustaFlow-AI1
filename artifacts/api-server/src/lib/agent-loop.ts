@@ -3953,13 +3953,15 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   // Use background+poll approach so npm install survives Fly autostop.
   // onMachineRestarted re-syncs workspace files when the machine's writable
   // layer resets between retries — without it, npm runs against an empty /app.
-  const { npmInstallInBackground: bgInstall } = await import("./container");
+  const { npmInstallInBackground: bgInstall, startContainerHealthServer } = await import("./container");
   const installResult = await bgInstall(ctx.containerState.id, ctx.input.projectId, {
     onMachineRestarted: async () => {
       const refreshedFiles = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
       if (refreshedFiles.length > 0) {
         await syncFilesToContainer(ctx.containerState.id!, ctx.input.projectId, refreshedFiles).catch(() => {});
       }
+      // Restart the health server so Fly keepalive pings work after machine wake.
+      await startContainerHealthServer(ctx.containerState.id!, ctx.input.projectId);
     },
   });
   ctx.commandsRun.push({
@@ -6477,8 +6479,11 @@ async function runCheckProfile(
     !input.signal.aborted
   ) {
     try {
-      const { npmInstallInBackground: bgInstall, syncFilesToContainer: syncFn } =
-        await import("./container");
+      const {
+        npmInstallInBackground: bgInstall,
+        syncFilesToContainer: syncFn,
+        startContainerHealthServer: startHealthSrv,
+      } = await import("./container");
       const containerId = effectiveContainerId;
       await bgInstall(containerId, input.projectId, {
         onMachineRestarted: async () => {
@@ -6486,6 +6491,8 @@ async function runCheckProfile(
           if (fileSet.length > 0) {
             await syncFn(containerId, input.projectId, fileSet).catch(() => {});
           }
+          // Restart the health server so keepalive pings keep the machine alive.
+          await startHealthSrv(containerId, input.projectId);
         },
       });
     } catch {

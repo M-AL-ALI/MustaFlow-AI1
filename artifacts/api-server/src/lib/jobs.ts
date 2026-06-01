@@ -1607,6 +1607,10 @@ export async function runJob(input: JobInput): Promise<void> {
   // Default "passed"; flipped to "failed" only when agentic builder mode chooses
   // to persist a snapshot despite required-check failures (see hard-gate blocks).
   let versionValidationStatus: "passed" | "failed" = "passed";
+  // Keepalive handle — cleared in the outer finally block.
+  let stopContainerKeepalive: (() => void) | null = null;
+  // Machine ID whose autostop was patched to "off" — restored in the outer finally.
+  let keepaliveMachineId: string | null = null;
 
   // Sanitise prompt before injecting into AI context — strip injection patterns
   const { cleaned: sanitisedPrompt, wasModified: promptWasModified } = sanitisePrompt(userPrompt);
@@ -2194,6 +2198,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
         // ── End agentic pre-flight gate ────────────────────────────────────────
 
+        // Disable Fly autostop on the build machine so it cannot idle-stop during
+        // long-running inline execs (npm install, tsc, vite build).  The keepalive
+        // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
+        if (project.containerId && project.containerUrl) {
+          const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
+            await import("./container");
+          keepaliveMachineId = project.containerId;
+          await patchMachineAutostop(project.containerId, projectId, "off");
+          await startContainerHealthServer(project.containerId, projectId);
+          stopContainerKeepalive = startContainerKeepalive(project.containerUrl, projectId);
+        }
+
         const USE_AGENT_LOOP_BUILD = process.env.AGENTIC_BUILDER_ENABLED !== "false";
         logger.info(
           { taskId, projectId, pipeline: USE_AGENT_LOOP_BUILD ? "agentic" : "legacy" },
@@ -2705,6 +2721,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           }
         }
         // ── End agentic pre-flight gate ────────────────────────────────────────
+
+        // Disable Fly autostop on the build machine so it cannot idle-stop during
+        // long-running inline execs (npm install, tsc, vite build).  The keepalive
+        // loop is a belt-and-suspenders fallback in case the PATCH hasn't propagated.
+        if (project.containerId && project.containerUrl) {
+          const { patchMachineAutostop, startContainerKeepalive, startContainerHealthServer } =
+            await import("./container");
+          keepaliveMachineId = project.containerId;
+          await patchMachineAutostop(project.containerId, projectId, "off");
+          await startContainerHealthServer(project.containerId, projectId);
+          stopContainerKeepalive = startContainerKeepalive(project.containerUrl, projectId);
+        }
 
         const USE_AGENT_LOOP_REFINE = process.env.AGENTIC_BUILDER_ENABLED !== "false";
         logger.info(
@@ -5413,6 +5441,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
   } finally {
+    // Stop the keepalive loop and restore autostop on the machine so it can
+    // idle-stop normally once the task is done.
+    stopContainerKeepalive?.();
+    if (keepaliveMachineId) {
+      const { patchMachineAutostop } = await import("./container");
+      await patchMachineAutostop(keepaliveMachineId, projectId, "stop");
+    }
+
     // Always release the advisory lock and pool client, and clear the in-memory guard.
     if (lockAcquired) {
       try {
