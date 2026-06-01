@@ -70,12 +70,14 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
   },
   "react-vite": {
     stack: "react-vite",
-    installCmd: ["sh", "-lc", "npm install --no-audit --no-fund --prefer-offline"],
+    // Note: Fly Machine exec API ignores `cwd` — all commands start from `/`.
+    // We must explicitly `cd /app` so npm finds package.json in /app.
+    installCmd: ["sh", "-c", "cd /app && npm install --no-audit --no-fund --prefer-offline"],
     checks: [
       {
         id: "typecheck",
         label: "TypeScript typecheck",
-        argv: ["sh", "-lc", "npx --yes tsc --noEmit"],
+        argv: ["sh", "-c", "cd /app && npx --yes --package typescript tsc --noEmit"],
         runner: "container",
         required: true,
         timeoutMs: TWO_MIN,
@@ -83,7 +85,7 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
       {
         id: "build",
         label: "Vite production build",
-        argv: ["sh", "-lc", "npx --yes vite build"],
+        argv: ["sh", "-c", "cd /app && npx --yes vite build"],
         runner: "container",
         required: true,
         timeoutMs: FIVE_MIN,
@@ -92,12 +94,12 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
   },
   "node-api": {
     stack: "node-api",
-    installCmd: ["sh", "-lc", "npm install --no-audit --no-fund --prefer-offline"],
+    installCmd: ["sh", "-c", "cd /app && npm install --no-audit --no-fund --prefer-offline"],
     checks: [
       {
         id: "typecheck",
         label: "TypeScript typecheck",
-        argv: ["sh", "-lc", "npx --yes tsc --noEmit"],
+        argv: ["sh", "-c", "cd /app && npx --yes --package typescript tsc --noEmit"],
         runner: "container",
         required: true,
         timeoutMs: TWO_MIN,
@@ -105,7 +107,7 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
       {
         id: "node-syntax",
         label: "Node syntax check (entry)",
-        argv: ["sh", "-lc", "node --check index.js"],
+        argv: ["sh", "-c", "cd /app && node --check index.js"],
         runner: "container",
         required: false,
         timeoutMs: ONE_MIN,
@@ -114,12 +116,12 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
   },
   nextjs: {
     stack: "nextjs",
-    installCmd: ["sh", "-lc", "npm install --no-audit --no-fund --prefer-offline"],
+    installCmd: ["sh", "-c", "cd /app && npm install --no-audit --no-fund --prefer-offline"],
     checks: [
       {
         id: "typecheck",
         label: "TypeScript typecheck",
-        argv: ["sh", "-lc", "npx --yes tsc --noEmit"],
+        argv: ["sh", "-c", "cd /app && npx --yes --package typescript tsc --noEmit"],
         runner: "container",
         required: true,
         timeoutMs: TWO_MIN,
@@ -127,7 +129,7 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
       {
         id: "build",
         label: "Next.js build",
-        argv: ["sh", "-lc", "npx --yes next build"],
+        argv: ["sh", "-c", "cd /app && npx --yes next build"],
         runner: "container",
         required: true,
         timeoutMs: FIVE_MIN,
@@ -138,14 +140,14 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
     stack: "python-flask",
     installCmd: [
       "sh",
-      "-lc",
-      "pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true",
+      "-c",
+      "cd /app && pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true",
     ],
     checks: [
       {
         id: "py-compile",
         label: "Python compile",
-        argv: ["sh", "-lc", "python -m compileall -q . 2>&1 | tail -n 100"],
+        argv: ["sh", "-c", "cd /app && python -m compileall -q . 2>&1 | tail -n 100"],
         runner: "container",
         required: true,
         timeoutMs: TWO_MIN,
@@ -156,14 +158,14 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
     stack: "python-fastapi",
     installCmd: [
       "sh",
-      "-lc",
-      "pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true",
+      "-c",
+      "cd /app && pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true",
     ],
     checks: [
       {
         id: "py-compile",
         label: "Python compile",
-        argv: ["sh", "-lc", "python -m compileall -q . 2>&1 | tail -n 100"],
+        argv: ["sh", "-c", "cd /app && python -m compileall -q . 2>&1 | tail -n 100"],
         runner: "container",
         required: true,
         timeoutMs: TWO_MIN,

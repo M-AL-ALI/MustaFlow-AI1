@@ -23,7 +23,7 @@
  * checks ran (none were skipped) and all passed — used for the UI banner.
  */
 
-import { execInContainer } from "./container";
+import { execInContainer, npmInstallInBackground, syncFilesToContainer } from "./container";
 import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,8 +111,79 @@ export async function runQualityGate(
   projectId: number,
   changedFiles: ReadonlyArray<{ path: string; content: string }>,
   allFiles: ReadonlyArray<{ path: string }>,
+  /** Full project file set with content, used to re-sync the container if the
+   *  Fly machine has restarted and lost its writable layer (package.json missing). */
+  allFilesForSync?: ReadonlyArray<{ path: string; content: string }>,
 ): Promise<QualityGateResult> {
   const checks: QualityGateCheck[] = [];
+
+  // ── Pre-flight: re-sync files + npm install if machine restarted ─────────
+  // Fly machines reset their writable layer on each stop/start cycle.
+  // If /app/package.json is missing after a restart, re-sync all project files
+  // and re-run npm install so that tsc/eslint can find their binaries.
+  if (allFilesForSync && allFilesForSync.length > 0) {
+    try {
+      const probe = await execInContainer(
+        containerId,
+        ["sh", "-c", "test -f /app/package.json && echo exists || echo missing"],
+        projectId,
+      );
+      if (probe.output.includes("missing") || probe.machineWoken) {
+        logger.info(
+          { projectId, containerId },
+          "Quality gate pre-flight: /app/package.json missing after machine restart — re-syncing files and running npm install",
+        );
+        await syncFilesToContainer(
+          containerId,
+          projectId,
+          allFilesForSync.map((f) => ({ path: f.path, content: f.content })),
+        ).catch((e: unknown) =>
+          logger.warn({ projectId, err: e }, "Quality gate pre-flight: syncFilesToContainer failed (non-fatal)"),
+        );
+        // Re-run npm install using the background+poll approach.
+        // Direct exec holds an open HTTP connection for ~90 s which gets cut by
+        // Fly's ~60 s autostop.  Detaching the process and polling with short
+        // execs keeps every individual exec well under the autostop window.
+        //
+        // Pass onMachineRestarted so that if the machine autostops DURING the
+        // background install (resetting /app), files are re-synced before the
+        // next install attempt.  Without this, npm would run against an empty
+        // /app directory (no package.json) and succeed with 0 packages.
+        const filesSnapshot = allFilesForSync;
+        const installResult = await npmInstallInBackground(containerId, projectId, {
+          onMachineRestarted: async () => {
+            logger.info(
+              { projectId, containerId },
+              "Quality gate pre-flight: machine restarted during npm install — re-syncing files",
+            );
+            await syncFilesToContainer(
+              containerId,
+              projectId,
+              filesSnapshot.map((f) => ({ path: f.path, content: f.content })),
+            ).catch((e: unknown) =>
+              logger.warn(
+                { projectId, err: e },
+                "Quality gate pre-flight: re-sync on restart failed (non-fatal)",
+              ),
+            );
+          },
+        });
+        if (installResult.ok) {
+          logger.info({ projectId, containerId }, "Quality gate pre-flight: re-sync + install complete");
+        } else {
+          logger.warn(
+            { projectId, containerId, output: installResult.output.slice(0, 500) },
+            "Quality gate pre-flight: npm install failed (non-fatal) — tsc/eslint checks may be skipped",
+          );
+        }
+      }
+    } catch (preFlightErr) {
+      logger.warn(
+        { projectId, err: preFlightErr },
+        "Quality gate pre-flight check failed — proceeding without re-sync (non-fatal)",
+      );
+    }
+  }
 
   // ── 1. TypeScript ──────────────────────────────────────────────────────────
   if (hasFile(allFiles, "tsconfig.json")) {

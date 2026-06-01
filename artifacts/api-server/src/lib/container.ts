@@ -485,6 +485,10 @@ export async function execInContainer(
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** True when the machine had auto-stopped and was woken up to service this exec.
+   *  Callers can use this flag to reset any in-memory "installed" state since the
+   *  Fly machine's writable layer is reset on each stop/start cycle. */
+  machineWoken: boolean;
 }> {
   if (!isConfigured()) {
     throw new ContainerUnavailableError(
@@ -492,16 +496,63 @@ export async function execInContainer(
         "Provision the project or add FLY_API_TOKEN to the environment.",
     );
   }
-  try {
+
+  /** Attempt a single exec POST and return raw response text + ok flag. */
+  const attemptExec = async () => {
     const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
       method: "POST",
       body: JSON.stringify({ command, cwd: workdir, timeout: 300 }),
     });
+    return { res, text: res.ok ? null : await res.text() };
+  };
+
+  /**
+   * Returns true when the non-ok exec response indicates the machine stopped
+   * (or is mid-transition), so we should wake it and retry.
+   *
+   * Fly returns "failed_precondition: machine not running" in the body when the
+   * machine is cleanly stopped.  An empty body occurs during the brief transition
+   * between stopped and starting, or occasionally under API transient errors —
+   * in both cases a wake-and-retry is the right remedy.
+   * "exec request failed: EOF" occurs when the machine stops mid-exec (e.g.
+   * autostop fires during a long-running npm install), cutting the HTTP
+   * connection — treat it the same way.
+   */
+  const isMachineStopped = (t: string | null): boolean =>
+    t === "" ||
+    t === null ||
+    (t?.includes("machine not running") ?? false) ||
+    (t?.includes("exec request failed: EOF") ?? false);
+
+  let machineWoken = false;
+
+  try {
+    let { res, text } = await attemptExec();
+
+    // Fly machines autostop when idle (HTTP port gets no traffic).  If the
+    // machine stopped between agent steps, wake it and retry up to 2 times.
+    // IMPORTANT: When a Fly machine stops and restarts, its writable layer is
+    // reset from the base Docker image — all files written via exec (project
+    // files, node_modules) are lost.  Callers must re-sync files and re-run
+    // npm install after detecting machineWoken=true.
+    for (let attempt = 0; !res.ok && isMachineStopped(text) && attempt < 2; attempt++) {
+      logger.info(
+        { machineId, projectId, attempt, body: text },
+        "Machine stopped between execs — auto-waking and retrying",
+      );
+      await writeLog(projectId, "system", "Container auto-waking after idle stop…");
+      machineWoken = true;
+      await startContainer(machineId, projectId);
+      await waitForMachineReady(machineId, 45);
+      // Give the container processes a moment to initialize after the VM reports "started"
+      await new Promise((r) => setTimeout(r, 3_000));
+      ({ res, text } = await attemptExec());
+    }
 
     if (!res.ok) {
-      const text = await res.text();
-      logger.warn({ machineId, projectId, command, body: text }, "Exec failed");
-      return { ok: false, output: text, stdout: "", stderr: text, exitCode: -1 };
+      const errText = text ?? (await res.text());
+      logger.warn({ machineId, projectId, command, body: errText }, "Exec failed");
+      return { ok: false, output: errText, stdout: "", stderr: errText, exitCode: -1, machineWoken };
     }
 
     const data = (await res.json()) as { stdout?: string; stderr?: string; exit_code?: number };
@@ -512,11 +563,138 @@ export async function execInContainer(
     const ok = exitCode === 0;
 
     await writeLog(projectId, ok ? "stdout" : "stderr", output.slice(0, 4000));
-    return { ok, output, stdout, stderr, exitCode };
+    return { ok, output, stdout, stderr, exitCode, machineWoken };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, output: msg, stdout: "", stderr: msg, exitCode: -1 };
+    return { ok: false, output: msg, stdout: "", stderr: msg, exitCode: -1, machineWoken };
   }
+}
+
+/**
+ * Options for npmInstallInBackground.
+ */
+export type NpmInstallOptions = {
+  /**
+   * Max times to (re)start the install (default 5).
+   */
+  maxAttempts?: number;
+  /**
+   * Called before every retry that was triggered by a machine restart.
+   * Use this to re-sync project files to the container — when the Fly machine
+   * autostops, its writable layer is reset, so /app files (including
+   * package.json) disappear.  Without a re-sync, npm install would run
+   * against an empty directory and succeed with 0 packages installed.
+   */
+  onMachineRestarted?: () => Promise<void>;
+};
+
+/**
+ * Runs `npm install` inside a container as a detached background process,
+ * then polls for completion with short execs every 5 seconds.
+ *
+ * Why detached?  Fly machines autostop after ~60 s of no HTTP connections.
+ * A direct exec holding the connection open for ~90 s (npm install duration)
+ * gets cut with EOF.  Detaching the install from the exec connection means
+ * each individual poll exec finishes in < 1 s, staying well under the
+ * autostop window.
+ *
+ * If the machine restarts during polling (machineWoken), /tmp files are lost
+ * and we relaunch the install.  The onMachineRestarted callback is invoked
+ * before each restart-triggered relaunch so the caller can re-sync project
+ * files — without this, npm install would run against an empty /app directory
+ * (no package.json) and succeed with 0 packages installed.
+ *
+ * @param machineId  - Fly machine ID
+ * @param projectId  - Project ID (for logging + writeLog)
+ * @param opts       - Optional configuration (see NpmInstallOptions)
+ */
+export async function npmInstallInBackground(
+  machineId: string,
+  projectId: number,
+  opts?: NpmInstallOptions,
+): Promise<{ ok: boolean; output: string }> {
+  const maxAttempts = opts?.maxAttempts ?? 5;
+  const onMachineRestarted = opts?.onMachineRestarted;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Launch npm install detached from the exec HTTP connection so it survives EOF/autostop.
+    // rm the sentinel files first so stale state from a previous run doesn't confuse polling.
+    const launch = await execInContainer(
+      machineId,
+      [
+        "sh",
+        "-c",
+        "rm -f /tmp/.npm-done /tmp/.npm-out && " +
+          "nohup sh -c 'cd /app && npm install --prefer-offline --no-audit --no-fund 2>&1 | tee /tmp/.npm-out; echo $? > /tmp/.npm-done' " +
+          "</dev/null >/dev/null 2>&1 &",
+      ],
+      projectId,
+    );
+
+    if (!launch.ok || launch.machineWoken) {
+      logger.warn({ machineId, projectId, attempt }, "npmInstallInBackground: launch exec failed — retrying");
+      // Machine restarted → /app is empty. Re-sync files before next launch.
+      if (launch.machineWoken && onMachineRestarted) {
+        try {
+          await onMachineRestarted();
+        } catch (e) {
+          logger.warn({ machineId, projectId, attempt, err: e }, "npmInstallInBackground: onMachineRestarted callback failed");
+        }
+      }
+      await new Promise((r) => setTimeout(r, 5_000));
+      continue;
+    }
+
+    // Poll for /tmp/.npm-done, written by the background shell when npm exits.
+    for (let poll = 0; poll < 72; poll++) {
+      // 72 × 5 s = 6 min ceiling
+      await new Promise((r) => setTimeout(r, 5_000));
+
+      const check = await execInContainer(
+        machineId,
+        [
+          "sh",
+          "-c",
+          'if [ -f /tmp/.npm-done ]; then echo "__EXIT_$(cat /tmp/.npm-done)__"; cat /tmp/.npm-out; else echo "__RUNNING__"; fi',
+        ],
+        projectId,
+      );
+
+      if (check.machineWoken) {
+        logger.info(
+          { machineId, projectId, attempt, poll },
+          "npmInstallInBackground: machine restarted during poll — re-syncing files and relaunching install",
+        );
+        // Machine restarted → /app is empty. Re-sync before the outer loop retries.
+        if (onMachineRestarted) {
+          try {
+            await onMachineRestarted();
+          } catch (e) {
+            logger.warn({ machineId, projectId, attempt, poll, err: e }, "npmInstallInBackground: onMachineRestarted callback failed");
+          }
+        }
+        break; // break polling loop → outer attempt loop will relaunch
+      }
+
+      const m = check.output.match(/__EXIT_(\d+)__/);
+      if (m) {
+        const exitCode = parseInt(m[1], 10);
+        const installOutput = check.output.replace(/__EXIT_\d+__\n?/, "");
+        if (exitCode === 0) {
+          logger.info({ machineId, projectId, attempt, poll }, "npmInstallInBackground: npm install succeeded");
+          return { ok: true, output: installOutput };
+        }
+        logger.warn(
+          { machineId, projectId, attempt, poll, exitCode, output: installOutput.slice(0, 500) },
+          "npmInstallInBackground: npm install exited non-zero",
+        );
+        return { ok: false, output: installOutput };
+      }
+      // Still running (__RUNNING__) or poll exec returned unexpected output — keep waiting
+    }
+    // Inner poll loop exhausted (timeout or machine restart) → retry outer attempt
+  }
+  return { ok: false, output: "npmInstallInBackground: exhausted all attempts" };
 }
 
 /**

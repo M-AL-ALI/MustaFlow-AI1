@@ -138,14 +138,21 @@ async function runAgenticPreflightGate(
 
   // ── 1. Container wake check ──────────────────────────────────────────────
   if (containerId) {
-    // Detect first-build: if no project_versions exist the app has never been
-    // successfully built, so /healthz cannot possibly respond. Skip the HTTP
-    // health check and only verify the container OS exec layer is working.
-    const [versionCountRow] = await db
+    // Detect first-build: if no project_versions with validationStatus='passed' exist
+    // then the container has never served a working app, so /healthz cannot possibly
+    // respond. Skip the HTTP health check and only verify the container OS exec layer.
+    // This covers both (a) truly first builds and (b) projects whose previous builds
+    // all failed validation — the container is running but has no HTTP server yet.
+    const [passedVersionRow] = await db
       .select({ n: count() })
       .from(projectVersionsTable)
-      .where(eq(projectVersionsTable.projectId, projectId));
-    const isFirstBuild = (versionCountRow?.n ?? 0) === 0;
+      .where(
+        and(
+          eq(projectVersionsTable.projectId, projectId),
+          eq(projectVersionsTable.validationStatus, "passed"),
+        ),
+      );
+    const isFirstBuild = (passedVersionRow?.n ?? 0) === 0;
 
     if (isFirstBuild) {
       await emitEvent(
@@ -3426,6 +3433,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               projectId,
               changedFilesForGate,
               stagingData,
+              stagingData, // full content set for pre-flight re-sync if machine restarted
             );
 
             // Smoke test — only after TypeScript/ESLint pass, server-side stacks only.
@@ -3818,18 +3826,17 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           try {
             await emitEvent(taskId, "narration", "Running quality checks (TypeScript, ESLint)…");
             const { runQualityGate, runSmokeTest } = await import("./quality-gate");
-            // Fetch just the paths of all project files so runQualityGate can
-            // detect tsconfig.json and ESLint configs even on refine tasks where
-            // filesToSmellScan only contains the changed files.
-            const allProjectFilePaths = await db
-              .select({ path: projectFilesTable.path })
+            // Fetch all project files (paths for config detection, content for re-sync pre-flight).
+            const allProjectFileRows = await db
+              .select({ path: projectFilesTable.path, content: projectFilesTable.content })
               .from(projectFilesTable)
               .where(eq(projectFilesTable.projectId, projectId));
             const gateResult = await runQualityGate(
               project.containerId,
               projectId,
               filesToSmellScan, // changedFiles — used for ESLint batching
-              allProjectFilePaths, // allFiles — used for config detection (tsconfig, eslintrc)
+              allProjectFileRows, // allFiles — used for config detection (tsconfig, eslintrc)
+              allProjectFileRows, // full content for pre-flight re-sync if machine restarted
             );
 
             if (gateResult.passed && _isServerStack) {
@@ -7094,8 +7101,6 @@ export async function failStuckBackgroundTasksOnBoot(): Promise<void> {
           inArray(agentTasksTable.status, ["building", "planning"]),
         ),
       );
-
-    if (stuck.length === 0) return;
 
     for (const t of stuck) {
       const msg = "Interrupted by server restart. Please retry.";

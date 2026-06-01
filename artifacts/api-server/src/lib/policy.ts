@@ -414,14 +414,17 @@ export function evaluatePkgInstall(
 function buildPkgInstallArgv(mgr: PkgManager, pkg: string, version: string): string[] {
   const spec = version ? (mgr === "pip" ? `${pkg}==${version}` : `${pkg}@${version}`) : pkg;
   switch (mgr) {
+    // Fly Machine exec API ignores the `cwd` JSON field — all execs start from `/`.
+    // We must cd into /app so npm finds package.json and doesn't hit the npm v10
+    // "Tracker 'idealTree' already exists" bug (triggered when npm runs without package.json).
     case "npm":
-      return ["npm", "install", "--no-audit", "--no-fund", "--save", spec];
+      return ["sh", "-c", `cd /app && npm install --no-audit --no-fund --save ${spec}`];
     case "pnpm":
-      return ["pnpm", "add", spec];
+      return ["sh", "-c", `cd /app && pnpm add ${spec}`];
     case "yarn":
-      return ["yarn", "add", spec];
+      return ["sh", "-c", `cd /app && yarn add ${spec}`];
     case "pip":
-      return ["pip", "install", "--no-cache-dir", spec];
+      return ["sh", "-c", `cd /app && pip install --no-cache-dir ${spec}`];
   }
 }
 

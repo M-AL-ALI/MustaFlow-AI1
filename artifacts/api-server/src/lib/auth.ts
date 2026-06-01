@@ -59,7 +59,7 @@ class DevOnlyAuthAdapter implements AuthAdapter {
           "Replace DevOnlyAuthAdapter in auth.ts before production launch.",
       );
     }
-    req.userId = "demo-user";
+    req.userId = "user_3EHZxIQGGhfh2Du5O2KlQ6s7rug";
     next();
   }
 }

@@ -262,6 +262,37 @@ const MODEL_FOR_MODE: Record<AgentMode, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// E2E test auto-approve bypass
+// Only active when NODE_ENV !== "production" AND E2E_TEST_ENABLED === "true".
+// Never bypasses destructive shell operations, database DDL, or deploy commands.
+// pkg_install is always considered safe; run_command is filtered by pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const E2E_BLOCKED_PATTERNS: RegExp[] = [
+  /\brm\s+-rf\b/,
+  /\bdrop\s+(table|database|schema)\b/i,
+  /\btruncate\b/i,
+  /\bdelete\s+from\b/i,
+  /\bdropdb\b/i,
+  /\bfly\s+(deploy|launch|destroy)\b/,
+  /\bstripe\b/i,
+  /\bpg_dump\b/i,
+  /\bcurl\s+-X\s+(DELETE|POST|PUT|PATCH)\b/i,
+  /\bsudo\b/,
+  /\bpasswd\b/,
+  /\bchmod\s+[0-7]{3,4}\s/,
+];
+
+function isE2EAutoApproveEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true";
+}
+
+function isE2ERunCommandSafe(argv: string[]): boolean {
+  const cmd = argv.join(" ");
+  return !E2E_BLOCKED_PATTERNS.some((re) => re.test(cmd));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Path sanitization & command checks
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3797,6 +3828,8 @@ async function execWithTimeout(
   exitCode: number;
   timedOut: boolean;
   aborted: boolean;
+  /** Propagated from execInContainer — true when the Fly machine had stopped and was woken. */
+  machineWoken?: boolean;
 }> {
   const { execInContainer } = await import("./container");
   let timer: NodeJS.Timeout | null = null;
@@ -3852,6 +3885,7 @@ async function execWithTimeout(
       stdout: r.stdout,
       stderr: r.stderr,
       exitCode: r.exitCode,
+      machineWoken: r.machineWoken,
       timedOut: false as const,
       aborted: false as const,
     }));
@@ -3889,31 +3923,52 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   const argv = ctx.profile.installCmd;
   await safeEvent(ctx.input.onEvent, "narration", "Installing dependencies…");
   const t = Date.now();
-  // Clear stale npm lock files before installing — prevents "Tracker 'idealTree' already exists"
-  // errors that occur when a previous npm run was interrupted and left lock files behind.
+
+  // Pre-sync: write all current workspace files to /app before npm install.
+  // This ensures package.json (and other config files) are present in the
+  // container when npm runs. Without this, npm v10 throws "Tracker 'idealTree'
+  // already exists" when it can't find package.json in the working directory.
+  const { syncFilesToContainer } = await import("./container");
+  const files = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
+  if (files.length > 0) {
+    await syncFilesToContainer(ctx.containerState.id, ctx.input.projectId, files).catch(() => {});
+  }
+
+  // Clear stale npm state before installing — prevents "Tracker 'idealTree' already exists"
+  // errors caused by a concurrent or interrupted npm run. The container's npm home may be
+  // at /.npm/ (when HOME=/  in the container image) rather than /root/.npm/, so we clear both.
   if (argv[0] === "npm" || argv[0] === "npx") {
     await execWithTimeout(
       ctx.containerState.id,
-      ["sh", "-c", "rm -f /root/.npm/_locks/* 2>/dev/null; true"],
+      [
+        "sh",
+        "-c",
+        "pkill -f 'npm install' 2>/dev/null; sleep 1; rm -f /root/.npm/_locks/* /.npm/_locks/* 2>/dev/null; true",
+      ],
       ctx.input.projectId,
-      5_000,
+      8_000,
       signal,
     ).catch(() => {});
   }
-  const r = await execWithTimeout(
-    ctx.containerState.id,
-    argv,
-    ctx.input.projectId,
-    5 * 60_000,
-    signal,
-  );
+  // Use background+poll approach so npm install survives Fly autostop.
+  // onMachineRestarted re-syncs workspace files when the machine's writable
+  // layer resets between retries — without it, npm runs against an empty /app.
+  const { npmInstallInBackground: bgInstall } = await import("./container");
+  const installResult = await bgInstall(ctx.containerState.id, ctx.input.projectId, {
+    onMachineRestarted: async () => {
+      const refreshedFiles = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
+      if (refreshedFiles.length > 0) {
+        await syncFilesToContainer(ctx.containerState.id!, ctx.input.projectId, refreshedFiles).catch(() => {});
+      }
+    },
+  });
   ctx.commandsRun.push({
     step,
     argv,
-    exitCode: r.ok ? 0 : 1,
+    exitCode: installResult.ok ? 0 : 1,
     durationMs: Date.now() - t,
-    stdoutPreview: r.ok ? r.output.slice(0, 400) : "",
-    stderrPreview: r.ok ? "" : r.output.slice(0, 400),
+    stdoutPreview: installResult.ok ? installResult.output.slice(0, 400) : "",
+    stderrPreview: installResult.ok ? "" : installResult.output.slice(0, 400),
   });
   ctx.containerState.installed = true;
 }
@@ -4392,41 +4447,50 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       // Runs BEFORE ensureInstalled so no side-effects occur on rejection.
       if (input.requireCommandApproval && input.taskId) {
         const fullCmd = argv.join(" ");
-        const { createPrompt } = await import("./agent-prompts");
-        const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
-        const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
-        const approvalPayload = {
-          question: `Allow the agent to run this command?\n\`${fullCmd}\``,
-          kind: "boolean" as const,
-          options: [],
-          allowMultiple: false,
-        };
-        const { promptId, promise } = createPrompt({
-          taskId: input.taskId,
-          projectId: input.projectId,
-          kind: "user_query",
-          payload: approvalPayload,
-          signal: input.signal,
-          timeoutMs: promptTimeoutMs,
-        });
-        await safeEvent(
-          input.onEvent,
-          "agent_prompt",
-          JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
-        );
-        const resp = await promise;
-        if (resp.canceled) {
-          // Both abort and wall-clock expiry terminate the task — never feed a
-          // "timed out / rejected" observation back to the model (manual-only gate).
-          throw new Error("Task terminated while awaiting command approval");
-        }
-        const approved =
-          typeof resp.response === "boolean" ? resp.response : resp.response === "true";
-        if (!approved) {
-          return {
-            ok: false,
-            observation: "Command rejected by user — find an alternative approach",
+        if (isE2EAutoApproveEnabled() && isE2ERunCommandSafe(argv)) {
+          // E2E bypass: auto-approve safe commands when E2E_TEST_ENABLED=true.
+          // Never runs in production (isE2EAutoApproveEnabled guards NODE_ENV).
+          logger.info(
+            { projectId: input.projectId, taskId: input.taskId, cmd: fullCmd },
+            "[E2E] Auto-approved run_command",
+          );
+        } else {
+          const { createPrompt } = await import("./agent-prompts");
+          const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+          const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+          const approvalPayload = {
+            question: `Allow the agent to run this command?\n\`${fullCmd}\``,
+            kind: "boolean" as const,
+            options: [],
+            allowMultiple: false,
           };
+          const { promptId, promise } = createPrompt({
+            taskId: input.taskId,
+            projectId: input.projectId,
+            kind: "user_query",
+            payload: approvalPayload,
+            signal: input.signal,
+            timeoutMs: promptTimeoutMs,
+          });
+          await safeEvent(
+            input.onEvent,
+            "agent_prompt",
+            JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+          );
+          const resp = await promise;
+          if (resp.canceled) {
+            // Both abort and wall-clock expiry terminate the task — never feed a
+            // "timed out / rejected" observation back to the model (manual-only gate).
+            throw new Error("Task terminated while awaiting command approval");
+          }
+          const approved =
+            typeof resp.response === "boolean" ? resp.response : resp.response === "true";
+          if (!approved) {
+            return {
+              ok: false,
+              observation: "Command rejected by user — find an alternative approach",
+            };
+          }
         }
       }
 
@@ -4466,7 +4530,11 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       const logPath = `/tmp/agent-cmd-${slug}.log`;
       const exitPath = `/tmp/agent-cmd-${slug}.exit`;
       const escaped = argv.map(shSingleQuote).join(" ");
-      const wrappedScript = `${escaped} > ${logPath} 2>&1; echo $? > ${exitPath}`;
+      // Fly Machine exec API ignores the `cwd` JSON field — all execs start from `/`.
+      // Prepend `cd /app &&` so agent commands run from the project directory.
+      // Absolute-path commands (ls /app, find /, /app/node_modules/.bin/tsc) still
+      // work correctly after the cd since they don't depend on CWD.
+      const wrappedScript = `cd /app && ${escaped} > ${logPath} 2>&1; echo $? > ${exitPath}`;
       const wrappedArgv = ["sh", "-c", wrappedScript];
 
       // Live poller: starts after a 1.2s delay so fast commands incur zero
@@ -4512,6 +4580,18 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       );
       polling = false;
       await pollerPromise;
+
+      // Fly machine woke up during this exec — the writable layer has been reset
+      // from the base Docker image, so all previously synced project files and
+      // node_modules are gone.  Clear the installed flag so the next run_command
+      // call triggers ensureInstalled again (which re-syncs files + re-runs npm install).
+      if (r.machineWoken) {
+        ctx.containerState.installed = false;
+        logger.info(
+          { projectId: input.projectId, taskId: input.taskId },
+          "Machine woke mid-task — resetting installed flag so next run_command re-syncs and re-installs",
+        );
+      }
 
       // Read full captured output + parsed inner exit code. We rely on a
       // separator to split log content from the exit file in a single exec
@@ -4736,42 +4816,58 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       // Human-in-the-loop approval gate — opt-in via requireCommandApproval
       if (input.requireCommandApproval && input.taskId) {
         const pkgLabel = `${decision.pkg}${decision.version ? `@${decision.version}` : ""}`;
-        const { createPrompt } = await import("./agent-prompts");
-        const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
-        const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
-        const approvalPayload = {
-          question: `Allow the agent to install package \`${pkgLabel}\` via ${decision.manager}?`,
-          kind: "boolean" as const,
-          options: [],
-          allowMultiple: false,
-        };
-        const { promptId, promise } = createPrompt({
-          taskId: input.taskId,
-          projectId: input.projectId,
-          kind: "user_query",
-          payload: approvalPayload,
-          signal: input.signal,
-          timeoutMs: promptTimeoutMs,
-        });
-        await safeEvent(
-          input.onEvent,
-          "agent_prompt",
-          JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
-        );
-        const resp = await promise;
-        if (resp.canceled) {
-          // Both abort and wall-clock expiry terminate the task — manual-only gate.
-          throw new Error("Task terminated while awaiting package installation approval");
-        }
-        const approved =
-          typeof resp.response === "boolean" ? resp.response : resp.response === "true";
-        if (!approved) {
-          return {
-            ok: false,
-            observation: "Package installation rejected by user — find an alternative approach",
+        if (isE2EAutoApproveEnabled()) {
+          // E2E bypass: pkg_install is always safe to auto-approve.
+          // Never runs in production (isE2EAutoApproveEnabled guards NODE_ENV).
+          logger.info(
+            { projectId: input.projectId, taskId: input.taskId, pkg: pkgLabel },
+            "[E2E] Auto-approved pkg_install",
+          );
+        } else {
+          const { createPrompt } = await import("./agent-prompts");
+          const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+          const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+          const approvalPayload = {
+            question: `Allow the agent to install package \`${pkgLabel}\` via ${decision.manager}?`,
+            kind: "boolean" as const,
+            options: [],
+            allowMultiple: false,
           };
+          const { promptId, promise } = createPrompt({
+            taskId: input.taskId,
+            projectId: input.projectId,
+            kind: "user_query",
+            payload: approvalPayload,
+            signal: input.signal,
+            timeoutMs: promptTimeoutMs,
+          });
+          await safeEvent(
+            input.onEvent,
+            "agent_prompt",
+            JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+          );
+          const resp = await promise;
+          if (resp.canceled) {
+            // Both abort and wall-clock expiry terminate the task — manual-only gate.
+            throw new Error("Task terminated while awaiting package installation approval");
+          }
+          const approved =
+            typeof resp.response === "boolean" ? resp.response : resp.response === "true";
+          if (!approved) {
+            return {
+              ok: false,
+              observation: "Package installation rejected by user — find an alternative approach",
+            };
+          }
         }
       }
+
+      // Ensure base dependencies are installed (and workspace files synced) before
+      // adding individual packages.  ensureInstalled is idempotent — it no-ops on
+      // the second call — and its pre-sync guarantees package.json exists in /app
+      // so that the per-package npm install below does not hit the npm v10
+      // "Tracker 'idealTree' already exists" bug triggered by a missing package.json.
+      await ensureInstalled(ctx, input.signal, step);
 
       // Checkpoint before package install — modifies node_modules and lockfile
       if (input.onBeforeRiskyOp) {
@@ -4787,14 +4883,19 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         `Installing ${decision.pkg}${decision.version ? `@${decision.version}` : ""} via ${decision.manager}…`,
       );
       const t = Date.now();
-      // Clear stale npm lock files before installing — prevents "Tracker 'idealTree' already exists"
-      // errors caused by interrupted previous npm runs leaving lock files in /root/.npm/_locks/.
+      // Clear stale npm state before installing — prevents "Tracker 'idealTree' already exists"
+      // errors caused by a concurrent or interrupted npm run. The container's npm home may be
+      // at /.npm/ (when HOME=/ in the container image) rather than /root/.npm/, so we clear both.
       if (decision.manager === "npm") {
         await execWithTimeout(
           containerState.id!,
-          ["sh", "-c", "rm -f /root/.npm/_locks/* 2>/dev/null; true"],
+          [
+            "sh",
+            "-c",
+            "pkill -f 'npm install' 2>/dev/null; sleep 1; rm -f /root/.npm/_locks/* /.npm/_locks/* 2>/dev/null; true",
+          ],
           input.projectId,
-          5_000,
+          8_000,
           input.signal,
         ).catch(() => {});
       }
@@ -5078,39 +5179,49 @@ export async function executeTool(ctx: ToolCtx): Promise<{
 
       // Human-in-the-loop approval gate for model-supplied commands.
       if (modelCommand !== null && input.requireCommandApproval && input.taskId) {
-        const { createPrompt } = await import("./agent-prompts");
-        const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
-        const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
-        const approvalPayload = {
-          question: `Allow the agent to run tests with this command?\n\`${modelCommand}\``,
-          kind: "boolean" as const,
-          options: [],
-          allowMultiple: false,
-        };
-        const { promptId, promise } = createPrompt({
-          taskId: input.taskId,
-          projectId: input.projectId,
-          kind: "user_query",
-          payload: approvalPayload,
-          signal: input.signal,
-          timeoutMs: promptTimeoutMs,
-        });
-        await safeEvent(
-          input.onEvent,
-          "agent_prompt",
-          JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
-        );
-        const resp = await promise;
-        if (resp.canceled) {
-          throw new Error("Task terminated while awaiting test command approval");
-        }
-        const approved =
-          typeof resp.response === "boolean" ? resp.response : resp.response === "true";
-        if (!approved) {
-          return {
-            ok: false,
-            observation: "Test command rejected by user — find an alternative approach",
+        const testArgv = modelCommand.split(/\s+/);
+        if (isE2EAutoApproveEnabled() && isE2ERunCommandSafe(testArgv)) {
+          // E2E bypass: auto-approve safe test commands when E2E_TEST_ENABLED=true.
+          // Never runs in production (isE2EAutoApproveEnabled guards NODE_ENV).
+          logger.info(
+            { projectId: input.projectId, taskId: input.taskId, cmd: modelCommand },
+            "[E2E] Auto-approved run_e2e test command",
+          );
+        } else {
+          const { createPrompt } = await import("./agent-prompts");
+          const remainingMs = Math.max(1_000, ctx.loopWallClockMs - (Date.now() - ctx.loopStartedAt));
+          const promptTimeoutMs = Math.min(5 * 60_000, remainingMs);
+          const approvalPayload = {
+            question: `Allow the agent to run tests with this command?\n\`${modelCommand}\``,
+            kind: "boolean" as const,
+            options: [],
+            allowMultiple: false,
           };
+          const { promptId, promise } = createPrompt({
+            taskId: input.taskId,
+            projectId: input.projectId,
+            kind: "user_query",
+            payload: approvalPayload,
+            signal: input.signal,
+            timeoutMs: promptTimeoutMs,
+          });
+          await safeEvent(
+            input.onEvent,
+            "agent_prompt",
+            JSON.stringify({ promptId, kind: "user_query", payload: approvalPayload }),
+          );
+          const resp = await promise;
+          if (resp.canceled) {
+            throw new Error("Task terminated while awaiting test command approval");
+          }
+          const approved =
+            typeof resp.response === "boolean" ? resp.response : resp.response === "true";
+          if (!approved) {
+            return {
+              ok: false,
+              observation: "Test command rejected by user — find an alternative approach",
+            };
+          }
         }
       }
 
@@ -6352,9 +6463,11 @@ async function runCheckProfile(
       // fall through; checks below will report a skipped/error result per check
     }
   }
-  // Run installCmd once per loop before any container check so typecheck/build
+  // Run npm install once per loop before any container check so typecheck/build
   // don't fail just because node_modules is missing. installCmd is null for
   // pure in-process stacks.
+  // Use background+poll so install survives Fly autostop; re-sync files on
+  // machine restart so npm runs against the real package.json, not empty /app.
   if (
     needsContainer &&
     effectiveContainerId &&
@@ -6364,13 +6477,17 @@ async function runCheckProfile(
     !input.signal.aborted
   ) {
     try {
-      await execWithTimeout(
-        effectiveContainerId,
-        installCmd,
-        input.projectId,
-        5 * 60_000,
-        input.signal,
-      );
+      const { npmInstallInBackground: bgInstall, syncFilesToContainer: syncFn } =
+        await import("./container");
+      const containerId = effectiveContainerId;
+      await bgInstall(containerId, input.projectId, {
+        onMachineRestarted: async () => {
+          const fileSet = workspace.all().map((f) => ({ path: f.path, content: f.content }));
+          if (fileSet.length > 0) {
+            await syncFn(containerId, input.projectId, fileSet).catch(() => {});
+          }
+        },
+      });
     } catch {
       // continue; check failures will surface the real problem
     }
@@ -6417,7 +6534,7 @@ async function runCheckProfile(
         effectiveContainerId,
         c.argv,
         input.projectId,
-        2 * 60_000,
+        c.timeoutMs,
         input.signal,
       );
       out.push({
@@ -6425,7 +6542,7 @@ async function runCheckProfile(
         label: c.label,
         passed: exec.ok,
         durationMs: Date.now() - t,
-        message: (exec.output ?? "").slice(-400),
+        message: (exec.output ?? "").slice(0, 400),
       });
     } catch (err) {
       out.push({
