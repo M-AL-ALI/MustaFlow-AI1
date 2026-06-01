@@ -266,98 +266,96 @@ function ChangeTag({ type }: { type: ChangeEntry["type"] }) {
 export default function DevelopersChangelogPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-10">
-          {/* Page header */}
-          <div className="space-y-4">
-            <Link
-              href="/developers"
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              Developer Portal
-            </Link>
-            <div className="flex items-center gap-3">
-              <History className="h-7 w-7 text-primary" />
-              <h1 className="text-3xl font-bold">API Changelog</h1>
-            </div>
-            <p className="text-muted-foreground max-w-xl">
-              A full history of additions, changes, and deprecations to the MustaFlow AI REST API.
-              Non-breaking additions are shipped within the same version; breaking changes bump the
-              version number.
-            </p>
-            <div className="flex flex-wrap gap-2 pt-1">
-              {(["added", "changed", "deprecated", "fixed"] as const).map((t) => (
-                <ChangeTag key={t} type={t} />
-              ))}
-            </div>
-          </div>
+      {/* Page header */}
+      <div className="space-y-4">
+        <Link
+          href="/developers"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          Developer Portal
+        </Link>
+        <div className="flex items-center gap-3">
+          <History className="h-7 w-7 text-primary" />
+          <h1 className="text-3xl font-bold">API Changelog</h1>
+        </div>
+        <p className="text-muted-foreground max-w-xl">
+          A full history of additions, changes, and deprecations to the MustaFlow AI REST API.
+          Non-breaking additions are shipped within the same version; breaking changes bump the
+          version number.
+        </p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {(["added", "changed", "deprecated", "fixed"] as const).map((t) => (
+            <ChangeTag key={t} type={t} />
+          ))}
+        </div>
+      </div>
 
-          {/* Timeline */}
-          <div className="relative">
-            {/* Vertical line */}
-            <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden />
+      {/* Timeline */}
+      <div className="relative">
+        {/* Vertical line */}
+        <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden />
 
-            <div className="space-y-10">
-              {CHANGELOG.map((entry) => (
-                <div key={entry.version} className="relative pl-8">
-                  {/* Timeline dot */}
-                  <div className="absolute left-0 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-primary bg-background" />
+        <div className="space-y-10">
+          {CHANGELOG.map((entry) => (
+            <div key={entry.version} className="relative pl-8">
+              {/* Timeline dot */}
+              <div className="absolute left-0 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-primary bg-background" />
 
-                  {/* Entry card */}
-                  <div className="rounded-xl border border-border bg-card overflow-hidden">
-                    <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border bg-muted/30">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/20">
-                          {entry.version}
-                        </span>
-                        <span className="text-sm font-semibold text-foreground">
-                          {entry.summary}
-                        </span>
-                      </div>
-                      <span className="text-xs text-muted-foreground shrink-0">{entry.date}</span>
-                    </div>
-                    <ul className="divide-y divide-border">
-                      {entry.changes.map((change, i) => (
-                        <li key={i} className="flex items-start gap-3 px-5 py-3">
-                          <ChangeTag type={change.type} />
-                          <span className="text-xs text-muted-foreground leading-relaxed pt-0.5">
-                            {change.text}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+              {/* Entry card */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/20">
+                      {entry.version}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">{entry.summary}</span>
                   </div>
+                  <span className="text-xs text-muted-foreground shrink-0">{entry.date}</span>
                 </div>
-              ))}
+                <ul className="divide-y divide-border">
+                  {entry.changes.map((change, i) => (
+                    <li key={i} className="flex items-start gap-3 px-5 py-3">
+                      <ChangeTag type={change.type} />
+                      <span className="text-xs text-muted-foreground leading-relaxed pt-0.5">
+                        {change.text}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
-          </div>
+          ))}
+        </div>
+      </div>
 
-          {/* Footer CTA */}
-          <div className="rounded-xl border border-border bg-card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Questions about a change?</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Browse the full OpenAPI spec or open a support ticket for migration help.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <a
-                href="/openapi.yaml"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-background text-sm font-medium hover:bg-muted transition-colors"
-              >
-                <Code2 className="h-3.5 w-3.5" />
-                OpenAPI spec
-              </a>
-              <Link
-                href="/help"
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-              >
-                Help center
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          </div>
+      {/* Footer CTA */}
+      <div className="rounded-xl border border-border bg-card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Questions about a change?</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Browse the full OpenAPI spec or open a support ticket for migration help.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <a
+            href="/openapi.yaml"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-background text-sm font-medium hover:bg-muted transition-colors"
+          >
+            <Code2 className="h-3.5 w-3.5" />
+            OpenAPI spec
+          </a>
+          <Link
+            href="/help"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Help center
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
