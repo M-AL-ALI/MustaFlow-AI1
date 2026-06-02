@@ -270,9 +270,10 @@ export function PreviewTab({
     prevFilesPayloadSeqRef.current = filesPayloadSeq;
     if (!filesPayload) return;
     if (!isReactVite) {
-      // Static project — let the refreshTrigger/iframeKey path handle the reload.
-      // Increment iframeKey directly so the DB-served snapshot is re-fetched.
-      setIframeKey((k) => k + 1);
+      // Static / agentic-container projects: the task-channel "completed" event
+      // (for static) or preview_ready event (for agentic) already increments
+      // buildRefreshCount → refreshTrigger → iframeKey in the parent.
+      // Do nothing here to avoid a double reload.
       return;
     }
     // React-Vite: sync incrementally via WebContainer FS

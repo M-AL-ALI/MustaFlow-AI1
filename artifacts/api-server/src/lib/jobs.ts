@@ -4672,10 +4672,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           publishPreviewReady(projectId);
         }
       } else {
-        // Static project — preview is always available from DB
+        // Static project — preview is always served from the DB snapshot and is
+        // always reachable. Mark it updated; the task-channel "completed" event
+        // is what triggers the frontend iframe reload (via setBuildRefreshCount).
+        // We intentionally do NOT emit publishPreviewReady here — that would
+        // cause a second setBuildRefreshCount call and a double iframe reload.
         report.previewUpdated = true;
         report.previewSyncQueued = true;
-        publishPreviewReady(projectId);
       }
       // ── End preview reachability verification ────────────────────────────────
 

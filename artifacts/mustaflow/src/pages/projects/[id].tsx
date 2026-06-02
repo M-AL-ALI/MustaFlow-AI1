@@ -1939,34 +1939,42 @@ export default function ProjectWorkspacePage() {
     previewEventSourceRef.current = es;
     es.onmessage = (e: MessageEvent<string>) => {
       try {
+        // Wire format: { eventType, projectId, data: { ...payload fields }, createdAt }
+        // All payload fields (files, changedPaths, etc.) live under `data`, not top-level.
         const event = JSON.parse(e.data) as {
           eventType: string;
           projectId?: number;
-          files?: Record<string, string>;
-          changedPaths?: string[];
-          removedPaths?: string[];
-          requiresInstall?: boolean;
-          requiresRestart?: boolean;
-          operationType?: string;
-          generatedAt?: string;
+          data?: {
+            files?: Record<string, string>;
+            changedPaths?: string[];
+            removedPaths?: string[];
+            requiresInstall?: boolean;
+            requiresRestart?: boolean;
+            operationType?: string;
+            generatedAt?: string;
+            projectId?: number;
+          };
         };
         if (event.eventType === "project_files_changed") {
+          const d = event.data ?? {};
           const payload: BackendFilesPayload = {
-            projectId: event.projectId ?? projectId,
-            operationType: event.operationType ?? "unknown",
-            changedPaths: event.changedPaths ?? [],
-            removedPaths: event.removedPaths ?? [],
-            files: event.files ?? {},
-            requiresInstall: event.requiresInstall ?? false,
-            requiresRestart: event.requiresRestart ?? false,
-            generatedAt: event.generatedAt ?? new Date().toISOString(),
+            projectId: d.projectId ?? event.projectId ?? projectId,
+            operationType: d.operationType ?? "unknown",
+            changedPaths: d.changedPaths ?? [],
+            removedPaths: d.removedPaths ?? [],
+            files: d.files ?? {},
+            requiresInstall: d.requiresInstall ?? false,
+            requiresRestart: d.requiresRestart ?? false,
+            generatedAt: d.generatedAt ?? new Date().toISOString(),
           };
           latestFilesPayloadRef.current = payload;
           setFilesPayloadSeq((n) => n + 1);
           // Invalidate file list so the editor panel reflects new content
           void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
         } else if (event.eventType === "preview_ready") {
-          // For static projects, trigger an iframe reload via buildRefreshCount
+          // Agentic projects: container healthz confirmed — trigger iframe reload.
+          // Static projects use the task-channel "completed" event for their reload
+          // (publishPreviewReady is not emitted for static to avoid double reload).
           setBuildRefreshCount((n) => n + 1);
         }
         // preview_sync_failed — no action needed beyond the UI label in PreviewTab
