@@ -104,6 +104,7 @@
     "verify-phase2e": "tsx ./src/verify-phase2e-validation.ts",
     "verify-phase2e-live": "tsx ./src/verify-phase2e-live.ts",
     "verify-ai-builder-live": "tsx ./src/verify-ai-builder-live.ts",
+    "verify-fullstack-builder-live": "tsx ./src/verify-fullstack-builder-live.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"

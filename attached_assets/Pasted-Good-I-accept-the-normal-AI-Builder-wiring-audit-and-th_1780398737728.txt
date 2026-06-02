@@ -1,0 +1,45 @@
+Good. I accept the normal AI Builder wiring audit and the wording fix.
+
+The “Developer Mode runtime” message was a serious UX problem, and I’m glad it was confirmed as a shared label issue, not a Developer-Mode-only backend path.
+
+Accepted:
+
+* Normal AI Builder uses the same agent-loop path.
+* Normal AI Builder receives file_diff and check_result events.
+* Normal AI Builder uses the same write_file/apply_patch tools.
+* Normal AI Builder uses the same repair/validation states.
+* Normal AI Builder publish gate uses the latest validation_status.
+* The wording has been changed from “Developer Mode runtime” to build/project container language.
+* Static AI Builder live test passed 8/8.
+
+Important next clarification:
+The live test used a static-html project with no container preflight. That is useful, but it does not fully prove the normal AI Builder can build a real full-stack/container app.
+
+Before I fully trust Zero/Agentic Builder as user-ready, please run one focused normal AI Builder full-stack test.
+
+Prompt:
+“Build a booking app with a home page, booking form, customer list, admin dashboard, backend API, and test database records.”
+
+Requirements:
+
+1. Use normal AI Builder, not Developer Mode.
+2. The project should use the full agentic/container path, not static-html only.
+3. Confirm container provisioning starts automatically.
+4. Confirm no “Developer Mode runtime” wording appears.
+5. Confirm files are written to project_files and container.
+6. Confirm backend/API files are generated.
+7. Confirm database/schema/test-data path is created or clearly marked as missing.
+8. Confirm package install is bounded and does not hang.
+9. Confirm server-start check passes or reports honest blocker.
+10. Confirm preview_refresh_requested fires.
+11. Confirm preview_ready only appears after HTTP 200.
+12. Confirm app loads in iframe if preview is ready.
+13. Confirm one visible UI interaction if app loads.
+14. Confirm final status is honest: passed, passed_with_warnings, completed_with_errors, failed, or blocked.
+15. Confirm autostop is restored and queue is clean.
+
+Do not add new features during this test.
+Do not run for more than 25 minutes.
+If it fails, stop and report the exact blocker.
+
+This is not reopening old work. This is the final proof that normal AI Builder + Zero can use the full agentic/container toolset, not only the static project path.

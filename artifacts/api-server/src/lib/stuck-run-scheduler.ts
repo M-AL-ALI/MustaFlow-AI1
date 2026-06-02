@@ -15,7 +15,9 @@ import { and, eq, lt, isNull, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 const SWEEP_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
-const HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+// 8 minutes: Fly.io machine cold-wake can take 3–4 min; add ≥3 min safety
+// margin so transient slow-wake doesn't trigger a false stuck-run kill.
+const HEARTBEAT_TIMEOUT_MS = 8 * 60 * 1000; // 8 minutes
 
 async function sweepStuckRuns(): Promise<void> {
   try {

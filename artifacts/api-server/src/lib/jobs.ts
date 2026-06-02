@@ -137,6 +137,21 @@ async function runAgenticPreflightGate(
     return { ok: false, message: CONTAINER_NOT_PROVISIONED };
   }
 
+  // ── 0b. Preflight heartbeat ───────────────────────────────────────────────
+  // Write a heartbeat to agent_tasks before the container wake so the
+  // stuck-run-scheduler's clock starts from now, not from when the job was
+  // first enqueued.  The wake loop can take 3–4 min on a cold Fly machine.
+  void (async () => {
+    try {
+      await db
+        .update(agentTasksTable)
+        .set({ lastHeartbeatAt: new Date() })
+        .where(eq(agentTasksTable.id, taskId));
+    } catch {
+      // non-fatal — stuck-run will still fire after 8 min if the build truly hangs
+    }
+  })();
+
   // ── 1. Container wake check ──────────────────────────────────────────────
   if (containerId) {
     // Detect first-build: if no project_versions with validationStatus='passed' exist

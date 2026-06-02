@@ -219,7 +219,13 @@ function flyHeaders(): Record<string, string> {
  */
 const FLY_RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
-async function flyFetch(path: string, init?: RequestInit): Promise<Response> {
+async function flyFetch(
+  path: string,
+  init?: RequestInit,
+  /** Per-request timeout in ms. Default 30 s for API calls. Pass 360_000 for
+   *  exec calls that stream output for up to Fly's 300-second exec timeout. */
+  timeoutMs = 30_000,
+): Promise<Response> {
   const { containerCircuit, withRetry, isTransientError } = await import("./resilience");
   return containerCircuit.call(() =>
     withRetry(
@@ -227,6 +233,7 @@ async function flyFetch(path: string, init?: RequestInit): Promise<Response> {
         const url = `${FLY_API_BASE}${path}`;
         const res = await fetch(url, {
           ...init,
+          signal: AbortSignal.timeout(timeoutMs),
           headers: { ...flyHeaders(), ...(init?.headers ?? {}) },
         });
         // Throw on retryable HTTP error statuses so withRetry can back off
@@ -499,10 +506,13 @@ export async function execInContainer(
 
   /** Attempt a single exec POST and return raw response text + ok flag. */
   const attemptExec = async () => {
-    const res = await flyFetch(`/apps/${FLY_APP}/machines/${machineId}/exec`, {
-      method: "POST",
-      body: JSON.stringify({ command, cwd: workdir, timeout: 300 }),
-    });
+    // Use a 360-second HTTP timeout — 60 s of headroom above Fly's 300-second
+    // exec timeout so the response can arrive before the connection is killed.
+    const res = await flyFetch(
+      `/apps/${FLY_APP}/machines/${machineId}/exec`,
+      { method: "POST", body: JSON.stringify({ command, cwd: workdir, timeout: 300 }) },
+      360_000,
+    );
     return { res, text: res.ok ? null : await res.text() };
   };
 
