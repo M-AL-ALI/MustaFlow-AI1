@@ -673,8 +673,9 @@ export async function npmInstallInBackground(
       [
         "sh",
         "-c",
-        "rm -f /tmp/.npm-done /tmp/.npm-out && " +
-          "nohup sh -c 'cd /app && npm install --prefer-offline --no-audit --no-fund 2>&1 | tee /tmp/.npm-out; echo $? > /tmp/.npm-done' " +
+        "pkill -f 'npm install' 2>/dev/null; sleep 1; " +
+          "rm -f /tmp/.npm-done /tmp/.npm-out && " +
+          "nohup sh -c 'cd /app && npm install --prefer-offline --no-audit --no-fund > /tmp/.npm-out 2>&1; echo $? > /tmp/.npm-done' " +
           "</dev/null >/dev/null 2>&1 &",
       ],
       projectId,

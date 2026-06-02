@@ -1,13 +1,18 @@
 /**
  * Submit a focused server-startup repair task for project 86.
  * Run with: pnpm --filter @workspace/api-server exec tsx src/repair-project86.ts
+ *
+ * This script keeps the process alive until the task reaches a terminal state.
+ * The enqueued job runs inside this tsx process (in-memory path — pg-boss is not
+ * started here). The job-level setInterval heartbeat in runJob keeps the event
+ * loop live; when runJob finishes its finally block clears the interval and the
+ * process exits naturally after the polling loop detects the terminal status.
  */
 import { db, projectsTable, agentTasksTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
 import { enqueueJob } from "./lib/jobs";
 
 const PROJECT_ID = 86;
-const REAL_USER_ID = "user_3Dv2h4CdaJoviog3ToUryvt3kft";
 
 const REPAIR_PROMPT = `Fix server startup for this node-api project. The dev server is not running because npm install did not complete in the previous build — node_modules is empty and tsx is not available.
 
@@ -27,10 +32,45 @@ Constraints:
 - The server must listen on process.env.PORT (already coded correctly in src/server/index.ts)
 - The /healthz route already exists and is correct — just need deps installed and server running`;
 
+const TERMINAL = new Set(["completed", "failed", "canceled", "completed_with_errors"]);
+
+async function pollUntilDone(taskId: number, timeoutMs = 25 * 60 * 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt++;
+    await new Promise((r) => setTimeout(r, 20_000));
+    const [row] = await db
+      .select({
+        status: agentTasksTable.status,
+        failureReason: agentTasksTable.failureReason,
+        lastHeartbeatAt: agentTasksTable.lastHeartbeatAt,
+        result: agentTasksTable.result,
+      })
+      .from(agentTasksTable)
+      .where(eq(agentTasksTable.id, taskId));
+    if (!row) {
+      console.log(`[poll #${attempt}] task ${taskId} not found`);
+      continue;
+    }
+    const hb = row.lastHeartbeatAt?.toISOString().slice(11, 19) ?? "never";
+    console.log(
+      `[poll #${attempt}] status=${row.status} hb=${hb} failReason=${row.failureReason ?? "-"}`,
+    );
+    if (TERMINAL.has(row.status)) {
+      console.log(`\n=== Task ${taskId} finished ===`);
+      console.log(`Status      : ${row.status}`);
+      if (row.failureReason) console.log(`Fail reason : ${row.failureReason}`);
+      if (row.result) console.log(`Result      : ${row.result.slice(0, 800)}`);
+      return;
+    }
+  }
+  console.warn(`Polling timed out after ${timeoutMs / 60_000} min — task may still be running.`);
+}
+
 async function main() {
   console.log("\n=== Project 86 Repair Task Submission ===\n");
 
-  // Confirm project exists
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, PROJECT_ID));
   if (!project) {
     console.error("Project 86 not found");
@@ -38,7 +78,6 @@ async function main() {
   }
   console.log(`Project: ${project.name} [${project.stack}] container=${project.containerId}`);
 
-  // Check no task is currently active
   const [active] = await db
     .select({ id: agentTasksTable.id, status: agentTasksTable.status })
     .from(agentTasksTable)
@@ -48,10 +87,11 @@ async function main() {
 
   if (active && ["building", "planning", "queued"].includes(active.status)) {
     console.log(`Task ${active.id} is already ${active.status} — skipping submission`);
+    console.log("Will poll the existing task for completion instead...\n");
+    await pollUntilDone(active.id);
     process.exit(0);
   }
 
-  // Insert the repair task
   const [task] = await db
     .insert(agentTasksTable)
     .values({
@@ -67,9 +107,12 @@ async function main() {
     .returning();
 
   console.log(`Created task id=${task.id} status=${task.status}`);
-  console.log(`Prompt length: ${REPAIR_PROMPT.length} chars`);
+  console.log("Enqueuing job — process stays alive until task completes...\n");
 
-  // Enqueue the job
+  // Fire the job. Because this script does NOT start pg-boss, enqueueJob falls
+  // through to the in-memory path and calls runJob() directly in this process.
+  // The job-level setInterval heartbeat inside runJob keeps the event loop alive
+  // for the full duration (30 s interval, NOT unref'd).
   enqueueJob({
     taskId: task.id,
     projectId: PROJECT_ID,
@@ -79,24 +122,12 @@ async function main() {
     agentIdentity: "main",
   });
 
-  console.log(`\nRepair task ${task.id} enqueued — agent is now working on project 86.`);
-  console.log(
-    "Monitor via: SELECT id, status, result FROM agent_tasks WHERE id = " + task.id + ";",
-  );
-  console.log("\nThe agent will:");
-  console.log("  1. Run npm install and capture output");
-  console.log("  2. Fix any TypeScript errors");
-  console.log("  3. Verify GET /healthz returns 200");
-  console.log("  4. Report final status honestly\n");
-
-  // Give the job a moment to start, then check status
-  await new Promise((r) => setTimeout(r, 3000));
-  const [check] = await db
-    .select({ status: agentTasksTable.status })
-    .from(agentTasksTable)
-    .where(eq(agentTasksTable.id, task.id));
-  console.log(`Task status after 3s: ${check?.status}`);
-
+  // Poll DB until terminal status — the process stays alive because runJob's
+  // setInterval is keeping the event loop busy. After runJob's finally block
+  // clears the interval the process will exit naturally once we return here.
+  await pollUntilDone(task.id);
+  // Give the event loop one tick to flush any final I/O before we force exit.
+  await new Promise((r) => setImmediate(r));
   process.exit(0);
 }
 

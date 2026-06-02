@@ -4267,20 +4267,59 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   // layer resets between retries — without it, npm runs against an empty /app.
   const { npmInstallInBackground: bgInstall, startContainerHealthServer } =
     await import("./container");
-  const installResult = await bgInstall(ctx.containerState.id, ctx.input.projectId, {
-    onMachineRestarted: async () => {
-      const refreshedFiles = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
-      if (refreshedFiles.length > 0) {
-        await syncFilesToContainer(
-          ctx.containerState.id!,
-          ctx.input.projectId,
-          refreshedFiles,
-        ).catch(() => {});
-      }
-      // Restart the health server so Fly keepalive pings work after machine wake.
-      await startContainerHealthServer(ctx.containerState.id!, ctx.input.projectId);
-    },
-  });
+
+  // Keep the stuck-run-scheduler from killing this task while npm install runs.
+  // ensureInstalled is called outside the AI tool loop so the normal per-step
+  // heartbeat at step%5===1 never fires here. npm install (--prefer-offline) can
+  // legitimately take several minutes; without a heartbeat the scheduler kills
+  // the task after 8 min with "stuck-run-timeout" and no report is written.
+  // wallClockCapMs is set to 6 min (below the 8-min kill window) so bgInstall
+  // exits with a clear error message before stuck-run can intervene.
+  const INSTALL_WALL_CLOCK_CAP_MS = 6 * 60 * 1000; // 6 min — under the 8-min stuck-run window
+  let installHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  if (ctx.input.taskId) {
+    const taskIdForHb = ctx.input.taskId;
+    installHeartbeatTimer = setInterval(() => {
+      void (async () => {
+        try {
+          const { eq: eqHb } = await import("drizzle-orm");
+          await db
+            .update(agentTasksTable)
+            .set({ lastHeartbeatAt: new Date() })
+            .where(eqHb(agentTasksTable.id, taskIdForHb));
+        } catch {
+          // Non-fatal — stuck-run will still respect a recent heartbeat
+        }
+      })();
+    }, 30_000);
+  }
+
+  let installResult: { ok: boolean; output: string };
+  try {
+    installResult = await bgInstall(ctx.containerState.id, ctx.input.projectId, {
+      wallClockCapMs: INSTALL_WALL_CLOCK_CAP_MS,
+      signal,
+      onMachineRestarted: async () => {
+        const refreshedFiles = ctx.workspace
+          .all()
+          .map((f) => ({ path: f.path, content: f.content }));
+        if (refreshedFiles.length > 0) {
+          await syncFilesToContainer(
+            ctx.containerState.id!,
+            ctx.input.projectId,
+            refreshedFiles,
+          ).catch(() => {});
+        }
+        // Restart the health server so Fly keepalive pings work after machine wake.
+        await startContainerHealthServer(ctx.containerState.id!, ctx.input.projectId);
+      },
+    });
+  } finally {
+    if (installHeartbeatTimer) {
+      clearInterval(installHeartbeatTimer);
+      installHeartbeatTimer = null;
+    }
+  }
   ctx.commandsRun.push({
     step,
     argv,

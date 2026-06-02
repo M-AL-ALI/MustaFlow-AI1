@@ -1844,6 +1844,13 @@ export async function runJob(input: JobInput): Promise<void> {
   let stopContainerKeepalive: (() => void) | null = null;
   // Machine ID whose autostop was patched to "off" — restored in the outer finally.
   let keepaliveMachineId: string | null = null;
+  // Job-level heartbeat timer — runs every 30 s for the entire job duration.
+  // The per-step heartbeat (step%5===1 in agent-loop.ts) only fires when AI tool
+  // steps complete. Long-blocking operations — AI calls, npm install, container
+  // execs — can exceed the 8-min stuck-run window without ever advancing a step.
+  // This timer ensures the scheduler never kills an actively running job.
+  // Cleared in the finally block below.
+  let jobHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   // Sanitise prompt before injecting into AI context — strip injection patterns
   const { cleaned: sanitisedPrompt, wasModified: promptWasModified } = sanitisePrompt(userPrompt);
@@ -1896,6 +1903,23 @@ export async function runJob(input: JobInput): Promise<void> {
       logger.info({ taskId, projectId }, "Task was canceled before pipeline started — skipping");
       return;
     }
+
+    // Start the job-level heartbeat now that we're committed to running.
+    // Fire immediately (in case the pre-build setup is slow) and every 30 s.
+    const writeJobHeartbeat = () => {
+      void (async () => {
+        try {
+          await db
+            .update(agentTasksTable)
+            .set({ lastHeartbeatAt: new Date() })
+            .where(eq(agentTasksTable.id, taskId));
+        } catch {
+          // Non-fatal — a missed heartbeat only risks a stuck-run false-positive
+        }
+      })();
+    };
+    writeJobHeartbeat(); // immediate write — replaces the one-shot in ensureContainerAwake
+    jobHeartbeatTimer = setInterval(writeJobHeartbeat, 30_000);
 
     // Persist agentIdentity to the task record so queries and the frontend can read it
     if (agentIdentity !== "main") {
@@ -5937,6 +5961,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
   } finally {
+    // Stop the job-level heartbeat timer.
+    if (jobHeartbeatTimer) {
+      clearInterval(jobHeartbeatTimer);
+      jobHeartbeatTimer = null;
+    }
     // Stop the keepalive loop and restore autostop on the machine so it can
     // idle-stop normally once the task is done.
     stopContainerKeepalive?.();
