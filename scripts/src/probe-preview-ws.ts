@@ -11,9 +11,10 @@ import { pool } from "@workspace/db";
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY!;
 const WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const wsAccept = (k: string) =>
-  createHash("sha1").update(k + WS_MAGIC).digest("base64");
-const hmacSign = (v: string) =>
-  createHmac("sha256", ENCRYPTION_KEY).update(v).digest("hex");
+  createHash("sha1")
+    .update(k + WS_MAGIC)
+    .digest("base64");
+const hmacSign = (v: string) => createHmac("sha256", ENCRYPTION_KEY).update(v).digest("hex");
 
 // ── Echo server ──────────────────────────────────────────────────────────────
 const echoServer = http.createServer((_, r) => r.end("ok"));
