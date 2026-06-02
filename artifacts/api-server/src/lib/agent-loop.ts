@@ -2989,6 +2989,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       },
     };
   }
+  // Capture whether we ended by hitting the step cap so we can emit a
+  // targeted repair prompt AFTER post-loop checks (at which point we know
+  // exactly which required checks failed and why).
+  const hitStepCap = terminationReason === "step-cap";
+
   await safeEvent(input.onEvent, "narration", "Running checks…");
   const checkRun = await runCheckProfile(
     profile.checks,
@@ -3018,6 +3023,44 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     terminationReason = "checks-failed";
   } else if (requiredFailed && terminationReason === "finalized") {
     terminationReason = "checks-failed";
+  }
+
+  // Step-cap + required checks failed → emit a targeted repair narration now
+  // that we know exactly which checks are blocking and why. This replaces the
+  // generic "Reached the step limit" message with actionable next steps.
+  if (!input.signal.aborted && hitStepCap && terminationReason === "checks-failed") {
+    const failedRequired = checkRun.filter(
+      (r) => !r.passed && profile.checks.find((c) => c.id === r.id)?.required,
+    );
+    const failedLabels = failedRequired.map((r) => r.label ?? r.id).join(", ");
+    const firstMsg = (failedRequired[0]?.message ?? "").slice(0, 300);
+
+    const isServerFail = failedRequired.some((r) => {
+      const key = ((r.label ?? "") + " " + r.id).toLowerCase();
+      return key.includes("server") || key.includes("healthz") || key.includes("start");
+    });
+    const isTsFail = failedRequired.some((r) => {
+      const key = ((r.label ?? "") + " " + r.id).toLowerCase();
+      return key.includes("type") || key.includes("tsc");
+    });
+
+    let repairNote = `Step limit reached with required checks still failing (${failedLabels}).`;
+    if (isServerFail) {
+      repairNote +=
+        " The preview server did not start." +
+        ' To repair, send: "Fix server startup first — read container logs,' +
+        " verify npm install completed, check the package.json dev script," +
+        " ensure the server binds to the PORT env var, and confirm GET /healthz" +
+        ' returns 200. Do not add features until preview is reachable."';
+    } else if (isTsFail) {
+      repairNote +=
+        " TypeScript errors remain." +
+        ' To repair, send: "Fix all TypeScript errors — run tsc --noEmit,' +
+        ' read each error, patch the affected files, and re-run until the output is clean."';
+    } else if (firstMsg) {
+      repairNote += ` Blocked on: ${firstMsg}`;
+    }
+    await safeEvent(input.onEvent, "narration", repairNote);
   }
 
   if (!STEP_CAP_REACHED(toolCalls.length) && terminationReason === "model-stopped" && finalized) {
@@ -4246,6 +4289,23 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
     stdoutPreview: installResult.ok ? installResult.output.slice(0, 400) : "",
     stderrPreview: installResult.ok ? "" : installResult.output.slice(0, 400),
   });
+
+  // When npm install fails, emit a warning narration immediately so the agent
+  // and user both know that dependencies are not installed before checks run.
+  // Without this, the check results look mysterious ("tsx: not found") with no
+  // explanation.
+  if (!installResult.ok) {
+    const errSnippet = installResult.output.slice(0, 300).trim();
+    await safeEvent(
+      ctx.input.onEvent,
+      "narration",
+      `npm install did not complete — dependencies are not installed and server checks will fail.${errSnippet ? ` Error: ${errSnippet}` : ""} Inspect the install output above and fix the root cause (missing registry access, bad package.json, etc.) before continuing.`,
+    );
+  }
+
+  // Mark installed regardless — this prevents infinite reinstall loops.
+  // If the install failed the agent will see the narration above and can
+  // decide how to recover (retry, fix package.json, etc.).
   ctx.containerState.installed = true;
 }
 
