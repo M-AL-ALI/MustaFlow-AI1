@@ -1,0 +1,110 @@
+Codex’s diagnosis sounds valid and I want this checked carefully.
+
+The issue may not only be Agent Zero’s coding ability. The bigger issue may be that Agent Zero writes files on the backend, but the live preview runtime does not reliably receive those new files.
+
+Please audit and fix the Preview Sync Pipeline.
+
+Current suspected root causes:
+
+1. WebContainer preview only syncs manual editor saves
+   If `use-web-container.ts` only listens for `mustaflow:file-saved`, then manual editor saves may update preview, but Agent Zero backend writes may not.
+
+Agent Zero writes files through the backend. Those accepted backend file changes must also sync into the browser WebContainer preview.
+
+2. Iframe reload is not enough
+   If PreviewTab only increments `iframeKey`, that only reloads the iframe. It does not guarantee WebContainer filesystem files were updated.
+
+For React/Vite WebContainer preview, the iframe may use `wc.previewUrl`, so cache-busting `/preview?t=...` does not update the actual runtime if files are stale.
+
+3. Task Agent staging must be explicit
+   If Task Agent writes into `stagingSnapshot`, preview should not update until the user clicks Apply. That is okay, but the UI must clearly say:
+
+“Changes are staged. Apply them to update preview.”
+
+Do not imply the preview has updated before Apply.
+
+4. Quick Preview and Full/Test Preview must be separate
+   Quick Preview should be the live draft preview, similar to Replit.
+
+Full/Test Preview should be an immutable tested candidate before publish.
+
+Draft changes should update Quick Preview, not automatically mutate Full/Test Preview.
+
+Required architecture:
+
+Accepted file change happens from:
+
+* manual editor save
+* Main Agent build/refine
+* Task Agent Apply
+* rollback
+* browser QA auto-fix
+
+Then backend must emit a project-level event:
+
+`project_files_changed`
+
+The event should include:
+
+* project ID
+* changed paths
+* operation type
+* either full file content or enough IDs for frontend to fetch the content
+* whether package/restart is required
+
+Frontend must subscribe to this event.
+
+For WebContainer preview:
+
+* if WebContainer is ready, sync changed files into WebContainer
+* if package.json, vite config, tsconfig, env, or dependency files changed, restart WebContainer/dev server
+* reload iframe only after sync/restart succeeds
+
+For static DB preview:
+
+* increment iframe key after the stored file snapshot changes
+
+For agentic container preview:
+
+* sync changed files to the dev container
+* run install if package files changed
+* restart dev server if needed
+* wait for `/healthz` before showing Preview Ready
+
+For Full/Test Preview:
+
+* do not auto-update after draft changes
+* mark testing candidate stale
+* show “Draft changed — rebuild test preview”
+
+For Task Agent staged output:
+
+* before Apply: preview remains unchanged and UI says staged changes are not live
+* after Apply: write to `project_files`, emit `project_files_changed`, sync preview, and mark test candidate stale
+
+Important:
+`previewUpdated` in the task report should only be true after actual preview sync/restart succeeds, or after a visible queued preview-sync operation exists.
+
+Regression tests needed:
+
+1. Main Agent changes `App.tsx` and WebContainer preview shows new text.
+2. Manual editor save still updates preview.
+3. Task Agent staged output does not update preview before Apply.
+4. Task Agent Apply updates preview.
+5. Background task completion updates preview even if Zero panel is closed.
+6. Full/Test Preview stays immutable and becomes stale after draft edit.
+7. Agentic container syncs changed files and waits for `/healthz` before preview_ready.
+8. iframe reload alone is not considered preview success.
+
+Please confirm whether Codex’s diagnosis is correct by auditing:
+
+* `use-web-container.ts`
+* `[id].tsx`
+* `preview-tab.tsx`
+* `jobs.ts`
+* backend file write/emit paths
+* task staging/apply path
+* preview_ready event logic
+
+The final goal:
+Agent Zero writes accepted files and the live Quick Preview updates reliably, like Replit, without requiring production deployment.
