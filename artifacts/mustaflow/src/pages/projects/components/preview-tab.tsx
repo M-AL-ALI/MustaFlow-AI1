@@ -472,6 +472,9 @@ export function PreviewTab({
   const postBuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [rollbackBanner, setRollbackBanner] = useState<{ crashMsg: string } | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
+  // Agentic proxy-unavailable detection: set to true when the preview endpoint
+  // returns 502, indicating the Fly proxy isn't reachable in this environment.
+  const [proxyUnavailable, setProxyUnavailable] = useState(false);
 
   const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
@@ -607,6 +610,34 @@ export function PreviewTab({
       wcRestartRef.current();
     }
   }, [project.status, isReactVite, hasFiles, isAgentic, containerLive]);
+
+  // Detect proxy-unavailable (502) for agentic projects so the UI can surface
+  // a clear message instead of silently showing the raw error HTML in the iframe.
+  // Only probe when the container is supposed to be running; clear the flag otherwise.
+  useEffect(() => {
+    if (!isAgentic || containerStatus !== "running") {
+      setProxyUnavailable(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/preview/?t=${Date.now()}`, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!cancelled) {
+          setProxyUnavailable(res.status === 502);
+        }
+      } catch {
+        // Network error — clear any stale flag so the iframe can attempt to load.
+        if (!cancelled) setProxyUnavailable(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAgentic, containerStatus, project.id, iframeKey]);
 
   // Step 6: Bridge WC process stdout/stderr into the PreviewTab console panel.
   // We track the last-seen WC log ID so we only forward net-new entries each render.
@@ -2249,6 +2280,44 @@ export function PreviewTab({
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
             <span className="text-sm">Loading preview…</span>
+          </div>
+        ) : isAgentic && proxyUnavailable ? (
+          /* ── Proxy-unavailable empty state ── */
+          <div className="flex flex-col items-center justify-center h-full max-w-md text-center gap-6 py-16">
+            <div className="relative">
+              <div className="w-20 h-20 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                <ServerCrash className="h-10 w-10 text-amber-500/60" />
+              </div>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-foreground mb-2">
+                Live preview requires production
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Live preview requires the production environment — deploy your project to see it
+                running.
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-2 leading-relaxed">
+                The container infrastructure is not reachable from this environment. Publishing your
+                project to production enables the full live preview.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 w-full">
+              <a
+                href={`/projects/${project.id}?tab=publishing`}
+                className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Go to Publishing
+              </a>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/60 border border-border text-xs text-muted-foreground text-left">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/60" />
+                <p>
+                  Once deployed, the container preview proxy will be active and this tab will show
+                  your running app.
+                </p>
+              </div>
+            </div>
           </div>
         ) : hasFiles ? (
           device === "desktop" ? (
