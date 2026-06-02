@@ -557,7 +557,9 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       const secretRows = await db
         .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
         .from(secretsTable)
-        .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.environment, "production")));
+        .where(
+          and(eq(secretsTable.projectId, projectId), eq(secretsTable.environment, "production")),
+        );
 
       const envVars: Record<string, string> = {
         PROJECT_ID: String(projectId),

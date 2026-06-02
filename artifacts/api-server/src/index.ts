@@ -119,48 +119,86 @@ server.on("upgrade", (req, socket, head) => {
   // Production and public hosts must never accept preview WebSocket upgrades.
   const host = req.headers.host;
   if (isPreviewSubdomainHost(host)) {
-    void validatePreviewWebSocketUpgrade(host, req.headers.cookie).then((result) => {
-      if (!result) {
-        // Invalid session, expired, revoked, wrong host, or missing cookie.
-        logger.warn({ host, url: req.url }, "Preview subdomain WS upgrade rejected — invalid session");
-        try { netSocket.destroy(); } catch { /* ignore */ }
-        return;
-      }
-      // Valid session — proxy the WebSocket upgrade to the test container.
-      // Use http-proxy-style raw TCP proxy: connect to the container and tunnel.
-      const target = new URL(result.containerUrl.replace(/^https?:/, "ws:").replace(/\/$/, "") + (req.url ?? "/"));
-      const http = require("node:http") as typeof import("node:http");
-      const proxyReq = http.request({
-        hostname: target.hostname,
-        port: target.port || 80,
-        path: target.pathname + target.search,
-        method: "GET",
-        headers: {
-          ...req.headers,
-          host: target.host,
-        },
-      });
-      proxyReq.on("upgrade", (_proxyRes: import("node:http").IncomingMessage, proxySocket: import("node:net").Socket, proxyHead: Buffer) => {
-        netSocket.write(
-          "HTTP/1.1 101 Switching Protocols\r\n" +
-          "Upgrade: websocket\r\n" +
-          "Connection: Upgrade\r\n\r\n"
+    void validatePreviewWebSocketUpgrade(host, req.headers.cookie)
+      .then((result) => {
+        if (!result) {
+          // Invalid session, expired, revoked, wrong host, or missing cookie.
+          logger.warn(
+            { host, url: req.url },
+            "Preview subdomain WS upgrade rejected — invalid session",
+          );
+          try {
+            netSocket.destroy();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        // Valid session — proxy the WebSocket upgrade to the test container.
+        // Use http-proxy-style raw TCP proxy: connect to the container and tunnel.
+        const target = new URL(
+          result.containerUrl.replace(/^https?:/, "ws:").replace(/\/$/, "") + (req.url ?? "/"),
         );
-        proxySocket.pipe(netSocket);
-        netSocket.pipe(proxySocket);
-        if (proxyHead.length > 0) proxySocket.unshift(proxyHead);
-        proxySocket.on("error", () => { try { netSocket.destroy(); } catch { /* ignore */ } });
-        netSocket.on("error", () => { try { proxySocket.destroy(); } catch { /* ignore */ } });
+        const http = require("node:http") as typeof import("node:http");
+        const proxyReq = http.request({
+          hostname: target.hostname,
+          port: target.port || 80,
+          path: target.pathname + target.search,
+          method: "GET",
+          headers: {
+            ...req.headers,
+            host: target.host,
+          },
+        });
+        proxyReq.on(
+          "upgrade",
+          (
+            _proxyRes: import("node:http").IncomingMessage,
+            proxySocket: import("node:net").Socket,
+            proxyHead: Buffer,
+          ) => {
+            netSocket.write(
+              "HTTP/1.1 101 Switching Protocols\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Connection: Upgrade\r\n\r\n",
+            );
+            proxySocket.pipe(netSocket);
+            netSocket.pipe(proxySocket);
+            if (proxyHead.length > 0) proxySocket.unshift(proxyHead);
+            proxySocket.on("error", () => {
+              try {
+                netSocket.destroy();
+              } catch {
+                /* ignore */
+              }
+            });
+            netSocket.on("error", () => {
+              try {
+                proxySocket.destroy();
+              } catch {
+                /* ignore */
+              }
+            });
+          },
+        );
+        proxyReq.on("error", (err: Error) => {
+          logger.warn({ err, host }, "Preview subdomain WS proxy error");
+          try {
+            netSocket.destroy();
+          } catch {
+            /* ignore */
+          }
+        });
+        proxyReq.end();
+      })
+      .catch((err: unknown) => {
+        logger.warn({ err, host }, "Preview subdomain WS validation error");
+        try {
+          netSocket.destroy();
+        } catch {
+          /* ignore */
+        }
       });
-      proxyReq.on("error", (err: Error) => {
-        logger.warn({ err, host }, "Preview subdomain WS proxy error");
-        try { netSocket.destroy(); } catch { /* ignore */ }
-      });
-      proxyReq.end();
-    }).catch((err: unknown) => {
-      logger.warn({ err, host }, "Preview subdomain WS validation error");
-      try { netSocket.destroy(); } catch { /* ignore */ }
-    });
     return;
   }
 

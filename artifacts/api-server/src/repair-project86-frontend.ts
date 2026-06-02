@@ -80,7 +80,7 @@ async function main() {
   // 3. Wake machine
   console.log("\n3. Ensuring machine is awake (autostop=off)...");
   await patchMachineAutostop(MACHINE_ID, PROJECT_ID, "off").catch((e: unknown) =>
-    console.warn("  autostop off skipped:", String(e))
+    console.warn("  autostop off skipped:", String(e)),
   );
   await new Promise((r) => setTimeout(r, 4000));
 
@@ -101,7 +101,7 @@ async function main() {
     MACHINE_ID,
     "cd /app && npm run build:client 2>&1",
     PROJECT_ID,
-    "/app"
+    "/app",
   );
   console.log(`   exit=${buildRes.exitCode}`);
   const buildOut = (buildRes.stdout + buildRes.stderr).slice(-3000);

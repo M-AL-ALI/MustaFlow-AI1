@@ -548,17 +548,34 @@ describe("Security-1 / S3: Testing-approval gate — all project types blocked w
 
   it("S3-A: static HTML project publish is blocked without testing approval", () => {
     const project = makePublishProject({ containerId: null, testedSnapshotId: null });
-    expect(simulatePublishGate(project)).toMatchObject({ allowed: false, code: "testing_required" });
+    expect(simulatePublishGate(project)).toMatchObject({
+      allowed: false,
+      code: "testing_required",
+    });
   });
 
   it("S3-B: React/Vite SPA project publish is blocked without testing approval", () => {
-    const project = makePublishProject({ containerId: null, builderMode: "static-legacy", testedSnapshotId: null });
-    expect(simulatePublishGate(project)).toMatchObject({ allowed: false, code: "testing_required" });
+    const project = makePublishProject({
+      containerId: null,
+      builderMode: "static-legacy",
+      testedSnapshotId: null,
+    });
+    expect(simulatePublishGate(project)).toMatchObject({
+      allowed: false,
+      code: "testing_required",
+    });
   });
 
   it("S3-C: full-stack container project publish is blocked without testing approval", () => {
-    const project = makePublishProject({ containerId: "fly-machine-abc", builderMode: "agentic", testedSnapshotId: null });
-    expect(simulatePublishGate(project)).toMatchObject({ allowed: false, code: "testing_required" });
+    const project = makePublishProject({
+      containerId: "fly-machine-abc",
+      builderMode: "agentic",
+      testedSnapshotId: null,
+    });
+    expect(simulatePublishGate(project)).toMatchObject({
+      allowed: false,
+      code: "testing_required",
+    });
   });
 
   it("S3-D: static project publish succeeds after testing approval", () => {
@@ -572,8 +589,16 @@ describe("Security-1 / S3: Testing-approval gate — all project types blocked w
   });
 
   it("S3-F: publish uses approved snapshot, not live draft files", () => {
-    const approvedSnapshot = [{ path: "index.html", content: "<h1>Approved</h1>", mimeType: "text/html" }];
-    const draftFiles = [{ path: "index.html", content: "<h1>Draft — must NOT be published</h1>", mimeType: "text/html" }];
+    const approvedSnapshot = [
+      { path: "index.html", content: "<h1>Approved</h1>", mimeType: "text/html" },
+    ];
+    const draftFiles = [
+      {
+        path: "index.html",
+        content: "<h1>Draft — must NOT be published</h1>",
+        mimeType: "text/html",
+      },
+    ];
 
     function resolvePublishFiles(testedSnapshotId: number | null) {
       return testedSnapshotId ? approvedSnapshot : draftFiles;
@@ -658,53 +683,63 @@ describe("Security-1 / S4: Preview subdomain WebSocket upgrade validation", () =
   const FUTURE = new Date(Date.now() + 8 * 60 * 60 * 1000);
 
   it("S4-A: valid session + valid cookie → WS upgrade allowed", () => {
-    expect(validateWsUpgradeLogic({
-      host: VALID_HOST,
-      cookieHeader: buildCookieHeader(VALID_ID),
-      session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
-      containerUrl: "http://fly.dev",
-      containerStatus: "running",
-    })).toBe(true);
+    expect(
+      validateWsUpgradeLogic({
+        host: VALID_HOST,
+        cookieHeader: buildCookieHeader(VALID_ID),
+        session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
+        containerUrl: "http://fly.dev",
+        containerStatus: "running",
+      }),
+    ).toBe(true);
   });
 
   it("S4-B: expired session → WS upgrade rejected", () => {
-    expect(validateWsUpgradeLogic({
-      host: VALID_HOST,
-      cookieHeader: buildCookieHeader(VALID_ID),
-      session: { sessionId: VALID_ID, expiresAt: new Date(Date.now() - 1000), revokedAt: null },
-      containerUrl: "http://fly.dev",
-      containerStatus: "running",
-    })).toBe(false);
+    expect(
+      validateWsUpgradeLogic({
+        host: VALID_HOST,
+        cookieHeader: buildCookieHeader(VALID_ID),
+        session: { sessionId: VALID_ID, expiresAt: new Date(Date.now() - 1000), revokedAt: null },
+        containerUrl: "http://fly.dev",
+        containerStatus: "running",
+      }),
+    ).toBe(false);
   });
 
   it("S4-C: revoked session → WS upgrade rejected", () => {
-    expect(validateWsUpgradeLogic({
-      host: VALID_HOST,
-      cookieHeader: buildCookieHeader(VALID_ID),
-      session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: new Date() },
-      containerUrl: "http://fly.dev",
-      containerStatus: "running",
-    })).toBe(false);
+    expect(
+      validateWsUpgradeLogic({
+        host: VALID_HOST,
+        cookieHeader: buildCookieHeader(VALID_ID),
+        session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: new Date() },
+        containerUrl: "http://fly.dev",
+        containerStatus: "running",
+      }),
+    ).toBe(false);
   });
 
   it("S4-D: missing cookie → WS upgrade rejected", () => {
-    expect(validateWsUpgradeLogic({
-      host: VALID_HOST,
-      cookieHeader: undefined,
-      session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
-      containerUrl: "http://fly.dev",
-      containerStatus: "running",
-    })).toBe(false);
+    expect(
+      validateWsUpgradeLogic({
+        host: VALID_HOST,
+        cookieHeader: undefined,
+        session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
+        containerUrl: "http://fly.dev",
+        containerStatus: "running",
+      }),
+    ).toBe(false);
   });
 
   it("S4-E: tampered HMAC → WS upgrade rejected", () => {
-    expect(validateWsUpgradeLogic({
-      host: VALID_HOST,
-      cookieHeader: `${COOKIE_NAME}=${VALID_ID}.${"d".repeat(64)}`,
-      session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
-      containerUrl: "http://fly.dev",
-      containerStatus: "running",
-    })).toBe(false);
+    expect(
+      validateWsUpgradeLogic({
+        host: VALID_HOST,
+        cookieHeader: `${COOKIE_NAME}=${VALID_ID}.${"d".repeat(64)}`,
+        session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
+        containerUrl: "http://fly.dev",
+        containerStatus: "running",
+      }),
+    ).toBe(false);
   });
 
   it("S4-F: production/public hosts are not classified as preview subdomains", () => {
@@ -721,13 +756,15 @@ describe("Security-1 / S4: Preview subdomain WebSocket upgrade validation", () =
   });
 
   it("S4-G: container not running → WS upgrade rejected", () => {
-    expect(validateWsUpgradeLogic({
-      host: VALID_HOST,
-      cookieHeader: buildCookieHeader(VALID_ID),
-      session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
-      containerUrl: "http://fly.dev",
-      containerStatus: "stopped",
-    })).toBe(false);
+    expect(
+      validateWsUpgradeLogic({
+        host: VALID_HOST,
+        cookieHeader: buildCookieHeader(VALID_ID),
+        session: { sessionId: VALID_ID, expiresAt: FUTURE, revokedAt: null },
+        containerUrl: "http://fly.dev",
+        containerStatus: "stopped",
+      }),
+    ).toBe(false);
   });
 });
 
@@ -805,7 +842,9 @@ describe("Security-1 / S5: Secrets isolation — preview vs production environme
   });
 
   it("S5-E: prod-only secrets are disjoint between preview and production environments", () => {
-    const prodOnlySecrets = secrets.filter((s) => s.environment === "production" && !s.isPreviewSafe);
+    const prodOnlySecrets = secrets.filter(
+      (s) => s.environment === "production" && !s.isPreviewSafe,
+    );
     const previewEnv = injectPreviewSecrets(secrets);
     const prodEnv = injectProductionSecrets(secrets);
 
