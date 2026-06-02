@@ -172,6 +172,66 @@ async function proxyToContainer(containerUrl: string, req: Request, res: Respons
 }
 
 /**
+ * Validate a WebSocket upgrade request for the preview subdomain.
+ *
+ * Called from the server-level 'upgrade' event handler in index.ts.
+ * Returns the test container URL to proxy to, or null if the request should
+ * be rejected (invalid session, expired, revoked, wrong host, missing cookie).
+ *
+ * Security invariants:
+ *   - Host must match the {sessionId}.preview.{PLATFORM_DOMAIN} pattern.
+ *   - __prs cookie must be present with a valid HMAC signature.
+ *   - DB session must exist, not be revoked, and not be expired.
+ *   - Session must NOT match production/public hosts.
+ */
+export async function validatePreviewWebSocketUpgrade(
+  host: string | undefined,
+  cookieHeader: string | undefined,
+): Promise<{ containerUrl: string } | null> {
+  const sessionId = extractPreviewSessionId(host);
+  if (!sessionId) return null;
+
+  const cookieSessionId = parseCookie(cookieHeader);
+  if (!cookieSessionId || cookieSessionId !== sessionId) return null;
+
+  const [session] = await db
+    .select({
+      id: previewSessionsTable.id,
+      projectId: previewSessionsTable.projectId,
+      expiresAt: previewSessionsTable.expiresAt,
+      revokedAt: previewSessionsTable.revokedAt,
+    })
+    .from(previewSessionsTable)
+    .where(eq(previewSessionsTable.sessionId, sessionId));
+
+  if (!session) return null;
+  if (session.revokedAt) return null;
+  if (new Date() > session.expiresAt) return null;
+
+  const [project] = await db
+    .select({
+      testContainerUrl: projectsTable.testContainerUrl,
+      testContainerStatus: projectsTable.testContainerStatus,
+      deletedAt: projectsTable.deletedAt,
+    })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, session.projectId), isNull(projectsTable.deletedAt)));
+
+  if (!project || !project.testContainerUrl) return null;
+  if (project.testContainerStatus !== "running") return null;
+
+  return { containerUrl: project.testContainerUrl };
+}
+
+/**
+ * Check if a Host header refers to a preview subdomain (used by the upgrade handler
+ * to route WebSocket upgrades without running the full middleware stack).
+ */
+export function isPreviewSubdomainHost(host: string | undefined): boolean {
+  return extractPreviewSessionId(host) !== null;
+}
+
+/**
  * The preview subdomain gateway middleware.
  * Must be registered before customDomainMiddleware and the /api router.
  */

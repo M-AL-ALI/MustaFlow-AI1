@@ -14,7 +14,6 @@ import {
   userSubscriptionsTable,
 } from "@workspace/db";
 import { guessMime } from "./builder";
-import { injectBridge } from "./consoleBridge";
 import { isBinaryMime } from "./binary-mime";
 import { recordProdLog, hashIp } from "./prodLogs";
 import { logger } from "./logger";
@@ -205,11 +204,12 @@ async function serveSnapshotById(
   if (isBinaryMime(mime)) {
     res.end(Buffer.from(file.content, "base64"));
   } else {
-    let body = file.content;
-    if (mime === "text/html") {
-      body = injectBridge(body);
-    }
-    res.send(body);
+    // SECURITY: consoleBridge / editor instrumentation scripts are intentionally
+    // NOT injected here. serveSnapshotById serves staging, preview-snapshot, and
+    // production custom-domain paths — all of which are user-facing (not editor).
+    // The bridge is injected only by the authenticated editor preview route
+    // (/api/projects/:id/preview/*) in routes/files.ts.
+    res.send(file.content);
   }
 }
 

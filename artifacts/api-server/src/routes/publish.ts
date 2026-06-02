@@ -161,11 +161,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // When the caller did not specify a versionId, auto-resolve from the project's
   // testedSnapshotId (set by POST /preview-env/approve).
   //
-  // Full-stack rule (first release): if the project has a dev container it MUST
-  // pass testing before publishing. Static projects may publish directly.
+  // Security rule: ALL project types (static HTML, React SPA, full-stack container)
+  // MUST pass the testing-approval gate before publishing to production.
+  // No project type is exempt — this prevents bypass via the static-project path.
   if (env === "production" && publishVersionId === null) {
-    const hasContainer = !!project.containerId;
-
     if (project.testedSnapshotId) {
       // Always publish from the approved snapshot — never from the draft.
       const [testedVersion] = await db
@@ -184,12 +183,18 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
           "Using approved testedSnapshotId for publish",
         );
       }
-    } else if (hasContainer) {
-      // Full-stack project with no tested snapshot: hard block.
+    } else {
+      // No tested snapshot for any project type: hard block.
+      // Full-stack projects have a container requirement; static/SPA projects must
+      // also complete a test preview (via /preview-env/start + /preview-env/approve)
+      // before publishing to production.
+      const hasContainer = !!project.containerId;
       res.status(422).json({
-        error:
-          "Full-stack projects must pass a test preview before publishing to production. " +
-          "Open the Test Environment tab, start a test build, verify the app, then approve it.",
+        error: hasContainer
+          ? "Full-stack projects must pass a test preview before publishing to production. " +
+            "Open the Test Environment tab, start a test build, verify the app, then approve it."
+          : "Projects must pass a test preview before publishing to production. " +
+            "Open the Test Environment tab, start a test preview, verify the app, then approve it.",
         code: "testing_required",
       });
       return;
@@ -547,10 +552,12 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   if (shouldDeployContainer) {
     req.log.info({ projectId }, "Project has dev container — deploying production container");
     try {
+      // SECURITY: Only inject secrets with environment='production' into production containers.
+      // Development and testing secrets must never reach the production environment.
       const secretRows = await db
         .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
         .from(secretsTable)
-        .where(eq(secretsTable.projectId, projectId));
+        .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.environment, "production")));
 
       const envVars: Record<string, string> = {
         PROJECT_ID: String(projectId),
