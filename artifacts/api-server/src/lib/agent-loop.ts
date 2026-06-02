@@ -42,6 +42,7 @@ import {
 } from "./checks/e2e-runner";
 import { logger } from "./logger";
 import { CHECK_PROFILES, resolveStackId, type CheckSpec, type StackId } from "./check-profiles";
+import { scanMissingDeps, addMissingToDeps } from "./dep-scanner";
 import {
   DEFAULT_POLICY_STRICTNESS,
   PER_CALL_STDOUT_CAP,
@@ -2715,6 +2716,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
 
         // Run checks now; only terminate if required checks pass.
+        // Phase 2G — last-chance dependency repair before the finalize gate.
+        // If the AI generated files that import packages it forgot to add to
+        // package.json, patch it now so the final typecheck/build can pass.
+        if (containerState.id && profile.installCmd?.[0] === "npm") {
+          const { detected } = await autoInstallMissingDeps(workspace, containerState, input);
+          if (detected.length > 0) {
+            await safeEvent(
+              input.onEvent,
+              "narration",
+              `Auto-installing missing packages before finalize: ${detected.join(", ")}…`,
+            );
+          }
+        }
         await safeEvent(input.onEvent, "narration", "Verifying checks before finalizing…");
         const verifyRun = await runCheckProfile(
           profile.checks,
@@ -2782,6 +2796,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // outcome as a synthetic system message so the next turn can react.
     // Skipped on abort to keep cancel prompt.
     if (mutatedThisTurn && !finalized && !input.signal.aborted) {
+      // Phase 2G — dependency intelligence: detect packages the AI imported but
+      // forgot to add to package.json, patch the manifest, and queue a reinstall
+      // before checks run so typecheck/build never fail on a "missing module" that
+      // the AI itself introduced.
+      if (containerState.id && profile.installCmd?.[0] === "npm") {
+        const { detected } = await autoInstallMissingDeps(workspace, containerState, input);
+        if (detected.length > 0) {
+          await safeEvent(
+            input.onEvent,
+            "narration",
+            `Detected ${detected.length} missing package${detected.length === 1 ? "" : "s"} (${detected.join(", ")}) — added to package.json, re-installing before checks…`,
+          );
+        }
+      }
       const turnChecks = await runCheckProfile(
         profile.checks,
         workspace,
@@ -4219,6 +4247,69 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
     stderrPreview: installResult.ok ? "" : installResult.output.slice(0, 400),
   });
   ctx.containerState.installed = true;
+}
+
+/**
+ * Phase 2G — Dependency intelligence.
+ *
+ * Scans the current workspace for JS/TS imports that reference packages absent
+ * from package.json, updates package.json in-place (both in the in-memory
+ * workspace and in the container), and marks the container as needing a fresh
+ * npm install so that the next `runCheckProfile` call re-runs npm install and
+ * picks up the newly added packages.
+ *
+ * This prevents "Cannot find module …" TypeScript/runtime errors that arise
+ * when the AI generates code importing a library it forgot to add to
+ * package.json.
+ *
+ * Returns the list of package names that were detected as missing (and added).
+ * Never throws — failures are logged and surfaced as warnings, not build errors.
+ */
+async function autoInstallMissingDeps(
+  workspace: FileWorkspace,
+  containerState: { id: string | null; installed: boolean },
+  input: AgentLoopInput,
+): Promise<{ detected: string[] }> {
+  const containerId = containerState.id;
+  if (!containerId || input.signal?.aborted) return { detected: [] };
+
+  const missing = scanMissingDeps(workspace.all());
+  if (missing.length === 0) return { detected: [] };
+
+  const pkgFile = workspace.read("package.json");
+  if (!pkgFile) return { detected: missing };
+
+  const updated = addMissingToDeps(pkgFile.content, missing);
+  // addMissingToDeps returns the original string when nothing changed
+  if (updated === pkgFile.content) return { detected: [] };
+
+  // Persist the updated package.json in the in-memory workspace
+  workspace.write("package.json", updated);
+
+  // Sync the updated package.json to the container's /app directory
+  try {
+    const { writeFileToContainer } = await import("./container");
+    await writeFileToContainer(containerId, "package.json", updated, input.projectId);
+  } catch (err) {
+    // If the container write fails, revert the workspace to keep them consistent
+    workspace.write("package.json", pkgFile.content);
+    logger.warn(
+      { err, projectId: input.projectId, missing },
+      "autoInstallMissingDeps: failed to sync package.json to container",
+    );
+    return { detected: missing };
+  }
+
+  // Signal that a fresh npm install is needed.  runCheckProfile checks this flag
+  // and will call npmInstallInBackground before running any container checks.
+  containerState.installed = false;
+
+  logger.info(
+    { projectId: input.projectId, missing },
+    "autoInstallMissingDeps: detected missing packages — package.json updated, npm install queued",
+  );
+
+  return { detected: missing };
 }
 
 /**
