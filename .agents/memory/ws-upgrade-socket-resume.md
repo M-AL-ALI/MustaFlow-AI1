@@ -24,7 +24,10 @@ server.on("upgrade", (req, socket, head) => {
   if (isPreviewSubdomainHost(host)) {
     netSocket.resume(); // claim socket before async validation
     void validateSession(host, req.headers.cookie).then((result) => {
-      if (!result) { netSocket.destroy(); return; }
+      if (!result) {
+        netSocket.destroy();
+        return;
+      }
       // proxy...
     });
     return;
