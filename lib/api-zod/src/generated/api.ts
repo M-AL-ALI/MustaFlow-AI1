@@ -5260,6 +5260,19 @@ export const StreamTaskEventsParams = zod.object({
 
 
 /**
+ * Project-scoped Server-Sent Events stream emitting `project_files_changed`,
+`preview_ready`, and `preview_sync_failed` events. Live-only — no DB replay.
+Guards: requires project ownership. Task Agent `needs_review` output does NOT
+emit here; only Apply does.
+
+ * @summary SSE live stream of project-level preview events (text/event-stream)
+ */
+export const StreamProjectPreviewEventsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * @summary Get the current container lifecycle status for a project
  */
 export const GetContainerStatusParams = zod.object({

@@ -1,0 +1,101 @@
+After #1243, complete these missing Preview Sync Pipeline tasks before marking the preview fixed.
+
+1. Persist event payloads
+- Add `data jsonb` to `task_events`.
+- Update DB schema + migration.
+- Update emitEvent/publishTaskEvent so `data` is stored.
+- Update routes/events.ts so replayed SSE events include `data`.
+- Test: close/reopen panel after task completes; replayed `project_files_changed` still contains file payload.
+
+2. Add project-level preview event stream
+Task-scoped SSE is not enough for manual saves, rollback, visual edit, and panel-closed workflows.
+- Add `GET /api/projects/:id/preview-events/stream`.
+- Emit preview events on channel `project:${projectId}:preview`.
+- Keep task SSE for chat/task timeline, but Quick Preview should listen to project-level preview events.
+- Test: preview updates even when Zero Agent panel is closed.
+
+3. Define one canonical payload helper
+Create `buildProjectFilesChangedPayload(projectId, files, removedPaths, operationType)`.
+- Calculates `changedPaths`.
+- Builds `files: Record<string,string>` only for safe text files.
+- Excludes `.env`, secrets, binary files, and huge files.
+- Sets `requiresInstall` for package files.
+- Sets `requiresRestart` for vite config, tsconfig, env/runtime config.
+- Test every operationType: build, refine, apply, rollback, visual-edit, manual-save, qa-auto-fix.
+
+4. Emit after every accepted project_files mutation
+Must emit `project_files_changed` after:
+- Main Agent build
+- Main Agent refine
+- Task Agent Apply only, not staging
+- manual editor save
+- visual edit
+- rollback
+- browser QA auto-fix
+- any direct project_files delete/reinsert path
+Also call `staleDraftCandidate(projectId, reason)` after every accepted draft mutation.
+
+5. Frontend subscription wiring
+In `[id].tsx` and dev-workspace:
+- Subscribe to project-level preview events.
+- On `project_files_changed`, store payload in ref and increment sequence.
+- Invalidate file list + project queries.
+- Do not depend only on activeTaskId.
+- Guard staged Task Agent output: no preview update while task.status === `needs_review`.
+
+6. WebContainer sync
+In `use-web-container.ts`:
+- Add `syncFromBackend(payload)`.
+- Use shared helper for writes/removes.
+- `wc.fs.writeFile` for changed text files.
+- `wc.fs.rm(path, { force: true, recursive: true })` for removed files.
+- No restart for normal React/Vite source changes; let HMR handle it.
+- Restart only for `requiresInstall` or `requiresRestart`.
+- Never wait for `server-ready` unless a restart was actually triggered.
+
+7. PreviewTab sequencing
+In `preview-tab.tsx`:
+- When filesPayloadSeq changes, call `wc.syncFromBackend(payload)` before iframe reload.
+- Clear `filesPayloadRef.current = null` before awaiting to prevent double apply.
+- For static preview, increment iframeKey after receiving payload.
+- Comment clearly: iframe reload without WebContainer sync is not a successful preview update.
+
+8. Agentic container sync
+For agentic/Fly preview:
+- After accepted files are written, sync files to the live dev container.
+- Run npm install if package files changed.
+- Restart dev server if runtime/config files changed.
+- Poll `/healthz`.
+- Emit `preview_ready` only after HTTP 200.
+- If sync/health fails, emit `preview_sync_failed` and show it in UI.
+
+9. Report truthfulness
+- Do not set `previewUpdated: true` just because files changed.
+- Use:
+  - `previewUpdated: true` only after sync success
+  - `previewSyncQueued: true` if async sync is pending
+  - `previewSyncFailed: true` if sync failed
+- Surface this in Builder Report.
+
+10. UI clarity
+- Task Agent needs_review: show “Changes are staged — apply to update preview.”
+- After Apply: “Preview updating…” then “Preview ready.”
+- Full/Test Preview: after any draft mutation, show “Draft changed — rebuild test preview.”
+- Quick Preview label: “Live Draft Preview.”
+- Full/Test Preview label: “Immutable Test Candidate.”
+
+11. Regression tests required before merge
+- Main Agent App.tsx change updates WebContainer preview.
+- Manual save still updates preview.
+- Task Agent staged output does not update preview before Apply.
+- Task Agent Apply updates preview.
+- Background task updates preview with panel closed.
+- Rollback emits project_files_changed and preview refreshes.
+- Visual edit syncs changed content.
+- WebContainer normal file sync does not restart.
+- WebContainer package.json change runs install/restart.
+- Agentic container waits for /healthz before preview_ready.
+- Replayed SSE event includes data payload.
+- Full/Test Preview remains immutable and becomes stale after draft edits.
+
+Do not mark #1243 complete unless all these wiring paths and tests pass.

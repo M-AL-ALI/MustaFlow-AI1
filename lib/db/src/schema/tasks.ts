@@ -27,6 +27,16 @@ export type TaskReport = {
   filesChanged: string[];
   filesRemoved: string[];
   previewUpdated: boolean;
+  /**
+   * Set when the preview sync was queued successfully (static projects).
+   * Distinguishes "queued but not yet visible" from "already visible".
+   */
+  previewSyncQueued?: boolean;
+  /**
+   * Set when the preview could not be synced (e.g. container not reachable).
+   * The build itself succeeded; only the live preview update failed.
+   */
+  previewSyncFailed?: boolean;
   warnings: string[];
   /** Non-required checks that failed. Present when versionValidationStatus=passed_with_warnings. */
   warningChecks?: Array<{ id: string; label: string; message: string }>;

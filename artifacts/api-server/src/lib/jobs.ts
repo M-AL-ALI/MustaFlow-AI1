@@ -71,6 +71,7 @@ import {
 } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
+import { publishProjectFilesChanged, publishPreviewReady, publishPreviewSyncFailed } from "./preview-events";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
 import { getCheckByName } from "./checks/registry";
@@ -705,6 +706,7 @@ async function emitEvent(
   eventType: string,
   message: string,
   filePath?: string,
+  data?: Record<string, unknown>,
 ): Promise<void> {
   try {
     const [row] = await db
@@ -714,6 +716,7 @@ async function emitEvent(
         eventType,
         message,
         filePath: filePath ?? null,
+        data: data ?? null,
       })
       .returning();
     if (row) {
@@ -723,6 +726,7 @@ async function emitEvent(
         eventType: row.eventType,
         message: row.message,
         filePath: row.filePath ?? null,
+        data: (row.data as Record<string, unknown> | undefined) ?? undefined,
         createdAt: row.createdAt,
       });
     }
@@ -4605,6 +4609,34 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         });
       }
 
+      // ── Emit project_files_changed before preview refresh ──────────────────
+      // Always publish to the project-level preview channel so every open tab
+      // receives the FS update regardless of whether the AI Builder panel is open.
+      // Also attach the structured payload to the task event so reconnecting
+      // clients can replay it from the task event history.
+      if (filesToSmellScan.length > 0) {
+        try {
+          const removedPathsForEvent = diffSummary?.filesRemoved ?? [];
+          const filesPayload = publishProjectFilesChanged(
+            projectId,
+            filesToSmellScan.map((f) => ({ path: f.path, content: f.content })),
+            removedPathsForEvent,
+            "build",
+          );
+          // Also store the payload on the task event so SSE replay includes it
+          await emitEvent(
+            taskId,
+            "project_files_changed",
+            `${filesToSmellScan.length} file(s) updated`,
+            undefined,
+            filesPayload as unknown as Record<string, unknown>,
+          );
+        } catch (previewEmitErr) {
+          logger.warn({ err: previewEmitErr, projectId, taskId }, "project_files_changed emit failed (non-fatal)");
+        }
+      }
+      // ── End project_files_changed emit ───────────────────────────────────────
+
       await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
       // ── Preview reachability verification ───────────────────────────────────
@@ -4619,11 +4651,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         });
         if (!previewCheck.reachable) {
           report.previewUpdated = false;
+          report.previewSyncFailed = true;
           report.warnings = [
             ...(report.warnings ?? []),
             `Preview refresh requested but app server is not yet reachable (${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}). Files were saved — the preview will load once your server starts.`,
           ];
+          publishPreviewSyncFailed(projectId, `Server not reachable: ${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}`);
+        } else {
+          report.previewUpdated = true;
+          publishPreviewReady(projectId);
         }
+      } else {
+        // Static project — preview is always available from DB
+        report.previewUpdated = true;
+        report.previewSyncQueued = true;
+        publishPreviewReady(projectId);
       }
       // ── End preview reachability verification ────────────────────────────────
 

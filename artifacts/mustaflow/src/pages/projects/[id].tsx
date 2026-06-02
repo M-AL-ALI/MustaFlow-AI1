@@ -1,5 +1,5 @@
 import { useParams, Link, useLocation } from "wouter";
-import { useWebContainer } from "@/hooks/use-web-container";
+import { useWebContainer, type BackendFilesPayload } from "@/hooks/use-web-container";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import {
   useGetProject,
@@ -1075,6 +1075,13 @@ export default function ProjectWorkspacePage() {
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
   const [liveCodeBuffer, setLiveCodeBuffer] = useState("");
   const taskEventSourceRef = useRef<EventSource | null>(null);
+  // Project-level preview event stream — receives project_files_changed /
+  // preview_ready / preview_sync_failed events independent of any task.
+  const previewEventSourceRef = useRef<EventSource | null>(null);
+  // Holds the latest BackendFilesPayload so PreviewTab can call syncFromBackend.
+  const latestFilesPayloadRef = useRef<BackendFilesPayload | null>(null);
+  // Increments every time a new files payload arrives — PreviewTab watches this.
+  const [filesPayloadSeq, setFilesPayloadSeq] = useState(0);
   // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
   // though that value is computed further down the component body.
   const pendingFeedTaskIdRef = useRef<number | null>(null);
@@ -1920,6 +1927,62 @@ export default function ProjectWorkspacePage() {
       if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
     };
   }, [activeTaskId, projectId, queryClient]);
+
+  // ── Project-level preview SSE ───────────────────────────────────────────────
+  // Subscribe to /preview-events/stream for the lifetime of this project page.
+  // This receives project_files_changed, preview_ready, and preview_sync_failed
+  // events emitted by any mutation (build, refine, rollback, manual save, etc.)
+  // so Quick Preview updates even when the AI Builder panel is closed.
+  useEffect(() => {
+    if (!projectId) return;
+    const es = new EventSource(`/api/projects/${projectId}/preview-events/stream`);
+    previewEventSourceRef.current = es;
+    es.onmessage = (e: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(e.data) as {
+          eventType: string;
+          projectId?: number;
+          files?: Record<string, string>;
+          changedPaths?: string[];
+          removedPaths?: string[];
+          requiresInstall?: boolean;
+          requiresRestart?: boolean;
+          operationType?: string;
+          generatedAt?: string;
+        };
+        if (event.eventType === "project_files_changed") {
+          const payload: BackendFilesPayload = {
+            projectId: event.projectId ?? projectId,
+            operationType: event.operationType ?? "unknown",
+            changedPaths: event.changedPaths ?? [],
+            removedPaths: event.removedPaths ?? [],
+            files: event.files ?? {},
+            requiresInstall: event.requiresInstall ?? false,
+            requiresRestart: event.requiresRestart ?? false,
+            generatedAt: event.generatedAt ?? new Date().toISOString(),
+          };
+          latestFilesPayloadRef.current = payload;
+          setFilesPayloadSeq((n) => n + 1);
+          // Invalidate file list so the editor panel reflects new content
+          void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
+        } else if (event.eventType === "preview_ready") {
+          // For static projects, trigger an iframe reload via buildRefreshCount
+          setBuildRefreshCount((n) => n + 1);
+        }
+        // preview_sync_failed — no action needed beyond the UI label in PreviewTab
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    es.onerror = () => {
+      // Browser will auto-reconnect; nothing to do here
+    };
+    return () => {
+      es.close();
+      previewEventSourceRef.current = null;
+    };
+  }, [projectId, queryClient]);
+  // ── End project-level preview SSE ──────────────────────────────────────────
 
   const dismissAgentPrompt = useCallback((promptId: string) => {
     setAgentPrompts((prev) => prev.filter((p) => p.promptId !== promptId));
@@ -4556,6 +4619,8 @@ export default function ProjectWorkspacePage() {
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
                 refreshTrigger={buildRefreshCount}
+                filesPayload={latestFilesPayloadRef.current}
+                filesPayloadSeq={filesPayloadSeq}
                 validationWarnings={(() => {
                   const recentReport = [...(messages ?? [])].reverse().find((m) => {
                     const p = m.plan as ChatPlanPayload | null | undefined;

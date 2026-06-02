@@ -14259,6 +14259,88 @@ export function useStreamTaskEvents<TData = Awaited<ReturnType<typeof streamTask
 
 
 
+export const getStreamProjectPreviewEventsUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/preview-events/stream`
+}
+
+/**
+ * Project-scoped Server-Sent Events stream emitting `project_files_changed`,
+`preview_ready`, and `preview_sync_failed` events. Live-only — no DB replay.
+Guards: requires project ownership. Task Agent `needs_review` output does NOT
+emit here; only Apply does.
+
+ * @summary SSE live stream of project-level preview events (text/event-stream)
+ */
+export const streamProjectPreviewEvents = async (id: number, options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getStreamProjectPreviewEventsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getStreamProjectPreviewEventsQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/preview-events/stream`
+    ] as const;
+    }
+
+
+export const getStreamProjectPreviewEventsQueryOptions = <TData = Awaited<ReturnType<typeof streamProjectPreviewEvents>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof streamProjectPreviewEvents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStreamProjectPreviewEventsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamProjectPreviewEvents>>> = ({ signal }) => streamProjectPreviewEvents(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof streamProjectPreviewEvents>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type StreamProjectPreviewEventsQueryResult = NonNullable<Awaited<ReturnType<typeof streamProjectPreviewEvents>>>
+export type StreamProjectPreviewEventsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary SSE live stream of project-level preview events (text/event-stream)
+ */
+
+export function useStreamProjectPreviewEvents<TData = Awaited<ReturnType<typeof streamProjectPreviewEvents>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof streamProjectPreviewEvents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getStreamProjectPreviewEventsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getGetContainerStatusUrl = (id: number,) => {
 
 

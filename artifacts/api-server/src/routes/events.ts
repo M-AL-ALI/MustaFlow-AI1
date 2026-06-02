@@ -2,7 +2,11 @@ import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
 import { db, agentTasksTable, taskEventsTable, toolAuditTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import { subscribeTaskEvents, type TaskEventPayload } from "../lib/event-bus";
+import {
+  subscribeTaskEvents,
+  subscribePreviewEvents,
+  type TaskEventPayload,
+} from "../lib/event-bus";
 
 const router: IRouter = Router();
 
@@ -43,6 +47,7 @@ router.get(
         eventType: e.eventType,
         message: e.message,
         filePath: e.filePath ?? null,
+        data: (e.data as Record<string, unknown> | null) ?? null,
         createdAt: e.createdAt,
       })),
     );
@@ -127,6 +132,7 @@ router.get(
         eventType: e.eventType,
         message: e.message,
         filePath: e.filePath ?? null,
+        data: (e.data as Record<string, unknown> | null) ?? null,
         createdAt: e.createdAt,
       });
       if (e.id > lastReplayedId) lastReplayedId = e.id;
@@ -154,6 +160,57 @@ router.get(
 
     req.on("close", () => {
       streamClosed = true;
+      unsubscribe();
+    });
+  },
+);
+
+/**
+ * SSE stream: GET /projects/:id/preview-events/stream
+ *
+ * Project-level preview event stream — independent of any task. Emits
+ * `project_files_changed`, `preview_ready`, and `preview_sync_failed` events
+ * triggered by:
+ *   - Agent build / refine completion
+ *   - Task agent Apply (not staging)
+ *   - Manual editor save
+ *   - Visual edit
+ *   - Rollback
+ *   - QA auto-fix
+ *
+ * This is a LIVE-ONLY stream (no DB replay). The frontend subscribes here so
+ * Quick Preview updates even when the AI Builder panel is closed.
+ *
+ * Guard: Task Agent `needs_review` output does NOT emit here — only Apply does.
+ */
+router.get(
+  "/projects/:id/preview-events/stream",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    if (!Number.isFinite(projectId)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const write = (payload: object): void => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    let closed = false;
+    const unsubscribe = subscribePreviewEvents(projectId, (payload) => {
+      if (closed) return;
+      write(payload);
+    });
+
+    req.on("close", () => {
+      closed = true;
       unsubscribe();
     });
   },

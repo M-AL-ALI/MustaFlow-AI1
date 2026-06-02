@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { agentTasksTable } from "./tasks";
 
 export const taskEventsTable = pgTable("task_events", {
@@ -9,6 +9,7 @@ export const taskEventsTable = pgTable("task_events", {
   eventType: text("event_type").notNull(),
   message: text("message").notNull(),
   filePath: text("file_path"),
+  data: jsonb("data").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -30,6 +30,8 @@ export type InvalidationReason =
   | "refine"
   | "apply"
   | "visual-edit"
+  | "manual-save"
+  | "rollback"
   | "testing-secret-created"
   | "testing-secret-updated"
   | "testing-secret-deleted"

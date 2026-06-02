@@ -6,6 +6,7 @@ export interface TaskEventPayload {
   eventType: string;
   message: string;
   filePath: string | null;
+  data?: Record<string, unknown>;
   createdAt: Date | string;
 }
 
@@ -37,6 +38,23 @@ export interface SecretEventPayload {
   secretId: number;
   action: "created" | "updated" | "deleted";
   secretName: string;
+}
+
+/**
+ * Project-level preview event — emitted whenever files are durably written
+ * and the Quick Preview should sync its WebContainer or reload the iframe.
+ *
+ * eventType values:
+ *   - "project_files_changed" — canonical update with file payload
+ *   - "preview_ready"         — async agentic sync confirmed HTTP 200
+ *   - "preview_sync_failed"   — agentic container sync failed
+ */
+export interface PreviewEventPayload {
+  projectId: number;
+  eventType: string;
+  /** Structured data (files, changedPaths, removedPaths, flags …) */
+  data?: Record<string, unknown>;
+  createdAt: string;
 }
 
 const bus = new EventEmitter();
@@ -127,6 +145,26 @@ export function subscribeProvisioningStep(
   handler: (payload: ProvisioningStepPayload) => void,
 ): () => void {
   const channel = `provisioning:step:${projectId}`;
+  bus.on(channel, handler);
+  return () => bus.off(channel, handler);
+}
+
+// ── Project-level preview events ──────────────────────────────────────────────
+
+/**
+ * Emit a project-level preview event to the in-process bus.
+ * The project-level SSE endpoint subscribes to this channel and forwards
+ * events to every connected browser regardless of which task triggered them.
+ */
+export function publishPreviewEvent(payload: PreviewEventPayload): void {
+  bus.emit(`project:${payload.projectId}:preview`, payload);
+}
+
+export function subscribePreviewEvents(
+  projectId: number,
+  handler: (payload: PreviewEventPayload) => void,
+): () => void {
+  const channel = `project:${projectId}:preview`;
   bus.on(channel, handler);
   return () => bus.off(channel, handler);
 }

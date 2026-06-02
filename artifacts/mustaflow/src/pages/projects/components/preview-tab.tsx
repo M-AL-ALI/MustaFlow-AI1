@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-container";
+import { STATUS_LABELS, type UseWebContainerResult, type BackendFilesPayload } from "@/hooks/use-web-container";
 import { cn } from "@/lib/utils";
 import {
   useListProjectFiles,
@@ -148,6 +148,18 @@ type PreviewTabProps = {
    * Pass a value that increments each time a build task completes.
    */
   refreshTrigger?: number;
+  /**
+   * Latest BackendFilesPayload received from the project-level preview SSE stream.
+   * When this changes (paired with filesPayloadSeq), PreviewTab calls
+   * wc.syncFromBackend so the WebContainer gets updated files without a full reload.
+   * Static (non-react-vite) projects increment iframeKey instead.
+   */
+  filesPayload?: BackendFilesPayload | null;
+  /**
+   * Increments each time a new filesPayload arrives. Use this as the effect
+   * dependency rather than the payload itself (stable ref identity).
+   */
+  filesPayloadSeq?: number;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -180,6 +192,8 @@ export function PreviewTab({
   onJumpToSecrets,
   onNavigateToTestEnv,
   refreshTrigger,
+  filesPayload,
+  filesPayloadSeq,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
@@ -235,6 +249,34 @@ export function PreviewTab({
       setIframeKey((k) => k + 1);
     }
   }, [refreshTrigger]);
+
+  // ── Backend-driven incremental sync ──────────────────────────────────────────
+  // When a project_files_changed payload arrives (filesPayloadSeq increments):
+  //   • React-Vite (WebContainer): call syncFromBackend for incremental FS update
+  //     without a full iframe reload — HMR handles source changes in place.
+  //   • Static projects: preview_ready from the SSE stream already increments
+  //     buildRefreshCount → refreshTrigger → iframeKey in the parent, so no
+  //     action needed here; we skip to avoid a double reload.
+  const prevFilesPayloadSeqRef = useRef<number | undefined>(undefined);
+  const wcSyncRef = useRef(wc.syncFromBackend);
+  wcSyncRef.current = wc.syncFromBackend;
+  useEffect(() => {
+    if (filesPayloadSeq === undefined || filesPayloadSeq === 0) return;
+    if (prevFilesPayloadSeqRef.current === filesPayloadSeq) return;
+    prevFilesPayloadSeqRef.current = filesPayloadSeq;
+    if (!filesPayload) return;
+    if (!isReactVite) {
+      // Static project — let the refreshTrigger/iframeKey path handle the reload.
+      // Increment iframeKey directly so the DB-served snapshot is re-fetched.
+      setIframeKey((k) => k + 1);
+      return;
+    }
+    // React-Vite: sync incrementally via WebContainer FS
+    void wcSyncRef.current(filesPayload).catch(() => {
+      // Non-fatal — worst case the user sees stale content until next full reload
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesPayloadSeq]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);

@@ -281,6 +281,30 @@ router.patch(
       });
     }
 
+    // Emit project_files_changed so Quick Preview syncs without a full reload.
+    // Also mark the testing snapshot stale since the draft changed.
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const { publishProjectFilesChanged } = await import("../lib/preview-events");
+          publishProjectFilesChanged(
+            projectId,
+            [{ path: updated.path, content: updated.content }],
+            [],
+            "manual-save",
+          );
+        } catch (err) {
+          logger.warn({ err, projectId }, "project_files_changed emit failed after manual save (non-fatal)");
+        }
+        try {
+          const { staleDraftCandidate } = await import("../lib/testing-invalidation");
+          await staleDraftCandidate(projectId, "manual-save");
+        } catch {
+          // non-fatal
+        }
+      })();
+    });
+
     // Sync the saved file to the live container (best-effort, non-fatal).
     setImmediate(() => {
       db.select({
