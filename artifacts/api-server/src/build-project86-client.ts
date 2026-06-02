@@ -28,10 +28,7 @@ const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
 const BUILD_DIR = "/tmp/towco-build";
 
-async function execC(
-  cmd: string[],
-  label: string,
-): Promise<{ ok: boolean; output: string }> {
+async function execC(cmd: string[], label: string): Promise<{ ok: boolean; output: string }> {
   console.log(`\n[container] ${label}`);
   const res = await execInContainer(MACHINE_ID, cmd, PROJECT_ID, "/app");
   const out = (res.stdout + res.stderr).trim();
@@ -85,7 +82,9 @@ async function main() {
   sh("npm install --no-audit --no-fund --prefer-offline 2>&1 | tail -5");
   const tsxPresent = fs.existsSync(path.join(BUILD_DIR, "node_modules/.bin/tsx"));
   const vitePresent = fs.existsSync(path.join(BUILD_DIR, "node_modules/.bin/vite"));
-  console.log(`[local] tsx: ${tsxPresent ? "PRESENT" : "MISSING"}, vite: ${vitePresent ? "PRESENT" : "MISSING"}`);
+  console.log(
+    `[local] tsx: ${tsxPresent ? "PRESENT" : "MISSING"}, vite: ${vitePresent ? "PRESENT" : "MISSING"}`,
+  );
 
   // ── 4. vite build → dist/client/ ──────────────────────────────────────────
   if (!vitePresent) {

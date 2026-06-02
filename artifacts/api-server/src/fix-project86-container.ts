@@ -21,7 +21,6 @@ import {
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
 
-
 async function run(
   cmd: string[],
   label: string,
@@ -179,11 +178,7 @@ async function main() {
     // Kill any existing npm/yarn first (SIGKILL to avoid lingering yarn workers
     // running concurrently with npm — that causes double OOM on 459 MB machines)
     await run(
-      [
-        "sh",
-        "-c",
-        "pkill -9 -f 'npm' 2>/dev/null; pkill -9 -f 'yarn' 2>/dev/null; sleep 3; true",
-      ],
+      ["sh", "-c", "pkill -9 -f 'npm' 2>/dev/null; pkill -9 -f 'yarn' 2>/dev/null; sleep 3; true"],
       "kill existing installs (SIGKILL)",
     );
 
@@ -287,7 +282,11 @@ async function main() {
   );
   if (viteBin.output.includes("PRESENT")) {
     const buildRes = await run(
-      ["sh", "-c", "cd /app && /app/node_modules/.bin/vite build 2>&1 && echo BUILD_OK || echo BUILD_FAIL"],
+      [
+        "sh",
+        "-c",
+        "cd /app && /app/node_modules/.bin/vite build 2>&1 && echo BUILD_OK || echo BUILD_FAIL",
+      ],
       "vite build",
     );
     if (buildRes.output.includes("BUILD_OK")) {
