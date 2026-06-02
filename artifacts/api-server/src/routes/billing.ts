@@ -29,7 +29,7 @@ import {
   userSubscriptionsTable,
 } from "@workspace/db";
 import { TIER_MONTHLY_CREDITS, TIER_PRICE_USD } from "@workspace/db";
-import { getOrCreateCredits, grantCredits } from "./credits";
+import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
   getUncachableStripeClient,

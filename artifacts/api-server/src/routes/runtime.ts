@@ -48,7 +48,7 @@ const router: IRouter = Router();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function getProject(projectId: number) {
+async function _getProject(projectId: number) {
   const [row] = await db
     .select()
     .from(projectsTable)
@@ -638,7 +638,7 @@ async function executeScheduledJob(
 async function provisionAddon(
   projectId: number,
   kind: AddonKind,
-  userId: string,
+  _userId: string,
 ): Promise<{
   status: string;
   externalId?: string;

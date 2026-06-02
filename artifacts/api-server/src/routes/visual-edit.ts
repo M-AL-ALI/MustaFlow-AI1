@@ -322,6 +322,7 @@ function patchInlineStyle(
       depth++;
     } else if (!isSelfClose) {
       if (depth === 0) {
+        // eslint-disable-next-line no-useless-assignment
         openIdx = lt;
         // Found the enclosing open tag — boundary is [lt, gt]
         return spliceStyle(source, lt, gt, property, value);

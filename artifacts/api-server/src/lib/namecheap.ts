@@ -84,7 +84,7 @@ function attr(xml: string, attrName: string): string | null {
 
 /** Extract text content of a specific XML element. */
 function text(xml: string, tagName: string): string | null {
-  const re = new RegExp(`<${tagName}[^>]*>([^<]*)<\/${tagName}>`, "i");
+  const re = new RegExp(`<${tagName}[^>]*>([^<]*)</${tagName}>`, "i");
   const m = re.exec(xml);
   return m?.[1]?.trim() ?? null;
 }

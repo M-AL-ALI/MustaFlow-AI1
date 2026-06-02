@@ -20,7 +20,7 @@
  *   The preview session is revoked immediately so the subdomain gateway blocks access.
  */
 
-import { eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, projectsTable, previewSessionsTable } from "@workspace/db";
 import { logger } from "./logger";
 

@@ -11,7 +11,7 @@
  */
 
 import { db, agentTasksTable } from "@workspace/db";
-import { and, eq, lt, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 const SWEEP_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes

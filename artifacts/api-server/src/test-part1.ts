@@ -15,7 +15,7 @@ const PROJECT_NAME = "Towco Fullstack";
 const PROMPT =
   "Build the Towco tow-truck request app with counter-offer flow, operator quotes, live status tracking, home page, request form, customer/operator dashboard, backend API, and test database records.";
 
-async function poll<T>(
+async function _poll<T>(
   label: string,
   fn: () => Promise<T | null>,
   until: (v: T) => boolean,

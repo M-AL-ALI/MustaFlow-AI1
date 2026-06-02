@@ -54,7 +54,7 @@ async function httpGet(
     let total = 0;
     const chunks: Uint8Array[] = [];
     if (reader) {
-      // eslint-disable-next-line no-constant-condition
+       
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -751,6 +751,7 @@ export interface DiagnosticsResult {
 /** Parse `tsc --noEmit` style output into structured diagnostics. */
 function parseTscOutput(raw: string, filterPath: string): Diagnostic[] {
   const out: Diagnostic[] = [];
+  // eslint-disable-next-line no-useless-escape
   const isGlob = /[*?\[]/.test(filterPath);
   for (const line of raw.split(/\r?\n/)) {
     // file.ts(12,5): error TS2304: Cannot find name 'foo'.
@@ -837,6 +838,7 @@ export async function readDiagnostics(input: {
     args.path.length > 512 ||
     args.path.startsWith("/") ||
     args.path.includes("..") ||
+    // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f\u007f'"`$\\;&|<>(){}\n\r ]/.test(args.path)
   ) {
     return {
@@ -849,6 +851,7 @@ export async function readDiagnostics(input: {
         "invalid path: must be a relative project path (globs allowed) with no shell metacharacters",
     };
   }
+  // eslint-disable-next-line no-useless-escape
   const isGlob = /[*?\[]/.test(args.path);
   const ext = isGlob ? "" : (args.path.split(".").pop()?.toLowerCase() ?? "");
   const auto =
@@ -955,6 +958,7 @@ function parseEslintOutput(raw: string): Diagnostic[] {
 }
 
 function shellQuote(s: string): string {
+  // eslint-disable-next-line no-useless-escape
   if (!/[^a-zA-Z0-9_./\-]/.test(s)) return s;
   return `'${s.replace(/'/g, "'\\''")}'`;
 }

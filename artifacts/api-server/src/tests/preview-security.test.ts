@@ -45,7 +45,7 @@ function makeProject(overrides: Record<string, unknown> = {}) {
 }
 
 /** Minimal project file row. */
-function makeFile(path: string, content: string, mimeType = "text/html") {
+function _makeFile(path: string, content: string, mimeType = "text/html") {
   return { id: 1, projectId: 42, path, content, mimeType };
 }
 

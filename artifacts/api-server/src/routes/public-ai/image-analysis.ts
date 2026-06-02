@@ -143,7 +143,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
 
   const start = Date.now();
   let reply: string | null = null;
-  let modelUsed = premiumModel;
+  const modelUsed = premiumModel;
 
   try {
     const { createChatCompletion } = await import("../../lib/ai-providers");
@@ -155,7 +155,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
       max_completion_tokens: maxTokens,
     });
     reply = result.choices[0]?.message?.content?.trim() ?? null;
-  } catch (err) {
+  } catch (_err) {
     logger.warn(
       {
         component: "ora-image-analysis",

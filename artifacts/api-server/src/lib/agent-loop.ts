@@ -51,7 +51,6 @@ import {
   PKG_INSTALL_TIMEOUT_MS,
   evaluatePkgInstall,
   evaluateRunCommand,
-  isPolicyStrictness,
   type PolicyStrictness,
 } from "./policy";
 import {
@@ -381,6 +380,7 @@ export function sanitizePath(rawPath: unknown): string | null {
   if (trimmed.length === 0 || trimmed.length > 512) return null;
   if (trimmed.includes("..")) return null;
   if (trimmed.startsWith("/")) return null;
+  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f]/.test(trimmed)) return null;
   // Reject shell metacharacters: $, backtick, |, &, ;, <, >, parens, quotes, *, ?, [, ], {, }, \, newlines.
   // Defence-in-depth — these paths should never reach a shell, but if they do
@@ -2257,7 +2257,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // The INSERT + COUNT are two separate statements (not a CTE) so the COUNT
       // sees the newly inserted row. Any DB error is non-fatal; we fall back to
       // the stale hourlyCountAtStart + current-run length estimate.
-      let postInsertHourlyCount = 0;
+      let postInsertHourlyCount: number;
       try {
         const { sql: dSql } = await import("drizzle-orm");
         await db.insert(agentToolCallsTable).values({
@@ -2571,7 +2571,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // this block the audit feed is incomplete and the rate limiter
       // undercounts every command execution.
       {
-        let postInsertHourlyCount = 0;
+        let postInsertHourlyCount: number;
         try {
           const { sql: dSql } = await import("drizzle-orm");
           await db.insert(agentToolCallsTable).values({
@@ -3365,7 +3365,7 @@ async function loadProjectSecretLiterals(projectId: number): Promise<string[]> {
   return p;
 }
 
-function escapeForRegex(s: string): string {
+function _escapeForRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -4317,7 +4317,6 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   } finally {
     if (installHeartbeatTimer) {
       clearInterval(installHeartbeatTimer);
-      installHeartbeatTimer = null;
     }
   }
   ctx.commandsRun.push({
@@ -4984,6 +4983,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           await safeEvent(input.onEvent, "narration", "Saving checkpoint before risky operation…");
           try {
             await input.onBeforeRiskyOp(`run_command: ${cmdStr.slice(0, 80)}`);
+          // eslint-disable-next-line no-empty
           } catch {}
         }
       }
@@ -5077,7 +5077,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       // Read full captured output + parsed inner exit code. We rely on a
       // separator to split log content from the exit file in a single exec
       // call (saves an RPC).
-      let stdout = "";
+      let stdout: string;
       let exitCode = r.timedOut ? 124 : r.exitCode;
       try {
         const finalRead = await execInContainer(
@@ -5359,6 +5359,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           await input.onBeforeRiskyOp(
             `pkg_install: ${decision.manager} ${decision.pkg}${decision.version ? `@${decision.version}` : ""}`,
           );
+        // eslint-disable-next-line no-empty
         } catch {}
       }
       await safeEvent(
@@ -6066,6 +6067,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
       if (!path && !url) {
         return { ok: false, observation: "ERROR: analyze_image requires either `path` or `url`" };
       }
+      // eslint-disable-next-line no-useless-assignment
       let dataUri: string | null = null;
       if (path) {
         const f = workspace.read(path);
@@ -6747,7 +6749,7 @@ const CREATIVE_CREDIT_COST: Record<
 async function executeCreativeTool(
   ctx: ToolCtx,
 ): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
-  const { name, args, workspace, input, containerState } = ctx;
+  const { name, args, workspace, input } = ctx;
   const tool = name as
     | "generate_image"
     | "generate_video"

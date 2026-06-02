@@ -89,7 +89,7 @@ async function main() {
   // ── 6. APPROACH A: Synchronous npm install (captures output, 290s timeout) ─
   console.log("\n── APPROACH A: Synchronous npm install ──");
   // Single packages one at a time uses less concurrent memory
-  const singlePkgs = ["express", "cors", "pg", "uuid", "drizzle-orm", "tsx"];
+  const _singlePkgs = ["express", "cors", "pg", "uuid", "drizzle-orm", "tsx"];
   let installed = false;
 
   // First, try a single-shot synchronous npm install of just tsx (lightweight).

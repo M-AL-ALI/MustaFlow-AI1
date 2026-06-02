@@ -87,7 +87,6 @@ import { fetchAttachmentAsDataUri } from "../routes/images.js";
 import { sendBuildFailureEmail } from "./emailClient";
 import { getClerkUserById } from "./clerk-users";
 import {
-  runArchitectReview,
   shouldTriggerAutoFix,
   buildAutoFixPrompt,
   toReportShape as architectToReportShape,
@@ -232,7 +231,7 @@ async function runAgenticPreflightGate(
           { projectId, taskId, containerId },
           "Server not responding to /healthz — probing exec layer to detect crashed server process",
         );
-        let execLayerOk = false;
+        let execLayerOk: boolean;
         try {
           const execProbe = await execInContainer(containerId, ["ls", "/app"], projectId);
           execLayerOk = execProbe.ok;
@@ -1808,6 +1807,7 @@ export async function runJob(input: JobInput): Promise<void> {
   // prompt so every downstream pipeline (including JSON-mode builders that
   // can't natively consume image_url blocks) has something concrete to work
   // with. Best-effort: failures fall back to the existing multimodal path.
+  // eslint-disable-next-line no-useless-assignment
   let imageLayoutBrief: string | null = null;
 
   const jobStartTime = Date.now();
@@ -5964,7 +5964,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     // Stop the job-level heartbeat timer.
     if (jobHeartbeatTimer) {
       clearInterval(jobHeartbeatTimer);
-      jobHeartbeatTimer = null;
     }
     // Stop the keepalive loop and restore autostop on the machine so it can
     // idle-stop normally once the task is done.
@@ -6426,7 +6425,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
           .update(agentTasksTable)
           .set({ status: "failed", result: errMsg.slice(0, 500), completedAt: new Date() })
           .where(eq(agentTasksTable.id, taskId));
-        throw new Error(errMsg);
+        throw new Error(errMsg, { cause: npmAuditErr });
       }
     }
   }
@@ -7371,6 +7370,7 @@ export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<
   const { findingId, projectId } = input;
   logger.info({ findingId, projectId }, "CVE auto-protect job starting");
 
+  // eslint-disable-next-line no-useless-assignment
   let finding: {
     id: number;
     packageName: string;

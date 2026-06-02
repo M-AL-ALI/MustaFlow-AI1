@@ -37,12 +37,14 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; category: SafetyCategory; reaso
   },
   {
     pattern:
+      // eslint-disable-next-line no-useless-escape
       /\b(racial\s+slur|n[\-\s]*word|k[\-\s]*k[\-\s]*k|white\s+suprema|nazi\s+propaganda|antisemit|islamophob|homophob\s+slur)\b/i,
     category: "hate_speech",
     reason: "Hate speech and discriminatory content is not allowed",
   },
   {
     pattern:
+      // eslint-disable-next-line no-useless-escape
       /\b(suicide\s+method|self[\-\s]harm\s+instruction|how\s+to\s+cut|self[\-\s]mutilat)\b/i,
     category: "self_harm",
     reason: "Content promoting self-harm is not allowed",
@@ -68,6 +70,7 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; category: SafetyCategory; reaso
   {
     // Brand impersonation: official-looking replicas of major brand logos / trademarks
     pattern:
+      // eslint-disable-next-line no-useless-escape
       /\b(?:official|authentic|real|exact|replica\s+of)\s+(?:apple|google|microsoft|amazon|meta|facebook|instagram|twitter|x\.com|nike|adidas|coca[\-\s]cola|pepsi|mcdonald|starbucks|visa|mastercard|paypal|stripe|openai|anthropic)\s+(?:logo|seal|badge|trademark|brand|identity)\b|\b(?:apple|google|microsoft|amazon|meta|facebook|instagram|twitter|nike|adidas|coca[\-\s]cola|pepsi|mcdonald|starbucks|visa|mastercard|paypal)\s+(?:logo\s+(?:replica|copy|clone|duplicate|forgery)|counterfeit\s+(?:logo|seal))\b/i,
     category: "misinformation",
     reason: "Replicas of official brand logos and trademarks are not allowed",

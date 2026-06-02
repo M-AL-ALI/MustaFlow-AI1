@@ -1,6 +1,6 @@
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { parse as acornParse } from "acorn";
-import { checkSyntax, formatSyntaxErrors } from "./checks/syntax-checker";
+import { checkSyntax } from "./checks/syntax-checker";
 import { runTsCheck, formatTsErrors } from "./checks/ts-checker";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
@@ -1747,7 +1747,7 @@ async function callWithRetry(
       }
     } catch (apiErr) {
       if (apiErr instanceof Error && (apiErr.name === "AbortError" || signal?.aborted)) {
-        throw new Error("Build cancelled");
+        throw new Error("Build cancelled", { cause: apiErr });
       }
       lastError = apiErr instanceof Error ? apiErr : new Error(String(apiErr));
       logger.error({ err: apiErr, attempt, label }, "OpenAI API call failed");
@@ -1798,7 +1798,7 @@ async function streamAndAccumulate(
       err instanceof Error &&
       (err.name === "AbortError" || err.message === "Build cancelled" || signal?.aborted)
     ) {
-      throw new Error("Build cancelled");
+      throw new Error("Build cancelled", { cause: err });
     }
     logger.warn({ err, label }, "Streaming failed — falling back to batch completion");
     return callWithRetry(messages, model, maxTokens, label, signal, stage, agentMode);
@@ -2686,6 +2686,7 @@ export async function runBuildPipeline(args: {
   const validationPassed = allCriticalErrors.length === 0;
 
   let correctionFailed = false;
+  // eslint-disable-next-line no-useless-assignment
   let postCorrectionWarnings: string[] = [];
 
   if (!validationPassed) {
@@ -3163,6 +3164,7 @@ export async function runRefinePipeline(args: {
   let correctionFailed = false;
   let correctionWasAttempted = false;
   let refineErrorCategory: string | null = null;
+  // eslint-disable-next-line no-useless-assignment
   let validationWarnings: string[] = [];
   let remainingCriticalErrors: string[] = [];
 
@@ -6262,8 +6264,8 @@ export async function runMobileRefinePipeline(args: {
       : "Refresh the Preview tab to see changes, or open the Files tab to inspect the code.";
 
   const existingPaths = new Set(existingFiles.map((f) => f.path));
-  const filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
-  const filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
+  const _filesCreated = changedFiles.filter((f) => !existingPaths.has(f.path)).map((f) => f.path);
+  const _filesChanged = changedFiles.filter((f) => existingPaths.has(f.path)).map((f) => f.path);
 
   const nativeFeatures = Array.isArray(parsed.nativeFeatures)
     ? parsed.nativeFeatures.filter((f): f is string => typeof f === "string")
@@ -6376,10 +6378,10 @@ export async function runMobileRefinePipeline(args: {
   }
 
   // Recompute created/changed lists in case correction added new files.
-  const finalFilesCreated = changedFiles
+  const _finalFilesCreated = changedFiles
     .filter((f) => !existingPaths.has(f.path))
     .map((f) => f.path);
-  const finalFilesChanged = changedFiles
+  const _finalFilesChanged = changedFiles
     .filter((f) => existingPaths.has(f.path))
     .map((f) => f.path);
 
@@ -6466,6 +6468,7 @@ export async function runMobileRefinePipeline(args: {
             const newChanged = [...tentativeChangedMap.values()];
             changedFiles.length = 0;
             changedFiles.push(...newChanged);
+            // eslint-disable-next-line no-useless-assignment
             mergedFiles = tentativeMerged;
             mobileRefineCritiqueMeta = { issuesFound: critiqueIssues, autoFixed: true };
             logger.info(
@@ -8240,7 +8243,7 @@ export async function runConverseStreamPipeline(
       : "No project files yet — starting fresh.";
 
   const model = modelFor(agentMode);
-  const effectiveSystemPromptStream = systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT;
+  const _effectiveSystemPromptStream = systemPromptOverride ?? CONVERSE_SYSTEM_PROMPT;
 
   type TextPart = { type: "text"; text: string };
   type ImagePart = { type: "image_url"; image_url: { url: string } };

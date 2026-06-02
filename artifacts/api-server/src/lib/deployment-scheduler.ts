@@ -60,6 +60,7 @@ async function fireSchedule(scheduleId: number): Promise<void> {
   if (!row || !row.enabled) return;
 
   let status: "ran" | "skipped" | "error" = "ran";
+  // eslint-disable-next-line no-useless-assignment
   let message = "";
 
   try {
@@ -245,8 +246,8 @@ export async function runUptimeProbeForProject(projectId: number): Promise<void>
   const target = `${base}${path.startsWith("/") ? path : "/" + path}`;
 
   const startedAt = Date.now();
-  let rootStatus = 0;
-  let ok = false;
+  let rootStatus: number;
+  let ok: boolean;
   try {
     const res = await fetch(target, {
       method: "GET",

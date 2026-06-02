@@ -27,7 +27,6 @@ import {
   projectWebhooksTable,
 } from "@workspace/db";
 import { and, gte } from "drizzle-orm";
-import { grantCredits } from "./credits";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { logger } from "../lib/logger";
 import { requireAdmin } from "../lib/adminAuth";

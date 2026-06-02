@@ -153,6 +153,7 @@ router.post(
 
     // Verify the object exists and read its true size from storage metadata,
     // rather than trusting the client-reported sizeBytes (defence-in-depth for the 50 MB cap).
+    // eslint-disable-next-line no-useless-assignment
     let actualSize = 0;
     let file: Awaited<ReturnType<typeof storage.getObjectEntityFile>>;
     try {

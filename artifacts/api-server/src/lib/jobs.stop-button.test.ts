@@ -23,9 +23,9 @@ const {
   updateCallCount,
   mockRunBuildPipeline,
   mockRunAgentLoop,
-  makeSelectChain,
-  makeUpdateChain,
-  makeInsertChain,
+  makeSelectChain: _makeSelectChain,
+  makeUpdateChain: _makeUpdateChain,
+  makeInsertChain: _makeInsertChain,
   makeDb,
   makePool,
   fakeAgentTasksTable,
@@ -49,7 +49,7 @@ const {
   fakeBuilderSkillsTable,
   TASK_ID,
   PROJECT_ID,
-  mockProject,
+  mockProject: _mockProject,
   publishTaskEventSpy,
 } = vi.hoisted(() => {
   const TASK_ID = 42;

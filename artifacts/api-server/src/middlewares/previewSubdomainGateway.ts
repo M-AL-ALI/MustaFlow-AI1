@@ -23,7 +23,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import { createHmac, createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { eq, and, isNull } from "drizzle-orm";
 import { db, projectsTable, previewSessionsTable } from "@workspace/db";
 import { logger } from "../lib/logger";

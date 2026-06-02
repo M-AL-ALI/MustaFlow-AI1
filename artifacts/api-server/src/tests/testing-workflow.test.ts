@@ -36,7 +36,7 @@ function makeProject(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeVersion(id: number, overrides: Record<string, unknown> = {}) {
+function _makeVersion(id: number, overrides: Record<string, unknown> = {}) {
   return {
     id,
     projectId: 42,

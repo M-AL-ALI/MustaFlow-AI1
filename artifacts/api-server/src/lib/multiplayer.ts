@@ -85,7 +85,7 @@ function sendJson(ws: WebSocket, payload: unknown): void {
   }
 }
 
-function broadcastBinary(room: Room, except: Peer, data: Uint8Array): void {
+function _broadcastBinary(room: Room, except: Peer, data: Uint8Array): void {
   for (const peer of room.peers) {
     if (peer === except) continue;
     sendBinary(peer.ws, data);
@@ -116,6 +116,7 @@ export function createMultiplayerServer(): MultiplayerServer {
     }
     const projectId = parseInt(match[1]!, 10);
 
+    // eslint-disable-next-line no-useless-assignment
     let userId: string | null = null;
     try {
       const auth = getAuth(req as unknown as Parameters<typeof getAuth>[0]);

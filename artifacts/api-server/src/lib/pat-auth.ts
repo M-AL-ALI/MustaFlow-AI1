@@ -25,7 +25,7 @@ export function hashToken(raw: string): string {
 }
 
 export function generateRawToken(): string {
-  const { randomBytes } = require("crypto") as typeof import("crypto");
+  const { randomBytes } = await import("crypto");
   return `${TOKEN_PREFIX}${randomBytes(32).toString("hex")}`;
 }
 

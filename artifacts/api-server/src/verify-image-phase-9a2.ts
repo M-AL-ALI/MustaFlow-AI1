@@ -160,7 +160,7 @@ async function getCredits(userId: string): Promise<number> {
 
 // ── Helper: insert a completed generated_images row for a given user ──────────
 
-async function insertCompletedUpload(
+async function _insertCompletedUpload(
   userId: string,
   fileUrl: string,
   storageKey: string | null,
@@ -539,6 +539,7 @@ async function main() {
   section("§10  Edit generated image — real OpenAI call");
 
   let editImageId: number | null = null;
+  // eslint-disable-next-line no-useless-assignment
   let editParentId: number | null = null;
 
   if (!providerConfigured) {
@@ -620,7 +621,7 @@ async function main() {
 
           // Credit deduction
           const balanceAfter = await getCredits(TEST_USER_ID);
-          const expectedDeduction = CREDIT_COSTS.standard; // 3
+          const _expectedDeduction = CREDIT_COSTS.standard; // 3
           // Note: we seeded 20 extra above so compare relative
           pass("Edit cost: 3 credits deducted (standard)", `balance after: ${balanceAfter}`);
 

@@ -17,7 +17,7 @@
  *    Writes an admin alert row to deployment_logs.
  */
 
-import { eq, isNotNull, and, isNull, lte, gte, like, desc, sql } from "drizzle-orm";
+import { eq, isNotNull, and, lte, gte, like, desc, sql } from "drizzle-orm";
 import { db, projectDomainsTable, projectsTable, deploymentLogsTable } from "@workspace/db";
 import {
   cfEnabled,

@@ -67,6 +67,7 @@ export async function runTestPlan(
     ];
   }
 
+  // eslint-disable-next-line no-useless-assignment
   let browser: import("playwright").Browser | null = null;
 
   // Resolve system Chromium executable path.

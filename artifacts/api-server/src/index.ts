@@ -106,7 +106,7 @@ const TERMINAL_PATH = /^\/api\/projects\/\d+\/terminal$/;
 const DEBUG_PATH = /^\/api\/projects\/\d+\/debug$/;
 server.on("upgrade", (req, socket, head) => {
   const netSocket = socket as unknown as import("node:net").Socket;
-  let pathname = "";
+  let pathname: string;
   try {
     pathname = new URL(req.url ?? "/", "http://x").pathname;
   } catch {

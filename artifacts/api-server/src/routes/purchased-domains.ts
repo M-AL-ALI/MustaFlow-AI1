@@ -255,7 +255,7 @@ router.post("/domains/purchase", async (req, res): Promise<void> => {
     hostname: rawHostname,
     projectId,
     years = 1,
-    contact,
+    contact: _contact,
     successUrl,
     cancelUrl,
   } = req.body as {
@@ -671,7 +671,7 @@ router.post("/domains/transfer-in", async (req, res): Promise<void> => {
     hostname: rawHostname,
     authCode,
     projectId,
-    contact,
+    contact: _contact2,
     successUrl,
     cancelUrl,
   } = req.body as {

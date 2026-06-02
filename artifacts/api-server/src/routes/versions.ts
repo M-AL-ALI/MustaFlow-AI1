@@ -15,7 +15,6 @@ import {
 } from "@workspace/db";
 import {
   ListVersionsParams,
-  ListVersionsResponse,
   CreateVersionParams,
   CreateVersionBody,
   PatchVersionParams,

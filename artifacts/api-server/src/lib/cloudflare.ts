@@ -1000,6 +1000,7 @@ async function r2Request(opts: {
   const endpoint = `https://${host}`;
 
   const now = new Date();
+  // eslint-disable-next-line no-useless-escape
   const datetime = now.toISOString().replace(/[:\-]/g, "").replace(/\.\d+/, "").slice(0, 15) + "Z";
 
   const body = opts.body ?? Buffer.alloc(0);
@@ -1153,6 +1154,7 @@ export async function r2GetObject(key: string): Promise<{
   const host = `${acctId}.r2.cloudflarestorage.com`;
 
   const now = new Date();
+  // eslint-disable-next-line no-useless-escape
   const datetime = now.toISOString().replace(/[:\-]/g, "").replace(/\.\d+/, "").slice(0, 15) + "Z";
 
   const emptyBody = Buffer.alloc(0);

@@ -1653,7 +1653,7 @@ export async function startContainerHealthServer(
  */
 export async function stopContainerHealthServer(
   machineId: string,
-  projectId: number,
+  _projectId: number,
 ): Promise<void> {
   if (!isConfigured()) return;
   try {

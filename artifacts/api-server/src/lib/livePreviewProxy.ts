@@ -360,6 +360,7 @@ export async function handleLivePreviewUpgrade(
     // and confirm the user can preview this project. Mirrors the HTTP
     // gate in `routes/files.ts` so a logged-in stranger cannot open a WS
     // to someone else's private preview by guessing the project id.
+    // eslint-disable-next-line no-useless-assignment
     let userId: string | null = null;
     try {
       const auth = getAuth(req as unknown as Parameters<typeof getAuth>[0]);

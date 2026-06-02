@@ -12,7 +12,7 @@
  *  5. Slim yarn install (server runtime deps only) in container
  *  6. Start the express server, confirm /healthz 200
  */
-import { execSync, spawnSync } from "child_process";
+import { execSync } from "child_process";
 import { db, projectFilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import fs from "fs";

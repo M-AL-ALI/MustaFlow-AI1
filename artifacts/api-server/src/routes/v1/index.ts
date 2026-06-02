@@ -52,7 +52,7 @@ import webhooksRouter from "./webhooks";
 
 const router: IRouter = Router();
 
-const TOKEN_PREFIX = "mfp_";
+const _TOKEN_PREFIX = "mfp_";
 const CNAME_TARGET = process.env.PLATFORM_CNAME_TARGET ?? "hosted.mustaflow.app";
 
 function normaliseHostname(raw: string): string | null {
@@ -266,6 +266,7 @@ router.post("/projects/:id/domains/:domainId/verify", async (req, res): Promise<
 
   const { hostname, verificationToken, recordType } = domain;
   const txtLookup = `_mustaflow.${hostname}`;
+  // eslint-disable-next-line no-useless-assignment
   let txtVerified = false;
   let cnameVerified = false;
 

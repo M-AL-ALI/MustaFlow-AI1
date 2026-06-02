@@ -12,7 +12,7 @@
  */
 
 import { createHmac } from "crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, projectWebhooksTable, webhookDeliveriesTable } from "@workspace/db";
 import type { WebhookEvent } from "@workspace/db";
 import { logger } from "./logger";

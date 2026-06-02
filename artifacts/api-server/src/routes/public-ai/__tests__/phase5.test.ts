@@ -9,7 +9,7 @@
  *   - POST /api/public-ai/image-analysis
  */
 
-import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   validateImage,
   isImageExtension,
@@ -18,7 +18,6 @@ import {
 import {
   storeImage,
   getImage,
-  imageStoreSize,
   type ImageEntry,
 } from "../../../lib/public-ai/image-store";
 import {

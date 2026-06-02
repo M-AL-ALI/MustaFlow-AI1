@@ -249,6 +249,7 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
       const rowData: string[] = [];
       for (let ci = 1; ci <= colCount; ci++) {
         const cell = row.getCell(ci);
+        // eslint-disable-next-line no-useless-assignment
         let rawValue = "";
 
         const cellVal = cell.value;

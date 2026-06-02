@@ -41,6 +41,7 @@ function sanitizeMessageContent(raw: string): string {
       // Strip URLs (potential PII leak via query params)
       .replace(/https?:\/\/\S+/gi, "[url]")
       // Strip email addresses
+      // eslint-disable-next-line no-useless-escape
       .replace(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g, "[email]")
       // Strip phone-like patterns
       .replace(/\b\+?[\d\s\-().]{7,}\d\b/g, "[phone]")

@@ -60,7 +60,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/mustaflow run lint"
+args = "pnpm run lint"
 
 [[workflows.workflow]]
 name = "format"
@@ -77,12 +77,12 @@ isValidation = true
 name = "quality-gate"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/mustaflow run lint && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run lint && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck"
 
 [[workflows.workflow]]
 name = "cdn-versions"

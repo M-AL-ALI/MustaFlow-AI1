@@ -13,6 +13,7 @@ const SECRET_PATTERNS: Array<{
   severity: "error" | "warning";
 }> = [
   {
+    // eslint-disable-next-line no-useless-escape
     pattern: /(?:api[_-]?key|apikey)\s*[:=]\s*["']([A-Za-z0-9_\-]{20,})["']/gi,
     label: "API key",
     severity: "error",
@@ -44,6 +45,7 @@ const SECRET_PATTERNS: Array<{
     severity: "error",
   },
   {
+    // eslint-disable-next-line no-useless-escape
     pattern: /xox[baprs]-[A-Za-z0-9\-]{10,}/gi,
     label: "Slack token",
     severity: "error",

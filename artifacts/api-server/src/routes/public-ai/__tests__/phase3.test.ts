@@ -330,12 +330,12 @@ describe("validateFile — Phase 3 dataset types", () => {
 });
 
 // ─── 8. /api/public-ai/dataset-analysis route ────────────────────────────────
-function makeApp(secret = TEST_SECRET) {
+function _makeApp(secret = TEST_SECRET) {
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
 
-  const envBefore = process.env.ORA_SESSION_SECRET;
+  const _envBefore = process.env.ORA_SESSION_SECRET;
   process.env.ORA_SESSION_SECRET = secret;
 
   const originalEnv = process.env.ORA_SESSION_SECRET;
@@ -664,7 +664,7 @@ describe("buildDatasetContextBlock", () => {
     };
     const block = buildDatasetContextBlock("data.csv", summary, "Summarize");
     // The neutralized cell value starts with '; no bare =EXEC should appear without the prefix
-    expect(block).not.toMatch(/(?<!')\=EXEC/);
+    expect(block).not.toMatch(/(?<!')=EXEC/);
     expect(block).toContain("'=EXEC(malicious)");
     expect(block).toContain("UNTRUSTED");
     expect(block).toContain("DO NOT FOLLOW");

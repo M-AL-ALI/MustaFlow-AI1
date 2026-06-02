@@ -35,7 +35,6 @@ import {
   deleteCustomHostname,
   applySecurityConfig,
   enableMtls,
-  writeHostnameKV,
   deleteHostnameKV,
   syncHostnameKVAfterPublish,
 } from "../lib/cloudflare";
@@ -828,7 +827,9 @@ router.post(
     const txtLookup = `_mustaflow.${hostname}`;
     const isApex = recordType === "a";
 
+    // eslint-disable-next-line no-useless-assignment
     let txtVerified = false;
+    // eslint-disable-next-line no-useless-assignment
     let recordVerified = false;
     let txtRecords: string[][] = [];
     let cnameRecords: string[] = [];
@@ -1069,6 +1070,7 @@ router.get(
     // Check 1: DNS resolves
     let resolvedIps: string[] = [];
     let resolvedCnames: string[] = [];
+    // eslint-disable-next-line no-useless-assignment
     let dnsResolvesOk = false;
     try {
       if (isApex) {
@@ -1128,6 +1130,7 @@ router.get(
     });
 
     // Check 3: TXT ownership proof
+    // eslint-disable-next-line no-useless-assignment
     let txtVerified = false;
     let txtRecords: string[][] = [];
     const txtName = `_mustaflow.${hostname}`;
@@ -1167,10 +1170,10 @@ router.get(
     const apexForCaa = hostname.split(".").slice(-2).join(".");
     let caaRecordsForIssue: string[] = [];
     let caaAllowsCf = true;
-    let caaChecked = false;
+    let _caaChecked = false;
     try {
       const caaRaw = await dns.resolveCaa(apexForCaa);
-      caaChecked = true;
+      _caaChecked = true;
       caaRecordsForIssue = caaRaw
         .filter((r) => r.issue !== undefined || r.issuewild !== undefined)
         .map((r) => r.issue ?? r.issuewild ?? "")
@@ -1183,7 +1186,7 @@ router.get(
       }
     } catch {
       // ENODATA / ENOTFOUND = no CAA records — any CA can issue. Non-fatal.
-      caaChecked = true;
+      _caaChecked = true;
       caaAllowsCf = true;
     }
     checks.push({

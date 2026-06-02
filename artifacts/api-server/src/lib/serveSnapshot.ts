@@ -329,7 +329,7 @@ export async function serveSnapshotForEnv(
   res: Response,
   publicSlug: string,
   filePath: string,
-  env: "staging",
+  _env: "staging",
 ): Promise<void> {
   const [project] = await db
     .select({

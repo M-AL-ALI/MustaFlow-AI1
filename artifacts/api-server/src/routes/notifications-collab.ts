@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, eq, desc, lt } from "drizzle-orm";
 import { db, notificationsTable } from "@workspace/db";
-import { z } from "zod";
 
 const router: IRouter = Router();
 

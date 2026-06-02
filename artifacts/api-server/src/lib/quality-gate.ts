@@ -252,6 +252,7 @@ export async function runQualityGate(
       "-c",
       "[ -f /app/node_modules/.bin/eslint ] && echo '__ESLINT_FOUND__' || echo '__ESLINT_NOT_INSTALLED__'",
     ];
+    // eslint-disable-next-line no-useless-assignment
     let eslintPresent = false;
     try {
       const probe = await execInContainer(containerId, probeCmd, projectId, "/app");

@@ -19,7 +19,6 @@ import {
   db,
   extensionsTable,
   projectExtensionsTable,
-  projectsTable,
   secretsTable,
   type ExtensionScope,
 } from "@workspace/db";

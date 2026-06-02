@@ -262,7 +262,7 @@ function flattenNpmDeps(
 function buildNpmComponents(): SbomComponent[] {
   const components: SbomComponent[] = [];
 
-  let depMap = new Map<string, string>();
+  const depMap = new Map<string, string>();
 
   try {
     const out = execSync("pnpm --filter @workspace/api-server list --json --depth 1 2>/dev/null", {
@@ -305,6 +305,7 @@ function buildNpmComponents(): SbomComponent[] {
     if (name.startsWith("@workspace/")) continue;
     const cleanVersion = version.replace(/^[\^~>=]/, "");
     const license = lookupPackageLicense(name);
+    // eslint-disable-next-line no-useless-escape
     const isSpdx = /^[A-Za-z0-9.+\-]+$/.test(license) || license === "0BSD";
     const bomRef = `npm-${name.replace(/\//g, "__")}-${cleanVersion}`;
 

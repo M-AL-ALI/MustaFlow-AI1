@@ -129,6 +129,7 @@ async function runAutoRenewal(): Promise<void> {
 
   const thirtyDaysFromNow = new Date(Date.now() + 30 * 86_400_000);
 
+  // eslint-disable-next-line no-useless-assignment
   let domainsToRenew: Array<{
     id: number;
     userId: string;
@@ -311,6 +312,7 @@ async function runAutoRenewal(): Promise<void> {
 async function runTransferPolling(): Promise<void> {
   if (!namecheapEnabled()) return;
 
+  // eslint-disable-next-line no-useless-assignment
   let pendingTransfers: Array<{
     id: number;
     userId: string;

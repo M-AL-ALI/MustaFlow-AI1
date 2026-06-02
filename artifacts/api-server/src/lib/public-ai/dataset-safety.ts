@@ -15,6 +15,7 @@
 
 const FORMULA_START_CHARS = new Set(["=", "@"]);
 
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHAR_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 const UNICODE_DIR_OVERRIDE_RE = /[\u202a-\u202e\u2066-\u2069]/g;
 

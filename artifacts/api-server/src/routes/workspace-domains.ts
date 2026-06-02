@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { eq, and, asc, desc, gte, lte, isNull, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, isNull, inArray } from "drizzle-orm";
 import { promises as dns } from "dns";
 import { randomBytes } from "crypto";
 import {
@@ -21,7 +21,6 @@ import {
   workspacesTable,
   workspaceDomainsTable,
   workspaceDomainRolesTable,
-  workspaceUsageDailyTable,
   workspaceDomainAuditTable,
   projectDomainsTable,
   projectsTable,

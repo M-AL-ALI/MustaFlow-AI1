@@ -320,6 +320,7 @@ export async function buildCsv(data: TabularData): Promise<Buffer> {
 function parseCellValue(raw: string, type: ColumnType | undefined): string | number | Date {
   if (!type || type === "text") return raw;
   if (type === "number" || type === "currency" || type === "percent") {
+    // eslint-disable-next-line no-useless-escape
     const n = parseFloat(raw.replace(/[^0-9.\-]/g, ""));
     return isNaN(n) ? raw : n;
   }
@@ -804,6 +805,7 @@ export async function generateFileFromPrompt(
   const aiData = JSON.parse(raw) as Record<string, unknown>;
 
   let fileBuffer: Buffer;
+  // eslint-disable-next-line no-useless-assignment
   let title = "file";
   let rowCount = 0;
   let sectionCount = 0;

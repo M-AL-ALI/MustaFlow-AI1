@@ -77,7 +77,7 @@ async function assertSafeEndpoint(endpoint: string): Promise<void> {
       }
     }
   } catch (err) {
-    throw new Error(`MCP endpoint DNS lookup failed: ${(err as Error).message}`);
+    throw new Error(`MCP endpoint DNS lookup failed: ${(err as Error).message}`, { cause: err });
   }
 }
 

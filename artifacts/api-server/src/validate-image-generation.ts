@@ -20,7 +20,6 @@
 import { db, pool, generatedImagesTable, userCreditsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { enqueueImageJob, getJob } from "./lib/image-generation-jobs";
-import { validateImagePrompt } from "./lib/image-safety";
 import { isImageProviderConfigured } from "./lib/image-provider";
 
 // ── Config ─────────────────────────────────────────────────────────────────────

@@ -121,6 +121,7 @@ export async function runE2eScenarios(opts: E2eRunOptions): Promise<E2eRunSummar
 
   const executablePath = await resolveChromiumPath();
 
+  // eslint-disable-next-line no-useless-assignment
   let browser: import("playwright").Browser | null = null;
   try {
     browser = await chromium.launch({

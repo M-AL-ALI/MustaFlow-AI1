@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, eq, isNull, desc, asc } from "drizzle-orm";
+import { and, eq, isNull, asc } from "drizzle-orm";
 import {
   db,
   projectCommentsTable,

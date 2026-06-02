@@ -799,8 +799,8 @@ router.get(
     // Compact the diff: only return changed lines ± 3 lines of context
     const CONTEXT = 3;
     const compactLines: (DiffLine & { lineA?: number; lineB?: number })[] = [];
-    let lineANum = 0;
-    let lineBNum = 0;
+    const lineANum = 0;
+    const lineBNum = 0;
     let lastChangedIdx = -1;
     for (let i = 0; i < diffLines.length; i++) {
       const l = diffLines[i]!;

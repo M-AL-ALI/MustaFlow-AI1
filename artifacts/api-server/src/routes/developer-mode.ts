@@ -47,6 +47,7 @@ router.get(
     const neonApiKeyPresent = !!process.env.NEON_API_KEY;
 
     let preflightOk = false;
+    // eslint-disable-next-line no-useless-assignment
     let preflightMessage: string | null = null;
 
     if (project.containerId) {

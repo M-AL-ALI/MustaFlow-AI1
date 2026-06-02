@@ -522,6 +522,7 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
       const toolCalls = msg.tool_calls ?? [];
       for (const tc of toolCalls) {
         if (tc.type !== "function") continue;
+        // eslint-disable-next-line no-useless-assignment
         let inputJson: unknown = {};
         try {
           inputJson = JSON.parse(tc.function.arguments || "{}");
@@ -807,6 +808,7 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
       }
       for (const tc of msg.tool_calls ?? []) {
         if (tc.type !== "function") continue;
+        // eslint-disable-next-line no-useless-assignment
         let argsObj: unknown = {};
         try {
           argsObj = JSON.parse(tc.function.arguments || "{}");

@@ -49,13 +49,32 @@ module.exports = tseslint.config(
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
       ],
       "no-console": "error",
     },
   },
   {
     files: ["scripts/**/*.ts"],
+    rules: {
+      "no-console": "off",
+    },
+  },
+  {
+    files: [
+      "artifacts/api-server/src/*.ts",
+    ],
+    rules: {
+      "no-console": "off",
+    },
+  },
+  {
+    files: ["**/*.test.ts", "**/__tests__/**/*.ts"],
     rules: {
       "no-console": "off",
     },

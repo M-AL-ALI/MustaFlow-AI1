@@ -152,6 +152,7 @@ async function ensureIndex(
   const out = new Map<string, { vector: number[] | null; snippet: string }>();
   if (files.length === 0) return out;
 
+  // eslint-disable-next-line no-useless-assignment
   let existing: ProjectEmbedding[] = [];
   try {
     existing = await db

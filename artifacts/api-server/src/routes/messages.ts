@@ -8,7 +8,6 @@ import {
   agentTasksTable,
   taskEventsTable,
   knowledgeEntriesTable,
-  generatedImagesTable,
 } from "@workspace/db";
 import {
   ListMessagesParams,
@@ -32,12 +31,10 @@ import {
   runJob,
   resolveAgentIdentity,
   type AgentIdentity,
-  CREDIT_COST,
   backgroundWallClockFor,
 } from "../lib/jobs";
 import {
   deductCreditsAtomic,
-  refundCredits,
   getOrCreateCredits,
   CREDITS_ENFORCEMENT_ENABLED,
 } from "./credits";
@@ -263,6 +260,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   const IMAGE_GENERATE_PATTERNS =
     /\b(?:generate|draw|render|produce|create|make|design|show\s+me)\s+(?:(?:a|an|me|us|some|my|the|few|several)\s+){0,3}(?:logo|logos|banner|banners|icon|icons|thumbnail|thumbnails|avatar|avatars|hero\s+images?|images?|pictures?|illustrations?|photos?|wallpapers?|background\s+images?|cover\s+(?:art|images?)|mockups?|posters?|flyers?|badges?|graphics?|visuals?|artworks?|artwork|paintings?|portraits?|murals?|watercolors?|sketches?)\b(?!\s+(?:component|element|widget|button|tab|panel|section|function|class|style|color|handler|hook|hooks|template|route|page|view|modal|menu|form|input|type|types|prop|props|state|util|utils|helper|helpers|module|library|lib|file|folder|dir|container|context|provider|reducer|action|slice|store|service|controller|model|schema|interface|enum|const|var|let))|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?)\s+(?:of|showing|depicting|featuring|with)\b|\b(?:create|make|generate|design|draw|render|produce)\s+(?:(?:a|an|me|us|some|my)\s+){0,3}(?:photorealistic\s+images?|ai\s+art)\b/i;
 
+  // eslint-disable-next-line no-useless-assignment
   let resolvedIntent: ResolvedIntent = "build";
   let intentConfidence = 1.0;
 
@@ -1238,6 +1236,7 @@ router.post(
       | "refactor"
       | "review"
       | "explain";
+    // eslint-disable-next-line no-useless-assignment
     let resolvedIntent: StreamResolvedIntent = "build";
     let intentConfidence = 1.0;
 
@@ -1308,7 +1307,7 @@ router.post(
       review: (await import("../lib/builder")).REVIEW_SYSTEM_PROMPT,
       explain: (await import("../lib/builder")).EXPLAIN_SYSTEM_PROMPT,
     };
-    const streamSystemPromptOverride =
+    const _streamSystemPromptOverride =
       resolvedIntent !== "converse" ? streamDeveloperIntentPrompts[resolvedIntent] : undefined;
 
     // Save user message
@@ -1330,7 +1329,7 @@ router.post(
         .returning();
       if (!userMessage) throw new Error("Failed to save user message");
       userMessageId = userMessage.id;
-    } catch (err) {
+    } catch (_err) {
       if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
       sendEvent({ type: "error", message: "Failed to save message" });
       res.end();

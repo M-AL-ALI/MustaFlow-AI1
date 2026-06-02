@@ -12,7 +12,7 @@
  */
 
 import { db, knowledgeEntriesTable, projectsTable } from "@workspace/db";
-import { and, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, isNull } from "drizzle-orm";
 import { logger } from "./logger";
 import { buildEmbeddingInput, generateEmbedding } from "./embeddings";
 

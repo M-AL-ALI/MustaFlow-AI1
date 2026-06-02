@@ -236,6 +236,7 @@ describe("input sanitization (content stripping)", () => {
       .replace(/data:[a-z/+]+;base64,[^\s"']*/gi, "[binary]")
       .replace(/\b(?:fileRef|imageRef|datasetRef|sessionId|fileId)\s*[:=]\s*\S+/gi, "[ref]")
       .replace(/https?:\/\/\S+/gi, "[url]")
+      // eslint-disable-next-line no-useless-escape
       .replace(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g, "[email]")
       .replace(/\s+/g, " ")
       .trim()
@@ -305,6 +306,7 @@ describe("anonymous flow — token URL safety", () => {
   it("token is a valid URL-safe UUID (no special chars needing encoding)", () => {
     const { token } = storeHandoff(SAMPLE_SUMMARY, "hash");
     // UUIDs are [0-9a-f-] — URL-safe without additional encoding
+    // eslint-disable-next-line no-useless-escape
     expect(token).toMatch(/^[0-9a-f\-]+$/i);
     // encodeURIComponent of a UUID should be the same as the UUID
     expect(encodeURIComponent(token)).toBe(token);

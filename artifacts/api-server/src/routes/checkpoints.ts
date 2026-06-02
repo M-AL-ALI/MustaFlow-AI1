@@ -152,6 +152,7 @@ router.post(
     const targetSnapshot = target.filesSnapshot as SnapshotFile[];
 
     // ── 1) Forward checkpoint: snapshot the CURRENT state first ────────────
+    // eslint-disable-next-line no-useless-assignment
     let forwardCheckpointId: number | null = null;
     try {
       const currentFiles = await db

@@ -256,6 +256,7 @@ describe("Phase 4 — Voice-A: ora-bubble integration", () => {
 
 describe("Phase 4 — Voice-A: no new backend routes", () => {
   it("no /transcribe route file exists", () => {
+    // eslint-disable-next-line no-useless-assignment
     let found = false;
     try {
       readApiRoute("transcribe.ts");
@@ -267,6 +268,7 @@ describe("Phase 4 — Voice-A: no new backend routes", () => {
   });
 
   it("no /tts route file exists", () => {
+    // eslint-disable-next-line no-useless-assignment
     let found = false;
     try {
       readApiRoute("tts.ts");
