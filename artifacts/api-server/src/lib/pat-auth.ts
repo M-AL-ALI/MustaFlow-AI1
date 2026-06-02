@@ -11,7 +11,7 @@
  * browser-based settings UI.
  */
 
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import type { Request, Response, NextFunction } from "express";
 import { eq, and } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
@@ -25,7 +25,6 @@ export function hashToken(raw: string): string {
 }
 
 export function generateRawToken(): string {
-  const { randomBytes } = await import("crypto");
   return `${TOKEN_PREFIX}${randomBytes(32).toString("hex")}`;
 }
 
