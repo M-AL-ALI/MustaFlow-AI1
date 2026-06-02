@@ -96,6 +96,7 @@ import {
 } from "./architect";
 import { encryptionService } from "./encryption";
 import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
+import { CHECK_PROFILES, resolveStackId } from "./check-profiles";
 
 /**
  * Pre-build gate for agentic projects.
@@ -1799,9 +1800,25 @@ export async function runJob(input: JobInput): Promise<void> {
   let analyticsErrorCategory: string | null = null;
   let analyticsCorrectionPasses = 0;
   // Persisted validation status for the version snapshot written by this job.
-  // "passed" = all checks OK; "failed" = legacy hard-gate failure (no container);
-  // "completed_with_errors" = repair loop exhausted after agentic check failures.
-  let versionValidationStatus: "passed" | "failed" | "completed_with_errors" = "passed";
+  // "passed"               = all checks clean.
+  // "passed_with_warnings" = required checks passed; at least one non-required check failed.
+  //                          Preview is available but the build is not fully clean.
+  // "failed"               = legacy hard-gate failure (no container for repair).
+  // "completed_with_errors"= repair loop exhausted after required check failures.
+  let versionValidationStatus:
+    | "passed"
+    | "passed_with_warnings"
+    | "failed"
+    | "completed_with_errors" = "passed";
+  // Collects ALL check results (required + non-required) from the agent loop.
+  // Populated in the build/refine paths regardless of correctionFailed status.
+  // Used after the repair loop to detect non-required failures → passed_with_warnings.
+  let _allAgentCheckResults: Array<{
+    id: string;
+    label: string;
+    passed: boolean;
+    message?: string;
+  }> = [];
   // Populated by the correctionFailed handlers in the build/refine paths when the
   // agentic loop terminates with check failures. The repair loop (below, after the
   // build/refine blocks) drains this to attempt targeted TypeScript fixes before
@@ -2690,6 +2707,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         // Hard gate (legacy) — refuse to write broken files; throw so runJob marks the task failed.
         // Agentic builder exception: persist the snapshot anyway with validation_status="failed"
         // so the user can inspect what the loop produced and iterate.
+        // Always capture all check results so we can detect non-required failures
+        // for passed_with_warnings even when correctionFailed is false.
+        if (USE_AGENT_LOOP_BUILD) {
+          _allAgentCheckResults =
+            (result.report.agentLoop?.checkResults as typeof _allAgentCheckResults) ?? [];
+        }
         if (result.correctionFailed && !USE_AGENT_LOOP_BUILD) {
           throw new Error(
             `Build validation still failed after correction pass${buildEscalationMode ? " and auto-escalation" : ""}. ` +
@@ -3230,6 +3253,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               `No files were saved. Try rephrasing your request or switching to a higher agent mode.`,
           );
         }
+        // Always capture all check results for passed_with_warnings detection.
+        if (USE_AGENT_LOOP_REFINE) {
+          _allAgentCheckResults =
+            (refineResult.report.agentLoop?.checkResults as typeof _allAgentCheckResults) ?? [];
+        }
         if (refineResult.correctionFailed && USE_AGENT_LOOP_REFINE) {
           // Defer final status — the repair loop (after build/refine blocks) will
           // attempt targeted TypeScript fixes before committing with an error status.
@@ -3759,6 +3787,40 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End TypeScript Repair Loop ─────────────────────────────────────────────
 
+      // ── Detect non-required check failures → passed_with_warnings ─────────────
+      // When all required checks passed (no correctionFailed, repair loop didn't
+      // trigger) but non-required checks failed, the build is "preview-runnable
+      // but not clean". Save as passed_with_warnings so the publish gate and UI
+      // can surface an honest warning instead of a misleading green.
+      if (versionValidationStatus === "passed" && _allAgentCheckResults.length > 0) {
+        const stackId = resolveStackId(
+          project.kind,
+          project.projectFormat ?? null,
+          project.stack ?? null,
+        );
+        const checkProfile = CHECK_PROFILES[stackId];
+        if (checkProfile) {
+          const nonRequiredFailed = _allAgentCheckResults.filter(
+            (c) =>
+              !c.passed &&
+              checkProfile.checks.some((spec) => spec.id === c.id && spec.required === false),
+          );
+          if (nonRequiredFailed.length > 0) {
+            versionValidationStatus = "passed_with_warnings";
+            report.warningChecks = nonRequiredFailed.map((c) => ({
+              id: c.id,
+              label: c.label,
+              message: (c.message ?? "").slice(0, 500),
+            }));
+            report.warnings = [
+              `Non-blocking validation checks failed: ${nonRequiredFailed.map((c) => c.label).join(", ")}. Preview is available but the build is not fully clean.`,
+              ...(report.warnings ?? []),
+            ];
+          }
+        }
+      }
+      // ── End passed_with_warnings detection ────────────────────────────────────
+
       // ── Ensure primary artifact kind matches the specialised pipeline ────────
       // Unconditional upsert so refine passes (and any build that skips the
       // stack-detection branch) also keep the artifact record in sync. Non-fatal.
@@ -4055,8 +4117,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           (f) => f.severity === "critical",
         );
         // allChecksPassed drives the green banner — only true when every check
-        // actually ran AND passed (no skips, no failures, no critical findings).
-        report.allChecksPassed = (report.qualityGate?.allPassed ?? false) && !hasCriticalFindings;
+        // actually ran AND passed (no skips, no failures, no critical findings,
+        // and no non-required warnings from the agentic path).
+        report.allChecksPassed =
+          (report.qualityGate?.allPassed ?? false) &&
+          !hasCriticalFindings &&
+          !(report.warningChecks as unknown[] | undefined)?.length;
 
         // ── 5a. Quality gate failed → needs_fix ───────────────────────────────
         if (!qualityGatePassed) {
@@ -5343,7 +5409,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         "completed",
         versionValidationStatus === "completed_with_errors"
           ? "Build complete — TypeScript repair exhausted. Preview may have issues. Review the report for details."
-          : "Task completed.",
+          : versionValidationStatus === "passed_with_warnings"
+            ? "Build completed with warnings — preview is available but validation is not fully clean."
+            : "Task completed.",
       );
 
       // Notify project owner of build completion (fire-and-forget)

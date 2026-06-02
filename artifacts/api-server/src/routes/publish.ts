@@ -247,6 +247,37 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     }
   }
 
+  // ── Validation gate: warn on passed_with_warnings ─────────────────────────
+  // Non-required checks (e.g. TypeScript typecheck in constrained containers)
+  // failed but required checks passed. Preview works, but the build is not
+  // fully clean. Require explicit opt-in via forcePublishWithWarnings=true.
+  if (env === "production" && !publishVersionId) {
+    try {
+      const [latestVersion] = await db
+        .select({ validationStatus: projectVersionsTable.validationStatus })
+        .from(projectVersionsTable)
+        .where(eq(projectVersionsTable.projectId, projectId))
+        .orderBy(desc(projectVersionsTable.createdAt))
+        .limit(1);
+      if (latestVersion?.validationStatus === "passed_with_warnings") {
+        const force = (req.body as Record<string, unknown>)?.forcePublishWithWarnings === true;
+        if (!force) {
+          res.status(422).json({
+            error:
+              "The latest build completed with validation warnings (non-blocking checks failed). The preview is functional, but the build is not fully clean. Fix the warnings before publishing, or pass forcePublishWithWarnings=true to override.",
+            code: "passed_with_warnings",
+          });
+          return;
+        }
+      }
+    } catch (warningGateErr) {
+      req.log.warn(
+        { err: warningGateErr, projectId },
+        "Warning gate check failed (non-fatal) — proceeding with publish",
+      );
+    }
+  }
+
   // When `approvedSnapshot` is set (versionId was specified), use that frozen snapshot
   // directly instead of re-querying project_files. This ensures the published bytes
   // exactly match the approved snapshot, with no risk of draft edits sneaking in.

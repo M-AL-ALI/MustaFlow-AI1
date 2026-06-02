@@ -1640,6 +1640,11 @@ export const ListTasksResponseItem = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1735,6 +1740,11 @@ export const CancelTaskResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1812,6 +1822,11 @@ export const ForceStartTaskResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1893,6 +1908,11 @@ export const UpdateTaskResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -1985,6 +2005,11 @@ export const ApplyTaskStagingResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -2096,6 +2121,11 @@ export const DiscardTaskStagingResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -2194,6 +2224,11 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
@@ -5363,6 +5398,11 @@ export const GetProjectQueueBatchResponse = zod.object({
   "filesRemoved": zod.array(zod.string()).optional(),
   "previewUpdated": zod.boolean().optional(),
   "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
   "suggestions": zod.array(zod.string()).optional(),
   "nextRecommendation": zod.string().optional(),
   "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),

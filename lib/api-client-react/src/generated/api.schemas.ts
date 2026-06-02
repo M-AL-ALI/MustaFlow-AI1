@@ -1287,6 +1287,12 @@ export type AgentTaskReport = {
   filesRemoved?: string[];
   previewUpdated?: boolean;
   warnings?: string[];
+  /** Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean. */
+  warningChecks?: {
+  id?: string;
+  label?: string;
+  message?: string;
+}[];
   suggestions?: string[];
   nextRecommendation?: string;
   /** Native Expo/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe. */

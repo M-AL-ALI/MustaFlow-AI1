@@ -28,6 +28,8 @@ export type TaskReport = {
   filesRemoved: string[];
   previewUpdated: boolean;
   warnings: string[];
+  /** Non-required checks that failed. Present when versionValidationStatus=passed_with_warnings. */
+  warningChecks?: Array<{ id: string; label: string; message: string }>;
   suggestions?: string[];
   integrationsNeeded: Array<{
     name: string;

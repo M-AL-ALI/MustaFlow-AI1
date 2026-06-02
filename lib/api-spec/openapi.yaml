@@ -7377,6 +7377,15 @@ components:
             filesRemoved: { type: array, items: { type: string } }
             previewUpdated: { type: boolean }
             warnings: { type: array, items: { type: string } }
+            warningChecks:
+              type: array
+              description: "Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean."
+              items:
+                type: object
+                properties:
+                  id: { type: string }
+                  label: { type: string }
+                  message: { type: string }
             suggestions: { type: array, items: { type: string } }
             nextRecommendation: { type: string }
             nativeFeatures:

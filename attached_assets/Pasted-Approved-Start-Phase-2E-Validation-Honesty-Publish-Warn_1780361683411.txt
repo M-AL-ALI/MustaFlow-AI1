@@ -1,0 +1,98 @@
+Approved. Start Phase 2E: Validation Honesty & Publish Warning Gate.
+
+Phase 2D is accepted at commit c65f8f89 with validators passing.
+
+Now fix the validation-status gap discovered after Phase 2D.
+
+Problem:
+Non-required checks, such as TypeScript typecheck in the constrained node-api container path, can fail but the project version still saves as validation_status = passed.
+
+That is not acceptable because the app is not fully clean. It may be preview-runnable, but it should not look production-clean.
+
+Required behavior:
+
+1. Add a warning validation state
+    Add or reuse a status such as:
+
+passed_with_warnings
+
+Meaning:
+
+* all required/blocking checks passed
+* at least one non-required check failed
+* app may be previewable
+* app is not clean for production without warning
+
+2. Save passed_with_warnings correctly
+    When quality gate/check results contain failed non-required checks, save the version as:
+
+validation_status = passed_with_warnings
+
+Do not save it as passed.
+
+3. Keep completed_with_errors separate
+    Use:
+
+* passed = all checks clean
+* passed_with_warnings = required checks passed, non-required checks failed
+* completed_with_errors = required checks failed after repair attempts or repair loop exhausted
+* failed = task failed or unsafe output
+
+4. Update final report
+    The Builder final report should clearly say:
+
+“Preview available with validation warnings”
+
+or
+
+“Build completed with warnings”
+
+The report should list:
+
+* failed non-required check names
+* why they are non-blocking
+* whether preview is safe to test
+* whether publish requires confirmation/override
+
+5. Update Builder UI
+    Do not show green clean-success if validation_status = passed_with_warnings.
+
+Use amber/warning state.
+
+Example:
+“Build completed with warnings”
+“Preview may be available, but validation is not clean.”
+
+6. Update publish gate
+    Publishing a version with passed_with_warnings should not silently proceed.
+
+Either:
+
+* block publish unless forcePublishWithWarnings=true, or
+* show a strong warning and require explicit confirmation
+
+Preferred:
+Require forcePublishWithWarnings=true.
+
+Keep existing completed_with_errors block behavior.
+
+7. Add regression test
+    Create or extend a verification script that simulates:
+
+* required checks pass
+* non-required typecheck fails
+* version saves as passed_with_warnings
+* publish without forcePublishWithWarnings is blocked or returns warning
+* publish with forcePublishWithWarnings is allowed only if policy permits
+* UI/report metadata includes warning details
+
+8. Do not reopen old issues
+    Do not reopen Fly/autostop, Anthropic streaming, write_file sync, or server-start unless a regression proves they broke.
+
+Acceptance criteria:
+
+* failed non-required check no longer saves as validation_status=passed
+* Builder report shows amber warning state
+* publish gate requires explicit override for passed_with_warnings
+* typecheck/lint/format/validation scripts pass
+* provide final commit hash and concise pass/fail report

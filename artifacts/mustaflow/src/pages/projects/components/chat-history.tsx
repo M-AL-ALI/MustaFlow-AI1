@@ -87,6 +87,7 @@ type TaskReport = {
   filesUnchanged?: string[];
   previewUpdated: boolean;
   warnings: string[];
+  warningChecks?: Array<{ id: string; label: string; message: string }>;
   integrationsNeeded?: Array<{
     name: string;
     why: string;
@@ -3490,6 +3491,28 @@ function TaskReviewCard({
               {report.qualityGate!.checks.map((c) => c.label).join(" · ")}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Validation warnings — required checks passed, non-required checks failed */}
+      {(report.warningChecks ?? []).length > 0 && (
+        <div className="px-2.5 py-1.5 bg-amber-500/10 border-b border-amber-500/20">
+          <div className="flex items-center gap-2 text-amber-400">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span className="text-[10px] font-semibold">
+              Build completed with warnings — preview available, validation not clean
+            </span>
+          </div>
+          <div className="mt-1 space-y-0.5">
+            {report.warningChecks!.map((c) => (
+              <div key={c.id} className="text-[9px] text-amber-400/70 pl-5">
+                {c.label} — non-blocking
+              </div>
+            ))}
+          </div>
+          <div className="text-[9px] text-amber-400/60 pl-5 mt-0.5">
+            Publish requires confirmation override
+          </div>
         </div>
       )}
 
