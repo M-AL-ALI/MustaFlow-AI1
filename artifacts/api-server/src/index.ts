@@ -120,6 +120,9 @@ server.on("upgrade", (req, socket, head) => {
   // Production and public hosts must never accept preview WebSocket upgrades.
   const host = req.headers.host;
   if (isPreviewSubdomainHost(host)) {
+    // Resume the socket immediately so the HTTP server does not reclaim it
+    // while async session validation (DB queries) is in flight.
+    netSocket.resume();
     void validatePreviewWebSocketUpgrade(host, req.headers.cookie)
       .then((result) => {
         if (!result) {
