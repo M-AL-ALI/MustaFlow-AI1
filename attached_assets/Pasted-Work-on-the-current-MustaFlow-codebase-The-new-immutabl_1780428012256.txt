@@ -1,0 +1,133 @@
+Work on the current MustaFlow codebase. The new immutable Test Preview architecture is present and should be preserved. Fix the remaining security and publishing bypasses without redesigning the whole system.
+
+Inspect the current implementation first, then implement the fixes below. Do not stop at a plan. Add tests and provide results.
+
+Relevant files:
+- `artifacts/api-server/src/lib/serveSnapshot.ts`
+- `artifacts/api-server/src/routes/deploy.ts`
+- `artifacts/api-server/src/routes/publish.ts`
+- `artifacts/api-server/src/routes/index.ts`
+- `artifacts/api-server/src/middlewares/previewSubdomainGateway.ts`
+- `artifacts/api-server/src/index.ts`
+- `artifacts/api-server/src/routes/preview-env.ts`
+- `lib/db/src/schema/projects.ts`
+- `lib/db/src/schema/secrets.ts`
+
+1. Remove editor console instrumentation from public output
+
+Problem:
+`serveSnapshotById()` in `serveSnapshot.ts` still calls `injectBridge(body)` for HTML snapshots. This helper is used by production snapshot serving, so published public apps may receive editor-only instrumentation.
+
+Fix:
+- Do not inject `consoleBridge` into production HTML, public slug output, custom domains, public staging URLs or shareable public previews.
+- Keep bridge injection only for authenticated editor preview routes where the studio needs console/crash reporting.
+- Make the choice explicit with a safe default, such as `injectEditorBridge: false`.
+- Clean stale comments that still say published editor preview routes are public.
+
+Tests:
+- Published HTML contains no MustaFlow editor bridge markers.
+- Custom-domain HTML contains no editor bridge.
+- Public staging/share HTML contains no editor bridge.
+- Authenticated editor preview still receives the bridge where required.
+
+2. Eliminate the legacy production deploy bypass
+
+Problem:
+`routes/deploy.ts` is still registered at `POST /api/projects/:id/deploy`.
+It loads current mutable `project_files`, creates a new snapshot at deploy time, and decrypts project secrets without strict environment filtering. This bypasses the tested immutable snapshot workflow.
+
+Fix:
+- Search the frontend and API client for callers of `/projects/:id/deploy`.
+- Prefer removing or deprecating this route and routing the UI through the safe publish flow.
+- If compatibility requires keeping it, make it delegate to the same safe service used by publishing.
+- Production deployment must require:
+  - `testedSnapshotId !== null`
+  - `testingStatus === "passed"`
+  - the approved version exists and has `testingApprovedAt`
+- Read deployed files only from `projectVersions[testedSnapshotId].filesSnapshot`.
+- Never query live `project_files` for production deployment.
+- Inject only secrets with `environment = "production"`.
+- Do not decrypt or inject testing/development secrets.
+- Preserve true blue/green behavior: switch public routing only after the green container is healthy.
+
+Tests:
+- `/deploy` cannot publish without Testing Passed.
+- `/deploy` deploys `testedSnapshotId.filesSnapshot`, not live draft files.
+- A late draft edit cannot enter production.
+- Testing and development secrets never enter a production container.
+- Failed green-container health check leaves existing production pointers unchanged.
+
+3. Require immutable Testing Passed approval for static apps too
+
+Problem:
+`publish.ts` still allows some static projects to publish directly from mutable draft files.
+
+Fix:
+- All production publishing paths must require `testedSnapshotId`.
+- Plain static apps:
+  - create an immutable static test candidate;
+  - render that candidate for review;
+  - allow `Mark Testing Passed`;
+  - publish exactly that approved snapshot.
+- React/Vite frontend-only apps:
+  - create an immutable candidate;
+  - run that candidate through isolated Test Preview/WebContainer or a built artifact;
+  - do not read live draft files after candidate creation;
+  - inject only approved `public-client` testing variables into the browser build.
+- Draft changes after candidate creation must mark the candidate stale and clear publish eligibility.
+
+Tests:
+- Static projects cannot publish without Testing Passed.
+- Static production output comes from `testedSnapshotId.filesSnapshot`.
+- React/Vite test preview uses frozen candidate files.
+- Draft changes after approval block publishing until retested.
+- Server secrets never enter a browser/WebContainer runtime.
+
+4. Add WebSocket support for preview subdomains
+
+Problem:
+HTTP preview-subdomain proxying exists, but Express middleware does not handle WebSocket upgrades. `index.ts` currently handles older path-based preview WebSockets only.
+
+Fix:
+- Add hostname-based WebSocket upgrade routing for:
+  - `{sessionId}.preview.{PLATFORM_DOMAIN}`
+- Validate the same preview session cookie used by the HTTP gateway:
+  - HMAC signature
+  - session ID
+  - expiration
+  - revocation state
+  - current project access
+  - running test container
+- Forward the WebSocket upgrade to `testContainerUrl`.
+- Do not expose raw Fly URLs.
+- Reuse shared authentication helpers so HTTP and WebSocket rules cannot drift.
+
+Tests:
+- Valid preview session WebSocket reaches the test container.
+- Missing cookie is rejected.
+- Expired or revoked session is rejected.
+- Unauthorized project access is rejected.
+- Old editor-preview WebSocket support still works if intentionally retained.
+
+5. Verify publishing integrity end to end
+
+Demonstrate one generated app with:
+- frontend page
+- backend `/api/test` route
+- preview subdomain
+- root-relative `fetch("/api/test")`
+- WebSocket connection
+- testing-only server secret
+- immutable candidate approval
+- late draft edit blocked from publishing
+- production deploy from the exact approved snapshot
+- public HTML with no editor bridge
+- failed production container fallback to frozen snapshot
+
+Delivery:
+- Provide changed files.
+- Provide test names and results.
+- Confirm whether `/projects/:id/deploy` was removed or safely delegated.
+- Confirm every production path uses only `testedSnapshotId.filesSnapshot`.
+- Confirm every production secret load filters `environment = "production"`.
+- Commit the fixes and push them to `M-AL-ALI/MustaFlow-AI1`.
