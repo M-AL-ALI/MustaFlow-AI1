@@ -47,10 +47,10 @@ async function main() {
   console.log("\n── Step 0: Inject TypeScript probe file ──");
   try {
     // Remove any leftover from a previous failed run
-    await pool.query(
-      `DELETE FROM project_files WHERE project_id=$1 AND path=$2`,
-      [PROJECT_ID, INJECTED_PATH],
-    );
+    await pool.query(`DELETE FROM project_files WHERE project_id=$1 AND path=$2`, [
+      PROJECT_ID,
+      INJECTED_PATH,
+    ]);
     const { rows } = await pool.query<{ id: number }>(
       `INSERT INTO project_files (project_id, path, content, mime_type)
        VALUES ($1, $2, $3, 'text/typescript')
@@ -123,10 +123,7 @@ async function main() {
       const { rows } = await pool.query<{
         status: string;
         report: Record<string, unknown> | null;
-      }>(
-        `SELECT status, report FROM agent_tasks WHERE id=$1`,
-        [preCreatedTaskId],
-      );
+      }>(`SELECT status, report FROM agent_tasks WHERE id=$1`, [preCreatedTaskId]);
       taskStatus = rows[0]?.status ?? "unknown";
       taskReport = rows[0]?.report ?? null;
 
@@ -233,9 +230,12 @@ async function main() {
       | undefined;
     results["warning_checks_populated"] = {
       pass: Array.isArray(warningChecks) && warningChecks.length > 0,
-      note: Array.isArray(warningChecks) && warningChecks.length > 0
-        ? `warningChecks: [${warningChecks.map((c) => c.label).join(", ")}]`
-        : `warningChecks missing or empty — report keys: ${Object.keys(taskReport ?? {}).slice(0, 8).join(", ")}`,
+      note:
+        Array.isArray(warningChecks) && warningChecks.length > 0
+          ? `warningChecks: [${warningChecks.map((c) => c.label).join(", ")}]`
+          : `warningChecks missing or empty — report keys: ${Object.keys(taskReport ?? {})
+              .slice(0, 8)
+              .join(", ")}`,
     };
 
     // ── 6. Verify allChecksPassed = false ────────────────────────────────────
@@ -259,8 +259,7 @@ async function main() {
     if (latestVersion?.validation_status === "passed_with_warnings") {
       results["publish_gate_would_block"] = {
         pass: true,
-        note:
-          "Latest version is passed_with_warnings — publish gate code path WILL return 422 (code=passed_with_warnings) unless forcePublishWithWarnings=true",
+        note: "Latest version is passed_with_warnings — publish gate code path WILL return 422 (code=passed_with_warnings) unless forcePublishWithWarnings=true",
       };
     } else {
       results["publish_gate_would_block"] = {
@@ -319,9 +318,7 @@ async function main() {
 
   if (criticalFails.length === 0) {
     console.log("STATUS: PHASE 2E FULLY LIVE-PROVEN");
-    console.log(
-      "  - passed_with_warnings saved to project_versions",
-    );
+    console.log("  - passed_with_warnings saved to project_versions");
     console.log("  - warningChecks populated in task report");
     console.log("  - allChecksPassed suppressed (no green banner)");
     console.log("  - publish gate blocks without forcePublishWithWarnings");
