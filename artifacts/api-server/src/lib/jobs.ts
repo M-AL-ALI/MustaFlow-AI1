@@ -469,7 +469,10 @@ function repairLoopMaxAttempts(mode: AgentMode): number {
 function detectRepairCategory(
   failedChecks: Array<{ label: string; output: string }>,
 ): "server-start" | "install" | "typecheck" | "build" | "preview" | "generic" {
-  const combined = failedChecks.map((c) => `${c.label} ${c.output}`).join(" ").toLowerCase();
+  const combined = failedChecks
+    .map((c) => `${c.label} ${c.output}`)
+    .join(" ")
+    .toLowerCase();
   if (/server.*start|healthz|not reachable|port|listen|eaddrinuse/.test(combined))
     return "server-start";
   if (/install|npm.*err|dependency|package.*not found|oom|sigkill|exit 137|lock/.test(combined))
