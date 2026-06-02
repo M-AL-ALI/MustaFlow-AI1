@@ -3728,12 +3728,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         filesToSmellScan = result.changedFiles;
       }
 
-      // ── TypeScript Repair Loop (Phase 2A) ─────────────────────────────────────
-      // Triggered when the agentic build/refine loop terminates with check failures.
-      // Attempts up to N targeted repair passes with error-focused prompts before
-      // falling back to "completed_with_errors". Only runs for agentic projects that
-      // have a container (needed to re-verify TypeScript after each repair pass).
-      if (_pendingRepairChecks.length > 0 && project.containerId && agentIdentity !== "task") {
+      // ── Automatic Repair Loop ─────────────────────────────────────────────────
+      // Triggered whenever the build/refine agent loop ends with foundation check
+      // failures. Attempts up to N targeted repair passes before committing with
+      // "completed_with_errors". Runs for all project types — containerId is passed
+      // as null for static projects, which skips container-dependent checks inside
+      // the agent loop but still runs syntax and structural repair.
+      if (_pendingRepairChecks.length > 0 && agentIdentity !== "task") {
         const maxRepairAttempts = repairLoopMaxAttempts(agentMode);
         const repairAttemptRecords: Array<{
           attempt: number;
@@ -3908,16 +3909,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         } else {
           report.completedWithErrors = false;
         }
-      } else if (_pendingRepairChecks.length > 0 && agentIdentity !== "task") {
-        // Fallback when no container is available: use the legacy failed status
-        // so the snapshot is still saved but clearly flagged for review.
-        versionValidationStatus = "failed";
-        report.warnings = [
-          "Required checks failed — no container available for automated repair. Snapshot saved with validation_status=failed.",
-          ...(report.warnings ?? []),
-        ];
       }
-      // ── End TypeScript Repair Loop ─────────────────────────────────────────────
+      // ── End Automatic Repair Loop ──────────────────────────────────────────────
 
       // ── Detect non-required check failures → passed_with_warnings ─────────────
       // When all required checks passed (no correctionFailed, repair loop didn't

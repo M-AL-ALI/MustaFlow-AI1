@@ -242,6 +242,7 @@ export function PreviewTab({
   const [nativeFeaturesDismissed, setNativeFeaturesDismissed] = useState(false);
   const prevWarningsRef = useRef<string[]>([]);
   const prevNativeFeaturesRef = useRef<string[]>([]);
+  const [buildIssuesOpen, setBuildIssuesOpen] = useState(false);
   const [crashBanner, setCrashBanner] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -1948,48 +1949,6 @@ export function PreviewTab({
         </div>
       )}
 
-      {/* Validation warnings banner */}
-      {validationWarnings.length > 0 && !validationDismissed && (
-        <div className="shrink-0 border-b border-orange-500/30 bg-orange-500/5 dark:bg-orange-500/8">
-          <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400 shrink-0" />
-            <span className="flex-1 text-[11px] font-semibold text-orange-700 dark:text-orange-400">
-              {validationWarnings.length} validation{" "}
-              {validationWarnings.length === 1 ? "issue" : "issues"} found — the AI flagged problems
-              it could not fully resolve
-            </span>
-            <button
-              onClick={() => setValidationDismissed(true)}
-              className="shrink-0 text-orange-600/60 hover:text-orange-700 dark:text-orange-400/60 dark:hover:text-orange-400 transition-colors"
-              title="Dismiss"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="px-3 pb-2 space-y-1.5">
-            {validationWarnings.map((warning, idx) => (
-              <div
-                key={idx}
-                className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg px-2.5 py-2"
-              >
-                <Wrench className="h-3 w-3 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
-                <span className="flex-1 text-[11px] text-orange-800 dark:text-orange-300/90 leading-relaxed">
-                  {warning}
-                </span>
-                {onFixPrompt && (
-                  <button
-                    onClick={() => onFixPrompt(`Fix this issue: ${warning}`)}
-                    className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/20 border border-orange-500/40 text-orange-800 dark:text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap"
-                  >
-                    Ask AI to fix this
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Mobile preview readiness panel — explains why buttons may not "work" + secret checklist */}
       {showMobileReadiness && (
         <div className="shrink-0 border-b border-purple-500/30 bg-purple-500/5 dark:bg-purple-500/8">
@@ -2283,23 +2242,18 @@ export function PreviewTab({
           </div>
         ) : isAgentic && proxyUnavailable ? (
           /* ── Proxy-unavailable empty state ── */
-          <div className="flex flex-col items-center justify-center h-full max-w-md text-center gap-6 py-16">
-            <div className="relative">
-              <div className="w-20 h-20 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                <ServerCrash className="h-10 w-10 text-amber-500/60" />
-              </div>
+          <div className="flex flex-col items-center justify-center h-full max-w-sm text-center gap-5 py-12">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+              <ServerCrash className="h-8 w-8 text-amber-500/60" />
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">
-                Live preview requires production
+            <div className="space-y-2">
+              <h3 className="text-base font-semibold text-foreground">
+                Container preview unavailable here
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Live preview requires the production environment — deploy your project to see it
-                running.
-              </p>
-              <p className="text-xs text-muted-foreground/70 mt-2 leading-relaxed">
-                The container infrastructure is not reachable from this environment. Publishing your
-                project to production enables the full live preview.
+                The container proxy isn&apos;t reachable from this development environment. Your app
+                has been built — deploy to production to get the full live preview with backend
+                routes and server logs.
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">
@@ -2310,11 +2264,11 @@ export function PreviewTab({
                 <ExternalLink className="h-4 w-4" />
                 Go to Publishing
               </a>
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/60 border border-border text-xs text-muted-foreground text-left">
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/40 border border-border text-xs text-muted-foreground text-left">
                 <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/60" />
                 <p>
-                  Once deployed, the container preview proxy will be active and this tab will show
-                  your running app.
+                  In production, the container preview proxy is active and this tab shows your
+                  running app — including API routes and real-time server logs.
                 </p>
               </div>
             </div>
@@ -2595,6 +2549,62 @@ export function PreviewTab({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Build Issues drawer — collapsible, sits above the console strip */}
+      {validationWarnings.length > 0 && !validationDismissed && (
+        <div className="shrink-0 border-t border-orange-500/20 bg-orange-500/5 dark:bg-orange-950/20">
+          <div className="flex items-center">
+            <button
+              onClick={() => setBuildIssuesOpen((v) => !v)}
+              className="flex-1 flex items-center gap-2 px-3 py-1.5 text-[11px] hover:bg-orange-500/5 transition-colors text-left"
+            >
+              <AlertTriangle className="h-3 w-3 text-orange-500 shrink-0" />
+              <span className="text-orange-700 dark:text-orange-400 font-semibold">
+                Build Issues
+              </span>
+              <span className="px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-700 dark:text-orange-300 text-[9px] font-bold leading-none">
+                {validationWarnings.length}
+              </span>
+              <div className="flex-1" />
+              {buildIssuesOpen ? (
+                <ChevronDown className="h-3 w-3 text-orange-500/70 shrink-0" />
+              ) : (
+                <ChevronUp className="h-3 w-3 text-orange-500/70 shrink-0" />
+              )}
+            </button>
+            <button
+              onClick={() => setValidationDismissed(true)}
+              className="shrink-0 px-2 py-1.5 text-orange-500/40 hover:text-orange-500/70 transition-colors"
+              title="Dismiss build issues"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          {buildIssuesOpen && (
+            <div className="px-3 pb-2.5 space-y-1.5 max-h-48 overflow-y-auto">
+              {validationWarnings.map((warning, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-2 bg-orange-500/8 border border-orange-500/20 rounded-lg px-2.5 py-2"
+                >
+                  <Wrench className="h-3 w-3 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+                  <span className="flex-1 text-[11px] text-orange-800 dark:text-orange-300/90 leading-relaxed">
+                    {warning}
+                  </span>
+                  {onFixPrompt && (
+                    <button
+                      onClick={() => onFixPrompt(`Fix this issue: ${warning}`)}
+                      className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/20 border border-orange-500/40 text-orange-800 dark:text-orange-300 hover:bg-orange-500/30 transition-colors whitespace-nowrap"
+                    >
+                      Ask AI to fix
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
