@@ -1,0 +1,190 @@
+I want to simplify the AI Builder toolbar and make Agent Zero smarter instead of exposing too many technical buttons to users.
+
+Right now there are too many visible quick actions:
+Planning, Task, Main, Variants, Debug, Refactor, Review, Explain, Fix tests, Fix types, Fix lint, Templates, Plan history.
+
+This is too much for non-technical users and makes the product feel complicated.
+
+My direction:
+
+Agent Zero should be the main all-in-one builder. Many of these actions should become part of Agent Zero’s core intelligence, not separate buttons.
+
+1. Task / queueing should not be a chat toolbar button
+
+We do not need a “Task” button in the main quick-action row.
+
+Instead, queued tasks should appear above the chat box or near the build panel, similar to Replit.
+
+The task queue should show:
+
+* current running task
+* queued tasks
+* task status
+* priority
+* option to expand and see all tasks
+* option to drag tasks up/down to change priority
+* option to “Run now”
+* option to pause/cancel a task
+
+This is project workflow management, not a chat shortcut.
+
+2. Plan Mode and Build/Main Mode should be inside the chat box
+
+Planning and Main/Build should not be separate confusing toolbar buttons.
+
+Inside the chat input, add simple controls:
+
+* Plan first checkbox/toggle
+* Build now checkbox/toggle or mode selector
+* Maybe “Background task” checkbox if the user wants it to run later
+
+Example:
+[ ] Plan first
+[✓] Build/apply changes
+[ ] Run in background
+
+Normal users should not need to understand “Main mode.” Rename it to plain language like “Build.”
+
+3. Debug/Fix should be core Agent Zero behavior
+
+Debug, Fix tests, Fix types, Fix lint should not all be separate main buttons.
+
+Agent Zero should automatically detect:
+
+* TypeScript errors
+* lint errors
+* failing tests
+* dependency errors
+* server-start errors
+* preview unavailable
+* build failures
+
+Then Agent Zero should fix them automatically or ask the user for approval when needed.
+
+If a user types:
+“Fix the app”
+“Debug this”
+“Why preview is not loading?”
+“Fix the errors”
+
+Agent Zero should understand and run the correct repair workflow.
+
+For normal users, replace all these buttons with one simple visible button:
+
+Fix Issues
+
+Then inside the issue report, the user can see specific options:
+
+* Fix TypeScript
+* Fix server startup
+* Fix preview
+* Fix dependencies
+* Fix tests
+* Fix lint
+
+But those should appear contextually only when those problems exist.
+
+4. Refactor, Review, Explain should be inside Agent Zero or Advanced menu
+
+These are useful but not needed as always-visible buttons.
+
+Move them into a More / Advanced menu.
+
+Suggested structure:
+Main visible:
+
+* Plan
+* Build
+* Fix Issues
+* Templates
+* More
+
+Inside More:
+
+* Review project
+* Explain project
+* Refactor/improve code
+* Generate variants
+* Plan history
+* Fix tests
+* Fix TypeScript
+* Fix lint
+
+5. Variants should be design-specific, not always visible
+
+“2 Variants” should appear only when the user is working on UI/design.
+
+Example:
+If user says:
+“Make the dashboard look better”
+“Create landing page”
+“Redesign this screen”
+
+Then show:
+Generate 2 design variants
+
+Do not show it all the time for backend/debug tasks.
+
+6. Agent Zero should decide the tool path
+
+The user should not have to pick between Debug, Fix types, Fix lint, Review, Refactor, etc.
+
+Agent Zero should inspect the project state and choose the correct workflow:
+
+If typecheck fails → fix types.
+If server-start fails → fix server.
+If preview is unreachable → fix runtime/proxy.
+If user asks for cleanup → refactor.
+If user asks “what does this do?” → explain.
+If user asks “is this good?” → review.
+If build is complex → plan first.
+
+7. Recommended simplified UI
+
+Chat input area should have:
+
+* prompt box
+* Plan first toggle
+* Build/apply toggle
+* Background task toggle
+* model/mode selector if needed: Lite / Eco / Power / Pro
+* submit button
+* microphone/icon if needed
+
+Above chat box:
+
+* active task card
+* queued tasks list
+* drag to reorder
+* run now / pause / cancel
+
+Below or inside issue area:
+
+* Fix Issues button only when issues exist
+
+Advanced tools:
+
+* Files
+* Terminal
+* Logs
+* Database
+* Secrets
+* Git
+* Tests
+* Packages
+
+8. Final goal
+
+AI Builder should feel simple:
+
+User describes what they want.
+Agent Zero plans if needed.
+Agent Zero builds.
+Agent Zero detects problems.
+Agent Zero fixes problems.
+Agent Zero updates preview.
+User tests the app.
+
+The user should not have to understand technical buttons like Fix lint, Fix types, Refactor, Debug, Main, Task, etc.
+
+Please redesign this toolbar so normal users see fewer options, while advanced users can still access deeper tools from an Advanced menu.
