@@ -92,12 +92,8 @@ export default function CustomerDashboard() {
         </div>
       </div>
 
-      {loading && (
-        <div className="text-center py-20 text-slate-500">Loading requests...</div>
-      )}
-      {error && !loading && (
-        <div className="text-center py-20 text-red-400">{error}</div>
-      )}
+      {loading && <div className="text-center py-20 text-slate-500">Loading requests...</div>}
+      {error && !loading && <div className="text-center py-20 text-red-400">{error}</div>}
       {!loading && !error && requests.length === 0 && (
         <div className="text-center py-20 space-y-3">
           <p className="text-slate-400">No requests yet.</p>

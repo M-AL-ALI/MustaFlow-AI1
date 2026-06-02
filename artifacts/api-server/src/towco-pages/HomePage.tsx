@@ -10,11 +10,13 @@ export default function HomePage() {
           On-demand towing
         </div>
         <h1 className="text-4xl sm:text-5xl font-bold text-white">
-          Fast, fair towing.<br />No surprises.
+          Fast, fair towing.
+          <br />
+          No surprises.
         </h1>
         <p className="text-lg text-slate-400 max-w-xl mx-auto">
-          Submit your tow request, receive competing quotes from verified operators,
-          and track your job in real time. Counter-offer to get the best price.
+          Submit your tow request, receive competing quotes from verified operators, and track your
+          job in real time. Counter-offer to get the best price.
         </p>
         <div className="flex items-center justify-center gap-3 flex-wrap">
           <Link
@@ -51,7 +53,10 @@ export default function HomePage() {
             body: "Follow your job from quoted to in-progress to completed with live status updates.",
           },
         ].map((f) => (
-          <div key={f.title} className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-3">
+          <div
+            key={f.title}
+            className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-3"
+          >
             {f.icon}
             <h3 className="font-semibold text-white">{f.title}</h3>
             <p className="text-sm text-slate-400">{f.body}</p>

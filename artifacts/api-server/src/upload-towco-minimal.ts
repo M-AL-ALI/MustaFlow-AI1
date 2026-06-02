@@ -7,11 +7,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "fs";
 import { resolve, join, relative } from "path";
-import {
-  execInContainer,
-  writeFileToContainer,
-  patchMachineAutostop,
-} from "./lib/container.js";
+import { execInContainer, writeFileToContainer, patchMachineAutostop } from "./lib/container.js";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
@@ -58,13 +54,19 @@ async function writeFileChunked(containerPath: string, content: string | Buffer)
 
   // Create / truncate the file
   const initRes = await flyExec(`mkdir -p "${dir}" && : > "${fullPath}"`);
-  if (!initRes) { console.error(`  chunk init failed`); return false; }
+  if (!initRes) {
+    console.error(`  chunk init failed`);
+    return false;
+  }
 
   for (let i = 0; i < chunks; i++) {
     const part = b64.slice(i * CHUNK, (i + 1) * CHUNK);
     if (i > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
     const ok = await flyExec(`printf '%s' '${part}' | base64 -d >> "${fullPath}"`);
-    if (!ok) { console.error(`  chunk ${i + 1}/${chunks} failed`); return false; }
+    if (!ok) {
+      console.error(`  chunk ${i + 1}/${chunks} failed`);
+      return false;
+    }
   }
 
   // Verify
@@ -89,7 +91,9 @@ async function flyExec(cmd: string): Promise<boolean> {
     if (!res.ok) return false;
     const json = (await res.json()) as { exit_code: number };
     return json.exit_code === 0;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 /** Run a shell command on the container, return combined stdout+stderr text. */
@@ -104,7 +108,9 @@ async function flyExecOut(cmd: string): Promise<string> {
     if (!res.ok) return "";
     const json = (await res.json()) as { exit_code: number; stdout: string; stderr: string };
     return ((json.stdout ?? "") + (json.stderr ?? "")).trim();
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 function walkDir(dir: string, base: string): Array<{ abs: string; rel: string }> {
@@ -145,32 +151,45 @@ async function main() {
   console.log(`\n[upload] ${clientFiles.length} client files via chunked append...`);
   for (const { abs, rel } of clientFiles) {
     const data = readFileSync(abs);
-    const b64len = Math.ceil(data.length * 4 / 3);
+    const b64len = Math.ceil((data.length * 4) / 3);
     const nchunks = Math.ceil(b64len / 3000);
-    process.stdout.write(`  dist/client/${rel} — ${Math.round(data.length / 1024)} KB (${nchunks} chunks)... `);
+    process.stdout.write(
+      `  dist/client/${rel} — ${Math.round(data.length / 1024)} KB (${nchunks} chunks)... `,
+    );
     const ok = await writeFileChunked(`dist/client/${rel}`, data);
     console.log(ok ? "OK" : "FAIL");
   }
 
   // 5. Verify client files
-  await exec("verify dist/client", sh("ls -la /app/dist/client/ && ls -la /app/dist/client/assets/"));
+  await exec(
+    "verify dist/client",
+    sh("ls -la /app/dist/client/ && ls -la /app/dist/client/assets/"),
+  );
 
   // 6. Upload minimal server (tiny — either method works)
   const serverContent = readFileSync(MINIMAL_SERVER, "utf-8");
   const serverOk = await writeFileToContainer(MACHINE_ID, "server.mjs", serverContent, PROJECT_ID);
-  console.log(`\n[upload] server.mjs (${serverContent.length} bytes) → ${serverOk ? "OK" : "FAIL"}`);
+  console.log(
+    `\n[upload] server.mjs (${serverContent.length} bytes) → ${serverOk ? "OK" : "FAIL"}`,
+  );
 
   // 7. Verify server
   await exec("verify server.mjs", sh("ls -la /app/server.mjs && head -3 /app/server.mjs"));
 
   // 8. Kill stale processes
-  await exec("kill stale", sh("pkill -9 -f 'tsx|node.*server|fly-health' 2>/dev/null; sleep 1; true"));
+  await exec(
+    "kill stale",
+    sh("pkill -9 -f 'tsx|node.*server|fly-health' 2>/dev/null; sleep 1; true"),
+  );
 
   // 9. Start minimal server
-  await exec("start server", sh(
-    "cd /app && rm -f /tmp/server.log && " +
-    "nohup node server.mjs > /tmp/server.log 2>&1 & echo PID=$! && sleep 2 && head -5 /tmp/server.log"
-  ));
+  await exec(
+    "start server",
+    sh(
+      "cd /app && rm -f /tmp/server.log && " +
+        "nohup node server.mjs > /tmp/server.log 2>&1 & echo PID=$! && sleep 2 && head -5 /tmp/server.log",
+    ),
+  );
 
   // 10. Poll /healthz using Node.js built-in http (curl/wget may be missing)
   console.log("\n[healthz] Polling via node http...");
@@ -178,12 +197,7 @@ async function main() {
   let healthy = false;
   for (let i = 0; i < 6; i++) {
     await new Promise((r) => setTimeout(r, 5000));
-    const res = await execInContainer(
-      MACHINE_ID,
-      ["node", "-e", hzScript],
-      PROJECT_ID,
-      "/app"
-    );
+    const res = await execInContainer(MACHINE_ID, ["node", "-e", hzScript], PROJECT_ID, "/app");
     const out = (res.stdout + res.stderr).trim();
     console.log(`  attempt ${i + 1}: ${out.slice(0, 120)} (exit=${res.exitCode})`);
     if (res.exitCode === 0 || out.startsWith("HTTP:200")) {
@@ -209,7 +223,10 @@ async function main() {
         res.on("end", () => resolve(res.statusCode ?? 0));
       });
       req.on("error", reject);
-      req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
+      req.setTimeout(15000, () => {
+        req.destroy();
+        reject(new Error("timeout"));
+      });
     });
     console.log(`  HTTP ${code} ${code === 200 ? "OK ✓" : "FAIL"} — ${body.slice(0, 80)}`);
     if (code === 200) healthy = true;

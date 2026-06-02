@@ -6,6 +6,13 @@
     "types": ["node"]
   },
   "include": ["src"],
+  "exclude": [
+    "src/towco-pages",
+    "src/repair-project86-frontend.ts",
+    "src/build-towco-client.ts",
+    "src/upload-towco-dist.ts",
+    "src/upload-towco-minimal.ts"
+  ],
   "references": [
     { "path": "../../lib/db" },
     { "path": "../../lib/api-zod" },

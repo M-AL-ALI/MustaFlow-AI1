@@ -122,10 +122,10 @@ export default function RequestForm() {
         body: JSON.stringify({ ...form, customerId }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error || "Request failed");
       }
-      const req = await res.json() as { id: string };
+      const req = (await res.json()) as { id: string };
       navigate(`/request/${req.id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -142,7 +142,9 @@ export default function RequestForm() {
           New Request
         </div>
         <h1 className="text-2xl font-bold text-white">Request a Tow</h1>
-        <p className="text-slate-400 text-sm">Fill in the details and operators will submit quotes.</p>
+        <p className="text-slate-400 text-sm">
+          Fill in the details and operators will submit quotes.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -172,7 +174,9 @@ export default function RequestForm() {
           )}
           {useExisting && customers.length > 0 ? (
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Select Customer</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                Select Customer
+              </label>
               <select
                 value={form.customerId}
                 onChange={(e) => handleCustomerSelect(e.target.value)}

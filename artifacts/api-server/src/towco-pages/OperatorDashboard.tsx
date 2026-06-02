@@ -58,10 +58,8 @@ export default function OperatorDashboard() {
       setRequests(
         all.filter(
           (req) =>
-            req.status === "pending" ||
-            req.status === "quoted" ||
-            req.status === "counter_offered"
-        )
+            req.status === "pending" || req.status === "quoted" || req.status === "counter_offered",
+        ),
       );
     } catch {
       setRequests([]);
@@ -174,7 +172,8 @@ export default function OperatorDashboard() {
                     {req.pickupAddress} &rarr; {req.dropoffAddress}
                   </p>
                   <p className="text-sm text-slate-400">
-                    {req.vehicleYear} {req.vehicleMake} {req.vehicleModel} &middot; {req.customerName}
+                    {req.vehicleYear} {req.vehicleMake} {req.vehicleModel} &middot;{" "}
+                    {req.customerName}
                   </p>
                   {req.notes && (
                     <p className="text-xs text-slate-500 truncate">&ldquo;{req.notes}&rdquo;</p>

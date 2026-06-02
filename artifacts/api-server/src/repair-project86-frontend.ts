@@ -12,11 +12,7 @@ import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { db, pool, projectFilesTable } from "@workspace/db";
-import {
-  execInContainer,
-  patchMachineAutostop,
-  syncFilesToContainer,
-} from "./lib/container.js";
+import { execInContainer, patchMachineAutostop, syncFilesToContainer } from "./lib/container.js";
 
 const PROJECT_ID = 86;
 const MACHINE_ID = "d895134c606e98";
@@ -72,11 +68,7 @@ async function main() {
         mimeType: "text/typescript",
       })
       .onConflictDoUpdate({
-        target: [
-          projectFilesTable.projectId,
-          projectFilesTable.artifactId,
-          projectFilesTable.path,
-        ],
+        target: [projectFilesTable.projectId, projectFilesTable.artifactId, projectFilesTable.path],
         set: {
           content: p.content,
           mimeType: "text/typescript",
@@ -88,7 +80,7 @@ async function main() {
   // 3. Wake machine
   console.log("\n3. Ensuring machine is awake (autostop=off)...");
   await patchMachineAutostop(MACHINE_ID, PROJECT_ID, "off").catch((e: unknown) =>
-    console.warn("  autostop off skipped:", String(e))
+    console.warn("  autostop off skipped:", String(e)),
   );
   await new Promise((r) => setTimeout(r, 4000));
 
@@ -109,7 +101,7 @@ async function main() {
     MACHINE_ID,
     "cd /app && npm run build:client 2>&1",
     PROJECT_ID,
-    "/app"
+    "/app",
   );
   console.log(`   exit=${buildRes.exitCode}`);
   const buildOut = (buildRes.stdout + buildRes.stderr).slice(-3000);
@@ -128,7 +120,7 @@ async function main() {
     MACHINE_ID,
     'curl -s -o /tmp/hz.txt -w "STATUS:%{http_code}" http://localhost:3000/healthz',
     PROJECT_ID,
-    "/app"
+    "/app",
   );
   const code = (hRes.stdout + hRes.stderr).match(/STATUS:(\d+)/)?.[1];
   const bodyRes = await execInContainer(MACHINE_ID, "cat /tmp/hz.txt", PROJECT_ID, "/app");
@@ -140,10 +132,14 @@ async function main() {
 
   // 10. Proxy diagnosis
   console.log("\n=== Proxy status ===");
-  console.log("  mustaflow-containers.fly.dev → CONFIRMED DEPLOYED (Fly API: status=deployed, 38 machines)");
+  console.log(
+    "  mustaflow-containers.fly.dev → CONFIRMED DEPLOYED (Fly API: status=deployed, 38 machines)",
+  );
   console.log("  DNS resolution from Replit sandbox: BLOCKED (Replit network policy)");
   console.log("  livePreviewProxy.ts server-side fetch fails → user sees 502 in dev mode");
-  console.log("  In production deployment: API server runs outside Replit sandbox → proxy resolves");
+  console.log(
+    "  In production deployment: API server runs outside Replit sandbox → proxy resolves",
+  );
   console.log("  Container URL: https://mustaflow-containers.fly.dev/container/" + MACHINE_ID);
 
   console.log("\n=== Repair complete ===");

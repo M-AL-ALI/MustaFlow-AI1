@@ -46,11 +46,14 @@ async function main() {
   await new Promise((r) => setTimeout(r, 2000));
 
   // 2. Diagnostics
-  await run("check server + node_modules", sh(
-    'curl -s http://localhost:3000/healthz 2>/dev/null && echo " (server up)" || echo "(server down)"; ' +
-    'ls /app/node_modules/.bin/vite 2>/dev/null && echo "vite present" || echo "vite MISSING"; ' +
-    'ls /app/src/pages/ 2>/dev/null && echo "pages exist" || echo "pages MISSING"'
-  ));
+  await run(
+    "check server + node_modules",
+    sh(
+      'curl -s http://localhost:3000/healthz 2>/dev/null && echo " (server up)" || echo "(server down)"; ' +
+        'ls /app/node_modules/.bin/vite 2>/dev/null && echo "vite present" || echo "vite MISSING"; ' +
+        'ls /app/src/pages/ 2>/dev/null && echo "pages exist" || echo "pages MISSING"',
+    ),
+  );
 
   // 3. Create pages dir
   await run("mkdir pages", sh("mkdir -p /app/src/pages"));
@@ -72,7 +75,7 @@ async function main() {
     MACHINE_ID,
     sh("cd /app && npm run build:client 2>&1"),
     PROJECT_ID,
-    "/app"
+    "/app",
   );
   console.log(`  exit=${buildRes.exitCode}`);
   const out = (buildRes.stdout + buildRes.stderr).trim();
@@ -91,7 +94,7 @@ async function main() {
     MACHINE_ID,
     sh('curl -s -o /tmp/hz.txt -w "STATUS:%{http_code}" http://localhost:3000/healthz'),
     PROJECT_ID,
-    "/app"
+    "/app",
   );
   const code = (hz.stdout + hz.stderr).match(/STATUS:(\d+)/)?.[1];
   const body = await execInContainer(MACHINE_ID, sh("cat /tmp/hz.txt"), PROJECT_ID, "/app");
@@ -103,10 +106,14 @@ async function main() {
   // Summary
   console.log("\n=== Summary ===");
   console.log(`  /healthz: HTTP ${code ?? "?"}`);
-  console.log(`  Vite build: ${buildRes.exitCode === 0 ? "PASSED" : "FAILED (exit " + buildRes.exitCode + ")"}`);
+  console.log(
+    `  Vite build: ${buildRes.exitCode === 0 ? "PASSED" : "FAILED (exit " + buildRes.exitCode + ")"}`,
+  );
   console.log("  Proxy: mustaflow-containers.fly.dev DEPLOYED (38 machines via Fly API)");
   console.log("         DNS unresolvable from Replit sandbox only (Replit network policy)");
-  console.log("         Preview will work in production deployment where API server has external access");
+  console.log(
+    "         Preview will work in production deployment where API server has external access",
+  );
 }
 
 main().catch((err) => {

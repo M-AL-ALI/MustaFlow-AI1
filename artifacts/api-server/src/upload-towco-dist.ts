@@ -7,11 +7,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "fs";
 import { resolve, join, relative } from "path";
-import {
-  execInContainer,
-  writeFileToContainer,
-  patchMachineAutostop,
-} from "./lib/container.js";
+import { execInContainer, writeFileToContainer, patchMachineAutostop } from "./lib/container.js";
 
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
@@ -25,7 +21,10 @@ function sh(cmd: string): string[] {
   return ["sh", "-c", cmd];
 }
 
-async function exec(label: string, cmd: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; exitCode: number; output: string }> {
+async function exec(
+  label: string,
+  cmd: string[],
+): Promise<{ ok: boolean; stdout: string; stderr: string; exitCode: number; output: string }> {
   console.log(`\n[exec] ${label}`);
   const res = await execInContainer(MACHINE_ID, cmd, PROJECT_ID, "/app");
   const out = (res.stdout + res.stderr).trim();
@@ -50,7 +49,9 @@ function walkDir(dir: string, base: string): Array<{ abs: string; rel: string }>
 
 async function uploadLargeText(containerPath: string, text: string) {
   const totalChunks = Math.ceil(text.length / CHUNK_CHARS);
-  console.log(`  chunking ${containerPath} (${Math.round(text.length / 1024)} KB text) into ${totalChunks} parts...`);
+  console.log(
+    `  chunking ${containerPath} (${Math.round(text.length / 1024)} KB text) into ${totalChunks} parts...`,
+  );
 
   const chunkPaths: string[] = [];
   for (let i = 0; i < totalChunks; i++) {
@@ -93,7 +94,12 @@ async function main() {
   console.log(`\n[upload] Uploading ${clientFiles.length} client files...`);
   for (const { abs, rel } of clientFiles) {
     const data = readFileSync(abs);
-    await writeFileToContainer(MACHINE_ID, `dist/client/${rel}`, data.toString("utf-8"), PROJECT_ID);
+    await writeFileToContainer(
+      MACHINE_ID,
+      `dist/client/${rel}`,
+      data.toString("utf-8"),
+      PROJECT_ID,
+    );
     console.log(`  dist/client/${rel} (${Math.round(data.length / 1024)} KB)`);
   }
 
@@ -110,10 +116,13 @@ async function main() {
   await exec("kill stale", sh("pkill -9 -f 'tsx|server|fly-health' 2>/dev/null; sleep 1; true"));
 
   // 7. Start server
-  await exec("start server", sh(
-    "cd /app && rm -f /tmp/server.log && " +
-    "nohup node dist/server.mjs > /tmp/server.log 2>&1 & echo PID=$!"
-  ));
+  await exec(
+    "start server",
+    sh(
+      "cd /app && rm -f /tmp/server.log && " +
+        "nohup node dist/server.mjs > /tmp/server.log 2>&1 & echo PID=$!",
+    ),
+  );
 
   // 8. Poll /healthz (up to 60s)
   console.log("\n[healthz] Polling...");
@@ -124,11 +133,14 @@ async function main() {
       MACHINE_ID,
       sh("curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/healthz"),
       PROJECT_ID,
-      "/app"
+      "/app",
     );
     const code = (res.stdout + res.stderr).trim();
     console.log(`  attempt ${i + 1}: HTTP ${code}`);
-    if (code === "200") { healthy = true; break; }
+    if (code === "200") {
+      healthy = true;
+      break;
+    }
     if (i === 2) await exec("server log", sh("tail -20 /tmp/server.log 2>/dev/null"));
   }
 
@@ -146,9 +158,15 @@ async function main() {
     try {
       const { default: https } = await import("https");
       const code = await new Promise<number>((resolve, reject) => {
-        const req = https.get(flyUrl, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+        const req = https.get(flyUrl, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
         req.on("error", reject);
-        req.setTimeout(15000, () => { req.destroy(); reject(new Error("timeout")); });
+        req.setTimeout(15000, () => {
+          req.destroy();
+          reject(new Error("timeout"));
+        });
       });
       console.log(`[external] HTTP ${code} ${code === 200 ? "OK ✓" : "FAIL"}`);
     } catch (e: unknown) {
@@ -162,7 +180,9 @@ async function main() {
   console.log(`\n=== Result: ${healthy ? "/healthz 200 OK ✓" : "FAILED ✗"} ===`);
   if (healthy) {
     console.log(`   Container: https://mustaflow-containers.fly.dev/container/${MACHINE_ID}`);
-    console.log("   Preview proxy: works in production deployment (DNS blocked from Replit sandbox)");
+    console.log(
+      "   Preview proxy: works in production deployment (DNS blocked from Replit sandbox)",
+    );
   }
 }
 

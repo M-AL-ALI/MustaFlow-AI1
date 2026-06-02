@@ -250,9 +250,7 @@ export default function RequestDetail() {
                         {Number(q.operatorRating).toFixed(1)}
                       </span>
                     </div>
-                    {q.notes && (
-                      <p className="text-slate-400 text-sm">&ldquo;{q.notes}&rdquo;</p>
-                    )}
+                    {q.notes && <p className="text-slate-400 text-sm">&ldquo;{q.notes}&rdquo;</p>}
                     {isCountered && q.counterOffer && (
                       <p className="text-purple-300 text-sm">
                         Counter offer: <strong>${Number(q.counterOffer).toFixed(2)}</strong>
@@ -264,10 +262,10 @@ export default function RequestDetail() {
                       q.status === "accepted"
                         ? "border-green-800 text-green-400 bg-green-950/30"
                         : q.status === "rejected"
-                        ? "border-red-800 text-red-400 bg-red-950/30"
-                        : q.status === "countered"
-                        ? "border-purple-800 text-purple-400 bg-purple-950/30"
-                        : "border-slate-700 text-slate-400 bg-slate-800"
+                          ? "border-red-800 text-red-400 bg-red-950/30"
+                          : q.status === "countered"
+                            ? "border-purple-800 text-purple-400 bg-purple-950/30"
+                            : "border-slate-700 text-slate-400 bg-slate-800"
                     }`}
                   >
                     {q.status.charAt(0).toUpperCase() + q.status.slice(1)}
