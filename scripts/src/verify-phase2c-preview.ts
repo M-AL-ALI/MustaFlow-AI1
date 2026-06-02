@@ -83,9 +83,7 @@ async function main(): Promise<void> {
   };
 
   console.log(`[PRE] containerUrl: ${proj.container_url ?? "null"}`);
-  console.log(
-    `[PRE] containerStatus: ${proj.container_status} | projectStatus: ${proj.status}`,
-  );
+  console.log(`[PRE] containerStatus: ${proj.container_status} | projectStatus: ${proj.status}`);
   console.log(`[PRE] latest version validation_status: ${proj.latest_validation}`);
 
   if (!proj.container_url) {
@@ -95,10 +93,9 @@ async function main(): Promise<void> {
   }
 
   // ── Ensure adequate credits ───────────────────────────────────────────────
-  await pool.query(
-    `UPDATE user_credits SET balance = GREATEST(balance, 200) WHERE user_id = $1`,
-    [OWNER_ID],
-  );
+  await pool.query(`UPDATE user_credits SET balance = GREATEST(balance, 200) WHERE user_id = $1`, [
+    OWNER_ID,
+  ]);
 
   // ── Create agent_task ─────────────────────────────────────────────────────
   const taskRow = await pool.query(
@@ -152,10 +149,7 @@ async function main(): Promise<void> {
   while (Date.now() < deadline) {
     await sleep(POLL_MS);
 
-    const tRow = await pool.query(
-      `SELECT status, report FROM agent_tasks WHERE id = $1`,
-      [taskId],
-    );
+    const tRow = await pool.query(`SELECT status, report FROM agent_tasks WHERE id = $1`, [taskId]);
     const task = tRow.rows[0] as
       | { status: string; report: Record<string, unknown> | null }
       | undefined;
@@ -187,10 +181,7 @@ async function main(): Promise<void> {
   }
 
   if (!finalStatus) {
-    const tRow = await pool.query(
-      `SELECT status, report FROM agent_tasks WHERE id = $1`,
-      [taskId],
-    );
+    const tRow = await pool.query(`SELECT status, report FROM agent_tasks WHERE id = $1`, [taskId]);
     finalStatus = tRow.rows[0]?.status ?? "timeout";
     finalReport = tRow.rows[0]?.report ?? null;
     console.log(`\n[TIMEOUT] 15m cap — task: ${finalStatus}`);
@@ -201,10 +192,7 @@ async function main(): Promise<void> {
   // ── Post-task checks ──────────────────────────────────────────────────────
 
   // pg-boss final state
-  const pgRow = await pool.query(
-    `SELECT state FROM pgboss.job WHERE id = $1`,
-    [jobId],
-  );
+  const pgRow = await pool.query(`SELECT state FROM pgboss.job WHERE id = $1`, [jobId]);
   const pgState: string = pgRow.rows[0]?.state ?? "not found";
 
   // Item 5: Preview content loads from /api/projects/:id/preview/
@@ -227,10 +215,12 @@ async function main(): Promise<void> {
      WHERE project_id = $1 ORDER BY id DESC LIMIT 1`,
     [PROJECT_ID],
   );
-  const latestVersion = beforeGateRow.rows[0] as {
-    id: number;
-    validation_status: string;
-  } | undefined;
+  const latestVersion = beforeGateRow.rows[0] as
+    | {
+        id: number;
+        validation_status: string;
+      }
+    | undefined;
 
   // Temporarily set to completed_with_errors, evaluate the gate, restore.
   let publishGateBlocked = false;
@@ -246,14 +236,13 @@ async function main(): Promise<void> {
     );
     // Gate logic: routes/publish.ts line 231:
     //   if (latestVersion?.validationStatus === "completed_with_errors") → 422
-    publishGateBlocked =
-      gateCheck.rows[0]?.validation_status === "completed_with_errors";
+    publishGateBlocked = gateCheck.rows[0]?.validation_status === "completed_with_errors";
     publishGateNote = `version ${latestVersion.id}: validation_status set to 'completed_with_errors' → gate evaluates: ${publishGateBlocked ? "BLOCKED (would return 422)" : "NOT blocked"}`;
     // Restore original value
-    await pool.query(
-      `UPDATE project_versions SET validation_status = $1 WHERE id = $2`,
-      [latestVersion.validation_status, latestVersion.id],
-    );
+    await pool.query(`UPDATE project_versions SET validation_status = $1 WHERE id = $2`, [
+      latestVersion.validation_status,
+      latestVersion.id,
+    ]);
   } else {
     publishGateNote = "no version found — N/A";
   }
@@ -261,12 +250,10 @@ async function main(): Promise<void> {
   // Item 8: Autostop restored — read machine config via DB-stored logs or just
   // check API server log for "restoring autostop" after task completion.
   // We check the project's container_status now (should be running, not stopped).
-  const afterProjRow = await pool.query(
-    `SELECT container_status FROM projects WHERE id = $1`,
-    [PROJECT_ID],
-  );
-  const containerStatusAfter: string =
-    afterProjRow.rows[0]?.container_status ?? "unknown";
+  const afterProjRow = await pool.query(`SELECT container_status FROM projects WHERE id = $1`, [
+    PROJECT_ID,
+  ]);
+  const containerStatusAfter: string = afterProjRow.rows[0]?.container_status ?? "unknown";
 
   const rep = finalReport ?? {};
   const hasPreviewRequested = seenEvents.has("preview_refresh_requested");
@@ -378,8 +365,7 @@ async function main(): Promise<void> {
     failed = 0,
     na = 0;
   for (const [label, { pass, note }] of items) {
-    const tag =
-      pass === true ? "PASS" : pass === false ? "FAIL" : "N/A ";
+    const tag = pass === true ? "PASS" : pass === false ? "FAIL" : "N/A ";
     if (pass === true) passed++;
     else if (pass === false) failed++;
     else na++;
@@ -399,9 +385,7 @@ async function main(): Promise<void> {
        AND created_at > now() - interval '1 hour'`,
   );
   const staleCount = parseInt(String(stale.rows[0]?.cnt ?? "0"));
-  console.log(
-    `\n  Stale tasks: ${staleCount === 0 ? "0 — queue clean" : staleCount + " STALE"}`,
-  );
+  console.log(`\n  Stale tasks: ${staleCount === 0 ? "0 — queue clean" : staleCount + " STALE"}`);
 
   console.log(`${"=".repeat(70)}\n`);
   await pool.end();

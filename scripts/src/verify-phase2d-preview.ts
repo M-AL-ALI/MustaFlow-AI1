@@ -67,15 +67,24 @@ function probe(url: string, timeoutMs = 12_000): Promise<{ status: number; body:
     let body = "";
     const req = lib.get(url, { timeout: timeoutMs }, (res) => {
       res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { body += chunk; });
+      res.on("data", (chunk: string) => {
+        body += chunk;
+      });
       res.on("end", () => resolve({ status: res.statusCode ?? 0, body: body.slice(0, 500) }));
     });
     req.on("error", () => resolve({ status: 0, body: "" }));
-    req.on("timeout", () => { req.destroy(); resolve({ status: 0, body: "timeout" }); });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ status: 0, body: "timeout" });
+    });
   });
 }
 
-function probePost(url: string, bodyStr: string, timeoutMs = 12_000): Promise<{ status: number; body: string }> {
+function probePost(
+  url: string,
+  bodyStr: string,
+  timeoutMs = 12_000,
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve) => {
     let respBody = "";
     const parsed = new URL(url);
@@ -94,11 +103,16 @@ function probePost(url: string, bodyStr: string, timeoutMs = 12_000): Promise<{ 
     const lib = parsed.protocol === "https:" ? https : http;
     const req = lib.request(opts, (res) => {
       res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { respBody += chunk; });
+      res.on("data", (chunk: string) => {
+        respBody += chunk;
+      });
       res.on("end", () => resolve({ status: res.statusCode ?? 0, body: respBody.slice(0, 500) }));
     });
     req.on("error", () => resolve({ status: 0, body: "" }));
-    req.on("timeout", () => { req.destroy(); resolve({ status: 0, body: "timeout" }); });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ status: 0, body: "timeout" });
+    });
     req.write(bodyStr);
     req.end();
   });
@@ -108,7 +122,7 @@ interface CheckRecord {
   id: string;
   label: string;
   passed: boolean;
-  output: string;
+  message?: string;
 }
 
 async function main(): Promise<void> {
@@ -159,10 +173,9 @@ async function main(): Promise<void> {
   }
 
   // ── Ensure credits ───────────────────────────────────────────────────────────
-  await pool.query(
-    `UPDATE user_credits SET balance = GREATEST(balance, 200) WHERE user_id = $1`,
-    [OWNER_ID],
-  );
+  await pool.query(`UPDATE user_credits SET balance = GREATEST(balance, 200) WHERE user_id = $1`, [
+    OWNER_ID,
+  ]);
   console.log("  Credits ensured (>=200)");
 
   // ── Enqueue refine task ──────────────────────────────────────────────────────
@@ -220,10 +233,7 @@ async function main(): Promise<void> {
   while (Date.now() - startTime < HARD_CAP_MS) {
     await sleep(POLL_MS);
 
-    const statusRow = await pool.query(
-      `SELECT status FROM agent_tasks WHERE id=$1`,
-      [taskId],
-    );
+    const statusRow = await pool.query(`SELECT status FROM agent_tasks WHERE id=$1`, [taskId]);
     taskStatus = (statusRow.rows[0] as { status: string })?.status ?? "unknown";
 
     // Collect events: check_result, preview_ready, preview_refresh_requested, narration
@@ -243,7 +253,9 @@ async function main(): Promise<void> {
       try {
         const parsed = JSON.parse(checkEvt.message) as CheckRecord[];
         if (Array.isArray(parsed)) checkResults = parsed;
-      } catch { /* ignore parse errors */ }
+      } catch {
+        /* ignore parse errors */
+      }
     }
 
     if (events.some((e) => e.event_type === "preview_ready")) {
@@ -296,17 +308,26 @@ async function main(): Promise<void> {
 
   results["1_typecheck"] = {
     pass: typecheckCheck?.passed === true,
-    note: typecheckCheck ? (typecheckCheck.passed ? "PASS" : "FAIL (non-blocking) — " + (typecheckCheck.message ?? "").slice(0, 120)) : "check not found",
+    note: typecheckCheck
+      ? typecheckCheck.passed
+        ? "PASS"
+        : "FAIL (non-blocking) — " + (typecheckCheck.message ?? "").slice(0, 120)
+      : "check not found",
   };
   results["2_server_start"] = {
     pass: serverStartCheck?.passed === true,
-    note: serverStartCheck ? (serverStartCheck.passed ? "healthz OK" : "FAIL — " + (serverStartCheck.message ?? "").slice(0, 120)) : "check not in profile yet (needs restart)",
+    note: serverStartCheck
+      ? serverStartCheck.passed
+        ? "healthz OK"
+        : "FAIL — " + (serverStartCheck.message ?? "").slice(0, 120)
+      : "check not in profile yet (needs restart)",
   };
   // preview_ready fires when the Fly proxy is reachable over HTTP.
   // In this dev environment the proxy blocks external HTTP (returns HTTP 0),
   // so preview_unreachable_503 fires instead. Count preview_refresh_requested
   // as sufficient evidence that finalize triggered the preview chain correctly.
-  const previewChainPass = previewReadyFired || (previewChainTriggered && taskStatus === "completed");
+  const previewChainPass =
+    previewReadyFired || (previewChainTriggered && taskStatus === "completed");
   results["3_preview_ready"] = {
     pass: previewChainPass,
     note: previewReadyFired
@@ -329,9 +350,10 @@ async function main(): Promise<void> {
     const containerHealthzPass = healthz.status === 200 || healthz.status === 0;
     results["4_container_healthz"] = {
       pass: containerHealthzPass,
-      note: healthz.status === 200
-        ? `HTTP 200 — ${healthz.body.slice(0, 60)}`
-        : `HTTP ${healthz.status} (Fly proxy blocks external HTTP from dev host; server-start check is authoritative)`,
+      note:
+        healthz.status === 200
+          ? `HTTP 200 — ${healthz.body.slice(0, 60)}`
+          : `HTTP ${healthz.status} (Fly proxy blocks external HTTP from dev host; server-start check is authoritative)`,
     };
 
     const root = await probe(`${containerUrl}/`);
@@ -376,12 +398,12 @@ async function main(): Promise<void> {
   console.log(`${"=".repeat(70)}`);
 
   const items = [
-    ["1. TypeScript typecheck",         results["1_typecheck"]],
-    ["2. Server startup (healthz)",     results["2_server_start"]],
-    ["3. preview_ready event",          results["3_preview_ready"]],
-    ["4. Container /healthz → 200",     results["4_container_healthz"]],
+    ["1. TypeScript typecheck", results["1_typecheck"]],
+    ["2. Server startup (healthz)", results["2_server_start"]],
+    ["3. preview_ready event", results["3_preview_ready"]],
+    ["4. Container /healthz → 200", results["4_container_healthz"]],
     ["5. Iframe content (preview API)", results["5_iframe_content"]],
-    ["6. Publish endpoint reachable",   results["6_publish_endpoint"]],
+    ["6. Publish endpoint reachable", results["6_publish_endpoint"]],
   ] as Array<[string, { pass: boolean; note: string }]>;
 
   let passed = 0;
@@ -397,16 +419,22 @@ async function main(): Promise<void> {
   console.log(`\nResult: ${passed}/${items.length} PASS`);
 
   if (passed === items.length) {
-    console.log("\nPHASE 2D STATUS: COMPLETE — App builds cleanly and preview is fully functional.");
+    console.log(
+      "\nPHASE 2D STATUS: COMPLETE — App builds cleanly and preview is fully functional.",
+    );
   } else if (passed >= 4) {
-    console.log("\nPHASE 2D STATUS: MOSTLY COMPLETE — Core preview chain works; minor items remaining.");
+    console.log(
+      "\nPHASE 2D STATUS: MOSTLY COMPLETE — Core preview chain works; minor items remaining.",
+    );
   } else {
     console.log("\nPHASE 2D STATUS: INCOMPLETE — Review failures above.");
   }
 
   // Checks summary
   console.log("\n── Check Profile Evidence ──");
-  console.log(`  server-start check is now in the node-api profile: YES (check-profiles.ts updated)`);
+  console.log(
+    `  server-start check is now in the node-api profile: YES (check-profiles.ts updated)`,
+  );
   console.log(`  DATABASE_URL lazy-init guidance in system prompt: YES (agent-loop.ts updated)`);
   console.log(`  developer-mode DATABASE_URL guidance: YES (agent-loop.ts updated)`);
   console.log(`  node-syntax uses smart entry detection: YES (check-profiles.ts updated)`);

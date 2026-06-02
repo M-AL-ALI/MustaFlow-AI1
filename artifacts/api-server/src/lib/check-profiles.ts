@@ -123,7 +123,7 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
         argv: [
           "sh",
           "-c",
-          "cd /app && MAIN=$(node -p 'try{const p=JSON.parse(require(\"fs\").readFileSync(\"package.json\",\"utf8\"));p.main||\"\"}catch(e){\"\"}' 2>/dev/null); if [ -n \"$MAIN\" ] && [ -f \"$MAIN\" ]; then node --check \"$MAIN\"; else echo \"No pre-compiled JS entry found — tsx-based server (skip).\"; fi",
+          'cd /app && MAIN=$(node -p \'try{const p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.main||""}catch(e){""}\' 2>/dev/null); if [ -n "$MAIN" ] && [ -f "$MAIN" ]; then node --check "$MAIN"; else echo "No pre-compiled JS entry found — tsx-based server (skip)."; fi',
         ],
         runner: "container",
         required: false,
