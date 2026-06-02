@@ -1,0 +1,123 @@
+I want to simplify MustaFlow AI.
+
+Going forward, I do not want Developer Mode to be a separate user-facing mode.
+
+The main product should be:
+
+AI Builder Mode = the main MustaFlow Agentic Builder
+Agent Zero = the main agent for MustaFlow
+Advanced tools = optional tools inside Builder, not a separate mode
+
+Please stop treating Developer Mode as a separate product experience.
+
+Direction:
+Remove/hide Developer Mode from the normal user flow and make Builder Mode the only main workspace.
+
+Important:
+Do this safely. Do not delete useful backend code blindly.
+
+Required approach:
+
+1. Hide Developer Mode from users
+
+* Remove Developer Mode from sidebar/navigation.
+* Remove automatic redirect to /dev.
+* Remove any “Developer Mode runtime” wording.
+* Normal users should never be pushed into Developer Mode.
+
+2. Keep AI Builder as the main workspace
+    The route /projects/[id] should be the main workspace for all users.
+
+AI Builder should include:
+
+* chat command center
+* Agent Zero
+* live preview
+* build timeline
+* Plan / Build / Test / Fix / Iterate / Deploy loop
+* files/tools only when Advanced View is enabled
+* publishing
+* integrations
+* validation warnings
+* checkpoints/rollback
+
+3. Move useful Developer Mode tools into Builder Advanced View
+    If Developer Mode has useful tools, do not lose them. Move them under AI Builder as optional advanced panels:
+
+* Files
+* Code editor
+* Terminal
+* Logs
+* Git
+* Database
+* Environment variables
+* Tests
+* Deploy/publish tools
+
+These should live inside Builder, not as a separate mode.
+
+4. Agent Zero must be the main agent
+    Agent Zero should be the main builder agent for MustaFlow.
+
+Agent Zero should:
+
+* plan
+* build
+* read files
+* write files
+* install packages
+* create frontend
+* create backend
+* create database/schema
+* run checks
+* repair errors
+* update preview
+* show live timeline
+* ask for approvals
+* prepare publishing
+
+5. Audit before deleting code
+    Before deleting Developer Mode files, please audit:
+
+* What Developer Mode files exist?
+* Which ones are user-facing only?
+* Which ones contain useful tools we should move into Builder Advanced View?
+* Which backend routes are only diagnostics?
+* Which code is safe to remove now?
+* Which code should stay temporarily until Builder Advanced View replaces it?
+
+6. Recommended migration path
+    Phase A:
+    Hide Developer Mode from UI/navigation and prevent new projects from routing to /dev.
+
+Phase B:
+Move useful Developer Mode panels/tools into Builder Advanced View.
+
+Phase C:
+Update wording and docs so MustaFlow has one main workspace: AI Builder.
+
+Phase D:
+After confirming no dependencies remain, remove old Developer Mode route/components safely.
+
+7. Do not break existing projects
+    If any old project has project_mode = developer, convert or redirect it safely to Builder Advanced View.
+
+Do not strand old projects.
+
+8. Final target
+    MustaFlow should feel simple:
+
+User opens project → AI Builder opens → Agent Zero builds everything.
+
+There should not be confusing choices like:
+
+* AI Builder Agent
+* Developer Mode Agent
+* Developer Runtime
+* separate agentic mode
+
+There should be one main experience:
+
+MustaFlow AI Builder powered by Agent Zero.
+
+Please create an audit and migration plan first before deleting anything.
