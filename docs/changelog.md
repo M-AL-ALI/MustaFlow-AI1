@@ -2,6 +2,47 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## E2E Verification Status (as of 2026-06-02)
+
+### Full-stack / agentic container path — VERIFIED
+Live run: task 320, project 82 ("E2E Booking App v2"), 776 s, status=completed.
+
+Evidence:
+- Provisioning ready: builder_mode=agentic, container_id=865990ce734128, provisioning_status=ready
+- 18 file_diff events — React frontend + Express backend + Drizzle ORM schema written
+- Files include: src/server/schema.ts, src/server/db.ts, src/server/migrate.ts (DB path exercised)
+- 19 check_result events fired including server-start
+- Version 149 captured as passed_with_warnings (honest)
+- Auto-fix refine spawned (architect review + quality gate wired)
+- No "Developer Mode runtime" wording; no autostop/keepalive errors
+- Queue clean after completion
+
+Fixes shipped in this session:
+1. `flyFetch` now carries `AbortSignal.timeout(timeoutMs)` — 30 s default, 360 s for exec POSTs.
+   Prevents indefinite hang when Fly machine is in a transient wake state.
+2. `runAgenticPreflightGate` writes a heartbeat before the container wake loop so the
+   stuck-run scheduler clock resets from "now", not from task enqueue time.
+3. Stuck-run `HEARTBEAT_TIMEOUT_MS`: 5 min → 8 min (headroom for cold-start + exec timeout).
+
+### Final user-facing preview/interaction — PENDING (Phase 2F)
+The Replit sandbox cannot direct-fetch the Fly container, so c10/c11 (HTTP probe +
+interactive HTML) could not be exercised from the verification script. A browser-level
+Playwright test is required to confirm the preview iframe loads and can be interacted with.
+
+Acceptance criteria (Phase 2F — Authenticated Preview & Interaction Test):
+1. Open project from normal AI Builder UI (authenticated session)
+2. Preview iframe loads real app content
+3. Visible content check passes
+4. Navigation works
+5. At least one button or form interaction works
+6. If validation_status=passed_with_warnings, UI shows amber warning state
+7. Publish is blocked or requires override depending on validation_status
+8. No stale jobs remain in pg-boss
+9. Autostop restored (Fly machine stops when idle)
+10. Final report clearly states whether the app is ready for user testing
+
+Do not reopen backend runtime or static/full-stack wiring unless Phase 2F exposes a regression.
+
 ## Scope — Web First
 
 The builder generates **static web apps** (HTML/CSS/JS + Tailwind + Lucide via CDN). Mobile (Expo/React Native) is a future milestone and is intentionally not exposed in the UI. Do not add mobile project kinds or mobile generation prompts until the Phase 4 mobile milestone is approved.
