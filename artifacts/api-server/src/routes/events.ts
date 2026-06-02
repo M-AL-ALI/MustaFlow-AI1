@@ -143,7 +143,9 @@ router.get(
     replayDone = true;
 
     for (const payload of liveBuffer) {
-      if (payload.id <= lastReplayedId) continue; // already replayed
+      // id === 0 means a bus-only (synthetic) event — never stored in DB, so it
+      // is never replayed and must always be forwarded to the client.
+      if (payload.id !== 0 && payload.id <= lastReplayedId) continue; // already replayed
       if (streamClosed) break;
       write(payload);
       if (TERMINAL_EVENT_TYPES.has(payload.eventType)) {

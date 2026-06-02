@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { WebContainer, FileSystemTree } from "@webcontainer/api";
 import { getProjectAllFileContent } from "@workspace/api-client-react";
+import type { ProjectFilesChangedPayload } from "@/lib/event-types";
 
 export type WebContainerStatus =
   | "idle"
@@ -45,7 +46,7 @@ export interface UseWebContainerResult {
   error: string | null;
   logs: WebContainerLog[];
   syncFile: (path: string, content: string) => Promise<void>;
-  syncFromBackend: (payload: BackendFilesPayload) => Promise<void>;
+  syncFromBackend: (payload: ProjectFilesChangedPayload) => Promise<void>;
   restart: () => void;
 }
 
@@ -276,63 +277,63 @@ export function useWebContainer({
     }
   }, []);
 
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { path, content } = (e as CustomEvent<{ path: string; content: string }>).detail;
-      void syncFile(path, content);
-    };
-    window.addEventListener("mustaflow:file-saved", handler);
-    return () => window.removeEventListener("mustaflow:file-saved", handler);
-  }, [syncFile]);
-
   /**
-   * Incrementally sync a backend `project_files_changed` payload into the
-   * running WebContainer's virtual filesystem.
-   *
-   * Rules:
-   *  - Write each file in `payload.files` (safe text content from backend).
-   *  - Remove each path in `payload.removedPaths`.
-   *  - If `requiresInstall`, run `npm install` inside the container.
-   *  - If `requiresRestart` or `requiresInstall`, restart the dev server.
-   *  - Otherwise, rely on Vite HMR — never restart for ordinary source changes.
-   *  - Never wait for `server-ready` unless a restart was actually triggered.
+   * Sync a batch of backend-written files into the WebContainer FS.
+   * Called from PreviewTab when a project_files_changed SSE event arrives.
+   * - Writes all changed files (creating parent dirs as needed).
+   * - Removes deleted files (best-effort, non-fatal).
+   * - Re-runs npm install + restart when package.json changes.
+   * - Restarts dev server (no install) when vite.config/tsconfig/.env changes.
+   * - Otherwise Vite HMR picks up changes without a restart.
    */
   const syncFromBackend = useCallback(
-    async (payload: BackendFilesPayload): Promise<void> => {
+    async (payload: ProjectFilesChangedPayload): Promise<void> => {
       const wc = wcRef.current;
       if (!wc) return;
 
-      try {
-        // Write changed files
-        for (const [filePath, content] of Object.entries(payload.files)) {
-          const segments = filePath.split("/");
+      // Write all changed files
+      for (const [path, content] of Object.entries(payload.files)) {
+        try {
+          const segments = path.split("/");
           if (segments.length > 1) {
             const dir = segments.slice(0, -1).join("/");
             await wc.fs.mkdir(dir, { recursive: true });
           }
-          await wc.fs.writeFile(filePath, content);
+          await wc.fs.writeFile(path, content);
+        } catch {
+          // Non-fatal: continue with remaining files
         }
+      }
 
-        // Remove deleted files
-        for (const removedPath of payload.removedPaths) {
-          try {
-            await wc.fs.rm(removedPath, { force: true, recursive: true });
-          } catch {
-            // Non-fatal: file may already not exist
-          }
+      // Remove deleted files (best-effort)
+      for (const path of payload.removedPaths) {
+        try {
+          await wc.fs.rm(path);
+        } catch {
+          // Non-fatal: file may already not exist
         }
+      }
 
-        // If no install or restart needed, HMR will handle it — we're done.
-        if (!payload.requiresInstall && !payload.requiresRestart) {
-          return;
-        }
+      // Helper: resolves when WC emits "server-ready" (or after 30 s timeout).
+      // Additive to the boot-flow serverReadyListenerRef — does not interfere with it.
+      const waitForServerReady = (): Promise<void> =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 30_000);
+          const unlisten = wc.on("server-ready", () => {
+            clearTimeout(timer);
+            unlisten();
+            resolve();
+          });
+        });
 
-        // Kill existing dev process before reinstalling / restarting
+      if (payload.requiresInstall) {
+        // Kill dev server, reinstall, restart
         devProcessRef.current?.kill();
         devProcessRef.current = null;
-
-        if (payload.requiresInstall) {
-          addLog("[WC] Detected package changes — running npm install…");
+        if (!mountedRef.current) return;
+        setStatus("installing");
+        addLog("[WC] package.json changed — running npm install…");
+        try {
           const installProcess = await wc.spawn("npm", ["install"]);
           installProcess.output.pipeTo(
             new WritableStream({
@@ -341,40 +342,79 @@ export function useWebContainer({
               },
             }),
           );
-          const installExit = await installProcess.exit;
-          if (installExit !== 0) {
-            addLog(`[WC] npm install failed (exit code ${installExit})`);
+          const exitCode = await installProcess.exit;
+          if (!mountedRef.current) return;
+          if (exitCode !== 0) {
+            addLog("[WC] npm install failed — dev server not restarted");
+            setStatus("error");
             return;
           }
-          // Update install cache with new package.json hash
           const pkgContent = payload.files["package.json"];
-          if (pkgContent) {
-            _installHashCache.set(payload.projectId, hashString(pkgContent));
-          }
+          if (pkgContent) _installHashCache.set(projectIdRef.current, hashString(pkgContent));
+        } catch (err) {
+          addLog(`[WC] npm install error: ${err instanceof Error ? err.message : String(err)}`);
+          return;
         }
-
-        // Restart dev server
-        addLog("[WC] Restarting dev server after config/dependency change…");
+        if (!mountedRef.current) return;
         setStatus("starting");
-        const devProcess = await wc.spawn("npm", ["run", "dev"]);
-        devProcessRef.current = devProcess;
-        devProcess.output.pipeTo(
-          new WritableStream({
-            write(chunk: string) {
-              addLog(chunk);
-            },
-          }),
-        );
-        // server-ready listener is already registered — status will go to "ready"
-        // when Vite emits the port event
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        addLog(`[WC] syncFromBackend error: ${msg}`);
-        // Non-fatal — HMR may still recover
+        addLog("[WC] Restarting dev server…");
+        try {
+          const devProcess = await wc.spawn("npm", ["run", "dev"]);
+          devProcessRef.current = devProcess;
+          devProcess.output.pipeTo(
+            new WritableStream({
+              write(chunk: string) {
+                addLog(chunk);
+              },
+            }),
+          );
+          // Await server-ready so callers (e.g. refreshTrigger effect) delay iframe
+          // reload until the new server is actually serving requests.
+          await waitForServerReady();
+        } catch (err) {
+          addLog(
+            `[WC] Dev server restart failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      } else if (payload.requiresRestart) {
+        // Config changed — kill and restart without reinstalling
+        devProcessRef.current?.kill();
+        devProcessRef.current = null;
+        if (!mountedRef.current) return;
+        setStatus("starting");
+        addLog("[WC] Config file changed — restarting dev server…");
+        try {
+          const devProcess = await wc.spawn("npm", ["run", "dev"]);
+          devProcessRef.current = devProcess;
+          devProcess.output.pipeTo(
+            new WritableStream({
+              write(chunk: string) {
+                addLog(chunk);
+              },
+            }),
+          );
+          // Await server-ready so callers delay iframe reload until the server is up.
+          await waitForServerReady();
+        } catch (err) {
+          addLog(
+            `[WC] Dev server restart failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
+      // If neither requiresInstall nor requiresRestart, Vite HMR picks up the
+      // FS writes automatically — no explicit restart needed.
     },
     [addLog],
   );
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { path, content } = (e as CustomEvent<{ path: string; content: string }>).detail;
+      void syncFile(path, content);
+    };
+    window.addEventListener("mustaflow:file-saved", handler);
+    return () => window.removeEventListener("mustaflow:file-saved", handler);
+  }, [syncFile]);
 
   const restart = useCallback(() => {
     devProcessRef.current?.kill();

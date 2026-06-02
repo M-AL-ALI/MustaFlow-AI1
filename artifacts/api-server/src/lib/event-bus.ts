@@ -6,7 +6,10 @@ export interface TaskEventPayload {
   eventType: string;
   message: string;
   filePath: string | null;
-  data?: Record<string, unknown>;
+  /** Optional payload. DB-persisted events carry `Record<string, unknown>`;
+   *  synthetic bus-only events (e.g. project_files_changed) carry a richer typed
+   *  payload. Using `unknown` here satisfies both. Not persisted for bus-only events. */
+  data?: unknown;
   createdAt: Date | string;
 }
 

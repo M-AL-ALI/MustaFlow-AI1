@@ -42,11 +42,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
-import {
-  STATUS_LABELS,
-  type UseWebContainerResult,
-  type BackendFilesPayload,
-} from "@/hooks/use-web-container";
+import { STATUS_LABELS, type UseWebContainerResult } from "@/hooks/use-web-container";
+import type { ProjectFilesChangedPayload } from "@/lib/event-types";
 import { cn } from "@/lib/utils";
 import {
   useListProjectFiles,
@@ -153,17 +150,18 @@ type PreviewTabProps = {
    */
   refreshTrigger?: number;
   /**
-   * Latest BackendFilesPayload received from the project-level preview SSE stream.
-   * When this changes (paired with filesPayloadSeq), PreviewTab calls
-   * wc.syncFromBackend so the WebContainer gets updated files without a full reload.
-   * Static (non-react-vite) projects increment iframeKey instead.
+   * Ref holding the latest ProjectFilesChangedPayload from a project_files_changed SSE event.
+   * When filesPayloadSeq changes, PreviewTab syncs the payload into the WebContainer FS.
    */
-  filesPayload?: BackendFilesPayload | null;
-  /**
-   * Increments each time a new filesPayload arrives. Use this as the effect
-   * dependency rather than the payload itself (stable ref identity).
-   */
+  filesPayloadRef?: React.RefObject<ProjectFilesChangedPayload | null>;
+  /** Increments each time a new files payload arrives — triggers the WC sync effect. */
   filesPayloadSeq?: number;
+  /**
+   * When true the active task is in needs_review / staged state. A banner is shown
+   * informing the user that changes are staged and the preview reflects the last live
+   * build, not the pending staged files.
+   */
+  isTaskStaged?: boolean;
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
@@ -196,8 +194,9 @@ export function PreviewTab({
   onJumpToSecrets,
   onNavigateToTestEnv,
   refreshTrigger,
-  filesPayload,
+  filesPayloadRef,
   filesPayloadSeq,
+  isTaskStaged,
 }: PreviewTabProps) {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(project.kind ?? "");
   const [readinessDismissed, setReadinessDismissed] = useState(false);
@@ -250,38 +249,39 @@ export function PreviewTab({
     }
     if (refreshTrigger !== prevRefreshTriggerRef.current) {
       prevRefreshTriggerRef.current = refreshTrigger;
-      setIframeKey((k) => k + 1);
+      // Sync-first-then-reload: if a payload arrived after the last filesPayloadSeq
+      // effect ran (e.g. final batch arrived simultaneously with "completed"), sync it
+      // into the WebContainer before flipping the iframe key so HMR sees the latest
+      // files. Falls back to immediate reload when WC is not ready or there is no
+      // pending payload.
+      const remaining = filesPayloadRef?.current ?? null;
+      if (remaining && wc.status === "ready") {
+        if (filesPayloadRef) filesPayloadRef.current = null;
+        void wc.syncFromBackend(remaining).then(() => {
+          setIframeKey((k) => k + 1);
+        });
+      } else {
+        setIframeKey((k) => k + 1);
+      }
     }
-  }, [refreshTrigger]);
+  }, [refreshTrigger, filesPayloadRef, wc]);
 
-  // ── Backend-driven incremental sync ──────────────────────────────────────────
-  // When a project_files_changed payload arrives (filesPayloadSeq increments):
-  //   • React-Vite (WebContainer): call syncFromBackend for incremental FS update
-  //     without a full iframe reload — HMR handles source changes in place.
-  //   • Static projects: preview_ready from the SSE stream already increments
-  //     buildRefreshCount → refreshTrigger → iframeKey in the parent, so no
-  //     action needed here; we skip to avoid a double reload.
+  // When a project_files_changed SSE event arrives, sync files into the WebContainer
+  // filesystem so Vite HMR can deliver the update without a full iframe reload.
+  // Only runs for WebContainer-backed projects (when wc.status === 'ready').
+  // Clears filesPayloadRef.current before the async call to prevent double-apply if
+  // the refreshTrigger effect races with a subsequent filesPayloadSeq increment.
   const prevFilesPayloadSeqRef = useRef<number | undefined>(undefined);
-  const wcSyncRef = useRef(wc.syncFromBackend);
-  wcSyncRef.current = wc.syncFromBackend;
   useEffect(() => {
-    if (filesPayloadSeq === undefined || filesPayloadSeq === 0) return;
+    if (filesPayloadSeq === undefined) return;
     if (prevFilesPayloadSeqRef.current === filesPayloadSeq) return;
     prevFilesPayloadSeqRef.current = filesPayloadSeq;
-    if (!filesPayload) return;
-    if (!isReactVite) {
-      // Static / agentic-container projects: the task-channel "completed" event
-      // (for static) or preview_ready event (for agentic) already increments
-      // buildRefreshCount → refreshTrigger → iframeKey in the parent.
-      // Do nothing here to avoid a double reload.
-      return;
-    }
-    // React-Vite: sync incrementally via WebContainer FS
-    void wcSyncRef.current(filesPayload).catch(() => {
-      // Non-fatal — worst case the user sees stale content until next full reload
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filesPayloadSeq]);
+    if (!filesPayloadRef?.current) return;
+    if (wc.status !== "ready") return;
+    const payload = filesPayloadRef.current;
+    filesPayloadRef.current = null; // clear before await — prevents double-apply
+    void wc.syncFromBackend(payload);
+  }, [filesPayloadSeq, filesPayloadRef, wc]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -438,8 +438,31 @@ export function PreviewTab({
         if (json.patched) {
           setVeToast(`Saved to ${json.filePath ?? "file"}`);
           setTimeout(() => setVeToast(null), 2500);
-          // Refresh file list so the editor sees the new content
-          // (TanStack Query will refetch via key match elsewhere; fire a soft reload)
+          // Sync the patched file into the WebContainer FS so Vite HMR delivers the
+          // update instantly for React/Vite projects. Falls back to iframe reload for
+          // static HTML projects (where WC is not active).
+          if (wc.status === "ready" && json.filePath) {
+            try {
+              const fileRes = await fetch(`/api/projects/${project.id}/preview/${json.filePath}`, {
+                credentials: "include",
+              });
+              if (fileRes.ok) {
+                const content = await fileRes.text();
+                await wc.syncFromBackend({
+                  projectId: project.id,
+                  changedPaths: [json.filePath],
+                  files: { [json.filePath]: content },
+                  removedPaths: [],
+                  operationType: "visual-edit",
+                  requiresInstall: false,
+                  requiresRestart: false,
+                });
+              }
+            } catch {
+              // Non-fatal — fall through to iframe reload
+            }
+          }
+          // Reload so the iframe (static) or WC dev server reflect the change.
           setIframeKey((k) => k + 1);
         } else if (json.suggestedPrompt && (onAutoSendPrompt ?? onFixPrompt)) {
           const target = onAutoSendPrompt ?? onFixPrompt!;
@@ -453,7 +476,8 @@ export function PreviewTab({
       }
       closeVe();
     },
-    [veSelection, project.id, onAutoSendPrompt, onFixPrompt, closeVe],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [veSelection, project.id, onAutoSendPrompt, onFixPrompt, closeVe, wc],
   );
 
   // EAS build status — fetch latest completed build for native QR
@@ -961,6 +985,13 @@ export function PreviewTab({
 
   return (
     <div className="flex flex-col h-full bg-background">
+      {/* Staged-state banner — shown when the active task is in needs_review mode */}
+      {isTaskStaged && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
+          <Info className="h-3 w-3 shrink-0" />
+          Changes are staged — apply to update preview
+        </div>
+      )}
       {/* Visual Edit toast */}
       {veToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 shadow-lg">

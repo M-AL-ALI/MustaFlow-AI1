@@ -29,6 +29,8 @@ import { deployProductionContainer } from "../lib/container";
 import { encryptionService } from "../lib/encryption";
 import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
 import { downloadSnapshotBlob } from "../lib/snapshot-storage";
+import { publishTaskEvent } from "../lib/event-bus";
+import { EventTypes, type ProjectFilesChangedPayload } from "../lib/event-types";
 
 const router: IRouter = Router();
 
@@ -38,7 +40,20 @@ async function emitRollbackEvent(
   message: string,
 ): Promise<void> {
   try {
-    await db.insert(taskEventsTable).values({ taskId, eventType, message, filePath: null });
+    const [row] = await db
+      .insert(taskEventsTable)
+      .values({ taskId, eventType, message, filePath: null })
+      .returning();
+    if (row) {
+      publishTaskEvent({
+        id: row.id,
+        taskId: row.taskId,
+        eventType: row.eventType,
+        message: row.message,
+        filePath: row.filePath ?? null,
+        createdAt: row.createdAt,
+      });
+    }
   } catch (err) {
     logger.warn({ err, taskId, eventType }, "Failed to emit rollback task event");
   }
@@ -305,6 +320,17 @@ router.post(
       `Restoring ${snapshot.length} file(s) from version "${version.label}"…`,
     );
 
+    // Capture current file paths before deletion so we can compute removedPaths
+    // (files that existed before rollback but are absent from the target snapshot).
+    const currentFileRows = await db
+      .select({ path: projectFilesTable.path })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
+    const snapshotPathSet = new Set(snapshot.map((f) => f.path));
+    const rollbackRemovedPaths = currentFileRows
+      .map((r) => r.path)
+      .filter((p) => !snapshotPathSet.has(p));
+
     // Bulk delete current files and re-insert snapshot
     await db.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
     if (snapshot.length > 0) {
@@ -315,6 +341,47 @@ router.post(
           content: f.content,
           mimeType: f.mimeType,
         })),
+      );
+    }
+
+    // Emit project_files_changed so any active SSE subscriber can sync the
+    // WebContainer filesystem without a full page reload.
+    try {
+      const changedPaths = snapshot.map((f) => f.path);
+      const filesMap: Record<string, string> = {};
+      for (const f of snapshot) filesMap[f.path] = f.content;
+      const requiresInstall = changedPaths.some(
+        (p) =>
+          p === "package.json" ||
+          p === "package-lock.json" ||
+          p === "yarn.lock" ||
+          p === "pnpm-lock.yaml",
+      );
+      const requiresRestart = changedPaths.some((p) =>
+        /^vite\.config\.|^tsconfig\.|^\.env/.test(p),
+      );
+      const filesChangedPayload: ProjectFilesChangedPayload = {
+        projectId,
+        changedPaths,
+        files: filesMap,
+        removedPaths: rollbackRemovedPaths,
+        operationType: "rollback",
+        requiresInstall,
+        requiresRestart,
+      };
+      publishTaskEvent({
+        id: 0,
+        taskId,
+        eventType: EventTypes.PROJECT_FILES_CHANGED,
+        message: `${snapshot.length} file(s) restored`,
+        filePath: null,
+        createdAt: new Date(),
+        data: filesChangedPayload,
+      });
+    } catch (emitErr) {
+      logger.warn(
+        { err: emitErr, projectId, taskId },
+        "rollback: project_files_changed emit failed (non-fatal)",
       );
     }
 

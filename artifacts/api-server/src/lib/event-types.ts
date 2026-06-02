@@ -27,6 +27,9 @@ export const EventTypes = {
   UPDATING_PREVIEW: "updating_preview",
   PREVIEW_UPDATED: "preview.updated",
   CONTAINER_UNAVAILABLE: "container_unavailable",
+  /** Emitted after writeFiles completes. Carries a ProjectFilesChangedPayload
+   *  in the `data` field. Bus-only (not persisted to taskEventsTable). */
+  PROJECT_FILES_CHANGED: "project_files_changed",
 
   // ── Heartbeat / stuck-run ───────────────────────────────────────────────
   HEARTBEAT: "heartbeat",
@@ -40,3 +43,24 @@ export const EventTypes = {
 } as const;
 
 export type EventType = (typeof EventTypes)[keyof typeof EventTypes];
+
+/**
+ * Payload for the PROJECT_FILES_CHANGED event.
+ * Carried in `TaskEventPayload.data` — allows the frontend to sync files into
+ * the WebContainer filesystem without a full page reload.
+ */
+export interface ProjectFilesChangedPayload {
+  projectId: number;
+  /** Paths of files that were written (created or updated). */
+  changedPaths: string[];
+  /** Map of path → content for all changed files. */
+  files: Record<string, string>;
+  /** Paths of files that were deleted. */
+  removedPaths: string[];
+  /** What triggered this change. */
+  operationType: "build" | "refine" | "apply" | "rollback" | "visual-edit" | "manual-save";
+  /** True when package.json, package-lock.json, yarn.lock, or pnpm-lock.yaml changed. */
+  requiresInstall: boolean;
+  /** True when vite.config.*, tsconfig.*, or .env* changed. */
+  requiresRestart: boolean;
+}

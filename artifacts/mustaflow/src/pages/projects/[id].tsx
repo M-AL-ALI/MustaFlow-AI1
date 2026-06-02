@@ -1,5 +1,5 @@
 import { useParams, Link, useLocation } from "wouter";
-import { useWebContainer, type BackendFilesPayload } from "@/hooks/use-web-container";
+import { useWebContainer } from "@/hooks/use-web-container";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import {
   useGetProject,
@@ -121,6 +121,7 @@ import { BackgroundTasksDrawer, type BgTask } from "./components/background-task
 import { ZeroAgentPanel } from "./components/zero-agent-panel";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import type { ProjectFilesChangedPayload } from "@/lib/event-types";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import { CanvasTab } from "./components/canvas-tab";
@@ -1078,15 +1079,14 @@ export default function ProjectWorkspacePage() {
   // Project-level preview event stream — receives project_files_changed /
   // preview_ready / preview_sync_failed events independent of any task.
   const previewEventSourceRef = useRef<EventSource | null>(null);
-  // Holds the latest BackendFilesPayload so PreviewTab can call syncFromBackend.
-  const latestFilesPayloadRef = useRef<BackendFilesPayload | null>(null);
-  // Increments every time a new files payload arrives — PreviewTab watches this.
-  const [filesPayloadSeq, setFilesPayloadSeq] = useState(0);
   // Holds the latest pendingFeedTaskId so handleStopStream can cancel it even
   // though that value is computed further down the component body.
   const pendingFeedTaskIdRef = useRef<number | null>(null);
   // Debounce timer for mid-run preview refresh triggered by file_diff events.
   const livePreviewRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guard: skip project_files_changed syncs when the active task is staged (needs_review).
+  // Updated whenever tasksForFeed or activeTaskId changes so the SSE handler sees fresh status.
+  const activeTaskNeedsReviewRef = useRef(false);
   // Banner shown when a build is blocked by a pre-flight container/DB failure
   const [preflightBanner, setPreflightBanner] = useState<{
     message: string;
@@ -1094,6 +1094,15 @@ export default function ProjectWorkspacePage() {
   } | null>(null);
   // Tracks the most recent user-typed prompt so "Retry" can re-submit it
   const lastSentPromptRef = useRef<string>("");
+
+  // Keep the needs_review guard ref in sync so the SSE handler always sees the
+  // active task's current status without needing it in the EventSource useEffect deps.
+  useEffect(() => {
+    const activeTask = (tasksForFeed as Array<{ id: number; status: string }>).find(
+      (t) => t.id === activeTaskId,
+    );
+    activeTaskNeedsReviewRef.current = activeTask?.status === "needs_review";
+  }, [tasksForFeed, activeTaskId]);
 
   // Auto-clear the Zero background pill when its task reaches a terminal status.
   // This runs independent of the panel being open so the pill is never stale.
@@ -1125,6 +1134,10 @@ export default function ProjectWorkspacePage() {
 
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [buildRefreshCount, setBuildRefreshCount] = useState(0);
+  /** Ref holding the most recent ProjectFilesChangedPayload — updated by SSE handler. */
+  const filesPayloadRef = useRef<ProjectFilesChangedPayload | null>(null);
+  /** Incrementing seq so PreviewTab can react to new payloads even if the ref content changed. */
+  const [filesPayloadSeq, setFilesPayloadSeq] = useState(0);
   const [pendingBuildStartedAt, setPendingBuildStartedAt] = useState<Date | null>(null);
   const [activeTab, setActiveTab] = useState<string>(() => {
     const valid = WORKSPACE_TABS.map((t) => t.value);
@@ -1891,8 +1904,19 @@ export default function ProjectWorkspacePage() {
           } catch {
             /* malformed prompt frame */
           }
+        } else if (event.eventType === "project_files_changed") {
+          // Sync backend-written files into the WebContainer FS (live HMR for React/Vite projects).
+          // Guard: skip if the active task is in needs_review (files are staged, not live) or
+          // if the payload has no data.
+          const parsed = event as unknown as { data?: ProjectFilesChangedPayload };
+          if (parsed.data && typeof parsed.data === "object" && !activeTaskNeedsReviewRef.current) {
+            filesPayloadRef.current = parsed.data;
+            setFilesPayloadSeq((n) => n + 1);
+          }
         } else if (event.eventType === "file_diff" && event.message) {
-          // Refresh the preview iframe a few seconds after a file is written
+          // Refresh the preview iframe a few seconds after a file is written.
+          // For WC projects this is handled by the project_files_changed sync above;
+          // for static HTML projects keep the debounce as a fallback.
           if (livePreviewRefreshTimerRef.current) clearTimeout(livePreviewRefreshTimerRef.current);
           livePreviewRefreshTimerRef.current = setTimeout(() => {
             setBuildRefreshCount((n) => n + 1);
@@ -1956,18 +1980,16 @@ export default function ProjectWorkspacePage() {
           };
         };
         if (event.eventType === "project_files_changed") {
-          const d = event.data ?? {};
-          const payload: BackendFilesPayload = {
-            projectId: d.projectId ?? event.projectId ?? projectId,
-            operationType: d.operationType ?? "unknown",
-            changedPaths: d.changedPaths ?? [],
-            removedPaths: d.removedPaths ?? [],
-            files: d.files ?? {},
-            requiresInstall: d.requiresInstall ?? false,
-            requiresRestart: d.requiresRestart ?? false,
-            generatedAt: d.generatedAt ?? new Date().toISOString(),
+          const payload: ProjectFilesChangedPayload = {
+            projectId: event.projectId ?? projectId,
+            operationType: (event.operationType ?? "unknown") as ProjectFilesChangedPayload["operationType"],
+            changedPaths: event.changedPaths ?? [],
+            removedPaths: event.removedPaths ?? [],
+            files: event.files ?? {},
+            requiresInstall: event.requiresInstall ?? false,
+            requiresRestart: event.requiresRestart ?? false,
           };
-          latestFilesPayloadRef.current = payload;
+          filesPayloadRef.current = payload;
           setFilesPayloadSeq((n) => n + 1);
           // Invalidate file list so the editor panel reflects new content
           void queryClient.invalidateQueries({ queryKey: getListProjectFilesQueryKey(projectId) });
@@ -4627,8 +4649,13 @@ export default function ProjectWorkspacePage() {
                 focusMode={focusMode}
                 onToggleFocusMode={() => setFocusMode((f) => !f)}
                 refreshTrigger={buildRefreshCount}
-                filesPayload={latestFilesPayloadRef.current}
+                filesPayloadRef={filesPayloadRef}
                 filesPayloadSeq={filesPayloadSeq}
+                isTaskStaged={
+                  (tasksForFeed as Array<{ id: number; status: string }>).find(
+                    (t) => t.id === activeTaskId,
+                  )?.status === "needs_review"
+                }
                 validationWarnings={(() => {
                   const recentReport = [...(messages ?? [])].reverse().find((m) => {
                     const p = m.plan as ChatPlanPayload | null | undefined;

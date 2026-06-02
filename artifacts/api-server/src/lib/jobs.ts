@@ -76,6 +76,7 @@ import {
   publishPreviewReady,
   publishPreviewSyncFailed,
 } from "./preview-events";
+import { EventTypes, type ProjectFilesChangedPayload } from "./event-types";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
 import { getCheckByName } from "./checks/registry";
@@ -88,6 +89,7 @@ import {
   type EasPlatform,
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
+import { staleDraftCandidate } from "./testing-invalidation";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
 import { sendBuildFailureEmail } from "./emailClient";
 import { getClerkUserById } from "./clerk-users";
@@ -736,6 +738,53 @@ async function emitEvent(
     }
   } catch (err) {
     logger.warn({ err, taskId, eventType }, "Failed to emit task event");
+  }
+}
+
+/**
+ * Publishes a PROJECT_FILES_CHANGED event directly to the in-process event bus.
+ * NOT persisted to taskEventsTable (bus-only). Allows the frontend WebContainer
+ * to sync written files without waiting for the next iframeKey flip.
+ */
+function emitFilesChangedEvent(
+  taskId: number,
+  projectId: number,
+  files: BuilderFile[],
+  removedPaths: string[],
+  operationType: ProjectFilesChangedPayload["operationType"],
+): void {
+  try {
+    const changedPaths = files.map((f) => f.path);
+    const filesMap: Record<string, string> = {};
+    for (const f of files) filesMap[f.path] = f.content;
+    const requiresInstall = changedPaths.some(
+      (p) =>
+        p === "package.json" ||
+        p === "package-lock.json" ||
+        p === "yarn.lock" ||
+        p === "pnpm-lock.yaml",
+    );
+    const requiresRestart = changedPaths.some((p) => /^vite\.config\.|^tsconfig\.|^\.env/.test(p));
+    const payload: ProjectFilesChangedPayload = {
+      projectId,
+      changedPaths,
+      files: filesMap,
+      removedPaths,
+      operationType,
+      requiresInstall,
+      requiresRestart,
+    };
+    publishTaskEvent({
+      id: 0,
+      taskId,
+      eventType: EventTypes.PROJECT_FILES_CHANGED,
+      message: `${files.length} file(s) updated`,
+      filePath: null,
+      createdAt: new Date(),
+      data: payload,
+    });
+  } catch (err) {
+    logger.warn({ err, taskId }, "emitFilesChangedEvent: failed (non-fatal)");
   }
 }
 
@@ -2924,6 +2973,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const { injectHealthEndpoint } = await import("./health-inject");
           const filesWithHealth = injectHealthEndpoint(result.files, project.stack ?? null);
           await writeFiles(projectId, filesWithHealth, true);
+          emitFilesChangedEvent(taskId, projectId, filesWithHealth, [], "build");
+          void staleDraftCandidate(projectId, "build").catch(() => {});
         }
         diffSummary = computeBuildDiff(result.files);
 
@@ -3703,6 +3754,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             await deleteFiles(projectId, result.removedPaths);
           }
         }
+        // Emit project_files_changed after both writeFiles and deleteFiles complete
+        // so removedPaths are accurate and the WebContainer FS doesn't drift.
+        if (
+          agentIdentity !== "task" &&
+          (result.changedFiles.length > 0 || result.removedPaths.length > 0)
+        ) {
+          emitFilesChangedEvent(
+            taskId,
+            projectId,
+            result.changedFiles,
+            result.removedPaths,
+            "refine",
+          );
+          void staleDraftCandidate(projectId, "refine").catch(() => {});
+        }
         if (agentIdentity === "task") {
           // Build the full merged file set so the staging snapshot is self-contained
           _refineChangedFiles = result.changedFiles;
@@ -3835,6 +3901,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           if (repairLoopResult) {
             if (repairLoopResult.changedFiles.length > 0) {
               await writeFiles(projectId, repairLoopResult.changedFiles, false);
+              emitFilesChangedEvent(taskId, projectId, repairLoopResult.changedFiles, [], "refine");
               repairChangedPaths.push(...repairLoopResult.changedFiles.map((f) => f.path));
               filesToSmellScan = repairLoopResult.changedFiles;
               for (const f of repairLoopResult.changedFiles) {
@@ -5523,6 +5590,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 });
                 if (fixResult && fixResult.changedFiles.length > 0) {
                   await writeFiles(projectId, fixResult.changedFiles, false);
+                  emitFilesChangedEvent(
+                    taskId,
+                    projectId,
+                    fixResult.changedFiles,
+                    fixResult.removedPaths,
+                    "refine",
+                  );
                   if (fixResult.removedPaths.length > 0) {
                     await deleteFiles(projectId, fixResult.removedPaths);
                   }
@@ -6578,6 +6652,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   // This guarantees test #10 and #11 in the preview-security test suite.
   void emitEvent(taskId, "narration", `Syncing ${builderFiles.length} file(s) to your project…`);
   await writeFiles(projectId, builderFiles, true);
+  emitFilesChangedEvent(taskId, projectId, builderFiles, [], "apply");
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
@@ -7360,6 +7435,7 @@ export async function runAppTestingJob(
     if (fixedFiles && fixedFiles.length > 0) {
       // Write the patched files to DB (partial update — replaceAll=false)
       await writeFiles(projectId, fixedFiles, false);
+      emitFilesChangedEvent(taskId, projectId, fixedFiles, [], "refine");
       autoFixed = true;
       logger.info(
         { projectId, taskId, patchedFiles: fixedFiles.map((f) => f.path) },
