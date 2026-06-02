@@ -294,7 +294,10 @@ router.patch(
             "manual-save",
           );
         } catch (err) {
-          logger.warn({ err, projectId }, "project_files_changed emit failed after manual save (non-fatal)");
+          logger.warn(
+            { err, projectId },
+            "project_files_changed emit failed after manual save (non-fatal)",
+          );
         }
         try {
           const { staleDraftCandidate } = await import("../lib/testing-invalidation");

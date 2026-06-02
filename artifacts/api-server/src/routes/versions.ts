@@ -342,7 +342,10 @@ router.post(
           "rollback",
         );
       } catch (err) {
-        req.log.warn({ err, projectId }, "project_files_changed emit failed after rollback (non-fatal)");
+        req.log.warn(
+          { err, projectId },
+          "project_files_changed emit failed after rollback (non-fatal)",
+        );
       }
     }
 

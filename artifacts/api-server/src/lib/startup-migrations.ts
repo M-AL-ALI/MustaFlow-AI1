@@ -3114,9 +3114,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-task-events-data",
     async run(client) {
       await client.query("BEGIN");
-      await client.query(
-        `ALTER TABLE task_events ADD COLUMN IF NOT EXISTS data JSONB`,
-      );
+      await client.query(`ALTER TABLE task_events ADD COLUMN IF NOT EXISTS data JSONB`);
       await client.query("COMMIT");
     },
   },

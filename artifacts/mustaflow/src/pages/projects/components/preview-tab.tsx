@@ -42,7 +42,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { STATUS_LABELS, type UseWebContainerResult, type BackendFilesPayload } from "@/hooks/use-web-container";
+import {
+  STATUS_LABELS,
+  type UseWebContainerResult,
+  type BackendFilesPayload,
+} from "@/hooks/use-web-container";
 import { cn } from "@/lib/utils";
 import {
   useListProjectFiles,
@@ -275,7 +279,7 @@ export function PreviewTab({
     void wcSyncRef.current(filesPayload).catch(() => {
       // Non-fatal — worst case the user sees stale content until next full reload
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filesPayloadSeq]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);

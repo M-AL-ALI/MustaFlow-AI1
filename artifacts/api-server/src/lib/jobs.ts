@@ -71,7 +71,11 @@ import {
 } from "../routes/credits";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
-import { publishProjectFilesChanged, publishPreviewReady, publishPreviewSyncFailed } from "./preview-events";
+import {
+  publishProjectFilesChanged,
+  publishPreviewReady,
+  publishPreviewSyncFailed,
+} from "./preview-events";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
 import { getCheckByName } from "./checks/registry";
@@ -4632,7 +4636,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             filesPayload as unknown as Record<string, unknown>,
           );
         } catch (previewEmitErr) {
-          logger.warn({ err: previewEmitErr, projectId, taskId }, "project_files_changed emit failed (non-fatal)");
+          logger.warn(
+            { err: previewEmitErr, projectId, taskId },
+            "project_files_changed emit failed (non-fatal)",
+          );
         }
       }
       // ── End project_files_changed emit ───────────────────────────────────────
@@ -4656,7 +4663,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             ...(report.warnings ?? []),
             `Preview refresh requested but app server is not yet reachable (${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}). Files were saved — the preview will load once your server starts.`,
           ];
-          publishPreviewSyncFailed(projectId, `Server not reachable: ${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}`);
+          publishPreviewSyncFailed(
+            projectId,
+            `Server not reachable: ${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}`,
+          );
         } else {
           report.previewUpdated = true;
           publishPreviewReady(projectId);
