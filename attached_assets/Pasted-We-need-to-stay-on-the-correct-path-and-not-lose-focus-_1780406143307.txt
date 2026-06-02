@@ -1,0 +1,224 @@
+We need to stay on the correct path and not lose focus.
+
+There are TWO connected priorities now:
+
+1. Finish the path we were already on:
+    Prove normal AI Builder works for my real account, not Developer Mode, not synthetic test users, not transferred internal projects.
+2. Fix Agent Zero behavior:
+    Zero is still repeating the same failed actions/tools instead of changing strategy, and the “Steer the build” input is not working.
+
+Both must be handled together because the goal is one product experience:
+
+Normal AI Builder + Agent Zero = the main MustaFlow Agentic Builder.
+
+Do not work on Developer Mode.
+Do not use Developer Mode as the test surface.
+Do not use synthetic-user project 82 as the final proof.
+Do not transfer project 82 and call that final proof.
+
+==================================================
+PART 1 — CONTINUE THE REAL AI BUILDER PROOF PATH
+
+The path we were already on is:
+
+Build a fresh fullstack/node-api agentic project under my real Clerk account and verify it from normal AI Builder.
+
+My real Clerk user ID is:
+
+user_3Dv2h4CdaJoviog3ToUryvt3kft
+
+Use this prompt:
+
+“Build the Towco tow-truck request app with counter-offer flow, operator quotes, live status tracking, home page, request form, customer/operator dashboard, backend API, and test database records.”
+
+Hard requirements:
+
+* Project must be owned by my real user ID.
+* Project must appear in my normal Projects list.
+* Project must open at /projects/[newId].
+* It must use project_mode = builder.
+* It must use builder_mode = agentic.
+* It must use normal AI Builder, not /dev.
+* Developer Mode must not be used as the test surface.
+* Do not run longer than 25 minutes.
+* Do not patch new backend code during the test unless I approve.
+* If it fails, stop and report the exact blocker.
+
+Verify:
+
+1. Project is owned by my real user ID.
+2. Project appears in my normal Projects list.
+3. Project opens in normal AI Builder at /projects/[newId].
+4. No Developer Mode route is used.
+5. Container/runtime provisions automatically if backend/database are needed.
+6. Zero writes real files.
+7. Frontend files are generated.
+8. Backend/API files are generated.
+9. Database/schema/test-data path is generated or clearly reports what is missing.
+10. file_diff events appear.
+11. check_result events appear.
+12. Preview refresh is triggered.
+13. Preview readiness is honest: preview_ready only after HTTP 200.
+14. If preview is unreachable, show preview_unreachable_503 or a clear blocker.
+15. Final status is honest: passed, passed_with_warnings, completed_with_errors, failed, or blocked.
+16. Publish gate uses validation_status correctly.
+17. Autostop is restored.
+18. Queue is clean.
+19. Give me the exact project ID, visible project name, owner_id, project_mode, builder_mode, task ID, and final validation status.
+
+==================================================
+PART 2 — FIX AGENT ZERO STRATEGY / REPEATED FAILURE
+
+From my live UI test, Zero still keeps repeating the same failing pattern.
+
+The screenshots show:
+
+* Zero writes package.json, src/types.ts, mockData.ts, Header.tsx, StatusBadge.tsx, StarRating.tsx, etc.
+* After each write, the same check fails:
+    “Expo project structure”
+    “Checks: 0/1 passed”
+* Zero keeps writing more feature files instead of stopping and fixing the foundation.
+* Preview does not update because the app foundation is still broken.
+* “Steer the build” does not send or does not affect the active task.
+
+This is not acceptable agentic behavior.
+
+Agent Zero should not keep spending time and credits doing the same failing thing.
+
+Required fix:
+
+1. Add failure classification
+    Every failed check should be classified:
+
+* Expo project structure failure
+* React/Vite structure failure
+* package/dependency failure
+* TypeScript failure
+* server-start failure
+* preview unreachable
+* file-sync failure
+* missing env/secrets
+* runtime/container failure
+
+In the screenshots, the failure is:
+Expo project structure failure.
+
+2. Stop feature work when foundation is broken
+    If “Expo project structure” fails, Zero should stop writing feature components and first fix the Expo foundation.
+
+It should inspect and fix:
+
+* package.json
+* app.json or app.config.ts
+* App.tsx / entry file
+* Expo dependencies
+* tsconfig
+* babel config if needed
+* required folder structure
+* whether this project should actually be Expo, React/Vite, or web instead
+
+3. Strategy switch after repeated same-check failure
+    If the same check fails twice, Zero must change strategy.
+
+Example behavior:
+First failure:
+“Expo project structure failed. I will inspect the expected Expo foundation.”
+
+Second failure:
+“The same Expo structure check failed again. I will stop feature work and rebuild the project foundation.”
+
+Third failure:
+“Blocked: Expo structure cannot be repaired automatically. User review needed.”
+
+Do not keep going endlessly.
+
+4. Add project-type playbooks
+    Agent Zero needs reusable build/fix playbooks.
+
+At minimum:
+
+* Expo app foundation recipe
+* React/Vite web app recipe
+* Node API recipe
+* Full-stack React + Express + DB recipe
+
+For Expo, Zero must know the minimum valid structure before generating features.
+
+5. Make failed checks actionable
+    The UI should not only say:
+    “Expo project structure failed.”
+
+It should show:
+
+* what is missing
+* what the check expected
+* what Zero will do next
+* whether Zero changed strategy
+
+Example:
+“Expo project structure failed because app.json is missing.”
+or
+“Expo project structure failed because package.json does not include expo.”
+
+6. Fix “Steer the build”
+    The “Steer the build” input is not working. I typed into it and it could not send or steer the active build.
+
+Required:
+
+* Enter key sends steering message.
+* Send icon works.
+* Steering message appears in the timeline/chat.
+* Agent receives the steering instruction during the active run.
+* Agent changes behavior when appropriate.
+* If the task cannot accept steering, the UI must say why.
+
+Example steering:
+“Stop writing more components and fix the Expo project structure first.”
+
+Zero should receive that and act on it.
+
+7. Credit/time protection
+    Add safeguards:
+
+* After 2 repeated same-check failures: strategy change required.
+* After 3 repeated same-check failures: stop or ask user.
+* Do not keep running forever.
+* Do not keep writing unrelated files when the same foundation check fails.
+* Final status must be honest: blocked, completed_with_errors, passed_with_warnings, failed, or passed.
+
+8. Use memory and prior failure context
+    Zero should remember within the task:
+
+* which check failed repeatedly
+* which files were changed
+* whether errors improved, changed, or stayed the same
+* which strategy already failed
+
+Then it must avoid repeating the same approach.
+
+==================================================
+REQUIRED COMBINED VERIFICATION
+
+Run the fresh real-account AI Builder test from Part 1 and also verify the Agent Zero behavior from Part 2.
+
+During the test, if Expo project structure or any foundation check fails:
+
+Expected behavior:
+
+* Zero stops writing unrelated feature files.
+* Zero diagnoses the foundation.
+* Zero changes strategy after repeated failure.
+* Steering input works if I tell it what to do.
+* Preview updates only after the app foundation is valid.
+* Final status is honest.
+
+Do not call the project successful if the agent only wrote files but never produced a valid runnable app.
+
+Do not call Phase 2F complete until:
+
+* the project belongs to my real account
+* normal AI Builder is used
+* Zero does not repeat the same failed approach endlessly
+* steer build works
+* preview status is honest
+* final report is honest

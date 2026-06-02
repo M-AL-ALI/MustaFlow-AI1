@@ -1569,12 +1569,14 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
   const [hint, setHint] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [sendError, setSendError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSend = useCallback(async () => {
     const trimmed = hint.trim();
     if (!trimmed || sending) return;
     setSending(true);
+    setSendError("");
     try {
       const resp = await fetch(`/api/projects/${projectId}/tasks/${taskId}/steer`, {
         method: "POST",
@@ -1585,9 +1587,20 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
         setHint("");
         setSent(true);
         setTimeout(() => setSent(false), 3000);
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        const msg =
+          typeof data?.error === "string"
+            ? data.error
+            : resp.status === 409
+              ? "Build not accepting hints right now"
+              : "Could not send — try again";
+        setSendError(msg);
+        setTimeout(() => setSendError(""), 5000);
       }
     } catch {
-      // ignore — non-fatal
+      setSendError("Network error — hint not sent");
+      setTimeout(() => setSendError(""), 5000);
     } finally {
       setSending(false);
     }
@@ -1634,6 +1647,11 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
           <span className="text-[10px] text-green-400">
             Hint queued — the agent will apply it on the next step.
           </span>
+        </div>
+      )}
+      {sendError && (
+        <div className="px-2 pb-1.5">
+          <span className="text-[10px] text-red-400">{sendError}</span>
         </div>
       )}
     </div>
@@ -2304,8 +2322,8 @@ export function AgentThinkingBubble({
 
             {isIdle && !isTerminal && !isQueued && <ThinkingIdleIndicator />}
 
-            {/* Mid-run steering input — visible while the build is in progress */}
-            {!isTerminal && !isQueued && loopStep && (
+            {/* Mid-run steering input — visible as soon as the build starts */}
+            {!isTerminal && !isQueued && (
               <SteeringInput projectId={projectId} taskId={taskId} />
             )}
 

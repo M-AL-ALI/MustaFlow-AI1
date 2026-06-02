@@ -252,6 +252,86 @@ const WALL_CLOCK_MS = Math.max(
 );
 const REPEATED_ERROR_CAP = 3;
 const MAX_OBSERVATION_CHARS = PER_CALL_STDOUT_CAP;
+
+/**
+ * Check-specific remediation guidance injected when a foundation or repeated
+ * check fails. Foundation checks (isFoundation=true) trigger guidance on the
+ * FIRST failure so Zero stops writing feature files immediately.
+ * Non-foundation checks trigger guidance only on the second consecutive failure.
+ */
+const CHECK_STRATEGY_HINTS: Record<
+  string,
+  { label: string; isFoundation: boolean; hint: string }
+> = {
+  "mobile-structure": {
+    label: "Expo project structure",
+    isFoundation: true,
+    hint: [
+      "STOP writing component or feature files immediately. The Expo project foundation is broken.",
+      "You MUST fix these in order before anything else:",
+      "  1. package.json — ensure \"expo\" is listed in dependencies (e.g. \"expo\": \"~51.0.0\")",
+      "  2. app.json (or app.config.ts) — must exist with at least: { \"expo\": { \"name\": \"...\", \"slug\": \"...\" } }",
+      "  3. App.tsx — must be the root entry file and export a valid default React component",
+      "  4. babel.config.js — must export: module.exports = { presets: ['babel-preset-expo'] }",
+      "  5. tsconfig.json — must extend 'expo/tsconfig.base'",
+      "Use read_file to inspect each of these files now. Only write feature code AFTER this check passes.",
+    ].join("\n"),
+  },
+  "server-start": {
+    label: "Server start",
+    isFoundation: true,
+    hint: [
+      "STOP adding routes or feature code. The server cannot start.",
+      "Fix the server entry point first:",
+      "  1. src/index.ts (or server.ts) must exist and call app.listen(Number(process.env.PORT) || 3000)",
+      "  2. Check package.json has a 'start' or 'dev' script that points to your entry file",
+      "  3. Use read_file on the entry file — look for missing imports, undefined variables, or syntax errors",
+      "  4. The server must respond HTTP 200 to GET /healthz before calling finalize",
+      "Only add routes after the server starts cleanly.",
+    ].join("\n"),
+  },
+  "node-syntax": {
+    label: "Node.js syntax",
+    isFoundation: true,
+    hint: [
+      "Node.js syntax check failed — there are parse errors in your server files.",
+      "Use read_file on each recently changed file and fix all syntax errors before writing more code.",
+    ].join("\n"),
+  },
+  "html-syntax": {
+    label: "HTML / JS syntax",
+    isFoundation: true,
+    hint: [
+      "HTML/JS syntax check failed. Fix syntax errors in your HTML/JS files before adding content.",
+      "Ensure index.html has a valid doctype, head, and body.",
+    ].join("\n"),
+  },
+  "typecheck": {
+    label: "TypeScript",
+    isFoundation: false,
+    hint: [
+      "TypeScript check failed. Fix all type errors before adding new features.",
+      "Use read_file on each failing file to inspect current types and imports.",
+      "For complex type mismatches, add an explicit cast (as Type) as a temporary fix to unblock progress.",
+    ].join("\n"),
+  },
+  "build": {
+    label: "Vite/build",
+    isFoundation: false,
+    hint: [
+      "Build failed. Fix all compilation errors before adding new features.",
+      "Check for: missing imports, circular dependencies, invalid JSX, or type errors in entry files.",
+    ].join("\n"),
+  },
+  "py-compile": {
+    label: "Python compile",
+    isFoundation: true,
+    hint: [
+      "Python syntax check failed. Fix syntax errors in your Python files before continuing.",
+      "Use read_file on each recently changed .py file to find the error.",
+    ].join("\n"),
+  },
+};
 const MAX_FILE_BYTES = 64_000;
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
@@ -1730,6 +1810,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // turns ended with checks still failing after writing/patching the same path.
   // Used for strategy-change steering when the agent is stuck on a single file.
   const pathConsecutiveCheckFails = new Map<string, number>();
+  // Per-check-id consecutive failure counts. Complements pathConsecutiveCheckFails
+  // for checks that span the whole project (e.g. "mobile-structure") where Zero
+  // writes different files each turn — no single path ever hits the threshold.
+  const checkConsecutiveFails = new Map<string, number>();
   let terminationReason: AgentLoopReport["terminationReason"] = "model-stopped";
   let finalSummary = "";
   let finalWarnings: string[] = [];
@@ -2745,6 +2829,36 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             `  E) if TypeScript types are the blocker, widen the type or add an explicit cast as a temporary fix\n` +
             `Pick a DIFFERENT strategy from what you just tried.`;
         }
+
+        // Per-check-id consecutive failure tracking. Catches the pattern where
+        // the same check (e.g. "Expo project structure") keeps failing even when
+        // the agent writes *different* files each turn — the per-path mechanism
+        // never fires because no single path hits the threshold. Here we inject
+        // check-specific, actionable guidance so Zero knows exactly what to fix.
+        for (const c of turnFailed) {
+          checkConsecutiveFails.set(c.id, (checkConsecutiveFails.get(c.id) ?? 0) + 1);
+        }
+        let checkStrategyHints = "";
+        for (const c of turnFailed) {
+          const failCount = checkConsecutiveFails.get(c.id) ?? 1;
+          const spec = CHECK_STRATEGY_HINTS[c.id];
+          if (!spec) continue;
+          if (spec.isFoundation) {
+            // Foundation checks: inject targeted stop-feature-work guidance on
+            // every failure turn — each turn Zero has a chance to read+fix it.
+            checkStrategyHints +=
+              failCount === 1
+                ? `\n\n[FOUNDATION CHECK FAILED: ${spec.label}]\n${spec.hint}`
+                : `\n\n[FOUNDATION CHECK STILL FAILING (turn ${failCount}): ${spec.label}]\n${spec.hint}\nYou MUST change strategy — do NOT continue writing feature files.`;
+          } else if (failCount >= 2) {
+            // Non-foundation checks: escalate only after second consecutive fail.
+            checkStrategyHints +=
+              failCount <= 3
+                ? `\n\n[REPEATED FAILURE (turn ${failCount}): ${spec.label}]\n${spec.hint}`
+                : `\n\n[CRITICAL — "${spec.label}" has failed ${failCount} consecutive turns. If you cannot fix this in 2 more turns, call finalize and explain the exact blocker.]`;
+          }
+        }
+
         const summary =
           `[auto-check] required checks failing after your edits:\n` +
           turnFailed
@@ -2753,12 +2867,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               return `- ${c.id}: ${(r?.message ?? "failed").slice(0, 200)}`;
             })
             .join("\n") +
-          `\nFix and continue, then call finalize.${strategyHint}`;
+          `\nFix and continue, then call finalize.${strategyHint}${checkStrategyHints}`;
         messages.push({ role: "system", content: summary.slice(0, MAX_OBSERVATION_CHARS) });
       } else {
-        // Checks passed — reset per-path failure counts for paths fixed this turn.
+        // Checks passed — reset per-path AND per-check-id failure counts.
         for (const p of mutatedPathsThisTurn) {
           pathConsecutiveCheckFails.delete(p);
+        }
+        for (const c of profile.checks) {
+          checkConsecutiveFails.delete(c.id);
         }
         messages.push({
           role: "system",

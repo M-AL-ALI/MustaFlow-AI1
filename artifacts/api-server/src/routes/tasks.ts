@@ -498,8 +498,14 @@ router.post(
       res.status(404).json({ error: "Task not found" });
       return;
     }
-    if (task.status !== "running") {
-      res.status(409).json({ error: "Task is not currently running" });
+    const isActive = ["building", "planning", "queued", "pending"].includes(task.status);
+    if (!isActive) {
+      res.status(409).json({
+        error:
+          task.status === "completed" || task.status === "failed" || task.status === "canceled"
+            ? "Build has already finished — hints cannot be added to a completed task"
+            : "Task is not currently active",
+      });
       return;
     }
 
