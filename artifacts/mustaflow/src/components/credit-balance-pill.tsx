@@ -46,25 +46,24 @@ export function CreditBalancePill() {
   const isLow = balance > 0 && balance <= 20;
 
   return (
-    <Link href="/billing">
-      <a
-        className={cn(
-          "flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
-          isZero
-            ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15"
-            : isLow
-              ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/15"
-              : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-        )}
-        title="Credit balance — click to manage"
-      >
-        {isZero || isLow ? (
-          <AlertTriangle style={{ width: 11, height: 11 }} className="shrink-0" />
-        ) : (
-          <Zap style={{ width: 11, height: 11 }} className="shrink-0" />
-        )}
-        {balance.toLocaleString()}
-      </a>
+    <Link
+      href="/billing"
+      className={cn(
+        "flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+        isZero
+          ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15"
+          : isLow
+            ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/15"
+            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+      title="Credit balance — click to manage"
+    >
+      {isZero || isLow ? (
+        <AlertTriangle style={{ width: 11, height: 11 }} className="shrink-0" />
+      ) : (
+        <Zap style={{ width: 11, height: 11 }} className="shrink-0" />
+      )}
+      {balance.toLocaleString()}
     </Link>
   );
 }

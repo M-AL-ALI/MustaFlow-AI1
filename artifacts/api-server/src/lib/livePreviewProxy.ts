@@ -20,6 +20,7 @@
 import type { Request, Response, NextFunction } from "express";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { and, eq } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
@@ -27,6 +28,35 @@ import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspac
 import { provisionContainer } from "./container";
 import { getContainerSecretMap } from "./container-secrets";
 import { logger } from "./logger";
+
+/**
+ * The Fly proxy app hostname derived from the same env var used in container.ts.
+ * Kept in sync: container.ts line 36 uses `process.env.FLY_APP_NAME ?? "mustaflow-containers"`.
+ */
+const FLY_PROXY_APP_NAME = process.env.FLY_APP_NAME ?? "mustaflow-containers";
+const FLY_PROXY_HOSTNAME = `${FLY_PROXY_APP_NAME}.fly.dev`;
+
+/**
+ * Eager DNS reachability probe — created once at module load time and shared
+ * by all requests. Resolves to `true` if the Fly proxy hostname is reachable
+ * from this environment, `false` otherwise (ENOTFOUND, ESERVFAIL, etc.).
+ * Never rejects.
+ */
+const flyProxyReachable: Promise<boolean> = dnsLookup(FLY_PROXY_HOSTNAME)
+  .then(() => {
+    logger.info(
+      { hostname: FLY_PROXY_HOSTNAME },
+      "Fly proxy hostname resolved — agentic preview proxy enabled",
+    );
+    return true;
+  })
+  .catch((err: unknown) => {
+    logger.info(
+      { hostname: FLY_PROXY_HOSTNAME, code: (err as NodeJS.ErrnoException).code },
+      "Fly proxy hostname not reachable — agentic preview proxy disabled in this environment",
+    );
+    return false;
+  });
 
 // Accepts both the full path (`/api/projects/:id/preview/...`, as seen by the
 // top-level WebSocket upgrade handler) and the router-relative path
@@ -133,6 +163,24 @@ const ERROR_HTML = (projectId: number, reason: string): string => `<!doctype htm
   <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
 </div></body></html>`;
 
+const PROXY_UNAVAILABLE_HTML = (projectId: number): string => `<!doctype html>
+<html><head><meta charset="utf-8"><title>Container preview unavailable</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0f1c;color:#e5e7eb;font-family:system-ui,-apple-system,sans-serif}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;text-align:center;padding:24px}
+  h1{font-weight:600;font-size:18px;margin:0;color:#f3f4f6}
+  p{margin:0;color:#9ca3af;font-size:14px;max-width:460px;line-height:1.5}
+  code{font-family:ui-monospace,monospace;font-size:12px;background:#1f2937;padding:1px 5px;border-radius:4px}
+  a{color:#60a5fa;text-decoration:none}
+  a:hover{text-decoration:underline}
+</style></head>
+<body><div class="wrap">
+  <h1>Container preview unavailable</h1>
+  <p>Container preview is not available in this environment. The Fly.io proxy (<code>${FLY_PROXY_HOSTNAME}</code>) could not be reached from here.</p>
+  <p>Deploy to production to test agentic app previews.</p>
+  <p><a href="/projects/${projectId}?tab=logs" target="_top">View container logs →</a></p>
+</div></body></html>`;
+
 /**
  * Per-project set of in-flight wake attempts. Prevents multiple concurrent
  * provisionContainer calls (one per 2-second browser refresh of the 503 page)
@@ -231,13 +279,16 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
         !maybeRes.headersSent
       ) {
         try {
+          const isEnvError = (err as NodeJS.ErrnoException).code === "ENOTFOUND";
           sendHtml(
             maybeRes as Response,
             502,
-            ERROR_HTML(
-              projectId,
-              "Couldn't reach the dev server inside the container. It may still be starting or have crashed — check the logs and retry.",
-            ),
+            isEnvError
+              ? PROXY_UNAVAILABLE_HTML(projectId)
+              : ERROR_HTML(
+                  projectId,
+                  "Couldn't reach the dev server inside the container. It may still be starting or have crashed — check the logs and retry.",
+                ),
           );
         } catch {
           /* swallow */
@@ -288,6 +339,17 @@ export async function handleLivePreviewHttp(
       wakeContainer(project.id);
     }
     sendHtml(res, 503, COLD_START_HTML(project.id));
+    return;
+  }
+
+  // Guard: if the Fly proxy hostname isn't reachable in this environment
+  // (e.g. Replit dev environment where mustaflow-containers.fly.dev doesn't
+  // resolve), return a clear 502 with an environment-specific explanation
+  // instead of crashing with ENOTFOUND. Status 502 (not 503) is intentional —
+  // 503 would trigger the COLD_START_HTML auto-refresh meta tag.
+  const reachable = await flyProxyReachable;
+  if (!reachable) {
+    sendHtml(res, 502, PROXY_UNAVAILABLE_HTML(project.id));
     return;
   }
 
