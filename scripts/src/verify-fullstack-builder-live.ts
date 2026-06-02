@@ -85,7 +85,9 @@ async function main() {
   console.log(
     `  kind=${proj.kind}  stack=${proj.stack}  builder_mode=${proj.builder_mode}  project_mode=${proj.project_mode}`,
   );
-  console.log(`  provisioning_status=${proj.provisioning_status}  container_id=${proj.container_id ?? "none"}`);
+  console.log(
+    `  provisioning_status=${proj.provisioning_status}  container_id=${proj.container_id ?? "none"}`,
+  );
   console.log(`  container_url=${proj.container_url ?? "none"}`);
 
   results["c01_provisioning_ready"] = {
@@ -186,10 +188,10 @@ async function main() {
     await sleep(POLL_MS);
     elapsed += POLL_MS;
 
-    const { rows: statusRows } = await pool.query<{ status: string; failure_reason: string | null }>(
-      `SELECT status, failure_reason FROM agent_tasks WHERE id=$1`,
-      [taskId],
-    );
+    const { rows: statusRows } = await pool.query<{
+      status: string;
+      failure_reason: string | null;
+    }>(`SELECT status, failure_reason FROM agent_tasks WHERE id=$1`, [taskId]);
     const { rows: evtRows } = await pool.query<{ n: string }>(
       `SELECT count(*) as n FROM task_events WHERE task_id=$1`,
       [taskId],
@@ -198,7 +200,9 @@ async function main() {
     failureReason = statusRows[0]?.failure_reason ?? "";
     const evtCount = Number(evtRows[0]?.n ?? 0);
     const secs = Math.round(elapsed / 1000);
-    process.stdout.write(`  [${secs}s] status=${finalStatus} failure_reason=${failureReason || "—"} events=${evtCount}\n`);
+    process.stdout.write(
+      `  [${secs}s] status=${finalStatus} failure_reason=${failureReason || "—"} events=${evtCount}\n`,
+    );
 
     if (["completed", "failed", "cancelled"].includes(finalStatus)) {
       // Wait an extra 15 s for any in-flight final DB writes to land
@@ -213,10 +217,7 @@ async function main() {
         const { rows: finalRows } = await pool.query<{
           status: string;
           failure_reason: string | null;
-        }>(
-          `SELECT status, failure_reason FROM agent_tasks WHERE id=$1`,
-          [taskId],
-        );
+        }>(`SELECT status, failure_reason FROM agent_tasks WHERE id=$1`, [taskId]);
         finalStatus = finalRows[0]?.status ?? finalStatus;
         failureReason = finalRows[0]?.failure_reason ?? failureReason;
         console.log(`  Status after extra wait: ${finalStatus} (${failureReason || "—"})`);
@@ -228,7 +229,9 @@ async function main() {
   }
 
   const elapsedSecs = Math.round((Date.now() - start) / 1000);
-  console.log(`\nPolling done in ${elapsedSecs}s — final status: ${finalStatus} (${failureReason || "—"})`);
+  console.log(
+    `\nPolling done in ${elapsedSecs}s — final status: ${finalStatus} (${failureReason || "—"})`,
+  );
 
   // ── Step 5: Read all events ───────────────────────────────────────────────
   const { rows: eventRows } = await pool.query<{ event_type: string; message: string }>(
@@ -271,7 +274,9 @@ async function main() {
   );
   const fileDiffEvents = eventRows.filter((e) => e.event_type === "file_diff");
   console.log(`\n  Files: ${baseFileCount} → ${afterFileCount} (+${newFileCount})`);
-  console.log(`  Container-related narrations: ${syncNarrations.length}  file_diff events: ${fileDiffEvents.length}`);
+  console.log(
+    `  Container-related narrations: ${syncNarrations.length}  file_diff events: ${fileDiffEvents.length}`,
+  );
   results["c03_files_written_and_synced"] = {
     pass: afterFileCount > baseFileCount && fileDiffEvents.length > 0,
     note:
@@ -292,7 +297,12 @@ async function main() {
   );
   const fileDiffBackend = fileDiffEvents.filter((e) => {
     const msg = (e.message ?? "").toLowerCase();
-    return msg.includes("server") || msg.includes("route") || msg.includes("api") || msg.includes("index");
+    return (
+      msg.includes("server") ||
+      msg.includes("route") ||
+      msg.includes("api") ||
+      msg.includes("index")
+    );
   });
   console.log(`  Backend paths: ${backendPaths.slice(0, 8).join(", ")}`);
   results["c04_backend_api_files"] = {
@@ -416,7 +426,9 @@ async function main() {
       const rootRes = await fetch(proj.container_url, { signal: AbortSignal.timeout(10_000) });
       const html = await rootRes.text();
       htmlHasInteractiveElements =
-        /<(button|input|form|select|a\s|textarea)/i.test(html) || html.includes("react") || html.includes("#root");
+        /<(button|input|form|select|a\s|textarea)/i.test(html) ||
+        html.includes("react") ||
+        html.includes("#root");
       htmlNote = htmlHasInteractiveElements
         ? "HTML contains interactive elements or React root"
         : `No interactive elements (snippet: ${html.slice(0, 120).replace(/\n/g, " ")})`;
@@ -467,10 +479,7 @@ async function main() {
   const activeJobs = Number(queueRows[0]?.n ?? 0);
   results["c14_queue_clean"] = {
     pass: activeJobs === 0,
-    note:
-      activeJobs === 0
-        ? "No active jobs in queue"
-        : `${activeJobs} active job(s) still queued`,
+    note: activeJobs === 0 ? "No active jobs in queue" : `${activeJobs} active job(s) still queued`,
   };
 
   // ── Criterion 15: Pipeline ran fully ─────────────────────────────────────
@@ -481,7 +490,8 @@ async function main() {
   const eventCount = eventRows.length;
   const versionCaptured = !!latestVersion;
   const trueStuck = failureReason === "stuck-run-timeout";
-  const failedWithEvidence = finalStatus === "failed" && !trueStuck && eventCount > 20 && versionCaptured;
+  const failedWithEvidence =
+    finalStatus === "failed" && !trueStuck && eventCount > 20 && versionCaptured;
   results["c15_pipeline_ran_fully"] = {
     pass: finalStatus === "completed" || failedWithEvidence,
     note:
@@ -529,9 +539,7 @@ async function main() {
     totalCount++;
   }
   console.log(`\n${"─".repeat(64)}`);
-  console.log(
-    `Full-Stack AI Builder Live: ${passCount}/${totalCount} PASS  (${totalElapsed}s)`,
-  );
+  console.log(`Full-Stack AI Builder Live: ${passCount}/${totalCount} PASS  (${totalElapsed}s)`);
   const allPass = passCount >= totalCount - 2; // allow up to 2 infra-only failures (c10/c11 from script env)
   console.log(
     `STATUS: ${passCount === totalCount ? "PERFECT" : allPass ? "PASS (minor env-only failures)" : "ISSUES FOUND — see FAIL rows"}`,
