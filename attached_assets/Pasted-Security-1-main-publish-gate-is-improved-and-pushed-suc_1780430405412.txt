@@ -1,0 +1,90 @@
+Security-1 main publish gate is improved and pushed successfully. Do not close the task yet. Audit found three remaining issues.
+
+1. Close the staging promotion bypass
+
+Problem:
+`POST /api/projects/:id/promote` currently copies:
+
+`stagingPublishedSnapshotId -> publishedSnapshotId`
+
+without enforcing:
+- `testedSnapshotId`
+- `testingStatus === "passed"`
+- `testingApprovedAt`
+- equality between the promoted staging snapshot and the approved tested snapshot
+
+Because staging may be created from mutable `project_files`, a user can publish an untested draft to staging and promote it directly into production.
+
+Fix:
+- Require the staging snapshot version to have `testingApprovedAt`.
+- Require `project.testingStatus === "passed"`.
+- Require `project.testedSnapshotId === project.stagingPublishedSnapshotId`.
+- Reuse `evaluatePublishGate()` or a shared promotion gate.
+- Block promotion with 422 if any condition fails.
+- Do not query mutable `project_files` as a production-readiness source.
+
+Tests:
+- Untested staging snapshot cannot promote.
+- Stale testing status cannot promote.
+- Staging snapshot different from testedSnapshotId cannot promote.
+- Approved matching staging snapshot promotes successfully.
+- Late draft edits cannot enter production through staging promotion.
+
+2. Close the manual container-publish bypass
+
+Problem:
+`POST /api/projects/:id/container/publish` still manually deploys a production container:
+- without Testing Passed approval;
+- from live draft files;
+- while decrypting all project secrets without strict `environment = "production"` filtering;
+- then updates `prodContainerUrl`, which public traffic may proxy to.
+
+Fix:
+Preferred:
+- Retire this route with `410 Gone`, like `/deploy`.
+
+If an operations-only route is required:
+- restrict it to explicit admin authorization;
+- require `testedSnapshotId`;
+- require `testingStatus === "passed"`;
+- load files only from `projectVersions[testedSnapshotId].filesSnapshot`;
+- load only secrets where `environment === "production"`;
+- perform blue/green health check before switching `prodContainer*` pointers;
+- never read mutable `project_files`.
+
+Tests:
+- Normal project owner cannot manually bypass publish gate.
+- No Testing Passed -> 422 or 410.
+- Development/testing secrets never reach production.
+- Manual ops deployment cannot deploy late draft edits.
+
+3. Fix preview-subdomain WebSocket proxy handshake
+
+Problem:
+The new WebSocket proxy in `index.ts` is wired, but it appears incorrect:
+- it rewrites `https:` to `ws:` and uses `http.request`, which may break TLS for secure Fly URLs;
+- after upstream upgrade, it manually writes a bare `101 Switching Protocols` response;
+- it does not forward upstream handshake headers such as `Sec-WebSocket-Accept`, protocol or extensions.
+
+A browser WebSocket client may reject that handshake.
+
+Fix:
+- Use a proven WebSocket proxy library or forward the upstream raw upgrade response correctly.
+- Preserve secure `wss:` handling with TLS when the container URL is HTTPS.
+- Forward required upstream handshake headers.
+- Keep the existing preview-session validation before proxying.
+
+Required integration tests:
+- Open an actual browser WebSocket through:
+  `{sessionId}.preview.{PLATFORM_DOMAIN}`
+- Confirm the browser reaches `OPEN`.
+- Send a message and receive an echo from the test container.
+- Confirm HTTPS preview origins use secure `wss:`.
+- Confirm missing, expired and revoked preview cookies fail.
+- Confirm raw production/public hosts cannot access preview WebSockets.
+
+Then:
+- run format, lint, typecheck and quality-gate;
+- commit and push to `M-AL-ALI/MustaFlow-AI1/main`;
+- provide the pushed GitHub SHA;
+- provide the exact regression and browser integration test results.

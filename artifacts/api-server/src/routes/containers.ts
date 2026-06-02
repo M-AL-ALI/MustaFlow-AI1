@@ -11,13 +11,7 @@
 
 import { Router, type IRouter } from "express";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import {
-  db,
-  projectsTable,
-  projectFilesTable,
-  containerLogsTable,
-  secretsTable,
-} from "@workspace/db";
+import { db, projectsTable, projectFilesTable, containerLogsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   provisionContainer,
@@ -25,12 +19,10 @@ import {
   getContainerStatus,
   execInContainer,
   destroyContainer,
-  deployProductionContainer,
 } from "../lib/container";
 import { ensureContainerLogTailer, recordContainerLog } from "../lib/container-logs";
 import { subscribeContainerLogs, type ContainerLogPayload } from "../lib/event-bus";
 import { getContainerSecretMap } from "../lib/container-secrets";
-import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -373,82 +365,21 @@ router.post(
   },
 );
 
-// ── POST /api/projects/:id/container/publish ─────────────────────────────────
-// Deploy a production container replica for this project.
-// This is called automatically by the publish route when a dev container exists.
-// It can also be called manually to (re-)deploy the production container without
-// going through the full publish flow (useful for ops / debugging).
-router.post(
-  "/projects/:id/container/publish",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const project = await loadProject(projectId);
-    if (!project) {
-      res.status(404).json({ error: "Project not found" });
-      return;
-    }
-
-    if (!project.containerId) {
-      res.status(409).json({ error: "Project does not have a dev container. Start one first." });
-      return;
-    }
-
-    req.log.info({ projectId }, "Deploying production container");
-
-    const files = await loadProjectFiles(projectId);
-
-    // Load secrets for env injection
-    const secretRows = await db
-      .select({ name: secretsTable.name, valueEncrypted: secretsTable.valueEncrypted })
-      .from(secretsTable)
-      .where(eq(secretsTable.projectId, projectId));
-
-    const envVars: Record<string, string> = {
-      PROJECT_ID: String(projectId),
-      NODE_ENV: "production",
-      PORT: "3000",
-    };
-    for (const s of secretRows) {
-      try {
-        envVars[s.name] = encryptionService.decrypt(s.valueEncrypted);
-      } catch {
-        // skip malformed secrets
-      }
-    }
-
-    const result = await deployProductionContainer(
-      projectId,
-      project.prodContainerId ?? null,
-      files,
-      envVars,
-    );
-
-    if (!result) {
-      res.status(500).json({
-        error: "Production container deploy failed. Check container logs for details.",
-      });
-      return;
-    }
-
-    // Persist new prod container info
-    await db
-      .update(projectsTable)
-      .set({
-        prodContainerId: result.prodContainerId,
-        prodContainerUrl: result.containerUrl,
-        prodContainerStatus: result.status,
-      })
-      .where(eq(projectsTable.id, projectId));
-
-    res.json({
-      ok: true,
-      containerId: result.prodContainerId,
-      containerUrl: result.containerUrl,
-      note: "Production container deployed. Public URL now proxies to this container.",
-    });
-  },
-);
+// ── POST /api/projects/:id/container/publish — RETIRED ───────────────────────
+// This route previously allowed manually deploying a production container outside
+// the publish gate, bypassing Testing Approval, reading from mutable project_files,
+// and injecting all secrets regardless of environment scoping.
+//
+// It is now retired (410 Gone). Production container deployments must go through
+// POST /api/projects/:id/publish, which enforces the full testing + approval gate.
+router.post("/projects/:id/container/publish", requireProjectOwnership, (_req, res): void => {
+  res.status(410).json({
+    error:
+      "This endpoint has been retired. Use POST /api/projects/:id/publish to deploy to production. " +
+      "Production deployments now require Testing Approval before they can proceed.",
+    code: "endpoint_retired",
+  });
+});
 
 // ── POST /api/projects/:id/container/unpublish ───────────────────────────────
 // Stop and destroy the production container for this project.

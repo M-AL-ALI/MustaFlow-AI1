@@ -1,4 +1,5 @@
 import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import app from "./app";
@@ -135,14 +136,14 @@ server.on("upgrade", (req, socket, head) => {
           return;
         }
         // Valid session — proxy the WebSocket upgrade to the test container.
-        // Use http-proxy-style raw TCP proxy: connect to the container and tunnel.
-        const target = new URL(
-          result.containerUrl.replace(/^https?:/, "ws:").replace(/\/$/, "") + (req.url ?? "/"),
-        );
-        const proxyReq = httpRequest({
+        // Use TLS-aware request: httpsRequest for https:// targets, httpRequest otherwise.
+        const isSecure = result.containerUrl.startsWith("https://");
+        const target = new URL(result.containerUrl.replace(/\/$/, "") + (req.url ?? "/"));
+        const requestFn = isSecure ? httpsRequest : httpRequest;
+        const proxyReq = requestFn({
           hostname: target.hostname,
-          port: target.port || 80,
-          path: target.pathname + target.search,
+          port: Number(target.port) || (isSecure ? 443 : 80),
+          path: target.pathname + (target.search || ""),
           method: "GET",
           headers: {
             ...req.headers,
@@ -152,14 +153,23 @@ server.on("upgrade", (req, socket, head) => {
         proxyReq.on(
           "upgrade",
           (
-            _proxyRes: import("node:http").IncomingMessage,
+            proxyRes: import("node:http").IncomingMessage,
             proxySocket: import("node:net").Socket,
             proxyHead: Buffer,
           ) => {
+            // Forward the real upstream 101 handshake — including Sec-WebSocket-Accept,
+            // Sec-WebSocket-Protocol, Sec-WebSocket-Extensions, etc.
+            // Without these the browser rejects the handshake.
+            const headerLines: string[] = [];
+            for (const [k, v] of Object.entries(proxyRes.headers)) {
+              if (k.toLowerCase() === "transfer-encoding") continue;
+              const vals = Array.isArray(v) ? v : [v];
+              for (const val of vals) {
+                headerLines.push(`${k}: ${val}`);
+              }
+            }
             netSocket.write(
-              "HTTP/1.1 101 Switching Protocols\r\n" +
-                "Upgrade: websocket\r\n" +
-                "Connection: Upgrade\r\n\r\n",
+              "HTTP/1.1 101 Switching Protocols\r\n" + headerLines.join("\r\n") + "\r\n\r\n",
             );
             proxySocket.pipe(netSocket);
             netSocket.pipe(proxySocket);

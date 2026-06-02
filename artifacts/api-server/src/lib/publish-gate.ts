@@ -149,3 +149,86 @@ export function evaluatePublishGate(
 
   return { ok: true, approvedSnapshot: testedVersion.filesSnapshot };
 }
+
+// ── Promotion gate ─────────────────────────────────────────────────────────
+//
+// Invariants enforced before staging → production promotion:
+//  1. testingStatus must be "passed"
+//  2. testedSnapshotId must be set
+//  3. testedSnapshotId must equal stagingPublishedSnapshotId
+//     (the tested snapshot and the staged snapshot must be identical)
+//  4. The staging version row must carry testingApprovedAt
+//
+// This closes the path where a draft is published to staging and promoted
+// directly to production without passing the test + approval gate.
+
+export type GatePromotionProject = {
+  testingStatus: string;
+  testedSnapshotId: number | null;
+  stagingPublishedSnapshotId: number | null;
+};
+
+export type GatePromotionVersion = {
+  testingApprovedAt: Date | null;
+};
+
+export type PromotionGateResult = { ok: true } | PublishGateBlock;
+
+/**
+ * Decide whether promoting staging → production is allowed.
+ *
+ * @param project        Project row (only promotion-relevant fields required).
+ * @param stagingVersion Already-fetched version row for stagingPublishedSnapshotId, or null.
+ */
+export function evaluatePromotionGate(
+  project: GatePromotionProject,
+  stagingVersion: GatePromotionVersion | null,
+): PromotionGateResult {
+  if (project.testingStatus !== "passed") {
+    return {
+      ok: false,
+      status: 422,
+      error: "Testing has not passed. Run Testing and approve it before promoting to production.",
+      code: "testing_not_passed",
+      extra: { testingStatus: project.testingStatus },
+    };
+  }
+
+  if (!project.testedSnapshotId) {
+    return {
+      ok: false,
+      status: 422,
+      error: "No tested snapshot found. Run Testing and approve it before promoting.",
+      code: "testing_required",
+    };
+  }
+
+  if (project.testedSnapshotId !== project.stagingPublishedSnapshotId) {
+    return {
+      ok: false,
+      status: 422,
+      error:
+        "The staging snapshot does not match the approved tested snapshot. " +
+        "Re-run Testing against the current staging snapshot before promoting.",
+      code: "staging_snapshot_mismatch",
+      extra: {
+        testedSnapshotId: project.testedSnapshotId,
+        stagingPublishedSnapshotId: project.stagingPublishedSnapshotId,
+      },
+    };
+  }
+
+  if (!stagingVersion?.testingApprovedAt) {
+    return {
+      ok: false,
+      status: 422,
+      error:
+        "The staging snapshot has not been approved for testing. " +
+        "Approve it in the Test Environment before promoting.",
+      code: "testing_approval_required",
+      extra: { versionId: project.stagingPublishedSnapshotId },
+    };
+  }
+
+  return { ok: true };
+}

@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { evaluatePublishGate } from "../publish-gate";
-import type { GateProject, GateSnapshotFile, GateSpecVersion } from "../publish-gate";
+import { evaluatePublishGate, evaluatePromotionGate } from "../publish-gate";
+import type {
+  GateProject,
+  GateSnapshotFile,
+  GateSpecVersion,
+  GatePromotionProject,
+  GatePromotionVersion,
+} from "../publish-gate";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -228,5 +234,155 @@ describe("production output equals testedSnapshotId.filesSnapshot", () => {
       // Reference equality: the gate returns exactly what was in the DB row
       expect(result.approvedSnapshot).toBe(frozen);
     }
+  });
+});
+
+// ── evaluatePromotionGate — staging → production promotion gate ───────────
+
+const APPROVED_VERSION: GatePromotionVersion = {
+  testingApprovedAt: new Date("2025-06-01T00:00:00Z"),
+};
+
+function promotionProject(overrides?: Partial<GatePromotionProject>): GatePromotionProject {
+  return {
+    testingStatus: "passed",
+    testedSnapshotId: 7,
+    stagingPublishedSnapshotId: 7,
+    ...overrides,
+  };
+}
+
+describe("evaluatePromotionGate — testingStatus must be passed", () => {
+  it("blocks when testingStatus is idle", () => {
+    const result = evaluatePromotionGate(
+      promotionProject({ testingStatus: "idle" }),
+      APPROVED_VERSION,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(422);
+      expect(result.code).toBe("testing_not_passed");
+    }
+  });
+
+  it("blocks when testingStatus is stale", () => {
+    const result = evaluatePromotionGate(
+      promotionProject({ testingStatus: "stale" }),
+      APPROVED_VERSION,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("testing_not_passed");
+      expect(result.extra?.testingStatus).toBe("stale");
+    }
+  });
+
+  it("blocks when testingStatus is failed", () => {
+    const result = evaluatePromotionGate(
+      promotionProject({ testingStatus: "failed" }),
+      APPROVED_VERSION,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("testing_not_passed");
+    }
+  });
+});
+
+describe("evaluatePromotionGate — testedSnapshotId must be set", () => {
+  it("blocks when testedSnapshotId is null even if testingStatus is passed", () => {
+    const result = evaluatePromotionGate(
+      promotionProject({ testedSnapshotId: null }),
+      APPROVED_VERSION,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(422);
+      expect(result.code).toBe("testing_required");
+    }
+  });
+});
+
+describe("evaluatePromotionGate — testedSnapshotId must equal stagingPublishedSnapshotId", () => {
+  it("blocks when staging snapshot differs from tested snapshot (mismatch)", () => {
+    const result = evaluatePromotionGate(
+      promotionProject({ testedSnapshotId: 7, stagingPublishedSnapshotId: 99 }),
+      APPROVED_VERSION,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(422);
+      expect(result.code).toBe("staging_snapshot_mismatch");
+      expect(result.extra?.testedSnapshotId).toBe(7);
+      expect(result.extra?.stagingPublishedSnapshotId).toBe(99);
+    }
+  });
+
+  it("late draft edit: new staging snapshot after approval cannot promote", () => {
+    // User approved snapshot 7 in Testing, then published a new draft to staging (snap 8).
+    // Promoting snap 8 must be blocked — it was never tested.
+    const result = evaluatePromotionGate(
+      promotionProject({ testedSnapshotId: 7, stagingPublishedSnapshotId: 8 }),
+      APPROVED_VERSION,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("staging_snapshot_mismatch");
+    }
+  });
+});
+
+describe("evaluatePromotionGate — staging version must have testingApprovedAt", () => {
+  it("blocks when staging version has no testingApprovedAt", () => {
+    const result = evaluatePromotionGate(promotionProject(), {
+      testingApprovedAt: null,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(422);
+      expect(result.code).toBe("testing_approval_required");
+      expect(result.extra?.versionId).toBe(7);
+    }
+  });
+
+  it("blocks when stagingVersion row is null (not found in DB)", () => {
+    const result = evaluatePromotionGate(promotionProject(), null);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("testing_approval_required");
+    }
+  });
+
+  it("blocks when untested staging snapshot tries to promote", () => {
+    // User published to staging but never ran Testing against it.
+    const result = evaluatePromotionGate(
+      promotionProject({ testingStatus: "idle", testedSnapshotId: null }),
+      { testingApprovedAt: null },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // First check fires: testingStatus !== "passed"
+      expect(result.code).toBe("testing_not_passed");
+    }
+  });
+});
+
+describe("evaluatePromotionGate — happy path", () => {
+  it("allows promotion when all invariants are satisfied", () => {
+    const result = evaluatePromotionGate(promotionProject(), APPROVED_VERSION);
+    expect(result.ok).toBe(true);
+  });
+
+  it("approved matching staging snapshot promotes successfully", () => {
+    const project = promotionProject({
+      testingStatus: "passed",
+      testedSnapshotId: 42,
+      stagingPublishedSnapshotId: 42,
+    });
+    const stagingVer: GatePromotionVersion = {
+      testingApprovedAt: new Date("2025-06-02T10:00:00Z"),
+    };
+    const result = evaluatePromotionGate(project, stagingVer);
+    expect(result.ok).toBe(true);
   });
 });

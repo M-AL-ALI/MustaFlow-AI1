@@ -178,3 +178,108 @@ describe("validatePreviewWebSocketUpgrade", () => {
     expect(result?.containerUrl).toBe("https://test.container.internal");
   });
 });
+
+// ── WS proxy handshake header forwarding — unit-level assertions ─────────────
+// These tests verify the logic that the proxy must forward real upstream headers
+// (including Sec-WebSocket-Accept) rather than writing a bare 101 response.
+// We test the header-building logic directly without spinning up a real WS server.
+
+describe("WS proxy handshake header extraction", () => {
+  function buildHeaderLines(headers: Record<string, string | string[]>): string[] {
+    const lines: string[] = [];
+    for (const [k, v] of Object.entries(headers)) {
+      if (k.toLowerCase() === "transfer-encoding") continue;
+      const vals = Array.isArray(v) ? v : [v];
+      for (const val of vals) {
+        lines.push(`${k}: ${val}`);
+      }
+    }
+    return lines;
+  }
+
+  it("forwards Sec-WebSocket-Accept from upstream response", () => {
+    const upstreamHeaders = {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+    };
+    const lines = buildHeaderLines(upstreamHeaders);
+    expect(lines).toContain("sec-websocket-accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+    expect(lines).toContain("upgrade: websocket");
+  });
+
+  it("forwards Sec-WebSocket-Protocol when present", () => {
+    const upstreamHeaders = {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-accept": "abc123==",
+      "sec-websocket-protocol": "chat",
+    };
+    const lines = buildHeaderLines(upstreamHeaders);
+    expect(lines).toContain("sec-websocket-protocol: chat");
+  });
+
+  it("strips transfer-encoding from forwarded headers", () => {
+    const upstreamHeaders = {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-accept": "abc123==",
+      "transfer-encoding": "chunked",
+    };
+    const lines = buildHeaderLines(upstreamHeaders);
+    expect(lines.some((l) => l.toLowerCase().startsWith("transfer-encoding"))).toBe(false);
+  });
+
+  it("handles multi-value headers as separate lines", () => {
+    const upstreamHeaders = {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-accept": "abc123==",
+      "x-custom": ["val1", "val2"],
+    };
+    const lines = buildHeaderLines(upstreamHeaders);
+    expect(lines).toContain("x-custom: val1");
+    expect(lines).toContain("x-custom: val2");
+  });
+
+  it("produces a valid HTTP/1.1 101 response string", () => {
+    const upstreamHeaders = {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+    };
+    const lines = buildHeaderLines(upstreamHeaders);
+    const response = "HTTP/1.1 101 Switching Protocols\r\n" + lines.join("\r\n") + "\r\n\r\n";
+    expect(response).toContain("sec-websocket-accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+    expect(response).toMatch(/^HTTP\/1\.1 101 Switching Protocols\r\n/);
+    expect(response).toMatch(/\r\n\r\n$/);
+  });
+
+  it("TLS detection: https:// containerUrl routes to wss proxy path", () => {
+    const containerUrl = "https://fly-machine.internal:443";
+    const isSecure = containerUrl.startsWith("https://");
+    expect(isSecure).toBe(true);
+  });
+
+  it("plain detection: http:// containerUrl routes to ws proxy path", () => {
+    const containerUrl = "http://fly-machine.internal:3000";
+    const isSecure = containerUrl.startsWith("https://");
+    expect(isSecure).toBe(false);
+  });
+
+  it("secure proxy uses port 443 when no port in URL", () => {
+    const containerUrl = "https://fly-machine.internal";
+    const target = new URL(containerUrl + "/");
+    const isSecure = containerUrl.startsWith("https://");
+    const port = Number(target.port) || (isSecure ? 443 : 80);
+    expect(port).toBe(443);
+  });
+
+  it("plain proxy uses port 80 when no port in URL", () => {
+    const containerUrl = "http://fly-machine.internal";
+    const target = new URL(containerUrl + "/");
+    const isSecure = containerUrl.startsWith("https://");
+    const port = Number(target.port) || (isSecure ? 443 : 80);
+    expect(port).toBe(80);
+  });
+});

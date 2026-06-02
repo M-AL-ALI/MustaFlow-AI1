@@ -59,7 +59,7 @@ import { deployProductionContainer, destroyContainer } from "../lib/container";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { encryptionService } from "../lib/encryption";
 import { getUnresolvedCriticalFindings } from "./readiness";
-import { evaluatePublishGate } from "../lib/publish-gate";
+import { evaluatePublishGate, evaluatePromotionGate } from "../lib/publish-gate";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
 import {
   r2Enabled,
@@ -900,6 +900,34 @@ router.post("/projects/:id/promote", requireProjectOwnership, async (req, res): 
       error: "No staging snapshot found. Publish to staging first before promoting.",
     });
     return;
+  }
+
+  // ── Staging promotion security gate ───────────────────────────────────────
+  // Require: testingStatus=passed, testedSnapshotId===stagingPublishedSnapshotId,
+  // and the staging version must have testingApprovedAt.
+  // This closes the path where a draft is published to staging and promoted
+  // directly to production without passing the test + approval gate.
+  {
+    const [stagingVersionForGate] = await db
+      .select({ testingApprovedAt: projectVersionsTable.testingApprovedAt })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
+    const promotionGateResult = evaluatePromotionGate(
+      {
+        testingStatus: project.testingStatus ?? "idle",
+        testedSnapshotId: project.testedSnapshotId ?? null,
+        stagingPublishedSnapshotId: project.stagingPublishedSnapshotId,
+      },
+      stagingVersionForGate ?? null,
+    );
+    if (!promotionGateResult.ok) {
+      res.status(promotionGateResult.status).json({
+        error: promotionGateResult.error,
+        code: promotionGateResult.code,
+        ...promotionGateResult.extra,
+      });
+      return;
+    }
   }
 
   // ── Production readiness gate ─────────────────────────────────────────────
