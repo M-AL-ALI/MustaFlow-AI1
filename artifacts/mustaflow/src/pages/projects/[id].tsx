@@ -1980,15 +1980,16 @@ export default function ProjectWorkspacePage() {
           };
         };
         if (event.eventType === "project_files_changed") {
+          const d = event.data ?? {};
           const payload: ProjectFilesChangedPayload = {
-            projectId: event.projectId ?? projectId,
-            operationType: (event.operationType ??
+            projectId: d.projectId ?? event.projectId ?? projectId,
+            operationType: (d.operationType ??
               "unknown") as ProjectFilesChangedPayload["operationType"],
-            changedPaths: event.changedPaths ?? [],
-            removedPaths: event.removedPaths ?? [],
-            files: event.files ?? {},
-            requiresInstall: event.requiresInstall ?? false,
-            requiresRestart: event.requiresRestart ?? false,
+            changedPaths: d.changedPaths ?? [],
+            removedPaths: d.removedPaths ?? [],
+            files: d.files ?? {},
+            requiresInstall: d.requiresInstall ?? false,
+            requiresRestart: d.requiresRestart ?? false,
           };
           filesPayloadRef.current = payload;
           setFilesPayloadSeq((n) => n + 1);
