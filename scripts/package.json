@@ -102,6 +102,7 @@
     "verify-write-file": "tsx ./src/verify-write-file.ts",
     "verify-large-critique": "tsx ./src/verify-large-critique.ts",
     "verify-phase2e": "tsx ./src/verify-phase2e-validation.ts",
+    "verify-phase2e-live": "tsx ./src/verify-phase2e-live.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
