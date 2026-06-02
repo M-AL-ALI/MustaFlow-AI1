@@ -1,0 +1,137 @@
+I am still facing the same core issue in normal AI Builder.
+
+Developer Mode is gone, but Agent Zero still cannot reliably build a runnable app or update the preview so users can test it.
+
+From the screenshots, the Builder shows:
+
+* Installing dependencies…
+* TypeScript typecheck failed
+* Agent loop terminated: wall-clock
+* Server startup failed
+* Preview refresh requested but app server is not reachable
+* Preview unavailable
+* The AI flagged problems it could not fully resolve
+
+This means the system is honest now, but it is still not delivering a usable result.
+
+This is not how I want Agent Zero to work. I want MustaFlow AI Builder to behave like a real agentic builder, closer to Replit Agent:
+
+The agent should not keep repeating the same action.
+The agent should not keep writing files when the app cannot start.
+The agent should not waste user time and credits.
+The agent should not say the build is complete if the preview cannot load.
+The agent should not leave users with “Preview unavailable” after a long build.
+
+Please treat this as a core Agent Zero reliability blocker.
+
+Immediate priority:
+Stop new feature work and run an Emergency Builder Stabilization phase.
+
+Required behavior:
+
+1. Foundation-first rule
+   If any of these fail:
+
+* dependency install
+* TypeScript
+* server-start
+* healthz
+* preview reachability
+
+Then Zero must stop writing new features and fix the foundation first.
+
+2. Install failure handling
+   If “Installing dependencies” exceeds a safe cap:
+
+* stop retrying
+* inspect npm/yarn logs
+* detect OOM / lock / network / missing package
+* report a clear blocker
+* do not keep running until wall-clock kills the task
+
+3. Server-start repair
+   If the app server is not reachable:
+
+* inspect container logs
+* inspect package.json scripts
+* verify entrypoint
+* verify port binding
+* verify /healthz
+* start server manually if needed
+* do not mark preview ready until HTTP 200
+
+4. Preview is a hard gate
+   A build is not user-testable unless:
+
+* preview_ready fires
+* iframe loads the app
+* visible UI content appears
+
+If preview is unavailable, final status must be:
+blocked, failed, or completed_with_errors — not success.
+
+5. Repeated-failure supervisor
+   Add an Agent Zero supervisor layer that watches checks across the task.
+
+Rules:
+
+* same check fails twice → force strategy change
+* same check fails three times → stop feature work and ask/mark blocked
+* install/server/preview failures override feature generation
+* no more random file writing while the same foundation check fails
+
+6. “Ask AI to fix this” must be targeted
+   Each button should send a precise repair prompt, not a generic retry.
+
+Examples:
+
+* TypeScript failed → “Fix TypeScript errors only. Do not add features.”
+* Server startup failed → “Fix server start and /healthz first.”
+* Preview unreachable → “Diagnose preview/server/proxy. Do not edit UI features until preview is reachable.”
+* Wall-clock hit → “Resume from last failure with a different strategy. Do not repeat the same actions.”
+
+7. Steer the build must actually affect the run
+   If I type:
+   “Stop writing new features and fix server startup first.”
+
+Zero must:
+
+* receive it
+* show it in the timeline
+* change behavior
+* or clearly say why it cannot
+
+8. Deadline rescue path
+   For the current failing app, do not rely only on the agent loop.
+
+Run a deterministic rescue:
+
+* inspect current files
+* list missing imports/files
+* list package/dependency problems
+* run install with logs
+* run TypeScript
+* run server-start
+* run /healthz
+* run preview probe
+* fix only the blockers needed to make preview load
+
+Goal:
+Get one real project to a working preview that I can test.
+
+9. Final proof required
+   For the current project, report:
+
+* project ID and name
+* exact root cause of preview unavailable
+* exact install result
+* exact TypeScript result
+* exact server-start result
+* exact /healthz result
+* exact preview result
+* whether iframe loaded
+* what still blocks the app, if anything
+
+Do not call this complete until the preview loads or the blocker is clearly proven outside the agent’s control.
+
+This is a product-critical issue. Agent Zero must become a builder that diagnoses, changes strategy, and delivers a runnable preview — not just a file writer that times out.

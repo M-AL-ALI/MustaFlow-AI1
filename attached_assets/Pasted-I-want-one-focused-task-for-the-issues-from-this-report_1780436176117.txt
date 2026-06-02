@@ -1,0 +1,132 @@
+I want one focused task for the issues from this report only.
+
+Do not mix this with Security-1, Developer Mode removal, or new Builder features.
+
+The report says:
+
+* npm install completed
+* TypeScript passed
+* API server, Vite frontend, and mockup sandbox are running
+* MustaFlow API `/healthz` returns 200
+* static published previews work through `/api/p/:slug/`
+* agentic container preview returns 502 / ENOTFOUND for `mustaflow-containers.fly.dev`
+* UI is navigable but has a nested `<a>` hydration error
+* final status is honest
+
+The two fixes needed are:
+
+1. Agentic container preview 502 / ENOTFOUND
+2. Nested `<a>` hydration warning
+
+==================================================
+FIX 1 — AGENTIC CONTAINER PREVIEW 502 / ENOTFOUND
+=================================================
+
+Problem:
+Static published previews work, but agentic container preview fails with:
+
+`ENOTFOUND mustaflow-containers.fly.dev`
+
+This means users cannot test agentic/full-stack generated apps in the iframe.
+
+Important distinction:
+Do not confuse these:
+
+1. MustaFlow API server healthz
+2. Vite frontend health
+3. Mockup sandbox health
+4. Generated app container healthz
+5. Preview proxy reachability
+6. Preview iframe load
+
+The report saying the API server returns 200 does not prove the generated app preview works.
+
+Please diagnose and fix the agentic preview proxy path:
+
+Check:
+
+1. Is `mustaflow-containers.fly.dev` actually deployed in the current environment?
+2. Is DNS configured correctly?
+3. Is `FLY_APP_NAME` correct?
+4. Is the API server supposed to resolve `mustaflow-containers.fly.dev` from inside Replit?
+5. Is the browser supposed to load the preview through the API proxy or directly through the Fly host?
+6. If Replit sandbox cannot resolve Fly hostnames, is there a production-like preview test environment where this can be verified?
+7. If the proxy app is not deployed in dev, the UI must clearly show:
+   “Agentic preview proxy is unavailable in this environment.”
+   not a generic broken preview.
+8. If the proxy should work in dev, fix the DNS/config/deployment.
+9. Confirm livePreviewProxy handles DNS failure cleanly and reports the exact blocker.
+10. Confirm the preview iframe only reports `preview_ready` after the generated app is actually reachable.
+
+Acceptance criteria:
+
+* Static preview still works.
+* Agentic preview either loads successfully or shows a clear environment-specific blocker.
+* The UI must not imply the generated app is testable if the preview proxy is unreachable.
+* Final report separates:
+
+  * generated app health
+  * proxy health
+  * iframe load result
+
+==================================================
+FIX 2 — NESTED <a> HYDRATION WARNING
+====================================
+
+Problem:
+Browser console shows:
+
+`<a> cannot be a descendant of <a>`
+
+This likely means a Wouter `<Link>` component, which renders an `<a>`, is wrapped inside another `<a>` or clickable link/card.
+
+This does not fully crash the UI, but it is noisy and not production-quality.
+
+Please fix the nested anchor issue.
+
+Check:
+
+1. Search for `<Link>` inside `<a>`.
+2. Search for `<a>` wrapping card components that contain `<Link>`.
+3. Search project workspace cards, nav links, preview links, project list links, and publishing/navigation tabs.
+4. Use the existing memory/pattern from `wouter-link-nested-anchors.md`.
+5. Replace nested anchors with one valid link structure.
+
+Correct patterns:
+
+* Use one `<Link>` as the outer clickable wrapper and remove inner `<a>`.
+* Or use a `<button>` / `<div role="button">` for inner actions.
+* Or use `onClick` navigation instead of wrapping links inside links.
+
+Acceptance criteria:
+
+* Browser console no longer shows nested anchor hydration warnings.
+* Navigation still works.
+* Project cards/workspace links still work.
+* No accessibility regression.
+
+==================================================
+FINAL VERIFICATION REQUIRED
+===========================
+
+After fixes, please run and report:
+
+1. npm install result
+2. TypeScript result
+3. frontend/Vite result
+4. API server healthz result
+5. generated app container healthz result, if applicable
+6. static preview `/api/p/:slug/` result
+7. agentic preview proxy result
+8. iframe load result
+9. nested anchor browser console result
+10. final status honesty
+
+Do not call this complete by saying only “API healthz 200.”
+
+The success condition is:
+
+* static preview works
+* agentic preview behavior is either working or clearly blocked by environment with explicit UI messaging
+* nested anchor warning is gone
+* final report clearly states what users can and cannot test in the current environment
