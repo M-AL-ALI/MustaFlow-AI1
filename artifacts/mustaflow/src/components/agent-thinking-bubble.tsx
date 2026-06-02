@@ -2323,9 +2323,7 @@ export function AgentThinkingBubble({
             {isIdle && !isTerminal && !isQueued && <ThinkingIdleIndicator />}
 
             {/* Mid-run steering input — visible as soon as the build starts */}
-            {!isTerminal && !isQueued && (
-              <SteeringInput projectId={projectId} taskId={taskId} />
-            )}
+            {!isTerminal && !isQueued && <SteeringInput projectId={projectId} taskId={taskId} />}
 
             {groups.length === 0 && !isTerminal && (
               <div className="flex items-center gap-2 text-muted-foreground">

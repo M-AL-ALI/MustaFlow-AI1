@@ -259,79 +259,77 @@ const MAX_OBSERVATION_CHARS = PER_CALL_STDOUT_CAP;
  * FIRST failure so Zero stops writing feature files immediately.
  * Non-foundation checks trigger guidance only on the second consecutive failure.
  */
-const CHECK_STRATEGY_HINTS: Record<
-  string,
-  { label: string; isFoundation: boolean; hint: string }
-> = {
-  "mobile-structure": {
-    label: "Expo project structure",
-    isFoundation: true,
-    hint: [
-      "STOP writing component or feature files immediately. The Expo project foundation is broken.",
-      "You MUST fix these in order before anything else:",
-      "  1. package.json — ensure \"expo\" is listed in dependencies (e.g. \"expo\": \"~51.0.0\")",
-      "  2. app.json (or app.config.ts) — must exist with at least: { \"expo\": { \"name\": \"...\", \"slug\": \"...\" } }",
-      "  3. App.tsx — must be the root entry file and export a valid default React component",
-      "  4. babel.config.js — must export: module.exports = { presets: ['babel-preset-expo'] }",
-      "  5. tsconfig.json — must extend 'expo/tsconfig.base'",
-      "Use read_file to inspect each of these files now. Only write feature code AFTER this check passes.",
-    ].join("\n"),
-  },
-  "server-start": {
-    label: "Server start",
-    isFoundation: true,
-    hint: [
-      "STOP adding routes or feature code. The server cannot start.",
-      "Fix the server entry point first:",
-      "  1. src/index.ts (or server.ts) must exist and call app.listen(Number(process.env.PORT) || 3000)",
-      "  2. Check package.json has a 'start' or 'dev' script that points to your entry file",
-      "  3. Use read_file on the entry file — look for missing imports, undefined variables, or syntax errors",
-      "  4. The server must respond HTTP 200 to GET /healthz before calling finalize",
-      "Only add routes after the server starts cleanly.",
-    ].join("\n"),
-  },
-  "node-syntax": {
-    label: "Node.js syntax",
-    isFoundation: true,
-    hint: [
-      "Node.js syntax check failed — there are parse errors in your server files.",
-      "Use read_file on each recently changed file and fix all syntax errors before writing more code.",
-    ].join("\n"),
-  },
-  "html-syntax": {
-    label: "HTML / JS syntax",
-    isFoundation: true,
-    hint: [
-      "HTML/JS syntax check failed. Fix syntax errors in your HTML/JS files before adding content.",
-      "Ensure index.html has a valid doctype, head, and body.",
-    ].join("\n"),
-  },
-  "typecheck": {
-    label: "TypeScript",
-    isFoundation: false,
-    hint: [
-      "TypeScript check failed. Fix all type errors before adding new features.",
-      "Use read_file on each failing file to inspect current types and imports.",
-      "For complex type mismatches, add an explicit cast (as Type) as a temporary fix to unblock progress.",
-    ].join("\n"),
-  },
-  "build": {
-    label: "Vite/build",
-    isFoundation: false,
-    hint: [
-      "Build failed. Fix all compilation errors before adding new features.",
-      "Check for: missing imports, circular dependencies, invalid JSX, or type errors in entry files.",
-    ].join("\n"),
-  },
-  "py-compile": {
-    label: "Python compile",
-    isFoundation: true,
-    hint: [
-      "Python syntax check failed. Fix syntax errors in your Python files before continuing.",
-      "Use read_file on each recently changed .py file to find the error.",
-    ].join("\n"),
-  },
-};
+const CHECK_STRATEGY_HINTS: Record<string, { label: string; isFoundation: boolean; hint: string }> =
+  {
+    "mobile-structure": {
+      label: "Expo project structure",
+      isFoundation: true,
+      hint: [
+        "STOP writing component or feature files immediately. The Expo project foundation is broken.",
+        "You MUST fix these in order before anything else:",
+        '  1. package.json — ensure "expo" is listed in dependencies (e.g. "expo": "~51.0.0")',
+        '  2. app.json (or app.config.ts) — must exist with at least: { "expo": { "name": "...", "slug": "..." } }',
+        "  3. App.tsx — must be the root entry file and export a valid default React component",
+        "  4. babel.config.js — must export: module.exports = { presets: ['babel-preset-expo'] }",
+        "  5. tsconfig.json — must extend 'expo/tsconfig.base'",
+        "Use read_file to inspect each of these files now. Only write feature code AFTER this check passes.",
+      ].join("\n"),
+    },
+    "server-start": {
+      label: "Server start",
+      isFoundation: true,
+      hint: [
+        "STOP adding routes or feature code. The server cannot start.",
+        "Fix the server entry point first:",
+        "  1. src/index.ts (or server.ts) must exist and call app.listen(Number(process.env.PORT) || 3000)",
+        "  2. Check package.json has a 'start' or 'dev' script that points to your entry file",
+        "  3. Use read_file on the entry file — look for missing imports, undefined variables, or syntax errors",
+        "  4. The server must respond HTTP 200 to GET /healthz before calling finalize",
+        "Only add routes after the server starts cleanly.",
+      ].join("\n"),
+    },
+    "node-syntax": {
+      label: "Node.js syntax",
+      isFoundation: true,
+      hint: [
+        "Node.js syntax check failed — there are parse errors in your server files.",
+        "Use read_file on each recently changed file and fix all syntax errors before writing more code.",
+      ].join("\n"),
+    },
+    "html-syntax": {
+      label: "HTML / JS syntax",
+      isFoundation: true,
+      hint: [
+        "HTML/JS syntax check failed. Fix syntax errors in your HTML/JS files before adding content.",
+        "Ensure index.html has a valid doctype, head, and body.",
+      ].join("\n"),
+    },
+    typecheck: {
+      label: "TypeScript",
+      isFoundation: false,
+      hint: [
+        "TypeScript check failed. Fix all type errors before adding new features.",
+        "Use read_file on each failing file to inspect current types and imports.",
+        "For complex type mismatches, add an explicit cast (as Type) as a temporary fix to unblock progress.",
+      ].join("\n"),
+    },
+    build: {
+      label: "Vite/build",
+      isFoundation: false,
+      hint: [
+        "Build failed. Fix all compilation errors before adding new features.",
+        "Check for: missing imports, circular dependencies, invalid JSX, or type errors in entry files.",
+      ].join("\n"),
+    },
+    "py-compile": {
+      label: "Python compile",
+      isFoundation: true,
+      hint: [
+        "Python syntax check failed. Fix syntax errors in your Python files before continuing.",
+        "Use read_file on each recently changed .py file to find the error.",
+      ].join("\n"),
+    },
+  };
 const MAX_FILE_BYTES = 64_000;
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {

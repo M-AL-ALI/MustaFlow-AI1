@@ -7,10 +7,7 @@
  */
 
 import { db } from "@workspace/db";
-import {
-  projectsTable,
-  agentTasksTable,
-} from "@workspace/db";
+import { projectsTable, agentTasksTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 const REAL_USER_ID = "user_3Dv2h4CdaJoviog3ToUryvt3kft";
@@ -85,10 +82,7 @@ async function main() {
     console.log(`  provisioning_error=${provisioned.provisioningError}`);
   }
 
-  if (
-    provisioned.provisioningStatus !== "ready" &&
-    provisioned.provisioningStatus !== "idle"
-  ) {
+  if (provisioned.provisioningStatus !== "ready" && provisioned.provisioningStatus !== "idle") {
     console.error("\nBLOCKER: Provisioning failed — aborting build test.");
     process.exit(1);
   }
@@ -97,9 +91,7 @@ async function main() {
     console.log(
       "\nNOTE: No Fly container provisioned (FLY_API_TOKEN may be absent or provisioning degraded).",
     );
-    console.log(
-      "      builder_mode=agentic without a container will be blocked at preflight.",
-    );
+    console.log("      builder_mode=agentic without a container will be blocked at preflight.");
     console.log("      Switching builder_mode to static-legacy for this test run.");
     await db
       .update(projectsTable)
@@ -181,8 +173,7 @@ async function main() {
     .where(eq(projectsTable.id, project.id));
 
   const report = finalTask.report as Record<string, unknown> | null;
-  const validationStatus =
-    (report?.validationStatus as string | undefined) ?? "(not set)";
+  const validationStatus = (report?.validationStatus as string | undefined) ?? "(not set)";
 
   console.log("\n=== FINAL REPORT ===");
   console.log(`Project ID:         ${finalProject.id}`);
@@ -203,7 +194,11 @@ async function main() {
   const loop = report?.agentLoop as Record<string, unknown> | null;
   if (loop) {
     console.log(`terminationReason:  ${loop.terminationReason ?? "?"}`);
-    const checks = loop.checkResults as Array<{ id: string; passed: boolean; message?: string }> | null;
+    const checks = loop.checkResults as Array<{
+      id: string;
+      passed: boolean;
+      message?: string;
+    }> | null;
     if (checks?.length) {
       console.log(`Check results (${checks.length} total):`);
       for (const c of checks) {
