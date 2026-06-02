@@ -59,6 +59,7 @@ import { deployProductionContainer, destroyContainer } from "../lib/container";
 import { pushSnapshotToCdn, cdnConfigured } from "../lib/cdn";
 import { encryptionService } from "../lib/encryption";
 import { getUnresolvedCriticalFindings } from "./readiness";
+import { evaluatePublishGate } from "../lib/publish-gate";
 import { runPostPublishHealthCheck, recordHealthCheck, getDeclaredRoutes } from "../lib/prodLogs";
 import {
   r2Enabled,
@@ -108,66 +109,51 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     return;
   }
 
-  // ── Testing approval gate (Task #767) ─────────────────────────────────────
-  // When a versionId is specified in the request body, the caller wants to
-  // publish a specific snapshot (not re-snapshot the current draft). For
-  // agentic projects, the specified version MUST have been approved via
-  // POST /projects/:id/versions/:versionId/approve-testing before it can be
-  // promoted to production.
+  // ── Production publish gate ────────────────────────────────────────────────
+  // Security rule: ALL project types (static HTML, React SPA, full-stack container)
+  // MUST publish from an immutable tested-and-approved snapshot. The mutable
+  // project_files table is NEVER consulted for production. No project type is exempt.
+  //
+  // The gate logic lives in lib/publish-gate.ts as a pure function so it is
+  // unit-testable without a DB or Express dependency.
   const versionIdRaw = (req.body as Record<string, unknown>)?.versionId;
   const publishVersionId = typeof versionIdRaw === "number" ? versionIdRaw : null;
 
-  // Track which snapshot files to publish. Null = re-snapshot from project_files (default).
+  // Track which snapshot files to publish. Null = use project_files (staging only).
   let approvedSnapshot: FileSnapshotEntry[] | null = null;
 
-  if (publishVersionId !== null && env === "production") {
-    const [specVersion] = await db
-      .select({
-        id: projectVersionsTable.id,
-        projectId: projectVersionsTable.projectId,
-        filesSnapshot: projectVersionsTable.filesSnapshot,
-        testingApprovedAt: projectVersionsTable.testingApprovedAt,
-      })
-      .from(projectVersionsTable)
-      .where(
-        and(
-          eq(projectVersionsTable.id, publishVersionId),
-          eq(projectVersionsTable.projectId, projectId),
-        ),
-      );
-
-    if (!specVersion) {
-      res.status(404).json({ error: "Version not found for this project" });
-      return;
+  if (env === "production") {
+    // Fetch specVersion when the caller supplied an explicit versionId.
+    let specVersionData: { testingApprovedAt: Date | null; filesSnapshot: FileSnapshotEntry[] | null } | null =
+      null;
+    if (publishVersionId !== null) {
+      const [sv] = await db
+        .select({
+          id: projectVersionsTable.id,
+          projectId: projectVersionsTable.projectId,
+          filesSnapshot: projectVersionsTable.filesSnapshot,
+          testingApprovedAt: projectVersionsTable.testingApprovedAt,
+        })
+        .from(projectVersionsTable)
+        .where(
+          and(
+            eq(projectVersionsTable.id, publishVersionId),
+            eq(projectVersionsTable.projectId, projectId),
+          ),
+        );
+      // Version-not-found is a 404, handled inside evaluatePublishGate when sv is null.
+      specVersionData = sv
+        ? {
+            testingApprovedAt: sv.testingApprovedAt,
+            filesSnapshot: sv.filesSnapshot as FileSnapshotEntry[] | null,
+          }
+        : null;
     }
 
-    // Agentic projects require testing approval before production promotion.
-    if (project.builderMode === "agentic" && !specVersion.testingApprovedAt) {
-      res.status(422).json({
-        error: "Version must pass Testing Approval before publishing to production.",
-        code: "testing_approval_required",
-        versionId: publishVersionId,
-      });
-      return;
-    }
-
-    // Use the approved version's frozen filesSnapshot, not the current draft.
-    if (specVersion.filesSnapshot && specVersion.filesSnapshot.length > 0) {
-      approvedSnapshot = specVersion.filesSnapshot;
-    }
-  }
-
-  // ── Test-then-publish gate (no explicit versionId supplied) ───────────────
-  // When the caller did not specify a versionId, auto-resolve from the project's
-  // testedSnapshotId (set by POST /preview-env/approve).
-  //
-  // Security rule: ALL project types (static HTML, React SPA, full-stack container)
-  // MUST pass the testing-approval gate before publishing to production.
-  // No project type is exempt — this prevents bypass via the static-project path.
-  if (env === "production" && publishVersionId === null) {
-    if (project.testedSnapshotId) {
-      // Always publish from the approved snapshot — never from the draft.
-      const [testedVersion] = await db
+    // Fetch testedVersion for the auto-resolve (no explicit versionId) path.
+    let testedVersionData: { filesSnapshot: FileSnapshotEntry[] | null } | null = null;
+    if (project.testedSnapshotId !== null && project.testedSnapshotId !== undefined && publishVersionId === null) {
+      const [tv] = await db
         .select({ filesSnapshot: projectVersionsTable.filesSnapshot })
         .from(projectVersionsTable)
         .where(
@@ -176,29 +162,42 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
             eq(projectVersionsTable.projectId, projectId),
           ),
         );
-      if (testedVersion?.filesSnapshot && testedVersion.filesSnapshot.length > 0) {
-        approvedSnapshot = testedVersion.filesSnapshot;
-        req.log.info(
-          { projectId, testedSnapshotId: project.testedSnapshotId },
-          "Using approved testedSnapshotId for publish",
-        );
-      }
-    } else {
-      // No tested snapshot for any project type: hard block.
-      // Full-stack projects have a container requirement; static/SPA projects must
-      // also complete a test preview (via /preview-env/start + /preview-env/approve)
-      // before publishing to production.
-      const hasContainer = !!project.containerId;
-      res.status(422).json({
-        error: hasContainer
-          ? "Full-stack projects must pass a test preview before publishing to production. " +
-            "Open the Test Environment tab, start a test build, verify the app, then approve it."
-          : "Projects must pass a test preview before publishing to production. " +
-            "Open the Test Environment tab, start a test preview, verify the app, then approve it.",
-        code: "testing_required",
+      testedVersionData = tv ? { filesSnapshot: tv.filesSnapshot as FileSnapshotEntry[] | null } : null;
+    }
+
+    const gate = evaluatePublishGate(
+      publishVersionId,
+      {
+        builderMode: project.builderMode ?? null,
+        testedSnapshotId: project.testedSnapshotId ?? null,
+        testingStatus: project.testingStatus ?? "idle",
+        containerId: project.containerId ?? null,
+      },
+      specVersionData,
+      testedVersionData,
+    );
+
+    if (!gate.ok) {
+      res.status(gate.status).json({
+        error: gate.error,
+        code: gate.code,
+        ...(gate.extra ?? {}),
       });
       return;
     }
+
+    approvedSnapshot = gate.approvedSnapshot as FileSnapshotEntry[];
+    req.log.info(
+      {
+        projectId,
+        versionId: publishVersionId,
+        testedSnapshotId: project.testedSnapshotId,
+        snapshotFileCount: gate.approvedSnapshot.length,
+      },
+      publishVersionId !== null
+        ? "Production publish: using explicit approved versionId snapshot"
+        : "Production publish: using approved testedSnapshotId snapshot",
+    );
   }
 
   // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
@@ -283,9 +282,24 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     }
   }
 
-  // When `approvedSnapshot` is set (versionId was specified), use that frozen snapshot
-  // directly instead of re-querying project_files. This ensures the published bytes
-  // exactly match the approved snapshot, with no risk of draft edits sneaking in.
+  // Hard invariant: for production, the gate above must always set approvedSnapshot.
+  // If it is somehow null here (code-path bug or future regression), block rather than
+  // silently falling back to the mutable project_files draft.
+  if (env === "production" && approvedSnapshot === null) {
+    req.log.error(
+      { projectId, publishVersionId },
+      "Production publish: gate passed but approvedSnapshot is null — invariant violated, blocking",
+    );
+    res.status(500).json({
+      error: "Internal error: approved snapshot unavailable for production publish.",
+      code: "internal_error",
+    });
+    return;
+  }
+
+  // For production: always use the frozen approved snapshot (set by the gate above).
+  // For staging: approvedSnapshot is null → fall back to the current project_files draft.
+  // This is the only code path that may read project_files, and only for staging.
   const files = approvedSnapshot
     ? approvedSnapshot.map((f) => ({
         id: 0,

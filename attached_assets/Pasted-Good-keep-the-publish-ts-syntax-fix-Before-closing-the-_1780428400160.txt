@@ -1,0 +1,48 @@
+Good: keep the publish.ts syntax fix. Before closing the task, commit and push the completed Security-1 changes to `M-AL-ALI/MustaFlow-AI1`, then prove the following with automated tests.
+
+Critical rule:
+For `env === "production"`, there must be no path that publishes from mutable `project_files`.
+
+Required production behavior:
+- Require `testedSnapshotId`.
+- Require `testingStatus === "passed"`.
+- Load files only from `projectVersions[testedSnapshotId].filesSnapshot`.
+- If the approved snapshot is absent, missing, empty or stale, return 422.
+- Never fall back to `project_files` for production, including static apps.
+- `project_files` fallback may exist only for non-production draft/testing workflows.
+
+Apply the same rule when a caller supplies `versionId`:
+- Production accepts the version only if `testingApprovedAt` is set.
+- This applies to static and agentic projects, not agentic only.
+
+Verify and test these remaining fixes:
+
+1. Public bridge removal
+- `serveSnapshotById()` must not inject `consoleBridge` for production, staging or shareable preview output.
+- Only authenticated editor preview may inject it.
+
+2. Legacy deploy route
+- `POST /api/projects/:id/deploy` must return `410 Gone` or delegate to the safe tested-snapshot publish service.
+- It must never read live `project_files` or load unfiltered secrets.
+
+3. Static publishing
+- Static apps must create an immutable candidate, receive Testing Passed approval, and publish only that candidate snapshot.
+
+4. Preview WebSockets
+- Add hostname-based upgrade handling for `{sessionId}.preview.{PLATFORM_DOMAIN}`.
+- Validate cookie signature, session expiry, revocation, current project access and running test container before proxying.
+
+Run regression tests proving:
+- Production without `testedSnapshotId` returns 422 for static and full-stack apps.
+- A late draft edit cannot reach production.
+- Production output equals `testedSnapshotId.filesSnapshot`.
+- Public HTML contains no editor bridge.
+- `/deploy` returns 410.
+- Valid preview-subdomain WebSocket succeeds.
+- Missing, revoked or expired preview session WebSocket fails.
+
+Then provide:
+- pushed GitHub commit SHA
+- exact changed files
+- test output
+- confirmation that `M-AL-ALI/MustaFlow-AI1/main` contains the fixes
