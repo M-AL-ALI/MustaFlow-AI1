@@ -1,0 +1,104 @@
+Also, please fix the preview page layout.
+
+Right now the validation issues and “Ask AI to fix this” cards are showing in the middle of the Preview area. This is messy and makes the preview look broken even before the user can see the app.
+
+The Preview tab should be reserved for the generated app UI.
+
+Do not put large validation/error cards inside the middle of the preview canvas.
+
+Required UI change:
+
+1. Move validation issues out of the preview canvas
+   Validation issues should live in:
+
+* the AI Builder chat/build timeline
+* the Checks panel
+* a collapsible “Build Issues” drawer
+* or a side/bottom status panel
+
+They should not cover or replace the app preview.
+
+2. Keep the preview iframe clean
+   The preview area should show only:
+
+* the generated app
+* loading/waking state
+* preview unavailable state if truly unreachable
+* small status banner if needed
+
+Do not fill the preview with multiple large issue cards.
+
+3. Small preview status only
+   If preview cannot load, show one clean compact state, for example:
+
+“Preview unavailable — app server is not reachable.”
+Buttons:
+
+* View logs
+* Retry preview
+* Fix server startup
+
+Do not show all validation issues in the preview area.
+
+4. Validation issue cards should be grouped elsewhere
+   The 4 validation issues should appear in a dedicated area:
+
+“Build Issues — 4 found”
+
+* TypeScript typecheck
+* Wall-clock / step cap
+* Server startup
+* Preview unreachable
+
+Each issue can have details and a repair action, but not inside the center of the preview.
+
+5. “Ask AI to fix this” should not be the main repair flow
+   Agent Zero should auto-detect and auto-repair issues during the build.
+
+The button should be a manual fallback, not something the user has to press for every issue.
+
+If TypeScript/server-start/preview fails, Zero should automatically start the correct repair flow unless approval is required.
+
+6. The current message “Live preview requires production” is confusing
+   For AI Builder, users need to test before publishing.
+
+The preview should not tell users they must deploy to production just to test the app.
+
+If agentic container preview is not available in the current environment, say clearly:
+
+“Container preview is unavailable in this development environment. Static preview works, but full app preview requires the preview proxy to be available.”
+
+But in production, the user must be able to preview/test before publishing.
+
+7. Better layout recommendation
+   Preview tab layout should be:
+
+Top small bar:
+
+* Preview status: Running / Waking / Unreachable / Ready
+* Retry preview
+* View logs
+* Open
+
+Center:
+
+* iframe / generated app only
+
+Bottom or side drawer:
+
+* Build Issues
+* Logs
+* Checks
+* Repair actions
+
+8. Final goal
+   The user should clearly see:
+
+* whether the app preview is loading
+* whether the app is ready to test
+* what issues remain
+* what Agent Zero is doing to fix them
+
+But the preview itself should not be cluttered with big error cards.
+
+Please clean this layout and keep Preview focused on the app.
