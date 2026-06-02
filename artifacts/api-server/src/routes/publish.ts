@@ -198,17 +198,6 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         code: "testing_required",
       });
       return;
-    } else {
-      // Static / SPA project with no tested snapshot: hard block.
-      // Static projects are not exempt from the testing-approval gate —
-      // they must go through Test Environment → Approve before production publish.
-      res.status(422).json({
-        error:
-          "This project must pass a test preview before publishing to production. " +
-          "Open the Test Environment tab, start a test build, verify the app, then approve it.",
-        code: "testing_required",
-      });
-      return;
     }
   }
 
