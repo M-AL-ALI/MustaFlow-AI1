@@ -463,9 +463,28 @@ function repairLoopMaxAttempts(mode: AgentMode): number {
 }
 
 /**
+ * Detect the dominant failure category from a set of failed check labels/outputs.
+ * Used to route buildRepairPrompt to the right targeted instructions.
+ */
+function detectRepairCategory(
+  failedChecks: Array<{ label: string; output: string }>,
+): "server-start" | "install" | "typecheck" | "build" | "preview" | "generic" {
+  const combined = failedChecks.map((c) => `${c.label} ${c.output}`).join(" ").toLowerCase();
+  if (/server.*start|healthz|not reachable|port|listen|eaddrinuse/.test(combined))
+    return "server-start";
+  if (/install|npm.*err|dependency|package.*not found|oom|sigkill|exit 137|lock/.test(combined))
+    return "install";
+  if (/tsc|typescript|type error|ts\(/.test(combined)) return "typecheck";
+  if (/vite|build.*fail|compilation/.test(combined)) return "build";
+  if (/preview|iframe|http 200|reachable/.test(combined)) return "preview";
+  return "generic";
+}
+
+/**
  * Build a focused repair prompt from failed quality-gate check results.
- * When previousErrors is provided, the prompt also explains how errors changed
- * between attempts so the agent can pick a different strategy when stuck.
+ * Routes to a category-specific template so the agent receives targeted
+ * instructions instead of a generic retry. When previousErrors is provided,
+ * the prompt also explains how errors changed between attempts.
  */
 function buildRepairPrompt(
   failedChecks: Array<{ label: string; output: string }>,
@@ -514,16 +533,78 @@ function buildRepairPrompt(
         : "");
   }
 
+  // Route to a category-specific header + rules so the model receives
+  // targeted instructions rather than a generic TypeScript-only prompt.
+  const category = detectRepairCategory(failedChecks);
+
+  const categoryHeaders: Record<typeof category, string[]> = {
+    "server-start": [
+      `[REPAIR attempt ${attemptNumber}] The server did not start or /healthz did not respond.`,
+      "Fix ONLY the server startup problem. Do NOT add new features.",
+      "Rules:",
+      "  1. read_file the server entry point (src/index.ts, server.ts, app.ts, or equivalent)",
+      "  2. Check that the server calls app.listen(Number(process.env.PORT) || 3000)",
+      "  3. Verify the package.json 'start' or 'dev' script points to the correct entry file",
+      "  4. Add a GET /healthz route that always returns HTTP 200 and never touches the database",
+      "  5. Ensure no module-level throws on missing env vars — use lazy initialization",
+      "  6. After fixing, run_command(['node', 'src/index.ts']) or the equivalent to verify it starts",
+      "Do NOT call finalize until GET /healthz returns HTTP 200.",
+    ],
+    install: [
+      `[REPAIR attempt ${attemptNumber}] Dependency install failed.`,
+      "Fix ONLY the install problem. Do NOT write feature code.",
+      "Rules:",
+      "  1. read_file package.json — check for typos, version conflicts, unsupported package names",
+      "  2. If exit 137 / SIGKILL: remove large optional packages to reduce memory pressure",
+      "  3. If 'idealTree' / lock error: run_command(['rm', '-f', '/root/.npm/_locks/*'])",
+      "  4. If ENOTFOUND / ETIMEDOUT: verify the package name on npmjs.com — it may be misspelled",
+      "  5. If E404: the package does not exist at that version — find the correct version",
+      "  6. After fixing package.json, pkg_install will re-run automatically on the next check",
+      "Do NOT add more packages — fix the existing install problem first.",
+    ],
+    typecheck: [
+      `[REPAIR attempt ${attemptNumber}] TypeScript errors were detected.`,
+      "Fix ONLY the TypeScript errors listed below. Do NOT add new features.",
+      "Rules:",
+      "  - Fix only the files involved in the errors",
+      "  - Do NOT use `any` or `@ts-ignore` to bypass errors",
+      "  - Do NOT disable strict TypeScript checks",
+      "  - Do NOT remove working features to make errors disappear",
+      "  - Make the smallest safe change that resolves each listed error",
+      "  - Preserve all existing UI and behavior",
+    ],
+    build: [
+      `[REPAIR attempt ${attemptNumber}] Build (Vite/tsc --build) failed.`,
+      "Fix ONLY the compilation error. Do NOT add new features.",
+      "Rules:",
+      "  1. run_command(['npm', 'run', 'build']) and read the FULL output",
+      "  2. read_file every file mentioned in the error stack",
+      "  3. Fix ONLY the compilation error: missing imports, invalid JSX, circular deps",
+      "  4. Do not add new routes or components until the build passes",
+      "Do NOT call finalize until npm run build exits 0.",
+    ],
+    preview: [
+      `[REPAIR attempt ${attemptNumber}] Preview is not reachable.`,
+      "Diagnose and fix the preview/server/proxy problem. Do NOT edit UI features.",
+      "Rules:",
+      "  1. run_command(['cat', '/proc/1/status']) — check if the server process is alive",
+      "  2. run_command the start command and watch for immediate exit or port conflict",
+      "  3. Verify PORT is read from process.env.PORT",
+      "  4. Verify GET /healthz returns HTTP 200",
+      "  5. Fix any crash reported in container logs before touching feature code",
+    ],
+    generic: [
+      `[REPAIR attempt ${attemptNumber}] Required checks failed after the last change.`,
+      "Fix ONLY the failures listed below. Do NOT add new features.",
+      "Rules:",
+      "  - Read each failing file before editing",
+      "  - Make the smallest safe change that resolves each listed error",
+      "  - Re-run the relevant check after fixing",
+    ],
+  };
+
   return [
-    `[REPAIR attempt ${attemptNumber}] TypeScript errors were detected after the last change.`,
-    "Fix ONLY the TypeScript errors listed below.",
-    "Rules:",
-    "- Fix only the files involved in the errors",
-    "- Do NOT use `any` or `@ts-ignore` to bypass errors",
-    "- Do NOT disable strict TypeScript checks",
-    "- Do NOT remove working features to make errors disappear",
-    "- Make the smallest safe change that resolves each listed error",
-    "- Preserve all existing UI and behavior",
+    ...categoryHeaders[category],
     progressSection,
     "",
     "ERRORS TO FIX:",
@@ -3678,10 +3759,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               })),
             ),
           );
+          const repairCategoryLabel = detectRepairCategory(currentFailedChecks);
+          const repairCategoryDisplay: Record<typeof repairCategoryLabel, string> = {
+            "server-start": "Server startup failure",
+            install: "Install failure",
+            typecheck: "TypeScript errors",
+            build: "Build failure",
+            preview: "Preview unreachable",
+            generic: "Check failure",
+          };
           await emitEvent(
             taskId,
             "narration",
-            `TypeScript errors found — attempting repair (${repairAttempt}/${maxRepairAttempts})…`,
+            `${repairCategoryDisplay[repairCategoryLabel]} found — attempting targeted repair (${repairAttempt}/${maxRepairAttempts})…`,
           );
 
           const repairPrompt = buildRepairPrompt(

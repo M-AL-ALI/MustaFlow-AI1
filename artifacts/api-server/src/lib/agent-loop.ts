@@ -192,6 +192,7 @@ export type AgentLoopReport = {
     | "model-stopped"
     | "aborted"
     | "checks-failed"
+    | "check-blocked"
     | "rate_limited"
     | "container-unavailable";
   toolCalls: ToolCallRecord[];
@@ -251,6 +252,8 @@ const WALL_CLOCK_MS = Math.max(
   parseInt(process.env.AGENTIC_BUILDER_WALL_CLOCK_MS ?? "480000", 10),
 );
 const REPEATED_ERROR_CAP = 3;
+/** Foundation check fails >= this many consecutive turns → force-stop with "check-blocked". */
+const HARD_BLOCK_FAIL_COUNT = 5;
 const MAX_OBSERVATION_CHARS = PER_CALL_STDOUT_CAP;
 
 /**
@@ -306,19 +309,40 @@ const CHECK_STRATEGY_HINTS: Record<string, { label: string; isFoundation: boolea
     },
     typecheck: {
       label: "TypeScript",
-      isFoundation: false,
+      isFoundation: true,
       hint: [
-        "TypeScript check failed. Fix all type errors before adding new features.",
-        "Use read_file on each failing file to inspect current types and imports.",
-        "For complex type mismatches, add an explicit cast (as Type) as a temporary fix to unblock progress.",
+        "STOP writing new features. TypeScript errors MUST be fixed first — a broken typecheck means the build will fail.",
+        "  1. run_command(['npx', 'tsc', '--noEmit']) — read the full output carefully",
+        "  2. read_file every file mentioned in the error output",
+        "  3. Fix ONLY the type errors — do NOT add new code or remove working features",
+        "  4. For complex mismatches, add an explicit cast (as Type) as a temporary unblock",
+        "  5. Re-run tsc --noEmit after fixing — only proceed when typecheck is green",
+        "Do NOT call finalize until typecheck passes.",
       ].join("\n"),
     },
     build: {
       label: "Vite/build",
-      isFoundation: false,
+      isFoundation: true,
       hint: [
-        "Build failed. Fix all compilation errors before adding new features.",
-        "Check for: missing imports, circular dependencies, invalid JSX, or type errors in entry files.",
+        "STOP writing new features. The build is broken — fix it before anything else.",
+        "  1. run_command(['npm', 'run', 'build']) and read the FULL output",
+        "  2. read_file every file in the error stack — do not guess",
+        "  3. Fix ONLY the compilation error: missing imports, invalid JSX, circular deps, type errors in entry files",
+        "  4. Do NOT add new routes or components until the build passes",
+        "Do NOT call finalize until npm run build exits 0.",
+      ].join("\n"),
+    },
+    install: {
+      label: "Install",
+      isFoundation: true,
+      hint: [
+        "STOP — dependency install failed. Do not write more code until install succeeds.",
+        "  1. read_file package.json — look for typos, version conflicts, unsupported fields",
+        "  2. If 'Killed' / exit 137 / SIGKILL: the container is OOM — remove large optional deps or split the install",
+        "  3. If 'Tracker idealTree already exists': run run_command(['rm', '-f', '/root/.npm/_locks/*']) then retry",
+        "  4. If 'ENOTFOUND' or 'ETIMEDOUT': the package name may be misspelled or the registry is down — verify the package name",
+        "  5. If 'E404': the package does not exist at that version — check the exact name and version on npmjs.com",
+        "  Fix the root cause in package.json — the install will re-run automatically on the next check.",
       ].join("\n"),
     },
     "py-compile": {
@@ -330,6 +354,48 @@ const CHECK_STRATEGY_HINTS: Record<string, { label: string; isFoundation: boolea
       ].join("\n"),
     },
   };
+
+/**
+ * Returns a user-facing narration for a foundation check that has been blocked
+ * (same check failed HARD_BLOCK_FAIL_COUNT consecutive turns). Used to tell the
+ * user exactly what repair prompt to send instead of just stopping silently.
+ */
+function getFoundationRepairNarration(checkId: string, label: string, failCount: number): string {
+  const repairCmds: Record<string, string> = {
+    "server-start":
+      'To repair, send: "Fix server startup — inspect container logs, verify npm install ' +
+      "completed, check the package.json start/dev script, ensure the server binds to " +
+      'process.env.PORT, and confirm GET /healthz returns HTTP 200. Do not add features until preview is reachable."',
+    typecheck:
+      'To repair, send: "Fix TypeScript errors only — run npx tsc --noEmit, read each ' +
+      'failing file, patch the type errors, and re-run until tsc exits 0. Do not add new features."',
+    build:
+      'To repair, send: "Fix the build error — run npm run build, read the full output, fix ' +
+      'the exact compilation error in the indicated file and line. Do not add new features until the build passes."',
+    install:
+      'To repair, send: "Inspect package.json for bad package names or version conflicts, ' +
+      'fix the root cause, then re-run npm install. Do not write new code until install succeeds."',
+    "mobile-structure":
+      'To repair, send: "Fix the Expo project structure — verify package.json has the expo ' +
+      "dependency, app.json exists with name/slug, App.tsx exports a valid default component, " +
+      'and babel.config.js uses babel-preset-expo."',
+    "node-syntax":
+      'To repair, send: "Fix all Node.js syntax errors — read each recently changed server ' +
+      'file and fix parse errors before writing any more code."',
+    "html-syntax":
+      'To repair, send: "Fix HTML/JS syntax errors — read index.html and any changed JS files, ' +
+      'fix all parse errors, and verify the file has a valid doctype, head, and body."',
+  };
+  const repairHint =
+    repairCmds[checkId] ??
+    `To repair, send: "Fix the ${label} failure and do not add any new features until the check passes."`;
+  return (
+    `Builder blocked: "${label}" has failed ${failCount} turns in a row with no progress. ` +
+    `Zero has stopped to avoid wasting your time and credits. ` +
+    repairHint
+  );
+}
+
 const MAX_FILE_BYTES = 64_000;
 
 const MODEL_FOR_MODE: Record<AgentMode, string> = {
@@ -1967,6 +2033,28 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       terminationReason = "repeated-error";
       break;
     }
+
+    // ── Foundation-check hard-block supervisor ────────────────────────────
+    // If the same foundation check has failed HARD_BLOCK_FAIL_COUNT consecutive
+    // turns, the agent has exhausted its strategy changes. Stop the loop now
+    // rather than burning the remaining step budget on the same failing pattern.
+    {
+      const blockedEntry = [...checkConsecutiveFails.entries()].find(([id, count]) => {
+        const spec = CHECK_STRATEGY_HINTS[id];
+        return spec?.isFoundation === true && count >= HARD_BLOCK_FAIL_COUNT;
+      });
+      if (blockedEntry) {
+        const [blockedId, blockedCount] = blockedEntry;
+        const spec = CHECK_STRATEGY_HINTS[blockedId]!;
+        terminationReason = "check-blocked";
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          getFoundationRepairNarration(blockedId, spec.label, blockedCount),
+        );
+        break;
+      }
+    }
     // Total tool-call cap (not just LLM turns). STEP_CAP is the budget for the
     // entire run measured in tool calls so a single turn that emits many calls
     // cannot exceed the safety budget.
@@ -2945,15 +3033,32 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         "narration",
         `Reached the step limit${fileNote}. You can continue with a follow-up prompt.`,
       );
+    } else if (terminationReason === "check-blocked") {
+      // narration already emitted in the supervisor block above
     } else if (terminationReason === "wall-clock") {
       const fileNote =
         changedCount > 0
           ? ` after modifying ${changedCount} file${changedCount !== 1 ? "s" : ""}`
           : "";
+      // Emit a targeted recovery note so the user knows exactly what failed
+      // and what to send as a follow-up instead of a blank "time budget" message.
+      const failedFoundation = [...checkConsecutiveFails.entries()].filter(([id]) => {
+        const spec = CHECK_STRATEGY_HINTS[id];
+        return spec?.isFoundation === true;
+      });
+      const recoveryNote =
+        failedFoundation.length > 0
+          ? ` Foundation check(s) still failing: ${failedFoundation.map(([id]) => CHECK_STRATEGY_HINTS[id]?.label ?? id).join(", ")}. ` +
+            getFoundationRepairNarration(
+              failedFoundation[0][0],
+              CHECK_STRATEGY_HINTS[failedFoundation[0][0]]?.label ?? failedFoundation[0][0],
+              failedFoundation[0][1],
+            )
+          : " You can continue with a follow-up prompt.";
       await safeEvent(
         input.onEvent,
         "narration",
-        `Reached the time budget${fileNote}. You can continue with a follow-up prompt.`,
+        `Reached the time budget${fileNote}.${recoveryNote}`,
       );
     }
   }
@@ -4328,17 +4433,48 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
     stderrPreview: installResult.ok ? "" : installResult.output.slice(0, 400),
   });
 
-  // When npm install fails, emit a warning narration immediately so the agent
-  // and user both know that dependencies are not installed before checks run.
-  // Without this, the check results look mysterious ("tsx: not found") with no
-  // explanation.
+  // When npm install fails, emit a specific, categorized warning narration so
+  // the agent and user can act immediately. Without this, downstream check
+  // results look mysterious ("tsx: not found") with no explanation.
   if (!installResult.ok) {
-    const errSnippet = installResult.output.slice(0, 300).trim();
-    await safeEvent(
-      ctx.input.onEvent,
-      "narration",
-      `npm install did not complete — dependencies are not installed and server checks will fail.${errSnippet ? ` Error: ${errSnippet}` : ""} Inspect the install output above and fix the root cause (missing registry access, bad package.json, etc.) before continuing.`,
-    );
+    const out = installResult.output;
+    const errSnippet = out.slice(0, 400).trim();
+
+    // Categorize the failure so the repair guidance is targeted.
+    let category = "unknown";
+    if (/Killed|exit 137|SIGKILL|signal: SIGKILL/.test(out)) category = "oom";
+    else if (/idealTree|_locks/.test(out)) category = "lock";
+    else if (/ENOTFOUND|ETIMEDOUT|network|getaddrinfo|ECONNRESET/.test(out)) category = "network";
+    else if (/E404|Not found in the npm registry|not found: not found/.test(out))
+      category = "package-not-found";
+    else if (/Cannot find module|MODULE_NOT_FOUND/.test(out)) category = "missing-module";
+    else if (/ERESOLVE|peer dep|conflicting peer|Conflicting/.test(out)) category = "conflict";
+    else if (/ENOENT|no such file/.test(out)) category = "missing-file";
+
+    const guidance: Record<string, string> = {
+      oom: "The container ran out of memory (SIGKILL/exit 137). Remove large optional dependencies from package.json or split the install into smaller groups.",
+      lock: "A stale npm lock file blocked the install. Use run_command(['rm', '-f', '/root/.npm/_locks/*']) to clear it, then the install will retry automatically.",
+      network:
+        "The npm registry was unreachable. Check that the package name is spelled correctly. If the name is correct, the registry may be temporarily down — retry in a moment.",
+      "package-not-found":
+        "One or more packages do not exist at the requested version. Check the exact package name and version on npmjs.com, then update package.json.",
+      "missing-module":
+        "A module was missing at runtime. Add the missing package to package.json dependencies and the install will re-run.",
+      conflict:
+        "Peer dependency conflicts blocked install. Try removing the version pin on the conflicting package, or add a resolutions/overrides entry in package.json.",
+      "missing-file":
+        "A required file was missing (ENOENT). Verify package.json exists and is valid JSON before re-running.",
+      unknown:
+        "Inspect the install output above and fix the root cause (bad package.json, missing registry access, etc.) before continuing.",
+    };
+
+    const narration =
+      `Install failed${category !== "unknown" ? ` (${category})` : ""} — ` +
+      `dependencies are not installed and server checks will fail. ` +
+      guidance[category] +
+      (errSnippet ? ` Error snippet: ${errSnippet.slice(0, 200)}` : "");
+
+    await safeEvent(ctx.input.onEvent, "narration", narration);
   }
 
   // Mark installed regardless — this prevents infinite reinstall loops.

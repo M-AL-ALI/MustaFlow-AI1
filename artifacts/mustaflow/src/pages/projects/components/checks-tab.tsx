@@ -151,6 +151,71 @@ const CHECK_META: Record<
       return `Fix the following security issues in the generated app: ${issues}. Review and fix any insecure patterns, missing Content Security Policy headers, or vulnerable dependencies.`;
     },
   },
+  typecheck: {
+    label: "TypeScript",
+    Icon: Code2,
+    fixPrompt: (findings) => {
+      const issues = findings
+        .map((f) => f.message)
+        .slice(0, 5)
+        .join("; ");
+      const detail = issues ? `: ${issues}` : ".";
+      return (
+        `Fix TypeScript errors only${detail} ` +
+        `Run npx tsc --noEmit, read each failing file, and patch the type errors. ` +
+        `Do NOT add new features — fix only the listed errors.`
+      );
+    },
+  },
+  build: {
+    label: "Build",
+    Icon: Zap,
+    fixPrompt: (findings) => {
+      const issues = findings
+        .map((f) => f.message)
+        .slice(0, 3)
+        .join("; ");
+      const detail = issues ? `: ${issues}` : ".";
+      return (
+        `Fix the build error${detail} ` +
+        `Run npm run build, read the full output, and fix the compilation error at the exact file and line. ` +
+        `Do NOT add new features until the build passes.`
+      );
+    },
+  },
+  "server-start": {
+    label: "Server Start",
+    Icon: Zap,
+    fixPrompt: (findings) => {
+      const issues = findings
+        .map((f) => f.message)
+        .slice(0, 3)
+        .join("; ");
+      const detail = issues ? `: ${issues}` : ".";
+      return (
+        `Fix server startup${detail} ` +
+        `Inspect container logs, verify npm install completed, check the package.json start/dev script, ` +
+        `ensure the server binds to process.env.PORT, and confirm GET /healthz returns HTTP 200. ` +
+        `Do not add features until the preview is reachable.`
+      );
+    },
+  },
+  install: {
+    label: "Install",
+    Icon: Code2,
+    fixPrompt: (findings) => {
+      const issues = findings
+        .map((f) => f.message)
+        .slice(0, 3)
+        .join("; ");
+      const detail = issues ? `: ${issues}` : ".";
+      return (
+        `Fix the dependency install failure${detail} ` +
+        `Inspect package.json for bad package names or version conflicts, fix the root cause, ` +
+        `then re-run npm install. Do not write new code until install succeeds.`
+      );
+    },
+  },
   privacy: {
     label: "Privacy",
     Icon: ShieldAlert,
