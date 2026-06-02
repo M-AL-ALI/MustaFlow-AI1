@@ -1,0 +1,91 @@
+Approved to proceed with #1224 — Phase Security-1: Close Publish/Preview Bypass Paths.
+
+This plan is aligned with what we need.
+
+Please keep the scope security-only. Do not add new Builder features during this task.
+
+Additional requirements before calling it complete:
+
+1. Route inventory matrix
+   Please include a route matrix in the final report showing every route that can serve, preview, deploy, publish, or expose snapshots.
+
+Include:
+
+* route path
+* file
+* private/public
+* draft/snapshot/container
+* requires auth?
+* requires approved snapshot?
+* secrets allowed?
+* bridge injection allowed?
+* WebSocket support?
+
+2. Legacy deploy must be truly closed
+   Do not leave a legacy route that can still publish `project_files`.
+
+Preferred:
+
+* remove the route registration from production, or
+* make it return 410 Gone / deprecated, or
+* make it delegate to the approved-snapshot publish pipeline with no alternate code path.
+
+Do not allow “legacy deploy but with a check” if it still has separate deploy logic.
+
+3. Static projects must follow the same safety rule
+   Static projects are simpler, but they are not automatically safe.
+
+Rule:
+No production publish from current draft files.
+All projects must publish from an approved immutable snapshot.
+
+This applies to:
+
+* static HTML
+* React/Vite static builds
+* full-stack/container apps
+* custom domain publish
+* platform subdomain publish
+
+4. Bridge injection must be private-preview only
+   Production/public snapshot HTML must not include:
+
+* consoleBridge
+* editor bridge
+* preview bridge
+* instrumentation scripts
+* authenticated editor messaging helpers
+
+Regression test must assert the public production HTML does not contain these markers.
+
+5. WebSocket upgrade must be tested at server level
+   Express middleware does not protect upgrade requests by itself.
+
+Please verify and test:
+
+* valid preview WebSocket token/cookie works
+* expired token closes socket
+* revoked token closes socket
+* wrong host closes socket
+* missing cookie closes socket
+* production/public hosts do not accept preview/editor WebSocket upgrades
+
+6. Secrets isolation must be tested by actual runtime path
+   Please verify secrets are not just stored correctly, but injected correctly.
+
+Required:
+
+* preview/test container gets only preview-safe development/testing secrets
+* production gets only production secrets
+* public snapshot serving decrypts no secrets
+* legacy deploy cannot bypass this
+* logs never print secret values
+
+7. Tests should prove the bypass used to exist
+   Where possible, write tests that would have failed before the fix and pass after the fix.
+
+8. Final report must include residual risks
+   If anything remains unresolved, such as CDN/Cloudflare behavior or browser-only DNS behavior, list it clearly.
+
+Acceptance:
+I will only accept Phase Security-1 as complete if all five bypass cases are covered by regression tests and the final report lists changed routes/files and remaining risks.

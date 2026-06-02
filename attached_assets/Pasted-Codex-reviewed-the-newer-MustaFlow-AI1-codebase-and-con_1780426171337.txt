@@ -1,0 +1,83 @@
+Codex reviewed the newer MustaFlow-AI1 codebase and confirmed meaningful improvements, but also found remaining bypass/security issues that must be closed before we call the testing-to-production pipeline safe.
+
+Good improvements confirmed:
+
+* `files.ts`: editor preview now requires authentication, even after publish.
+* `serveSnapshot.ts`: failed production containers fall back to frozen published snapshot.
+* `previewSubdomainGateway.ts`: dedicated preview subdomains, one-time tokens, host-only cookies, expiry, and revocation exist.
+* `preview-env.ts`: immutable test candidates, dedicated test containers, health checks, and Testing Approved flow exist.
+* `projects.ts`: test container, running snapshot, candidate snapshot, approved snapshot, and rollback fields exist.
+* `secrets.ts`: secrets support development, testing, staging, production, `isPreviewSafe`, and `exposureType`.
+
+This is a real improvement.
+
+However, do not call the test-to-production pipeline secure yet.
+
+Codex found these remaining issues:
+
+1. `serveSnapshot.ts` still calls `injectBridge(body)` when serving snapshots.
+   If this same helper serves production snapshots, public apps may still receive editor console instrumentation.
+
+Required fix:
+
+* Inject the editor bridge only for authenticated private preview/editor sessions.
+* Never inject bridge code into production/public published snapshots.
+* Add a regression test proving production snapshot HTML does not include editor bridge/console instrumentation.
+
+2. The legacy `deploy.ts` route is still registered.
+   It can deploy live `project_files`, not the approved tested snapshot, and may load project secrets without proper environment isolation.
+
+Required fix:
+
+* Remove the legacy deploy route from production use, or make it delegate to the new approved-snapshot publish pipeline.
+* Ensure no route can publish live draft `project_files` directly.
+* Ensure production deploy only uses the approved immutable snapshot.
+* Ensure production deploy only receives production-safe secrets.
+
+3. `publish.ts` still allows some static projects to publish directly from the current draft.
+   Static projects must follow the same approved immutable candidate flow.
+
+Required fix:
+
+* Static projects must publish only from an approved immutable candidate snapshot.
+* No static project should bypass Testing Approved.
+* Add tests for static project publish blocking until approval.
+
+4. Preview subdomain WebSocket upgrades are not confirmed.
+   Express middleware alone does not handle WebSocket upgrade requests.
+
+Required fix:
+
+* Verify whether preview subdomain WebSocket upgrades route to the test container.
+* If not, add `server.on("upgrade")` handling with the same host/token/cookie validation.
+* WebSocket upgrades must respect preview token expiry/revocation.
+* Add a test for a valid preview WebSocket and an invalid/revoked preview WebSocket.
+
+5. Secrets isolation must be verified end-to-end.
+   Since `secrets.ts` now supports environments and preview-safety metadata, verify the actual runtime path uses it correctly.
+
+Required verification:
+
+* Preview/test containers only receive preview-safe/development/testing secrets.
+* Production publish only receives production secrets.
+* Public snapshots never expose private/editor/test secrets.
+* Legacy deploy route cannot bypass secret isolation.
+
+Please prioritize this as:
+
+Phase Security-1 — Close Publish/Preview Bypass Paths
+
+Do not add new Builder features until these are closed.
+
+Acceptance criteria:
+
+1. Public production snapshots never include editor bridge instrumentation.
+2. Legacy deploy route cannot publish live draft files.
+3. All publish paths use approved immutable snapshots.
+4. Static projects also require Testing Approved before production publish.
+5. Preview WebSocket upgrades are validated and routed correctly.
+6. Secrets are isolated by environment and exposure policy.
+7. Regression tests cover all bypass cases.
+8. Final report lists routes removed/changed, tests run, and any remaining risks.
+
+This should be treated as a security/release blocker before calling the testing-to-production pipeline production-safe.
