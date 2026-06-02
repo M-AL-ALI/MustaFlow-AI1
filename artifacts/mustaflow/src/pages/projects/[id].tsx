@@ -1982,7 +1982,8 @@ export default function ProjectWorkspacePage() {
         if (event.eventType === "project_files_changed") {
           const payload: ProjectFilesChangedPayload = {
             projectId: event.projectId ?? projectId,
-            operationType: (event.operationType ?? "unknown") as ProjectFilesChangedPayload["operationType"],
+            operationType: (event.operationType ??
+              "unknown") as ProjectFilesChangedPayload["operationType"],
             changedPaths: event.changedPaths ?? [],
             removedPaths: event.removedPaths ?? [],
             files: event.files ?? {},

@@ -476,7 +476,6 @@ export function PreviewTab({
       }
       closeVe();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [veSelection, project.id, onAutoSendPrompt, onFixPrompt, closeVe, wc],
   );
 
