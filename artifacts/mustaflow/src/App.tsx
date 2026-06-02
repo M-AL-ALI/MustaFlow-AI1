@@ -58,13 +58,8 @@ import { WorkspaceProvider } from "./contexts/workspace-context";
 import { OnboardingTour } from "./components/onboarding-tour";
 import { OfflineIndicator } from "./components/offline-indicator";
 import TrustPage from "./pages/trust";
-import DocsDevModePage from "./pages/docs-developer-mode";
 import DevelopersPage from "./pages/developers";
 import DevelopersChangelogPage from "./pages/developers-changelog";
-import ModeSelectPage from "./pages/mode-select";
-import DevHomePage from "./pages/dev-home";
-import DevDeploymentsPage from "./pages/dev-deployments";
-import DevWorkspacePage from "./pages/dev-workspace";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -377,10 +372,8 @@ function SmartSignedInRedirect() {
     );
   }
 
-  const mode = prefsQuery.data?.preferredMode ?? null;
-  if (mode === "builder") return <Redirect to="/projects" />;
-  if (mode === "developer") return <Redirect to="/dev" />;
-  return <Redirect to="/mode-select" />;
+  // All authenticated users go to AI Builder — there is no separate mode choice.
+  return <Redirect to="/projects" />;
 }
 
 // Home: public landing for visitors; authenticated users redirect to their mode dashboard.
@@ -432,31 +425,6 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
 
               {/* ── Protected routes ── */}
-              <Route path="/mode-select">
-                <Protected>
-                  <ModeSelectPage />
-                </Protected>
-              </Route>
-              <Route path="/dev">
-                <Protected>
-                  <DevHomePage />
-                </Protected>
-              </Route>
-              <Route path="/dev/projects">
-                <Protected>
-                  <DevHomePage />
-                </Protected>
-              </Route>
-              <Route path="/dev/deployments">
-                <Protected>
-                  <DevDeploymentsPage />
-                </Protected>
-              </Route>
-              <Route path="/dev/workspace/:id">
-                <Protected>
-                  <DevWorkspacePage />
-                </Protected>
-              </Route>
               <Route path="/projects">
                 <Protected>
                   <AppLayout>
@@ -667,9 +635,6 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 <AppLayout>
                   <TrustPage />
                 </AppLayout>
-              </Route>
-              <Route path="/docs/developer-mode">
-                <DocsDevModePage />
               </Route>
               <Route path="/developers/changelog">
                 <DevelopersChangelogPage />
