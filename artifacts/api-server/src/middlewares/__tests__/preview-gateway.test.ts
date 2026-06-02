@@ -79,10 +79,7 @@ describe("validatePreviewWebSocketUpgrade", () => {
   const validHost = `${SESSION_ID}.preview.${PLATFORM_DOMAIN}`;
   const validCookie = makeValidCookie(SESSION_ID, SECRET);
 
-  function setupDbReturns(
-    sessionRow: object | null,
-    projectRow: object | null,
-  ): void {
+  function setupDbReturns(sessionRow: object | null, projectRow: object | null): void {
     let callCount = 0;
     (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       from: () => ({

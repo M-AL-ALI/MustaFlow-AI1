@@ -66,9 +66,7 @@ module.exports = tseslint.config(
     },
   },
   {
-    files: [
-      "artifacts/api-server/src/*.ts",
-    ],
+    files: ["artifacts/api-server/src/*.ts"],
     rules: {
       "no-console": "off",
     },

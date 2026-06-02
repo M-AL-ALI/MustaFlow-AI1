@@ -54,7 +54,6 @@ async function httpGet(
     let total = 0;
     const chunks: Uint8Array[] = [];
     if (reader) {
-       
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;

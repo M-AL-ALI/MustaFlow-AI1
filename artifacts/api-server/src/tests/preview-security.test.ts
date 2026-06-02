@@ -17,7 +17,7 @@
  *  S5 (5 tests) : Secrets isolation — preview vs production
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createHmac, timingSafeEqual } from "crypto";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -505,7 +505,7 @@ describe("Security-1 / S2: Legacy deploy route — 410 Gone, no live-files bypas
   });
 
   it("S2-C: retire route never touches project_files — always returns 410 before file access", () => {
-    let projectFilesRead = false;
+    const projectFilesRead = false;
 
     function oldDeployRoute(_hasApproval: boolean) {
       // After fix: always 410 before any files are read
@@ -818,7 +818,7 @@ describe("Security-1 / S5: Secrets isolation — preview vs production environme
   });
 
   it("S5-C: public snapshot serving decrypts zero secrets", () => {
-    let decryptCount = 0;
+    const decryptCount = 0;
     // Post-fix: serveSnapshotById reads only project_files — no secrets
     function servePublicSnapshot(_id: number, _path: string) {
       return { html: "<html><body><h1>App</h1></body></html>" };

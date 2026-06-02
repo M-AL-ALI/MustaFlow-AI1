@@ -124,8 +124,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
 
   if (env === "production") {
     // Fetch specVersion when the caller supplied an explicit versionId.
-    let specVersionData: { testingApprovedAt: Date | null; filesSnapshot: FileSnapshotEntry[] | null } | null =
-      null;
+    let specVersionData: {
+      testingApprovedAt: Date | null;
+      filesSnapshot: FileSnapshotEntry[] | null;
+    } | null = null;
     if (publishVersionId !== null) {
       const [sv] = await db
         .select({
@@ -152,7 +154,11 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
 
     // Fetch testedVersion for the auto-resolve (no explicit versionId) path.
     let testedVersionData: { filesSnapshot: FileSnapshotEntry[] | null } | null = null;
-    if (project.testedSnapshotId !== null && project.testedSnapshotId !== undefined && publishVersionId === null) {
+    if (
+      project.testedSnapshotId !== null &&
+      project.testedSnapshotId !== undefined &&
+      publishVersionId === null
+    ) {
       const [tv] = await db
         .select({ filesSnapshot: projectVersionsTable.filesSnapshot })
         .from(projectVersionsTable)
@@ -162,7 +168,9 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
             eq(projectVersionsTable.projectId, projectId),
           ),
         );
-      testedVersionData = tv ? { filesSnapshot: tv.filesSnapshot as FileSnapshotEntry[] | null } : null;
+      testedVersionData = tv
+        ? { filesSnapshot: tv.filesSnapshot as FileSnapshotEntry[] | null }
+        : null;
     }
 
     const gate = evaluatePublishGate(

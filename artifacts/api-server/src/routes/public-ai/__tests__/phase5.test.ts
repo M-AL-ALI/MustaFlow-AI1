@@ -15,11 +15,7 @@ import {
   isImageExtension,
   MAX_IMAGE_SIZE_BYTES,
 } from "../../../lib/public-ai/image-validate";
-import {
-  storeImage,
-  getImage,
-  type ImageEntry,
-} from "../../../lib/public-ai/image-store";
+import { storeImage, getImage, type ImageEntry } from "../../../lib/public-ai/image-store";
 import {
   createSession,
   validateSession,

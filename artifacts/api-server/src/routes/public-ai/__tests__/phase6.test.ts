@@ -231,16 +231,18 @@ describe("handoff store — no file content transferred", () => {
 
 describe("input sanitization (content stripping)", () => {
   function sanitize(raw: string): string {
-    return raw
-      .replace(/<[^>]*>/g, " ")
-      .replace(/data:[a-z/+]+;base64,[^\s"']*/gi, "[binary]")
-      .replace(/\b(?:fileRef|imageRef|datasetRef|sessionId|fileId)\s*[:=]\s*\S+/gi, "[ref]")
-      .replace(/https?:\/\/\S+/gi, "[url]")
-      // eslint-disable-next-line no-useless-escape
-      .replace(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g, "[email]")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 300);
+    return (
+      raw
+        .replace(/<[^>]*>/g, " ")
+        .replace(/data:[a-z/+]+;base64,[^\s"']*/gi, "[binary]")
+        .replace(/\b(?:fileRef|imageRef|datasetRef|sessionId|fileId)\s*[:=]\s*\S+/gi, "[ref]")
+        .replace(/https?:\/\/\S+/gi, "[url]")
+        // eslint-disable-next-line no-useless-escape
+        .replace(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g, "[email]")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 300)
+    );
   }
 
   it("strips HTML tags from message content (leaving inner text as plain string)", () => {

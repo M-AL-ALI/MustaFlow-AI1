@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import app from "./app";
@@ -139,8 +139,7 @@ server.on("upgrade", (req, socket, head) => {
         const target = new URL(
           result.containerUrl.replace(/^https?:/, "ws:").replace(/\/$/, "") + (req.url ?? "/"),
         );
-        const http = require("node:http") as typeof import("node:http");
-        const proxyReq = http.request({
+        const proxyReq = httpRequest({
           hostname: target.hostname,
           port: target.port || 80,
           path: target.pathname + target.search,

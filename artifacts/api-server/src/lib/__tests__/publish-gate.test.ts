@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evaluatePublishGate } from "../publish-gate";
-import type { GateProject, GateSnapshotFile, GateSpecVersion, GateTestedVersion } from "../publish-gate";
+import type { GateProject, GateSnapshotFile, GateSpecVersion } from "../publish-gate";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -204,7 +204,10 @@ describe("explicit versionId path — gates ALL project types (not just agentic)
 
   it("allows and uses versionId snapshot when approved", () => {
     const project = staticProject();
-    const specVersion: GateSpecVersion = { testingApprovedAt: APPROVED_AT, filesSnapshot: SNAPSHOT };
+    const specVersion: GateSpecVersion = {
+      testingApprovedAt: APPROVED_AT,
+      filesSnapshot: SNAPSHOT,
+    };
     const result = evaluatePublishGate(7, project, specVersion, null);
     expect(result.ok).toBe(true);
     if (result.ok) {

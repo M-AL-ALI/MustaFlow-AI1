@@ -33,11 +33,7 @@ import {
   type AgentIdentity,
   backgroundWallClockFor,
 } from "../lib/jobs";
-import {
-  deductCreditsAtomic,
-  getOrCreateCredits,
-  CREDITS_ENFORCEMENT_ENABLED,
-} from "./credits";
+import { deductCreditsAtomic, getOrCreateCredits, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
 import { logger } from "../lib/logger";
 import { writeKnowledge } from "../lib/knowledge";
 import { fetchAttachmentAsDataUri } from "./images";

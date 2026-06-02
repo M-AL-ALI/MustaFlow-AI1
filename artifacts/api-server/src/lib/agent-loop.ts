@@ -4983,7 +4983,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           await safeEvent(input.onEvent, "narration", "Saving checkpoint before risky operation…");
           try {
             await input.onBeforeRiskyOp(`run_command: ${cmdStr.slice(0, 80)}`);
-          // eslint-disable-next-line no-empty
+            // eslint-disable-next-line no-empty
           } catch {}
         }
       }
@@ -5359,7 +5359,7 @@ export async function executeTool(ctx: ToolCtx): Promise<{
           await input.onBeforeRiskyOp(
             `pkg_install: ${decision.manager} ${decision.pkg}${decision.version ? `@${decision.version}` : ""}`,
           );
-        // eslint-disable-next-line no-empty
+          // eslint-disable-next-line no-empty
         } catch {}
       }
       await safeEvent(
