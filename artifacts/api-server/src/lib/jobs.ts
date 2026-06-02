@@ -208,13 +208,44 @@ async function runAgenticPreflightGate(
         throw err;
       }
       if (!wakeResult.ok) {
-        return { ok: false, message: wakeResult.message ?? "Container did not wake in time." };
+        // /healthz is still not responding — the HTTP server process may have
+        // crashed (e.g. the server throws at startup due to a missing env var).
+        // The Fly machine itself can still be alive.  Verify exec-layer access:
+        // if `ls /app` succeeds the agent CAN write files and fix the crash.
+        logger.warn(
+          { projectId, taskId, containerId },
+          "Server not responding to /healthz — probing exec layer to detect crashed server process",
+        );
+        let execLayerOk = false;
+        try {
+          const execProbe = await execInContainer(containerId, ["ls", "/app"], projectId);
+          execLayerOk = execProbe.ok;
+        } catch {
+          execLayerOk = false;
+        }
+
+        if (execLayerOk) {
+          // Machine is running but the server process has crashed.
+          // Allow the agent loop to proceed so it can fix the startup error.
+          logger.info(
+            { projectId, taskId, containerId },
+            "Container exec layer accessible despite /healthz failure — server process likely crashed; proceeding so agent can fix it",
+          );
+          await emitEvent(
+            taskId,
+            "narration",
+            "Server process appears to have crashed — proceeding to diagnose and fix…",
+          );
+        } else {
+          return { ok: false, message: wakeResult.message ?? "Container did not wake in time." };
+        }
+      } else {
+        await emitEvent(taskId, "narration", "Server woke up after a delay — proceeding");
+        logger.info(
+          { projectId, taskId, containerId },
+          "Container awake after retry — proceeding with build",
+        );
       }
-      await emitEvent(taskId, "narration", "Server woke up after a delay — proceeding");
-      logger.info(
-        { projectId, taskId, containerId },
-        "Container awake after retry — proceeding with build",
-      );
     } else {
       logger.info(
         { projectId, taskId, containerId, isFirstBuild },

@@ -1348,8 +1348,83 @@ The container runtime injects PORT (default 3000). Your server MUST read it:
 - Go/Gin:          port := os.Getenv("PORT"); if port == "" { port = "3000" }; router.Run(":" + port)
 Never hardcode a port other than as a fallback when PORT is unset.
 
+## Critical: server must start even without DATABASE_URL
+The preview container injects DATABASE_URL at runtime — but it may not be set during early preview checks before a database is provisioned. Your server MUST start and respond to HTTP requests even when DATABASE_URL is absent.
+
+Rules:
+- NEVER throw, crash, or call process.exit() at module import time because of a missing env var.
+- Use LAZY database initialization — create the pool/client inside the first function/handler that needs it, not at the module top level.
+- Add a GET /healthz route that always returns HTTP 200 and never touches the database.
+- Return HTTP 503 from DB-dependent endpoints when the database is unavailable.
+
+Pattern:
+\`\`\`ts
+// db.ts — lazy, never throws at import
+let _pool: Pool | null = null;
+export function getPool() {
+  if (!process.env.DATABASE_URL) return null;
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  return _pool;
+}
+
+// route handler
+app.get("/api/items", async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not yet configured" });
+  const result = await pool.query("SELECT * FROM items");
+  res.json(result.rows);
+});
+
+// healthz — always 200, never touches DB
+app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
+\`\`\`
+
 The app must always be a real server that handles HTTP requests — never generate a static-HTML-only build. You may run any shell commands (npm/npx/tsc/python/go/etc.) via run_command. To add dependencies, use pkg_install.`
-        : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
+        : ["node-api", "nextjs"].includes(stack)
+          ? `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.
+
+## Critical: server must start even without DATABASE_URL
+The preview container injects DATABASE_URL at runtime — but it may not be set during early preview checks before a database is provisioned. Your server MUST start and respond to HTTP requests even when DATABASE_URL is absent.
+
+Rules:
+- NEVER throw, crash, or call process.exit() at module import time because of a missing env var.
+- Use LAZY database initialization — create the pool/client INSIDE the function or handler that first needs it, not at the top level of a module.
+- Add a GET /healthz route that always returns HTTP 200 and never touches the database.
+- Return HTTP 503 (with a JSON body) from DB-dependent endpoints when DATABASE_URL is unset or the connection fails.
+
+Pattern:
+\`\`\`ts
+// src/db.ts — lazy, never throws at import time
+export function getPool() {
+  if (!process.env.DATABASE_URL) return null;
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  return _pool;
+}
+
+// route handler
+app.get("/api/items", async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: "Database not yet configured" });
+  const result = await pool.query("SELECT * FROM items");
+  res.json(result.rows);
+});
+
+// healthz — always 200, no DB
+app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
+\`\`\`
+
+## Critical: bind to process.env.PORT
+  const port = parseInt(process.env.PORT ?? "3000", 10);
+  app.listen(port, "0.0.0.0", () => console.log(\`Listening on \${port}\`));
+
+## npm install in containers — OOM / timeout handling
+Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL) or times out:
+- Do NOT retry npm install in a loop — it will keep failing.
+- Instead, check whether the server is already running: curl -sf http://localhost:3000/healthz
+- If the server responds → proceed to finalize immediately.
+- Use npx to run binaries that aren't in node_modules (e.g. \`npx tsx src/server/index.ts\`).
+- Never fail a task solely because npm install cannot complete — the server may already be running.`
+          : `This is a ${stack} project running inside a Linux container. You may run shell commands (npm/npx/tsc/python/etc.) via run_command. To add new dependencies, prefer pkg_install over raw \`npm install\`.`;
   return [
     isDeveloperMode
       ? `You are MustaFlow's Developer Mode AI. Your job is to ${input.mode === "build" ? "build" : "update"} a production-quality ${isStatic ? "Node.js/Express" : stack} server application that runs as a live process in a Linux container. The project is always containerized — never produce a raw static HTML bundle without a server.`

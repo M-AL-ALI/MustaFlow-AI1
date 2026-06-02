@@ -99,18 +99,71 @@ export const CHECK_PROFILES: Record<StackId, CheckProfile> = {
       {
         id: "typecheck",
         label: "TypeScript typecheck",
-        argv: ["sh", "-c", "cd /app && npx --yes --package typescript tsc --noEmit"],
+        // Use local tsc if available (node_modules present), fall back to npx.
+        // The `--` separator is required for npm@10 to correctly route to the
+        // `typescript` package binary rather than installing a `tsc` package.
+        argv: [
+          "sh",
+          "-c",
+          "cd /app && if [ -f ./node_modules/.bin/tsc ]; then ./node_modules/.bin/tsc --noEmit; else npx --yes --package typescript -- tsc --noEmit; fi",
+        ],
         runner: "container",
-        required: true,
+        // Non-required: npm install often fails with OOM (SIGKILL/137) in
+        // constrained Fly machines, making tsc unreachable. A timeout here
+        // must not block preview reachability — the server-start check is the
+        // real gate for whether the server is actually running.
+        required: false,
         timeoutMs: TWO_MIN,
       },
       {
         id: "node-syntax",
         label: "Node syntax check (entry)",
-        argv: ["sh", "-c", "cd /app && node --check index.js"],
+        // Detect the compiled entry from package.json `main`; skip gracefully
+        // when the project uses `tsx` (no pre-compiled JS entry at check time).
+        argv: [
+          "sh",
+          "-c",
+          "cd /app && MAIN=$(node -p 'try{const p=JSON.parse(require(\"fs\").readFileSync(\"package.json\",\"utf8\"));p.main||\"\"}catch(e){\"\"}' 2>/dev/null); if [ -n \"$MAIN\" ] && [ -f \"$MAIN\" ]; then node --check \"$MAIN\"; else echo \"No pre-compiled JS entry found — tsx-based server (skip).\"; fi",
+        ],
         runner: "container",
         required: false,
         timeoutMs: ONE_MIN,
+      },
+      {
+        id: "server-start",
+        label: "Server startup (healthz)",
+        // Poll the live dev-server on port 3000 first.  If it doesn't answer,
+        // try to (re-)start it via `npm run dev:server` and wait up to ~14 s.
+        // This surfaces DATABASE_URL / crash errors to the agent so it can fix
+        // them before calling finalize.
+        argv: [
+          "sh",
+          "-c",
+          [
+            "cd /app",
+            // Quick poll — server may already be running and healthy
+            "CODE=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:3000/healthz 2>/dev/null || echo 000)",
+            'if [ "$CODE" = "200" ]; then echo "healthz OK"; exit 0; fi',
+            // Not yet healthy — (re-)start the dev server
+            "pkill -f 'tsx ' 2>/dev/null || true",
+            "pkill -f 'node ' 2>/dev/null || true",
+            "sleep 1",
+            "export PORT=3000",
+            "nohup npm run dev:server >/tmp/__hc_server.log 2>&1 &",
+            // Poll up to 7 × 2 s = 14 s
+            "for i in 1 2 3 4 5 6 7; do",
+            "  sleep 2",
+            "  CODE=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:3000/healthz 2>/dev/null || echo 000)",
+            '  if [ "$CODE" = "200" ]; then echo "healthz OK after restart"; exit 0; fi',
+            "done",
+            'echo "Server did not respond to GET /healthz within 15 s (last HTTP $CODE)"',
+            "tail -50 /tmp/__hc_server.log 2>/dev/null || true",
+            "exit 1",
+          ].join("\n"),
+        ],
+        runner: "container",
+        required: true,
+        timeoutMs: TWO_MIN,
       },
     ],
   },
