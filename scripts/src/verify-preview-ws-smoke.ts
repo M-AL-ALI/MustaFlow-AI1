@@ -335,9 +335,7 @@ async function runSmoke(): Promise<void> {
 
   // 2. Insert test project pointing at echo server
   testProjectId = await insertTestProject(echoPort);
-  console.log(
-    `Test project id=${testProjectId}, testContainerUrl=http://127.0.0.1:${echoPort}\n`,
-  );
+  console.log(`Test project id=${testProjectId}, testContainerUrl=http://127.0.0.1:${echoPort}\n`);
 
   // ── Case 1: Valid session ─────────────────────────────────────────────────
   console.log("Case 1: Valid session — should reach OPEN and echo");
@@ -347,14 +345,8 @@ async function runSmoke(): Promise<void> {
   const c1 = await connectWs(validSid, validCookie);
   assert("WebSocket reaches OPEN", c1.opened, `opened=${c1.opened}`);
   assert("Sec-WebSocket-Accept forwarded correctly", c1.acceptHeader !== null);
-  assert(
-    "Echo response matches sent message",
-    c1.echo === "hello-smoke-test",
-    `got="${c1.echo}"`,
-  );
-  console.log(
-    `  Preview hostname pattern: ${validSid}.preview.${PLATFORM_DOMAIN}\n`,
-  );
+  assert("Echo response matches sent message", c1.echo === "hello-smoke-test", `got="${c1.echo}"`);
+  console.log(`  Preview hostname pattern: ${validSid}.preview.${PLATFORM_DOMAIN}\n`);
 
   // ── Case 2: Missing cookie ─────────────────────────────────────────────────
   console.log("Case 2: Missing cookie — should be rejected");
@@ -391,15 +383,11 @@ async function runSmoke(): Promise<void> {
 
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${"─".repeat(55)}`);
-  console.log(
-    `Result: ${passed} passed, ${failed} failed${failed > 0 ? " ← FAIL" : " ← PASS"}`,
-  );
+  console.log(`Result: ${passed} passed, ${failed} failed${failed > 0 ? " ← FAIL" : " ← PASS"}`);
 
   if (c1.opened && c1.echo === "hello-smoke-test") {
     console.log("\nWS Proxy smoke test: PASS");
-    console.log(
-      `  Preview subdomain pattern : {16-char-hex}.preview.${PLATFORM_DOMAIN}`,
-    );
+    console.log(`  Preview subdomain pattern : {16-char-hex}.preview.${PLATFORM_DOMAIN}`);
     console.log(`  TLS-aware proxy           : httpsRequest for https:// targets`);
     console.log(`  Header forwarding         : Sec-WebSocket-Accept forwarded correctly`);
     console.log(`  Session gate              : missing/expired/revoked cookies all rejected`);
