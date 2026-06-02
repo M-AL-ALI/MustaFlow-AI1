@@ -13,9 +13,6 @@ import {
   Image as ImageIcon,
   Layers2,
   FlaskConical,
-  Navigation,
-  Cpu,
-  Zap,
   LayoutTemplate,
   Clock,
   Lock,
@@ -25,7 +22,18 @@ import {
   CheckSquare,
   BookOpen as BookOpenIcon,
   Lightbulb,
+  MoreHorizontal,
+  AlertCircle,
+  ChevronDown,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   useGetAgentRouting,
@@ -40,36 +48,6 @@ import { BrainstormPanel } from "@/components/brainstorm-panel";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 type AgentType = "planning" | "task" | "main";
-
-const AGENT_OPTIONS: {
-  value: AgentType;
-  label: string;
-  description: string;
-  icon: React.ElementType;
-  className: string;
-}[] = [
-  {
-    value: "planning",
-    label: "Planning",
-    description: "Shows a plan before building — use this for big or complex changes.",
-    icon: Navigation,
-    className: "text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/15",
-  },
-  {
-    value: "task",
-    label: "Task",
-    description: "Stage changes for your review before applying",
-    icon: Cpu,
-    className: "text-amber-400 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/15",
-  },
-  {
-    value: "main",
-    label: "Main",
-    description: "Direct edit — changes apply immediately",
-    icon: Zap,
-    className: "text-green-400 border-green-500/30 bg-green-500/10 hover:bg-green-500/15",
-  },
-];
 
 interface QueueRow {
   id: string;
@@ -216,6 +194,10 @@ interface QueueComposerProps {
   onPromptValueChange?: (v: string) => void;
   onAgentIdentityChange?: (identity: AgentType) => void;
   chatPlaceholder?: string;
+  issueCount?: number;
+  hasFailedBuild?: boolean;
+  hasContainerError?: boolean;
+  hasCodeQuality?: boolean;
 }
 
 export function QueueComposer({
@@ -238,6 +220,10 @@ export function QueueComposer({
   onPromptValueChange,
   onAgentIdentityChange,
   chatPlaceholder,
+  issueCount = 0,
+  hasFailedBuild = false,
+  hasContainerError = false,
+  hasCodeQuality = false,
 }: QueueComposerProps) {
   const lsKey = `mustaflow_agent_type_${projectId}`;
   const [agentType, setAgentTypeRaw] = useState<AgentType>(() => {
@@ -622,6 +608,15 @@ export function QueueComposer({
       /\b(add|build|create|make|implement|fix|remove|delete|update|change|refactor|style|integrate|connect|deploy|enable|disable|install|generate|write)\b/;
     if (buildWords.test(lower)) return "build";
     return null;
+  }, [rows]);
+
+  const isDesignIntent = useMemo(() => {
+    const text = rows[0]?.text?.trim() ?? "";
+    if (text.length < 4) return false;
+    const lower = text.toLowerCase();
+    return /\b(design|landing|dashboard|look|style|layout|screen|page|ui|theme|redesign|color|font|hero|banner)\b/.test(
+      lower,
+    );
   }, [rows]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -1823,6 +1818,65 @@ export function QueueComposer({
                 </button>
               </>
             )}
+            {/* Plan first / Run in background checkboxes */}
+            <button
+              type="button"
+              onClick={() => setAgentType(agentType === "planning" ? "main" : "planning")}
+              title={
+                agentType === "planning"
+                  ? "Plan first is on — AI will show a plan before building"
+                  : "Enable Plan first — AI will show a plan before building"
+              }
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
+                agentType === "planning"
+                  ? "border-blue-500/30 bg-blue-500/10 text-blue-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-3 w-3 rounded-sm border flex items-center justify-center shrink-0",
+                  agentType === "planning"
+                    ? "border-blue-400 bg-blue-500/20"
+                    : "border-muted-foreground/40",
+                )}
+              >
+                {agentType === "planning" && (
+                  <span className="h-1.5 w-1.5 rounded-sm bg-blue-400 block" />
+                )}
+              </span>
+              Plan first
+            </button>
+            <button
+              type="button"
+              onClick={() => setAgentType(agentType === "task" ? "main" : "task")}
+              title={
+                agentType === "task"
+                  ? "Run in background is on — tasks queue instead of blocking"
+                  : "Enable Run in background — tasks queue instead of blocking"
+              }
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
+                agentType === "task"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-3 w-3 rounded-sm border flex items-center justify-center shrink-0",
+                  agentType === "task"
+                    ? "border-amber-400 bg-amber-500/20"
+                    : "border-muted-foreground/40",
+                )}
+              >
+                {agentType === "task" && (
+                  <span className="h-1.5 w-1.5 rounded-sm bg-amber-400 block" />
+                )}
+              </span>
+              Background
+            </button>
             <div className="ml-auto flex items-center gap-2">
               <div className="flex flex-col items-end gap-0.5">
                 {/* Discuss / Brainstorm pill — opens the full BrainstormPanel */}
@@ -1936,30 +1990,211 @@ export function QueueComposer({
       </div>
 
       {!isBusy && (
-        <div className="mt-1.5 px-9 flex items-center gap-2 flex-wrap">
-          {/* Three-way agent selector */}
-          <div className="flex items-center gap-1 bg-background/60 border border-border rounded-lg p-0.5">
-            {AGENT_OPTIONS.map((opt) => {
-              const Icon = opt.icon;
-              const isActive = agentType === opt.value;
-              return (
+        <div className="mt-1.5 px-3 flex items-center gap-2 flex-wrap">
+          {/* Fix Issues — only when issueCount > 0 */}
+          {issueCount > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
                 <button
-                  key={opt.value}
-                  onClick={() => setAgentType(opt.value)}
-                  title={opt.description}
-                  className={cn(
-                    "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border",
-                    isActive
-                      ? opt.className
-                      : "text-muted-foreground border-transparent hover:text-foreground",
-                  )}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                  title="View detected issues and apply one-click fixes"
                 >
-                  <Icon className="h-3 w-3" />
-                  {opt.label}
+                  <AlertCircle className="h-3 w-3" />
+                  Fix Issues
+                  <span className="ml-0.5 bg-destructive/30 text-destructive rounded-full px-1 text-[9px] font-bold">
+                    {issueCount}
+                  </span>
                 </button>
-              );
-            })}
-          </div>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start" side="top">
+                <p className="text-[11px] font-semibold text-foreground mb-2">
+                  Detected issues — pick a fix
+                </p>
+                <div className="flex flex-col gap-1">
+                  {(hasFailedBuild || hasCodeQuality) && (
+                    <>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          onSingleSend(
+                            "Fix all TypeScript type errors in this project",
+                            "fix_types",
+                          );
+                        }}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] text-left text-foreground hover:bg-accent transition-colors disabled:opacity-40 w-full"
+                      >
+                        <Wrench className="h-3 w-3 text-blue-400 shrink-0" />
+                        Fix TypeScript errors
+                      </button>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          onSingleSend("Fix all ESLint violations in this project", "fix_lint");
+                        }}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] text-left text-foreground hover:bg-accent transition-colors disabled:opacity-40 w-full"
+                      >
+                        <CheckSquare className="h-3 w-3 text-amber-400 shrink-0" />
+                        Fix lint issues
+                      </button>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          onSingleSend("Fix all failing tests in this project", "fix_tests");
+                        }}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] text-left text-foreground hover:bg-accent transition-colors disabled:opacity-40 w-full"
+                      >
+                        <FlaskConical className="h-3 w-3 text-emerald-400 shrink-0" />
+                        Fix failing tests
+                      </button>
+                    </>
+                  )}
+                  {hasContainerError && (
+                    <button
+                      disabled={disabled}
+                      onClick={() => {
+                        if (disabled) return;
+                        onSingleSend(
+                          "The server is not starting — find and fix the startup error",
+                          "fix_types",
+                        );
+                      }}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] text-left text-foreground hover:bg-accent transition-colors disabled:opacity-40 w-full"
+                    >
+                      <Bug className="h-3 w-3 text-red-400 shrink-0" />
+                      Fix server startup
+                    </button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+
+          {/* Templates — always visible */}
+          <button
+            onClick={() => setShowTemplatePicker(true)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
+            title="Start from a pre-built plan template"
+          >
+            <LayoutTemplate className="h-3 w-3" /> Templates
+          </button>
+
+          {/* More dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
+                title="More actions"
+              >
+                <MoreHorizontal className="h-3 w-3" />
+                More
+                <ChevronDown className="h-2.5 w-2.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" className="w-52">
+              <DropdownMenuItem
+                onClick={() => {
+                  setActiveIntent("debug");
+                  const newId = crypto.randomUUID();
+                  setRows([{ id: newId, text: "Debug this error: " }]);
+                  if (onPromptValueChange) onPromptValueChange("Debug this error: ");
+                }}
+              >
+                <Bug className="h-3.5 w-3.5 text-red-400" />
+                Debug project
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setActiveIntent("review");
+                  const newId = crypto.randomUUID();
+                  setRows([{ id: newId, text: "Review my code for " }]);
+                  if (onPromptValueChange) onPromptValueChange("Review my code for ");
+                }}
+              >
+                <CheckSquare className="h-3.5 w-3.5 text-blue-400" />
+                Review project
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setActiveIntent("explain");
+                  const newId = crypto.randomUUID();
+                  setRows([{ id: newId, text: "Explain how " }]);
+                  if (onPromptValueChange) onPromptValueChange("Explain how ");
+                }}
+              >
+                <BookOpenIcon className="h-3.5 w-3.5 text-violet-400" />
+                Explain project
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setActiveIntent("refactor");
+                  const newId = crypto.randomUUID();
+                  setRows([{ id: newId, text: "Refactor " }]);
+                  if (onPromptValueChange) onPromptValueChange("Refactor ");
+                }}
+              >
+                <Wrench className="h-3.5 w-3.5 text-yellow-400" />
+                Refactor / improve
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onVariantModeChange(!variantMode)}>
+                <Layers2 className="h-3.5 w-3.5 text-violet-400" />
+                Generate variants
+                {variantMode && <span className="ml-auto text-[9px] text-violet-400">on</span>}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowPlanHistory(true)}>
+                <Clock className="h-3.5 w-3.5" />
+                Plan history
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onSingleSend("Fix all failing tests in this project", "fix_tests");
+                }}
+              >
+                <FlaskConical className="h-3.5 w-3.5 text-emerald-400" />
+                Fix tests
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onSingleSend("Fix all TypeScript type errors in this project", "fix_types");
+                }}
+              >
+                <Wrench className="h-3.5 w-3.5 text-blue-400" />
+                Fix TypeScript
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onSingleSend("Fix all ESLint violations in this project", "fix_lint");
+                }}
+              >
+                <CheckSquare className="h-3.5 w-3.5 text-amber-400" />
+                Fix lint
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Contextual variants chip — shown when prompt matches design keywords */}
+          {isDesignIntent && !variantMode && (
+            <button
+              onClick={() => {
+                onVariantModeChange(true);
+                void handleSend();
+              }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-violet-500/30 bg-violet-500/8 text-violet-400 hover:bg-violet-500/15 transition-colors"
+              title="Generate 2 design variants (A: minimalist, B: bold) and pick the best"
+            >
+              <Layers2 className="h-3 w-3" /> Generate 2 variants
+            </button>
+          )}
 
           {/* Client-side intent hint badge — display-only, updates instantly as user types */}
           {clientIntent && !planMode && (
@@ -1981,9 +2216,7 @@ export function QueueComposer({
             </span>
           )}
 
-          {/* Routing hint badge — updates as user types.
-              "planning" is suppressed here because plan intent is auto-detected
-              and applied on send — no manual switch required. */}
+          {/* Routing hint badge — updates as user types */}
           {routingHint?.agentIdentity &&
             routingHint.agentIdentity !== agentType &&
             routingHint.agentIdentity !== "planning" && (
@@ -1995,158 +2228,6 @@ export function QueueComposer({
                 Switch to {routingHint.agentIdentity === "task" ? "Task" : "Main"} Agent
               </button>
             )}
-
-          <button
-            onClick={() => onVariantModeChange(!variantMode)}
-            className={cn(
-              "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors border",
-              variantMode
-                ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
-                : "text-muted-foreground border-border hover:text-foreground",
-            )}
-            title="Generate 2 design variants (A: minimalist, B: bold) and pick the best"
-          >
-            <Layers2 className="h-3 w-3" /> 2 Variants
-          </button>
-
-          {/* Developer intent quick-action buttons */}
-          {[
-            {
-              intent: "debug" as const,
-              icon: Bug,
-              label: "Debug",
-              starter: "Debug this error: ",
-              title:
-                "Paste a stack trace or error message and get a root-cause analysis · 1 credit",
-              cls: "border-red-500/20 text-red-400/70 hover:text-red-400 hover:border-red-500/40",
-              activeCls: "border-red-500/40 text-red-400 bg-red-500/10",
-            },
-            {
-              intent: "refactor" as const,
-              icon: Wrench,
-              label: "Refactor",
-              starter: "Refactor ",
-              title: "Improve code structure without changing behaviour · 1 credit",
-              cls: "border-yellow-500/20 text-yellow-400/70 hover:text-yellow-400 hover:border-yellow-500/40",
-              activeCls: "border-yellow-500/40 text-yellow-400 bg-yellow-500/10",
-            },
-            {
-              intent: "review" as const,
-              icon: CheckSquare,
-              label: "Review",
-              starter: "Review my code for ",
-              title: "Get a structured code review — Critical / Warnings / Suggestions · 1 credit",
-              cls: "border-blue-500/20 text-blue-400/70 hover:text-blue-400 hover:border-blue-500/40",
-              activeCls: "border-blue-500/40 text-blue-400 bg-blue-500/10",
-            },
-            {
-              intent: "explain" as const,
-              icon: BookOpenIcon,
-              label: "Explain",
-              starter: "Explain how ",
-              title: "Get a deep technical explanation with architectural context · 1 credit",
-              cls: "border-violet-500/20 text-violet-400/70 hover:text-violet-400 hover:border-violet-500/40",
-              activeCls: "border-violet-500/40 text-violet-400 bg-violet-500/10",
-            },
-          ].map(({ intent, icon: Icon, label, starter, title, cls, activeCls }) => {
-            const isActive = activeIntent === intent;
-            return (
-              <button
-                key={intent}
-                title={isActive ? `${label} mode is active — click to deactivate` : title}
-                onClick={() => {
-                  if (isActive) {
-                    setActiveIntent(null);
-                    return;
-                  }
-                  // Set the intent mode and prefill the textarea with the starter text
-                  setActiveIntent(intent);
-                  const newId = crypto.randomUUID();
-                  setRows([{ id: newId, text: starter }]);
-                  if (onPromptValueChange) onPromptValueChange(starter);
-                  setTimeout(() => {
-                    const ta = textareaRefs.current.get(newId);
-                    if (ta) {
-                      ta.focus();
-                      ta.setSelectionRange(ta.value.length, ta.value.length);
-                    }
-                  }, 50);
-                }}
-                className={cn(
-                  "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border bg-transparent",
-                  isActive ? activeCls : cls,
-                )}
-              >
-                <Icon className="h-3 w-3" />
-                {label}
-              </button>
-            );
-          })}
-
-          {/* Fix failing tests — one-shot trigger for the test-fix loop */}
-          <button
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              onSingleSend("Fix all failing tests in this project", "fix_tests");
-            }}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-emerald-500/20 text-emerald-400/70 hover:text-emerald-400 hover:border-emerald-500/40 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Run the test suite, identify failing tests, and automatically fix them — loops until all tests pass · costs build credits"
-          >
-            <FlaskConical className="h-3 w-3" /> Fix tests
-          </button>
-
-          {/* Fix TypeScript errors — one-shot trigger for the tsc fix loop */}
-          <button
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              onSingleSend("Fix all TypeScript type errors in this project", "fix_types");
-            }}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-blue-500/20 text-blue-400/70 hover:text-blue-400 hover:border-blue-500/40 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Run tsc --noEmit, read the type errors, and automatically fix them — loops until the project compiles clean · costs build credits"
-          >
-            <Wrench className="h-3 w-3" /> Fix types
-          </button>
-
-          {/* Fix lint violations — one-shot trigger for the eslint fix loop */}
-          <button
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              onSingleSend("Fix all ESLint violations in this project", "fix_lint");
-            }}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-amber-500/20 text-amber-400/70 hover:text-amber-400 hover:border-amber-500/40 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Run ESLint, read the violations, and automatically fix them — loops until zero warnings · costs build credits"
-          >
-            <CheckSquare className="h-3 w-3" /> Fix lint
-          </button>
-
-          {/* Template picker + plan history — shown in Planning mode */}
-          {agentType === "planning" && (
-            <>
-              <button
-                onClick={() => setShowTemplatePicker(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
-                title="Start from a pre-built plan template"
-              >
-                <LayoutTemplate className="h-3 w-3" /> Templates
-              </button>
-              <button
-                onClick={() => setShowPlanHistory(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors border text-muted-foreground border-border hover:text-foreground"
-                title="View and restore previous plan versions"
-              >
-                <Clock className="h-3 w-3" /> Plan history
-              </button>
-            </>
-          )}
-
-          {!isMultiRow && (
-            <span className="ml-auto text-[9px] text-muted-foreground/40">
-              ⌘↩ send · Shift+↩ add task
-            </span>
-          )}
         </div>
       )}
 

@@ -114,6 +114,8 @@ function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
 import { SuggestionChips } from "./components/suggestion-chips";
 import { SavedSuggestionsTab } from "./components/saved-suggestions-tab";
 import { QueueComposer } from "./components/queue-composer";
+import { TaskQueuePanel } from "./components/task-queue-panel";
+import { useProjectIssues } from "@/hooks/use-project-issues";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
 import { BackgroundTasksDrawer, type BgTask } from "./components/background-tasks-drawer";
 import { ZeroAgentPanel } from "./components/zero-agent-panel";
@@ -1611,7 +1613,9 @@ export default function ProjectWorkspacePage() {
         | "refactor"
         | "review"
         | "explain"
-        | "fix_tests";
+        | "fix_tests"
+        | "fix_types"
+        | "fix_lint";
       attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
     };
   } | null>(null);
@@ -1619,6 +1623,9 @@ export default function ProjectWorkspacePage() {
   // Combined busy state — true when either the regular mutation or the streaming fetch is active.
   // Declared early so query refetchInterval options can reference it without a forward-reference.
   const isBusy = sendMessage.isPending || isStreaming;
+
+  // ── Project issues detection ────────────────────────────────────────────────
+  const projectIssues = useProjectIssues(projectId, containerStatus, project?.builderMode);
 
   // ── Navigation guard (Task #755) ───────────────────────────────────────────
   // Warn users before they leave while a build is in progress.
@@ -1970,7 +1977,9 @@ export default function ProjectWorkspacePage() {
           | "refactor"
           | "review"
           | "explain"
-          | "fix_tests";
+          | "fix_tests"
+          | "fix_types"
+          | "fix_lint";
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
         idempotencyKey?: string;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -2058,7 +2067,9 @@ export default function ProjectWorkspacePage() {
           | "refactor"
           | "review"
           | "explain"
-          | "fix_tests";
+          | "fix_tests"
+          | "fix_types"
+          | "fix_lint";
         /** Override agent identity — pass "task" for auto-fix retries from QualityGateFailureCard. */
         agentIdentity?: string;
         attachments?: Array<{
@@ -4127,6 +4138,9 @@ export default function ProjectWorkspacePage() {
                     </div>
                   )}
 
+                  {/* Task queue panel — shows running / queued / paused tasks above composer */}
+                  <TaskQueuePanel projectId={projectId} onStop={handleStopStream} />
+
                   {/* Chat / Queue input */}
                   <div data-tour="chat-input">
                     <QueueComposer
@@ -4143,6 +4157,10 @@ export default function ProjectWorkspacePage() {
                       disabled={isBusy}
                       activeTaskId={activeTaskId}
                       onStopBuild={handleStopStream}
+                      issueCount={projectIssues.totalCount}
+                      hasFailedBuild={projectIssues.hasFailedBuild}
+                      hasContainerError={projectIssues.hasContainerError}
+                      hasCodeQuality={projectIssues.hasCodeQuality}
                       chatPlaceholder={
                         project?.builderMode === "agentic"
                           ? "Describe a feature or change — I'll plan, build, and test it for you…"
@@ -4193,7 +4211,11 @@ export default function ProjectWorkspacePage() {
                                         ? { agentIntent: "explain" as const }
                                         : intent === "fix_tests"
                                           ? { agentIntent: "fix_tests" as const }
-                                          : {}),
+                                          : intent === "fix_types"
+                                            ? { agentIntent: "fix_types" as const }
+                                            : intent === "fix_lint"
+                                              ? { agentIntent: "fix_lint" as const }
+                                              : {}),
                           ...(brainstormContext && brainstormContext.length > 0
                             ? { brainstormContext }
                             : {}),

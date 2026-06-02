@@ -17,4 +17,11 @@ export const ChatExchangeDetectedIntent = {
   plan: 'plan',
   build: 'build',
   image_generate: 'image_generate',
+  fix_tests: 'fix_tests',
+  fix_types: 'fix_types',
+  fix_lint: 'fix_lint',
+  debug: 'debug',
+  refactor: 'refactor',
+  review: 'review',
+  explain: 'explain',
 } as const;
