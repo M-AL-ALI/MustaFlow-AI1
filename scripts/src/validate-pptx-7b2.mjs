@@ -4,9 +4,11 @@
  * Step 2 (Python):  Inspect the file via Python's built-in zipfile module and validate structure/content.
  */
 
+/* eslint-disable no-console */
+/* global process, console */
 import { createRequire } from "module";
 import { statSync } from "fs";
-import { execSync, spawnSync } from "child_process";
+import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
 

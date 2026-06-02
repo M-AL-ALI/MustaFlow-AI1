@@ -224,6 +224,7 @@ async function main(): Promise<void> {
 
   // Temporarily set to completed_with_errors, evaluate the gate, restore.
   let publishGateBlocked = false;
+  // eslint-disable-next-line no-useless-assignment
   let publishGateNote = "";
   if (latestVersion) {
     await pool.query(

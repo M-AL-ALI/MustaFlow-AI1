@@ -37,6 +37,7 @@ async function sleep(ms: number) {
 async function main() {
   const results: Record<string, Result> = {};
   const start = Date.now();
+  // eslint-disable-next-line no-useless-assignment
   let taskId: number | null = null;
 
   console.log(`\nAI Builder Live Verification — project ${PROJECT_ID}`);
@@ -132,6 +133,7 @@ async function main() {
   // ── Step 3: Poll until task completes ────────────────────────────────────
   console.log("\n── Step 3: Polling for completion (max 10 min) ──");
   let finalStatus = "";
+  // eslint-disable-next-line no-useless-assignment
   let eventCount = 0;
   let elapsed = 0;
 
@@ -249,7 +251,7 @@ async function main() {
      FROM project_versions WHERE project_id=$1 ORDER BY id DESC LIMIT 3`,
     [PROJECT_ID],
   );
-  const newVersions = versionRows.filter((v) => Number(baseVersionCount) < 9999); // all versions after baseline
+  const _newVersions = versionRows.filter((_v) => Number(baseVersionCount) < 9999); // all versions after baseline
   console.log("  Recent versions:");
   versionRows.forEach((v) =>
     console.log(`    id=${v.id} validation_status=${v.validation_status} created=${v.created_at}`),

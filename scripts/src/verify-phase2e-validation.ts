@@ -80,7 +80,7 @@ async function main() {
     const seen = new Set(rows.map((r) => r.validation_status).filter(Boolean));
     const hasPassedWithWarnings = seen.has("passed_with_warnings");
     const typesOk = ["passed", "passed_with_warnings", "failed", "completed_with_errors"].every(
-      (v) => true /* column accepts any text — type is enforced by TS, not PG check constraint */,
+      (_v) => true /* column accepts any text — type is enforced by TS, not PG check constraint */,
     );
     console.log(`\n1. DB validation_status values seen: ${[...seen].join(", ") || "(none)"}`);
     if (hasPassedWithWarnings) {
@@ -115,7 +115,7 @@ async function main() {
     const warningChecks = [
       { id: "typecheck", label: "TypeScript typecheck", message: "error TS2345" },
     ];
-    const report = {
+    const _report = {
       allChecksPassed: false,
       warningChecks,
       warnings: ["Non-blocking validation checks failed: TypeScript typecheck."],

@@ -37,7 +37,9 @@ async function sleep(ms: number) {
 async function main() {
   const results: Record<string, Result> = {};
   const start = Date.now();
+  // eslint-disable-next-line no-useless-assignment
   let preCreatedTaskId: number | null = null;
+  // eslint-disable-next-line no-useless-assignment
   let injectedFileId: number | null = null;
 
   console.log(`\nPhase 2E Live Verification — project ${PROJECT_ID}`);

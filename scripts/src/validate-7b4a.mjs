@@ -4,8 +4,9 @@
  *        management summary, improvement roadmap, DOCX, XLSX, privacy audit.
  */
 
+/* eslint-disable no-console */
+/* global URL, TextDecoder, process, console */
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { createRequire } from "node:module";
 
 // Resolve xlsx/docx from mustaflow's node_modules (they aren't in scripts/)
@@ -313,7 +314,7 @@ const BANNED_FIELDS = [
   "flymachine",
 ];
 
-function hasNoBannedFields(obj, path = "") {
+function hasNoBannedFields(obj, _path = "") {
   const str = JSON.stringify(obj).toLowerCase();
   const found = BANNED_FIELDS.filter((f) => str.includes(f.toLowerCase()));
   return found.length === 0 ? { clean: true } : { clean: false, found };
@@ -727,7 +728,7 @@ try {
   let entryCount = 0;
   let hasDocumentXml = false;
   let hasContentTypes = false;
-  let hasPresentation = false;
+  let _hasPresentation = false;
 
   // Simple ZIP local file header scan (0x504B0304)
   let pos = 0;
@@ -763,7 +764,7 @@ try {
 
 // Group 11: Regression — existing section IDs still match code
 console.log("\n── Regression Audit ───────────────────────────────");
-const legacyExportSections = [
+const _legacyExportSections = [
   "executive-summary",
   "key-findings",
   "recommendations",

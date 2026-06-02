@@ -111,7 +111,7 @@ const STAGE_PROMPT: Record<Stage, string> = {
   architect: ARCHITECT_SYSTEM_PROMPT,
 };
 
-const STAGE_JSON_MODE: Record<Stage, boolean> = {
+const _STAGE_JSON_MODE: Record<Stage, boolean> = {
   build: true,
   refine: true,
   plan: true,
@@ -532,6 +532,7 @@ async function main() {
   );
   const latest = await runAll();
 
+  // eslint-disable-next-line no-useless-assignment
   let baseline: RunRecord | null = null;
   try {
     baseline = JSON.parse(await readFile(BASELINE_PATH, "utf8")) as RunRecord;

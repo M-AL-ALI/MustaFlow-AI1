@@ -51,6 +51,7 @@ async function sleep(ms: number) {
 async function main() {
   const results: Record<string, Result> = {};
   const start = Date.now();
+  // eslint-disable-next-line no-useless-assignment
   let taskId: number | null = null;
 
   console.log(`\nFull-Stack AI Builder Live Verification — project ${PROJECT_ID}`);
@@ -420,6 +421,7 @@ async function main() {
 
   // ── Criterion 11: HTML has interactive elements ───────────────────────────
   let htmlHasInteractiveElements = false;
+  // eslint-disable-next-line no-useless-assignment
   let htmlNote = "";
   if (containerHttpOk && proj.container_url) {
     try {

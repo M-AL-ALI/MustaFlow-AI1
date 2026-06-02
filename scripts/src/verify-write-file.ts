@@ -111,9 +111,8 @@ if (!canExec) {
 } else {
   // 1a. Write to container
   const writeOk = await writeFileTo(containerId, TEST_FILE, TEST_CONTENT);
-  writeOk
-    ? pass("1a writeFileToContainer returns true")
-    : fail("1a writeFileToContainer returned false — sync failed");
+  if (writeOk) pass("1a writeFileToContainer returns true");
+  else fail("1a writeFileToContainer returned false — sync failed");
 
   // 1b. Read back from container
   const readBack = await execInMachine(containerId, ["/bin/sh", "-c", `cat /app/${TEST_FILE}`]);
@@ -135,15 +134,13 @@ if (!canExec) {
     "-c",
     `test -f /app/${TEST_FILE} && echo EXISTS || echo MISSING`,
   ]);
-  pathCheck.stdout.trim() === "EXISTS"
-    ? pass("1c file exists at /app/ path in container")
-    : fail("1c file not found at /app/ path", pathCheck.stdout.trim());
+  if (pathCheck.stdout.trim() === "EXISTS") pass("1c file exists at /app/ path in container");
+  else fail("1c file not found at /app/ path", pathCheck.stdout.trim());
 
   // 1d. Failure case: bad container returns false (not success)
   const badWrite = await writeFileTo("nonexistent-machine-00000", TEST_FILE, TEST_CONTENT);
-  !badWrite
-    ? pass("1d bad-container write returns false (would have looped before fix)")
-    : fail("1d bad-container write incorrectly returned true");
+  if (!badWrite) pass("1d bad-container write returns false (would have looped before fix)");
+  else fail("1d bad-container write incorrectly returned true");
 
   // Cleanup
   await execInMachine(containerId, ["/bin/sh", "-c", `rm -f /app/${TEST_FILE}`]);
@@ -162,29 +159,31 @@ const previewSrc = readFileSync(
 );
 
 // file_diff emitted from write_file and apply_patch
-agentSrc.includes('op: "write"') && agentSrc.includes("emitFileDiffEvent")
-  ? pass("2a file_diff emitted from write_file tool handler")
-  : fail("2a file_diff emission missing from write_file");
+if (agentSrc.includes('op: "write"') && agentSrc.includes("emitFileDiffEvent"))
+  pass("2a file_diff emitted from write_file tool handler");
+else fail("2a file_diff emission missing from write_file");
 
-agentSrc.includes('op: "patch"') && agentSrc.includes("emitFileDiffEvent")
-  ? pass("2b file_diff emitted from apply_patch tool handler")
-  : fail("2b file_diff emission missing from apply_patch");
+if (agentSrc.includes('op: "patch"') && agentSrc.includes("emitFileDiffEvent"))
+  pass("2b file_diff emitted from apply_patch tool handler");
+else fail("2b file_diff emission missing from apply_patch");
 
 // jobs.ts emits updating_preview after pipeline completes
-jobsSrc.includes("updating_preview")
-  ? pass("2c updating_preview event emitted in jobs.ts build pipeline")
-  : fail("2c updating_preview not found in jobs.ts");
+if (jobsSrc.includes("updating_preview"))
+  pass("2c updating_preview event emitted in jobs.ts build pipeline");
+else fail("2c updating_preview not found in jobs.ts");
 
 // Frontend PreviewPane has refreshTrigger
-previewSrc.includes("refreshTrigger")
-  ? pass("2d PreviewPane uses refreshTrigger to reload iframe")
-  : fail("2d PreviewPane refreshTrigger not found");
+if (previewSrc.includes("refreshTrigger"))
+  pass("2d PreviewPane uses refreshTrigger to reload iframe");
+else fail("2d PreviewPane refreshTrigger not found");
 
 // refreshTrigger is wired to a useEffect that reloads the iframe
-previewSrc.includes("prevRefreshTriggerRef") &&
-previewSrc.includes("refreshTrigger !== prevRefreshTriggerRef.current")
-  ? pass("2e refreshTrigger change detection fires iframe reload")
-  : fail("2e refreshTrigger change detection not found");
+if (
+  previewSrc.includes("prevRefreshTriggerRef") &&
+  previewSrc.includes("refreshTrigger !== prevRefreshTriggerRef.current")
+)
+  pass("2e refreshTrigger change detection fires iframe reload");
+else fail("2e refreshTrigger change detection not found");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST 3: Failure behavior — write_file returns ok:false, no blind loop
@@ -192,35 +191,45 @@ previewSrc.includes("refreshTrigger !== prevRefreshTriggerRef.current")
 section("Test 3: Failure behavior");
 
 // write_file tool handler: syncFailed → ok:false with BLOCKED message
-agentSrc.includes("syncFailed") &&
-agentSrc.includes("BLOCKED: write_file workspace save succeeded but container sync FAILED")
-  ? pass("3a write_file returns ok:false when container sync fails")
-  : fail("3a write_file ok:false branch not found");
+if (
+  agentSrc.includes("syncFailed") &&
+  agentSrc.includes("BLOCKED: write_file workspace save succeeded but container sync FAILED")
+)
+  pass("3a write_file returns ok:false when container sync fails");
+else fail("3a write_file ok:false branch not found");
 
 // apply_patch tool handler: same check
-agentSrc.includes("patchSyncFailed") &&
-agentSrc.includes("BLOCKED: apply_patch workspace save succeeded but container sync FAILED")
-  ? pass("3b apply_patch returns ok:false when container sync fails")
-  : fail("3b apply_patch ok:false branch not found");
+if (
+  agentSrc.includes("patchSyncFailed") &&
+  agentSrc.includes("BLOCKED: apply_patch workspace save succeeded but container sync FAILED")
+)
+  pass("3b apply_patch returns ok:false when container sync fails");
+else fail("3b apply_patch ok:false branch not found");
 
 // ok:false propagates to consecutiveErrors (not silently reset to 0)
-agentSrc.includes("if (lastError === observation) consecutiveErrors++") &&
-agentSrc.includes("consecutiveErrors = 1;")
-  ? pass("3c ok:false result increments consecutiveErrors (REPEATED_ERROR_CAP terminates after 3)")
-  : fail("3c consecutiveErrors tracking not found");
+if (
+  agentSrc.includes("if (lastError === observation) consecutiveErrors++") &&
+  agentSrc.includes("consecutiveErrors = 1;")
+)
+  pass("3c ok:false result increments consecutiveErrors (REPEATED_ERROR_CAP terminates after 3)");
+else fail("3c consecutiveErrors tracking not found");
 
 // build timeline narrates "Blocked:" for repeated-error termination
-agentSrc.includes('terminationReason === "repeated-error"') &&
-agentSrc.includes("Blocked: file write to container failed repeatedly")
-  ? pass("3d build timeline emits Blocked: narration for repeated-error")
-  : fail("3d Blocked: narration for repeated-error not found");
+if (
+  agentSrc.includes('terminationReason === "repeated-error"') &&
+  agentSrc.includes("Blocked: file write to container failed repeatedly")
+)
+  pass("3d build timeline emits Blocked: narration for repeated-error");
+else fail("3d Blocked: narration for repeated-error not found");
 
 // Agent does not continue past a failed write (ok:false short-circuits tool handler)
-agentSrc.includes("if (syncFailed)") &&
-agentSrc.includes("return {") &&
-agentSrc.includes("Do NOT keep editing other files")
-  ? pass("3e agent stops editing other files when sync fails (instruction in observation)")
-  : fail("3e stop-editing instruction missing from sync-failed observation");
+if (
+  agentSrc.includes("if (syncFailed)") &&
+  agentSrc.includes("return {") &&
+  agentSrc.includes("Do NOT keep editing other files")
+)
+  pass("3e agent stops editing other files when sync fails (instruction in observation)");
+else fail("3e stop-editing instruction missing from sync-failed observation");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST 4: Stuck-loop strategy-change detection
@@ -228,15 +237,17 @@ agentSrc.includes("Do NOT keep editing other files")
 section("Test 4: Stuck-loop strategy-change detection");
 
 // Per-path failure map declared outside the per-step loop
-agentSrc.includes("const pathConsecutiveCheckFails = new Map<string, number>()")
-  ? pass("4a pathConsecutiveCheckFails map declared (persists across turns)")
-  : fail("4a pathConsecutiveCheckFails map not found");
+if (agentSrc.includes("const pathConsecutiveCheckFails = new Map<string, number>()"))
+  pass("4a pathConsecutiveCheckFails map declared (persists across turns)");
+else fail("4a pathConsecutiveCheckFails map not found");
 
 // Triggered after 2 consecutive failures on the same path
-agentSrc.includes("STRATEGY CHANGE REQUIRED") &&
-agentSrc.includes("pathConsecutiveCheckFails.get(p) ?? 0) >= 2")
-  ? pass("4b STRATEGY CHANGE REQUIRED injected after 2 failures on same path")
-  : fail("4b strategy-change trigger not found or wrong threshold");
+if (
+  agentSrc.includes("STRATEGY CHANGE REQUIRED") &&
+  agentSrc.includes("pathConsecutiveCheckFails.get(p) ?? 0) >= 2")
+)
+  pass("4b STRATEGY CHANGE REQUIRED injected after 2 failures on same path");
+else fail("4b strategy-change trigger not found or wrong threshold");
 
 // Path accumulation in BOTH parallel and serial tool-call paths
 const hasParallelAccum =
@@ -244,39 +255,44 @@ const hasParallelAccum =
 const hasSerialAccum =
   agentSrc.includes("_mutPathSerial") &&
   agentSrc.includes("mutatedPathsThisTurn.push(_mutPathSerial)");
-hasParallelAccum && hasSerialAccum
-  ? pass("4c mutatedPathsThisTurn accumulated in both parallel and serial call paths")
-  : fail(
-      "4c path accumulator missing — " +
-        (!hasParallelAccum ? "parallel path" : "") +
-        (!hasSerialAccum ? " serial path" : ""),
-    );
+if (hasParallelAccum && hasSerialAccum)
+  pass("4c mutatedPathsThisTurn accumulated in both parallel and serial call paths");
+else
+  fail(
+    "4c path accumulator missing — " +
+      (!hasParallelAccum ? "parallel path" : "") +
+      (!hasSerialAccum ? " serial path" : ""),
+  );
 
 // Per-path count resets when checks pass (no false-positive after recovery)
-agentSrc.includes("pathConsecutiveCheckFails.delete(p)")
-  ? pass("4d per-path failure count resets when checks pass")
-  : fail("4d per-path reset on success not found");
+if (agentSrc.includes("pathConsecutiveCheckFails.delete(p)"))
+  pass("4d per-path failure count resets when checks pass");
+else fail("4d per-path reset on success not found");
 
 // Strategy hint includes 5 concrete alternative approaches
-agentSrc.includes("read_file the failing file and inspect what is actually on disk") &&
-agentSrc.includes("read_file related imported modules") &&
-agentSrc.includes("write_file the entire file from scratch") &&
-agentSrc.includes("revert your changes")
-  ? pass("4e strategy hint includes 4+ concrete alternative approaches")
-  : fail("4e strategy hint alternatives incomplete");
+if (
+  agentSrc.includes("read_file the failing file and inspect what is actually on disk") &&
+  agentSrc.includes("read_file related imported modules") &&
+  agentSrc.includes("write_file the entire file from scratch") &&
+  agentSrc.includes("revert your changes")
+)
+  pass("4e strategy hint includes 4+ concrete alternative approaches");
+else fail("4e strategy hint alternatives incomplete");
 
 // Repair loop prompt shows error progress between attempts
-jobsSrc.includes("PROGRESS SINCE LAST ATTEMPT") &&
-jobsSrc.includes("UNCHANGED (still failing)") &&
-jobsSrc.includes("Try a DIFFERENT strategy")
-  ? pass("4f repair loop prompt shows FIXED/UNCHANGED progress between attempts")
-  : fail("4f repair loop progress section not found");
+if (
+  jobsSrc.includes("PROGRESS SINCE LAST ATTEMPT") &&
+  jobsSrc.includes("UNCHANGED (still failing)") &&
+  jobsSrc.includes("Try a DIFFERENT strategy")
+)
+  pass("4f repair loop prompt shows FIXED/UNCHANGED progress between attempts");
+else fail("4f repair loop progress section not found");
 
 // Attempt number passed per repair cycle so context improves each attempt
 // (call is multiline-formatted; check for the repairAttempt arg on its own line)
-jobsSrc.includes("buildRepairPrompt(") && jobsSrc.includes("repairAttempt,")
-  ? pass("4g attemptNumber passed to buildRepairPrompt each repair cycle")
-  : fail("4g attemptNumber not passed to buildRepairPrompt");
+if (jobsSrc.includes("buildRepairPrompt(") && jobsSrc.includes("repairAttempt,"))
+  pass("4g attemptNumber passed to buildRepairPrompt each repair cycle");
+else fail("4g attemptNumber not passed to buildRepairPrompt");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Summary
