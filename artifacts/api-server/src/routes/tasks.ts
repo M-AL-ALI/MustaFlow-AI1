@@ -42,15 +42,22 @@ router.get("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pro
     .where(eq(agentTasksTable.projectId, params.data.id))
     .orderBy(desc(agentTasksTable.createdAt));
 
-  const rowsWithElapsed = rows.map((row) => ({
-    ...row,
-    elapsedSeconds:
-      row.completedAt && (row.startedAt ?? row.createdAt)
-        ? Math.round(
-            (row.completedAt.getTime() - (row.startedAt ?? row.createdAt).getTime()) / 1000,
-          )
-        : null,
-  }));
+  // Filter out legacy task kinds (e.g. "refine") that no longer exist in the
+  // current API enum. Passing unknown kinds to ListTasksResponse.parse() throws
+  // a ZodError and returns a 500. Legacy rows are safe to omit from the list
+  // because they are historical-only and the UI doesn't need them.
+  const VALID_KINDS = new Set(["main", "background", "plan", "converse"]);
+  const rowsWithElapsed = rows
+    .filter((row) => VALID_KINDS.has(row.kind))
+    .map((row) => ({
+      ...row,
+      elapsedSeconds:
+        row.completedAt && (row.startedAt ?? row.createdAt)
+          ? Math.round(
+              (row.completedAt.getTime() - (row.startedAt ?? row.createdAt).getTime()) / 1000,
+            )
+          : null,
+    }));
 
   res.json(ListTasksResponse.parse(rowsWithElapsed));
 });

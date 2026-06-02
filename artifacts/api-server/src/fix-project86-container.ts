@@ -21,26 +21,6 @@ import {
 const MACHINE_ID = "d895134c606e98";
 const PROJECT_ID = 86;
 
-// Minimal runtime-only package.json
-const SLIM_PKG = JSON.stringify(
-  {
-    name: "towco",
-    version: "1.0.0",
-    private: true,
-    type: "module",
-    scripts: { dev: "tsx watch src/server/index.ts", start: "tsx src/server/index.ts" },
-    dependencies: {
-      cors: "^2.8.5",
-      "drizzle-orm": "^0.30.10",
-      express: "^4.18.3",
-      pg: "^8.11.5",
-      uuid: "^9.0.1",
-    },
-    devDependencies: { tsx: "^4.7.3" },
-  },
-  null,
-  2,
-);
 
 async function run(
   cmd: string[],
@@ -94,18 +74,10 @@ async function main() {
   await syncFilesToContainer(MACHINE_ID, PROJECT_ID, files);
   console.log("[sync] Done");
 
-  // ── 4. Write slim package.json ────────────────────────────────────────────
-  const escapedPkg = SLIM_PKG.replace(/'/g, "'\\''");
-  const writeRes = await run(
-    ["sh", "-c", `printf '%s' '${escapedPkg}' > /app/package.json && echo WRITTEN`],
-    "write slim package.json",
-  );
-  if (!writeRes.output.includes("WRITTEN")) {
-    console.error("Failed to write slim package.json");
-    process.exit(1);
-  }
-
-  // ── 5. Clean stale state ──────────────────────────────────────────────────
+  // ── 4. Clean stale state ──────────────────────────────────────────────────
+  // Do NOT overwrite package.json — the synced real package.json has all deps
+  // including vite (needed for client build).  Removing it causes future AI
+  // builder runs to see a stale slim-only manifest.
   await run(
     [
       "sh",
@@ -161,23 +133,42 @@ async function main() {
   // ── 7. APPROACH B: Yarn install ───────────────────────────────────────────
   if (!installed) {
     console.log("\n── APPROACH B: Yarn install ──");
-    // yarn v1.22 is known to be available on Alpine in these containers
+    // Clear any corrupted yarn cache entries (drizzle-orm was observed to have a
+    // corrupted .yarn-metadata.json that causes ENOENT → YARN_FAIL even though
+    // most packages install fine).  Bust just the affected packages then retry.
+    await run(
+      [
+        "sh",
+        "-c",
+        "yarn cache clean drizzle-orm 2>/dev/null; yarn cache clean @neondatabase 2>/dev/null; true",
+      ],
+      "clear corrupted yarn cache entries",
+    );
     await run(["sh", "-c", "rm -f /app/yarn.lock"], "remove yarn.lock");
     const yarnInstall = await run(
       [
         "sh",
         "-c",
-        "cd /app && yarn install --non-interactive --prefer-offline 2>&1 && echo YARN_OK || echo YARN_FAIL",
+        // --network-timeout 60000: allow slow downloads
+        // --no-cache for drizzle-orm to avoid the ENOENT on corrupt cache
+        "cd /app && yarn install --non-interactive --network-timeout 60000 2>&1 && echo YARN_OK || echo YARN_FAIL",
       ],
       "yarn install",
     );
-    if (yarnInstall.output.includes("YARN_OK")) {
-      const tsxBin = await run(
-        ["sh", "-c", "ls /app/node_modules/.bin/tsx 2>/dev/null && echo PRESENT || echo MISSING"],
-        "tsx check after yarn",
-      );
-      installed = tsxBin.output.includes("PRESENT");
-    } else {
+    // Always check tsx presence regardless of exit code — yarn may partially
+    // succeed (install all packages except the cache-corrupted ones) and still
+    // exit non-zero.  If tsx binary is present we can proceed.
+    const tsxBin = await run(
+      ["sh", "-c", "ls /app/node_modules/.bin/tsx 2>/dev/null && echo PRESENT || echo MISSING"],
+      "tsx check after yarn",
+    );
+    if (tsxBin.output.includes("PRESENT")) {
+      installed = true;
+      if (!yarnInstall.output.includes("YARN_OK")) {
+        console.log("[approach-b] yarn exited non-zero but tsx is present — proceeding");
+        console.log("[approach-b] yarn tail:", yarnInstall.output.slice(-300));
+      }
+    } else if (!yarnInstall.output.includes("YARN_OK")) {
       console.log("[approach-b] yarn output:", yarnInstall.output.slice(0, 500));
     }
   }
@@ -185,10 +176,15 @@ async function main() {
   // ── 8. APPROACH C: nohup npm install (background, 10min cap) ─────────────
   if (!installed) {
     console.log("\n── APPROACH C: nohup npm install (background) ──");
-    // Kill any existing npm/yarn first
+    // Kill any existing npm/yarn first (SIGKILL to avoid lingering yarn workers
+    // running concurrently with npm — that causes double OOM on 459 MB machines)
     await run(
-      ["sh", "-c", "pkill -f 'npm' 2>/dev/null; pkill -f 'yarn' 2>/dev/null; sleep 2; true"],
-      "kill existing installs",
+      [
+        "sh",
+        "-c",
+        "pkill -9 -f 'npm' 2>/dev/null; pkill -9 -f 'yarn' 2>/dev/null; sleep 3; true",
+      ],
+      "kill existing installs (SIGKILL)",
     );
 
     // Diagnostic: check network connectivity first
@@ -281,7 +277,30 @@ async function main() {
     process.exit(1);
   }
 
-  // ── 10. Kill stale servers ────────────────────────────────────────────────
+  // ── 10. Build client (vite build) ─────────────────────────────────────────
+  // The express server serves the pre-built React app from dist/client/.
+  // Without this the root GET / returns 404 and the preview iframe is blank.
+  console.log("\n── Building client (vite build) ──");
+  const viteBin = await run(
+    ["sh", "-c", "ls /app/node_modules/.bin/vite 2>/dev/null && echo PRESENT || echo MISSING"],
+    "vite binary check",
+  );
+  if (viteBin.output.includes("PRESENT")) {
+    const buildRes = await run(
+      ["sh", "-c", "cd /app && /app/node_modules/.bin/vite build 2>&1 && echo BUILD_OK || echo BUILD_FAIL"],
+      "vite build",
+    );
+    if (buildRes.output.includes("BUILD_OK")) {
+      console.log("[client-build] vite build succeeded ✓");
+    } else {
+      console.warn("[client-build] vite build failed — preview / will be blank");
+      console.log("[client-build] tail:", buildRes.output.slice(-400));
+    }
+  } else {
+    console.warn("[client-build] vite not installed — preview / will be blank");
+  }
+
+  // ── 11. Kill stale servers ────────────────────────────────────────────────
   await run(
     [
       "sh",
@@ -297,7 +316,10 @@ async function main() {
     [
       "sh",
       "-c",
-      "rm -f /tmp/server.log; PORT=3000 nohup /app/node_modules/.bin/tsx watch src/server/index.ts > /tmp/server.log 2>&1 & echo PID=$!",
+      // Explicitly cd inside the nohup shell — nohup detaches from the exec
+      // workdir so the relative path `src/server/index.ts` would otherwise
+      // resolve against `/` (the container root) instead of `/app`.
+      "cd /app && rm -f /tmp/server.log && nohup sh -c 'cd /app && PORT=3000 /app/node_modules/.bin/tsx src/server/index.ts > /tmp/server.log 2>&1' </dev/null >/dev/null 2>&1 & echo PID=$!",
     ],
     "start tsx server",
   );
