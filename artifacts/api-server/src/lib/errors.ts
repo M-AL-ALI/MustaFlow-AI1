@@ -12,7 +12,7 @@
  * rather than letting the build proceed against a phantom container.
  */
 export class ContainerUnavailableError extends Error {
-  constructor(message = "Developer container is not available or not configured.") {
+  constructor(message = "Project container is not available or not configured.") {
     super(message);
     this.name = "ContainerUnavailableError";
     Object.setPrototypeOf(this, ContainerUnavailableError.prototype);
@@ -20,9 +20,20 @@ export class ContainerUnavailableError extends Error {
 }
 
 /**
- * Standard user-facing message for any Developer Mode operation that cannot
- * reach the project container.  Used in preflight, write_file, syncFilesToContainer,
- * and any other hard-fail path where the container is absent for an agentic project.
+ * User-facing message when a provisioned container fails the wake / exec
+ * preflight.  Used in preflight, write_file, syncFilesToContainer, and any
+ * other hard-fail path where the container is absent or unreachable.
+ *
+ * Intentionally does NOT mention "Developer Mode" — this same preflight runs
+ * for both AI Builder agentic projects and Developer Mode projects.
  */
 export const DEVELOPER_MODE_RUNTIME_NOT_READY =
-  "Developer Mode runtime is not ready. The agent cannot edit files, run commands, test, or update preview until the project container is provisioned.";
+  "Build container is not ready. The agent cannot edit files, run commands, test, or update preview until the container is reachable.";
+
+/**
+ * User-facing message shown when an agentic project has no container yet —
+ * i.e. provisioning is still in progress or has not been triggered.
+ * Distinct from DEVELOPER_MODE_RUNTIME_NOT_READY (which is a wake/exec failure).
+ */
+export const CONTAINER_NOT_PROVISIONED =
+  "Project container is still being set up. The build will start automatically once provisioning completes.";

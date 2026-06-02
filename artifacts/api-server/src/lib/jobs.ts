@@ -95,7 +95,7 @@ import {
   ARCHITECT_AUTOFIX_TITLE_PREFIX,
 } from "./architect";
 import { encryptionService } from "./encryption";
-import { DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
+import { CONTAINER_NOT_PROVISIONED, DEVELOPER_MODE_RUNTIME_NOT_READY } from "./errors";
 import { CHECK_PROFILES, resolveStackId } from "./check-profiles";
 
 /**
@@ -129,12 +129,12 @@ async function runAgenticPreflightGate(
   builderMode?: string | null,
 ): Promise<{ ok: boolean; message?: string }> {
   // ── 0. Hard-fail: agentic project with no container ──────────────────────
-  // If this project is in Developer Mode (builder_mode = 'agentic') but has
-  // no containerId, the provisioning step has not completed. Running the agent
-  // loop against a phantom container would silently no-op every file write.
+  // builderMode='agentic' means a container should exist, but provisioning
+  // has not completed yet. Running the agent loop against a phantom container
+  // would silently no-op every file write.
   if (builderMode === "agentic" && !containerId) {
-    await emitEvent(taskId, "container_unavailable", DEVELOPER_MODE_RUNTIME_NOT_READY);
-    return { ok: false, message: DEVELOPER_MODE_RUNTIME_NOT_READY };
+    await emitEvent(taskId, "container_unavailable", CONTAINER_NOT_PROVISIONED);
+    return { ok: false, message: CONTAINER_NOT_PROVISIONED };
   }
 
   // ── 1. Container wake check ──────────────────────────────────────────────

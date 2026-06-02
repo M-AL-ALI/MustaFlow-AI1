@@ -1,0 +1,74 @@
+I need you to stop and verify something important.
+
+The AI Builder screen is showing:
+
+“Build blocked. Developer Mode runtime is not ready.”
+
+This is a problem.
+
+Question 1:
+Are all the recent Agentic Builder changes actually wired into the normal AI Builder mode, or are some of them only working through Developer Mode / Developer runtime paths?
+
+Please audit and answer clearly:
+
+1. When I use normal AI Builder at /projects/[id], does it use the same agent-loop.ts path?
+2. Does normal AI Builder create/provision the container automatically?
+3. Does normal AI Builder use the same write_file/apply_patch tool path?
+4. Does normal AI Builder receive file_diff events?
+5. Does normal AI Builder receive check_result events?
+6. Does normal AI Builder trigger preview refresh/reachability events?
+7. Does normal AI Builder use the TypeScript repair loop?
+8. Does normal AI Builder show passed_with_warnings/completed_with_errors correctly?
+9. Does normal AI Builder publish gate use the latest validation status?
+10. Is “Developer Mode runtime” just an old internal label, or is the AI Builder actually depending on a Developer Mode-only runtime path?
+
+If this is only a wording issue, rename the message for AI Builder users.
+
+Use:
+“Build runtime is not ready yet.”
+or
+“Project container is still starting.”
+
+Do not show:
+“Developer Mode runtime is not ready”
+inside normal AI Builder.
+
+Question 2:
+Why is Zero repeating the same actions/tools without successfully building?
+
+Please audit the agent loop behavior from the normal AI Builder UI, not Developer Mode.
+
+Check:
+
+* Is the agent repeating the same file reads/writes?
+* Is it calling the same tool after failed results?
+* Is stuck-loop detection actually firing?
+* Is strategy-change prompt actually injected?
+* Is the agent switching strategy after repeated failure?
+* Is the final status honest: blocked / completed_with_errors / passed_with_warnings?
+* Is the preview actually updating after file_diff?
+
+This needs to be tested from the real AI Builder user flow.
+
+Required next verification:
+Run a normal AI Builder test, not Developer Mode, not direct DB-only script.
+
+Prompt:
+“Build a simple booking app with a home page, booking form, customer list, and admin dashboard.”
+
+Verify:
+
+1. AI Builder starts the agent.
+2. No “Developer Mode runtime” wording appears.
+3. Container provisions or explains exactly why it cannot.
+4. Agent writes real files.
+5. Agent does not repeat the same failed actions endlessly.
+6. Agent changes strategy if a file/check/preview error repeats.
+7. Preview refreshes.
+8. App loads or clearly reports why it cannot.
+9. Final report shows the real status.
+
+Important:
+If normal AI Builder still depends on Developer Mode runtime setup, fix the routing/wording so AI Builder feels like the main Agentic Builder, not a side wrapper around Developer Mode.
+
+Do not call the Builder user-ready until this normal AI Builder flow is proven.

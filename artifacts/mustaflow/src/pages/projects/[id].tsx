@@ -883,6 +883,13 @@ function getPreflightSuggestion(message: string): {
   showSecretsLink: boolean;
 } {
   const lower = message.toLowerCase();
+  if (lower.includes("still being set up") || lower.includes("provisioning completes")) {
+    return {
+      suggestion:
+        "Your project container is finishing setup. This usually takes under a minute — retry once the provisioning badge turns green.",
+      showSecretsLink: false,
+    };
+  }
   if (lower.includes("database is unreachable") || lower.includes("database_url")) {
     return {
       suggestion:
@@ -904,7 +911,7 @@ function getPreflightSuggestion(message: string): {
   // Default: container wake failure
   return {
     suggestion:
-      "Your server container is taking longer than expected to wake up. Wait a moment and retry — it usually recovers on its own.",
+      "Your build container is taking longer than expected to start. Wait a moment and retry — it usually recovers on its own.",
     showSecretsLink: false,
   };
 }
