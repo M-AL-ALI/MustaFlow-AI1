@@ -41,10 +41,7 @@ async function main() {
 
   // ── 0. Fetch project 86 ──────────────────────────────────────────────────
   section("Step 0: Load project 86");
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(eq(projectsTable.id, PROJECT_ID));
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, PROJECT_ID));
 
   if (!project) {
     fail("Project 86 not found");
@@ -104,7 +101,11 @@ export const api = axios.create({ baseURL: '/api' });`,
   }
 
   // Step 1b: declared packages are NOT flagged
-  if (!missing.includes("react") && !missing.includes("react-dom") && !missing.includes("express")) {
+  if (
+    !missing.includes("react") &&
+    !missing.includes("react-dom") &&
+    !missing.includes("express")
+  ) {
     pass("Declared packages (react, react-dom, express) not flagged");
   } else {
     fail("Some declared packages were incorrectly flagged", JSON.stringify(missing));
@@ -203,7 +204,11 @@ export const api = axios.create({ baseURL: '/api' });`,
     // Read current package.json from container
     try {
       const { execInContainer } = await import("./lib/container");
-      const catResult = await execInContainer(containerId, ["cat", "/app/package.json"], PROJECT_ID);
+      const catResult = await execInContainer(
+        containerId,
+        ["cat", "/app/package.json"],
+        PROJECT_ID,
+      );
       const containerPkg = JSON.parse(catResult.stdout || "{}");
       const containerDeps = {
         ...(containerPkg.dependencies ?? {}),
@@ -234,7 +239,11 @@ export const api = axios.create({ baseURL: '/api' });`,
         }
 
         // Verify the file landed in the container
-        const catAfter = await execInContainer(containerId, ["cat", "/app/package.json"], PROJECT_ID);
+        const catAfter = await execInContainer(
+          containerId,
+          ["cat", "/app/package.json"],
+          PROJECT_ID,
+        );
         const afterPkg = JSON.parse(catAfter.stdout || "{}");
         const hasRouterAfter = "react-router-dom" in (afterPkg.dependencies ?? {});
         if (hasRouterAfter) {
