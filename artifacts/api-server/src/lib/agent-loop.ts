@@ -472,6 +472,77 @@ export function isCommandAllowed(
   return r.ok ? { ok: true } : { ok: false, reason: r.reason };
 }
 
+function commandBasename(cmd: string): string {
+  return cmd.replace(/\\/g, "/").split("/").pop() ?? cmd;
+}
+
+function shellPayload(argv: string[]): string | null {
+  const bin = commandBasename(argv[0] ?? "");
+  if (bin !== "sh" && bin !== "bash") return null;
+  const scriptIndex = argv.findIndex((arg, index) => index > 0 && /^-.*c/.test(arg));
+  if (scriptIndex < 0) return null;
+  return argv
+    .slice(scriptIndex + 1)
+    .join(" ")
+    .trim();
+}
+
+/**
+ * Decide whether a plain run_command needs the automatic profile install first.
+ *
+ * The old behavior installed dependencies before every shell command. That traps
+ * server-start repair tasks at "Installing dependencies..." before the agent can
+ * inspect harmless diagnostics like logs, process state, or /healthz. We only
+ * pre-install for commands that are likely to execute project tooling.
+ */
+export function shouldAutoInstallBeforeRunCommand(
+  argv: string[],
+  installCmd: string[] | null,
+): boolean {
+  if (!installCmd || argv.length === 0) return false;
+
+  const commandText = (shellPayload(argv) ?? argv.join(" ")).trim();
+  const normalized = commandText.replace(/^cd\s+\/app\s*&&\s*/i, "").trim();
+  const firstWord = commandBasename(normalized.split(/\s+/)[0] ?? "");
+
+  if (!normalized) return false;
+
+  if (/\b(npm|pnpm|yarn)\s+(install|i|add)\b/i.test(normalized)) return false;
+  if (/\b(pip|pip3)\s+install\b/i.test(normalized)) return false;
+
+  if (/^(node|npm|pnpm|yarn|python|python3)\s+(--version|-v|version)\b/i.test(normalized)) {
+    return false;
+  }
+
+  if (
+    /^(ls|cat|head|tail|grep|rg|find|wc|pwd|echo|true|false|ps|free|df|du|env|printenv|which|whoami|id|stat|test)(\s|$)/i.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+
+  if (/\b(curl|wget)\b.*\b(localhost|127\.0\.0\.1|healthz)\b/i.test(normalized)) {
+    return false;
+  }
+
+  if (/\b(npm|pnpm|yarn)\s+(run|start|test|build|dev|preview)\b/i.test(normalized)) {
+    return true;
+  }
+  if (/\bnpx\b/i.test(normalized)) return true;
+  if (
+    /\b(\.\/node_modules\/\.bin\/)?(tsx|tsc|vite|vitest|jest|eslint|next|webpack|drizzle-kit|prisma)\b/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (firstWord === "node" || firstWord === "python" || firstWord === "python3") return true;
+  if (/^(pytest|flask|uvicorn|gunicorn|fastapi)\b/i.test(firstWord)) return true;
+
+  return false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // In-process validators (for static-html + mobile-cross)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4398,6 +4469,14 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
       })();
     }, 30_000);
   }
+  const installProgressTimer = setInterval(() => {
+    const elapsedMinutes = Math.max(1, Math.floor((Date.now() - t) / 60_000));
+    void safeEvent(
+      ctx.input.onEvent,
+      "narration",
+      `Still installing dependencies (${elapsedMinutes} min elapsed, 6 min cap)…`,
+    );
+  }, 60_000);
 
   let installResult: { ok: boolean; output: string };
   try {
@@ -4423,6 +4502,7 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
     if (installHeartbeatTimer) {
       clearInterval(installHeartbeatTimer);
     }
+    clearInterval(installProgressTimer);
   }
   ctx.commandsRun.push({
     step,
@@ -5124,8 +5204,12 @@ export async function executeTool(ctx: ToolCtx): Promise<{
         }
       }
 
-      // Install deps on first shell use (after approval so no side-effects on rejection)
-      await ensureInstalled(ctx, input.signal, step);
+      // Install deps only before commands that execute project tooling. Server
+      // repair tasks must be able to inspect logs/processes/healthz before a
+      // potentially slow package install.
+      if (shouldAutoInstallBeforeRunCommand(argv, ctx.profile.installCmd)) {
+        await ensureInstalled(ctx, input.signal, step);
+      }
 
       const timeoutMs =
         typeof args.timeout_ms === "number" && args.timeout_ms > 0

@@ -1,6 +1,18 @@
-import { describe, it, expect } from "vitest";
-import { isCommandAllowed } from "./agent-loop.js";
+import { describe, it, expect, vi } from "vitest";
+import { isCommandAllowed, shouldAutoInstallBeforeRunCommand } from "./agent-loop.js";
 import { CHECK_PROFILES } from "./check-profiles.js";
+
+vi.mock("@workspace/integrations-openai-ai-server", () => ({
+  openai: {},
+}));
+
+vi.mock("@workspace/db", () => ({
+  db: {},
+  toolAuditTable: {},
+  agentToolCallsTable: {},
+  agentTasksTable: {},
+  projectsTable: {},
+}));
 
 const reactVite = CHECK_PROFILES["react-vite"];
 const REACT_VITE_POLICY = {
@@ -206,5 +218,49 @@ describe("isCommandAllowed — misc edge cases", () => {
   it("allows a URL pointing to an allowlisted host (github.com)", () => {
     const r = isCommandAllowed(["node", "fetch.js", "https://github.com/some/repo"], EMPTY_POLICY);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("shouldAutoInstallBeforeRunCommand", () => {
+  const installCmd = reactVite.installCmd;
+
+  it("does not run hidden install before log/process diagnostics", () => {
+    expect(
+      shouldAutoInstallBeforeRunCommand(["sh", "-lc", "tail -50 /tmp/server.log"], installCmd),
+    ).toBe(false);
+    expect(shouldAutoInstallBeforeRunCommand(["ps", "aux"], installCmd)).toBe(false);
+  });
+
+  it("does not run hidden install before explicit package install commands", () => {
+    expect(
+      shouldAutoInstallBeforeRunCommand(
+        ["sh", "-c", "cd /app && npm install --no-audit --no-fund"],
+        installCmd,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not run hidden install before local health probes", () => {
+    expect(
+      shouldAutoInstallBeforeRunCommand(
+        ["sh", "-lc", "curl -sf http://localhost:3000/healthz"],
+        installCmd,
+      ),
+    ).toBe(false);
+  });
+
+  it("does run hidden install before project tooling commands", () => {
+    expect(shouldAutoInstallBeforeRunCommand(["sh", "-lc", "npm run dev"], installCmd)).toBe(true);
+    expect(shouldAutoInstallBeforeRunCommand(["npx", "tsc", "--noEmit"], installCmd)).toBe(true);
+    expect(
+      shouldAutoInstallBeforeRunCommand(
+        ["sh", "-lc", "cd /app && ./node_modules/.bin/tsx src/server/index.ts"],
+        installCmd,
+      ),
+    ).toBe(true);
+  });
+
+  it("no-ops when the stack has no install command", () => {
+    expect(shouldAutoInstallBeforeRunCommand(["npm", "run", "dev"], null)).toBe(false);
   });
 });
