@@ -3,11 +3,9 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import { clerkMiddleware } from "@clerk/express";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
-  getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
@@ -134,16 +132,12 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(cookieParser());
 
-// Resolve publishable key from the request host so the same server can serve
-// multiple Clerk custom domains. Falls back to CLERK_PUBLISHABLE_KEY.
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
+// Use the static clerkMiddleware form so the Clerk SDK is created once at
+// startup and the JWKS is cached for the process lifetime.  The per-request
+// callback form re-creates the Clerk client on every request which prevents
+// JWKS caching and causes spurious 401s once the first JWKS entry expires.
+// CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are read from the environment.
+app.use(clerkMiddleware());
 
 // Custom-domain middleware: intercepts GET requests whose Host header matches
 // a project's configured custom domain and serves the published snapshot directly.

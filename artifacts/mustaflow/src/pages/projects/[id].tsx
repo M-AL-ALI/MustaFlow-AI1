@@ -2328,6 +2328,20 @@ export default function ProjectWorkspacePage() {
             }
 
             if (!resp.ok || !resp.body) {
+              // 401 on the initial POST (before connection was established):
+              // the Clerk dev-mode JWT (60s lifetime) may have expired mid-refresh.
+              // Wait 3 s for Clerk to finish refreshing the cookie, then retry once
+              // automatically before surfacing the "Session expired" error.
+              if (
+                resp.status === 401 &&
+                !connectionEstablished &&
+                attempt === 0
+              ) {
+                await new Promise<void>((r) => setTimeout(r, 3000));
+                attempt += 1;
+                continue;
+              }
+
               // Non-2xx or no body — surface the error and let the user decide.
               setIsStreaming(false);
               setStreamingText("");
@@ -3936,17 +3950,23 @@ export default function ProjectWorkspacePage() {
                                   <div className="flex-1 min-w-0">
                                     <p className="text-foreground font-medium">Session expired</p>
                                     <p className="text-muted-foreground mt-0.5">
-                                      Your session has expired. Refresh the page to continue.
+                                      Your session has expired. Sign in again to continue.
                                     </p>
                                   </div>
                                 </div>
                                 <div className="mt-2.5 flex items-center gap-2">
                                   <button
-                                    onClick={() => window.location.reload()}
+                                    onClick={() => {
+                                      window.location.href =
+                                        "/sign-in?redirect_url=" +
+                                        encodeURIComponent(
+                                          window.location.pathname + window.location.search,
+                                        );
+                                    }}
                                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:opacity-90 transition-opacity"
                                   >
                                     <RefreshCw className="w-3 h-3" />
-                                    Refresh page
+                                    Sign in again
                                   </button>
                                   <button
                                     onClick={() => { setStreamError(false); setStreamErrorStatus(null); }}
