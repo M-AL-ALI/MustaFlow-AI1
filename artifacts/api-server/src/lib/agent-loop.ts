@@ -1633,14 +1633,36 @@ app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
   const port = parseInt(process.env.PORT ?? "3000", 10);
   app.listen(port, "0.0.0.0", () => console.log(\`Listening on \${port}\`));
 
+## Required: TypeScript configuration for Node.js projects
+Every node-api / nextjs project MUST include these in package.json devDependencies:
+- "@types/node": "^22" — gives TypeScript access to process.env, Buffer, etc.
+Any package that ships without bundled types also needs its @types/* counterpart (e.g. "@types/express", "@types/cors").
+
+The tsconfig.json MUST include "types": ["node"] in compilerOptions, for example:
+\`\`\`json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
+  }
+}
+\`\`\`
+Without @types/node installed AND listed in "types", tsc will fail with "Cannot find name process" or "Cannot find module" errors even when the server runs fine at runtime.
+
 ## First build: install dependencies before writing source files
 When you write a new package.json (first build or adding packages), you MUST call pkg_install
 for all required runtime dependencies IMMEDIATELY after writing package.json and BEFORE writing
 any source files. This guarantees node_modules is populated before your code references it.
 Order of operations:
-1. Write package.json
+1. Write package.json (include "@types/node" in devDependencies)
 2. Call pkg_install for each required package group (runtime deps first, then devDeps)
-3. Write source files (index.ts, routes, etc.)
+3. Write tsconfig.json (with "types": ["node"]) and source files
 4. Start the server and verify /healthz responds
 
 ## npm install in containers — OOM / timeout handling
