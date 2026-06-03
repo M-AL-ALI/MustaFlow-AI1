@@ -4409,7 +4409,6 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   }
   if (!ctx.containerState.id) return;
   const argv = ctx.profile.installCmd;
-  await safeEvent(ctx.input.onEvent, "narration", "Installing dependencies…");
   const t = Date.now();
 
   // Pre-sync: write all current workspace files to /app before npm install.
@@ -4421,6 +4420,42 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
   if (files.length > 0) {
     await syncFilesToContainer(ctx.containerState.id, ctx.input.projectId, files).catch(() => {});
   }
+
+  // Fast-path: if node_modules already exists in the container and the
+  // package.json hash matches what we last installed, skip the 3-6 min npm
+  // install entirely. Each task starts with installed=false (no per-task
+  // state), so without this check every task re-runs a full install even when
+  // nothing has changed. We store the hash in /tmp/.pkg-hash inside the
+  // container after each successful install.
+  let pkgHash = "";
+  const pkgJsonFile = ctx.workspace.all().find((f) => f.path === "package.json");
+  if (pkgJsonFile) {
+    const { createHash } = await import("crypto");
+    pkgHash = createHash("sha1").update(pkgJsonFile.content).digest("hex");
+    const hashCheck = await execWithTimeout(
+      ctx.containerState.id,
+      [
+        "sh",
+        "-c",
+        "[ -d /app/node_modules ] && cat /tmp/.pkg-hash 2>/dev/null || echo MISS",
+      ],
+      ctx.input.projectId,
+      6_000,
+      signal,
+    ).catch(() => ({ stdout: "MISS" as string }));
+    const storedHash = ((hashCheck as { stdout: string }).stdout ?? "").trim();
+    if (storedHash === pkgHash) {
+      await safeEvent(
+        ctx.input.onEvent,
+        "narration",
+        "Dependencies already installed — skipping install.",
+      );
+      ctx.containerState.installed = true;
+      return;
+    }
+  }
+
+  await safeEvent(ctx.input.onEvent, "narration", "Installing dependencies…");
 
   // Clear stale npm state before installing — prevents "Tracker 'idealTree' already exists"
   // errors caused by a concurrent or interrupted npm run. The container's npm home may be
@@ -4555,6 +4590,17 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
       (errSnippet ? ` Error snippet: ${errSnippet.slice(0, 200)}` : "");
 
     await safeEvent(ctx.input.onEvent, "narration", narration);
+  }
+
+  // On success, persist the package.json hash so the next task can skip install.
+  if (installResult.ok && pkgHash && ctx.containerState.id) {
+    await execWithTimeout(
+      ctx.containerState.id,
+      ["sh", "-c", `printf '%s' '${pkgHash}' > /tmp/.pkg-hash`],
+      ctx.input.projectId,
+      4_000,
+      signal,
+    ).catch(() => {});
   }
 
   // Mark installed regardless — this prevents infinite reinstall loops.
