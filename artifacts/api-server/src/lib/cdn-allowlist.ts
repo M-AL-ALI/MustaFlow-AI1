@@ -160,7 +160,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
         upgradeTo: "1.6.0",
       },
     ],
-    minimumRecommendedVersion: "1.16.1",
+    minimumRecommendedVersion: "1.17.0",
   },
   {
     name: "lodash",
