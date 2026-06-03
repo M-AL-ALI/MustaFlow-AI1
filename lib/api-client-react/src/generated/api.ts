@@ -1619,7 +1619,7 @@ export const getGetProjectHealthUrl = (id: number,) => {
 }
 
 /**
- * @summary Get aggregated build metrics, task failure rates, and recent incidents for a project.
+ * @summary Get build health metrics for a project (success rate, latency percentiles, recent incidents).
  */
 export const getProjectHealth = async (id: number, options?: RequestInit): Promise<ProjectHealthResponse> => {
 
@@ -1643,7 +1643,7 @@ export const getGetProjectHealthQueryKey = (id: number,) => {
     }
 
 
-export const getGetProjectHealthQueryOptions = <TData = Awaited<ReturnType<typeof getProjectHealth>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetProjectHealthQueryOptions = <TData = Awaited<ReturnType<typeof getProjectHealth>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1662,14 +1662,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetProjectHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectHealth>>>
-export type GetProjectHealthQueryError = ErrorType<ApiError>
+export type GetProjectHealthQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Get aggregated build metrics, task failure rates, and recent incidents for a project.
+ * @summary Get build health metrics for a project (success rate, latency percentiles, recent incidents).
  */
 
-export function useGetProjectHealth<TData = Awaited<ReturnType<typeof getProjectHealth>>, TError = ErrorType<ApiError>>(
+export function useGetProjectHealth<TData = Awaited<ReturnType<typeof getProjectHealth>>, TError = ErrorType<unknown>>(
  id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {

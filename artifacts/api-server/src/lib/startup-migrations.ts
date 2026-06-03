@@ -675,6 +675,18 @@ const MIGRATION_STEPS: MigrationStep[] = [
   },
 
   // ── migrate-staging-domains ─────────────────────────────────────────────────
+  // Persist the chat surface that created each task so delayed reports can be
+  // written back to the correct thread (for example Zero background tasks).
+  {
+    name: "migrate-agent-task-origin",
+    async run(client) {
+      await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS origin text`);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS agent_tasks_origin_idx ON agent_tasks(origin) WHERE origin IS NOT NULL`,
+      );
+    },
+  },
+
   {
     name: "migrate-staging-domains",
     async run(client) {
@@ -2429,6 +2441,354 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-collaboration ────────────────────────────────────────────────────
+  {
+    name: "migrate-collaboration",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS organizations (
+          id serial PRIMARY KEY,
+          name text NOT NULL,
+          slug text NOT NULL UNIQUE,
+          description text,
+          type text NOT NULL DEFAULT 'team',
+          avatar_url text,
+          billing_email text,
+          stripe_customer_id text,
+          created_by_user_id text NOT NULL,
+          deleted_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS org_members (
+          id serial PRIMARY KEY,
+          organization_id integer NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          user_id text NOT NULL,
+          role text NOT NULL DEFAULT 'member',
+          display_name text,
+          email text,
+          avatar_url text,
+          joined_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (organization_id, user_id)
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS org_members_user_idx ON org_members(user_id)`);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS org_members_org_idx ON org_members(organization_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS org_invites (
+          id serial PRIMARY KEY,
+          organization_id integer NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          token text NOT NULL UNIQUE,
+          email text NOT NULL,
+          role text NOT NULL DEFAULT 'member',
+          invited_by_user_id text NOT NULL,
+          status text NOT NULL DEFAULT 'pending',
+          accepted_by_user_id text,
+          expires_at timestamptz NOT NULL,
+          accepted_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS org_invites_org_idx ON org_invites(organization_id)`,
+      );
+      await client.query(`CREATE INDEX IF NOT EXISTS org_invites_email_idx ON org_invites(email)`);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS project_comments (
+          id serial PRIMARY KEY,
+          project_id integer NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          author_id text NOT NULL,
+          author_name text,
+          author_avatar text,
+          parent_id integer,
+          file_path text,
+          line_start integer,
+          line_end integer,
+          build_result_id integer,
+          body text NOT NULL,
+          resolved boolean NOT NULL DEFAULT false,
+          resolved_by_user_id text,
+          resolved_at timestamptz,
+          edited_at timestamptz,
+          deleted_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_comments_project_idx ON project_comments(project_id, created_at DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_comments_parent_idx ON project_comments(parent_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_comments_file_idx ON project_comments(project_id, file_path)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id serial PRIMARY KEY,
+          recipient_id text NOT NULL,
+          type text NOT NULL,
+          title text NOT NULL,
+          body text,
+          actor_id text,
+          actor_name text,
+          resource_type text,
+          resource_id text,
+          project_id integer,
+          metadata jsonb,
+          read boolean NOT NULL DEFAULT false,
+          read_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS notifications_recipient_idx ON notifications(recipient_id, created_at DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS notifications_unread_idx ON notifications(recipient_id, read) WHERE read = false`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS project_activity (
+          id serial PRIMARY KEY,
+          project_id integer NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          actor_id text,
+          actor_name text,
+          actor_avatar text,
+          event_type text NOT NULL,
+          summary text NOT NULL,
+          metadata jsonb,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_activity_project_idx ON project_activity(project_id, created_at DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_activity_actor_idx ON project_activity(actor_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS share_links (
+          id serial PRIMARY KEY,
+          project_id integer NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          token text NOT NULL UNIQUE,
+          label text,
+          created_by_user_id text NOT NULL,
+          scope text NOT NULL DEFAULT 'draft',
+          snapshot_version_id integer,
+          password_hash text,
+          expires_at timestamptz,
+          revoked boolean NOT NULL DEFAULT false,
+          revoked_at timestamptz,
+          view_count integer NOT NULL DEFAULT 0,
+          last_viewed_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS share_links_project_idx ON share_links(project_id)`,
+      );
+      await client.query(`CREATE INDEX IF NOT EXISTS share_links_token_idx ON share_links(token)`);
+      await client.query(`
+        ALTER TABLE projects
+          ADD COLUMN IF NOT EXISTS organization_id integer REFERENCES organizations(id)
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS projects_org_idx ON projects(organization_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
+
+  // ── migrate-ecosystem ─────────────────────────────────────────────────────────
+  {
+    name: "migrate-ecosystem",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS gallery_templates (
+          id serial PRIMARY KEY,
+          slug text NOT NULL UNIQUE,
+          title text NOT NULL,
+          description text NOT NULL,
+          readme text,
+          category text NOT NULL DEFAULT 'web',
+          tags jsonb NOT NULL DEFAULT '[]',
+          author_id text,
+          author_name text,
+          files_snapshot jsonb,
+          preview_url text,
+          thumbnail_url text,
+          platform text NOT NULL DEFAULT 'web',
+          stack text NOT NULL DEFAULT 'react-vite',
+          rating real NOT NULL DEFAULT 0,
+          rating_count integer NOT NULL DEFAULT 0,
+          fork_count integer NOT NULL DEFAULT 0,
+          use_count integer NOT NULL DEFAULT 0,
+          status text NOT NULL DEFAULT 'draft',
+          featured boolean NOT NULL DEFAULT false,
+          editors_pick boolean NOT NULL DEFAULT false,
+          is_system boolean NOT NULL DEFAULT false,
+          forked_from_id integer,
+          source_project_id integer,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          published_at timestamptz
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS gallery_templates_status_idx ON gallery_templates(status)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS gallery_templates_category_idx ON gallery_templates(category)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS gallery_templates_featured_idx ON gallery_templates(featured)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS gallery_templates_rating_idx ON gallery_templates(rating DESC)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS gallery_templates_author_idx ON gallery_templates(author_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS template_ratings (
+          id serial PRIMARY KEY,
+          template_id integer NOT NULL,
+          user_id text NOT NULL,
+          rating integer NOT NULL CHECK (rating >= 1 AND rating <= 5),
+          comment text,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS template_ratings_template_idx ON template_ratings(template_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS template_ratings_user_idx ON template_ratings(user_id)`,
+      );
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS template_ratings_user_template_unique ON template_ratings(template_id, user_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS extensions (
+          id serial PRIMARY KEY,
+          slug text NOT NULL UNIQUE,
+          name text NOT NULL,
+          description text NOT NULL,
+          long_description text,
+          version text NOT NULL DEFAULT '1.0.0',
+          author_id text,
+          author_name text,
+          manifest_url text,
+          manifest jsonb,
+          scopes jsonb NOT NULL DEFAULT '[]',
+          icon_url text,
+          homepage_url text,
+          repository_url text,
+          category text NOT NULL DEFAULT 'productivity',
+          tags jsonb NOT NULL DEFAULT '[]',
+          install_count integer NOT NULL DEFAULT 0,
+          status text NOT NULL DEFAULT 'draft',
+          vetted boolean NOT NULL DEFAULT false,
+          featured boolean NOT NULL DEFAULT false,
+          is_system boolean NOT NULL DEFAULT false,
+          vetting_notes text,
+          vetted_at timestamptz,
+          vetted_by text,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          published_at timestamptz
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS extensions_status_idx ON extensions(status)`);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS extensions_category_idx ON extensions(category)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS extensions_featured_idx ON extensions(featured)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS extensions_author_idx ON extensions(author_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS project_extensions (
+          id serial PRIMARY KEY,
+          project_id integer NOT NULL,
+          extension_id integer NOT NULL,
+          extension_slug text NOT NULL,
+          installed_by text,
+          config jsonb,
+          enabled boolean NOT NULL DEFAULT true,
+          installed_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_extensions_project_idx ON project_extensions(project_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS project_extensions_extension_idx ON project_extensions(extension_id)`,
+      );
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS project_extensions_unique ON project_extensions(project_id, extension_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS community_profiles (
+          id serial PRIMARY KEY,
+          user_id text NOT NULL UNIQUE,
+          username text NOT NULL UNIQUE,
+          display_name text,
+          bio text,
+          avatar_url text,
+          website_url text,
+          twitter_handle text,
+          github_handle text,
+          location text,
+          public_project_ids jsonb NOT NULL DEFAULT '[]',
+          showcased_project_ids jsonb NOT NULL DEFAULT '[]',
+          follower_count integer NOT NULL DEFAULT 0,
+          following_count integer NOT NULL DEFAULT 0,
+          badge_embed_enabled boolean NOT NULL DEFAULT false,
+          profile_public boolean NOT NULL DEFAULT true,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS community_profiles_username_idx ON community_profiles(username)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS community_profiles_user_id_idx ON community_profiles(user_id)`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS profile_follows (
+          id serial PRIMARY KEY,
+          follower_id text NOT NULL,
+          following_id text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS profile_follows_follower_idx ON profile_follows(follower_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS profile_follows_following_idx ON profile_follows(following_id)`,
+      );
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS profile_follows_unique ON profile_follows(follower_id, following_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
+
   // ── migrate-ora-transcripts ──────────────────────────────────────────────────
   {
     name: "migrate-ora-transcripts",
@@ -2631,6 +2991,31 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  {
+    name: "knowledge_usage_events",
+    run: async (client) => {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_usage_events (
+          id                      BIGSERIAL   PRIMARY KEY,
+          user_id                 TEXT        NOT NULL,
+          query                   TEXT        NOT NULL,
+          report_type             TEXT        NOT NULL DEFAULT 'knowledge-report',
+          selected_entry_ids      INTEGER[]   NOT NULL DEFAULT '{}',
+          selected_entry_versions INTEGER[]   NOT NULL DEFAULT '{}',
+          entry_count             INTEGER     NOT NULL DEFAULT 0,
+          created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_kue_user_id ON knowledge_usage_events (user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_kue_created_at ON knowledge_usage_events (created_at)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 
   // ── migrate-image-studio ─────────────────────────────────────────────────
   {
@@ -2742,33 +3127,6 @@ const MIGRATION_STEPS: MigrationStep[] = [
     async run(client) {
       await client.query("BEGIN");
       await client.query(`ALTER TABLE task_events ADD COLUMN IF NOT EXISTS data JSONB`);
-      await client.query("COMMIT");
-    },
-  },
-
-  // ── migrate-image-edit-lineage ────────────────────────────────────────────
-  {
-    name: "migrate-image-edit-lineage",
-    async run(client) {
-      await client.query("BEGIN");
-      await client.query(`
-        ALTER TABLE generated_images
-          ADD COLUMN IF NOT EXISTS parent_image_id INTEGER REFERENCES generated_images(id),
-          ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'generated',
-          ADD COLUMN IF NOT EXISTS edit_instruction TEXT
-      `);
-      await client.query("COMMIT");
-    },
-  },
-
-  // ── migrate-ora-transcript-cleanup ────────────────────────────────────────
-  {
-    name: "migrate-ora-transcript-cleanup",
-    async run(client) {
-      await client.query("BEGIN");
-      await client.query(
-        `ALTER TABLE ora_transcripts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
-      );
       await client.query("COMMIT");
     },
   },

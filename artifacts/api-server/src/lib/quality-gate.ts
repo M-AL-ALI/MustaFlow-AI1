@@ -154,6 +154,7 @@ export async function runQualityGate(
         // /app directory (no package.json) and succeed with 0 packages.
         const filesSnapshot = allFilesForSync;
         const installResult = await npmInstallInBackground(containerId, projectId, {
+          wallClockCapMs: 6 * 60 * 1000,
           onMachineRestarted: async () => {
             logger.info(
               { projectId, containerId },

@@ -5,10 +5,8 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
-import type { ProjectHealthIncidentKind } from './projectHealthIncidentKind';
 
 export interface ProjectHealthIncident {
-  at: Date;
-  kind: ProjectHealthIncidentKind;
   message: string;
+  at: Date;
 }

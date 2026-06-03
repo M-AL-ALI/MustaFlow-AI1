@@ -4434,11 +4434,7 @@ async function ensureInstalled(ctx: ToolCtx, signal: AbortSignal, step: number):
     pkgHash = createHash("sha1").update(pkgJsonFile.content).digest("hex");
     const hashCheck = await execWithTimeout(
       ctx.containerState.id,
-      [
-        "sh",
-        "-c",
-        "[ -d /app/node_modules ] && cat /tmp/.pkg-hash 2>/dev/null || echo MISS",
-      ],
+      ["sh", "-c", "[ -d /app/node_modules ] && cat /tmp/.pkg-hash 2>/dev/null || echo MISS"],
       ctx.input.projectId,
       6_000,
       signal,
@@ -7238,17 +7234,47 @@ async function runCheckProfile(
         startContainerHealthServer: startHealthSrv,
       } = await import("./container");
       const containerId = effectiveContainerId;
-      await bgInstall(containerId, input.projectId, {
-        onMachineRestarted: async () => {
-          const fileSet = workspace.all().map((f) => ({ path: f.path, content: f.content }));
-          if (fileSet.length > 0) {
-            await syncFn(containerId, input.projectId, fileSet).catch(() => {});
-          }
-          // Restart the health server so keepalive pings keep the machine alive.
-          await startHealthSrv(containerId, input.projectId);
-        },
-      });
+      const installStartedAt = Date.now();
+      const INSTALL_WALL_CLOCK_CAP_MS = 6 * 60 * 1000;
+      await safeEvent(input.onEvent, "narration", "Installing dependencies for checks…");
+      const installProgressTimer = setInterval(() => {
+        const elapsedMinutes = Math.max(1, Math.floor((Date.now() - installStartedAt) / 60_000));
+        void safeEvent(
+          input.onEvent,
+          "narration",
+          `Still installing dependencies for checks (${elapsedMinutes} min elapsed, 6 min cap)…`,
+        );
+      }, 60_000);
+      let installResult: { ok: boolean; output: string };
+      try {
+        installResult = await bgInstall(containerId, input.projectId, {
+          wallClockCapMs: INSTALL_WALL_CLOCK_CAP_MS,
+          signal: input.signal,
+          onMachineRestarted: async () => {
+            const fileSet = workspace.all().map((f) => ({ path: f.path, content: f.content }));
+            if (fileSet.length > 0) {
+              await syncFn(containerId, input.projectId, fileSet).catch(() => {});
+            }
+            // Restart the health server so keepalive pings keep the machine alive.
+            await startHealthSrv(containerId, input.projectId);
+          },
+        });
+      } finally {
+        clearInterval(installProgressTimer);
+      }
+      if (!installResult.ok && !input.signal.aborted) {
+        await safeEvent(
+          input.onEvent,
+          "narration",
+          `Dependency install for checks did not complete. Checks will continue and may fail until package.json is fixed. ${installResult.output.slice(0, 240)}`,
+        );
+      }
     } catch {
+      await safeEvent(
+        input.onEvent,
+        "narration",
+        "Dependency install for checks failed before checks could run. Continuing so the report can surface the real failure.",
+      );
       // continue; check failures will surface the real problem
     }
     containerState.installed = true;

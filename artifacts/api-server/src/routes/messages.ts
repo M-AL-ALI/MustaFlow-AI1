@@ -41,6 +41,13 @@ import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
 
 const router: IRouter = Router();
 
+function checkpointIdFromPlan(plan: Record<string, unknown> | null): number | null {
+  const report = plan?.kind === "report" ? plan.report : null;
+  if (!report || typeof report !== "object") return null;
+  const versionId = (report as { versionId?: unknown }).versionId;
+  return typeof versionId === "number" && Number.isFinite(versionId) ? versionId : null;
+}
+
 // ---------------------------------------------------------------------------
 // Idempotency store — in-memory dedup for retried POSTs caused by network blips
 // ---------------------------------------------------------------------------
@@ -365,6 +372,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
   let assistantContent: string;
   // eslint-disable-next-line no-useless-assignment
   let plan: Record<string, unknown> | null = null;
+  let persistedAssistantMessage: typeof chatMessagesTable.$inferSelect | null = null;
 
   const DEVELOPER_INTENT_SYSTEM_PROMPTS: Record<string, string> = {
     debug: (await import("../lib/builder")).DEBUG_SYSTEM_PROMPT,
@@ -412,6 +420,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         status: "building",
         prompt: content,
         agentIdentity: "main",
+        origin: messageOrigin,
         hasBrainstormContext,
         brainstormTurnCount: hasBrainstormContext
           ? (brainstormContext as Array<{ role: string; content: string }>).length
@@ -550,6 +559,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         status: "planning",
         prompt: content,
         agentIdentity: "planning",
+        origin: messageOrigin,
       })
       .returning();
 
@@ -736,6 +746,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         prompt: content,
         attachments: imageAttachments.length > 0 ? imageAttachments : null,
         agentIdentity: resolvedAgentIdentity,
+        origin: messageOrigin,
         runMode: runInBackground ? "background" : "foreground",
         wallClockCapMs,
         creditsReserved: reservedCredits,
@@ -780,6 +791,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         userPrompt: userPromptWithContext,
         agentMode: mode,
         agentIdentity: resolvedAgentIdentity,
+        origin: messageOrigin,
         conversationHistory,
         imageAttachments: jobImageAttachments,
         runMode: "background",
@@ -795,6 +807,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         userPrompt: userPromptWithContext,
         agentMode: mode,
         agentIdentity: resolvedAgentIdentity,
+        origin: messageOrigin,
         conversationHistory,
         imageAttachments: jobImageAttachments,
       });
@@ -813,6 +826,24 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
             unknown
           >)
         : ({ kind: "task-done", taskId: task.id } as unknown as Record<string, unknown>);
+      if (refreshed?.report) {
+        const checkpointId = checkpointIdFromPlan(plan);
+        const [completionMessage] = await db
+          .update(chatMessagesTable)
+          .set({ origin: messageOrigin, checkpointId })
+          .where(
+            sql`id = (
+              SELECT id FROM chat_messages
+              WHERE project_id = ${project.id}
+                AND (plan->>'kind') = 'report'
+                AND (plan->>'taskId') = ${String(task.id)}
+              ORDER BY created_at DESC
+              LIMIT 1
+            )`,
+          )
+          .returning();
+        persistedAssistantMessage = completionMessage ?? null;
+      }
     }
   }
 
@@ -866,18 +897,23 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     })();
   });
 
-  const [assistantMessage] = await db
-    .insert(chatMessagesTable)
-    .values({
-      projectId: project.id,
-      role: "assistant",
-      content: assistantContent,
-      agentMode: mode,
-      planMode: effectivePlanMode,
-      plan: plan ?? undefined,
-      origin: messageOrigin,
-    })
-    .returning();
+  const checkpointId = checkpointIdFromPlan(plan);
+  const [insertedAssistantMessage] = persistedAssistantMessage
+    ? [persistedAssistantMessage]
+    : await db
+        .insert(chatMessagesTable)
+        .values({
+          projectId: project.id,
+          role: "assistant",
+          content: assistantContent,
+          agentMode: mode,
+          planMode: effectivePlanMode,
+          plan: plan ?? undefined,
+          origin: messageOrigin,
+          checkpointId,
+        })
+        .returning();
+  const assistantMessage = insertedAssistantMessage;
   if (!assistantMessage) {
     if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
     res.status(500).json({ error: "Failed to save assistant message" });
@@ -1342,6 +1378,7 @@ router.post(
         status: "building",
         prompt: content,
         agentIdentity: "main",
+        origin: streamMessageOrigin,
         hasBrainstormContext: streamHasBrainstormContext,
         brainstormTurnCount: streamHasBrainstormContext
           ? (streamBrainstormContext as Array<{ role: string; content: string }>).length

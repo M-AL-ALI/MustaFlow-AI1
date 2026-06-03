@@ -417,6 +417,9 @@ export const agentTasksTable = pgTable(
     // "planning" = Planning Agent (plan mode), "task" = Task Agent (staging gate),
     // "main" = Main Agent (direct fast edit). Default "main" for backward compat.
     agentIdentity: text("agent_identity").notNull().default("main"),
+    // origin: source surface that created the task. Mirrors chat_messages.origin
+    // so queued/background task reports can be written back to the same thread.
+    origin: text("origin"),
     // stagingSnapshot: Task Agent stores generated files here before the user
     // approves. Null for Main Agent (files are written directly). Promoted to
     // project_files on Apply; discarded on Discard.

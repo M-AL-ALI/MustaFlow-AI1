@@ -356,7 +356,6 @@ export * from './projectFileRename';
 export * from './projectFileSummary';
 export * from './projectFileUpdate';
 export * from './projectHealthIncident';
-export * from './projectHealthIncidentKind';
 export * from './projectHealthResponse';
 export * from './projectHealthTaskMetrics';
 export * from './projectHealthWindow';

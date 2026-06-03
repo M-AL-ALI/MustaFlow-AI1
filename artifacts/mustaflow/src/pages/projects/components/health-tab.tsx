@@ -9,10 +9,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  useGetProjectHealth,
-  type ProjectHealthWindow,
-} from "@workspace/api-client-react";
+import { useGetProjectHealth, type ProjectHealthWindow } from "@workspace/api-client-react";
 
 type Window = "24h" | "7d" | "30d";
 

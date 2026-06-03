@@ -9,8 +9,7 @@ import type { ProjectHealthIncident } from './projectHealthIncident';
 import type { ProjectHealthWindow } from './projectHealthWindow';
 
 export interface ProjectHealthResponse {
-  projectId: number;
-  generatedAt: Date;
   windows: ProjectHealthWindow[];
   recentIncidents: ProjectHealthIncident[];
+  generatedAt: Date;
 }

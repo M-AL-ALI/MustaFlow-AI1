@@ -665,6 +665,8 @@ export interface JobInput {
   agentMode: AgentMode;
   /** Which of the three agents handles this task. Default "main". */
   agentIdentity?: AgentIdentity;
+  /** Source surface that created the task. Mirrors chat_messages.origin. */
+  origin?: string | null;
   /** Structured plan from the Planning Agent (injected into build/refine prompt). */
   planContext?: Record<string, unknown> | null;
   conversationHistory?: ConversationTurn[];
@@ -1659,6 +1661,7 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     // Preserve the agentIdentity and execution context that were set when this
     // batch task was originally enqueued (Task #item-1).
     agentIdentity: (nextTask.agentIdentity as AgentIdentity | undefined) ?? undefined,
+    origin: nextTask.origin ?? null,
     conversationHistory,
     imageAttachments: drainedImageAttachments,
     queueBatchId: completedTask.queueBatchId,
@@ -1773,6 +1776,7 @@ export async function drainNextProjectTask(
       (project.agentMode as AgentMode) ??
       "power",
     agentIdentity: (nextTask.agentIdentity as AgentIdentity | undefined) ?? undefined,
+    origin: nextTask.origin ?? null,
     imageAttachments: drainedImageAttachments,
     runMode: (nextTask.runMode as "foreground" | "background" | undefined) ?? undefined,
     wallClockCapMs: nextTask.wallClockCapMs ?? undefined,
@@ -1929,6 +1933,8 @@ export async function runJob(input: JobInput): Promise<void> {
   } = input;
   let { userPrompt, agentMode } = input;
   const agentIdentity: AgentIdentity = input.agentIdentity ?? "main";
+  const jobOrigin =
+    typeof input.origin === "string" && input.origin.length > 0 ? input.origin : null;
   // Task #665 — image layout analysis. When the user drops in screenshots,
   // we run a vision pass once and prepend a structured layout brief to the
   // prompt so every downstream pipeline (including JSON-mode builders that
@@ -2352,6 +2358,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               content: archMessage,
               agentMode,
               planMode: false,
+              origin: jobOrigin,
               plan: {
                 kind: "architecture_chosen",
                 stack: detectedStack,
@@ -4336,6 +4343,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             content: assistantSummary,
             agentMode,
             planMode: false,
+            origin: jobOrigin,
             plan: {
               kind: "report",
               report,
@@ -4419,6 +4427,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           content: assistantSummary,
           agentMode,
           planMode: false,
+          origin: jobOrigin,
           plan: {
             kind: "report",
             report,
@@ -4945,13 +4954,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 );
               try {
                 const autoFixResult = await pool.query<{ id: number }>(
-                  `INSERT INTO agent_tasks (project_id, title, kind, status, prompt)
-                   VALUES ($1, $2, 'background', 'queued', $3)
+                  `INSERT INTO agent_tasks (project_id, title, kind, status, prompt, origin)
+                   VALUES ($1, $2, 'background', 'queued', $3, $4)
                    ON CONFLICT (project_id, title)
                    WHERE kind = 'background' AND status IN ('queued', 'building', 'planning')
                    DO NOTHING
                    RETURNING id`,
-                  [projectId, fixTitle, fixPrompt],
+                  [projectId, fixTitle, fixPrompt, jobOrigin],
                 );
                 const followUp = autoFixResult.rows[0];
                 if (followUp) {
@@ -4963,6 +4972,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     content: `Architect review verdict: **${review.verdict}**. ${review.summary} Queued an auto-fix (Task #${followUp.id}) to address the findings; the architect will re-review afterwards.`,
                     agentMode,
                     planMode: false,
+                    origin: jobOrigin,
                     plan: {
                       kind: "task-queued",
                       taskId: followUp.id,
@@ -4974,6 +4984,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     kind: "refine",
                     userPrompt: fixPrompt,
                     agentMode,
+                    origin: jobOrigin,
                   });
                 }
               } catch (enqueueErr) {
@@ -4996,6 +5007,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 content: `Architect re-review after auto-fix still reports **${review.verdict}**. ${review.summary} Unresolved findings will need your input — no further auto-fix attempts.`,
                 agentMode,
                 planMode: false,
+                origin: jobOrigin,
               });
             }
 
@@ -5316,13 +5328,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     const autoFixTitle = `Auto-fix: ${checkNames}`;
 
                     const autoFixResult = await pool.query<{ id: number }>(
-                      `INSERT INTO agent_tasks (project_id, title, kind, status, prompt)
-                       VALUES ($1, $2, 'background', 'queued', $3)
+                      `INSERT INTO agent_tasks (project_id, title, kind, status, prompt, origin)
+                       VALUES ($1, $2, 'background', 'queued', $3, $4)
                        ON CONFLICT (project_id, title)
                        WHERE kind = 'background' AND status IN ('queued', 'building', 'planning')
                        DO NOTHING
                        RETURNING id`,
-                      [projectId, autoFixTitle, autoFixPrompt],
+                      [projectId, autoFixTitle, autoFixPrompt, jobOrigin],
                     );
 
                     if (autoFixResult.rows.length === 0) {
@@ -5340,6 +5352,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                             content: autoFixPrompt,
                             agentMode,
                             planMode: false,
+                            origin: jobOrigin,
                           },
                           {
                             projectId,
@@ -5351,6 +5364,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                               kind: "task-queued",
                               taskId: followUpTask.id,
                             } as unknown as Record<string, unknown>,
+                            origin: jobOrigin,
                           },
                         ]);
                         enqueueJob({
@@ -5359,6 +5373,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                           kind: "refine",
                           userPrompt: autoFixPrompt,
                           agentMode,
+                          origin: jobOrigin,
                         });
                         logger.info(
                           {
@@ -5832,6 +5847,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         content: assistantSummary,
         agentMode,
         planMode: false,
+        origin: jobOrigin,
         plan: { kind: "report", report, taskId, ...batchMeta } as unknown as Record<
           string,
           unknown
@@ -5857,6 +5873,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 WHERE project_id = ${projectId}
                   AND role = 'user'
                   AND checkpoint_id IS NULL
+                  AND (
+                    (${jobOrigin}::text IS NULL AND origin IS NULL)
+                    OR origin = ${jobOrigin}
+                  )
                 ORDER BY created_at DESC
                 LIMIT 1
               )`,
@@ -5886,13 +5906,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             // Once a previous auto-fix resolves (status → done/failed/canceled), the row
             // falls outside the partial index and a new auto-fix can be enqueued.
             const autoFixResult = await pool.query<{ id: number }>(
-              `INSERT INTO agent_tasks (project_id, title, kind, status, prompt)
-               VALUES ($1, $2, 'background', 'queued', $3)
+              `INSERT INTO agent_tasks (project_id, title, kind, status, prompt, origin)
+               VALUES ($1, $2, 'background', 'queued', $3, $4)
                ON CONFLICT (project_id, title)
                WHERE kind = 'background' AND status IN ('queued', 'building', 'planning')
                DO NOTHING
                RETURNING id`,
-              [projectId, "Auto-fix: Replace Moment.js with Luxon", MOMENT_REPLACE_PROMPT],
+              [
+                projectId,
+                "Auto-fix: Replace Moment.js with Luxon",
+                MOMENT_REPLACE_PROMPT,
+                jobOrigin,
+              ],
             );
             if (autoFixResult.rows.length === 0) {
               logger.info(
@@ -5916,6 +5941,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 content: MOMENT_REPLACE_PROMPT,
                 agentMode,
                 planMode: false,
+                origin: jobOrigin,
               },
               {
                 projectId,
@@ -5923,6 +5949,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 content: `Moment.js was detected in this build. I've queued an automatic follow-up to replace it with Luxon (Task #${followUpTask.id}). The refine will run in the background and post a report here when complete.`,
                 agentMode,
                 planMode: false,
+                origin: jobOrigin,
                 plan: {
                   kind: "task-queued",
                   taskId: followUpTask.id,
@@ -5935,6 +5962,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               kind: "refine",
               userPrompt: MOMENT_REPLACE_PROMPT,
               agentMode,
+              origin: jobOrigin,
             });
             logger.info(
               { projectId, taskId, followUpTaskId: followUpTask.id },
@@ -6152,6 +6180,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           content: `Build failed: ${message}`,
           agentMode,
           planMode: false,
+          origin: jobOrigin,
           plan: { kind: "error", message, suggestions, ...errBatchMeta } as unknown as Record<
             string,
             unknown
@@ -6542,6 +6571,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     (task.taskAgentMode as AgentMode | null | undefined) ??
     (project.agentMode as AgentMode) ??
     "power";
+  const taskOrigin = typeof task.origin === "string" && task.origin.length > 0 ? task.origin : null;
 
   // ── SAST gate (before any files are written or synced) ─────────────────
   // Run a static security scan on all JS/HTML files in the staging snapshot.
@@ -6954,6 +6984,50 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       ),
     );
 
+  await db.insert(chatMessagesTable).values({
+    projectId,
+    role: "system",
+    content: assistantSummary,
+    agentMode,
+    planMode: false,
+    origin: taskOrigin,
+    plan: {
+      kind: "report",
+      report: finalReport,
+      taskId,
+      agentIdentity: "task",
+      applied: true,
+    } as unknown as Record<string, unknown>,
+    checkpointId: version?.id ?? null,
+  });
+
+  if (version?.id) {
+    try {
+      await db
+        .update(chatMessagesTable)
+        .set({ checkpointId: version.id })
+        .where(
+          sql`id = (
+            SELECT id FROM chat_messages
+            WHERE project_id = ${projectId}
+              AND role = 'user'
+              AND checkpoint_id IS NULL
+              AND (
+                (${taskOrigin}::text IS NULL AND origin IS NULL)
+                OR origin = ${taskOrigin}
+              )
+            ORDER BY created_at DESC
+            LIMIT 1
+          )`,
+        );
+    } catch (err) {
+      logger.warn(
+        { err, projectId, versionId: version.id },
+        "Failed to link apply triggering message to checkpoint",
+      );
+    }
+  }
+
   // Update project status
   await db
     .update(projectsTable)
@@ -7176,6 +7250,7 @@ function serializeJobInput(input: JobInput): Record<string, unknown> {
     userPrompt: input.userPrompt,
     agentMode: input.agentMode,
     agentIdentity: input.agentIdentity ?? null,
+    origin: input.origin ?? null,
     planContext: input.planContext ?? null,
     conversationHistory: input.conversationHistory ?? null,
     imageAttachments: input.imageAttachments ?? null,

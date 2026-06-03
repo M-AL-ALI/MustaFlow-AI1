@@ -10,7 +10,7 @@
  * shutdown. All errors are swallowed so one bad sweep never crashes the server.
  */
 
-import { db, agentTasksTable } from "@workspace/db";
+import { db, agentTasksTable, taskEventsTable } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -23,13 +23,18 @@ async function sweepStuckRuns(): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - HEARTBEAT_TIMEOUT_MS);
 
-    // Tasks that are still "building" but whose heartbeat is older than 5 min
-    // (or never sent a heartbeat and started more than 5 min ago).
+    const message =
+      "Task timed out because Agent Zero stopped sending progress heartbeats. Please retry or inspect the last task events.";
+
+    // Tasks that are still "building" but whose heartbeat is older than the
+    // timeout window (or never sent a heartbeat and started before the cutoff).
     const result = await db
       .update(agentTasksTable)
       .set({
         status: "failed",
+        result: message,
         failureReason: "stuck-run-timeout",
+        completedAt: sql`now()`,
       })
       .where(
         and(
@@ -44,6 +49,14 @@ async function sweepStuckRuns(): Promise<void> {
       .returning({ id: agentTasksTable.id });
 
     if (result.length > 0) {
+      await db.insert(taskEventsTable).values(
+        result.map((r) => ({
+          taskId: r.id,
+          eventType: "failed",
+          message,
+          filePath: null,
+        })),
+      );
       logger.warn(
         { count: result.length, taskIds: result.map((r) => r.id) },
         "stuck-run-scheduler: marked stuck builds as failed",
@@ -65,7 +78,7 @@ export function startStuckRunScheduler(): void {
   sweepTimer = setInterval(() => void sweepStuckRuns(), SWEEP_INTERVAL_MS);
   sweepTimer.unref();
 
-  logger.info("stuck-run-scheduler: started (sweep every 2 min, timeout 5 min)");
+  logger.info("stuck-run-scheduler: started (sweep every 2 min, timeout 8 min)");
 }
 
 export function stopStuckRunScheduler(): void {

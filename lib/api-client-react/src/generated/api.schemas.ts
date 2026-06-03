@@ -1378,6 +1378,11 @@ export interface AgentTask {
   /** Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
   agentIdentity?: AgentTaskAgentIdentity;
   /**
+     * Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.
+     * @nullable
+     */
+  origin?: string | null;
+  /**
      * Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.
      * @nullable
      */
@@ -3225,6 +3230,49 @@ export interface TriggerChecksResult {
   runs: CheckRun[];
 }
 
+export interface ProjectHealthTaskMetrics {
+  total: number;
+  succeeded: number;
+  failed: number;
+  successRate: number;
+  avgDurationMs?: number | null;
+  p50DurationMs?: number | null;
+  p95DurationMs?: number | null;
+  p99DurationMs?: number | null;
+}
+
+export type ProjectHealthWindowWindow = typeof ProjectHealthWindowWindow[keyof typeof ProjectHealthWindowWindow];
+
+
+export const ProjectHealthWindowWindow = {
+  '24h': '24h',
+  '7d': '7d',
+  '30d': '30d',
+} as const;
+
+export type ProjectHealthWindowDeployments = {
+  published: number;
+  unpublished: number;
+};
+
+export interface ProjectHealthWindow {
+  window: ProjectHealthWindowWindow;
+  windowLabel: string;
+  tasks: ProjectHealthTaskMetrics;
+  deployments: ProjectHealthWindowDeployments;
+}
+
+export interface ProjectHealthIncident {
+  message: string;
+  at: string;
+}
+
+export interface ProjectHealthResponse {
+  windows: ProjectHealthWindow[];
+  recentIncidents: ProjectHealthIncident[];
+  generatedAt: string;
+}
+
 export type CveFindingSeverity = typeof CveFindingSeverity[keyof typeof CveFindingSeverity];
 
 
@@ -4382,59 +4430,6 @@ export interface ImageEditRequest {
   instruction: string;
   quality?: ImageEditRequestQuality;
   projectId?: number;
-}
-
-export interface ProjectHealthTaskMetrics {
-  total: number;
-  succeeded: number;
-  failed: number;
-  successRate: number;
-  avgDurationMs?: number | null;
-  p50DurationMs?: number | null;
-  p95DurationMs?: number | null;
-  p99DurationMs?: number | null;
-}
-
-export type ProjectHealthWindowWindow = typeof ProjectHealthWindowWindow[keyof typeof ProjectHealthWindowWindow];
-
-
-export const ProjectHealthWindowWindow = {
-  '24h': '24h',
-  '7d': '7d',
-  '30d': '30d',
-} as const;
-
-export type ProjectHealthWindowDeployments = {
-  published: number;
-  unpublished: number;
-};
-
-export interface ProjectHealthWindow {
-  window: ProjectHealthWindowWindow;
-  windowLabel: string;
-  tasks: ProjectHealthTaskMetrics;
-  deployments: ProjectHealthWindowDeployments;
-}
-
-export type ProjectHealthIncidentKind = typeof ProjectHealthIncidentKind[keyof typeof ProjectHealthIncidentKind];
-
-
-export const ProjectHealthIncidentKind = {
-  build_failure: 'build_failure',
-  publish_failure: 'publish_failure',
-} as const;
-
-export interface ProjectHealthIncident {
-  at: string;
-  kind: ProjectHealthIncidentKind;
-  message: string;
-}
-
-export interface ProjectHealthResponse {
-  projectId: number;
-  generatedAt: string;
-  windows: ProjectHealthWindow[];
-  recentIncidents: ProjectHealthIncident[];
 }
 
 export interface DeveloperModeRuntimeStatus {

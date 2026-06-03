@@ -22,6 +22,11 @@ export interface AgentTask {
   /** Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
   agentIdentity?: AgentTaskAgentIdentity;
   /**
+     * Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.
+     * @nullable
+     */
+  origin?: string | null;
+  /**
      * Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.
      * @nullable
      */
