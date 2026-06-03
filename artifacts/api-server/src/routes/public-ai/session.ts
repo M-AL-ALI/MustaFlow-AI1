@@ -5,6 +5,9 @@ import {
   validateSession,
   setSessionCookie,
   MSG_LIMIT_VALUE,
+  FILE_LIMIT_VALUE,
+  IMAGE_LIMIT_VALUE,
+  IMAGE_ANALYSIS_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { oraSessionLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
@@ -51,6 +54,12 @@ router.get("/public-ai/session", (req, res) => {
     sessionId: session.sessionId,
     msgCount: session.msgCount,
     msgLimit: MSG_LIMIT_VALUE,
+    fileCount: session.fileCount,
+    fileLimit: FILE_LIMIT_VALUE,
+    imageCount: session.imageCount,
+    imageLimit: IMAGE_LIMIT_VALUE,
+    imageAnalysisCount: session.imageAnalysisCount,
+    imageAnalysisLimit: IMAGE_ANALYSIS_LIMIT_VALUE,
   });
 });
 

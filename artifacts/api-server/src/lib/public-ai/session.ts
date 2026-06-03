@@ -109,5 +109,6 @@ export function setSessionCookie(res: import("express").Response, token: string)
     sameSite: "lax",
     path: "/api/public-ai",
     maxAge: SESSION_EXPIRY_SECONDS * 1000,
+    secure: process.env.NODE_ENV === "production",
   });
 }

@@ -45,16 +45,26 @@ const bodySchema = z.object({
   message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
+  languageHint: z.string().max(20).optional(),
 });
 
 /**
  * Build the system prompt, injecting an explicit language instruction when
- * the caller specifies one. This ensures the language selector in the UI
- * actually influences model output.
+ * the caller specifies one. When the user's selector is "auto", a browser
+ * locale hint (`languageHint`) is used as a tiebreaker for ambiguous or
+ * very short messages so the model defaults to the user's preferred language
+ * instead of picking arbitrarily.
  */
-function buildSystemPrompt(language: string | undefined): string {
+function buildSystemPrompt(language: string | undefined, languageHint: string | undefined): string {
   if (!language || language === "auto") {
-    return ORA_SYSTEM_PROMPT;
+    if (!languageHint) return ORA_SYSTEM_PROMPT;
+    // Normalise: "fr-FR" → "fr", "en-US" → "en"
+    const primaryLang = languageHint.split("-")[0].toLowerCase();
+    if (primaryLang === "en") return ORA_SYSTEM_PROMPT; // English is the default — no hint needed
+    return (
+      ORA_SYSTEM_PROMPT +
+      `\n\n## Language tiebreaker\nThe visitor's browser is set to "${languageHint}". When their message is too short or ambiguous to reliably detect a language, default to responding in ${primaryLang}. If the message is clearly in a different language, match that language instead.`
+    );
   }
   return (
     ORA_SYSTEM_PROMPT +
@@ -96,7 +106,7 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  const { message, messages, language } = parsed.data;
+  const { message, messages, language, languageHint } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
@@ -209,7 +219,7 @@ router.post("/public-ai/chat", async (req, res) => {
     .slice(-20)
     .map((m) => ({ role: m.role, content: m.content }));
 
-  const systemPrompt = buildSystemPrompt(language);
+  const systemPrompt = buildSystemPrompt(language, languageHint);
 
   const callMessages = [
     { role: "system" as const, content: systemPrompt },
@@ -338,7 +348,7 @@ router.post("/public-ai/chat", async (req, res) => {
       const parsedSuggestions = JSON.parse(raw) as { suggestions?: unknown };
       if (Array.isArray(parsedSuggestions.suggestions)) {
         suggestions = (parsedSuggestions.suggestions as unknown[])
-          .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 80)
+          .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 60)
           .slice(0, 3);
       }
     } catch (parseErr) {
@@ -354,11 +364,15 @@ router.post("/public-ai/chat", async (req, res) => {
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
-  // Show the "Continue in Builder" CTA after every substantive answer so visitors
-  // are reminded they can take the conversation further inside MustaFlow.
-  // (builder_request is already handled with an early return above, so we always
-  // reach this point for simple_faq and premium intents only.)
-  const handoffCta = true;
+  // Show the CTA only when the topic signals a build intent, OR after at least
+  // 3 messages have been exchanged (conversation is substantive). Always suppress
+  // for high-confidence simple FAQ answers — those are informational, not build-intent.
+  const BUILDER_TOPICS: OraTopic[] = ["app-planning", "saas", "ecommerce", "mobile", "technical"];
+  const isHighConfidenceFaq =
+    classifierResult.intent === "simple_faq" && classifierResult.confidence === "high";
+  const handoffCta =
+    !isHighConfidenceFaq &&
+    (BUILDER_TOPICS.includes(classifierResult.topic) || payload.msgCount >= 3);
 
   res.json({
     reply,

@@ -231,6 +231,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const formatMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Reset handoff dismissal when the conversation is cleared so the CTA
+  // re-appears on the next substantive exchange.
+  useEffect(() => {
+    if (messages.length === 0) setHandoffDismissed(false);
+  }, [messages.length]);
+
   // ─── Resize (desktop only) ────────────────────────────────────────────────
   const [panelWidth, setPanelWidth] = useState(() => {
     try {

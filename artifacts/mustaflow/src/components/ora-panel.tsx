@@ -237,6 +237,12 @@ export function OraPanel({ chat }: OraPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasMessages = messages.length > 0;
 
+  // Reset handoff dismissal when the conversation is cleared so the CTA
+  // re-appears on the next substantive exchange.
+  useEffect(() => {
+    if (messages.length === 0) setHandoffDismissed(false);
+  }, [messages.length]);
+
   // ─── Voice ────────────────────────────────────────────────────────────────
   // Two distinct modes share one SpeechRecognition instance:
   //   A. Normal dictation — transcript lands in the textarea; user presses Send.

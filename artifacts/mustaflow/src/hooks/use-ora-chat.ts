@@ -345,6 +345,10 @@ export function useOraChat(): UseOraChatReturn {
             msgLimit: number;
             fileCount?: number;
             fileLimit?: number;
+            imageCount?: number;
+            imageLimit?: number;
+            imageAnalysisCount?: number;
+            imageAnalysisLimit?: number;
           }>("/api/public-ai/session");
           setSession({
             sessionId: data.sessionId,
@@ -352,6 +356,10 @@ export function useOraChat(): UseOraChatReturn {
             msgLimit: data.msgLimit,
             fileCount: data.fileCount ?? 0,
             fileLimit: data.fileLimit ?? FILE_LIMIT,
+            imageCount: data.imageCount ?? 0,
+            imageLimit: data.imageLimit ?? IMAGE_LIMIT,
+            imageAnalysisCount: data.imageAnalysisCount ?? 0,
+            imageAnalysisLimit: data.imageAnalysisLimit ?? 2,
           });
           const stored = getStoredTranscript();
           if (stored.length > 0) {
@@ -414,8 +422,25 @@ export function useOraChat(): UseOraChatReturn {
       try {
         const data = await apiGet<{ messages: OraMessage[] }>("/api/ora/transcript");
         if (data.messages.length > 0) {
-          setMessages(data.messages);
-          storeTranscript(data.messages);
+          // Merge: only overwrite local state if the server transcript has equal-or-more
+          // messages. If the user sent messages between Phase 1 init and sign-in
+          // confirmation, those local-only messages are appended after the server transcript.
+          setMessages((localMsgs) => {
+            if (data.messages.length >= localMsgs.length) {
+              storeTranscript(data.messages);
+              return data.messages;
+            }
+            // Local state has newer messages — append them after the server transcript
+            const serverIds = new Set(
+              data.messages.map((m) => `${m.role}:${m.content.slice(0, 50)}`),
+            );
+            const localOnly = localMsgs.filter(
+              (m) => !serverIds.has(`${m.role}:${m.content.slice(0, 50)}`),
+            );
+            const merged = [...data.messages, ...localOnly];
+            storeTranscript(merged);
+            return merged;
+          });
         }
       } catch {
         // Best-effort — sessionStorage messages (set in Phase 1) remain as fallback
@@ -624,6 +649,8 @@ export function useOraChat(): UseOraChatReturn {
           };
           if (language && language !== "auto") {
             body.language = language;
+          } else {
+            body.languageHint = navigator.language;
           }
 
           if (currentAttachment.isImage) {
@@ -732,6 +759,8 @@ export function useOraChat(): UseOraChatReturn {
           const body: Record<string, unknown> = { message: content, messages: history };
           if (language && language !== "auto") {
             body.language = language;
+          } else {
+            body.languageHint = navigator.language;
           }
           const data = await apiPost<{
             reply: string;
@@ -870,7 +899,11 @@ export function useOraChat(): UseOraChatReturn {
       try {
         const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
         const body: Record<string, unknown> = { message: content, messages: history, format };
-        if (language && language !== "auto") body.language = language;
+        if (language && language !== "auto") {
+          body.language = language;
+        } else {
+          body.languageHint = navigator.language;
+        }
 
         const data = await apiPost<{
           reply: string;
@@ -916,8 +949,80 @@ export function useOraChat(): UseOraChatReturn {
         if (status === 429) {
           setError(msg ?? "You have reached the message limit for this session.");
         } else if (status === 401) {
-          // Keep the transcript — only clear the expired session token.
+          // Session expired — try refreshing the session cookie and retrying once.
           clearStoredSessionId();
+          try {
+            const refreshed = await apiPost<{
+              sessionId: string;
+              msgCount: number;
+              msgLimit: number;
+              fileCount?: number;
+              fileLimit?: number;
+            }>("/api/public-ai/session", {});
+            storeSessionId(refreshed.sessionId);
+            setSession({
+              sessionId: refreshed.sessionId,
+              msgCount: refreshed.msgCount,
+              msgLimit: refreshed.msgLimit,
+              fileCount: refreshed.fileCount ?? 0,
+              fileLimit: refreshed.fileLimit ?? FILE_LIMIT,
+            });
+            // Retry the file generation with the fresh session
+            const retryHistory = messages
+              .slice(-10)
+              .map((m) => ({ role: m.role, content: m.content }));
+            const retryBody: Record<string, unknown> = {
+              message: content,
+              messages: retryHistory,
+              format,
+            };
+            if (language && language !== "auto") {
+              retryBody.language = language;
+            } else {
+              retryBody.languageHint = navigator.language;
+            }
+            const retryData = await apiPost<{
+              reply: string;
+              fileName: string;
+              fileData: string;
+              mimeType: string;
+              msgCount: number;
+              msgLimit: number;
+            }>("/api/public-ai/generate-file", retryBody);
+            setMessages((prev) => {
+              const next = [
+                ...prev,
+                {
+                  role: "assistant" as const,
+                  content: retryData.reply,
+                  generatedFile: {
+                    fileName: retryData.fileName,
+                    fileData: retryData.fileData,
+                    mimeType: retryData.mimeType,
+                    format,
+                  } satisfies GeneratedFile,
+                },
+              ];
+              storeTranscript(next);
+              if (isSignedIn) saveToServer(next);
+              return next;
+            });
+            setSession((prev) =>
+              prev
+                ? { ...prev, msgCount: retryData.msgCount, msgLimit: retryData.msgLimit }
+                : {
+                    sessionId: refreshed.sessionId,
+                    msgCount: retryData.msgCount,
+                    msgLimit: retryData.msgLimit,
+                    fileCount: 0,
+                    fileLimit: FILE_LIMIT,
+                  },
+            );
+            setIsLoading(false);
+            return;
+          } catch {
+            // Retry failed; fall through to error state
+          }
           setError(
             "Your session has expired. Please refresh the page to start a new conversation.",
           );
@@ -945,6 +1050,10 @@ export function useOraChat(): UseOraChatReturn {
     clearStoredSessionId();
     setMessages([]);
     setError(null);
+    setSessionExpired(false);
+    setAttachedFile(null);
+    setUploadState("idle");
+    setUploadError(null);
     if (isSignedIn) {
       try {
         await apiDelete("/api/ora/transcript");
