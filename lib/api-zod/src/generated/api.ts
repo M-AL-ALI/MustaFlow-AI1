@@ -1709,8 +1709,95 @@ export const CreateTaskParams = zod.object({
 export const CreateTaskBody = zod.object({
   "title": zod.string().min(1),
   "kind": zod.enum(['main', 'background', 'plan', 'converse']),
-  "prompt": zod.string().optional()
+  "prompt": zod.string().optional(),
+  "chatContent": zod.string().optional().describe('Optional chat message content to insert as a user chat_messages row when this task is queued while a build is running.')
 })
+
+
+/**
+ * @summary Reorder queued tasks by assigning each a queueIndex
+ */
+export const ReorderTasksParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReorderTasksBody = zod.object({
+  "taskIds": zod.array(zod.number()).describe('Ordered list of queued task IDs. Each task is assigned queueIndex equal to its position in this array.')
+})
+
+export const ReorderTasksResponseItem = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "title": zod.string(),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
+  "prompt": zod.string().nullish(),
+  "result": zod.string().nullish(),
+  "queueBatchId": zod.string().nullish(),
+  "queueIndex": zod.number().nullish(),
+  "report": zod.object({
+  "userRequest": zod.string().optional(),
+  "filesCreated": zod.array(zod.string()).optional(),
+  "filesChanged": zod.array(zod.string()).optional(),
+  "filesRemoved": zod.array(zod.string()).optional(),
+  "previewUpdated": zod.boolean().optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "warningChecks": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "label": zod.string().optional(),
+  "message": zod.string().optional()
+})).optional().describe('Non-required checks that failed. Present when validation_status=passed_with_warnings. Preview is available but the build is not fully clean.'),
+  "suggestions": zod.array(zod.string()).optional(),
+  "nextRecommendation": zod.string().optional(),
+  "nativeFeatures": zod.array(zod.string()).optional().describe('Native Expo\/device features used (e.g. Camera, Location, Push Notifications). Only present on mobile builds. Features require a real device — they cannot be previewed in the web iframe.'),
+  "knowledgeApplied": zod.array(zod.object({
+  "title": zod.string().optional(),
+  "category": zod.string().optional()
+})).optional(),
+  "securityFindings": zod.object({
+  "kind": zod.enum(['sast', 'npm_audit']).optional(),
+  "blocked": zod.boolean().optional(),
+  "message": zod.string().optional(),
+  "fixPrompt": zod.string().optional(),
+  "sast": zod.array(zod.object({
+  "file": zod.string().optional(),
+  "line": zod.number().nullish(),
+  "message": zod.string().optional(),
+  "detail": zod.string().nullish(),
+  "severity": zod.enum(['error', 'warning', 'info']).optional(),
+  "remediation": zod.string().nullish()
+})).optional(),
+  "npmAudit": zod.object({
+  "critical": zod.number().optional(),
+  "high": zod.number().optional(),
+  "parsed": zod.boolean().optional(),
+  "packages": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "severity": zod.string().optional()
+})).optional(),
+  "remediation": zod.string().nullish()
+}).optional()
+}).nullish().describe('Populated when a SAST or npm-audit gate blocked the Apply step. UI renders findings as an expandable \"Security findings\" section on the failed task row.'),
+  "versionId": zod.number().nullish()
+}).nullish(),
+  "userFeedback": zod.union([zod.literal('positive'),zod.literal('negative'),zod.literal(null)]).nullish(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "createdAt": zod.coerce.date(),
+  "startedAt": zod.coerce.date().nullish(),
+  "completedAt": zod.coerce.date().nullish(),
+  "elapsedSeconds": zod.number().nullish(),
+  "runMode": zod.union([zod.literal('foreground'),zod.literal('background'),zod.literal(null)]).nullish().describe('Foreground tasks block the chat. Background tasks run async (Task #509) with extended wall-clock and credit reservation.'),
+  "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
+  "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
+  "pausedAt": zod.coerce.date().nullish(),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "discardedAt": zod.coerce.date().nullish(),
+  "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
+  "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
+})
+export const ReorderTasksResponse = zod.array(ReorderTasksResponseItem)
 
 
 /**

@@ -1,11 +1,13 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { db, projectsTable, agentTasksTable } from "@workspace/db";
+import { db, projectsTable, agentTasksTable, chatMessagesTable } from "@workspace/db";
 import {
   ListTasksParams,
   ListTasksResponse,
   CreateTaskParams,
   CreateTaskBody,
+  ReorderTasksBody,
+  ReorderTasksParams,
   SubmitTaskFeedbackParams,
   SubmitTaskFeedbackBody,
   CancelTaskParams,
@@ -101,6 +103,18 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     .limit(1);
 
   const hasActiveBuild = activeTasks.length > 0;
+
+  // If chatContent is provided and a build is active, insert a user chat message first
+  // so the queued task shows up immediately in the chat feed.
+  if (hasActiveBuild && parsed.data.chatContent) {
+    await db.insert(chatMessagesTable).values({
+      projectId: project.id,
+      role: "user",
+      content: parsed.data.chatContent,
+      agentMode: project.agentMode,
+      planMode: false,
+    });
+  }
 
   const [task] = await db
     .insert(agentTasksTable)
@@ -310,6 +324,68 @@ router.post(
       .limit(1);
 
     res.json(updated ?? target);
+  },
+);
+
+router.post(
+  "/projects/:id/tasks/reorder",
+  requireProjectOwnership,
+  async (req, res): Promise<void> => {
+    const params = ReorderTasksParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: params.error.message });
+      return;
+    }
+    const parsed = ReorderTasksBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { id: projectId } = params.data;
+    const { taskIds } = parsed.data;
+
+    if (taskIds.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    // In a single transaction: validate all IDs belong to this project and are queued,
+    // then set queueIndex to each task's position in the provided array.
+    const updated = await db.transaction(async (tx) => {
+      const existingTasks = await tx
+        .select({ id: agentTasksTable.id, status: agentTasksTable.status })
+        .from(agentTasksTable)
+        .where(and(eq(agentTasksTable.projectId, projectId), inArray(agentTasksTable.id, taskIds)));
+
+      const existingIds = new Set(existingTasks.map((t) => t.id));
+      const nonQueued = existingTasks.filter((t) => t.status !== "queued");
+
+      if (existingIds.size !== taskIds.length) {
+        return { error: "One or more task IDs not found in this project" };
+      }
+      if (nonQueued.length > 0) {
+        return { error: "Only queued tasks can be reordered" };
+      }
+
+      const results: (typeof agentTasksTable.$inferSelect)[] = [];
+      for (let i = 0; i < taskIds.length; i++) {
+        const [row] = await tx
+          .update(agentTasksTable)
+          .set({ queueIndex: i })
+          .where(eq(agentTasksTable.id, taskIds[i]!))
+          .returning();
+        if (row) results.push(row);
+      }
+      return { tasks: results };
+    });
+
+    if ("error" in updated) {
+      res.status(400).json({ error: updated.error });
+      return;
+    }
+
+    res.json(updated.tasks);
   },
 );
 

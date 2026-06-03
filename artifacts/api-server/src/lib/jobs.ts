@@ -1758,7 +1758,10 @@ export async function drainNextProjectTask(
           isNull(agentTasksTable.queueBatchId),
         ),
       )
-      .orderBy(asc(agentTasksTable.createdAt))
+      .orderBy(
+        asc(sql`COALESCE(${agentTasksTable.queueIndex}, 2147483647)`),
+        asc(agentTasksTable.createdAt),
+      )
       .limit(1);
     nextTask = oldest;
   }
@@ -1767,6 +1770,56 @@ export async function drainNextProjectTask(
 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project) return;
+
+  // Auto-checkpoint: before running this queued task, snapshot the current project files
+  // into a version so users can roll back if this task breaks something the previous one built.
+  // Only create the checkpoint when there are already files to snapshot (skips the very first build).
+  try {
+    const [fileCountRow] = await db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
+    const hasExistingFiles = (fileCountRow?.c ?? 0) > 0;
+
+    if (hasExistingFiles) {
+      const snap = await snapshotFilesForVersion(projectId);
+      const checkpointLabel = `Auto-checkpoint before: ${nextTask.title.slice(0, 80)}`;
+      const [checkpointVersion] = await db
+        .insert(projectVersionsTable)
+        .values({
+          projectId,
+          label: checkpointLabel,
+          note: `Auto-checkpoint created before queued task "${nextTask.title.slice(0, 120)}" started.`,
+          changelogEntry: checkpointLabel,
+          filesSnapshot: snap,
+        })
+        .returning({ id: projectVersionsTable.id });
+
+      if (checkpointVersion) {
+        await db.insert(chatMessagesTable).values({
+          projectId,
+          role: "assistant",
+          content: `Checkpoint saved before starting: ${nextTask.title.slice(0, 80)}`,
+          agentMode: project.agentMode,
+          planMode: false,
+          plan: {
+            kind: "checkpoint-saved",
+            label: checkpointLabel,
+            versionId: checkpointVersion.id,
+          } as unknown as Record<string, unknown>,
+        });
+      }
+
+      logger.info(
+        { projectId, nextTaskId: nextTask.id, versionId: checkpointVersion?.id },
+        "Auto-checkpoint created before draining queued project task",
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { err, projectId, nextTaskId: nextTask.id },
+      "drainNextProjectTask: auto-checkpoint failed (non-fatal)",
+    );
+  }
 
   const [fileRow] = await db
     .select({ c: sql<number>`count(*)::int` })

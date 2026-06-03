@@ -420,6 +420,7 @@ export * from './renewDomainResponse';
 export * from './renewPurchasedDomainBody';
 export * from './reorderBlocksResponse';
 export * from './reorderFileBlocksBody';
+export * from './reorderTasksBody';
 export * from './requestAttachmentUploadUrl200';
 export * from './requestAttachmentUploadUrlBody';
 export * from './requestProjectUploadUrl200';

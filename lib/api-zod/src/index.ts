@@ -56,3 +56,7 @@ export { ToggleAdminSkillBody } from "./generated/api";
 export { UpdateAdminSkillDraftBody } from "./generated/api";
 export { ResumeStreamParams } from "./generated/api";
 export { SteerTaskBody } from "./generated/api";
+export { ReorderTasksBody } from "./generated/api";
+export { ReorderTasksParams } from "./generated/api";
+export { ReorderTasksResponse } from "./generated/api";
+export { ReorderTasksResponseItem } from "./generated/api";

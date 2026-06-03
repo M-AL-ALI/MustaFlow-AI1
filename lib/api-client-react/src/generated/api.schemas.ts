@@ -1494,6 +1494,13 @@ export interface AgentTaskInput {
   title: string;
   kind: AgentTaskInputKind;
   prompt?: string;
+  /** Optional chat message content to insert as a user chat_messages row when this task is queued while a build is running. */
+  chatContent?: string;
+}
+
+export interface ReorderTasksBody {
+  /** Ordered list of queued task IDs. Each task is assigned queueIndex equal to its position in this array. */
+  taskIds: number[];
 }
 
 export interface UpdateTaskBody {

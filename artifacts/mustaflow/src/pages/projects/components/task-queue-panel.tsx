@@ -1,12 +1,14 @@
-import { useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   useListTasks,
   useCancelTask,
+  useForceStartTask,
+  useReorderTasks,
   getListTasksQueryKey,
   resumePausedQueue,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Square, X, ListChecks, Clock, Play } from "lucide-react";
+import { Loader2, Square, Trash2, ListChecks, Clock, Play, GripVertical, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TaskQueuePanelProps {
@@ -29,30 +31,94 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
   });
 
   const cancelTask = useCancelTask();
+  const forceStartTask = useForceStartTask();
+  const reorderTasks = useReorderTasks();
+
+  const [confirmRunNowId, setConfirmRunNowId] = useState<number | null>(null);
+
+  // Drag-to-reorder state
+  const [localOrder, setLocalOrder] = useState<number[]>([]);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const draggingIdRef = useRef<number | null>(null);
+
+  const invalidate = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+  }, [projectId, queryClient]);
 
   const handleResume = useCallback(() => {
     resumePausedQueue(projectId)
       .then((data) => {
         if (data && (data.resumed ?? 0) > 0) {
-          void queryClient.invalidateQueries({
-            queryKey: getListTasksQueryKey(projectId),
-          });
+          invalidate();
         }
       })
       .catch(() => {});
-  }, [projectId, queryClient]);
+  }, [projectId, invalidate]);
 
   const activeTask = tasks.find((t) => (ACTIVE_STATUSES as readonly string[]).includes(t.status));
-  const queuedTasks = tasks.filter((t) => t.status === "queued");
+  const rawQueuedTasks = tasks.filter((t) => t.status === "queued");
   const pausedTasks = tasks.filter((t) => (t.status as string) === PAUSED_STATUS);
 
-  const hasActivity = activeTask != null || queuedTasks.length > 0 || pausedTasks.length > 0;
+  // Apply local ordering optimistically; fall back to server order when localOrder is stale
+  const queuedTaskIds = rawQueuedTasks.map((t) => t.id);
+  const localIds = localOrder.filter((id) => queuedTaskIds.includes(id));
+  const orderedQueuedTasks =
+    localIds.length === queuedTaskIds.length
+      ? localIds.map((id) => rawQueuedTasks.find((t) => t.id === id)!)
+      : rawQueuedTasks;
+
+  const hasActivity = activeTask != null || rawQueuedTasks.length > 0 || pausedTasks.length > 0;
 
   const summaryParts = [
     activeTask ? "1 active" : null,
-    queuedTasks.length > 0 ? `${queuedTasks.length} queued` : null,
+    rawQueuedTasks.length > 0 ? `${rawQueuedTasks.length} queued` : null,
     pausedTasks.length > 0 ? `${pausedTasks.length} paused` : null,
   ].filter(Boolean);
+
+  // Drag handlers
+  const handleDragStart = (taskId: number) => {
+    draggingIdRef.current = taskId;
+    if (localOrder.length === 0) {
+      setLocalOrder(orderedQueuedTasks.map((t) => t.id));
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, taskId: number) => {
+    e.preventDefault();
+    if (draggingIdRef.current === null || draggingIdRef.current === taskId) return;
+    setDragOverId(taskId);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    const sourceId = draggingIdRef.current;
+    if (sourceId === null || sourceId === targetId) {
+      setDragOverId(null);
+      return;
+    }
+
+    const current = localOrder.length > 0 ? localOrder : orderedQueuedTasks.map((t) => t.id);
+    const sourceIdx = current.indexOf(sourceId);
+    const targetIdx = current.indexOf(targetId);
+    if (sourceIdx === -1 || targetIdx === -1) {
+      setDragOverId(null);
+      return;
+    }
+
+    const newOrder = [...current];
+    newOrder.splice(sourceIdx, 1);
+    newOrder.splice(targetIdx, 0, sourceId);
+    setLocalOrder(newOrder);
+    setDragOverId(null);
+    draggingIdRef.current = null;
+
+    reorderTasks.mutate({ id: projectId, data: { taskIds: newOrder } }, { onSettled: invalidate });
+  };
+
+  const handleDragEnd = () => {
+    draggingIdRef.current = null;
+    setDragOverId(null);
+  };
 
   // When the queue is idle, render a compact collapsed summary row
   if (!hasActivity) {
@@ -94,22 +160,93 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
           </div>
         )}
 
-        {queuedTasks.map((task) => (
-          <div key={task.id} className="px-3 py-1.5 flex items-center gap-2">
-            <Clock className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-            <span className="flex-1 text-[11px] text-muted-foreground truncate min-w-0">
-              {task.title}
-            </span>
-            <button
-              onClick={() => cancelTask.mutate({ id: projectId, taskId: task.id })}
-              title="Cancel this task"
-              className="h-5 w-5 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              aria-label="Cancel task"
+        {orderedQueuedTasks.map((task) => {
+          const isConfirming = confirmRunNowId === task.id;
+          const isDragOver = dragOverId === task.id;
+          const showDragHandle = orderedQueuedTasks.length > 1;
+
+          return (
+            <div
+              key={task.id}
+              draggable={showDragHandle}
+              onDragStart={() => handleDragStart(task.id)}
+              onDragOver={(e) => handleDragOver(e, task.id)}
+              onDrop={(e) => handleDrop(e, task.id)}
+              onDragEnd={handleDragEnd}
+              className={cn(
+                "px-3 py-1.5 flex items-center gap-2 transition-colors",
+                isDragOver && "bg-primary/10",
+              )}
             >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        ))}
+              {showDragHandle && (
+                <span title="Drag to reorder">
+                  <GripVertical className="h-3 w-3 text-muted-foreground/40 shrink-0 cursor-grab active:cursor-grabbing" />
+                </span>
+              )}
+              <Clock className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+              <span className="flex-1 text-[11px] text-muted-foreground truncate min-w-0">
+                {task.title}
+              </span>
+
+              {isConfirming ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] text-muted-foreground">Stop build?</span>
+                  <button
+                    onClick={() => {
+                      setConfirmRunNowId(null);
+                      forceStartTask.mutate(
+                        { id: projectId, taskId: task.id },
+                        { onSuccess: invalidate, onError: invalidate },
+                      );
+                    }}
+                    className="h-5 px-1.5 rounded-md text-[10px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => setConfirmRunNowId(null)}
+                    className="h-5 px-1.5 rounded-md text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => {
+                      if (activeTask) {
+                        setConfirmRunNowId(task.id);
+                      } else {
+                        forceStartTask.mutate(
+                          { id: projectId, taskId: task.id },
+                          { onSuccess: invalidate, onError: invalidate },
+                        );
+                      }
+                    }}
+                    title="Run this task now"
+                    className="h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <Zap className="h-2.5 w-2.5" />
+                    Run Now
+                  </button>
+                  <button
+                    onClick={() =>
+                      cancelTask.mutate(
+                        { id: projectId, taskId: task.id },
+                        { onSuccess: invalidate, onError: invalidate },
+                      )
+                    }
+                    title="Cancel this task"
+                    className="h-5 w-5 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    aria-label="Cancel task"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {pausedTasks.length > 0 && (
           <div className="px-3 py-2 flex items-center gap-2">

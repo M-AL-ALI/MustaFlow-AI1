@@ -25,6 +25,7 @@ import {
   MoreHorizontal,
   AlertCircle,
   ChevronDown,
+  ListPlus,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -173,6 +174,13 @@ interface QueueComposerProps {
   activeTaskId?: number | null;
   /** Called when the user clicks the Stop build button. */
   onStopBuild?: () => void;
+  /**
+   * When true, a build is running and the next send will be queued rather than started.
+   * The send button becomes a "Queue" button (with ListPlus icon) and stays enabled.
+   */
+  queueingBehind?: boolean;
+  /** Called when the user submits in queue-behind mode instead of onSingleSend. */
+  onQueueBehind?: (content: string) => void;
   onSingleSend: (
     content: string,
     agentIntent?:
@@ -214,6 +222,8 @@ export function QueueComposer({
   disabled,
   activeTaskId,
   onStopBuild,
+  queueingBehind = false,
+  onQueueBehind,
   onSingleSend,
   onBatchStarted,
   promptValue,
@@ -1964,7 +1974,26 @@ export function QueueComposer({
                         : "10 credits · security-first strict mode"}
                 </span>
               </div>
-              {(activeTaskId != null && disabled) || (disabled && !isSubmitting) ? (
+              {queueingBehind ? (
+                <button
+                  onClick={() => {
+                    const queueText = rows
+                      .map((r) => r.text)
+                      .filter(Boolean)
+                      .join("\n")
+                      .trim();
+                    if (!queueText) return;
+                    if (onQueueBehind) onQueueBehind(queueText);
+                    setRows([{ id: crypto.randomUUID(), text: "" }]);
+                  }}
+                  disabled={!rows.some((r) => r.text.trim())}
+                  title="Add to queue — will run after the current build"
+                  className="h-8 px-3 bg-primary/80 rounded-xl flex items-center gap-1.5 shadow-md shadow-primary/20 hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground"
+                >
+                  <ListPlus style={{ width: 14, height: 14 }} />
+                  <span className="text-[11px] font-semibold">Queue</span>
+                </button>
+              ) : (activeTaskId != null && disabled) || (disabled && !isSubmitting) ? (
                 <button
                   onClick={onStopBuild}
                   title="Stop the current build"

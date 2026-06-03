@@ -240,6 +240,7 @@ import type {
   RenewPurchasedDomainBody,
   ReorderBlocksResponse,
   ReorderFileBlocksBody,
+  ReorderTasksBody,
   RequestAttachmentUploadUrl200,
   RequestAttachmentUploadUrlBody,
   RequestProjectUploadUrl200,
@@ -4589,6 +4590,78 @@ export const useCreateTask = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateTaskMutationOptions(options));
+    }
+
+export const getReorderTasksUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/tasks/reorder`
+}
+
+/**
+ * @summary Reorder queued tasks by assigning each a queueIndex
+ */
+export const reorderTasks = async (id: number,
+    reorderTasksBody: ReorderTasksBody, options?: RequestInit): Promise<AgentTask[]> => {
+
+  return customFetch<AgentTask[]>(getReorderTasksUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      reorderTasksBody,)
+  }
+);}
+
+
+
+
+export const getReorderTasksMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderTasks>>, TError,{id: number;data: BodyType<ReorderTasksBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reorderTasks>>, TError,{id: number;data: BodyType<ReorderTasksBody>}, TContext> => {
+
+const mutationKey = ['reorderTasks'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderTasks>>, {id: number;data: BodyType<ReorderTasksBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  reorderTasks(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReorderTasksMutationResult = NonNullable<Awaited<ReturnType<typeof reorderTasks>>>
+    export type ReorderTasksMutationBody = BodyType<ReorderTasksBody>
+    export type ReorderTasksMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Reorder queued tasks by assigning each a queueIndex
+ */
+export const useReorderTasks = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderTasks>>, TError,{id: number;data: BodyType<ReorderTasksBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reorderTasks>>,
+        TError,
+        {id: number;data: BodyType<ReorderTasksBody>},
+        TContext
+      > => {
+      return useMutation(getReorderTasksMutationOptions(options));
     }
 
 export const getCancelTaskUrl = (id: number,
