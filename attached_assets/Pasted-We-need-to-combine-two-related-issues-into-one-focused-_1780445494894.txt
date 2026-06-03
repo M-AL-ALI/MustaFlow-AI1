@@ -1,0 +1,305 @@
+We need to combine two related issues into one focused Preview Architecture Fix.
+
+This is not just a wording problem. It is a product architecture problem.
+
+The goal is:
+
+Agent Zero writes accepted files → Quick Preview updates inside MustaFlow → user tests the app before production → user approves tested snapshot → publish to production.
+
+Right now MustaFlow is still not behaving like Replit preview.
+
+The UI says:
+
+“Container preview unavailable here. The container proxy isn't reachable from this development environment. Your app has been built — deploy to production to get the full live preview with backend routes and server logs.”
+
+This is not acceptable.
+
+Users should not need to deploy to production just to test their app.
+
+Correct flow must be:
+
+Build → Preview/Test inside MustaFlow → Fix issues → Approve tested version → Publish to production
+
+Not:
+
+Build → Deploy to production → Test
+
+==================================================
+PART 1 — FIX THE WRONG PREVIEW PRODUCT FLOW
+===========================================
+
+Problem:
+The current preview UI tells users to go to production/publishing to get full live preview.
+
+This is wrong for MustaFlow AI Builder.
+
+Required changes:
+
+1. Remove all messaging that says or implies:
+
+* “Live preview requires production”
+* “Deploy to production to test”
+* “Go to Publishing” as the main preview action
+
+2. Replace it with accurate states:
+
+If container preview is unavailable in this dev environment:
+“Container preview is unavailable in this development environment.”
+
+If preview runtime is not started:
+“Preview runtime is not running yet.”
+
+If app server is not reachable:
+“App server is not reachable yet.”
+
+If test preview is needed:
+“Start test preview to test this app before publishing.”
+
+3. Add correct actions:
+
+* Start test preview
+* Retry preview
+* Start preview runtime
+* View logs
+* Fix server startup
+* Run test environment
+* Rebuild test preview
+
+Do not make “Go to Publishing” the main action when preview is unavailable.
+
+4. Separate preview types clearly:
+
+Quick Preview:
+Live draft preview while Agent Zero builds. Should update from accepted file changes.
+
+Test Preview:
+Stable test candidate used before publishing. Must be immutable and approval-based.
+
+Production:
+Final published version only after tested snapshot approval.
+
+5. Acceptance:
+   A user must be able to test a full-stack/agentic app inside MustaFlow before production publish.
+
+If the current environment cannot support container preview, show that clearly and provide a test-preview action — do not tell the user production is required.
+
+==================================================
+PART 2 — CODEX PREVIEW-SYNC FINDINGS MUST BE FIXED
+==================================================
+
+Codex reviewed pushed range 3409e873..eab5b518 and found real preview-sync issues.
+
+These must be fixed before accepting preview-sync.
+
+---
+
+## P1 — Frontend reads wrong project_files_changed payload shape
+
+Problem:
+Backend sends project_files_changed fields under:
+
+event.data
+
+But frontend [id].tsx reads:
+
+event.files
+event.changedPaths
+event.installRequired
+event.restartRequired
+
+Result:
+Project-level preview events become empty payloads. Quick Preview will not sync file contents, install flags, or restart flags.
+
+Required fix:
+
+* Update [id].tsx to read from event.data.
+* Normalize event parsing so future event shape mismatches do not silently fail.
+* Add regression test proving backend project_files_changed event causes frontend/WebContainer sync.
+
+Acceptance:
+Agent Zero writes src/pages/HomePage.tsx → backend emits project_files_changed → frontend receives changed path/content → Quick Preview updates.
+
+---
+
+## P1 — Apply/Rollback can leave deleted files in WebContainer
+
+Problem:
+Apply writes a full replacement snapshot in jobs.ts, but emits removedPaths: [].
+Rollback computes removed paths, but versions.ts passes [] to the project-level event.
+
+Result:
+Deleted files can stay live in WebContainer even though the DB snapshot no longer contains them.
+
+Required fix:
+
+* Apply must compute removedPaths by comparing previous project files to replacement snapshot.
+* Rollback must pass actual removedPaths into the preview-sync event.
+* WebContainer sync must delete removed files from preview runtime.
+* Container preview sync must also delete removed files when applicable.
+
+Acceptance:
+If a file is removed by Apply or Rollback, it disappears from:
+
+* project_files
+* WebContainer filesystem
+* live Quick Preview
+
+---
+
+## P2 — Raw emitFilesChangedEvent bypasses safe payload builder
+
+Problem:
+jobs.ts and versions.ts raw emitFilesChangedEvent calls put full file content into event payloads.
+
+But the canonical helper in preview-events.ts filters:
+
+* secret files
+* binary files
+* oversized files
+* unsafe content
+
+Result:
+Privacy/safety regression and duplicated event logic.
+
+Required fix:
+
+* Route all project_files_changed events through the safe payload builder.
+* Do not emit raw full contents for secret, binary, oversized, or unsafe files.
+* Remove duplicated preview event payload logic.
+
+Acceptance:
+All preview sync events use the same safe filtering rules.
+
+---
+
+## P2 — Rollback task kind not in generated schema
+
+Problem:
+Rollback tasks use:
+
+kind: "rollback"
+
+But generated schemas allow only:
+
+main | background | plan | converse
+
+Result:
+Typed task-list clients may reject task responses after rollback.
+
+Required fix:
+
+* Add rollback to task kind schema, or map rollback to an allowed kind consistently.
+* Regenerate API types if needed.
+* Add regression test proving task list still parses after rollback.
+
+==================================================
+PART 3 — QUICK PREVIEW VS FULL/TEST PREVIEW ARCHITECTURE
+========================================================
+
+Codex’s bigger point is important:
+
+Agent Zero may write files correctly, but the preview runtime may not receive them.
+
+Mustaflow needs a reliable pipeline:
+
+Agent Zero writes accepted files
+→ backend commits files to project_files
+→ backend emits project_files_changed
+→ frontend receives event
+→ WebContainer or container preview syncs files
+→ install/restart happens if needed
+→ health check passes
+→ iframe reloads
+→ preview_ready only after the new app is actually serving
+
+Required behavior:
+
+1. Accepted file changes should emit project_files_changed from:
+
+* manual editor save
+* Main Agent build/refine
+* Task Agent Apply
+* rollback
+* browser QA auto-fix
+* background task completion
+
+2. WebContainer Quick Preview:
+
+* sync changed files into WebContainer
+* delete removed files
+* restart when package.json, vite config, tsconfig, env/dependency files change
+* reload iframe only after sync/restart succeeds
+
+3. Static DB Quick Preview:
+
+* increment iframe key after stored file snapshot changes
+
+4. Agentic container Quick Preview:
+
+* sync changed files to dev container
+* delete removed files
+* run install when package files change
+* restart dev server if needed
+* wait for /healthz before preview_ready
+
+5. Full/Test Preview:
+
+* must remain immutable
+* should not auto-update after draft changes
+* should be marked stale when draft changes
+* show “Draft changed — rebuild test preview”
+
+6. Task Agent staged output:
+
+* before Apply: preview remains unchanged
+* UI must say “Changes are staged. Apply to update preview.”
+* after Apply: write to project_files, emit project_files_changed, sync preview, mark test candidate stale
+
+7. previewUpdated in the task report:
+   Do not set previewUpdated=true just because iframeKey changed.
+   Set true only when actual preview sync/restart succeeds or a visible preview-sync operation is queued.
+
+==================================================
+PART 4 — REGRESSION TESTS REQUIRED
+==================================
+
+Please add regression tests for:
+
+1. Backend project_files_changed event shape matches frontend expected shape.
+2. [id].tsx reads event.data correctly.
+3. Main Agent changes App.tsx and Quick Preview shows new text.
+4. Manual editor save still updates Quick Preview.
+5. Task Agent staged output does not update preview before Apply.
+6. Task Agent Apply updates Quick Preview.
+7. Rollback removes deleted files from WebContainer preview.
+8. Apply removes deleted files from WebContainer preview.
+9. Background task completion updates preview even if Zero panel is closed.
+10. Full/Test Preview stays immutable after draft edits.
+11. Full/Test Preview becomes stale after draft edits.
+12. Safe preview event builder filters secret/binary/large files.
+13. Rollback task kind does not break typed task-list clients.
+14. Agentic container preview sync waits for /healthz before preview_ready.
+15. iframe reload alone is not counted as preview success.
+
+==================================================
+FINAL ACCEPTANCE CRITERIA
+=========================
+
+Do not call this complete until:
+
+1. Quick Preview updates from Agent Zero accepted file writes.
+2. Manual save still updates Quick Preview.
+3. Task Agent Apply updates Quick Preview.
+4. Rollback/apply deletes removed files from preview runtime.
+5. Full/Test Preview remains immutable and only marks stale after draft changes.
+6. Preview events use safe payload builder everywhere.
+7. Frontend reads correct event.data payload shape.
+8. Container preview no longer tells users to deploy to production just to test.
+9. UI offers Start test preview / Retry preview / View logs / Fix preview instead of Go to Publishing as the main fix.
+10. preview_ready fires only after actual runtime health is confirmed.
+11. If the environment cannot support agentic container preview, the UI says the exact environment blocker and does not imply production is required.
+12. Tests cover the Codex findings and the product behavior.
+
+This must make MustaFlow behave closer to Replit:
+
+Users should be able to build, preview, test, and fix inside MustaFlow before publishing.
