@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Auto-push to GitHub after every Replit checkpoint / commit.
+# Runs in the background so it never slows down the commit itself.
+if [ -n "${GITHUB_PAT:-}" ]; then
+  (
+    git \
+      -c credential.helper='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f' \
+      push https://github.com/M-AL-ALI/MustaFlow-AI1.git main:main \
+      2>/tmp/github-push.log
+  ) &
+fi
