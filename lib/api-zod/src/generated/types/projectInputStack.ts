@@ -13,6 +13,7 @@ export type ProjectInputStack = typeof ProjectInputStack[keyof typeof ProjectInp
 
 
 export const ProjectInputStack = {
+  'static-html': 'static-html',
   'react-vite': 'react-vite',
   nextjs: 'nextjs',
   'node-api': 'node-api',
