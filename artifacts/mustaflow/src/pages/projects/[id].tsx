@@ -1132,6 +1132,17 @@ export default function ProjectWorkspacePage() {
     }
   }, [tasksForFeed, activeTaskId]);
 
+  // Polling-based safety net: if the tracked task has reached a terminal status in the
+  // feed (SSE event was missed or stream was closed early), clear activeTaskId so the
+  // Stop button gives way to the Send button automatically within the next poll interval.
+  useEffect(() => {
+    if (activeTaskId === null) return;
+    const tracked = tasksForFeed.find((t) => t.id === activeTaskId);
+    if (tracked && ["completed", "failed", "cancelled", "canceled"].includes(tracked.status)) {
+      setActiveTaskId(null);
+    }
+  }, [tasksForFeed, activeTaskId]);
+
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [buildRefreshCount, setBuildRefreshCount] = useState(0);
   /** Ref holding the most recent ProjectFilesChangedPayload — updated by SSE handler. */
@@ -1934,6 +1945,8 @@ export default function ProjectWorkspacePage() {
           // Drop any unanswered prompts and clear the live code buffer when task ends.
           setAgentPrompts([]);
           setLiveCodeBuffer("");
+          // Clear the active task so the Stop button gives way to the Send button.
+          setActiveTaskId(null);
           // Reload the preview iframe so the freshly-built files are visible.
           if (event.eventType === "completed") {
             setBuildRefreshCount((n) => n + 1);
@@ -2603,6 +2616,7 @@ export default function ProjectWorkspacePage() {
     setStreamError(false);
     setPendingIsConverse(false);
     pendingIsConverseRef.current = false;
+    setActiveTaskId(null);
   }, [activeTaskId, projectId, cancelTask]);
 
   const handleAddKey = useCallback((keyName: string) => {

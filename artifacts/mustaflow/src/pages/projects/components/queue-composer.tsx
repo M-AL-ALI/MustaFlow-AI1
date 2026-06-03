@@ -1964,7 +1964,7 @@ export function QueueComposer({
                         : "10 credits · security-first strict mode"}
                 </span>
               </div>
-              {activeTaskId != null || (disabled && !isSubmitting) ? (
+              {(activeTaskId != null && disabled) || (disabled && !isSubmitting) ? (
                 <button
                   onClick={onStopBuild}
                   title="Stop the current build"
