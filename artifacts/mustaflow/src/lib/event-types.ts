@@ -18,7 +18,40 @@ export interface ProjectFilesChangedPayload {
   changedPaths: string[];
   files: Record<string, string>;
   removedPaths: string[];
-  operationType: "build" | "refine" | "apply" | "rollback" | "visual-edit" | "manual-save";
+  operationType:
+    | "build"
+    | "refine"
+    | "apply"
+    | "rollback"
+    | "visual-edit"
+    | "manual-save"
+    | "qa-auto-fix"
+    | "delete-reinsert";
   requiresInstall: boolean;
   requiresRestart: boolean;
+}
+
+export type ProjectFilesChangedFrame = {
+  eventType: string;
+  projectId?: number;
+  data?: Omit<Partial<ProjectFilesChangedPayload>, "operationType"> & {
+    operationType?: string;
+  };
+};
+
+export function projectFilesChangedPayloadFromFrame(
+  event: ProjectFilesChangedFrame,
+  fallbackProjectId: number,
+): ProjectFilesChangedPayload {
+  const data = event.data ?? {};
+  return {
+    projectId: data.projectId ?? event.projectId ?? fallbackProjectId,
+    operationType: (data.operationType ??
+      "manual-save") as ProjectFilesChangedPayload["operationType"],
+    changedPaths: data.changedPaths ?? [],
+    removedPaths: data.removedPaths ?? [],
+    files: data.files ?? {},
+    requiresInstall: data.requiresInstall ?? false,
+    requiresRestart: data.requiresRestart ?? false,
+  };
 }

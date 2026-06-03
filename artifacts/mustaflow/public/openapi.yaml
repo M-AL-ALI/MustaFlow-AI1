@@ -1062,6 +1062,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentTask"
 
+  /projects/{id}/tasks/reorder:
+    post:
+      operationId: reorderTasks
+      tags: [tasks]
+      summary: Reorder queued tasks by providing a new ordered list of task IDs
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderTasksBody"
+      responses:
+        "200":
+          description: Updated tasks in new order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentTask"
+
   /projects/{id}/tasks/{taskId}/cancel:
     post:
       operationId: cancelTask
@@ -5448,7 +5471,7 @@ components:
         title: { type: string }
         kind:
           type: string
-          enum: [main, background, plan, converse]
+          enum: [main, background, plan, converse, rollback]
         status:
           type: string
           enum:
@@ -5579,8 +5602,22 @@ components:
         title: { type: string, minLength: 1 }
         kind:
           type: string
-          enum: [main, background, plan, converse]
+          enum: [main, background, plan, converse, rollback]
         prompt: { type: string }
+        chatContent:
+          {
+            type: string,
+            description: "Optional chat message content to insert into the chat timeline when queuing behind a running build.",
+          }
+
+    ReorderTasksBody:
+      type: object
+      required: [taskIds]
+      properties:
+        taskIds:
+          type: array
+          items: { type: integer }
+          description: Ordered list of queued task IDs. Each task gets its queueIndex set to its position in this array.
 
     UpdateTaskBody:
       type: object

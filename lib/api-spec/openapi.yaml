@@ -1215,7 +1215,7 @@ paths:
     post:
       operationId: reorderTasks
       tags: [tasks]
-      summary: Reorder queued tasks by assigning each a queueIndex
+      summary: Reorder queued tasks by providing a new ordered list of task IDs
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -1226,19 +1226,13 @@ paths:
               $ref: "#/components/schemas/ReorderTasksBody"
       responses:
         "200":
-          description: Updated task rows
+          description: Updated tasks in new order
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/AgentTask"
-        "400":
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/tasks/{taskId}/cancel:
     post:
@@ -7412,7 +7406,7 @@ components:
         title: { type: string }
         kind:
           type: string
-          enum: [main, background, plan, converse]
+          enum: [main, background, plan, converse, rollback]
         status:
           type: string
           enum:
@@ -7591,11 +7585,13 @@ components:
         title: { type: string, minLength: 1 }
         kind:
           type: string
-          enum: [main, background, plan, converse]
+          enum: [main, background, plan, converse, rollback]
         prompt: { type: string }
         chatContent:
-          type: string
-          description: Optional chat message content to insert as a user chat_messages row when this task is queued while a build is running.
+          {
+            type: string,
+            description: "Optional chat message content to insert into the chat timeline when queuing behind a running build.",
+          }
 
     ReorderTasksBody:
       type: object
@@ -7604,7 +7600,7 @@ components:
         taskIds:
           type: array
           items: { type: integer }
-          description: Ordered list of queued task IDs. Each task is assigned queueIndex equal to its position in this array.
+          description: Ordered list of queued task IDs. Each task gets its queueIndex set to its position in this array.
 
     UpdateTaskBody:
       type: object

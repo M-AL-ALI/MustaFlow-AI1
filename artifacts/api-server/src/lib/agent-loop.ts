@@ -7276,7 +7276,7 @@ function buildTaskReport(result: AgentLoopResult, userRequest: string): TaskRepo
     filesCreated: result.changedFiles.map((f) => f.path),
     filesChanged: [],
     filesRemoved: result.removedPaths,
-    previewUpdated: result.changedFiles.length > 0 || result.removedPaths.length > 0,
+    previewUpdated: false,
     warnings,
     integrationsNeeded: [],
     summary: result.assistantSummary,

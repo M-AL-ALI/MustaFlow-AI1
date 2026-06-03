@@ -7,6 +7,6 @@
  */
 
 export interface ReorderTasksBody {
-  /** Ordered list of queued task IDs. Each task is assigned queueIndex equal to its position in this array. */
+  /** Ordered list of queued task IDs. Each task gets its queueIndex set to its position in this array. */
   taskIds: number[];
 }

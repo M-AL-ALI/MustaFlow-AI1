@@ -30,7 +30,8 @@ import { encryptionService } from "../lib/encryption";
 import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-restore";
 import { downloadSnapshotBlob } from "../lib/snapshot-storage";
 import { publishTaskEvent } from "../lib/event-bus";
-import { EventTypes, type ProjectFilesChangedPayload } from "../lib/event-types";
+import { EventTypes } from "../lib/event-types";
+import { publishProjectFilesChanged } from "../lib/preview-events";
 
 const router: IRouter = Router();
 
@@ -347,28 +348,12 @@ router.post(
     // Emit project_files_changed so any active SSE subscriber can sync the
     // WebContainer filesystem without a full page reload.
     try {
-      const changedPaths = snapshot.map((f) => f.path);
-      const filesMap: Record<string, string> = {};
-      for (const f of snapshot) filesMap[f.path] = f.content;
-      const requiresInstall = changedPaths.some(
-        (p) =>
-          p === "package.json" ||
-          p === "package-lock.json" ||
-          p === "yarn.lock" ||
-          p === "pnpm-lock.yaml",
-      );
-      const requiresRestart = changedPaths.some((p) =>
-        /^vite\.config\.|^tsconfig\.|^\.env/.test(p),
-      );
-      const filesChangedPayload: ProjectFilesChangedPayload = {
+      const filesChangedPayload = publishProjectFilesChanged(
         projectId,
-        changedPaths,
-        files: filesMap,
-        removedPaths: rollbackRemovedPaths,
-        operationType: "rollback",
-        requiresInstall,
-        requiresRestart,
-      };
+        snapshot.map((f) => ({ path: f.path, content: f.content })),
+        rollbackRemovedPaths,
+        "rollback",
+      );
       publishTaskEvent({
         id: 0,
         taskId,
@@ -395,25 +380,6 @@ router.post(
       await invalidateProjectEmbeddings(projectId);
     } catch (err) {
       req.log.warn({ err, projectId }, "rollback: invalidate embeddings failed (non-fatal)");
-    }
-
-    // Emit project_files_changed so Quick Preview syncs the restored snapshot
-    // across all open browser tabs without waiting for a manual reload.
-    if (snapshot.length > 0) {
-      try {
-        const { publishProjectFilesChanged } = await import("../lib/preview-events");
-        publishProjectFilesChanged(
-          projectId,
-          snapshot.map((f) => ({ path: f.path, content: f.content })),
-          [],
-          "rollback",
-        );
-      } catch (err) {
-        req.log.warn(
-          { err, projectId },
-          "project_files_changed emit failed after rollback (non-fatal)",
-        );
-      }
     }
 
     await emitRollbackEvent(taskId, "updating_preview", "Refreshing preview with restored files…");

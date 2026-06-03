@@ -1625,7 +1625,7 @@ export const ListTasksResponseItem = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -1708,28 +1708,28 @@ export const CreateTaskParams = zod.object({
 
 export const CreateTaskBody = zod.object({
   "title": zod.string().min(1),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "prompt": zod.string().optional(),
-  "chatContent": zod.string().optional().describe('Optional chat message content to insert as a user chat_messages row when this task is queued while a build is running.')
+  "chatContent": zod.string().optional().describe('Optional chat message content to insert into the chat timeline when queuing behind a running build.')
 })
 
 
 /**
- * @summary Reorder queued tasks by assigning each a queueIndex
+ * @summary Reorder queued tasks by providing a new ordered list of task IDs
  */
 export const ReorderTasksParams = zod.object({
   "id": zod.coerce.number()
 })
 
 export const ReorderTasksBody = zod.object({
-  "taskIds": zod.array(zod.number()).describe('Ordered list of queued task IDs. Each task is assigned queueIndex equal to its position in this array.')
+  "taskIds": zod.array(zod.number()).describe('Ordered list of queued task IDs. Each task gets its queueIndex set to its position in this array.')
 })
 
 export const ReorderTasksResponseItem = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -1812,7 +1812,7 @@ export const CancelTaskResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -1894,7 +1894,7 @@ export const ForceStartTaskResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -1980,7 +1980,7 @@ export const UpdateTaskResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -2077,7 +2077,7 @@ export const ApplyTaskStagingResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -2193,7 +2193,7 @@ export const DiscardTaskStagingResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -2296,7 +2296,7 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),
@@ -5483,7 +5483,7 @@ export const GetProjectQueueBatchResponse = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
   "title": zod.string(),
-  "kind": zod.enum(['main', 'background', 'plan', 'converse']),
+  "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
   "stagingSnapshot": zod.record(zod.string(), zod.unknown()).nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.'),

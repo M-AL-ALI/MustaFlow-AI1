@@ -1247,6 +1247,7 @@ export const AgentTaskKind = {
   background: 'background',
   plan: 'plan',
   converse: 'converse',
+  rollback: 'rollback',
 } as const;
 
 export type AgentTaskStatus = typeof AgentTaskStatus[keyof typeof AgentTaskStatus];
@@ -1487,6 +1488,7 @@ export const AgentTaskInputKind = {
   background: 'background',
   plan: 'plan',
   converse: 'converse',
+  rollback: 'rollback',
 } as const;
 
 export interface AgentTaskInput {
@@ -1494,12 +1496,12 @@ export interface AgentTaskInput {
   title: string;
   kind: AgentTaskInputKind;
   prompt?: string;
-  /** Optional chat message content to insert as a user chat_messages row when this task is queued while a build is running. */
+  /** Optional chat message content to insert into the chat timeline when queuing behind a running build. */
   chatContent?: string;
 }
 
 export interface ReorderTasksBody {
-  /** Ordered list of queued task IDs. Each task is assigned queueIndex equal to its position in this array. */
+  /** Ordered list of queued task IDs. Each task gets its queueIndex set to its position in this array. */
   taskIds: number[];
 }
 

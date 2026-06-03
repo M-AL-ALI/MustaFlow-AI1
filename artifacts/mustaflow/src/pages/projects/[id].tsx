@@ -121,7 +121,10 @@ import { BackgroundTasksDrawer, type BgTask } from "./components/background-task
 import { ZeroAgentPanel } from "./components/zero-agent-panel";
 import { DynamicAtom } from "@/components/icons/dynamic-atom";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import type { ProjectFilesChangedPayload } from "@/lib/event-types";
+import {
+  projectFilesChangedPayloadFromFrame,
+  type ProjectFilesChangedPayload,
+} from "@/lib/event-types";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import { CanvasTab } from "./components/canvas-tab";
@@ -147,7 +150,6 @@ import {
   getGetCveScanStatusQueryKey,
   useAcknowledgeCveScan,
   useCancelTask,
-  useCreateTask,
   getBillingSubscription,
   resumePausedQueue,
   getContainerStatus,
@@ -248,7 +250,6 @@ type ChatPlanPayload =
   | { kind: "task-queued"; taskId: number }
   | { kind: "task-done"; taskId: number }
   | { kind: "error"; message: string; suggestions?: string[] }
-  | { kind: "checkpoint-saved"; label: string; versionId: number }
   | Record<string, unknown>;
 
 function ReportCard({
@@ -1134,17 +1135,6 @@ export default function ProjectWorkspacePage() {
     }
   }, [tasksForFeed, activeTaskId]);
 
-  // Polling-based safety net: if the tracked task has reached a terminal status in the
-  // feed (SSE event was missed or stream was closed early), clear activeTaskId so the
-  // Stop button gives way to the Send button automatically within the next poll interval.
-  useEffect(() => {
-    if (activeTaskId === null) return;
-    const tracked = tasksForFeed.find((t) => t.id === activeTaskId);
-    if (tracked && ["completed", "failed", "cancelled", "canceled"].includes(tracked.status)) {
-      setActiveTaskId(null);
-    }
-  }, [tasksForFeed, activeTaskId]);
-
   const [agentPrompts, setAgentPrompts] = useState<AgentPromptCard[]>([]);
   const [buildRefreshCount, setBuildRefreshCount] = useState(0);
   /** Ref holding the most recent ProjectFilesChangedPayload — updated by SSE handler. */
@@ -1947,8 +1937,6 @@ export default function ProjectWorkspacePage() {
           // Drop any unanswered prompts and clear the live code buffer when task ends.
           setAgentPrompts([]);
           setLiveCodeBuffer("");
-          // Clear the active task so the Stop button gives way to the Send button.
-          setActiveTaskId(null);
           // Reload the preview iframe so the freshly-built files are visible.
           if (event.eventType === "completed") {
             setBuildRefreshCount((n) => n + 1);
@@ -1995,17 +1983,7 @@ export default function ProjectWorkspacePage() {
           };
         };
         if (event.eventType === "project_files_changed") {
-          const d = event.data ?? {};
-          const payload: ProjectFilesChangedPayload = {
-            projectId: d.projectId ?? event.projectId ?? projectId,
-            operationType: (d.operationType ??
-              "unknown") as ProjectFilesChangedPayload["operationType"],
-            changedPaths: d.changedPaths ?? [],
-            removedPaths: d.removedPaths ?? [],
-            files: d.files ?? {},
-            requiresInstall: d.requiresInstall ?? false,
-            requiresRestart: d.requiresRestart ?? false,
-          };
+          const payload = projectFilesChangedPayloadFromFrame(event, projectId);
           filesPayloadRef.current = payload;
           setFilesPayloadSeq((n) => n + 1);
           // Invalidate file list so the editor panel reflects new content
@@ -2593,26 +2571,6 @@ export default function ProjectWorkspacePage() {
     [projectId, agentMode, planMode, runInBackground, sendRegular, queryClient, agentIdentity],
   );
 
-  const createTask = useCreateTask();
-
-  const handleQueueBehind = useCallback(
-    (content: string) => {
-      createTask.mutate(
-        {
-          id: projectId,
-          data: { title: content.slice(0, 140), kind: "main", chatContent: content },
-        },
-        {
-          onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
-            void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
-          },
-        },
-      );
-    },
-    [projectId, createTask, queryClient],
-  );
-
   const cancelTask = useCancelTask();
   const handleStopStream = useCallback(() => {
     if (streamAbortRef.current) {
@@ -2638,7 +2596,6 @@ export default function ProjectWorkspacePage() {
     setStreamError(false);
     setPendingIsConverse(false);
     pendingIsConverseRef.current = false;
-    setActiveTaskId(null);
   }, [activeTaskId, projectId, cancelTask]);
 
   const handleAddKey = useCallback((keyName: string) => {
@@ -3629,7 +3586,6 @@ export default function ProjectWorkspacePage() {
                           const isReport = payloadKind === "report";
                           const isError = payloadKind === "error";
                           const isTaskQueued = payloadKind === "task-queued";
-                          const isCheckpointSaved = payloadKind === "checkpoint-saved";
                           const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
                           const structuredPlan =
                             isPlanCard && planPayload ? (planPayload as StructuredPlan) : null;
@@ -3641,19 +3597,7 @@ export default function ProjectWorkspacePage() {
                                 msg.role === "user" ? "justify-end" : "justify-start",
                               )}
                             >
-                              {isCheckpointSaved ? (
-                                <button
-                                  onClick={() => switchLeftPanel("history")}
-                                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/40 bg-muted/20 text-[10px] text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors"
-                                  title="View in Build History"
-                                >
-                                  <Bookmark className="h-3 w-3 text-primary/60 shrink-0" />
-                                  <span>
-                                    Checkpoint saved — roll back any time from Build History
-                                  </span>
-                                  <ChevronRight className="h-3 w-3 shrink-0 opacity-50" />
-                                </button>
-                              ) : isTaskQueued ? (
+                              {isTaskQueued ? (
                                 <button
                                   onClick={() => setBackgroundPanelOpen(true)}
                                   className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/40 bg-muted/30 text-[10px] text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors"
@@ -4301,8 +4245,6 @@ export default function ProjectWorkspacePage() {
                       disabled={isBusy}
                       activeTaskId={activeTaskId}
                       onStopBuild={handleStopStream}
-                      queueingBehind={isBusy}
-                      onQueueBehind={handleQueueBehind}
                       issueCount={projectIssues.totalCount}
                       hasFailedBuild={projectIssues.hasFailedBuild}
                       hasContainerError={projectIssues.hasContainerError}

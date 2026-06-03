@@ -12,6 +12,6 @@ export interface AgentTaskInput {
   title: string;
   kind: AgentTaskInputKind;
   prompt?: string;
-  /** Optional chat message content to insert as a user chat_messages row when this task is queued while a build is running. */
+  /** Optional chat message content to insert into the chat timeline when queuing behind a running build. */
   chatContent?: string;
 }

@@ -73,10 +73,11 @@ import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import {
   publishProjectFilesChanged,
+  type ProjectFilesChangedPayload,
   publishPreviewReady,
   publishPreviewSyncFailed,
 } from "./preview-events";
-import { EventTypes, type ProjectFilesChangedPayload } from "./event-types";
+import { EventTypes } from "./event-types";
 import { runAudit } from "./auditor";
 import { runOrchestration } from "./checks/orchestrator";
 import { getCheckByName } from "./checks/registry";
@@ -742,9 +743,8 @@ async function emitEvent(
 }
 
 /**
- * Publishes a PROJECT_FILES_CHANGED event directly to the in-process event bus.
- * NOT persisted to taskEventsTable (bus-only). Allows the frontend WebContainer
- * to sync written files without waiting for the next iframeKey flip.
+ * Publishes a canonical, safe PROJECT_FILES_CHANGED payload to both the
+ * project-wide preview stream and, when taskId is present, the task stream.
  */
 function emitFilesChangedEvent(
   taskId: number,
@@ -754,37 +754,23 @@ function emitFilesChangedEvent(
   operationType: ProjectFilesChangedPayload["operationType"],
 ): void {
   try {
-    const changedPaths = files.map((f) => f.path);
-    const filesMap: Record<string, string> = {};
-    for (const f of files) filesMap[f.path] = f.content;
-    const requiresInstall = changedPaths.some(
-      (p) =>
-        p === "package.json" ||
-        p === "package-lock.json" ||
-        p === "yarn.lock" ||
-        p === "pnpm-lock.yaml",
-    );
-    const requiresRestart = changedPaths.some((p) => /^vite\.config\.|^tsconfig\.|^\.env/.test(p));
-    const payload: ProjectFilesChangedPayload = {
+    const payload = publishProjectFilesChanged(
       projectId,
-      changedPaths,
-      files: filesMap,
+      files.map((f) => ({ path: f.path, content: f.content })),
       removedPaths,
       operationType,
-      requiresInstall,
-      requiresRestart,
-    };
+    );
     publishTaskEvent({
       id: 0,
       taskId,
       eventType: EventTypes.PROJECT_FILES_CHANGED,
-      message: `${files.length} file(s) updated`,
+      message: `${payload.changedPaths.length} file(s) updated`,
       filePath: null,
       createdAt: new Date(),
       data: payload,
     });
   } catch (err) {
-    logger.warn({ err, taskId }, "emitFilesChangedEvent: failed (non-fatal)");
+    logger.warn({ err, taskId }, "project_files_changed emit failed (non-fatal)");
   }
 }
 
@@ -1758,10 +1744,7 @@ export async function drainNextProjectTask(
           isNull(agentTasksTable.queueBatchId),
         ),
       )
-      .orderBy(
-        asc(sql`COALESCE(${agentTasksTable.queueIndex}, 2147483647)`),
-        asc(agentTasksTable.createdAt),
-      )
+      .orderBy(asc(agentTasksTable.createdAt))
       .limit(1);
     nextTask = oldest;
   }
@@ -1770,56 +1753,6 @@ export async function drainNextProjectTask(
 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project) return;
-
-  // Auto-checkpoint: before running this queued task, snapshot the current project files
-  // into a version so users can roll back if this task breaks something the previous one built.
-  // Only create the checkpoint when there are already files to snapshot (skips the very first build).
-  try {
-    const [fileCountRow] = await db
-      .select({ c: sql<number>`count(*)::int` })
-      .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
-    const hasExistingFiles = (fileCountRow?.c ?? 0) > 0;
-
-    if (hasExistingFiles) {
-      const snap = await snapshotFilesForVersion(projectId);
-      const checkpointLabel = `Auto-checkpoint before: ${nextTask.title.slice(0, 80)}`;
-      const [checkpointVersion] = await db
-        .insert(projectVersionsTable)
-        .values({
-          projectId,
-          label: checkpointLabel,
-          note: `Auto-checkpoint created before queued task "${nextTask.title.slice(0, 120)}" started.`,
-          changelogEntry: checkpointLabel,
-          filesSnapshot: snap,
-        })
-        .returning({ id: projectVersionsTable.id });
-
-      if (checkpointVersion) {
-        await db.insert(chatMessagesTable).values({
-          projectId,
-          role: "assistant",
-          content: `Checkpoint saved before starting: ${nextTask.title.slice(0, 80)}`,
-          agentMode: project.agentMode,
-          planMode: false,
-          plan: {
-            kind: "checkpoint-saved",
-            label: checkpointLabel,
-            versionId: checkpointVersion.id,
-          } as unknown as Record<string, unknown>,
-        });
-      }
-
-      logger.info(
-        { projectId, nextTaskId: nextTask.id, versionId: checkpointVersion?.id },
-        "Auto-checkpoint created before draining queued project task",
-      );
-    }
-  } catch (err) {
-    logger.warn(
-      { err, projectId, nextTaskId: nextTask.id },
-      "drainNextProjectTask: auto-checkpoint failed (non-fatal)",
-    );
-  }
 
   const [fileRow] = await db
     .select({ c: sql<number>`count(*)::int` })
@@ -4788,13 +4721,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             `Server not reachable: ${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}`,
           );
         } else {
+          // Agentic confirmation: /healthz returned 200 after the files were written.
           report.previewUpdated = true;
           publishPreviewReady(projectId);
         }
       } else {
-        // Static project — preview is always served from the DB snapshot and is
-        // always reachable. Mark it updated; the task-channel "completed" event
-        // is what triggers the frontend iframe reload (via setBuildRefreshCount).
+        // Static confirmation: writeFiles has durably updated the DB snapshot that
+        // backs the iframe; the task-channel "completed" event triggers reload.
         // We intentionally do NOT emit publishPreviewReady here — that would
         // cause a second setBuildRefreshCount call and a double iframe reload.
         report.previewUpdated = true;
@@ -5132,15 +5065,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 autoCommitProjectId,
                 autoCommitProjectName,
               );
-              if (result.ok) {
-                if (result.sha) {
-                  void emitEvent(
-                    autoCommitTaskId,
-                    "github_sync",
-                    `Pushed to GitHub: ${result.sha.slice(0, 7)}`,
-                  );
-                }
-              } else {
+              if (!result.ok) {
                 logger.warn(
                   { projectId: autoCommitProjectId, taskId: autoCommitTaskId },
                   `GitHub auto-commit warning: ${result.message}`,
@@ -6712,8 +6637,16 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   // Task Agent changes are invisible in any preview mode until the user clicks Apply.
   // This guarantees test #10 and #11 in the preview-security test suite.
   void emitEvent(taskId, "narration", `Syncing ${builderFiles.length} file(s) to your project…`);
+  const currentFileRows = await db
+    .select({ path: projectFilesTable.path })
+    .from(projectFilesTable)
+    .where(eq(projectFilesTable.projectId, projectId));
+  const appliedPathSet = new Set(builderFiles.map((f) => f.path));
+  const removedPaths = currentFileRows
+    .map((row) => row.path)
+    .filter((path) => !appliedPathSet.has(path));
   await writeFiles(projectId, builderFiles, true);
-  emitFilesChangedEvent(taskId, projectId, builderFiles, [], "apply");
+  emitFilesChangedEvent(taskId, projectId, builderFiles, removedPaths, "apply");
 
   // Run container file sync + Drizzle migrations for any schema files in the staging
   // set (item 2). Non-fatal: failure surfaces as a report warning so the apply
@@ -6779,10 +6712,14 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       filesCreated: [],
       filesChanged: [],
       filesRemoved: [],
-      previewUpdated: true,
+      previewUpdated: false,
       warnings: [],
       integrationsNeeded: [],
     }),
+    // Static confirmation: Apply has durably replaced project_files. Agentic
+    // apply stays false here because no /healthz confirmation runs in this path.
+    previewUpdated: !project.containerUrl,
+    previewSyncQueued: !project.containerUrl ? true : report?.previewSyncQueued,
     // Merge any post-write migration warnings (item 2) into the report so the
     // user sees them in the task result card even though Apply still succeeded.
     warnings: [...((report?.warnings ?? []) as string[]), ...postWriteWarnings],

@@ -58,7 +58,15 @@ export interface ProjectFilesChangedPayload {
   /** Paths of files that were deleted. */
   removedPaths: string[];
   /** What triggered this change. */
-  operationType: "build" | "refine" | "apply" | "rollback" | "visual-edit" | "manual-save";
+  operationType:
+    | "build"
+    | "refine"
+    | "apply"
+    | "rollback"
+    | "visual-edit"
+    | "manual-save"
+    | "qa-auto-fix"
+    | "delete-reinsert";
   /** True when package.json, package-lock.json, yarn.lock, or pnpm-lock.yaml changed. */
   requiresInstall: boolean;
   /** True when vite.config.*, tsconfig.*, or .env* changed. */

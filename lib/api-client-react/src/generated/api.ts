@@ -4601,7 +4601,7 @@ export const getReorderTasksUrl = (id: number,) => {
 }
 
 /**
- * @summary Reorder queued tasks by assigning each a queueIndex
+ * @summary Reorder queued tasks by providing a new ordered list of task IDs
  */
 export const reorderTasks = async (id: number,
     reorderTasksBody: ReorderTasksBody, options?: RequestInit): Promise<AgentTask[]> => {
@@ -4619,7 +4619,7 @@ export const reorderTasks = async (id: number,
 
 
 
-export const getReorderTasksMutationOptions = <TError = ErrorType<ApiError>,
+export const getReorderTasksMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderTasks>>, TError,{id: number;data: BodyType<ReorderTasksBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof reorderTasks>>, TError,{id: number;data: BodyType<ReorderTasksBody>}, TContext> => {
 
@@ -4648,12 +4648,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReorderTasksMutationResult = NonNullable<Awaited<ReturnType<typeof reorderTasks>>>
     export type ReorderTasksMutationBody = BodyType<ReorderTasksBody>
-    export type ReorderTasksMutationError = ErrorType<ApiError>
+    export type ReorderTasksMutationError = ErrorType<unknown>
 
     /**
- * @summary Reorder queued tasks by assigning each a queueIndex
+ * @summary Reorder queued tasks by providing a new ordered list of task IDs
  */
-export const useReorderTasks = <TError = ErrorType<ApiError>,
+export const useReorderTasks = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderTasks>>, TError,{id: number;data: BodyType<ReorderTasksBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof reorderTasks>>,

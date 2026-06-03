@@ -830,6 +830,13 @@ export function PreviewTab({
     setIframeKey((k) => k + 1);
   }, []);
 
+  const requestServerStartupFix = useCallback(() => {
+    const target = onAutoSendPrompt ?? onFixPrompt;
+    target?.(
+      "Fix the server startup so the container preview can run inside MustaFlow. Check the server logs, health endpoint, package scripts, and port binding.",
+    );
+  }, [onAutoSendPrompt, onFixPrompt]);
+
   // Auto-refresh when project finishes building + open 30s crash-watch window
   useEffect(() => {
     const prev = prevStatusRef.current;
@@ -1511,15 +1518,15 @@ export function PreviewTab({
                     <div className="text-center">
                       <p className="text-sm font-medium text-foreground mb-1">Not published yet</p>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Publish your app first to get a public URL you can scan and test on any
-                        device.
+                        Run and approve a test preview in MustaFlow first. A public QR code is
+                        available after you choose to publish.
                       </p>
                     </div>
                     <button
                       onClick={() => setQrOpen(false)}
-                      className="text-xs text-primary hover:underline"
+                      className="text-[11px] text-muted-foreground hover:text-primary hover:underline"
                     >
-                      Go to Publishing tab to publish
+                      Publishing options
                     </button>
                   </div>
                 )}
@@ -2318,36 +2325,62 @@ export function PreviewTab({
             <span className="text-sm">Loading preview…</span>
           </div>
         ) : isAgentic && proxyUnavailable ? (
-          /* ── Proxy-unavailable empty state ── */
+          /* Proxy-unavailable empty state */
           <div className="flex flex-col items-center justify-center h-full max-w-sm text-center gap-5 py-12">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
               <ServerCrash className="h-8 w-8 text-amber-500/60" />
             </div>
             <div className="space-y-2">
               <h3 className="text-base font-semibold text-foreground">
-                Container preview unavailable here
+                Container preview is unavailable in this development environment
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                The container proxy isn&apos;t reachable from this development environment. Your app
-                has been built — deploy to production to get the full live preview with backend
-                routes and server logs.
+                The app files are still saved in MustaFlow. Use the test preview tools to start,
+                retry, or inspect the container runtime.
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">
-              <a
-                href={`/projects/${project.id}?tab=publishing`}
-                className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-              >
-                <ExternalLink className="h-4 w-4" />
-                Go to Publishing
-              </a>
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/40 border border-border text-xs text-muted-foreground text-left">
-                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/60" />
-                <p>
-                  In production, the container preview proxy is active and this tab shows your
-                  running app — including API routes and real-time server logs.
-                </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {onNavigateToTestEnv && (
+                  <Button onClick={onNavigateToTestEnv} size="sm" className="gap-2">
+                    <Zap className="h-4 w-4" />
+                    Start test preview
+                  </Button>
+                )}
+                <Button onClick={refresh} size="sm" variant="secondary" className="gap-2">
+                  <RefreshCw className="h-4 w-4" />
+                  Retry preview
+                </Button>
+                <Button
+                  onClick={() => setConsoleOpen(true)}
+                  size="sm"
+                  variant="secondary"
+                  className="gap-2"
+                >
+                  <Terminal className="h-4 w-4" />
+                  View logs
+                </Button>
               </div>
+              {(onAutoSendPrompt ?? onFixPrompt) && (
+                <Button
+                  onClick={requestServerStartupFix}
+                  size="sm"
+                  variant="outline"
+                  className="gap-2 w-full"
+                >
+                  <Wrench className="h-4 w-4" />
+                  Fix server startup
+                </Button>
+              )}
+              {onNavigateToTestEnv && (
+                <button
+                  type="button"
+                  onClick={onNavigateToTestEnv}
+                  className="text-[11px] text-muted-foreground hover:text-primary hover:underline"
+                >
+                  Rebuild test preview
+                </button>
+              )}
             </div>
           </div>
         ) : hasFiles ? (
