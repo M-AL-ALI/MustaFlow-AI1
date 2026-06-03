@@ -5416,8 +5416,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         })
         .where(eq(projectsTable.id, projectId));
 
-      // Sync files to live container and run npm install (best-effort, non-fatal).
-      // Only runs when a container is active for this project.
+      // Sync files to live container, install deps, restart the app server, and
+      // verify the preview is actually reachable before reporting success.
+      // Runs detached (setImmediate) so the task can settle as "completed" while
+      // the preview readiness is published asynchronously via publishPreviewReady /
+      // publishPreviewSyncFailed. Only runs when a container is active.
       setImmediate(() => {
         void (async () => {
           try {
@@ -5425,50 +5428,37 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               .select({
                 containerId: projectsTable.containerId,
                 containerStatus: projectsTable.containerStatus,
+                containerUrl: projectsTable.containerUrl,
               })
               .from(projectsTable)
               .where(eq(projectsTable.id, projectId));
 
-            if (!containerRow?.containerId || containerRow.containerStatus !== "running") return;
-
-            const { containerId } = containerRow;
-
-            // Import dynamically to keep this module tree-shakeable.
-            const { syncFilesToContainer, execInContainer } = await import("./container");
+            // Only require a container to exist — syncAgenticApplyPreview wakes a
+            // hibernated/stopped machine itself, so gating on "running" here would
+            // skip the sync (and leave the preview stale) after Fly autostop.
+            if (!containerRow?.containerId) return;
 
             const allFiles = await db
               .select({ path: projectFilesTable.path, content: projectFilesTable.content })
               .from(projectFilesTable)
               .where(eq(projectFilesTable.projectId, projectId));
 
-            await emitEvent(taskId, "narration", "Syncing files to container…");
-            await syncFilesToContainer(containerId, projectId, allFiles, true);
-
-            // Run npm install if a package.json was written
-            const hasPackageJson = allFiles.some((f) => f.path === "package.json");
-            if (hasPackageJson) {
-              await emitEvent(taskId, "narration", "Running npm install in container…");
-              const installResult = await execInContainer(
-                containerId,
-                ["npm", "install", "--prefer-offline", "--no-audit"],
-                projectId,
-              );
-              if (!installResult.ok) {
-                logger.warn({ projectId, taskId }, "npm install in container exited non-zero");
-              }
-            }
-
-            // #756 — start the Node.js server in background so it keeps running.
-            if (project.stack === "node-api") {
-              await execInContainer(
-                containerId,
-                ["/bin/sh", "-c", "pkill -f 'node ' 2>/dev/null; nohup npm start &>/tmp/app.log &"],
-                projectId,
-              );
-              await emitEvent(taskId, "narration", "Server started.");
-            } else {
-              await emitEvent(taskId, "narration", "Container ready.");
-            }
+            // Delegate to the canonical, battle-tested sync path. It uses the
+            // detached npmInstallInBackground helper (survives Fly autostop EOF,
+            // cleans stale npm locks, re-syncs files on machine restart), restarts
+            // the app server, then polls real reachability — publishing an honest
+            // ready/failed status instead of optimistically claiming "Server started".
+            await syncAgenticApplyPreview({
+              projectId,
+              taskId,
+              containerId: containerRow.containerId,
+              containerStatus: containerRow.containerStatus,
+              containerUrl: containerRow.containerUrl,
+              stack: project.stack,
+              files: allFiles,
+              removedPaths: [],
+              packageManifestChanged: true,
+            });
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             const { mapFlyErrorToMessage } = await import("./container");
