@@ -44,6 +44,10 @@ args = "typecheck"
 task = "workflow.run"
 args = "push-to-github"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "pull-from-github"
+
 [[workflows.workflow]]
 name = "codegen-drift"
 author = "agent"
@@ -117,6 +121,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "bash scripts/push-to-github.sh --force"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "pull-from-github"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/pull-from-github.sh"
 
 [workflows.workflow.metadata]
 outputType = "console"

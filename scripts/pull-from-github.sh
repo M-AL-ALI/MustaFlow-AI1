@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Pull latest changes from GitHub (M-AL-ALI/MustaFlow-AI1) and merge into local main.
+set -euo pipefail
+
+REMOTE_URL="https://github.com/M-AL-ALI/MustaFlow-AI1.git"
+BRANCH="main"
+
+if [ -z "${GITHUB_PAT:-}" ]; then
+  echo "ERROR: GITHUB_PAT env var is not set" >&2
+  exit 1
+fi
+
+CRED_HELPER='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'
+
+echo "Fetching from GitHub MustaFlow-AI1 …"
+git -c credential.helper="$CRED_HELPER" fetch "$REMOTE_URL" "$BRANCH:refs/remotes/github/$BRANCH"
+
+echo "Merging github/$BRANCH into local $BRANCH …"
+git merge --no-edit "refs/remotes/github/$BRANCH"
+
+echo "Local HEAD is now: $(git rev-parse --short HEAD)"
+echo "Done."
