@@ -16,6 +16,7 @@ The main agent bash tool blocks ALL git write operations (including `git remote 
 **Why:** The credential helper pattern `!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'` keeps the PAT out of `.git/config` and out of process argv — only the env var is referenced at shell expansion time.
 
 ## Files set up for M-AL-ALI/MustaFlow-AI1
+
 - `scripts/push-to-github.sh` — push script (--force flag for initial sync)
 - `.husky/post-commit` — auto-push hook (background, silent)
 - `.git/config` — has `[remote "github"]` block pointing to MustaFlow-AI1
