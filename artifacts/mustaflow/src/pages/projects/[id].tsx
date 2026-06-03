@@ -1623,6 +1623,7 @@ export default function ProjectWorkspacePage() {
   // Reconnect state: attempt count (0 = connected/idle) and error flag (max retries hit)
   const [streamReconnectAttempt, setStreamReconnectAttempt] = useState(0);
   const [streamError, setStreamError] = useState(false);
+  const [streamErrorStatus, setStreamErrorStatus] = useState<number | null>(null);
   // Stored params for "Try again" retry after exhausted reconnects
   const streamRetryParamsRef = useRef<{
     content: string;
@@ -2268,6 +2269,7 @@ export default function ProjectWorkspacePage() {
       setStreamingText("");
       setStreamReconnectAttempt(0);
       setStreamError(false);
+      setStreamErrorStatus(null);
       streamRetryParamsRef.current = { content, opts };
 
       const MAX_STREAM_RETRIES = 3;
@@ -2331,6 +2333,7 @@ export default function ProjectWorkspacePage() {
               setStreamingText("");
               setStreamReconnectAttempt(0);
               setStreamError(true);
+              setStreamErrorStatus(resp.status);
               setPendingBuildStartedAt(null);
               pendingIsPlanRef.current = false;
               setPendingIsPlan(false);
@@ -2596,6 +2599,7 @@ export default function ProjectWorkspacePage() {
     setStreamingText("");
     setStreamReconnectAttempt(0);
     setStreamError(false);
+    setStreamErrorStatus(null);
     setPendingIsConverse(false);
     pendingIsConverseRef.current = false;
   }, [activeTaskId, projectId, cancelTask]);
@@ -3925,36 +3929,68 @@ export default function ProjectWorkspacePage() {
                       {streamError && !isStreaming && !sendMessage.isPending && (
                         <div className="flex justify-start animate-in fade-in duration-150">
                           <div className="max-w-[90%] px-3 py-2.5 rounded-xl text-xs bg-muted border border-destructive/30 rounded-bl-sm">
-                            <div className="flex items-start gap-2">
-                              <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-foreground font-medium">Connection lost</p>
-                                <p className="text-muted-foreground mt-0.5">
-                                  The response couldn't be delivered after 3 attempts.
-                                </p>
-                              </div>
-                            </div>
-                            <div className="mt-2.5 flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  const params = streamRetryParamsRef.current;
-                                  if (params) {
-                                    setStreamError(false);
-                                    send(params.content, params.opts);
-                                  }
-                                }}
-                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:opacity-90 transition-opacity"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                                Try again
-                              </button>
-                              <button
-                                onClick={() => setStreamError(false)}
-                                className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                Dismiss
-                              </button>
-                            </div>
+                            {streamErrorStatus === 401 ? (
+                              <>
+                                <div className="flex items-start gap-2">
+                                  <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-foreground font-medium">Session expired</p>
+                                    <p className="text-muted-foreground mt-0.5">
+                                      Your session has expired. Refresh the page to continue.
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="mt-2.5 flex items-center gap-2">
+                                  <button
+                                    onClick={() => window.location.reload()}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:opacity-90 transition-opacity"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    Refresh page
+                                  </button>
+                                  <button
+                                    onClick={() => { setStreamError(false); setStreamErrorStatus(null); }}
+                                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    Dismiss
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-start gap-2">
+                                  <WifiOff className="w-3.5 h-3.5 text-destructive shrink-0 mt-px" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-foreground font-medium">Connection lost</p>
+                                    <p className="text-muted-foreground mt-0.5">
+                                      The response couldn't be delivered after 3 attempts.
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="mt-2.5 flex items-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      const params = streamRetryParamsRef.current;
+                                      if (params) {
+                                        setStreamError(false);
+                                        setStreamErrorStatus(null);
+                                        send(params.content, params.opts);
+                                      }
+                                    }}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-[11px] font-medium hover:opacity-90 transition-opacity"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    Try again
+                                  </button>
+                                  <button
+                                    onClick={() => { setStreamError(false); setStreamErrorStatus(null); }}
+                                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    Dismiss
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                       )}

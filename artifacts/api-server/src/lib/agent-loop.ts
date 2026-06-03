@@ -2260,13 +2260,17 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const useVision = visionTurnsRemaining > 0;
       if (useVision) visionTurnsRemaining -= 1;
       const effectiveModel = useVision ? VISION_MODEL[provider] : routedModel;
+      // Combine the wall-clock abort signal with a per-call timeout so a hung
+      // AI response never blocks the loop for more than 3 minutes, regardless
+      // of how much wall-clock budget remains.
+      const perCallSignal = AbortSignal.any([input.signal, AbortSignal.timeout(3 * 60_000)]);
       response = await createChatCompletion({
         provider,
         model: effectiveModel,
         messages,
         tools: toolsForLoop,
         tool_choice: "required",
-        signal: input.signal,
+        signal: perCallSignal,
       });
     } catch (err) {
       if (input.signal.aborted) {
