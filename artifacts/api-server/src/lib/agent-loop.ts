@@ -249,7 +249,7 @@ export type AgentLoopResult = {
 const STEP_CAP = Math.max(5, parseInt(process.env.AGENTIC_BUILDER_STEP_CAP ?? "25", 10));
 const WALL_CLOCK_MS = Math.max(
   60_000,
-  parseInt(process.env.AGENTIC_BUILDER_WALL_CLOCK_MS ?? "480000", 10),
+  parseInt(process.env.AGENTIC_BUILDER_WALL_CLOCK_MS ?? "1200000", 10),
 );
 const REPEATED_ERROR_CAP = 3;
 /** Foundation check fails >= this many consecutive turns → force-stop with "check-blocked". */
@@ -1632,6 +1632,16 @@ app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
 ## Critical: bind to process.env.PORT
   const port = parseInt(process.env.PORT ?? "3000", 10);
   app.listen(port, "0.0.0.0", () => console.log(\`Listening on \${port}\`));
+
+## First build: install dependencies before writing source files
+When you write a new package.json (first build or adding packages), you MUST call pkg_install
+for all required runtime dependencies IMMEDIATELY after writing package.json and BEFORE writing
+any source files. This guarantees node_modules is populated before your code references it.
+Order of operations:
+1. Write package.json
+2. Call pkg_install for each required package group (runtime deps first, then devDeps)
+3. Write source files (index.ts, routes, etc.)
+4. Start the server and verify /healthz responds
 
 ## npm install in containers — OOM / timeout handling
 Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL) or times out:

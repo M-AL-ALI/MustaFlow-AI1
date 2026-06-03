@@ -73,7 +73,7 @@ export function ProvisioningProgress({
   const isReady = status === "ready";
   const isError = status === "error";
   const isHibernated = status === "hibernated";
-  const showTimeout = isProvisioning && elapsedSeconds > 90;
+  const showTimeout = isProvisioning && elapsedSeconds > 180;
 
   const badgeColor = isReady
     ? "bg-green-500/10 text-green-400 border-green-500/20"
