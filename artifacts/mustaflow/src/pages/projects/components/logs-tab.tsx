@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   useListTasks,
@@ -681,7 +682,7 @@ function MobileBuildRow({
     if (!expanded || !build.buildId) return;
     setLogsLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/builds/${build.id}/logs`);
+      const res = await authFetch(`/api/projects/${projectId}/builds/${build.id}/logs`);
       if (res.ok) {
         const data = (await res.json()) as { logs?: string };
         setLogs(data.logs ?? "");
@@ -892,8 +893,8 @@ function ProdLogsPanel({ projectId }: { projectId: number }) {
     setLoading(true);
     try {
       const [logsRes, groupsRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/prod-logs?limit=50`),
-        fetch(`/api/projects/${projectId}/prod-errors?limit=20`),
+        authFetch(`/api/projects/${projectId}/prod-logs?limit=50`),
+        authFetch(`/api/projects/${projectId}/prod-errors?limit=20`),
       ]);
       if (logsRes.ok) {
         const data = (await logsRes.json()) as { logs: ProdLogRow[] };
@@ -1153,7 +1154,7 @@ function ContainerLogsPanel({ projectId }: { projectId: number }) {
   }, []);
 
   const sendTestLine = useCallback(() => {
-    void fetch(`/api/projects/${projectId}/container/logs/test`, { method: "POST" }).catch(
+    void authFetch(`/api/projects/${projectId}/container/logs/test`, { method: "POST" }).catch(
       () => {},
     );
   }, [projectId]);
@@ -1504,7 +1505,7 @@ export function LogsTab({
   const fetchMobileBuilds = useCallback(async () => {
     if (!isMobile) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/builds`);
+      const res = await authFetch(`/api/projects/${projectId}/builds`);
       if (res.ok) {
         const data = (await res.json()) as { builds: MobileBuildRow[] };
         setMobileBuilds(data.builds ?? []);
@@ -1546,7 +1547,7 @@ export function LogsTab({
     if (!isAgentic) return;
     setAuditLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/agent-audit?limit=100`);
+      const res = await authFetch(`/api/projects/${projectId}/agent-audit?limit=100`);
       if (res.ok) {
         const data = (await res.json()) as { rows: AgentAuditRow[] };
         setAuditRows(data.rows ?? []);

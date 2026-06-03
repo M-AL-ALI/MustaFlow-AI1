@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useRef, useCallback } from "react";
 import { Search, Loader2, Regex } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,7 +35,7 @@ export function SearchPanel({ projectId, onNavigateToFile }: SearchPanelProps) {
       try {
         const params = new URLSearchParams({ q });
         if (useRegex) params.set("regex", "1");
-        const res = await fetch(`/api/projects/${projectId}/files/search?${params.toString()}`);
+        const res = await authFetch(`/api/projects/${projectId}/files/search?${params.toString()}`);
         if (res.ok) {
           const data = (await res.json()) as SearchResult[];
           setResults(data);

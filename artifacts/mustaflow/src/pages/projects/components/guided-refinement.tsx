@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { HelpCircle, ChevronRight, Loader2, Send, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -192,7 +193,7 @@ export function GuidedRefinementLoader({
   useEffect(() => {
     const check = async () => {
       try {
-        const res = await fetch(`/api/projects/${projectId}/plans/clarify`, {
+        const res = await authFetch(`/api/projects/${projectId}/plans/clarify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",

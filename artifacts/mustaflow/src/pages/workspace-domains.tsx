@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   Globe,
@@ -139,7 +140,7 @@ export default function WorkspaceDomainsPage() {
     if (!workspaceId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains`);
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains`);
       if (!res.ok) throw new Error(await res.text());
       setData(await res.json());
     } catch (err) {
@@ -156,7 +157,7 @@ export default function WorkspaceDomainsPage() {
   const fetchProjects = useCallback(async () => {
     if (!workspaceId) return;
     try {
-      const res = await fetch(`/api/projects?workspaceId=${workspaceId}`);
+      const res = await authFetch(`/api/projects?workspaceId=${workspaceId}`);
       if (!res.ok) return;
       const json = (await res.json()) as { projects?: ProjectSummary[] } | ProjectSummary[];
       const list = Array.isArray(json) ? json : (json.projects ?? []);
@@ -176,7 +177,7 @@ export default function WorkspaceDomainsPage() {
     if (!newHostname.trim() || !workspaceId) return;
     setClaiming(true);
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains`, {
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ hostname: newHostname.trim() }),
@@ -208,7 +209,7 @@ export default function WorkspaceDomainsPage() {
     if (!workspaceId) return;
     setVerifyingId(domainId);
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains/${domainId}/verify`, {
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains/${domainId}/verify`, {
         method: "POST",
       });
       const body = (await res.json().catch(() => ({}))) as {
@@ -253,7 +254,7 @@ export default function WorkspaceDomainsPage() {
     )
       return;
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains/${domain.id}`, {
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains/${domain.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(await res.text());
@@ -271,7 +272,7 @@ export default function WorkspaceDomainsPage() {
   async function loadRoles(domainId: number) {
     if (!workspaceId) return;
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains/${domainId}/roles`);
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains/${domainId}/roles`);
       if (!res.ok) throw new Error(await res.text());
       const body = (await res.json()) as { roles: RoleGrant[] };
       setRolesByDomain((m) => ({ ...m, [domainId]: body.roles }));
@@ -610,7 +611,7 @@ function RolesPanel({
     }
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains/${domain.id}/roles`, {
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains/${domain.id}/roles`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: trimmed, role }),
@@ -637,7 +638,7 @@ function RolesPanel({
   async function revoke(targetUserId: string, label: string) {
     if (!window.confirm(`Revoke access for ${label}?`)) return;
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/workspaces/${workspaceId}/domains/${domain.id}/roles/${encodeURIComponent(targetUserId)}`,
         { method: "DELETE" },
       );
@@ -761,7 +762,7 @@ function SubHostnamePanel({
     const fullHostname = sub.includes(".") ? sub : `${sub}.${domain.hostname}`;
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/domains/${domain.id}/sub-claim`, {
+      const res = await authFetch(`/api/workspaces/${workspaceId}/domains/${domain.id}/sub-claim`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

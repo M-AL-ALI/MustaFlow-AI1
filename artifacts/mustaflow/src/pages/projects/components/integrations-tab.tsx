@@ -13,6 +13,7 @@
  *
  * No emojis — lucide-react icons only.
  */
+import { authFetch } from "@/lib/api-fetch";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ShieldCheck,
@@ -253,8 +254,8 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
     setError(null);
     try {
       const [bpRes, instRes] = await Promise.all([
-        fetch("/api/blueprints", { credentials: "include" }),
-        fetch(`/api/projects/${projectId}/blueprints`, { credentials: "include" }),
+        authFetch("/api/blueprints", { credentials: "include" }),
+        authFetch(`/api/projects/${projectId}/blueprints`, { credentials: "include" }),
       ]);
       if (!bpRes.ok) throw new Error(`catalog: HTTP ${bpRes.status}`);
       if (!instRes.ok) throw new Error(`installed: HTTP ${instRes.status}`);
@@ -280,7 +281,7 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
       setLastResult(null);
       setLastNotices([]);
       try {
-        const res = await fetch(`/api/projects/${projectId}/blueprints/install`, {
+        const res = await authFetch(`/api/projects/${projectId}/blueprints/install`, {
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },
@@ -309,8 +310,8 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
         // so we can show the post-install dialog instead of asking users to switch tabs.
         if (bp.requiredSecrets.length > 0) {
           const [bpDetailRes, secretsRes] = await Promise.all([
-            fetch(`/api/blueprints/${bp.id}`, { credentials: "include" }),
-            fetch(`/api/projects/${projectId}/secrets`, { credentials: "include" }),
+            authFetch(`/api/blueprints/${bp.id}`, { credentials: "include" }),
+            authFetch(`/api/projects/${projectId}/secrets`, { credentials: "include" }),
           ]);
           const bpDetail = bpDetailRes.ok
             ? ((await bpDetailRes.json()) as {
@@ -372,7 +373,7 @@ function BlueprintsPanel({ projectId }: { projectId: number }) {
     async (bpId: string) => {
       setError(null);
       try {
-        const res = await fetch(`/api/projects/${projectId}/blueprints/${bpId}`, {
+        const res = await authFetch(`/api/projects/${projectId}/blueprints/${bpId}`, {
           method: "DELETE",
           credentials: "include",
         });
@@ -706,7 +707,7 @@ function PostInstallSecretsDialog({
     );
     try {
       for (const spec of toSave) {
-        const res = await fetch(`/api/projects/${projectId}/secrets`, {
+        const res = await authFetch(`/api/projects/${projectId}/secrets`, {
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },
@@ -880,7 +881,9 @@ function WebhooksPanel({ projectId }: { projectId: number }) {
 
   const loadWebhooks = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/webhooks`, { credentials: "include" });
+      const res = await authFetch(`/api/projects/${projectId}/webhooks`, {
+        credentials: "include",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { webhooks: WebhookRow[]; availableEvents: string[] };
       setWebhooks(body.webhooks);
@@ -902,7 +905,7 @@ function WebhooksPanel({ projectId }: { projectId: number }) {
     setError(null);
     setNewSecret(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/webhooks`, {
+      const res = await authFetch(`/api/projects/${projectId}/webhooks`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -930,7 +933,7 @@ function WebhooksPanel({ projectId }: { projectId: number }) {
   const handleDelete = async (hookId: number) => {
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/webhooks/${hookId}`, {
+      const res = await authFetch(`/api/projects/${projectId}/webhooks/${hookId}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -945,7 +948,7 @@ function WebhooksPanel({ projectId }: { projectId: number }) {
     setTestingId(hookId);
     setTestResult(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/webhooks/${hookId}/test`, {
+      const res = await authFetch(`/api/projects/${projectId}/webhooks/${hookId}/test`, {
         method: "POST",
         credentials: "include",
       });
@@ -966,7 +969,7 @@ function WebhooksPanel({ projectId }: { projectId: number }) {
     setExpandedHook(hookId);
     setLoadingDeliveries(hookId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/webhooks/${hookId}/deliveries`, {
+      const res = await authFetch(`/api/projects/${projectId}/webhooks/${hookId}/deliveries`, {
         credentials: "include",
       });
       const body = (await res.json()) as { deliveries: WebhookDelivery[] };
@@ -1262,7 +1265,7 @@ function McpPanel() {
 
   const loadServers = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/mcp-servers", { credentials: "include" });
+      const res = await authFetch("/api/admin/mcp-servers", { credentials: "include" });
       if (res.status === 403 || res.status === 401) {
         setIsAdmin(false);
         setServers([]);
@@ -1286,7 +1289,7 @@ function McpPanel() {
   const handleRefresh = async (id: number) => {
     setRefreshingId(id);
     try {
-      await fetch(`/api/admin/mcp-servers/${id}/refresh-tools`, {
+      await authFetch(`/api/admin/mcp-servers/${id}/refresh-tools`, {
         method: "POST",
         credentials: "include",
       });
@@ -1303,7 +1306,7 @@ function McpPanel() {
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await fetch("/api/admin/mcp-servers", {
+      const res = await authFetch("/api/admin/mcp-servers", {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -1329,7 +1332,7 @@ function McpPanel() {
 
   const handleDelete = async (id: number) => {
     try {
-      await fetch(`/api/admin/mcp-servers/${id}`, {
+      await authFetch(`/api/admin/mcp-servers/${id}`, {
         method: "DELETE",
         credentials: "include",
       });

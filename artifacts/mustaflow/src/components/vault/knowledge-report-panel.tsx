@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -92,7 +93,7 @@ export function KnowledgeReportPanel({ open, onOpenChange }: KnowledgeReportPane
   // ── Find suggestions mutation ───────────────────────────────────────────────
   const findMutation = useMutation<SuggestionsResponse, Error, string>({
     mutationFn: async (q: string) => {
-      const res = await fetch("/api/vault/knowledge-suggestions", {
+      const res = await authFetch("/api/vault/knowledge-suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -119,7 +120,7 @@ export function KnowledgeReportPanel({ open, onOpenChange }: KnowledgeReportPane
   // ── Generate report mutation ────────────────────────────────────────────────
   const generateMutation = useMutation<GenerateReportResponse, Error, number[]>({
     mutationFn: async (ids: number[]) => {
-      const res = await fetch("/api/vault/generate-report", {
+      const res = await authFetch("/api/vault/generate-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

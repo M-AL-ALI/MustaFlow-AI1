@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   X,
@@ -44,8 +45,8 @@ export function BuyCreditsSheet({
     setLoadingPkgs(true);
     try {
       const [pkgRes, balRes] = await Promise.all([
-        fetch("/api/billing/packages"),
-        fetch("/api/credits"),
+        authFetch("/api/billing/packages"),
+        authFetch("/api/credits"),
       ]);
       if (pkgRes.ok) setPackages((await pkgRes.json()) as PackagesResponse);
       if (balRes.ok) {
@@ -67,7 +68,7 @@ export function BuyCreditsSheet({
     if (!pkg.available || !packages?.stripeConfigured) return;
     setCheckoutLoading(pkg.id);
     try {
-      const res = await fetch("/api/billing/checkout", {
+      const res = await authFetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -2,6 +2,7 @@
  * WebhooksPanel — manage project webhooks (CRUD + delivery history).
  * Used inside the Publishing tab Domains section.
  */
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import {
   Webhook,
@@ -144,7 +145,7 @@ function WebhookRow({
   const loadDeliveries = useCallback(async () => {
     setLoadingDeliveries(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/webhooks/${hook.id}/deliveries`);
+      const r = await authFetch(`/api/projects/${projectId}/webhooks/${hook.id}/deliveries`);
       if (r.ok) {
         const data = (await r.json()) as { deliveries: WebhookDelivery[] };
         setDeliveries(data.deliveries ?? []);
@@ -163,7 +164,7 @@ function WebhookRow({
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/webhooks/${hook.id}`, {
+      const r = await authFetch(`/api/projects/${projectId}/webhooks/${hook.id}`, {
         method: "DELETE",
       });
       if (r.ok) onDeleted(hook.id);
@@ -177,7 +178,7 @@ function WebhookRow({
   const handleToggle = async () => {
     setToggling(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/webhooks/${hook.id}`, {
+      const r = await authFetch(`/api/projects/${projectId}/webhooks/${hook.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active: !hook.active }),
@@ -193,7 +194,7 @@ function WebhookRow({
   const handleTest = async () => {
     setTesting(true);
     try {
-      await fetch(`/api/projects/${projectId}/webhooks/${hook.id}/test`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/webhooks/${hook.id}/test`, { method: "POST" });
       onTestSent();
       if (open) await loadDeliveries();
     } catch {
@@ -340,7 +341,7 @@ function CreateWebhookForm({
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/webhooks`, {
+      const r = await authFetch(`/api/projects/${projectId}/webhooks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -426,7 +427,7 @@ export function WebhooksPanel({ projectId }: { projectId: number }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/webhooks`);
+      const r = await authFetch(`/api/projects/${projectId}/webhooks`);
       if (r.ok) {
         const data = (await r.json()) as { webhooks: Webhook[] };
         setHooks(data.webhooks ?? []);

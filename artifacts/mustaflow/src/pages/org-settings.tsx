@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import {
@@ -142,9 +143,9 @@ export default function OrgSettingsPage() {
     setLoading(true);
     try {
       const [orgR, membersR, invitesR] = await Promise.all([
-        fetch(`/api/orgs/${orgId}`),
-        fetch(`/api/orgs/${orgId}/members`),
-        fetch(`/api/orgs/${orgId}/invites`),
+        authFetch(`/api/orgs/${orgId}`),
+        authFetch(`/api/orgs/${orgId}/members`),
+        authFetch(`/api/orgs/${orgId}/invites`),
       ]);
       if (orgR.ok) {
         const o = (await orgR.json()) as Org;
@@ -164,7 +165,7 @@ export default function OrgSettingsPage() {
     if (!Number.isFinite(orgId)) return;
     setActivityLoading(true);
     try {
-      const r = await fetch(`/api/orgs/${orgId}/activity?limit=100`);
+      const r = await authFetch(`/api/orgs/${orgId}/activity?limit=100`);
       if (r.ok) {
         const data = (await r.json()) as { items: ActivityItem[]; total: number };
         setActivityItems(data.items);
@@ -188,7 +189,7 @@ export default function OrgSettingsPage() {
   const saveGeneral = async () => {
     setSaving(true);
     try {
-      const r = await fetch(`/api/orgs/${orgId}`, {
+      const r = await authFetch(`/api/orgs/${orgId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -212,7 +213,7 @@ export default function OrgSettingsPage() {
     if (!inviteEmail.trim()) return;
     setInviting(true);
     try {
-      const r = await fetch(`/api/orgs/${orgId}/invites`, {
+      const r = await authFetch(`/api/orgs/${orgId}/invites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
@@ -230,17 +231,17 @@ export default function OrgSettingsPage() {
   };
 
   const revokeInvite = async (inviteId: number) => {
-    await fetch(`/api/orgs/${orgId}/invites/${inviteId}`, { method: "DELETE" });
+    await authFetch(`/api/orgs/${orgId}/invites/${inviteId}`, { method: "DELETE" });
     void loadAll();
   };
 
   const removeMember = async (memberId: number) => {
-    await fetch(`/api/orgs/${orgId}/members/${memberId}`, { method: "DELETE" });
+    await authFetch(`/api/orgs/${orgId}/members/${memberId}`, { method: "DELETE" });
     void loadAll();
   };
 
   const updateMemberRole = async (memberId: number, role: string) => {
-    await fetch(`/api/orgs/${orgId}/members/${memberId}`, {
+    await authFetch(`/api/orgs/${orgId}/members/${memberId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role }),
@@ -620,7 +621,7 @@ export default function OrgSettingsPage() {
                       className="gap-2"
                       onClick={async () => {
                         if (!confirm(`Delete "${org.name}"? This cannot be undone.`)) return;
-                        const r = await fetch(`/api/orgs/${orgId}`, { method: "DELETE" });
+                        const r = await authFetch(`/api/orgs/${orgId}`, { method: "DELETE" });
                         if (r.ok) setLocation("/projects");
                       }}
                     >

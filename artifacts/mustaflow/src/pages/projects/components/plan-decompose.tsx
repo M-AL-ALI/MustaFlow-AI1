@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import {
   ListChecks,
@@ -57,7 +58,7 @@ export function PlanDecomposeView({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/plans/decompose`, {
+      const res = await authFetch(`/api/projects/${projectId}/plans/decompose`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

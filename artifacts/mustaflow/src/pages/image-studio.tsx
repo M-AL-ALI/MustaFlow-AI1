@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   ImagePlus,
@@ -128,7 +129,7 @@ function ImageCard({
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await fetch(`/api/images/${image.id}`, { method: "DELETE" });
+      await authFetch(`/api/images/${image.id}`, { method: "DELETE" });
       onDelete(image.id);
     } catch {
       setDeleting(false);
@@ -275,7 +276,7 @@ export default function ImageStudioPage() {
 
   const fetchImages = useCallback(async () => {
     try {
-      const res = await fetch("/api/images?limit=40");
+      const res = await authFetch("/api/images?limit=40");
       if (res.ok) {
         const data = (await res.json()) as { images: GeneratedImage[] };
         setImages(data.images);
@@ -296,7 +297,7 @@ export default function ImageStudioPage() {
       const toCheck = Array.from(pendingJobsRef.current);
       for (const jobId of toCheck) {
         try {
-          const res = await fetch(`/api/images/status/${jobId}`);
+          const res = await authFetch(`/api/images/status/${jobId}`);
           if (!res.ok) {
             pendingJobsRef.current.delete(jobId);
             continue;
@@ -328,7 +329,7 @@ export default function ImageStudioPage() {
     setGenerating(true);
 
     try {
-      const res = await fetch("/api/images/generate", {
+      const res = await authFetch("/api/images/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -389,7 +390,7 @@ export default function ImageStudioPage() {
     try {
       const formData = new FormData();
       formData.append("image", file);
-      const res = await fetch("/api/images/upload", { method: "POST", body: formData });
+      const res = await authFetch("/api/images/upload", { method: "POST", body: formData });
       const body = (await res.json()) as { error?: string };
       if (!res.ok) {
         setUploadError(body.error ?? "Upload failed");
@@ -408,7 +409,7 @@ export default function ImageStudioPage() {
     setEditError(null);
     setEditSubmitting(true);
     try {
-      const res = await fetch(`/api/images/${editingImage.id}/edit`, {
+      const res = await authFetch(`/api/images/${editingImage.id}/edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),

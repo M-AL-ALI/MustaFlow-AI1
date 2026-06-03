@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import {
   Database,
@@ -797,7 +798,7 @@ export function DnsRecordsPanel({
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns`);
+      const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns`);
       if (!r.ok) throw new Error("Failed to load DNS records");
       const data = (await r.json()) as {
         enabled: boolean;
@@ -840,7 +841,7 @@ export function DnsRecordsPanel({
     setSyncResult(null);
     setError(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/sync`, {
+      const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns/sync`, {
         method: "POST",
       });
       const data = (await r.json()) as {
@@ -867,7 +868,7 @@ export function DnsRecordsPanel({
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/history`);
+      const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns/history`);
       if (!r.ok) throw new Error();
       const data = (await r.json()) as { history: DnsHistoryEntry[] };
       setHistory(data.history ?? []);
@@ -891,7 +892,7 @@ export function DnsRecordsPanel({
       setSaving(true);
       setError(null);
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns`, {
+        const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(input),
@@ -917,7 +918,7 @@ export function DnsRecordsPanel({
       setError(null);
       // First do a dry run
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/dry-run`, {
+        const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns/dry-run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ changes: [input] }),
@@ -942,11 +943,14 @@ export function DnsRecordsPanel({
       setSaving(true);
       setError(null);
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/${recordId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        });
+        const r = await authFetch(
+          `/api/projects/${projectId}/domains/${domain.id}/dns/${recordId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        );
         const data = (await r.json()) as { record?: CfDnsRecord; error?: string };
         if (!r.ok) {
           setError(data.error ?? "Failed to update record.");
@@ -968,7 +972,7 @@ export function DnsRecordsPanel({
       setError(null);
       // Show a dry-run diff preview before committing the update.
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/dry-run`, {
+        const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns/dry-run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ changes: [input] }),
@@ -993,9 +997,12 @@ export function DnsRecordsPanel({
       setDeleting(recordId);
       setError(null);
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/${recordId}`, {
-          method: "DELETE",
-        });
+        const r = await authFetch(
+          `/api/projects/${projectId}/domains/${domain.id}/dns/${recordId}`,
+          {
+            method: "DELETE",
+          },
+        );
         if (!r.ok) {
           const data = (await r.json()) as { error?: string };
           setError(data.error ?? "Failed to delete record.");
@@ -1014,7 +1021,7 @@ export function DnsRecordsPanel({
       setPropagationChecking((s) => ({ ...s, [recordId]: true }));
       setPropagationOpen((s) => ({ ...s, [recordId]: true }));
       try {
-        const r = await fetch(
+        const r = await authFetch(
           `/api/projects/${projectId}/domains/${domain.id}/dns/${recordId}/propagation`,
         );
         const data = (await r.json()) as PropagationResult & { error?: string };
@@ -1054,7 +1061,7 @@ export function DnsRecordsPanel({
     async (logId: number) => {
       setRollingBack(logId);
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/dns/rollback`, {
+        const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/dns/rollback`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ logId }),
@@ -1074,7 +1081,7 @@ export function DnsRecordsPanel({
     setCertSuccess(null);
     setCertUploading(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/certificate`, {
+      const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/certificate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ certificate: certPem, privateKey: keyPem }),
@@ -1106,7 +1113,7 @@ export function DnsRecordsPanel({
     setCertError(null);
     setCertSuccess(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/domains/${domain.id}/certificate`, {
+      const r = await authFetch(`/api/projects/${projectId}/domains/${domain.id}/certificate`, {
         method: "DELETE",
       });
       if (r.ok) {

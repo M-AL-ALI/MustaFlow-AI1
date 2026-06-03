@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState } from "react";
 import { Globe, Copy, Check, ExternalLink, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -60,7 +61,7 @@ export default function PublishedPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/projects");
+      const res = await authFetch("/api/projects");
       if (!res.ok) throw new Error("Failed to load projects");
       const data = (await res.json()) as Project[];
       setProjects(data.filter((p) => p.status === "published" && p.publicSlug));

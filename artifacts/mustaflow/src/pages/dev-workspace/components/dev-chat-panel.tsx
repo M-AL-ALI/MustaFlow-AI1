@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   X,
@@ -407,7 +408,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
       try {
         const resized = await resizeImageForVision(file);
         const resizedFile = new File([resized], file.name, { type: resized.type || file.type });
-        const metaRes = await fetch(`/api/projects/${projectId}/attachments/upload-url`, {
+        const metaRes = await authFetch(`/api/projects/${projectId}/attachments/upload-url`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -538,7 +539,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
       setIsListening(false);
       if (blob.size === 0) return;
       try {
-        const res = await fetch("/api/transcribe?format=webm", {
+        const res = await authFetch("/api/transcribe?format=webm", {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: blob,
@@ -1075,9 +1076,12 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => {
-                          void fetch(`/api/projects/${projectId}/tasks/${activeTaskId}/cancel`, {
-                            method: "POST",
-                          });
+                          void authFetch(
+                            `/api/projects/${projectId}/tasks/${activeTaskId}/cancel`,
+                            {
+                              method: "POST",
+                            },
+                          );
                         }}
                         className="flex items-center justify-center h-6 w-6 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
                       >

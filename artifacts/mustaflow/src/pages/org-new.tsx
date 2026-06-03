@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { Building2, ArrowLeft, Loader2 } from "lucide-react";
@@ -19,7 +20,7 @@ export default function OrgNewPage() {
     setError("");
     setCreating(true);
     try {
-      const r = await fetch("/api/orgs", {
+      const r = await authFetch("/api/orgs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

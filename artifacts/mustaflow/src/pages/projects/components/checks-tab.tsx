@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -958,7 +959,7 @@ function useLatestQAFromActivity(projectId: number): BrowserQAResult | null {
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
-    fetch(`/api/projects/${projectId}/activity-log?eventType=qa_completed&limit=1`)
+    authFetch(`/api/projects/${projectId}/activity-log?eventType=qa_completed&limit=1`)
       .then((r) => (r.ok ? r.json() : null))
       .then((rows: { metadata?: unknown }[] | null) => {
         if (cancelled || !rows || rows.length === 0) return;

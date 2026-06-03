@@ -63,7 +63,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - pnpm workspaces, Node 24, TypeScript 5.9
 - **API**: Express 5, Drizzle ORM + Postgres, Zod, pino
 - **Frontend**: React + Vite + Tailwind v4 + shadcn/ui + wouter + TanStack Query
-- **Auth**: Clerk (cookie-based session, no bearer tokens on the frontend)
+- **Auth**: Clerk session cookie + a fresh bearer token on every API call. The backend `getAuth(req)` accepts both; the bearer token guards against the dev-mode JWT cookie (60s lifetime) going stale inside the embedded preview iframe.
 - **AI**: OpenAI Chat Completions via the Replit AI integration. Models route by agent mode: `lite`/`eco` → gpt-5-mini, `power`/`pro` → gpt-5.4.
 - **API contract**: OpenAPI → Orval (React Query hooks + Zod schemas)
 
@@ -89,7 +89,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **AI calls are non-streaming** Chat Completions — Orval can't generate SSE hooks; keeps server + client simple.
 - **Plan Mode** uses `response_format: json_object` so the structured plan can render as a card.
 - **Secrets** are never returned from the API — only a masked preview (`••••••••XXXX`). Encrypted at rest.
-- **Auth** is cookie-based. Do NOT add `getToken()` or `Authorization` headers to browser API calls.
+- **Auth** is cookie + bearer. The Orval `customFetch` attaches a fresh `Authorization: Bearer <token>` via the registered token getter (App.tsx `ClerkTokenProvider`). Raw `fetch("/api/...")` calls that bypass Orval MUST go through `authFetch` (`artifacts/mustaflow/src/lib/api-fetch.ts`) — it adds the bearer token and `credentials: "include"`. Cookie-only requests intermittently 401 ("Session expired") in the preview iframe because the dev-mode JWT cookie expires every ~60s.
 - **Generated apps are static** (HTML/CSS/JS + Tailwind/lucide via CDN). They are served from the DB at `GET /api/projects/:id/preview/{*splat}` and iframed. No npm/build tools run server-side. Iframe sandbox: `allow-scripts allow-forms allow-popups` (no `allow-same-origin`).
 - **Versions**: every successful build/refine snapshots all files into `project_versions.filesSnapshot` and writes a `TaskReport`. Rollback restores via `POST /api/projects/:id/versions/:versionId/rollback`.
 - **Soft delete**: projects use `deleted_at` and all list/get queries filter `IS NULL`. Hard-delete recovery requires admin SQL.

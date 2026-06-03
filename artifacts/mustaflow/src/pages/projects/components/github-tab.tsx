@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import {
   Github,
@@ -71,7 +72,7 @@ function ConnectPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void fetch(`/api/projects/${projectId}/github/oauth/config`, { credentials: "include" })
+    void authFetch(`/api/projects/${projectId}/github/oauth/config`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : { enabled: false }))
       .then((j: { enabled?: boolean }) => {
         if (!cancelled) setOauthEnabled(!!j.enabled);

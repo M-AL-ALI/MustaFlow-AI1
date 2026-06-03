@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Editor from "@monaco-editor/react";
 import {
@@ -135,7 +136,7 @@ function VariantTile({
 
   useEffect(() => {
     if (!visible || variant.status !== "ready") return;
-    fetch(`/api/projects/${variant.projectId}/canvas/variants/${variant.id}/touch`, {
+    authFetch(`/api/projects/${variant.projectId}/canvas/variants/${variant.id}/touch`, {
       method: "POST",
     }).catch(() => {});
   }, [visible, variant.id, variant.projectId, variant.status]);
@@ -333,7 +334,7 @@ function EditOverlay({
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/projects/${variant.projectId}/canvas/variants/${variant.id}/files`,
         );
         if (!res.ok) throw new Error(`Failed to load variant files (${res.status})`);
@@ -360,7 +361,7 @@ function EditOverlay({
       setSaving(true);
       setAutoSaved(false);
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/projects/${variant.projectId}/canvas/variants/${variant.id}/files`,
           {
             method: "PATCH",
@@ -572,7 +573,7 @@ export function DevCanvasTab({ projectId, onProjectFilesChanged }: DevCanvasTabP
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/projects/${projectId}/canvas/state`);
+        const res = await authFetch(`/api/projects/${projectId}/canvas/state`);
         if (!res.ok) return;
         const json = (await res.json()) as { canvasState?: Record<string, unknown> };
         const serverState = json.canvasState;
@@ -593,7 +594,7 @@ export function DevCanvasTab({ projectId, onProjectFilesChanged }: DevCanvasTabP
 
   const fetchVariants = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants`);
+      const res = await authFetch(`/api/projects/${projectId}/canvas/variants`);
       if (!res.ok) return;
       const json = (await res.json()) as { variants: CanvasVariant[] };
       setVariants(json.variants ?? []);
@@ -633,7 +634,7 @@ export function DevCanvasTab({ projectId, onProjectFilesChanged }: DevCanvasTabP
       lsSaveCanvasState(projectId, state);
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
       saveDebounceRef.current = setTimeout(() => {
-        fetch(`/api/projects/${projectId}/canvas/state`, {
+        authFetch(`/api/projects/${projectId}/canvas/state`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ canvasState: state }),
@@ -677,7 +678,7 @@ export function DevCanvasTab({ projectId, onProjectFilesChanged }: DevCanvasTabP
     setGenerating(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/explore`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/explore`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: text, variantCount: 3 }),
@@ -709,11 +710,14 @@ export function DevCanvasTab({ projectId, onProjectFilesChanged }: DevCanvasTabP
     setGraduating(variant.id);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants/${variant.id}/graduate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
+      const res = await authFetch(
+        `/api/projects/${projectId}/canvas/variants/${variant.id}/graduate`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        },
+      );
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `Apply failed (${res.status})`);
@@ -729,7 +733,7 @@ export function DevCanvasTab({ projectId, onProjectFilesChanged }: DevCanvasTabP
 
   const handleDelete = async (variant: CanvasVariant) => {
     try {
-      await fetch(`/api/projects/${projectId}/canvas/variants/${variant.id}`, {
+      await authFetch(`/api/projects/${projectId}/canvas/variants/${variant.id}`, {
         method: "DELETE",
       });
       setVariants((prev) => prev.filter((v) => v.id !== variant.id));

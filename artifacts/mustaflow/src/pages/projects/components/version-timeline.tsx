@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -258,7 +259,7 @@ function SnapshotFileBrowser({
 
       setComparingPath(snapshotFile.path);
       try {
-        const res = await fetch(`/api/projects/${projectId}/files/${currentFile.id}`);
+        const res = await authFetch(`/api/projects/${projectId}/files/${currentFile.id}`);
         if (res.ok) {
           const fetched = (await res.json()) as { content: string };
           onDiff({

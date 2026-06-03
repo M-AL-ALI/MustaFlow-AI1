@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import { useListKnowledge, getListKnowledgeQueryKey } from "@workspace/api-client-react";
 import type { KnowledgeEntry } from "@workspace/api-client-react";
@@ -54,7 +55,7 @@ function StyleMemoryCard({ entry, onRated }: { entry: KnowledgeEntry; onRated: (
   const handleRate = async (direction: "up" | "down") => {
     if (rating === direction) return;
     try {
-      await fetch(`/api/knowledge/${entry.id}/rate`, {
+      await authFetch(`/api/knowledge/${entry.id}/rate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rating: direction }),
@@ -179,7 +180,7 @@ function BrandProfileSection() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/knowledge/brand-profile");
+        const res = await authFetch("/api/knowledge/brand-profile");
         if (!res.ok) {
           if (!cancelled) setLoaded(true);
           return;
@@ -216,7 +217,7 @@ function BrandProfileSection() {
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/knowledge/brand-profile", {
+      const res = await authFetch("/api/knowledge/brand-profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(profile),
@@ -237,7 +238,7 @@ function BrandProfileSection() {
   const handleClear = async () => {
     setSaving(true);
     try {
-      await fetch("/api/knowledge/brand-profile", { method: "DELETE" });
+      await authFetch("/api/knowledge/brand-profile", { method: "DELETE" });
       setProfile(EMPTY_BRAND);
       setHasSaved(false);
       toast({ title: "Brand profile cleared" });
@@ -405,7 +406,7 @@ export default function MemoryPage() {
   const handleInferStyle = useCallback(async () => {
     setInferring(true);
     try {
-      const res = await fetch("/api/knowledge/infer-style", { method: "POST" });
+      const res = await authFetch("/api/knowledge/infer-style", { method: "POST" });
       const data = (await res.json()) as { inferred: number; message: string };
       toast({
         title: data.inferred > 0 ? "Style preferences updated" : "No new preferences found",

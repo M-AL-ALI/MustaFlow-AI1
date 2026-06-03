@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { Bell, X, Check, CheckCheck, MessageSquare, Users, Rocket, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -77,7 +78,7 @@ export function NotificationsBell() {
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch("/api/notifications?limit=20");
+      const resp = await authFetch("/api/notifications?limit=20");
       if (resp.ok) setData((await resp.json()) as NotificationsResponse);
     } finally {
       setLoading(false);
@@ -91,7 +92,7 @@ export function NotificationsBell() {
   }, [fetchNotifications]);
 
   const markRead = async (id: number) => {
-    await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+    await authFetch(`/api/notifications/${id}/read`, { method: "POST" });
     setData((prev) =>
       prev
         ? {
@@ -104,7 +105,7 @@ export function NotificationsBell() {
   };
 
   const markAllRead = async () => {
-    await fetch("/api/notifications/read-all", { method: "POST" });
+    await authFetch("/api/notifications/read-all", { method: "POST" });
     setData((prev) =>
       prev
         ? {
@@ -117,7 +118,7 @@ export function NotificationsBell() {
   };
 
   const dismiss = async (id: number) => {
-    await fetch(`/api/notifications/${id}`, { method: "DELETE" });
+    await authFetch(`/api/notifications/${id}`, { method: "DELETE" });
     setData((prev) =>
       prev
         ? {

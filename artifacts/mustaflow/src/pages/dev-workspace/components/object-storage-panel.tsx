@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Boxes,
@@ -86,7 +87,7 @@ function FileRow({
     }
     setDeleting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/uploads/${file.id}`, {
+      const res = await authFetch(`/api/projects/${projectId}/uploads/${file.id}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -203,7 +204,7 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/uploads`, { credentials: "include" });
+      const res = await authFetch(`/api/projects/${projectId}/uploads`, { credentials: "include" });
       if (res.ok) {
         const data = (await res.json()) as { uploads: ProjectUpload[] };
         setFiles(data.uploads ?? []);
@@ -229,7 +230,7 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
       try {
         for (const file of Array.from(fileList)) {
           // Step 1: request presigned URL
-          const urlRes = await fetch(`/api/projects/${projectId}/uploads/request-url`, {
+          const urlRes = await authFetch(`/api/projects/${projectId}/uploads/request-url`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -260,7 +261,7 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
           }
 
           // Step 3: register the upload (only after confirmed PUT success)
-          await fetch(`/api/projects/${projectId}/uploads`, {
+          await authFetch(`/api/projects/${projectId}/uploads`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

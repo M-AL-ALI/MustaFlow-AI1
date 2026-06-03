@@ -2,6 +2,7 @@
  * DomainAnalyticsCard — shows Cloudflare + Postgres traffic metrics for a domain.
  * Used inside the Publishing tab Domains section.
  */
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import {
   BarChart2,
@@ -89,7 +90,7 @@ export function DomainAnalyticsCard({
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch(
+      const r = await authFetch(
         `/api/projects/${projectId}/domains/${domainId}/analytics?window=${window}`,
       );
       if (!r.ok) {

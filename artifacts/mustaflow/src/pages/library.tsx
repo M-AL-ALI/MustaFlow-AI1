@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useMemo } from "react";
 import {
   useListPublicKnowledge,
@@ -74,7 +75,7 @@ function PublicLessonCard({ entry }: { entry: KnowledgeEntry }) {
   const handleRate = async (direction: "up" | "down") => {
     if (ratedUp || ratedDown) return;
     try {
-      const res = await fetch(`/api/knowledge/${entry.id}/rate`, {
+      const res = await authFetch(`/api/knowledge/${entry.id}/rate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rating: direction }),

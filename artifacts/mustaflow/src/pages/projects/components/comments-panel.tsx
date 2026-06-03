@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   MessageSquare,
@@ -68,7 +69,7 @@ function CommentThread({
     if (!replyBody.trim()) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/projects/${projectId}/comments`, {
+      await authFetch(`/api/projects/${projectId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: replyBody.trim(), parentId: comment.id }),
@@ -83,7 +84,7 @@ function CommentThread({
 
   const saveEdit = async () => {
     if (!editBody.trim()) return;
-    await fetch(`/api/projects/${projectId}/comments/${comment.id}`, {
+    await authFetch(`/api/projects/${projectId}/comments/${comment.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body: editBody.trim() }),
@@ -93,7 +94,7 @@ function CommentThread({
   };
 
   const toggleResolve = async () => {
-    await fetch(`/api/projects/${projectId}/comments/${comment.id}/resolve`, {
+    await authFetch(`/api/projects/${projectId}/comments/${comment.id}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resolved: !comment.resolved }),
@@ -102,7 +103,7 @@ function CommentThread({
   };
 
   const deleteComment = async () => {
-    await fetch(`/api/projects/${projectId}/comments/${comment.id}`, { method: "DELETE" });
+    await authFetch(`/api/projects/${projectId}/comments/${comment.id}`, { method: "DELETE" });
     onRefresh();
   };
 
@@ -307,7 +308,7 @@ export function CommentsPanel({ projectId, filePath }: CommentsPanelProps) {
     if (!newBody.trim()) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/projects/${projectId}/comments`, {
+      await authFetch(`/api/projects/${projectId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import {
   useGetAccountSecurityFindings,
@@ -316,8 +317,8 @@ export default function SecurityPage() {
   const load = useCallback(async () => {
     try {
       const [meRes, readinessRes] = await Promise.all([
-        fetch("/api/admin/me"),
-        fetch("/api/admin/launch-readiness"),
+        authFetch("/api/admin/me"),
+        authFetch("/api/admin/launch-readiness"),
       ]);
       if (meRes.ok) {
         const me = (await meRes.json()) as { isAdmin: boolean };
@@ -522,7 +523,7 @@ function ScanActions({ onRefresh, loading }: { onRefresh: () => void; loading: b
     setScanning(true);
     setLastResult(null);
     try {
-      const res = await fetch("/api/security/cve/scan", {
+      const res = await authFetch("/api/security/cve/scan", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

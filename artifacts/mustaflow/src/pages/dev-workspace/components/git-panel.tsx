@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import {
   GitBranch,
@@ -105,7 +106,7 @@ function ConnectedView({
     setPulling(true);
     setPullMsg(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/github/pull`, {
+      const res = await authFetch(`/api/projects/${projectId}/github/pull`, {
         method: "POST",
         credentials: "include",
       });
@@ -127,7 +128,7 @@ function ConnectedView({
   const handleGenerateMessage = useCallback(async () => {
     setGeneratingMsg(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/git/generate-message`, {
+      const res = await authFetch(`/api/projects/${projectId}/git/generate-message`, {
         method: "POST",
         credentials: "include",
       });

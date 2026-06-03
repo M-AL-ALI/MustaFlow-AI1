@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import logoUrl from "/logo.png";
@@ -35,7 +36,7 @@ function DrawerCreditsWidget() {
 
   const fetchBalance = useCallback(async () => {
     try {
-      const res = await fetch("/api/credits");
+      const res = await authFetch("/api/credits");
       if (res.ok) {
         const data = (await res.json()) as { balance: number };
         setBalance(data.balance);
@@ -98,7 +99,7 @@ function DrawerAdminNavItem({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
-    fetch("/api/admin/me")
+    authFetch("/api/admin/me")
       .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin: boolean }>) : null))
       .then((data) => {
         if (data?.isAdmin) setIsAdmin(true);

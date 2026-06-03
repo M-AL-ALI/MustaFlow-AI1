@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -368,7 +369,7 @@ function SecretAuditTimeline({ secretId, projectId }: { secretId: number; projec
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    fetch(`/api/projects/${projectId}/secrets/${secretId}/audit`)
+    authFetch(`/api/projects/${projectId}/secrets/${secretId}/audit`)
       .then(async (r) => {
         if (r.ok) {
           const data = (await r.json()) as AuditEntry[];
@@ -463,7 +464,7 @@ function SecretVerifyButton({
   const verify = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/secrets/${secretId}/verify`, {
+      const res = await authFetch(`/api/projects/${projectId}/secrets/${secretId}/verify`, {
         method: "POST",
       });
       if (res.ok) {
@@ -785,7 +786,7 @@ function SecretRowWithAudit({
   const handleMinRoleChange = async (newRole: string) => {
     setSavingRole(true);
     try {
-      await fetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
+      await authFetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ minRole: newRole }),

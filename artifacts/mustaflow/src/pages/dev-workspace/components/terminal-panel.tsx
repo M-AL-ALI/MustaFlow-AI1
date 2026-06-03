@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal, Power, Loader2, AlertCircle, RefreshCw, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -248,7 +249,7 @@ function LogsTab({ projectId }: { projectId: number }) {
 
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/container/logs`);
+      const res = await authFetch(`/api/projects/${projectId}/container/logs`);
       if (res.ok) {
         const raw = await res.json();
         const entries: Array<{ level: string; message: string; createdAt: string }> = Array.isArray(

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { Building2, Check, ChevronDown, Plus, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ export function OrgSwitcher({ onOrgChange, currentOrgId }: OrgSwitcherProps) {
 
   useEffect(() => {
     setLoading(true);
-    fetch("/api/orgs")
+    authFetch("/api/orgs")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: unknown) => setOrgs(Array.isArray(data) ? (data as Org[]) : []))
       .catch(() => setOrgs([]))

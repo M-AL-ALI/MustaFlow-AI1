@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import {
   Lock,
@@ -61,7 +62,7 @@ function SecretRow({
     if (!canTogglePreview || togglingPreview) return;
     setTogglingPreview(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
+      const res = await authFetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isPreviewSafe: !isPreviewSafe }),
@@ -97,7 +98,7 @@ function SecretRow({
     if (!editValue.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
+      const res = await authFetch(`/api/projects/${projectId}/secrets/${secret.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: editValue.trim() }),
@@ -357,7 +358,7 @@ function BulkEditModal({
         return;
       }
       for (const pair of pairs) {
-        await fetch(`/api/projects/${projectId}/secrets`, {
+        await authFetch(`/api/projects/${projectId}/secrets`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...pair, environment: "development" }),

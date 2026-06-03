@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useMemo } from "react";
 import {
   Mail,
@@ -376,7 +377,7 @@ export function EmailSetupWizard({
 
     for (const record of applyableRecords) {
       try {
-        const r = await fetch(`/api/projects/${projectId}/domains/${domainId}/dns`, {
+        const r = await authFetch(`/api/projects/${projectId}/domains/${domainId}/dns`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

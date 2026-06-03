@@ -3,10 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import { clerkMiddleware } from "@clerk/express";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-} from "./middlewares/clerkProxyMiddleware";
+import { CLERK_PROXY_PATH, clerkProxyMiddleware } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
 import { previewSubdomainGateway } from "./middlewares/previewSubdomainGateway";

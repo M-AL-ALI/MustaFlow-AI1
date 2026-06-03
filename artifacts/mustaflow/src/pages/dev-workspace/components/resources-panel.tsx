@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Gauge, Cpu, HardDrive, MemoryStick, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -118,7 +119,9 @@ export function ResourcesPanel({ projectId, containerStatus }: ResourcesPanelPro
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/resources`, { credentials: "include" });
+      const res = await authFetch(`/api/projects/${projectId}/resources`, {
+        credentials: "include",
+      });
       if (res.ok) {
         const data = (await res.json()) as ResourceUsage;
         setUsage(data);

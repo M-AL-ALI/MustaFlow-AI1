@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   X,
@@ -240,8 +241,8 @@ export function DeploymentPanel({
   const loadConfig = useCallback(async () => {
     try {
       const [cfgRes, secRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/deployment-config`),
-        fetch(`/api/projects/${projectId}/secrets`),
+        authFetch(`/api/projects/${projectId}/deployment-config`),
+        authFetch(`/api/projects/${projectId}/secrets`),
       ]);
       if (cfgRes.ok) {
         const cfg = (await cfgRes.json()) as {
@@ -265,7 +266,7 @@ export function DeploymentPanel({
   const loadHistory = useCallback(async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/deployments`);
+      const res = await authFetch(`/api/projects/${projectId}/deployments`);
       if (res.ok) {
         const data = (await res.json()) as { deployments?: DeploymentLog[] };
         setHistory(data.deployments ?? []);
@@ -296,7 +297,7 @@ export function DeploymentPanel({
     setSavingDomain(true);
     setDomainError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/domains`, {
+      const res = await authFetch(`/api/projects/${projectId}/domains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hostname: domain }),
@@ -326,7 +327,7 @@ export function DeploymentPanel({
     async (versionId: number) => {
       setRollingBack(versionId);
       try {
-        const res = await fetch(`/api/projects/${projectId}/versions/${versionId}/rollback`, {
+        const res = await authFetch(`/api/projects/${projectId}/versions/${versionId}/rollback`, {
           method: "POST",
         });
         if (res.ok) {
@@ -350,7 +351,7 @@ export function DeploymentPanel({
 
     try {
       // 1. Persist deployment type + region config
-      await fetch(`/api/projects/${projectId}/deployment-config`, {
+      await authFetch(`/api/projects/${projectId}/deployment-config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deploymentType: deployType, region }),
@@ -367,7 +368,7 @@ export function DeploymentPanel({
       const slugToApply = customSlug.trim();
       if (slugToApply) {
         setBuildLog((l) => [...l, `Setting subdomain: ${slugToApply}.${PLATFORM_DOMAIN}…`]);
-        await fetch(`/api/projects/${projectId}`, {
+        await authFetch(`/api/projects/${projectId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ publicSlug: slugToApply }),
@@ -377,7 +378,7 @@ export function DeploymentPanel({
       // 3. For Scheduled type, upsert a deployment schedule with the cron expression
       if (deployType === "scheduled" && cronExpr.trim()) {
         setBuildLog((l) => [...l, `Registering schedule: ${cronExpr}…`]);
-        const schRes = await fetch(`/api/projects/${projectId}/schedules`, {
+        const schRes = await authFetch(`/api/projects/${projectId}/schedules`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ cronExpr: cronExpr.trim(), kind: "task_run", enabled: true }),
@@ -400,7 +401,7 @@ export function DeploymentPanel({
         `Syncing ${syncedSecretIds.length} secret${syncedSecretIds.length !== 1 ? "s" : ""}…`,
       ]);
 
-      const res = await fetch(`/api/projects/${projectId}/deploy`, {
+      const res = await authFetch(`/api/projects/${projectId}/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -440,7 +441,7 @@ export function DeploymentPanel({
   const checkDomainStatus = useCallback(async () => {
     if (!customDomain) return;
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/projects/${projectId}/deployments/domain-status?domain=${encodeURIComponent(customDomain)}`,
       );
       if (res.ok) {

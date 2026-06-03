@@ -2,6 +2,7 @@
  * Workflows panel (Task #538) — list & run named workflows declared in
  * workflows.yaml (or stack defaults).
  */
+import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Play, Terminal, Loader2 } from "lucide-react";
@@ -29,7 +30,7 @@ export function WorkflowsPanel({ projectId }: { projectId: number }) {
   const { data, isLoading } = useQuery({
     queryKey: ["project-workflows", projectId],
     queryFn: async (): Promise<ListResp> => {
-      const r = await fetch(`/api/projects/${projectId}/workflows`, { credentials: "include" });
+      const r = await authFetch(`/api/projects/${projectId}/workflows`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load workflows");
       return r.json();
     },
@@ -42,7 +43,7 @@ export function WorkflowsPanel({ projectId }: { projectId: number }) {
     setRunning(name);
     setLastResult(null);
     try {
-      const r = await fetch(
+      const r = await authFetch(
         `/api/projects/${projectId}/workflows/${encodeURIComponent(name)}/run`,
         {
           method: "POST",

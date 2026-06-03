@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useParams, Link, useLocation } from "wouter";
 import { useWebContainer } from "@/hooks/use-web-container";
 import { CreateProjectModal } from "@/components/create-project-modal";
@@ -159,6 +160,7 @@ import {
   getProjectProvisioningStatus,
   retryProjectProvisioning,
   submitProjectQueue,
+  getAuthToken,
 } from "@workspace/api-client-react";
 import { GithubTab } from "./components/github-tab";
 import { RecipesTab } from "./components/recipes-tab";
@@ -761,9 +763,13 @@ function ApplyEditButton({
   const handleApply = async () => {
     setState("loading");
     try {
-      const resp = await fetch(`/api/projects/${projectId}/files/apply-suggestion`, {
+      const authToken = await getAuthToken();
+      const resp = await authFetch(`/api/projects/${projectId}/files/apply-suggestion`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({ filePath, content: code }),
         credentials: "include",
       });
@@ -1522,7 +1528,7 @@ export default function ProjectWorkspacePage() {
     if (!containerId) return;
 
     const fetchHealth = () => {
-      fetch(`/api/projects/${projectId}/container-health`)
+      authFetch(`/api/projects/${projectId}/container-health`)
         .then((r) => (r.ok ? (r.json() as Promise<{ health: ContainerHealth }>) : null))
         .then((data) => {
           if (data?.health) setContainerHealthStatus(data.health);
@@ -2311,17 +2317,32 @@ export default function ProjectWorkspacePage() {
           try {
             let resp: Response;
 
+            // Attach a fresh Clerk bearer token. The session cookie's JWT
+            // expires every ~60 s in dev and isn't always refreshed in time
+            // (embedded iframe / cross-site contexts), so relying on the cookie
+            // alone causes spurious 401 "Session expired" errors. getAuthToken()
+            // returns a freshly-minted token via Clerk's getToken(), or null in
+            // E2E mode (cookie fallback).
+            const authToken = await getAuthToken();
+            const authHeaders: Record<string, string> = authToken
+              ? { Authorization: `Bearer ${authToken}` }
+              : {};
+
             if (connectionEstablished && activeSessionId) {
               // Resume mode: request only the tokens the client has not yet seen.
               const resumeUrl =
                 `/api/projects/${projectId}/messages/stream/resume` +
                 `?sessionId=${encodeURIComponent(activeSessionId)}` +
                 `&resumeAfterTokens=${tokenCount}`;
-              resp = await fetch(resumeUrl, { method: "GET", signal: ctrl.signal });
+              resp = await fetch(resumeUrl, {
+                method: "GET",
+                headers: authHeaders,
+                signal: ctrl.signal,
+              });
             } else {
-              resp = await fetch(`/api/projects/${projectId}/messages/stream`, {
+              resp = await authFetch(`/api/projects/${projectId}/messages/stream`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...authHeaders },
                 body,
                 signal: ctrl.signal,
               });
@@ -2332,11 +2353,7 @@ export default function ProjectWorkspacePage() {
               // the Clerk dev-mode JWT (60s lifetime) may have expired mid-refresh.
               // Wait 3 s for Clerk to finish refreshing the cookie, then retry once
               // automatically before surfacing the "Session expired" error.
-              if (
-                resp.status === 401 &&
-                !connectionEstablished &&
-                attempt === 0
-              ) {
+              if (resp.status === 401 && !connectionEstablished && attempt === 0) {
                 await new Promise<void>((r) => setTimeout(r, 3000));
                 attempt += 1;
                 continue;
@@ -3969,7 +3986,10 @@ export default function ProjectWorkspacePage() {
                                     Sign in again
                                   </button>
                                   <button
-                                    onClick={() => { setStreamError(false); setStreamErrorStatus(null); }}
+                                    onClick={() => {
+                                      setStreamError(false);
+                                      setStreamErrorStatus(null);
+                                    }}
                                     className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                                   >
                                     Dismiss
@@ -4003,7 +4023,10 @@ export default function ProjectWorkspacePage() {
                                     Try again
                                   </button>
                                   <button
-                                    onClick={() => { setStreamError(false); setStreamErrorStatus(null); }}
+                                    onClick={() => {
+                                      setStreamError(false);
+                                      setStreamErrorStatus(null);
+                                    }}
                                     className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                                   >
                                     Dismiss

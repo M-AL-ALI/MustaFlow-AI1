@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import {
@@ -112,8 +113,8 @@ export default function UserProfilePage() {
       setNotFound(false);
       try {
         const [profileRes, projectsRes] = await Promise.all([
-          fetch(`/api/profiles/${username}`),
-          fetch(`/api/profiles/${username}/projects`),
+          authFetch(`/api/profiles/${username}`),
+          authFetch(`/api/profiles/${username}/projects`),
         ]);
 
         if (profileRes.status === 404) {
@@ -145,7 +146,7 @@ export default function UserProfilePage() {
     setFollowLoading(true);
     try {
       const method = profile.isFollowing ? "DELETE" : "POST";
-      const res = await fetch(`/api/profiles/${username}/follow`, { method });
+      const res = await authFetch(`/api/profiles/${username}/follow`, { method });
       if (res.status === 401) {
         toast({ title: "Sign in to follow users", variant: "destructive" });
         navigate("/sign-in");
@@ -171,7 +172,7 @@ export default function UserProfilePage() {
 
   const handleCopyBadge = async () => {
     try {
-      const res = await fetch("/api/me/profile/badge");
+      const res = await authFetch("/api/me/profile/badge");
       if (!res.ok) throw new Error("Get profile first");
       const { html } = (await res.json()) as { html: string };
       await navigator.clipboard.writeText(html);

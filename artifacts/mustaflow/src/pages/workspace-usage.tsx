@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   BarChart2,
@@ -75,7 +76,7 @@ export default function WorkspaceUsagePage() {
     if (!workspaceId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/usage?month=${month}`);
+      const res = await authFetch(`/api/workspaces/${workspaceId}/usage?month=${month}`);
       if (!res.ok) throw new Error(await res.text());
       setUsage(await res.json());
     } catch (err) {

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/react";
 import {
@@ -305,7 +306,7 @@ export default function ExtensionsPage() {
   // Fetch user's projects once signed-in so the install picker is ready
   useEffect(() => {
     if (!isSignedIn) return;
-    fetch("/api/projects", { credentials: "include" })
+    authFetch("/api/projects", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: unknown) => {
         const rows = Array.isArray(data) ? (data as ProjectListItem[]) : [];
@@ -320,7 +321,7 @@ export default function ExtensionsPage() {
   const handleInstall = async (extSlug: string, projectId: number): Promise<void> => {
     setInstallingSlug(extSlug);
     try {
-      const res = await fetch(`/api/projects/${projectId}/extensions/install`, {
+      const res = await authFetch(`/api/projects/${projectId}/extensions/install`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -356,7 +357,7 @@ export default function ExtensionsPage() {
     if (category !== "all") params.set("category", category);
     if (search) params.set("search", search);
 
-    fetch(`/api/extensions?${params}`, { signal: controller.signal })
+    authFetch(`/api/extensions?${params}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data: unknown) => setExtensions(Array.isArray(data) ? (data as Extension[]) : []))
       .catch(() => setExtensions([]))
@@ -372,7 +373,7 @@ export default function ExtensionsPage() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch("/api/extensions", {
+      const res = await authFetch("/api/extensions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(submitData),

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useMemo } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -251,7 +252,7 @@ function EntryViewer({
     useQuery<EmbeddingStatusResult>({
       queryKey: ["vault-embedding-status", entry.id],
       queryFn: async () => {
-        const res = await fetch(`/api/vault/${entry.id}/embedding-status`, {
+        const res = await authFetch(`/api/vault/${entry.id}/embedding-status`, {
           credentials: "include",
         });
         if (!res.ok) throw new Error("Failed to load embedding status");
@@ -263,7 +264,7 @@ function EntryViewer({
   const { data: versions } = useQuery<VaultVersion[]>({
     queryKey: ["vault-versions", entry.id],
     queryFn: async () => {
-      const res = await fetch(`/api/vault/${entry.id}/versions`, { credentials: "include" });
+      const res = await authFetch(`/api/vault/${entry.id}/versions`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load versions");
       return res.json() as Promise<VaultVersion[]>;
     },
@@ -277,7 +278,7 @@ function EntryViewer({
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean);
-      const res = await fetch(`/api/vault/${entry.id}`, {
+      const res = await authFetch(`/api/vault/${entry.id}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -305,7 +306,7 @@ function EntryViewer({
 
   const handleArchive = async () => {
     try {
-      await fetch(`/api/vault/${entry.id}/archive`, {
+      await authFetch(`/api/vault/${entry.id}/archive`, {
         method: "POST",
         credentials: "include",
       });
@@ -319,7 +320,7 @@ function EntryViewer({
 
   const handleRestore = async () => {
     try {
-      await fetch(`/api/vault/${entry.id}/restore`, {
+      await authFetch(`/api/vault/${entry.id}/restore`, {
         method: "POST",
         credentials: "include",
       });
@@ -333,7 +334,7 @@ function EntryViewer({
   const handleReindex = async () => {
     setReindexing(true);
     try {
-      const res = await fetch(`/api/vault/${entry.id}/reindex`, {
+      const res = await authFetch(`/api/vault/${entry.id}/reindex`, {
         method: "POST",
         credentials: "include",
       });
@@ -354,7 +355,7 @@ function EntryViewer({
   const handleReindexAll = async () => {
     setReindexingAll(true);
     try {
-      const res = await fetch("/api/vault/reindex", {
+      const res = await authFetch("/api/vault/reindex", {
         method: "POST",
         credentials: "include",
       });
@@ -814,7 +815,7 @@ export default function VaultPage() {
       if (showArchived) params.set("archived", "true");
       if (search) params.set("q", search);
       params.set("limit", "100");
-      const res = await fetch(`/api/vault?${params.toString()}`, { credentials: "include" });
+      const res = await authFetch(`/api/vault?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load vault");
       return res.json() as Promise<{ entries: VaultEntry[]; total: number }>;
     },
@@ -847,7 +848,7 @@ export default function VaultPage() {
 
   const semanticMutation = useMutation<SemanticSearchResponse, Error, string>({
     mutationFn: async (query: string) => {
-      const res = await fetch("/api/vault/search/semantic", {
+      const res = await authFetch("/api/vault/search/semantic", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -874,7 +875,7 @@ export default function VaultPage() {
     async (entryId: number) => {
       setOpeningEntryId(entryId);
       try {
-        const res = await fetch(`/api/vault/${entryId}`, { credentials: "include" });
+        const res = await authFetch(`/api/vault/${entryId}`, { credentials: "include" });
         if (!res.ok) throw new Error("Entry not found");
         const entry = (await res.json()) as VaultEntry;
         setSelectedEntry(entry);
@@ -1082,7 +1083,7 @@ export default function VaultPage() {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    void fetch("/api/vault/reindex", {
+                    void authFetch("/api/vault/reindex", {
                       method: "POST",
                       credentials: "include",
                     });

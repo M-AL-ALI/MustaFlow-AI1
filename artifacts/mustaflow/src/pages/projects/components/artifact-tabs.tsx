@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState } from "react";
 import {
   Plus,
@@ -117,7 +118,7 @@ export function ArtifactTabs(props: {
 
   const refresh = async () => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/artifacts`, {
+      const r = await authFetch(`/api/projects/${projectId}/artifacts`, {
         credentials: "include",
       });
       if (r.ok) {
@@ -246,7 +247,7 @@ function AddArtifactModal(props: {
     setSubmitting(true);
     setError(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/artifacts`, {
+      const r = await authFetch(`/api/projects/${projectId}/artifacts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import {
   Dialog,
@@ -124,7 +125,7 @@ export function VaultSaveDialog({ open, onOpenChange, defaults, onSaved }: Vault
         .map((t) => t.trim())
         .filter(Boolean);
 
-      const res = await fetch("/api/vault", {
+      const res = await authFetch("/api/vault", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

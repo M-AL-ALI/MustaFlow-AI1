@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useListTasks,
@@ -1578,7 +1579,7 @@ function SteeringInput({ projectId, taskId }: { projectId: number; taskId: numbe
     setSending(true);
     setSendError("");
     try {
-      const resp = await fetch(`/api/projects/${projectId}/tasks/${taskId}/steer`, {
+      const resp = await authFetch(`/api/projects/${projectId}/tasks/${taskId}/steer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hint: trimmed }),

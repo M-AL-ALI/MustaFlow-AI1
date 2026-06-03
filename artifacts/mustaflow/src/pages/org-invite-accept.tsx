@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { Show } from "@clerk/react";
@@ -17,7 +18,7 @@ function AcceptInner({ token }: { token: string }) {
     let cancelled = false;
     void (async () => {
       try {
-        const r = await fetch(`/api/orgs/invites/${encodeURIComponent(token)}/accept`, {
+        const r = await authFetch(`/api/orgs/invites/${encodeURIComponent(token)}/accept`, {
           method: "POST",
         });
         if (cancelled) return;

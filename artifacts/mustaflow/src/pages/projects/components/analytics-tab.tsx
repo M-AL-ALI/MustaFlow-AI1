@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState, useCallback } from "react";
 import {
   BarChart3,
@@ -245,8 +246,8 @@ export function AnalyticsTab({ project }: { project: Project }) {
     setError(null);
     try {
       const [deployRes, analyticsRes] = await Promise.all([
-        fetch(`/api/projects/${project.id}/deployments`),
-        fetch(`/api/projects/${project.id}/analytics/summary`),
+        authFetch(`/api/projects/${project.id}/deployments`),
+        authFetch(`/api/projects/${project.id}/analytics/summary`),
       ]);
       if (deployRes.ok) {
         const data = (await deployRes.json()) as { deployments: Deployment[] };

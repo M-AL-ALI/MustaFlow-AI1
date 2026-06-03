@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useMemo } from "react";
 import {
   X,
@@ -67,7 +68,7 @@ export function PlanTemplatesPicker({
 
   useEffect(() => {
     setLoading(true);
-    fetch("/api/plan-templates", { credentials: "include" })
+    authFetch("/api/plan-templates", { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) throw new Error("Failed to load templates");
         const data = (await r.json()) as PlanTemplate[];

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { Zap, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
@@ -11,7 +12,7 @@ export function CreditBalancePill() {
 
   const fetchBalance = useCallback(async () => {
     try {
-      const res = await fetch("/api/credits");
+      const res = await authFetch("/api/credits");
       if (res.ok) {
         const data = (await res.json()) as { balance: number };
         setBalance(data.balance);

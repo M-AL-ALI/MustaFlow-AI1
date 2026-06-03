@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -161,10 +162,10 @@ export default function BillingPage() {
     setLoading(true);
     try {
       const [balRes, pkgRes, txRes, subRes] = await Promise.all([
-        fetch("/api/billing/credits"),
-        fetch("/api/billing/packages"),
-        fetch("/api/billing/transactions"),
-        fetch("/api/billing/subscription"),
+        authFetch("/api/billing/credits"),
+        authFetch("/api/billing/packages"),
+        authFetch("/api/billing/transactions"),
+        authFetch("/api/billing/subscription"),
       ]);
       if (balRes.ok) setBalance((await balRes.json()) as CreditsBalance);
       if (pkgRes.ok) setPackages((await pkgRes.json()) as PackagesResponse);
@@ -182,7 +183,7 @@ export default function BillingPage() {
 
   const fetchInvoices = useCallback(async () => {
     try {
-      const res = await fetch("/api/billing/invoices");
+      const res = await authFetch("/api/billing/invoices");
       if (res.ok) setInvoices(((await res.json()) as { invoices: Invoice[] }).invoices);
     } catch {
       /* ignore */
@@ -191,7 +192,7 @@ export default function BillingPage() {
 
   const fetchUsage = useCallback(async () => {
     try {
-      const res = await fetch("/api/billing/usage");
+      const res = await authFetch("/api/billing/usage");
       if (res.ok) setUsage((await res.json()) as UsageData);
     } catch {
       /* ignore */
@@ -205,7 +206,7 @@ export default function BillingPage() {
   async function _handleManageSubscription() {
     setPortalLoading(true);
     try {
-      const res = await fetch("/api/billing/subscription/portal", {
+      const res = await authFetch("/api/billing/subscription/portal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -267,7 +268,7 @@ export default function BillingPage() {
     if (!pkg.available) return;
     setCheckoutLoading(pkg.id);
     try {
-      const res = await fetch("/api/billing/checkout", {
+      const res = await authFetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -302,7 +303,7 @@ export default function BillingPage() {
   async function handleSubscribe(tier: string) {
     setCheckoutLoading(tier);
     try {
-      const res = await fetch("/api/billing/subscription/checkout", {
+      const res = await authFetch("/api/billing/subscription/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -346,7 +347,7 @@ export default function BillingPage() {
       return;
     setCancelLoading(true);
     try {
-      const res = await fetch("/api/billing/cancel-subscription", { method: "POST" });
+      const res = await authFetch("/api/billing/cancel-subscription", { method: "POST" });
       if (res.ok) {
         toast({
           title: "Subscription cancelled",
@@ -371,7 +372,7 @@ export default function BillingPage() {
   async function handlePortal() {
     setPortalLoading(true);
     try {
-      const res = await fetch("/api/billing/portal", {
+      const res = await authFetch("/api/billing/portal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ returnUrl: window.location.href }),

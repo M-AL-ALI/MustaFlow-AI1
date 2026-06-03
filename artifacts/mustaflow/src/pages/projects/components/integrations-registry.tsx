@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -510,7 +511,7 @@ function VerifyIntegrationButton({
     const next: Record<number, string> = {};
     for (const secret of intSecrets) {
       try {
-        const res = await fetch(`/api/projects/${projectId}/secrets/${secret.id}/verify`, {
+        const res = await authFetch(`/api/projects/${projectId}/secrets/${secret.id}/verify`, {
           method: "POST",
         });
         if (res.ok) {

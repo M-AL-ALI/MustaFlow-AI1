@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -234,7 +235,7 @@ function AddonsSection({ projectId }: { projectId: number }) {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/addons`);
+      const r = await authFetch(`/api/projects/${projectId}/addons`);
       if (r.ok) setAddons((await r.json()).addons ?? []);
     } catch {
       // ignore
@@ -251,7 +252,7 @@ function AddonsSection({ projectId }: { projectId: number }) {
     setProvisioning(kind);
     setError(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/addons`, {
+      const r = await authFetch(`/api/projects/${projectId}/addons`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind }),
@@ -269,7 +270,7 @@ function AddonsSection({ projectId }: { projectId: number }) {
 
   const deprovision = async (addonId: number) => {
     if (!confirm("Remove this add-on? Injected env vars will also be deleted.")) return;
-    await fetch(`/api/projects/${projectId}/addons/${addonId}`, { method: "DELETE" });
+    await authFetch(`/api/projects/${projectId}/addons/${addonId}`, { method: "DELETE" });
     await load();
   };
 
@@ -439,7 +440,7 @@ function JobsSection({ projectId }: { projectId: number }) {
 
   const _load = useCallback(async () => {
     try {
-      const r = await fetch(
+      const r = await authFetch(
         `/api/projects/${projectId}/deployment-config/schedules`.replace("/deployment-config", ""),
       );
       if (r.ok) setSchedules((await r.json()).schedules ?? []);
@@ -453,7 +454,7 @@ function JobsSection({ projectId }: { projectId: number }) {
   // Use the existing /api/projects/:id/schedules endpoint
   const loadSchedules = useCallback(async () => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/schedules`);
+      const r = await authFetch(`/api/projects/${projectId}/schedules`);
       if (r.ok) setSchedules((await r.json()).schedules ?? []);
     } catch {
       // ignore
@@ -468,7 +469,7 @@ function JobsSection({ projectId }: { projectId: number }) {
 
   const loadRuns = async (scheduleId: number) => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/schedules/${scheduleId}/runs`);
+      const r = await authFetch(`/api/projects/${projectId}/schedules/${scheduleId}/runs`);
       if (r.ok) {
         const data = await r.json();
         setRuns((prev) => ({ ...prev, [scheduleId]: data.runs ?? [] }));
@@ -490,7 +491,9 @@ function JobsSection({ projectId }: { projectId: number }) {
   const triggerRun = async (scheduleId: number) => {
     setTriggering(scheduleId);
     try {
-      await fetch(`/api/projects/${projectId}/schedules/${scheduleId}/trigger`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/schedules/${scheduleId}/trigger`, {
+        method: "POST",
+      });
       setTimeout(() => loadRuns(scheduleId), 2000);
     } finally {
       setTriggering(null);
@@ -498,7 +501,7 @@ function JobsSection({ projectId }: { projectId: number }) {
   };
 
   const toggleEnabled = async (schedule: Schedule) => {
-    await fetch(`/api/projects/${projectId}/schedules/${schedule.id}`, {
+    await authFetch(`/api/projects/${projectId}/schedules/${schedule.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: !schedule.enabled }),
@@ -508,13 +511,13 @@ function JobsSection({ projectId }: { projectId: number }) {
 
   const deleteSchedule = async (id: number) => {
     if (!confirm("Delete this schedule?")) return;
-    await fetch(`/api/projects/${projectId}/schedules/${id}`, { method: "DELETE" });
+    await authFetch(`/api/projects/${projectId}/schedules/${id}`, { method: "DELETE" });
     await loadSchedules();
   };
 
   const createSchedule = async () => {
     setCreating(false);
-    await fetch(`/api/projects/${projectId}/schedules`, {
+    await authFetch(`/api/projects/${projectId}/schedules`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -783,7 +786,7 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/environments`);
+      const r = await authFetch(`/api/projects/${projectId}/environments`);
       if (r.ok) {
         const data = await r.json();
         setEnvironments(
@@ -807,7 +810,7 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
 
   const createEnv = async () => {
     setError(null);
-    const r = await fetch(`/api/projects/${projectId}/environments`, {
+    const r = await authFetch(`/api/projects/${projectId}/environments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newEnvName }),
@@ -827,7 +830,9 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
     if (!confirm(`Promote '${envName}' to '${next}'?`)) return;
     setPromoting(envId);
     try {
-      await fetch(`/api/projects/${projectId}/environments/${envId}/promote`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/environments/${envId}/promote`, {
+        method: "POST",
+      });
       setTimeout(load, 1500);
     } finally {
       setPromoting(null);
@@ -836,7 +841,9 @@ function EnvironmentsSection({ projectId }: { projectId: number }) {
 
   const deleteEnv = async (envId: number, name: string) => {
     if (!confirm(`Delete '${name}' environment?`)) return;
-    const r = await fetch(`/api/projects/${projectId}/environments/${envId}`, { method: "DELETE" });
+    const r = await authFetch(`/api/projects/${projectId}/environments/${envId}`, {
+      method: "DELETE",
+    });
     if (!r.ok) {
       const d = await r.json();
       setError(d.error ?? "Failed to delete");

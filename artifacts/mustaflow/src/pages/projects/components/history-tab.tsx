@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   useListKnowledge,
@@ -561,7 +562,7 @@ export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }:
 
   // Detect admin status for the blocked-commands section of the trace panel
   useEffect(() => {
-    fetch("/api/admin/me")
+    authFetch("/api/admin/me")
       .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin?: boolean }>) : null))
       .then((data) => {
         if (data?.isAdmin) setIsAdmin(true);

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import {
   Monitor,
   Smartphone,
@@ -422,7 +423,7 @@ export function PreviewTab({
           body.kind = "delete";
           body.text = veSelection.text;
         }
-        const res = await fetch(`/api/projects/${project.id}/visual-edit`, {
+        const res = await authFetch(`/api/projects/${project.id}/visual-edit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -443,9 +444,12 @@ export function PreviewTab({
           // static HTML projects (where WC is not active).
           if (wc.status === "ready" && json.filePath) {
             try {
-              const fileRes = await fetch(`/api/projects/${project.id}/preview/${json.filePath}`, {
-                credentials: "include",
-              });
+              const fileRes = await authFetch(
+                `/api/projects/${project.id}/preview/${json.filePath}`,
+                {
+                  credentials: "include",
+                },
+              );
               if (fileRes.ok) {
                 const content = await fileRes.text();
                 await wc.syncFromBackend({
@@ -494,7 +498,7 @@ export function PreviewTab({
   const fetchEasBuilds = useCallback(async () => {
     if (!isMobile) return;
     try {
-      const res = await fetch(`/api/projects/${project.id}/eas/builds`);
+      const res = await authFetch(`/api/projects/${project.id}/eas/builds`);
       if (res.ok) {
         const data = (await res.json()) as { builds: EasBuildEntry[] };
         // Pick the most recent completed build (any platform)
@@ -692,7 +696,7 @@ export function PreviewTab({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/projects/${project.id}/preview/?t=${Date.now()}`, {
+        const res = await authFetch(`/api/projects/${project.id}/preview/?t=${Date.now()}`, {
           method: "GET",
           credentials: "include",
         });
@@ -1033,7 +1037,7 @@ export function PreviewTab({
                 onClick={async () => {
                   if (!veSelection?.text) return;
                   try {
-                    const res = await fetch(`/api/projects/${project.id}/visual-edit/resolve`, {
+                    const res = await authFetch(`/api/projects/${project.id}/visual-edit/resolve`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       credentials: "include",
@@ -2226,13 +2230,13 @@ export function PreviewTab({
               setRollingBack(true);
               try {
                 // Fetch the most recent version to roll back to
-                const vRes = await fetch(`/api/projects/${project.id}/versions`);
+                const vRes = await authFetch(`/api/projects/${project.id}/versions`);
                 if (vRes.ok) {
                   const versions = (await vRes.json()) as Array<{ id: number; label: string }>;
                   // Skip the first (current) version and roll back to the second
                   const target = versions[1];
                   if (target) {
-                    const rbRes = await fetch(
+                    const rbRes = await authFetch(
                       `/api/projects/${project.id}/versions/${target.id}/rollback`,
                       { method: "POST" },
                     );

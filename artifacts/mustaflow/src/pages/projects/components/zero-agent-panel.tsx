@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   X,
@@ -516,7 +517,7 @@ export function ZeroAgentPanel({
       setUploadingCount((c) => c + 1);
       try {
         const blob = await resizeImageForVision(file);
-        const res = await fetch(`/api/projects/${projectId}/attachments/upload-url`, {
+        const res = await authFetch(`/api/projects/${projectId}/attachments/upload-url`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -547,7 +548,7 @@ export function ZeroAgentPanel({
     async (file: File): Promise<PendingAttachment | null> => {
       setUploadingCount((c) => c + 1);
       try {
-        const reqRes = await fetch(`/api/projects/${projectId}/uploads/request-url`, {
+        const reqRes = await authFetch(`/api/projects/${projectId}/uploads/request-url`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -568,7 +569,7 @@ export function ZeroAgentPanel({
           body: file,
         });
         if (!put.ok) return null;
-        const regRes = await fetch(`/api/projects/${projectId}/uploads`, {
+        const regRes = await authFetch(`/api/projects/${projectId}/uploads`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -780,7 +781,7 @@ export function ZeroAgentPanel({
 
   const handleStopTask = useCallback(() => {
     if (!activeTaskId) return;
-    void fetch(`/api/projects/${projectId}/tasks/${activeTaskId}/cancel`, {
+    void authFetch(`/api/projects/${projectId}/tasks/${activeTaskId}/cancel`, {
       method: "POST",
       credentials: "include",
     }).then(() => {

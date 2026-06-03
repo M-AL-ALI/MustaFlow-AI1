@@ -44,6 +44,25 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
 
+/**
+ * Invoke the currently-registered auth token getter, if any.
+ *
+ * Useful for raw `fetch()` calls that bypass `customFetch` (e.g. SSE/streaming
+ * endpoints) but still need a fresh `Authorization: Bearer <token>` header so
+ * they don't rely solely on a possibly-expired session cookie.
+ *
+ * Returns `null` when no getter is registered (e.g. E2E test mode) so callers
+ * can safely fall back to cookie-based auth.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  if (!_authTokenGetter) return null;
+  try {
+    return await _authTokenGetter();
+  } catch {
+    return null;
+  }
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }

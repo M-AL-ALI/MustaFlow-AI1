@@ -3,6 +3,7 @@
  * Publishing tab. Mirrors the search/buy logic from /account/domains but is
  * scoped to the current project (purchased domain auto-attaches to it).
  */
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import { Search, ShoppingCart, Loader2, CheckCircle, XCircle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,7 +41,7 @@ export function DomainPurchaseWidget({ projectId }: { projectId: number }) {
       setSearching(true);
       setSearched(false);
       try {
-        const res = await fetch(`/api/domains/search?q=${encodeURIComponent(q)}`);
+        const res = await authFetch(`/api/domains/search?q=${encodeURIComponent(q)}`);
         if (!res.ok) throw new Error("Search failed");
         const data = (await res.json()) as SearchResponse;
         setResults(data.results.filter((r) => r.available !== false));
@@ -62,7 +63,7 @@ export function DomainPurchaseWidget({ projectId }: { projectId: number }) {
       try {
         const origin = window.location.origin;
         const base = (import.meta.env.BASE_URL as string).replace(/\/$/, "");
-        const res = await fetch("/api/domains/purchase", {
+        const res = await authFetch("/api/domains/purchase", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

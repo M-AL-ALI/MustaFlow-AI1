@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useMemo, useCallback, useRef } from "react";
 import {
   useListKnowledge,
@@ -243,7 +244,7 @@ function KnowledgeCard({ entry, onUpdate }: { entry: KnowledgeEntry; onUpdate: (
   const handleRate = async (direction: "up" | "down") => {
     if (rating === direction) return;
     try {
-      await fetch(`/api/knowledge/${entry.id}/rate`, {
+      await authFetch(`/api/knowledge/${entry.id}/rate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rating: direction }),
@@ -575,7 +576,7 @@ function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const res = await fetch("/api/knowledge/export", { credentials: "include" });
+      const res = await authFetch("/api/knowledge/export", { credentials: "include" });
       if (!res.ok) throw new Error(`Export failed (${res.status})`);
       const data = await res.json();
       const count = typeof data?.count === "number" ? data.count : (data?.entries?.length ?? 0);
@@ -622,7 +623,7 @@ function ExportImportPanel({ onImportDone }: { onImportDone: () => void }) {
         });
         return;
       }
-      const res = await fetch("/api/knowledge/import", {
+      const res = await authFetch("/api/knowledge/import", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

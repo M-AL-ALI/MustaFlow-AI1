@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Rocket,
@@ -386,7 +387,7 @@ export function QueueComposer({
           const contentType = blob.type || file.type;
 
           // Get a signed PUT URL from the project-scoped endpoint.
-          const meta = await fetch(`/api/projects/${projectId}/attachments/upload-url`, {
+          const meta = await authFetch(`/api/projects/${projectId}/attachments/upload-url`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
@@ -430,7 +431,7 @@ export function QueueComposer({
         // uploads (Task #540). Two-step: request presigned URL, PUT, then
         // register with the project so `list_uploads`/`read_upload` agent
         // tools can see it.
-        const reqRes = await fetch(`/api/projects/${projectId}/uploads/request-url`, {
+        const reqRes = await authFetch(`/api/projects/${projectId}/uploads/request-url`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -454,7 +455,7 @@ export function QueueComposer({
           body: file,
         });
         if (!put.ok) throw new Error("Upload failed");
-        const regRes = await fetch(`/api/projects/${projectId}/uploads`, {
+        const regRes = await authFetch(`/api/projects/${projectId}/uploads`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -577,7 +578,7 @@ export function QueueComposer({
     }
     setGeneratingImage(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/generate-image`, {
+      const res = await authFetch(`/api/projects/${projectId}/generate-image`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -800,7 +801,7 @@ export function QueueComposer({
       setIsListening(false);
       if (blob.size === 0) return;
       try {
-        const res = await fetch(`/api/transcribe?format=${audioFmt}`, {
+        const res = await authFetch(`/api/transcribe?format=${audioFmt}`, {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: blob,
@@ -1187,7 +1188,7 @@ export function QueueComposer({
       brainstormContextRef.current = null;
       setIsSubmitting(true);
       try {
-        const res = await fetch(`/api/projects/${projectId}/queue`, {
+        const res = await authFetch(`/api/projects/${projectId}/queue`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1251,7 +1252,7 @@ export function QueueComposer({
     brainstormContextRef.current = null;
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/queue`, {
+      const res = await authFetch(`/api/projects/${projectId}/queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages, agentMode, planMode, agentIdentity: agentType }),

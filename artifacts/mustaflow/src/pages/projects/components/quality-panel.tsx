@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -1454,7 +1455,7 @@ function ProjectAutoFixSection({
     if (isPreviewing || isApplying) return;
     setIsPreviewing(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/eslint-fix-all`, {
+      const res = await authFetch(`/api/projects/${projectId}/eslint-fix-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dryRun: true }),
@@ -1497,7 +1498,7 @@ function ProjectAutoFixSection({
     if (isApplying || fileIds.length === 0) return;
     setIsApplying(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/eslint-fix-all`, {
+      const res = await authFetch(`/api/projects/${projectId}/eslint-fix-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileIds }),

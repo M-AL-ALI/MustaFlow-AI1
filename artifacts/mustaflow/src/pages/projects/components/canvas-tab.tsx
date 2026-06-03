@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -440,7 +441,7 @@ function DiffPanel({
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/projects/${projectId}/canvas/diff?a=${selectedIds[0]}&b=${selectedIds[1]}&file=${encodeURIComponent(file)}`,
         );
         if (!res.ok) {
@@ -612,7 +613,7 @@ function LibraryPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/canvas/library");
+      const res = await authFetch("/api/canvas/library");
       if (!res.ok) throw new Error(`Failed to load library (${res.status})`);
       const json = (await res.json()) as { items: LibraryItem[] };
       setItems(json.items ?? []);
@@ -630,7 +631,7 @@ function LibraryPanel({
   const deleteItem = async (id: number) => {
     if (!confirm("Remove this item from your library?")) return;
     try {
-      await fetch(`/api/canvas/library/${id}`, { method: "DELETE" });
+      await authFetch(`/api/canvas/library/${id}`, { method: "DELETE" });
       setItems((prev) => prev.filter((i) => i.id !== id));
     } catch {
       /* non-fatal */
@@ -640,7 +641,7 @@ function LibraryPanel({
   const importItem = async (item: LibraryItem) => {
     setImporting(item.id);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/library/${item.id}/import`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/library/${item.id}/import`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -768,7 +769,7 @@ function AbTestsPanel({ projectId, variants }: { projectId: number; variants: Ca
   const loadTests = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/ab-tests`);
+      const res = await authFetch(`/api/projects/${projectId}/canvas/ab-tests`);
       if (!res.ok) return;
       const json = (await res.json()) as { tests: CanvasAbTest[] };
       setTests(json.tests ?? []);
@@ -788,7 +789,7 @@ function AbTestsPanel({ projectId, variants }: { projectId: number; variants: Ca
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/ab-tests`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/ab-tests`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -816,7 +817,7 @@ function AbTestsPanel({ projectId, variants }: { projectId: number; variants: Ca
 
   const stopTest = async (testId: number, winnerId?: number) => {
     try {
-      await fetch(`/api/projects/${projectId}/canvas/ab-tests/${testId}/stop`, {
+      await authFetch(`/api/projects/${projectId}/canvas/ab-tests/${testId}/stop`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ winnerId: winnerId ?? null }),
@@ -1169,7 +1170,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
 
   const loadVariants = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants`);
+      const res = await authFetch(`/api/projects/${projectId}/canvas/variants`);
       if (!res.ok) return;
       const json = (await res.json()) as { variants: CanvasVariant[] };
       setVariants(json.variants ?? []);
@@ -1197,7 +1198,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
     setExploring(true);
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/explore`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/explore`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: prompt.trim(), variantCount }),
@@ -1224,7 +1225,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
     )
       return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}/graduate`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/variants/${v.id}/graduate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -1245,7 +1246,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
   const deleteVariant = async (v: CanvasVariant) => {
     if (!confirm(`Delete variant "${v.label}"? This cannot be undone.`)) return;
     try {
-      await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}`, { method: "DELETE" });
+      await authFetch(`/api/projects/${projectId}/canvas/variants/${v.id}`, { method: "DELETE" });
       setVariants((prev) => prev.filter((x) => x.id !== v.id));
     } catch {
       /* non-fatal */
@@ -1255,7 +1256,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
   const forkVariant = async (v: CanvasVariant) => {
     const label = window.prompt(`Fork label (leave blank to use "Fork of ${v.label}"):`) ?? "";
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}/fork`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/variants/${v.id}/fork`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ label: label.trim() || undefined }),
@@ -1274,7 +1275,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
 
   const shareVariant = async (v: CanvasVariant) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/variants/${v.id}/share`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/variants/${v.id}/share`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -1301,7 +1302,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
     const labelInput =
       window.prompt(`Library label for "${v.label}" (or press OK to keep same label):`) ?? "";
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/projects/${projectId}/canvas/variants/${v.id}/save-to-library`,
         {
           method: "POST",
@@ -1337,7 +1338,7 @@ function VariantsMode({ projectId }: { projectId: number }) {
     setExtracting(true);
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/extract`, {
+      const res = await authFetch(`/api/projects/${projectId}/canvas/extract`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ paths, label: extractLabel.trim() || undefined }),

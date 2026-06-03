@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 type MonacoEditor = Parameters<OnMount>[0];
@@ -118,7 +119,7 @@ function FileSearchPanel({
       setIsSearching(true);
       setSearched(false);
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/projects/${projectId}/files/search?q=${encodeURIComponent(q)}`,
         );
         if (res.ok) {
@@ -598,7 +599,7 @@ function GitPushPanel({ projectId }: { projectId: number }) {
       };
       if (token.trim()) body.token = token.trim();
 
-      const res = await fetch(`/api/projects/${projectId}/github/push`, {
+      const res = await authFetch(`/api/projects/${projectId}/github/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -941,7 +942,7 @@ export function CodeEditorTab({
     setInlineAiLoading(true);
     setInlineAiResult(null);
     try {
-      const resp = await fetch(`/api/projects/${projectId}/ai/inline-action`, {
+      const resp = await authFetch(`/api/projects/${projectId}/ai/inline-action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -1232,14 +1233,17 @@ export function CodeEditorTab({
     async (ruleIds?: string[]): Promise<EslintFixResponse | null> => {
       if (!selectedFileId || !selectedFile) return null;
       try {
-        const res = await fetch(`/api/projects/${projectId}/files/${selectedFileId}/eslint-fix`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: displayContent,
-            ruleIds: ruleIds ?? [],
-          }),
-        });
+        const res = await authFetch(
+          `/api/projects/${projectId}/files/${selectedFileId}/eslint-fix`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: displayContent,
+              ruleIds: ruleIds ?? [],
+            }),
+          },
+        );
         if (!res.ok) return null;
         return (await res.json()) as EslintFixResponse;
       } catch {
@@ -2167,7 +2171,7 @@ export function CodeEditorTab({
                             endColumn: position.column,
                           });
                           try {
-                            const resp = await fetch(
+                            const resp = await authFetch(
                               `/api/projects/${projectId}/ai/inline-action`,
                               {
                                 method: "POST",

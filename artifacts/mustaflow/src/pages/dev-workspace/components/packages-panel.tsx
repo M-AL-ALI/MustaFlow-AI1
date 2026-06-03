@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Package,
@@ -52,7 +53,7 @@ function PackageRow({
     }
     setRemoving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/packages/uninstall`, {
+      const res = await authFetch(`/api/projects/${projectId}/packages/uninstall`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: pkg.name, dev: pkg.isDev }),
@@ -194,7 +195,9 @@ export function PackagesPanel({ projectId }: PackagesPanelProps) {
   const loadInstalled = useCallback(async () => {
     setLoadingInstalled(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/packages`, { credentials: "include" });
+      const res = await authFetch(`/api/projects/${projectId}/packages`, {
+        credentials: "include",
+      });
       if (res.ok) {
         const data = (await res.json()) as {
           dependencies?: Record<string, string>;
@@ -232,7 +235,7 @@ export function PackagesPanel({ projectId }: PackagesPanelProps) {
       setSearching(true);
       setSearchError(null);
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/projects/${projectId}/packages/search?q=${encodeURIComponent(q)}&registry=${registry}`,
           { credentials: "include" },
         );
@@ -268,7 +271,7 @@ export function PackagesPanel({ projectId }: PackagesPanelProps) {
     async (name: string, dev: boolean) => {
       setInstallingPkg(name);
       try {
-        const res = await fetch(`/api/projects/${projectId}/packages/install`, {
+        const res = await authFetch(`/api/projects/${projectId}/packages/install`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, dev }),

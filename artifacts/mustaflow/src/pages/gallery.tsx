@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
@@ -212,7 +213,7 @@ export default function GalleryPage() {
       if (search) params.set("search", search);
       if (showEditorsPick) params.set("editorsPick", "true");
 
-      const res = await fetch(`/api/gallery-templates?${params.toString()}`);
+      const res = await authFetch(`/api/gallery-templates?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to load");
       const data = (await res.json()) as TemplateListResponse;
       setTemplates(data.templates);
@@ -231,7 +232,7 @@ export default function GalleryPage() {
   const handleUse = async (slug: string) => {
     setSubmitting(slug);
     try {
-      const res = await fetch(`/api/gallery-templates/${slug}/use`, { method: "POST" });
+      const res = await authFetch(`/api/gallery-templates/${slug}/use`, { method: "POST" });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
         if (res.status === 401) {
@@ -258,7 +259,7 @@ export default function GalleryPage() {
   const handleFork = async (slug: string) => {
     setSubmitting(slug + "-fork");
     try {
-      const res = await fetch(`/api/gallery-templates/${slug}/fork`, { method: "POST" });
+      const res = await authFetch(`/api/gallery-templates/${slug}/fork`, { method: "POST" });
       if (!res.ok) {
         if (res.status === 401) {
           toast({ title: "Sign in to fork templates", variant: "destructive" });

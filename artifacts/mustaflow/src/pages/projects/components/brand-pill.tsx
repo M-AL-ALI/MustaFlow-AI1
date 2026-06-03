@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useState } from "react";
 import { Palette } from "lucide-react";
 import { Link } from "wouter";
@@ -18,7 +19,7 @@ export function BrandPill() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/knowledge/brand-profile");
+        const res = await authFetch("/api/knowledge/brand-profile");
         if (!res.ok) return;
         const data = (await res.json()) as { profile: BrandProfile | null };
         if (cancelled) return;

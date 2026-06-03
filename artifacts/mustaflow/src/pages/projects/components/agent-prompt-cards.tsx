@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { HelpCircle, KeyRound, Rocket, ExternalLink, X, Check, Loader2 } from "lucide-react";
@@ -33,7 +34,7 @@ async function respondToPrompt(
   response: Record<string, unknown>,
 ): Promise<boolean> {
   try {
-    const r = await fetch(
+    const r = await authFetch(
       `/api/projects/${projectId}/tasks/${taskId}/prompts/${promptId}/respond`,
       {
         method: "POST",

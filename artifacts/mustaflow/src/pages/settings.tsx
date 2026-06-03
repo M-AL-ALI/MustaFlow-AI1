@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import {
@@ -633,7 +634,7 @@ function CreditsTab() {
   const fetchPackages = useCallback(async () => {
     setPackagesLoading(true);
     try {
-      const res = await fetch("/api/billing/packages");
+      const res = await authFetch("/api/billing/packages");
       if (res.ok) setPackages((await res.json()) as PackagesResponse);
     } catch {
       // ignore
@@ -654,7 +655,7 @@ function CreditsTab() {
     if (!pkg.available) return;
     setCheckoutLoading(pkg.id);
     try {
-      const res = await fetch("/api/billing/checkout", {
+      const res = await authFetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1143,7 +1144,7 @@ function PrivacyTab() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const res = await fetch("/api/me/export");
+      const res = await authFetch("/api/me/export");
       if (!res.ok) {
         toast({
           title: "Export failed",
@@ -1175,7 +1176,7 @@ function PrivacyTab() {
     if (deleteConfirm !== "DELETE") return;
     setDeleting(true);
     try {
-      const res = await fetch("/api/me", { method: "DELETE" });
+      const res = await authFetch("/api/me", { method: "DELETE" });
       if (res.ok) {
         toast({
           title: "Deletion requested",
@@ -1418,7 +1419,7 @@ function DeveloperTab() {
   const fetchTokens = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/me/tokens");
+      const res = await authFetch("/api/me/tokens");
       if (res.ok) {
         const data = (await res.json()) as { tokens: ApiToken[] };
         setTokens(data.tokens);
@@ -1459,7 +1460,7 @@ function DeveloperTab() {
       const days = parseInt(expiresInDays, 10);
       if (!isNaN(days) && days > 0) body.expiresInDays = days;
 
-      const res = await fetch("/api/me/tokens", {
+      const res = await authFetch("/api/me/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1508,7 +1509,7 @@ function DeveloperTab() {
       return next;
     });
     try {
-      const res = await fetch(`/api/tokens/${tokenId}/test`);
+      const res = await authFetch(`/api/tokens/${tokenId}/test`);
       const data = (await res.json()) as {
         ok: boolean;
         scopes?: string[];
@@ -1528,7 +1529,7 @@ function DeveloperTab() {
   async function handleRotate(tokenId: number) {
     setRotating(tokenId);
     try {
-      const res = await fetch(`/api/tokens/${tokenId}/rotate`, { method: "POST" });
+      const res = await authFetch(`/api/tokens/${tokenId}/rotate`, { method: "POST" });
       const data = (await res.json()) as {
         token?: ApiToken;
         rawToken?: string;
@@ -1557,7 +1558,7 @@ function DeveloperTab() {
   async function handleRevoke(tokenId: number) {
     setRevoking(tokenId);
     try {
-      const res = await fetch(`/api/me/tokens/${tokenId}`, { method: "DELETE" });
+      const res = await authFetch(`/api/me/tokens/${tokenId}`, { method: "DELETE" });
       if (res.ok) {
         setTokens((prev) => prev.filter((t) => t.id !== tokenId));
         toast({ title: "Token revoked" });

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import { useParams } from "wouter";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -81,7 +82,7 @@ export default function DevWorkspacePage() {
     setIsStarting(true);
     setContainerStatus("starting");
     try {
-      const res = await fetch(`/api/projects/${projectId}/container/start`, { method: "POST" });
+      const res = await authFetch(`/api/projects/${projectId}/container/start`, { method: "POST" });
       if (res.ok) {
         const data = (await res.json()) as { containerStatus?: string; containerUrl?: string };
         setContainerStatus((data.containerStatus as ContainerStatus | undefined) ?? "starting");
@@ -100,7 +101,7 @@ export default function DevWorkspacePage() {
 
   const handleStopContainer = useCallback(async () => {
     try {
-      await fetch(`/api/projects/${projectId}/container/stop`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/container/stop`, { method: "POST" });
       setContainerStatus("hibernated");
       setContainerUrl(null);
     } catch {

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useEffect, useRef, useState, useCallback, isValidElement } from "react";
 import {
   Search,
@@ -464,7 +465,7 @@ function StagingFileDiffRow({
     // For created files: beforeContent = "", after = new content.
     const afterContent = status === "deleted" ? "" : (stagingContent ?? "");
     try {
-      const resp = await fetch(`/api/projects/${projectId}/tasks/${taskId}/explain-change`, {
+      const resp = await authFetch(`/api/projects/${projectId}/tasks/${taskId}/explain-change`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -1890,7 +1891,7 @@ function FeedbackModal({ projectId, onClose }: { projectId: number; onClose: () 
     setSubmitting(true);
     setError(null);
     try {
-      const r = await fetch(`/api/projects/${projectId}/inbox`, {
+      const r = await authFetch(`/api/projects/${projectId}/inbox`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2062,7 +2063,7 @@ function InlineImagePendingCard({
     if (!editInstruction.trim() || editSubmitting || !imageId) return;
     setEditSubmitting(true);
     try {
-      const res = await fetch(`/api/images/${imageId}/edit`, {
+      const res = await authFetch(`/api/images/${imageId}/edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),
@@ -2084,7 +2085,7 @@ function InlineImagePendingCard({
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/images/status/${jobId}`);
+        const res = await authFetch(`/api/images/status/${jobId}`);
         if (!res.ok) return;
         const data = (await res.json()) as ImagePendingStatus;
         if (!stopped) {
@@ -2335,7 +2336,7 @@ function InlineImageResultCard({
     if (!editInstruction.trim() || editSubmitting || !imageId) return;
     setEditSubmitting(true);
     try {
-      const res = await fetch(`/api/images/${imageId}/edit`, {
+      const res = await authFetch(`/api/images/${imageId}/edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),
@@ -4047,7 +4048,7 @@ export function ChatHistory({
     setServerSearching(true);
     void (async () => {
       try {
-        const r = await fetch(
+        const r = await authFetch(
           `/api/projects/${projectId}/messages/search?q=${encodeURIComponent(debouncedQuery)}&limit=50`,
         );
         if (!r.ok) {

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useRef } from "react";
 import {
   Trash2,
@@ -181,7 +182,7 @@ export function ManageTab({
     setDuplicateError(null);
     setDuplicateSuccess(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/duplicate`, {
+      const res = await authFetch(`/api/projects/${projectId}/duplicate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });

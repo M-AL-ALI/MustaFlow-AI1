@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import {
@@ -76,7 +77,7 @@ function HealthCheckBanner({
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/projects/${projectId}/health-checks`);
+      const r = await authFetch(`/api/projects/${projectId}/health-checks`);
       if (r.ok) {
         const data = (await r.json()) as { latest: typeof latest };
         setLatest(data.latest ?? null);
@@ -95,7 +96,7 @@ function HealthCheckBanner({
   const runNow = useCallback(async () => {
     setRunning(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/health-checks/run`, { method: "POST" });
+      const r = await authFetch(`/api/projects/${projectId}/health-checks/run`, { method: "POST" });
       if (r.ok) await load();
     } catch {
       /* ignore */
@@ -225,7 +226,7 @@ function EasCredVerifyButton({
     setLoading(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/secrets/${secretId}/verify`, {
+      const res = await authFetch(`/api/projects/${projectId}/secrets/${secretId}/verify`, {
         method: "POST",
       });
       if (res.ok) {
@@ -633,9 +634,9 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
   const refresh = useCallback(async () => {
     try {
       const [cRes, uRes, sRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/deployment-config`),
-        fetch(`/api/projects/${projectId}/uptime`),
-        fetch(`/api/projects/${projectId}/schedules`),
+        authFetch(`/api/projects/${projectId}/deployment-config`),
+        authFetch(`/api/projects/${projectId}/uptime`),
+        authFetch(`/api/projects/${projectId}/schedules`),
       ]);
       if (cRes.ok) setConfig((await cRes.json()) as DeploymentConfig);
       if (uRes.ok) setUptime((await uRes.json()) as UptimeSummary);
@@ -651,7 +652,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch("/api/billing/subscription");
+        const res = await authFetch("/api/billing/subscription");
         if (res.ok) {
           const data = (await res.json()) as { tier?: string };
           setUserTier(data.tier ?? "free");
@@ -670,7 +671,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/deployment-config`, {
+      const res = await authFetch(`/api/projects/${projectId}/deployment-config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(update),
@@ -690,7 +691,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
   async function runProbeNow(): Promise<void> {
     setBusy(true);
     try {
-      await fetch(`/api/projects/${projectId}/uptime/probe`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/uptime/probe`, { method: "POST" });
       await refresh();
     } finally {
       setBusy(false);
@@ -701,7 +702,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/schedules`, {
+      const res = await authFetch(`/api/projects/${projectId}/schedules`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cronExpr: newCron, kind: newKind, note: newNote || null }),
@@ -720,7 +721,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
   }
 
   async function toggleSchedule(id: number, enabled: boolean): Promise<void> {
-    await fetch(`/api/projects/${projectId}/schedules/${id}`, {
+    await authFetch(`/api/projects/${projectId}/schedules/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
@@ -729,7 +730,7 @@ function DeploymentSubstratePanel({ projectId }: { projectId: number }) {
   }
 
   async function deleteSchedule(id: number): Promise<void> {
-    await fetch(`/api/projects/${projectId}/schedules/${id}`, { method: "DELETE" });
+    await authFetch(`/api/projects/${projectId}/schedules/${id}`, { method: "DELETE" });
     await refresh();
   }
 
@@ -1003,7 +1004,7 @@ function CustomSubdomainPicker({
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch(`/api/projects/${projectId}/subdomain`, {
+      const res = await authFetch(`/api/projects/${projectId}/subdomain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slug }),
@@ -1182,7 +1183,7 @@ function ReadinessGate({
   const dismissFinding = async (key: string) => {
     setDismissing(key);
     try {
-      await fetch(`/api/projects/${projectId}/findings/dismiss`, {
+      await authFetch(`/api/projects/${projectId}/findings/dismiss`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ findingKey: key }),
@@ -1408,7 +1409,7 @@ function EasBuildPanel({
 
   const fetchState = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/eas/builds`);
+      const res = await authFetch(`/api/projects/${projectId}/eas/builds`);
       if (res.ok) {
         const data = (await res.json()) as EasState & { builds: EasBuildEntry[] };
         const filtered = data.builds.filter((b) => b.env === env);
@@ -1433,7 +1434,7 @@ function EasBuildPanel({
       if (ids.length > 0) {
         await Promise.allSettled(
           ids.map((id) =>
-            fetch(`/api/projects/${projectId}/eas/builds/${id}`, { method: "PATCH" }).catch(
+            authFetch(`/api/projects/${projectId}/eas/builds/${id}`, { method: "PATCH" }).catch(
               () => {},
             ),
           ),
@@ -1452,7 +1453,7 @@ function EasBuildPanel({
     setTokenError(null);
     setTokenOk(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/eas/validate-token`, {
+      const res = await authFetch(`/api/projects/${projectId}/eas/validate-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: tokenInput.trim() }),
@@ -1486,7 +1487,7 @@ function EasBuildPanel({
     setTriggerError(null);
     setTriggerHint(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/eas/trigger`, {
+      const res = await authFetch(`/api/projects/${projectId}/eas/trigger`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platform, profile: "preview" }),
@@ -1518,7 +1519,7 @@ function EasBuildPanel({
       const body: Record<string, string> = { platform };
       if (linkBuildId.trim()) body.easBuildId = linkBuildId.trim();
       if (expUrlInput.trim()) body.expUrl = expUrlInput.trim();
-      const res = await fetch(`/api/projects/${projectId}/eas/builds`, {
+      const res = await authFetch(`/api/projects/${projectId}/eas/builds`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1542,7 +1543,7 @@ function EasBuildPanel({
   const refreshBuild = async (logId: number) => {
     setRefreshing(logId);
     try {
-      await fetch(`/api/projects/${projectId}/eas/builds/${logId}`, { method: "PATCH" });
+      await authFetch(`/api/projects/${projectId}/eas/builds/${logId}`, { method: "PATCH" });
       void fetchState();
     } finally {
       setRefreshing(null);
@@ -1552,7 +1553,7 @@ function EasBuildPanel({
   const reloadLogs = async (logId: number) => {
     setReloadingLogsId(logId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/eas/builds/${logId}?force=1`, {
+      const res = await authFetch(`/api/projects/${projectId}/eas/builds/${logId}?force=1`, {
         method: "PATCH",
       });
       if (res.ok) {
@@ -2144,7 +2145,7 @@ function BuildLogViewer({
 
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/builds/${buildLogId}/logs`);
+      const res = await authFetch(`/api/projects/${projectId}/builds/${buildLogId}/logs`);
       if (!res.ok) {
         setError(`HTTP ${res.status}`);
         return;
@@ -2364,7 +2365,7 @@ function SigningFileUpload({
         };
       }
 
-      const res = await fetch(`/api/projects/${projectId}/signing/${platform}`, {
+      const res = await authFetch(`/api/projects/${projectId}/signing/${platform}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -2388,7 +2389,7 @@ function SigningFileUpload({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/signing/${platform}`, {
+      const res = await authFetch(`/api/projects/${projectId}/signing/${platform}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -2833,7 +2834,7 @@ function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
   const fetchStatus = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/github/status`);
+      const res = await authFetch(`/api/projects/${projectId}/github/status`);
       const data = (await res.json()) as {
         connected: boolean;
         connection?: GithubConnection;
@@ -2857,7 +2858,7 @@ function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
     setConnecting(true);
     setConnectError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/github/connect`, {
+      const res = await authFetch(`/api/projects/${projectId}/github/connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: token.trim() }),
@@ -2880,7 +2881,7 @@ function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
     setFetchingRepos(true);
     setRepoError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/github/repositories`);
+      const res = await authFetch(`/api/projects/${projectId}/github/repositories`);
       const data = (await res.json()) as { repositories?: GithubRepo[]; error?: string };
       if (!res.ok) {
         setRepoError(data.error ?? "Failed to load repositories");
@@ -2898,7 +2899,7 @@ function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
     setSelecting(true);
     try {
       const [owner, name] = r.fullName.split("/");
-      await fetch(`/api/projects/${projectId}/github/select-repository`, {
+      await authFetch(`/api/projects/${projectId}/github/select-repository`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2920,7 +2921,7 @@ function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
   const handleDisconnect = async () => {
     setDisconnecting(true);
     try {
-      await fetch(`/api/projects/${projectId}/github/disconnect`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/github/disconnect`, { method: "POST" });
       setConnection(null);
       setRepos(null);
       setShowRepoPicker(false);
@@ -3342,7 +3343,7 @@ export function PublishingTab({
   const fetchSigningStatus = useCallback(async () => {
     if (!isMobile) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/signing`, { credentials: "include" });
+      const res = await authFetch(`/api/projects/${projectId}/signing`, { credentials: "include" });
       if (res.ok) {
         const data = (await res.json()) as SigningStatus;
         setSigningStatus(data);
@@ -3364,7 +3365,7 @@ export function PublishingTab({
   const fetchConfiguredSecrets = useCallback(async () => {
     if (!isMobile) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/secrets`);
+      const res = await authFetch(`/api/projects/${projectId}/secrets`);
       if (res.ok) {
         const data = (await res.json()) as {
           secrets?: Array<{ name: string; id: number; verificationStatus?: string | null }>;
@@ -3439,7 +3440,7 @@ export function PublishingTab({
   const fetchPreviewSnapshots = useCallback(async () => {
     setPreviewSnapshotsLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/preview-snapshots`);
+      const res = await authFetch(`/api/projects/${projectId}/preview-snapshots`);
       if (res.ok) {
         const data = (await res.json()) as { previewSnapshots: PreviewSnapshotEntry[] };
         setPreviewSnapshots(data.previewSnapshots ?? []);
@@ -3466,7 +3467,7 @@ export function PublishingTab({
     setPreviewLinkError(null);
     setPreviewLinkResult(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/preview-link`, { method: "POST" });
+      const res = await authFetch(`/api/projects/${projectId}/preview-link`, { method: "POST" });
       const data = (await res.json()) as {
         ok?: boolean;
         error?: string;
@@ -3515,7 +3516,7 @@ export function PublishingTab({
   const fetchBandwidth = useCallback(async () => {
     setBandwidthLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/bandwidth`);
+      const res = await authFetch(`/api/projects/${projectId}/bandwidth`);
       if (res.ok) {
         const data = (await res.json()) as BandwidthData;
         setBandwidthData(data);
@@ -3542,7 +3543,7 @@ export function PublishingTab({
   const fetchTrafficData = useCallback(async () => {
     setTrafficLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/analytics/traffic?days=30`);
+      const res = await authFetch(`/api/projects/${projectId}/analytics/traffic?days=30`);
       if (res.ok) {
         const data = (await res.json()) as TrafficData;
         setTrafficData(data);
@@ -3564,7 +3565,7 @@ export function PublishingTab({
     setSavingErrorPages(true);
     setErrorPagesSaved(false);
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
+      const res = await authFetch(`/api/projects/${projectId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3660,7 +3661,7 @@ export function PublishingTab({
   const fetchDomainQuota = useCallback(async () => {
     if (!workspaceIdForQuota) return;
     try {
-      const res = await fetch(`/api/workspaces/${workspaceIdForQuota}/usage`);
+      const res = await authFetch(`/api/workspaces/${workspaceIdForQuota}/usage`);
       if (!res.ok) return;
       const data = (await res.json()) as { quota?: DomainQuotaInfo };
       if (data?.quota) setDomainQuota(data.quota);
@@ -3684,7 +3685,7 @@ export function PublishingTab({
   const fetchMobileBuilds = useCallback(async () => {
     if (!isMobile) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/builds`);
+      const res = await authFetch(`/api/projects/${projectId}/builds`);
       if (res.ok) {
         const data = (await res.json()) as { builds: MobileBuildLog[] };
         setMobileBuilds(data.builds ?? []);
@@ -3697,7 +3698,7 @@ export function PublishingTab({
   const fetchCreditBalance = useCallback(async () => {
     if (!isMobile) return;
     try {
-      const res = await fetch("/api/credits");
+      const res = await authFetch("/api/credits");
       if (res.ok) {
         const data = (await res.json()) as { balance: number };
         setCreditBalance(data.balance);
@@ -3715,7 +3716,7 @@ export function PublishingTab({
     setBuildError(null);
     setCredsMissing(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/builds`, {
+      const res = await authFetch(`/api/projects/${projectId}/builds`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platform: p }),
@@ -3742,7 +3743,7 @@ export function PublishingTab({
     setIsDeploying(true);
     setDeployError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/deploy`, {
+      const res = await authFetch(`/api/projects/${projectId}/deploy`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -3778,7 +3779,7 @@ export function PublishingTab({
     setStagingError(null);
     setStagingResult(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish?env=staging`, {
+      const res = await authFetch(`/api/projects/${projectId}/publish?env=staging`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -3809,7 +3810,7 @@ export function PublishingTab({
     setPromoteError(null);
     setPromoteResult(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/promote`, {
+      const res = await authFetch(`/api/projects/${projectId}/promote`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -3837,7 +3838,7 @@ export function PublishingTab({
     setIsPublishing(true);
     setPublishError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish`, {
+      const res = await authFetch(`/api/projects/${projectId}/publish`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -3880,7 +3881,7 @@ export function PublishingTab({
     if (platform !== "web") return;
     setReadinessLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=${webEnv}`);
+      const res = await authFetch(`/api/projects/${projectId}/publish-readiness?env=${webEnv}`);
       if (res.ok) setReadiness((await res.json()) as ReadinessResult);
     } catch {
       /* ignore */
@@ -3893,7 +3894,7 @@ export function PublishingTab({
     if (!isMobile) return;
     setIosReadinessLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=ios`);
+      const res = await authFetch(`/api/projects/${projectId}/publish-readiness?env=ios`);
       if (res.ok) setIosReadiness((await res.json()) as ReadinessResult);
     } catch {
       /* ignore */
@@ -3906,7 +3907,7 @@ export function PublishingTab({
     if (!isMobile) return;
     setAndReadinessLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/publish-readiness?env=android`);
+      const res = await authFetch(`/api/projects/${projectId}/publish-readiness?env=android`);
       if (res.ok) setAndReadiness((await res.json()) as ReadinessResult);
     } catch {
       /* ignore */
@@ -3917,7 +3918,7 @@ export function PublishingTab({
 
   const fetchDeployments = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/deployments`);
+      const res = await authFetch(`/api/projects/${projectId}/deployments`);
       if (res.ok) {
         const data = (await res.json()) as {
           deployments: Array<{
@@ -3938,7 +3939,7 @@ export function PublishingTab({
 
   const fetchSiteSettings = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}`);
+      const res = await authFetch(`/api/projects/${projectId}`);
       if (res.ok) {
         const data = (await res.json()) as {
           siteTitle?: string | null;
@@ -3962,7 +3963,7 @@ export function PublishingTab({
 
   const fetchDomain = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/domain`);
+      const res = await authFetch(`/api/projects/${projectId}/domain`);
       if (res.ok) {
         const data = (await res.json()) as DomainInfo;
         setDomainInfo(data);
@@ -3974,7 +3975,7 @@ export function PublishingTab({
 
   const fetchDomains = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/domains`);
+      const res = await authFetch(`/api/projects/${projectId}/domains`);
       if (res.ok) {
         const data = (await res.json()) as DomainsResponse;
         setDomainsData(data);
@@ -3994,7 +3995,7 @@ export function PublishingTab({
     setAddingDomain(true);
     setDomainAddError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/domains`, {
+      const res = await authFetch(`/api/projects/${projectId}/domains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hostname }),
@@ -4015,7 +4016,7 @@ export function PublishingTab({
 
   const removeDomainById = async (domainId: number) => {
     try {
-      await fetch(`/api/projects/${projectId}/domains/${domainId}`, { method: "DELETE" });
+      await authFetch(`/api/projects/${projectId}/domains/${domainId}`, { method: "DELETE" });
       await fetchDomains();
       setDiagnoseResults((prev) => {
         const next = { ...prev };
@@ -4030,7 +4031,9 @@ export function PublishingTab({
 
   const setPrimaryDomain = async (domainId: number) => {
     try {
-      await fetch(`/api/projects/${projectId}/domains/${domainId}/primary`, { method: "PATCH" });
+      await authFetch(`/api/projects/${projectId}/domains/${domainId}/primary`, {
+        method: "PATCH",
+      });
       await fetchDomains();
     } catch {
       /* ignore */
@@ -4040,7 +4043,7 @@ export function PublishingTab({
   const verifyDomainById = async (domainId: number) => {
     setVerifyingDomainId(domainId);
     try {
-      await fetch(`/api/projects/${projectId}/domains/${domainId}/verify`, { method: "POST" });
+      await authFetch(`/api/projects/${projectId}/domains/${domainId}/verify`, { method: "POST" });
       await fetchDomains();
     } catch {
       /* ignore */
@@ -4053,7 +4056,7 @@ export function PublishingTab({
     setDiagnosingDomainId(domainId);
     setExpandedDomainId(domainId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/domains/${domainId}/diagnose`);
+      const res = await authFetch(`/api/projects/${projectId}/domains/${domainId}/diagnose`);
       if (res.ok) {
         const data = (await res.json()) as DiagnoseResult;
         setDiagnoseResults((prev) => ({ ...prev, [domainId]: data }));
@@ -4067,7 +4070,7 @@ export function PublishingTab({
 
   const toggleWwwRedirect = async (domainId: number, enabled: boolean) => {
     try {
-      await fetch(`/api/projects/${projectId}/domains/${domainId}/www-redirect`, {
+      await authFetch(`/api/projects/${projectId}/domains/${domainId}/www-redirect`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
@@ -4081,7 +4084,7 @@ export function PublishingTab({
   const saveSiteSettings = async () => {
     setSavingSettings(true);
     try {
-      await fetch(`/api/projects/${projectId}`, {
+      await authFetch(`/api/projects/${projectId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4099,7 +4102,7 @@ export function PublishingTab({
     setBlockPublishOnCritical(value);
     setSavingSecurityGate(true);
     try {
-      await fetch(`/api/projects/${projectId}`, {
+      await authFetch(`/api/projects/${projectId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ blockPublishOnCritical: value }),
@@ -6280,7 +6283,7 @@ export function PublishingTab({
                       variant="outline"
                       size="sm"
                       onClick={async () => {
-                        await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+                        await authFetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
                         setDeployResult(null);
                         void fetchDomain();
                         void fetchDeployments();
@@ -6344,7 +6347,7 @@ export function PublishingTab({
                       variant="outline"
                       size="sm"
                       onClick={async () => {
-                        await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+                        await authFetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
                         setPublishResult(null);
                         void fetchDomain();
                         void fetchDeployments();

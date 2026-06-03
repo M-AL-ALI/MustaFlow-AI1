@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback } from "react";
 import { useListProjects } from "@workspace/api-client-react";
 import { Link } from "wouter";
@@ -95,7 +96,7 @@ export default function DevDeploymentsPage() {
     async (projectId: number) => {
       setRedeploying(projectId);
       try {
-        await fetch(`/api/projects/${projectId}/deploy`, { method: "POST" });
+        await authFetch(`/api/projects/${projectId}/deploy`, { method: "POST" });
         void refetch();
       } catch {
         /* ignore */
@@ -110,7 +111,7 @@ export default function DevDeploymentsPage() {
     async (projectId: number) => {
       setStopping(projectId);
       try {
-        await fetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
+        await authFetch(`/api/projects/${projectId}/unpublish`, { method: "POST" });
         void refetch();
       } catch {
         /* ignore */

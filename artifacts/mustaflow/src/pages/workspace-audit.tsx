@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   ShieldCheck,
@@ -96,7 +97,9 @@ export default function WorkspaceAuditPage() {
       if (!workspaceId) return;
       setLoading(true);
       try {
-        const res = await fetch(`/api/workspaces/${workspaceId}/audit?limit=${LIMIT}&offset=${o}`);
+        const res = await authFetch(
+          `/api/workspaces/${workspaceId}/audit?limit=${LIMIT}&offset=${o}`,
+        );
         if (!res.ok) throw new Error(await res.text());
         const data: AuditResponse = await res.json();
         setEntries((prev) => (o === 0 ? data.audit : [...prev, ...data.audit]));

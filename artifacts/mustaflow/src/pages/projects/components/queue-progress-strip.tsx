@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   CheckCircle2,
@@ -84,7 +85,7 @@ export function QueueProgressStrip({
 
   const fetchBatch = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/queue/${batchId}`, {
+      const res = await authFetch(`/api/projects/${projectId}/queue/${batchId}`, {
         credentials: "include",
       });
       if (!res.ok) return;
@@ -114,7 +115,7 @@ export function QueueProgressStrip({
   const handleCancel = useCallback(async () => {
     setCancelling(true);
     try {
-      await fetch(`/api/projects/${projectId}/queue/${batchId}`, {
+      await authFetch(`/api/projects/${projectId}/queue/${batchId}`, {
         method: "DELETE",
         credentials: "include",
       });

@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ export default function PricingPage() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/billing/subscription/checkout", {
+      const res = await authFetch("/api/billing/subscription/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

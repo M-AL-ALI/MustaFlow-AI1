@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { X, Clock, ChevronDown, ChevronRight, BrainCircuit, ArrowLeft } from "lucide-react";
 import type { StructuredPlan } from "./plan-card";
@@ -237,7 +238,7 @@ export function PlanHistoryPanel({ projectId, onRestorePlan, onClose }: PlanHist
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/projects/${projectId}/plan-history`, { credentials: "include" })
+    authFetch(`/api/projects/${projectId}/plan-history`, { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) throw new Error("Failed to load plan history");
         const data = (await r.json()) as PlanHistoryEntry[];

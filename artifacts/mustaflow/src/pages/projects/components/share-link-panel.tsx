@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback } from "react";
 import { Link2, Plus, Trash2, Copy, Check, Loader2, Eye, Clock, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,7 @@ export function ShareLinkPanel({ projectId }: ShareLinkPanelProps) {
   const fetchLinks = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/projects/${projectId}/share`);
+      const r = await authFetch(`/api/projects/${projectId}/share`);
       if (r.ok) setLinks((await r.json()) as ShareLink[]);
     } finally {
       setLoading(false);
@@ -64,7 +65,7 @@ export function ShareLinkPanel({ projectId }: ShareLinkPanelProps) {
       if (label.trim()) body.label = label.trim();
       if (expiresInDays.trim()) body.expiresInDays = parseInt(expiresInDays, 10);
 
-      const r = await fetch(`/api/projects/${projectId}/share`, {
+      const r = await authFetch(`/api/projects/${projectId}/share`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -81,7 +82,7 @@ export function ShareLinkPanel({ projectId }: ShareLinkPanelProps) {
   };
 
   const revokeLink = async (linkId: number) => {
-    await fetch(`/api/projects/${projectId}/share/${linkId}`, { method: "DELETE" });
+    await authFetch(`/api/projects/${projectId}/share/${linkId}`, { method: "DELETE" });
     void fetchLinks();
   };
 
