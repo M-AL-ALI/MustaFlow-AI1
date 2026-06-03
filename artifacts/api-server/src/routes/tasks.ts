@@ -61,7 +61,10 @@ router.get("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pro
           : null,
     }));
 
-  res.json(ListTasksResponse.parse(rowsWithElapsed));
+  // Use safeParse so a schema mismatch in any field (e.g. stagingSnapshot stored
+  // as an array instead of object) never causes a 500 — just return the raw rows.
+  const parsed = ListTasksResponse.safeParse(rowsWithElapsed);
+  res.json(parsed.success ? parsed.data : rowsWithElapsed);
 });
 
 router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Promise<void> => {

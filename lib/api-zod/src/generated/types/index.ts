@@ -57,7 +57,6 @@ export * from './agentTaskInputKind';
 export * from './agentTaskKind';
 export * from './agentTaskReport';
 export * from './agentTaskRunMode';
-export * from './agentTaskStagingSnapshot';
 export * from './agentTaskStatus';
 export * from './agentTaskUserFeedback';
 export * from './agentTraceResponse';

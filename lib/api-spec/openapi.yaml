@@ -7446,9 +7446,8 @@ components:
           type: ["string", "null"]
           description: "Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread."
         stagingSnapshot:
-          type: ["object", "null"]
-          additionalProperties: true
-          description: "Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard."
+          nullable: true
+          description: "Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object."
         prompt: { type: ["string", "null"] }
         result: { type: ["string", "null"] }
         queueBatchId: { type: ["string", "null"] }

@@ -9,7 +9,6 @@ import type { AgentTaskAgentIdentity } from './agentTaskAgentIdentity';
 import type { AgentTaskKind } from './agentTaskKind';
 import type { AgentTaskReport } from './agentTaskReport';
 import type { AgentTaskRunMode } from './agentTaskRunMode';
-import type { AgentTaskStagingSnapshot } from './agentTaskStagingSnapshot';
 import type { AgentTaskStatus } from './agentTaskStatus';
 import type { AgentTaskUserFeedback } from './agentTaskUserFeedback';
 
@@ -26,11 +25,8 @@ export interface AgentTask {
      * @nullable
      */
   origin?: string | null;
-  /**
-     * Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard.
-     * @nullable
-     */
-  stagingSnapshot?: AgentTaskStagingSnapshot;
+  /** Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object. */
+  stagingSnapshot?: unknown | null;
   /** @nullable */
   prompt?: string | null;
   /** @nullable */
