@@ -126,7 +126,7 @@ describe("Preview Architecture Fix regression coverage", () => {
 
   it("agentic previewUpdated only flips true after healthz passes", () => {
     expect(jobsSource).toContain("pollPreviewReachability");
-    expect(jobsSource).toContain("if (!previewCheck.reachable)");
+    expect(jobsSource).toContain("if (previewCheck.reachable)");
     expect(jobsSource).toContain("Agentic confirmation: /healthz returned 200");
   });
 
@@ -171,9 +171,25 @@ describe("Preview Architecture Fix regression coverage", () => {
   });
 
   it("Task Agent Apply syncs agentic containers and confirms health", () => {
-    expect(jobsSource).toContain("syncAgenticApplyPreview");
-    expect(jobsSource).toContain("Syncing applied files to container");
+    expect(jobsSource).toContain("syncAgenticPreviewRuntime");
+    expect(jobsSource).toContain("Syncing project files to preview container");
     expect(jobsSource).toContain("pollPreviewReachability");
     expect(jobsSource).toContain("publishPreviewReady(opts.projectId)");
+  });
+
+  it("Agent Zero build/refine syncs and restarts the live preview runtime", () => {
+    expect(jobsSource).toContain("const runtimePreviewResult = await syncAgenticPreviewRuntime");
+    expect(jobsSource).toContain("files: allRuntimeFileRows.map");
+    expect(jobsSource).toContain("Restarting container app server");
+    expect(jobsSource).toContain("report.previewUpdated = runtimePreviewResult.previewUpdated");
+    expect(jobsSource).not.toContain("Running npm install in container");
+    expect(jobsSource).not.toContain('["npm", "install", "--prefer-offline", "--no-audit"]');
+  });
+
+  it("container preview startup uses platform port and stack-specific health probes", () => {
+    expect(jobsSource).toContain("healthPath: healthCheckPathForStack(opts.stack)");
+    expect(jobsSource).toContain("npm run dev -- --host 0.0.0.0 --port 3000");
+    expect(jobsSource).toContain("npm run dev -- -H 0.0.0.0 -p 3000");
+    expect(jobsSource).toContain("uvicorn main:app --host 0.0.0.0 --port 3000");
   });
 });

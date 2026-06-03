@@ -91,6 +91,7 @@ import {
 } from "./eas";
 import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
+import { healthCheckPathForStack } from "./health-inject";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
 import { sendBuildFailureEmail } from "./emailClient";
 import { getClerkUserById } from "./clerk-users";
@@ -798,10 +799,16 @@ function emitFilesChangedEvent(
 async function pollPreviewReachability(
   taskId: number,
   containerUrl: string,
-  opts: { maxWaitMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
+  opts: {
+    healthPath?: string;
+    maxWaitMs?: number;
+    intervalMs?: number;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<{ reachable: boolean; httpStatus: number | null }> {
   const maxWaitMs = opts.maxWaitMs ?? 75_000; // 75-second ceiling
   const intervalMs = opts.intervalMs ?? 5_000; // check every 5 s
+  const healthPath = opts.healthPath ?? "/healthz";
   const signal = opts.signal;
   const deadline = Date.now() + maxWaitMs;
 
@@ -811,7 +818,7 @@ async function pollPreviewReachability(
     "Preview refresh requested, verifying server is reachable…",
   );
 
-  const healthzUrl = containerUrl.replace(/\/$/, "") + "/healthz";
+  const healthzUrl = containerUrl.replace(/\/$/, "") + healthPath;
   let lastHttpStatus: number | null = null;
 
   while (Date.now() < deadline) {
@@ -4709,30 +4716,40 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       await emitEvent(taskId, "updating_preview", "Refreshing preview…");
 
       // ── Preview reachability verification ───────────────────────────────────
-      // For agentic projects the preview is served by a live container — verify
-      // the server is actually responding before marking previewUpdated: true.
-      // Static projects serve from the DB and are always reachable; skip them.
-      if (project.containerUrl) {
-        const previewCheck = await pollPreviewReachability(taskId, project.containerUrl, {
+      // For container-backed projects, first sync the durable DB file set into
+      // /app and restart the runtime; only mark previewUpdated after health passes.
+      // Static projects serve from the DB and are always reachable.
+      if (project.containerId || project.containerUrl) {
+        const allRuntimeFileRows = await db
+          .select({ path: projectFilesTable.path, content: projectFilesTable.content })
+          .from(projectFilesTable)
+          .where(eq(projectFilesTable.projectId, projectId));
+        const packageManifestChanged = filesToSmellScan.some((file) =>
+          isRuntimeManifestPath(file.path),
+        );
+        const runtimePreviewResult = await syncAgenticPreviewRuntime({
+          projectId,
+          taskId,
+          containerId: project.containerId,
+          containerStatus: project.containerStatus,
+          containerUrl: project.containerUrl,
+          stack: project.stack,
           signal,
-          maxWaitMs: 75_000,
-          intervalMs: 5_000,
+          files: allRuntimeFileRows.map((file) => ({
+            path: file.path,
+            content: file.content,
+          })),
+          removedPaths: diffSummary?.filesRemoved ?? [],
+          packageManifestChanged,
         });
-        if (!previewCheck.reachable) {
-          report.previewUpdated = false;
-          report.previewSyncFailed = true;
-          report.warnings = [
-            ...(report.warnings ?? []),
-            `Preview refresh requested but app server is not yet reachable (${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}). Files were saved — the preview will load once your server starts.`,
-          ];
-          publishPreviewSyncFailed(
-            projectId,
-            `Server not reachable: ${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}`,
-          );
-        } else {
-          // Agentic confirmation: /healthz returned 200 after the files were written.
-          report.previewUpdated = true;
-          publishPreviewReady(projectId);
+
+        report.previewUpdated = runtimePreviewResult.previewUpdated;
+        report.previewSyncQueued =
+          runtimePreviewResult.previewSyncQueued || report.previewSyncQueued === true;
+        report.previewSyncFailed =
+          runtimePreviewResult.previewSyncFailed || report.previewSyncFailed === true;
+        if (runtimePreviewResult.warnings.length > 0) {
+          report.warnings = [...(report.warnings ?? []), ...runtimePreviewResult.warnings];
         }
       } else {
         // Static confirmation: writeFiles has durably updated the DB snapshot that
@@ -5415,59 +5432,6 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           updatedAt: sql`now()`,
         })
         .where(eq(projectsTable.id, projectId));
-
-      // Sync files to live container, install deps, restart the app server, and
-      // verify the preview is actually reachable before reporting success.
-      // Runs detached (setImmediate) so the task can settle as "completed" while
-      // the preview readiness is published asynchronously via publishPreviewReady /
-      // publishPreviewSyncFailed. Only runs when a container is active.
-      setImmediate(() => {
-        void (async () => {
-          try {
-            const [containerRow] = await db
-              .select({
-                containerId: projectsTable.containerId,
-                containerStatus: projectsTable.containerStatus,
-                containerUrl: projectsTable.containerUrl,
-              })
-              .from(projectsTable)
-              .where(eq(projectsTable.id, projectId));
-
-            // Only require a container to exist — syncAgenticApplyPreview wakes a
-            // hibernated/stopped machine itself, so gating on "running" here would
-            // skip the sync (and leave the preview stale) after Fly autostop.
-            if (!containerRow?.containerId) return;
-
-            const allFiles = await db
-              .select({ path: projectFilesTable.path, content: projectFilesTable.content })
-              .from(projectFilesTable)
-              .where(eq(projectFilesTable.projectId, projectId));
-
-            // Delegate to the canonical, battle-tested sync path. It uses the
-            // detached npmInstallInBackground helper (survives Fly autostop EOF,
-            // cleans stale npm locks, re-syncs files on machine restart), restarts
-            // the app server, then polls real reachability — publishing an honest
-            // ready/failed status instead of optimistically claiming "Server started".
-            await syncAgenticApplyPreview({
-              projectId,
-              taskId,
-              containerId: containerRow.containerId,
-              containerStatus: containerRow.containerStatus,
-              containerUrl: containerRow.containerUrl,
-              stack: project.stack,
-              files: allFiles,
-              removedPaths: [],
-              packageManifestChanged: true,
-            });
-          } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            const { mapFlyErrorToMessage } = await import("./container");
-            const humanMsg = mapFlyErrorToMessage(errMsg);
-            logger.warn({ err, projectId, taskId }, "Container sync/install failed");
-            await emitEvent(taskId, "narration", `Container sync failed: ${humanMsg}`);
-          }
-        })();
-      });
 
       // Extract the page map BEFORE emitting "completed" so the
       // "page_map_updated" event is guaranteed to precede the terminal event.
@@ -6280,6 +6244,7 @@ async function runPostWriteMigrationSync(
     startContainer,
     getContainerStatus,
     mapFlyErrorToMessage,
+    npmInstallInBackground,
   } = await import("./container");
 
   if (containerRow.containerStatus !== "running") {
@@ -6311,11 +6276,18 @@ async function runPostWriteMigrationSync(
   const hasPackageJson = allCurrentFiles.some((f) => f.path === "package.json");
   if (hasPackageJson) {
     await emitEvent(taskId, "narration", "Running npm install before migration…");
-    await execInContainer(
-      activeContainerId,
-      ["npm", "install", "--prefer-offline", "--no-audit"],
-      projectId,
-    );
+    const installResult = await npmInstallInBackground(activeContainerId, projectId, {
+      wallClockCapMs: 6 * 60 * 1000,
+      onMachineRestarted: async () => {
+        await syncFilesToContainer(activeContainerId, projectId, allCurrentFiles);
+      },
+    });
+    if (!installResult.ok) {
+      return {
+        ok: false,
+        error: `npm install before migration failed: ${installResult.output.slice(0, 500)}`,
+      };
+    }
   }
 
   let migrationCmd: string[];
@@ -6347,7 +6319,7 @@ async function runPostWriteMigrationSync(
   return { ok: true };
 }
 
-type AgenticApplyPreviewResult = {
+type AgenticPreviewRuntimeResult = {
   previewUpdated: boolean;
   previewSyncQueued: boolean;
   previewSyncFailed: boolean;
@@ -6367,9 +6339,20 @@ function startCommandForFiles(
     try {
       const pkg = JSON.parse(pkgFile.content) as { scripts?: Record<string, string> };
       const scripts = pkg.scripts ?? {};
+      if (stack === "react-vite") {
+        if (scripts.dev) return "npm run dev -- --host 0.0.0.0 --port 3000";
+        if (scripts.preview) return "npm run preview -- --host 0.0.0.0 --port 3000";
+        if (scripts.start) return "npm start -- --host 0.0.0.0 --port 3000";
+        return "npx vite --host 0.0.0.0 --port 3000";
+      }
+      if (stack === "nextjs") {
+        if (scripts.dev) return "npm run dev -- -H 0.0.0.0 -p 3000";
+        if (scripts.start) return "npm start";
+        return "npx next dev -H 0.0.0.0 -p 3000";
+      }
       if (scripts["dev:server"]) return "npm run dev:server";
+      if (scripts.dev) return "npm run dev";
       if (scripts.start) return "npm start";
-      if (scripts.dev) return "npm run dev -- --host 0.0.0.0";
       return "npm start";
     } catch {
       return "npm start";
@@ -6378,22 +6361,33 @@ function startCommandForFiles(
 
   if (stack === "python-flask" || files.some((f) => f.path === "app.py")) return "python app.py";
   if (stack === "python-fastapi" || files.some((f) => f.path === "main.py"))
-    return "python main.py";
+    return "uvicorn main:app --host 0.0.0.0 --port 3000";
   return null;
 }
 
-async function syncAgenticApplyPreview(opts: {
+function isRuntimeManifestPath(path: string): boolean {
+  return [
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "requirements.txt",
+  ].includes(path);
+}
+
+async function syncAgenticPreviewRuntime(opts: {
   projectId: number;
   taskId: number;
   containerId: string | null;
   containerStatus: string | null;
   containerUrl: string | null;
   stack: string | null | undefined;
+  signal?: AbortSignal;
   files: Array<{ path: string; content: string }>;
   removedPaths: string[];
   packageManifestChanged: boolean;
-}): Promise<AgenticApplyPreviewResult> {
-  const base: AgenticApplyPreviewResult = {
+}): Promise<AgenticPreviewRuntimeResult> {
+  const base: AgenticPreviewRuntimeResult = {
     previewUpdated: false,
     previewSyncQueued: false,
     previewSyncFailed: false,
@@ -6401,6 +6395,11 @@ async function syncAgenticApplyPreview(opts: {
   };
 
   if (!opts.containerUrl) {
+    if (opts.containerId) {
+      const warning = "Preview sync failed: this container-backed project has no preview URL.";
+      publishPreviewSyncFailed(opts.projectId, warning);
+      return { ...base, previewSyncFailed: true, warnings: [warning] };
+    }
     return { ...base, previewUpdated: true, previewSyncQueued: true };
   }
 
@@ -6424,7 +6423,7 @@ async function syncAgenticApplyPreview(opts: {
 
   try {
     if (opts.containerStatus !== "running") {
-      await emitEvent(opts.taskId, "narration", "Waking container for applied changes…");
+      await emitEvent(opts.taskId, "narration", "Waking preview container…");
       await startContainer(opts.containerId, opts.projectId);
       const deadline = Date.now() + 45_000;
       while (Date.now() < deadline) {
@@ -6434,7 +6433,7 @@ async function syncAgenticApplyPreview(opts: {
       }
     }
 
-    await emitEvent(opts.taskId, "narration", "Syncing applied files to container…");
+    await emitEvent(opts.taskId, "narration", "Syncing project files to preview container…");
     await syncFilesToContainer(opts.containerId, opts.projectId, opts.files, true);
 
     if (opts.removedPaths.length > 0) {
@@ -6506,11 +6505,14 @@ async function syncAgenticApplyPreview(opts: {
     }
 
     const previewCheck = await pollPreviewReachability(opts.taskId, opts.containerUrl, {
+      healthPath: healthCheckPathForStack(opts.stack),
+      signal: opts.signal,
       maxWaitMs: 75_000,
       intervalMs: 5_000,
     });
     if (previewCheck.reachable) {
       publishPreviewReady(opts.projectId);
+      // Agentic confirmation: /healthz returned 200 after file sync and server restart.
       return { ...base, previewUpdated: true };
     }
 
@@ -6848,13 +6850,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     currentFileRows.map((row) => [row.path, row.content ?? ""] as const),
   );
   const packageManifestChanged = builderFiles.some((file) =>
-    [
-      "package.json",
-      "package-lock.json",
-      "pnpm-lock.yaml",
-      "yarn.lock",
-      "requirements.txt",
-    ].includes(file.path)
+    isRuntimeManifestPath(file.path)
       ? previousContentByPath.get(file.path) !== file.content
       : false,
   );
@@ -6878,7 +6874,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     }
   }
 
-  const applyPreviewResult = await syncAgenticApplyPreview({
+  const applyPreviewResult = await syncAgenticPreviewRuntime({
     projectId,
     taskId,
     containerId: project.containerId,
