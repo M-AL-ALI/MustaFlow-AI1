@@ -380,7 +380,9 @@ vi.mock("./eas", () => ({
   triggerEasSubmit: vi.fn(),
   mapEasStatusToDeploymentStatus: vi.fn(),
 }));
-vi.mock("./github", () => ({ autoCommitProjectFiles: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("./github", () => ({
+  autoCommitProjectFiles: vi.fn().mockResolvedValue({ ok: true, sha: null }),
+}));
 vi.mock("../routes/images.js", () => ({
   fetchAttachmentAsDataUri: vi.fn().mockResolvedValue(null),
 }));

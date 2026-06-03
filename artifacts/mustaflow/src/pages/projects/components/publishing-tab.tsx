@@ -42,10 +42,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEventSource } from "@/lib/use-event-source";
 import {
-  useListSecrets,
-  useCreateSecret,
-  useDeleteSecret,
-  getListSecretsQueryKey,
   getGetProjectQueryKey,
   useListVersions,
   getListVersionsQueryKey,
@@ -2795,174 +2791,172 @@ function MobileBuildStatusBadge({ status }: { status: string }) {
   );
 }
 
-type GithubSavedState = { repo: string; branch: string; repoUrl: string };
+// ─── GitHub Auto-Sync panel ───────────────────────────────────────────────────
+// Connects a project to a GitHub repository via a personal access token. Once
+// configured, every successful AI build automatically pushes the latest files
+// as a commit. The connection is stored server-side in project_github_connections.
 
-function githubStorageKey(projectId: number) {
-  return `mustaflow:github:${projectId}`;
+interface GithubConnection {
+  id: number;
+  githubAccountName: string;
+  repositoryOwner: string | null;
+  repositoryName: string | null;
+  defaultBranch: string;
+  lastSyncAt: string | null;
+  syncStatus: string;
 }
 
-function loadGithubState(projectId: number): GithubSavedState | null {
-  try {
-    const raw = localStorage.getItem(githubStorageKey(projectId));
-    if (!raw) return null;
-    return JSON.parse(raw) as GithubSavedState;
-  } catch {
-    return null;
-  }
+interface GithubRepo {
+  name: string;
+  fullName: string;
+  private: boolean;
+  htmlUrl: string;
+  defaultBranch: string;
+  description: string | null;
 }
 
-function saveGithubState(projectId: number, state: GithubSavedState) {
-  try {
-    localStorage.setItem(githubStorageKey(projectId), JSON.stringify(state));
-  } catch {
-    // Non-fatal
-  }
-}
-
-function clearGithubState(projectId: number) {
-  try {
-    localStorage.removeItem(githubStorageKey(projectId));
-  } catch {
-    // Non-fatal
-  }
-}
-
-function GithubPushPanel({ projectId }: { projectId: number }) {
+function GitHubAutoSyncPanel({ projectId }: { projectId: number }) {
   const [open, setOpen] = useState(false);
+  // undefined = not fetched yet, null = not connected, GithubConnection = connected
+  const [connection, setConnection] = useState<GithubConnection | null | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
   const [token, setToken] = useState("");
-  const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("main");
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [pushing, setPushing] = useState(false);
-  const [saveToken, setSaveToken] = useState(false);
-  const [savingToken, setSavingToken] = useState(false);
-  const [result, setResult] = useState<{
-    repoUrl: string;
-    commitSha: string;
-    filesCount: number;
-    created: boolean;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Saved connection state (repo/branch from last successful push — stored in localStorage)
-  const [savedState, setSavedState] = useState<GithubSavedState | null>(null);
-
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [repos, setRepos] = useState<GithubRepo[] | null>(null);
+  const [fetchingRepos, setFetchingRepos] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [showRepoPicker, setShowRepoPicker] = useState(false);
 
-  const queryClient = useQueryClient();
-  const createSecret = useCreateSecret();
-  const deleteSecret = useDeleteSecret();
+  const fetchStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/github/status`);
+      const data = (await res.json()) as {
+        connected: boolean;
+        connection?: GithubConnection;
+      };
+      setConnection(data.connected ? (data.connection ?? null) : null);
+    } catch {
+      setConnection(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
 
-  // Check if GITHUB_TOKEN secret is already stored for this project
-  const { data: secrets = [] } = useListSecrets(projectId, {
-    query: { queryKey: getListSecretsQueryKey(projectId), enabled: open },
-  });
-  const hasStoredToken = secrets.some((s) => s.name === "GITHUB_TOKEN");
-  const githubTokenSecret = secrets.find((s) => s.name === "GITHUB_TOKEN");
+  useEffect(() => {
+    if (open && connection === undefined) {
+      void fetchStatus();
+    }
+  }, [open, connection, fetchStatus]);
+
+  const handleConnect = async () => {
+    if (!token.trim()) return;
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/github/connect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+      const data = (await res.json()) as { connected?: boolean; error?: string };
+      if (!res.ok) {
+        setConnectError(data.error ?? "Connection failed");
+      } else {
+        setToken("");
+        await fetchStatus();
+      }
+    } catch {
+      setConnectError("Connection failed — check your network");
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const fetchRepos = async () => {
+    setFetchingRepos(true);
+    setRepoError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/github/repositories`);
+      const data = (await res.json()) as { repositories?: GithubRepo[]; error?: string };
+      if (!res.ok) {
+        setRepoError(data.error ?? "Failed to load repositories");
+      } else {
+        setRepos(data.repositories ?? []);
+      }
+    } catch {
+      setRepoError("Failed to load repositories");
+    } finally {
+      setFetchingRepos(false);
+    }
+  };
+
+  const handleSelectRepo = async (r: GithubRepo) => {
+    setSelecting(true);
+    try {
+      const [owner, name] = r.fullName.split("/");
+      await fetch(`/api/projects/${projectId}/github/select-repository`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repositoryOwner: owner,
+          repositoryName: name,
+          defaultBranch: r.defaultBranch,
+        }),
+      });
+      setRepos(null);
+      setShowRepoPicker(false);
+      await fetchStatus();
+    } catch {
+      // Non-fatal
+    } finally {
+      setSelecting(false);
+    }
+  };
 
   const handleDisconnect = async () => {
-    if (!githubTokenSecret) return;
     setDisconnecting(true);
     try {
-      await deleteSecret.mutateAsync({ id: projectId, secretId: githubTokenSecret.id });
-      void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
-      clearGithubState(projectId);
-      setSavedState(null);
-      setToken("");
-      setRepo("");
-      setBranch("main");
+      await fetch(`/api/projects/${projectId}/github/disconnect`, { method: "POST" });
+      setConnection(null);
+      setRepos(null);
+      setShowRepoPicker(false);
     } catch {
-      // Non-fatal: ignore disconnect errors silently
+      // Non-fatal
     } finally {
       setDisconnecting(false);
     }
   };
 
-  // Load saved state from localStorage when the panel first opens
-  useEffect(() => {
-    if (!open) return;
-    const saved = loadGithubState(projectId);
-    setSavedState(saved);
-    if (saved) {
-      setRepo(saved.repo);
-      setBranch(saved.branch);
-    }
-  }, [open, projectId]);
+  const isConnected = connection !== null && connection !== undefined;
+  const hasRepo = isConnected && !!connection.repositoryOwner && !!connection.repositoryName;
 
-  const handlePush = async () => {
-    if (!repo.trim()) return;
-    // Require either a typed token or a stored one
-    if (!token.trim() && !hasStoredToken) return;
-    setPushing(true);
-    setError(null);
-    setResult(null);
-    try {
-      const body: Record<string, unknown> = {
-        repo: repo.trim(),
-        branch: branch.trim() || "main",
-        private: isPrivate,
-        commitMessage: commitMessage.trim() || undefined,
-      };
-      // Only include token if the user typed one; omit to use stored secret
-      if (token.trim()) body.token = token.trim();
-
-      const res = await fetch(`/api/projects/${projectId}/github/push`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as {
-        repoUrl?: string;
-        commitSha?: string;
-        filesCount?: number;
-        created?: boolean;
-        error?: string;
-      };
-      if (!res.ok) {
-        setError(data.error ?? "Push failed");
-      } else {
-        setResult({
-          repoUrl: data.repoUrl!,
-          commitSha: data.commitSha!,
-          filesCount: data.filesCount!,
-          created: data.created ?? false,
-        });
-
-        // Persist repo/branch so the panel can pre-fill them next time
-        const newSaved: GithubSavedState = {
-          repo: repo.trim(),
-          branch: branch.trim() || "main",
-          repoUrl: data.repoUrl!,
-        };
-        saveGithubState(projectId, newSaved);
-        setSavedState(newSaved);
-
-        // Save (or replace) token in project secrets if requested
-        if (saveToken && token.trim()) {
-          setSavingToken(true);
-          try {
-            await createSecret.mutateAsync({
-              id: projectId,
-              data: { name: "GITHUB_TOKEN", value: token.trim(), environment: "production" },
-            });
-            void queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
-          } catch {
-            // Non-fatal: token save failure doesn't block the success result
-          } finally {
-            setSavingToken(false);
-          }
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Push failed");
-    } finally {
-      setPushing(false);
-    }
-  };
-
-  const canPush = repo.trim() && (token.trim() || hasStoredToken) && !pushing;
-  const isConnected = hasStoredToken && !!savedState;
+  let headerSubtitle: React.ReactNode;
+  if (isConnected && hasRepo) {
+    headerSubtitle = (
+      <div className="flex items-center gap-1 mt-0.5">
+        <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+        <span className="text-xs text-green-500 truncate">
+          {connection.repositoryOwner}/{connection.repositoryName} · auto-sync on
+        </span>
+      </div>
+    );
+  } else if (isConnected) {
+    headerSubtitle = (
+      <div className="text-xs text-muted-foreground">
+        Connected as @{connection.githubAccountName} — select a repo
+      </div>
+    );
+  } else {
+    headerSubtitle = (
+      <div className="text-xs text-muted-foreground">
+        Push to GitHub automatically after every build
+      </div>
+    );
+  }
 
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -2973,19 +2967,8 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
       >
         <Github className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold">Push to GitHub</div>
-          {isConnected ? (
-            <div className="flex items-center gap-1 mt-0.5">
-              <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
-              <span className="text-xs text-green-500 truncate">
-                {savedState.repo} · {savedState.branch}
-              </span>
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">
-              Export all project files to a GitHub repository
-            </div>
-          )}
+          <div className="text-sm font-semibold">GitHub Auto-Sync</div>
+          {headerSubtitle}
         </div>
         {open ? (
           <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -2996,169 +2979,214 @@ function GithubPushPanel({ projectId }: { projectId: number }) {
 
       {open && (
         <div className="border-t border-border px-4 py-4 space-y-4">
-          {result ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                {result.created ? "Repository created and pushed" : "Pushed successfully"}
-              </div>
-              {savingToken && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Saving token to project secrets…
-                </div>
-              )}
-              <div className="bg-muted/40 rounded-lg px-3 py-2 space-y-1 text-xs font-mono">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground shrink-0">Repo:</span>
-                  <a
-                    href={result.repoUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary hover:underline truncate flex-1 flex items-center gap-1"
-                  >
-                    {result.repoUrl} <ArrowUpRight className="h-3 w-3 shrink-0" />
-                  </a>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground shrink-0">Commit:</span>
-                  <span className="text-foreground">{result.commitSha.slice(0, 12)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground shrink-0">Files:</span>
-                  <span className="text-foreground">{result.filesCount}</span>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setResult(null);
-                  setToken("");
-                }}
-              >
-                Push again
-              </Button>
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading…
             </div>
-          ) : (
+          ) : !isConnected ? (
+            // ── Phase 1: not connected ─────────────────────────────────────────
             <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Paste a GitHub personal access token with <span className="font-mono">repo</span>{" "}
+                scope. Every successful build will be pushed as a commit to the repository you
+                select.
+              </p>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-foreground">Personal access token</label>
-                {hasStoredToken && (
-                  <div className="flex items-center justify-between gap-2 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 mb-1">
-                    <div className="flex items-center gap-2 text-[10px] text-green-500">
-                      <Key className="h-3 w-3 shrink-0" />
-                      Saved GITHUB_TOKEN found — leave blank to use it
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleDisconnect()}
-                      disabled={disconnecting}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
-                      title="Remove saved token"
-                    >
-                      {disconnecting ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <XCircle className="h-3 w-3" />
-                      )}
-                      {disconnecting ? "Removing…" : "Disconnect"}
-                    </button>
-                  </div>
-                )}
                 <input
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder={hasStoredToken ? "Using saved token (enter to replace)" : "ghp_…"}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleConnect();
+                  }}
+                  placeholder="ghp_…"
                   className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
                 />
-                {token.trim() && (
-                  <label className="flex items-center gap-2 cursor-pointer mt-1">
-                    <input
-                      type="checkbox"
-                      checked={saveToken}
-                      onChange={(e) => setSaveToken(e.target.checked)}
-                      className="accent-primary h-3 w-3"
-                    />
-                    <span className="text-[10px] text-muted-foreground">
-                      {hasStoredToken
-                        ? "Replace saved GITHUB_TOKEN with this token"
-                        : "Save as GITHUB_TOKEN project secret for future pushes"}
-                    </span>
-                  </label>
-                )}
-                {!hasStoredToken && !token.trim() && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Needs <span className="font-mono">repo</span> scope.
-                  </p>
-                )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-foreground">Repository name</label>
-                  <input
-                    type="text"
-                    value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                    placeholder="my-app"
-                    className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-foreground">Branch</label>
-                  <input
-                    type="text"
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    placeholder="main"
-                    className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">
-                  Commit message (optional)
-                </label>
-                <input
-                  type="text"
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  placeholder="Push from MustaFlow AI"
-                  className="w-full text-xs bg-background border border-border rounded px-3 py-1.5 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsPrivate((p) => !p)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {isPrivate ? (
-                    <ToggleRight className="h-4 w-4 text-primary" />
-                  ) : (
-                    <ToggleLeft className="h-4 w-4" />
-                  )}
-                  {isPrivate ? "Private repository" : "Public repository"}
-                </button>
-              </div>
-              {error && (
+              {connectError && (
                 <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  {error}
+                  {connectError}
                 </div>
               )}
-              <Button className="w-full" disabled={!canPush} onClick={() => void handlePush()}>
-                {pushing ? (
+              <Button
+                className="w-full"
+                disabled={!token.trim() || connecting}
+                onClick={() => void handleConnect()}
+              >
+                {connecting ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Pushing…
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Connecting…
                   </>
                 ) : (
                   <>
-                    <Github className="h-4 w-4 mr-2" /> Push to GitHub
+                    <Github className="h-4 w-4 mr-2" />
+                    Connect GitHub
                   </>
                 )}
               </Button>
+            </div>
+          ) : !hasRepo || showRepoPicker ? (
+            // ── Phase 2: connected, selecting a repo ──────────────────────────
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-green-500">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Connected as @{connection.githubAccountName}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleDisconnect()}
+                  disabled={disconnecting}
+                  className="text-[10px] text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                >
+                  {disconnecting ? "Disconnecting…" : "Disconnect"}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Select the repository that will receive automatic commits after each build.
+              </p>
+              {repos === null && !fetchingRepos && (
+                <Button variant="outline" className="w-full" onClick={() => void fetchRepos()}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Load repositories
+                </Button>
+              )}
+              {fetchingRepos && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading repositories…
+                </div>
+              )}
+              {repoError && (
+                <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  {repoError}
+                </div>
+              )}
+              {repos !== null && repos.length > 0 && (
+                <div className="max-h-52 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+                  {repos.map((r) => (
+                    <button
+                      key={r.fullName}
+                      type="button"
+                      disabled={selecting}
+                      onClick={() => void handleSelectRepo(r)}
+                      className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-muted/30 transition-colors disabled:opacity-50"
+                    >
+                      <Lock
+                        className={cn(
+                          "h-3 w-3 mt-0.5 shrink-0",
+                          r.private ? "text-muted-foreground" : "text-muted-foreground/40",
+                        )}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-foreground truncate">
+                          {r.fullName}
+                        </div>
+                        {r.description && (
+                          <div className="text-[10px] text-muted-foreground truncate">
+                            {r.description}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {repos !== null && repos.length === 0 && (
+                <p className="text-xs text-muted-foreground">No repositories found.</p>
+              )}
+              {hasRepo && showRepoPicker && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => setShowRepoPicker(false)}
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
+          ) : (
+            // ── Phase 3: fully configured ──────────────────────────────────────
+            <div className="space-y-3">
+              <div className="bg-muted/40 rounded-lg px-3 py-2.5 space-y-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground w-14 shrink-0">Account</span>
+                  <span className="text-foreground font-mono">@{connection.githubAccountName}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground w-14 shrink-0">Repository</span>
+                  <a
+                    href={`https://github.com/${connection.repositoryOwner}/${connection.repositoryName}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline flex items-center gap-1 font-mono truncate"
+                  >
+                    {connection.repositoryOwner}/{connection.repositoryName}
+                    <ArrowUpRight className="h-3 w-3 shrink-0" />
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground w-14 shrink-0">Branch</span>
+                  <span className="text-foreground font-mono">{connection.defaultBranch}</span>
+                </div>
+                {connection.lastSyncAt && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-14 shrink-0">Last sync</span>
+                    <span className="text-foreground">
+                      {new Date(connection.lastSyncAt).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    {connection.syncStatus === "syncing" && (
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    )}
+                    {connection.syncStatus === "error" && (
+                      <span className="text-destructive">· sync failed</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/20 border border-border rounded-lg px-3 py-2">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary" />
+                Files are pushed automatically after every successful build.
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => {
+                    setShowRepoPicker(true);
+                    setRepos(null);
+                    void fetchRepos();
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                  Change repo
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive border-destructive/30 hover:border-destructive/60"
+                  disabled={disconnecting}
+                  onClick={() => void handleDisconnect()}
+                >
+                  {disconnecting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <XCircle className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
             </div>
           )}
         </div>
@@ -6327,8 +6355,8 @@ export function PublishingTab({
                   </div>
                 )}
 
-                {/* GitHub push panel */}
-                <GithubPushPanel projectId={projectId} />
+                {/* GitHub auto-sync panel */}
+                <GitHubAutoSyncPanel projectId={projectId} />
 
                 {webEnv === "testing" && (
                   <div className="space-y-2">

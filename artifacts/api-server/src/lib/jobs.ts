@@ -5079,7 +5079,15 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 autoCommitProjectId,
                 autoCommitProjectName,
               );
-              if (!result.ok) {
+              if (result.ok) {
+                if (result.sha) {
+                  void emitEvent(
+                    autoCommitTaskId,
+                    "github_sync",
+                    `Pushed to GitHub: ${result.sha.slice(0, 7)}`,
+                  );
+                }
+              } else {
                 logger.warn(
                   { projectId: autoCommitProjectId, taskId: autoCommitTaskId },
                   `GitHub auto-commit warning: ${result.message}`,

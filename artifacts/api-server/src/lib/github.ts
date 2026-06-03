@@ -145,7 +145,7 @@ export async function pushFiles(args: PushFilesArgs): Promise<{ sha: string; rep
 export async function autoCommitProjectFiles(
   projectId: number,
   projectName: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; sha: string | null } | { ok: false; message: string }> {
   const [conn] = await db
     .select()
     .from(projectGithubConnectionsTable)
@@ -153,7 +153,7 @@ export async function autoCommitProjectFiles(
     .limit(1);
 
   if (!conn?.repositoryOwner || !conn?.repositoryName) {
-    return { ok: true };
+    return { ok: true, sha: null };
   }
 
   let token: string;
@@ -169,7 +169,7 @@ export async function autoCommitProjectFiles(
     .where(eq(projectFilesTable.projectId, projectId));
 
   if (files.length === 0) {
-    return { ok: true };
+    return { ok: true, sha: null };
   }
 
   const timestamp = new Date().toISOString().replace("T", " ").slice(0, 16);
@@ -181,7 +181,7 @@ export async function autoCommitProjectFiles(
       .set({ syncStatus: "syncing", updatedAt: new Date() })
       .where(eq(projectGithubConnectionsTable.projectId, projectId));
 
-    await pushFiles({
+    const { sha } = await pushFiles({
       token,
       owner: conn.repositoryOwner,
       repo: conn.repositoryName,
@@ -200,10 +200,11 @@ export async function autoCommitProjectFiles(
         projectId,
         repo: `${conn.repositoryOwner}/${conn.repositoryName}`,
         filesCount: files.length,
+        sha,
       },
       "GitHub auto-commit succeeded",
     );
-    return { ok: true };
+    return { ok: true, sha };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     logger.warn({ err, projectId }, "GitHub auto-commit failed (non-fatal)");

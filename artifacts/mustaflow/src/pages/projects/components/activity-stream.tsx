@@ -56,6 +56,7 @@ type EventType =
   | "preview_server_reachable"
   | "preview_unreachable_503"
   | "preview_ready"
+  | "github_sync"
   | "completed"
   | "failed";
 
@@ -192,6 +193,12 @@ const EVENT_META: Record<
     icon: CheckCircle2,
     color: "text-green-400",
     label: "Preview ready",
+    pillStyle: "done",
+  },
+  github_sync: {
+    icon: GitBranch,
+    color: "text-emerald-400",
+    label: "GitHub sync",
     pillStyle: "done",
   },
   completed: { icon: CheckCircle2, color: "text-green-400", label: "Completed", pillStyle: "done" },
