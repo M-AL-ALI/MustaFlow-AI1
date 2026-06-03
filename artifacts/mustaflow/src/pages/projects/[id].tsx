@@ -930,6 +930,21 @@ function getPreflightSuggestion(message: string): {
   };
 }
 
+function getHttpStatus(error: unknown): number | null {
+  if (error && typeof error === "object" && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    return typeof status === "number" ? status : null;
+  }
+  return null;
+}
+
+function getLoadErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "The project could not be loaded. Please retry.";
+}
+
 export default function ProjectWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = parseInt(id, 10);
@@ -938,6 +953,8 @@ export default function ProjectWorkspacePage() {
     data: project,
     isLoading: projectLoading,
     isError: projectError,
+    error: projectLoadError,
+    refetch: refetchProject,
   } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId), retry: false },
   });
@@ -2867,17 +2884,41 @@ export default function ProjectWorkspacePage() {
     (t) => !["completed", "failed", "canceled"].includes(t.status),
   ).length;
 
-  if (projectError || (!projectLoading && !project))
+  if (projectError || (!projectLoading && !project)) {
+    const status = getHttpStatus(projectLoadError);
+    const isNotFound = status === 404 || (!projectError && !project);
+    const title = isNotFound
+      ? "Project not found"
+      : status === 401 || status === 403
+        ? "Session needs refresh"
+        : "Project failed to load";
+    const description = isNotFound
+      ? "We couldn't find a project with that ID."
+      : status === 401 || status === 403
+        ? "Your session could not be verified. Retry the request, or sign in again if it keeps failing."
+        : getLoadErrorMessage(projectLoadError);
+
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background gap-4 px-6 text-center">
         <div className="bg-destructive/10 p-4 rounded-full">
           <TerminalSquare className="h-8 w-8 text-destructive" />
         </div>
-        <h1 className="text-xl font-semibold">Project not found</h1>
-        <p className="text-muted-foreground max-w-md">We couldn't find a project with that ID.</p>
-        <Button onClick={() => window.history.back()}>Go back</Button>
+        <h1 className="text-xl font-semibold">{title}</h1>
+        <p className="text-muted-foreground max-w-md">{description}</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {!isNotFound && (
+            <Button onClick={() => void refetchProject()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Try again
+            </Button>
+          )}
+          <Button variant={isNotFound ? "default" : "outline"} asChild>
+            <Link href="/projects">Back to projects</Link>
+          </Button>
+        </div>
       </div>
     );
+  }
 
   if (!project)
     return (

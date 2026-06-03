@@ -43,7 +43,11 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useCreateProject, getListProjectsQueryKey } from "@workspace/api-client-react";
+import {
+  useCreateProject,
+  getListProjectsQueryKey,
+  getGetProjectQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { TemplatePicker } from "@/components/template-picker";
@@ -265,6 +269,7 @@ export default function HomePage() {
       },
       {
         onSuccess: (project) => {
+          queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           setLocation(`/projects/${project.id}`);
         },

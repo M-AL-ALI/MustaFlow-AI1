@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   useCreateProject,
   getListProjectsQueryKey,
+  getGetProjectQueryKey,
   ProjectInputStack,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -270,6 +271,7 @@ export function CreateProjectModal({
       },
       {
         onSuccess: (project) => {
+          queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           onOpenChange(false);
           setLocation(`/projects/${project.id}`);

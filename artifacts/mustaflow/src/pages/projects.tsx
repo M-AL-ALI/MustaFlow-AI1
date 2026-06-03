@@ -8,6 +8,7 @@ import {
   useGetSecurityBadgeCountsByProject,
   getGetSecurityBadgeCountsByProjectQueryKey,
   getListProjectsQueryKey,
+  getGetProjectQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -178,6 +179,7 @@ function HomeHero() {
       },
       {
         onSuccess: (project) => {
+          queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
           void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           setLocation(`/projects/${project.id}`);
         },
@@ -381,7 +383,12 @@ function HomeHero() {
 }
 
 export default function ProjectsPage() {
-  const { data: summary } = useGetProjectsSummary();
+  const {
+    data: summary,
+    isError: summaryError,
+    error: summaryLoadError,
+    refetch: refetchSummary,
+  } = useGetProjectsSummary();
   const { data: activity } = useGetRecentActivity();
   const { data: securityCounts } = useGetSecurityBadgeCountsByProject({
     query: { queryKey: getGetSecurityBadgeCountsByProjectQueryKey() },
@@ -395,14 +402,32 @@ export default function ProjectsPage() {
       <HomeHero />
 
       {/* Divider */}
-      {hasProjects && (
+      {(hasProjects || summaryError) && (
         <div className="px-6 md:px-8 max-w-7xl mx-auto">
           <div className="border-t border-border" />
         </div>
       )}
 
+      {summaryError && (
+        <div className="p-6 md:p-8 max-w-3xl mx-auto">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-5 text-center">
+            <FolderKanban className="h-8 w-8 text-destructive mx-auto mb-3" />
+            <h2 className="text-lg font-semibold mb-2">Could not load your projects</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              {summaryLoadError instanceof Error && summaryLoadError.message
+                ? summaryLoadError.message
+                : "The project list request failed. Retry the request, or sign in again if it keeps failing."}
+            </p>
+            <Button onClick={() => void refetchSummary()} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Projects + activity section */}
-      {hasProjects && (
+      {!summaryError && hasProjects && (
         <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 w-full">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-6">
