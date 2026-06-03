@@ -6328,6 +6328,185 @@ async function runPostWriteMigrationSync(
   return { ok: true };
 }
 
+type AgenticApplyPreviewResult = {
+  previewUpdated: boolean;
+  previewSyncQueued: boolean;
+  previewSyncFailed: boolean;
+  warnings: string[];
+};
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function startCommandForFiles(
+  files: Array<{ path: string; content: string }>,
+  stack: string | null | undefined,
+): string | null {
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (pkgFile) {
+    try {
+      const pkg = JSON.parse(pkgFile.content) as { scripts?: Record<string, string> };
+      const scripts = pkg.scripts ?? {};
+      if (scripts["dev:server"]) return "npm run dev:server";
+      if (scripts.start) return "npm start";
+      if (scripts.dev) return "npm run dev -- --host 0.0.0.0";
+      return "npm start";
+    } catch {
+      return "npm start";
+    }
+  }
+
+  if (stack === "python-flask" || files.some((f) => f.path === "app.py")) return "python app.py";
+  if (stack === "python-fastapi" || files.some((f) => f.path === "main.py"))
+    return "python main.py";
+  return null;
+}
+
+async function syncAgenticApplyPreview(opts: {
+  projectId: number;
+  taskId: number;
+  containerId: string | null;
+  containerStatus: string | null;
+  containerUrl: string | null;
+  stack: string | null | undefined;
+  files: Array<{ path: string; content: string }>;
+  removedPaths: string[];
+  packageManifestChanged: boolean;
+}): Promise<AgenticApplyPreviewResult> {
+  const base: AgenticApplyPreviewResult = {
+    previewUpdated: false,
+    previewSyncQueued: false,
+    previewSyncFailed: false,
+    warnings: [],
+  };
+
+  if (!opts.containerUrl) {
+    return { ...base, previewUpdated: true, previewSyncQueued: true };
+  }
+
+  if (!opts.containerId) {
+    return {
+      ...base,
+      previewSyncFailed: true,
+      warnings: [
+        "Preview sync skipped: this agentic project has a container URL but no container id.",
+      ],
+    };
+  }
+
+  const {
+    startContainer,
+    getContainerStatus,
+    syncFilesToContainer,
+    execInContainer,
+    npmInstallInBackground,
+  } = await import("./container");
+
+  try {
+    if (opts.containerStatus !== "running") {
+      await emitEvent(opts.taskId, "narration", "Waking container for applied changes…");
+      await startContainer(opts.containerId, opts.projectId);
+      const deadline = Date.now() + 45_000;
+      while (Date.now() < deadline) {
+        const status = await getContainerStatus(opts.containerId);
+        if (status === "running") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
+
+    await emitEvent(opts.taskId, "narration", "Syncing applied files to container…");
+    await syncFilesToContainer(opts.containerId, opts.projectId, opts.files, true);
+
+    if (opts.removedPaths.length > 0) {
+      const rmArgs = opts.removedPaths.map((path) => shellQuote(`/app/${path}`)).join(" ");
+      await execInContainer(opts.containerId, ["sh", "-c", `rm -rf -- ${rmArgs}`], opts.projectId);
+    }
+
+    const hasPackageJson = opts.files.some((f) => f.path === "package.json");
+    let nodeModulesMissing = false;
+    if (hasPackageJson) {
+      const nodeModulesCheck = await execInContainer(
+        opts.containerId,
+        ["sh", "-c", "test -d /app/node_modules && echo __PRESENT__ || echo __MISSING__"],
+        opts.projectId,
+      );
+      nodeModulesMissing = !nodeModulesCheck.output.includes("__PRESENT__");
+    }
+
+    if (hasPackageJson && (opts.packageManifestChanged || nodeModulesMissing)) {
+      await emitEvent(opts.taskId, "narration", "Installing container dependencies…");
+      const installResult = await npmInstallInBackground(opts.containerId, opts.projectId, {
+        wallClockCapMs: 6 * 60 * 1000,
+        onMachineRestarted: async () => {
+          await syncFilesToContainer(opts.containerId!, opts.projectId, opts.files, true);
+        },
+      });
+      if (!installResult.ok) {
+        const warning = `Preview sync failed: dependency install did not complete (${installResult.output.slice(0, 300)}).`;
+        publishPreviewSyncFailed(opts.projectId, warning);
+        return { ...base, previewSyncFailed: true, warnings: [warning] };
+      }
+    }
+
+    const hasRequirements = opts.files.some((f) => f.path === "requirements.txt");
+    if (hasRequirements) {
+      await emitEvent(opts.taskId, "narration", "Installing Python dependencies…");
+      const pipResult = await execInContainer(
+        opts.containerId,
+        ["sh", "-c", "cd /app && pip install -r requirements.txt"],
+        opts.projectId,
+      );
+      if (!pipResult.ok) {
+        const warning = `Preview sync failed: Python dependency install failed (${pipResult.output.slice(0, 300)}).`;
+        publishPreviewSyncFailed(opts.projectId, warning);
+        return { ...base, previewSyncFailed: true, warnings: [warning] };
+      }
+    }
+
+    const startCommand = startCommandForFiles(opts.files, opts.stack);
+    if (startCommand) {
+      await emitEvent(opts.taskId, "narration", "Restarting container app server…");
+      await execInContainer(
+        opts.containerId,
+        [
+          "sh",
+          "-c",
+          [
+            "cd /app",
+            "pkill -f 'node ' 2>/dev/null || true",
+            "pkill -f 'tsx ' 2>/dev/null || true",
+            "pkill -f 'vite' 2>/dev/null || true",
+            "pkill -f 'next' 2>/dev/null || true",
+            "export PORT=3000",
+            `nohup ${startCommand} >/tmp/app.log 2>&1 &`,
+          ].join(" && "),
+        ],
+        opts.projectId,
+      );
+    }
+
+    const previewCheck = await pollPreviewReachability(opts.taskId, opts.containerUrl, {
+      maxWaitMs: 75_000,
+      intervalMs: 5_000,
+    });
+    if (previewCheck.reachable) {
+      publishPreviewReady(opts.projectId);
+      return { ...base, previewUpdated: true };
+    }
+
+    const warning = `Preview sync failed: container health check did not pass (${previewCheck.httpStatus !== null ? `HTTP ${previewCheck.httpStatus}` : "no response"}).`;
+    publishPreviewSyncFailed(opts.projectId, warning);
+    return { ...base, previewSyncFailed: true, warnings: [warning] };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const warning = `Preview sync failed: ${message.slice(0, 300)}`;
+    logger.warn({ err, projectId: opts.projectId, taskId: opts.taskId }, warning);
+    publishPreviewSyncFailed(opts.projectId, warning);
+    return { ...base, previewSyncFailed: true, warnings: [warning] };
+  }
+}
+
 export async function applyTaskAgentStaging(taskId: number, projectId: number): Promise<void> {
   const [task] = await db
     .select()
@@ -6638,13 +6817,27 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   // This guarantees test #10 and #11 in the preview-security test suite.
   void emitEvent(taskId, "narration", `Syncing ${builderFiles.length} file(s) to your project…`);
   const currentFileRows = await db
-    .select({ path: projectFilesTable.path })
+    .select({ path: projectFilesTable.path, content: projectFilesTable.content })
     .from(projectFilesTable)
     .where(eq(projectFilesTable.projectId, projectId));
   const appliedPathSet = new Set(builderFiles.map((f) => f.path));
   const removedPaths = currentFileRows
     .map((row) => row.path)
     .filter((path) => !appliedPathSet.has(path));
+  const previousContentByPath = new Map(
+    currentFileRows.map((row) => [row.path, row.content ?? ""] as const),
+  );
+  const packageManifestChanged = builderFiles.some((file) =>
+    [
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "requirements.txt",
+    ].includes(file.path)
+      ? previousContentByPath.get(file.path) !== file.content
+      : false,
+  );
   await writeFiles(projectId, builderFiles, true);
   emitFilesChangedEvent(taskId, projectId, builderFiles, removedPaths, "apply");
 
@@ -6664,6 +6857,18 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       );
     }
   }
+
+  const applyPreviewResult = await syncAgenticApplyPreview({
+    projectId,
+    taskId,
+    containerId: project.containerId,
+    containerStatus: project.containerStatus,
+    containerUrl: project.containerUrl,
+    stack: project.stack,
+    files: builderFiles.map((file) => ({ path: file.path, content: file.content })),
+    removedPaths,
+    packageManifestChanged,
+  });
 
   // Save version snapshot
   void emitEvent(taskId, "narration", "Saving version snapshot…");
@@ -6716,13 +6921,16 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       warnings: [],
       integrationsNeeded: [],
     }),
-    // Static confirmation: Apply has durably replaced project_files. Agentic
-    // apply stays false here because no /healthz confirmation runs in this path.
-    previewUpdated: !project.containerUrl,
-    previewSyncQueued: !project.containerUrl ? true : report?.previewSyncQueued,
+    previewUpdated: applyPreviewResult.previewUpdated,
+    previewSyncQueued: applyPreviewResult.previewSyncQueued,
+    previewSyncFailed: applyPreviewResult.previewSyncFailed || report?.previewSyncFailed,
     // Merge any post-write migration warnings (item 2) into the report so the
     // user sees them in the task result card even though Apply still succeeded.
-    warnings: [...((report?.warnings ?? []) as string[]), ...postWriteWarnings],
+    warnings: [
+      ...((report?.warnings ?? []) as string[]),
+      ...postWriteWarnings,
+      ...applyPreviewResult.warnings,
+    ],
     versionId: version?.id ?? null,
   };
 

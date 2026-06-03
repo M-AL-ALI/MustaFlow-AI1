@@ -543,9 +543,8 @@ export function PreviewTab({
   const postBuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [rollbackBanner, setRollbackBanner] = useState<{ crashMsg: string } | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
-  // Agentic proxy-unavailable detection: set to true when the preview endpoint
-  // returns 502, indicating the Fly proxy isn't reachable in this environment.
-  const [proxyUnavailable, setProxyUnavailable] = useState(false);
+  type PreviewIssue = "proxy-unavailable" | "server-unreachable" | "container-error";
+  const [previewIssue, setPreviewIssue] = useState<PreviewIssue | null>(null);
 
   const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
@@ -682,12 +681,12 @@ export function PreviewTab({
     }
   }, [project.status, isReactVite, hasFiles, isAgentic, containerLive]);
 
-  // Detect proxy-unavailable (502) for agentic projects so the UI can surface
-  // a clear message instead of silently showing the raw error HTML in the iframe.
-  // Only probe when the container is supposed to be running; clear the flag otherwise.
+  // Detect agentic preview failure class from the backend header. A 502 can mean
+  // either the Fly proxy is unreachable or the app server crashed; keep those
+  // separate so the UI suggests the right action.
   useEffect(() => {
     if (!isAgentic || containerStatus !== "running") {
-      setProxyUnavailable(false);
+      setPreviewIssue(null);
       return;
     }
     let cancelled = false;
@@ -698,11 +697,20 @@ export function PreviewTab({
           credentials: "include",
         });
         if (!cancelled) {
-          setProxyUnavailable(res.status === 502);
+          const state = res.headers.get("X-MustaFlow-Preview-State");
+          if (
+            state === "proxy-unavailable" ||
+            state === "server-unreachable" ||
+            state === "container-error"
+          ) {
+            setPreviewIssue(state);
+          } else {
+            setPreviewIssue(null);
+          }
         }
       } catch {
         // Network error — clear any stale flag so the iframe can attempt to load.
-        if (!cancelled) setProxyUnavailable(false);
+        if (!cancelled) setPreviewIssue(null);
       }
     })();
     return () => {
@@ -2324,27 +2332,36 @@ export function PreviewTab({
             <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
             <span className="text-sm">Loading preview…</span>
           </div>
-        ) : isAgentic && proxyUnavailable ? (
-          /* Proxy-unavailable empty state */
+        ) : isAgentic && previewIssue ? (
+          /* Agentic preview issue empty state */
           <div className="flex flex-col items-center justify-center h-full max-w-sm text-center gap-5 py-12">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
               <ServerCrash className="h-8 w-8 text-amber-500/60" />
             </div>
             <div className="space-y-2">
               <h3 className="text-base font-semibold text-foreground">
-                Container preview is unavailable in this development environment
+                {previewIssue === "proxy-unavailable"
+                  ? "Container preview is unavailable in this development environment"
+                  : "Container server is not responding"}
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                The app files are still saved in MustaFlow. Use the test preview tools to start,
-                retry, or inspect the container runtime.
+                {previewIssue === "proxy-unavailable"
+                  ? "The app files are still saved in MustaFlow. Use the test preview tools to start, retry, or inspect the container runtime."
+                  : "The app files are saved, but the container app has not passed its health check. Inspect logs, fix startup, then retry the preview."}
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {onNavigateToTestEnv && (
+                {previewIssue === "proxy-unavailable" && onNavigateToTestEnv && (
                   <Button onClick={onNavigateToTestEnv} size="sm" className="gap-2">
                     <Zap className="h-4 w-4" />
                     Start test preview
+                  </Button>
+                )}
+                {previewIssue !== "proxy-unavailable" && (onAutoSendPrompt ?? onFixPrompt) && (
+                  <Button onClick={requestServerStartupFix} size="sm" className="gap-2">
+                    <Wrench className="h-4 w-4" />
+                    Fix server startup
                   </Button>
                 )}
                 <Button onClick={refresh} size="sm" variant="secondary" className="gap-2">
@@ -2361,7 +2378,7 @@ export function PreviewTab({
                   View logs
                 </Button>
               </div>
-              {(onAutoSendPrompt ?? onFixPrompt) && (
+              {previewIssue === "proxy-unavailable" && (onAutoSendPrompt ?? onFixPrompt) && (
                 <Button
                   onClick={requestServerStartupFix}
                   size="sm"

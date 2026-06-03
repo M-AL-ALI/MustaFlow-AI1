@@ -12,6 +12,8 @@ const readSource = (path: string): string => readFileSync(resolve(repoRoot, path
 const jobsSource = readSource("artifacts/api-server/src/lib/jobs.ts");
 const versionsSource = readSource("artifacts/api-server/src/routes/versions.ts");
 const filesSource = readSource("artifacts/api-server/src/routes/files.ts");
+const previewEnvSource = readSource("artifacts/api-server/src/routes/preview-env.ts");
+const livePreviewProxySource = readSource("artifacts/api-server/src/lib/livePreviewProxy.ts");
 const builderSource = readSource("artifacts/api-server/src/lib/builder.ts");
 const agentLoopSource = readSource("artifacts/api-server/src/lib/agent-loop.ts");
 
@@ -150,5 +152,28 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(versionsSource).toContain("data: filesChangedPayload");
     expect(jobsSource).not.toContain("filesMap[f.path] = f.content");
     expect(versionsSource).not.toContain("filesMap[f.path] = f.content");
+  });
+
+  it("preview proxy distinguishes proxy and app-server failures", () => {
+    expect(livePreviewProxySource).toContain("X-MustaFlow-Preview-State");
+    expect(livePreviewProxySource).toContain('"proxy-unavailable"');
+    expect(livePreviewProxySource).toContain('"server-unreachable"');
+    expect(livePreviewProxySource).toContain("isFlyProxyReachable");
+    expect(livePreviewProxySource).not.toContain(
+      "Deploy to production to test agentic app previews",
+    );
+  });
+
+  it("test preview uses bounded background installs instead of direct npm install", () => {
+    expect(previewEnvSource).toContain("npmInstallInBackground");
+    expect(previewEnvSource).toContain("wallClockCapMs: 6 * 60 * 1000");
+    expect(previewEnvSource).not.toContain('["npm", "install", "--prefer-offline", "--no-audit"]');
+  });
+
+  it("Task Agent Apply syncs agentic containers and confirms health", () => {
+    expect(jobsSource).toContain("syncAgenticApplyPreview");
+    expect(jobsSource).toContain("Syncing applied files to container");
+    expect(jobsSource).toContain("pollPreviewReachability");
+    expect(jobsSource).toContain("publishPreviewReady(opts.projectId)");
   });
 });

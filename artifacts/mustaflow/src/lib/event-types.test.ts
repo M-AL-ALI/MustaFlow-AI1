@@ -71,6 +71,9 @@ describe("project_files_changed frontend payload parsing", () => {
     expect(previewTabSource).toContain("Retry preview");
     expect(previewTabSource).toContain("View logs");
     expect(previewTabSource).toContain("Fix server startup");
+    expect(previewTabSource).toContain('headers.get("X-MustaFlow-Preview-State")');
+    expect(previewTabSource).toContain('"server-unreachable"');
+    expect(previewTabSource).toContain("Container server is not responding");
     expect(previewTabSource).not.toContain("deploy to production");
     expect(previewTabSource).not.toContain("Go to Publishing tab to publish");
   });

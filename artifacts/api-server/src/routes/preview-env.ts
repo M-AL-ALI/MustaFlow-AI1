@@ -28,6 +28,7 @@ import {
   syncFilesToContainer,
   execInContainer,
   getContainerStatus,
+  npmInstallInBackground,
 } from "../lib/container";
 import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
@@ -47,6 +48,30 @@ function isFullStack(project: {
   builderMode: string;
 }): boolean {
   return !!project.containerId || project.builderMode === "agentic";
+}
+
+function startCommandForSnapshot(
+  stack: string | null | undefined,
+  files: Array<{ path: string; content: string | null }>,
+): string | null {
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (pkgFile?.content) {
+    try {
+      const pkg = JSON.parse(pkgFile.content) as { scripts?: Record<string, string> };
+      const scripts = pkg.scripts ?? {};
+      if (scripts["dev:server"]) return "npm run dev:server";
+      if (scripts.start) return "npm start";
+      if (scripts.dev) return "npm run dev -- --host 0.0.0.0";
+    } catch {
+      return "npm start";
+    }
+    return "npm start";
+  }
+
+  if (stack === "python-flask" || files.some((f) => f.path === "app.py")) return "python app.py";
+  if (stack === "python-fastapi" || files.some((f) => f.path === "main.py"))
+    return "python main.py";
+  return null;
 }
 
 /** Generate a cryptographically random session ID (16 hex chars). */
@@ -683,31 +708,55 @@ async function startTestContainer(
     throw new Error(`Test container machine did not reach started state within 60 s`);
   }
 
+  const snapshotFiles = files.map((f) => ({ path: f.path, content: f.content ?? "" }));
+
   // Sync snapshot files.
-  await syncFilesToContainer(
-    containerInfo.containerId,
-    projectId,
-    files.map((f) => ({ path: f.path, content: f.content ?? "" })),
-  );
+  await syncFilesToContainer(containerInfo.containerId, projectId, snapshotFiles);
 
   // For Node.js projects: install dependencies and start the app.
   const hasPackageJson = files.some((f) => f.path === "package.json");
   if (hasPackageJson) {
-    await execInContainer(
-      containerInfo.containerId,
-      ["npm", "install", "--prefer-offline", "--no-audit"],
-      projectId,
-    );
+    const installResult = await npmInstallInBackground(containerInfo.containerId, projectId, {
+      wallClockCapMs: 6 * 60 * 1000,
+      onMachineRestarted: async () => {
+        await syncFilesToContainer(containerInfo.containerId, projectId, snapshotFiles);
+      },
+    });
+    if (!installResult.ok) {
+      await destroyContainer(containerInfo.containerId, projectId).catch(() => {});
+      throw new Error(
+        `Test container dependency install failed: ${installResult.output.slice(0, 500)}`,
+      );
+    }
     // Run build if a build script is present (non-fatal if it fails — app may not need it).
     await execInContainer(containerInfo.containerId, ["npm", "run", "build"], projectId).catch(
       () => {},
     );
   }
 
+  const hasRequirements = files.some((f) => f.path === "requirements.txt");
+  if (hasRequirements) {
+    const pipResult = await execInContainer(
+      containerInfo.containerId,
+      ["sh", "-c", "cd /app && pip install -r requirements.txt"],
+      projectId,
+    );
+    if (!pipResult.ok) {
+      await destroyContainer(containerInfo.containerId, projectId).catch(() => {});
+      throw new Error(`Test container Python dependency install failed: ${pipResult.output}`);
+    }
+  }
+
+  const startCommand = startCommandForSnapshot(project.stack, files);
+  if (!startCommand) {
+    await destroyContainer(containerInfo.containerId, projectId).catch(() => {});
+    throw new Error("Test container startup failed: no supported start command was found.");
+  }
+
   // Start the app process in the background.
   await execInContainer(
     containerInfo.containerId,
-    ["/bin/sh", "-c", "cd /app && nohup npm start &>/tmp/app.log &"],
+    ["/bin/sh", "-c", `cd /app && export PORT=3000 && nohup ${startCommand} &>/tmp/app.log &`],
     projectId,
   );
 
