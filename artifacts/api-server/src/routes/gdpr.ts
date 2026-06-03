@@ -26,6 +26,7 @@ import {
   orgMembersTable,
   userPreferencesTable,
   userSubscriptionsTable,
+  oraTranscriptsTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { enqueueGdprErasure, isDurableQueueReady } from "../lib/durable-queue";
@@ -105,9 +106,11 @@ router.get("/me/export", async (req, res): Promise<void> => {
         "  workspaces.json        — Workspace metadata",
         "  billing.json           — Credit transaction history and subscription details",
         "  knowledge.json         — Your knowledge vault entries",
+        "  ora-chat.json          — Your Ora AI assistant conversation history (text only)",
         "",
         "Secret values are intentionally excluded for security.",
         "Signed upload download URLs expire 7 days from export time.",
+        "Generated file binaries are excluded from ora-chat.json; only file metadata is included.",
         "To request account deletion or cancel a pending erasure: privacy@mustaflow.app",
         "Data Processing Agreement: https://mustaflow.app/privacy",
       ].join("\n"),
@@ -384,6 +387,29 @@ router.get("/me/export", async (req, res): Promise<void> => {
       .where(eq(knowledgeEntriesTable.userId, userId));
 
     addJson("knowledge.json", knowledge);
+
+    // ── Ora chat transcript — text-only; strip any generatedFile.fileData ──
+    const oraRow = await db
+      .select({ messages: oraTranscriptsTable.messages, updatedAt: oraTranscriptsTable.updatedAt })
+      .from(oraTranscriptsTable)
+      .where(eq(oraTranscriptsTable.userId, userId))
+      .limit(1);
+
+    const oraMessages = ((oraRow[0]?.messages as unknown[]) ?? []).map((msg: unknown) => {
+      if (!msg || typeof msg !== "object") return msg;
+      const m = msg as Record<string, unknown>;
+      if (m.generatedFile && typeof m.generatedFile === "object") {
+        const { fileData: _fileData, ...rest } = m.generatedFile as Record<string, unknown>;
+        return { ...m, generatedFile: rest };
+      }
+      return m;
+    });
+
+    addJson("ora-chat.json", {
+      note: "Ora AI assistant conversation history. Generated file binaries are excluded; only file metadata (fileName, mimeType, format) is included.",
+      updatedAt: oraRow[0]?.updatedAt ?? null,
+      messages: oraMessages,
+    });
 
     zip.end();
   } catch (err) {

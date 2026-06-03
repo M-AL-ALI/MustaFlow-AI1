@@ -6,18 +6,35 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
-const generatedFileSchema = z.object({
-  fileName: z.string(),
-  fileData: z.string(),
-  mimeType: z.string(),
-  format: z.string(),
-});
+const generatedFileSchema = z
+  .object({
+    fileName: z.string(),
+    fileData: z.string().optional(),
+    mimeType: z.string(),
+    format: z.string(),
+  })
+  .transform(({ fileData: _fileData, ...rest }) => rest);
+
+const datasetResultSchema = z
+  .object({
+    summary: z.string().optional(),
+    columnCount: z.number().optional(),
+    rowCount: z.number().optional(),
+    truncated: z.boolean().optional(),
+  })
+  .catchall(z.unknown())
+  .transform(({ summary, columnCount, rowCount, truncated }) => ({
+    summary,
+    columnCount,
+    rowCount,
+    truncated,
+  }));
 
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32000),
   handoffCta: z.boolean().optional(),
-  datasetResult: z.unknown().optional(),
+  datasetResult: datasetResultSchema.optional(),
   messageKind: z.enum(["image-analysis", "document-analysis"]).optional(),
   suggestions: z.array(z.string()).optional(),
   generatedFile: generatedFileSchema.optional(),
@@ -26,10 +43,11 @@ const messageSchema = z.object({
 });
 
 const saveBodySchema = z.object({
-  messages: z.array(messageSchema).max(200),
+  messages: z.array(messageSchema).max(100),
 });
 
 const MAX_STORED = 100;
+const MAX_PAYLOAD_BYTES = 256_000;
 
 router.get("/ora/transcript", async (req, res) => {
   const userId = req.userId!;
@@ -55,6 +73,14 @@ router.post("/ora/transcript", async (req, res) => {
   }
 
   const messages = parsed.data.messages.slice(-MAX_STORED);
+
+  const payloadSize = Buffer.byteLength(JSON.stringify(messages), "utf8");
+  if (payloadSize > MAX_PAYLOAD_BYTES) {
+    res.status(413).json({
+      error: `Transcript payload too large (${payloadSize} bytes). Maximum allowed is ${MAX_PAYLOAD_BYTES} bytes after stripping.`,
+    });
+    return;
+  }
 
   try {
     await db

@@ -32,6 +32,7 @@ import {
   userPreferencesTable,
   userSubscriptionsTable,
   personalAccessTokensTable,
+  oraTranscriptsTable,
 } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
@@ -129,7 +130,11 @@ export async function runGdprErasure(userId: string): Promise<void> {
   // ── 9. Hard-delete personal access tokens ────────────────────────────────
   await db.delete(personalAccessTokensTable).where(eq(personalAccessTokensTable.userId, userId));
 
-  // ── 10. Hard-delete user preferences (last — contains erasure metadata) ──
+  // ── 10. Hard-delete Ora transcript ───────────────────────────────────────
+  await db.delete(oraTranscriptsTable).where(eq(oraTranscriptsTable.userId, userId));
+  logger.info({ userId }, "gdpr-erasure: ora transcript hard-deleted");
+
+  // ── 11. Hard-delete user preferences (last — contains erasure metadata) ──
   await db.delete(userPreferencesTable).where(eq(userPreferencesTable.userId, userId));
 
   logger.info({ userId }, "gdpr-erasure: hard-delete complete");

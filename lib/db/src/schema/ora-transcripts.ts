@@ -7,6 +7,7 @@ export const oraTranscriptsTable = pgTable(
     userId: text("user_id").notNull(),
     messages: jsonb("messages").notNull().default([]),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("ora_transcripts_user_id_idx").on(t.userId)],
 );

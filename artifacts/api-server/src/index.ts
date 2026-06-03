@@ -14,6 +14,7 @@ import { failStuckBackgroundTasksOnBoot } from "./lib/jobs";
 import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
 import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
 import { startContainerLogRetentionScheduler } from "./lib/container-log-retention";
+import { startOraTranscriptRetentionScheduler } from "./lib/ora-transcript-retention";
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 import {
   validatePreviewWebSocketUpgrade,
@@ -94,6 +95,7 @@ void resumeContainerLogTailersOnBoot();
 // projects don't grow the table without bound. Caps by age (default 14 days)
 // and by per-project row count (default 10k).
 startContainerLogRetentionScheduler();
+startOraTranscriptRetentionScheduler();
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);

@@ -2760,6 +2760,18 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-transcript-cleanup ────────────────────────────────────────
+  {
+    name: "migrate-ora-transcript-cleanup",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(
+        `ALTER TABLE ora_transcripts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**
