@@ -4384,6 +4384,59 @@ export interface ImageEditRequest {
   projectId?: number;
 }
 
+export interface ProjectHealthTaskMetrics {
+  total: number;
+  succeeded: number;
+  failed: number;
+  successRate: number;
+  avgDurationMs?: number | null;
+  p50DurationMs?: number | null;
+  p95DurationMs?: number | null;
+  p99DurationMs?: number | null;
+}
+
+export type ProjectHealthWindowWindow = typeof ProjectHealthWindowWindow[keyof typeof ProjectHealthWindowWindow];
+
+
+export const ProjectHealthWindowWindow = {
+  '24h': '24h',
+  '7d': '7d',
+  '30d': '30d',
+} as const;
+
+export type ProjectHealthWindowDeployments = {
+  published: number;
+  unpublished: number;
+};
+
+export interface ProjectHealthWindow {
+  window: ProjectHealthWindowWindow;
+  windowLabel: string;
+  tasks: ProjectHealthTaskMetrics;
+  deployments: ProjectHealthWindowDeployments;
+}
+
+export type ProjectHealthIncidentKind = typeof ProjectHealthIncidentKind[keyof typeof ProjectHealthIncidentKind];
+
+
+export const ProjectHealthIncidentKind = {
+  build_failure: 'build_failure',
+  publish_failure: 'publish_failure',
+} as const;
+
+export interface ProjectHealthIncident {
+  at: string;
+  kind: ProjectHealthIncidentKind;
+  message: string;
+}
+
+export interface ProjectHealthResponse {
+  projectId: number;
+  generatedAt: string;
+  windows: ProjectHealthWindow[];
+  recentIncidents: ProjectHealthIncident[];
+}
+
 export interface DeveloperModeRuntimeStatus {
   flyApiTokenPresent: boolean;
   neonApiKeyPresent: boolean;

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import {
   Activity,
   CheckCircle2,
@@ -9,55 +9,28 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  useGetProjectHealth,
+  type ProjectHealthWindow,
+} from "@workspace/api-client-react";
 
 type Window = "24h" | "7d" | "30d";
 
-interface TaskMetrics {
-  total: number;
-  succeeded: number;
-  failed: number;
-  successRate: number;
-  avgDurationMs: number | null;
-  p50DurationMs: number | null;
-  p95DurationMs: number | null;
-  p99DurationMs: number | null;
-}
-
-interface WindowMetrics {
-  window: Window;
-  windowLabel: string;
-  tasks: TaskMetrics;
-  deployments: { published: number; unpublished: number };
-}
-
-interface RecentIncident {
-  at: string;
-  kind: "build_failure" | "publish_failure";
-  message: string;
-}
-
-interface HealthData {
-  projectId: number;
-  generatedAt: string;
-  windows: WindowMetrics[];
-  recentIncidents: RecentIncident[];
-}
-
-function formatMs(ms: number | null): string {
-  if (ms === null) return "—";
+function formatMs(ms: number | null | undefined): string {
+  if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function LatencyRow({ label, value }: { label: string; value: number | null }) {
-  const ok = value !== null && value < 5000;
+function LatencyRow({ label, value }: { label: string; value: number | null | undefined }) {
+  const ok = value != null && value < 5000;
   return (
     <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span
         className={cn(
           "text-xs font-mono font-medium",
-          ok ? "text-green-400" : value !== null ? "text-yellow-400" : "text-muted-foreground",
+          ok ? "text-green-400" : value != null ? "text-yellow-400" : "text-muted-foreground",
         )}
       >
         {formatMs(value)}
@@ -93,32 +66,10 @@ function MetricCard({
 }
 
 export function HealthTab({ projectId }: { projectId: number }) {
-  const [data, setData] = useState<HealthData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error, refetch } = useGetProjectHealth(projectId);
   const [window, setWindow] = useState<Window>("24h");
 
-  const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-  const fetchHealth = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${basePath}/api/projects/${projectId}/health`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      setData((await res.json()) as HealthData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load health data");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, basePath]);
-
-  useEffect(() => {
-    void fetchHealth();
-  }, [fetchHealth]);
-
-  const wm = data?.windows.find((w) => w.window === window);
+  const wm: ProjectHealthWindow | undefined = data?.windows.find((w) => w.window === window);
 
   const successAccent = !wm
     ? "green"
@@ -129,6 +80,12 @@ export function HealthTab({ projectId }: { projectId: number }) {
         : "red";
 
   const WINDOWS: Window[] = ["24h", "7d", "30d"];
+
+  const errorMessage = error
+    ? error instanceof Error
+      ? error.message
+      : "Failed to load health data"
+    : null;
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-5">
@@ -155,22 +112,22 @@ export function HealthTab({ projectId }: { projectId: number }) {
             ))}
           </div>
           <button
-            onClick={() => void fetchHealth()}
-            disabled={loading}
+            onClick={() => void refetch()}
+            disabled={isLoading}
             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground transition-colors"
           >
-            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+            <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
           </button>
         </div>
       </div>
 
-      {error && (
+      {errorMessage && (
         <div className="p-3 rounded-lg border bg-red-500/10 border-red-500/20 text-red-400 text-xs">
-          {error}
+          {errorMessage}
         </div>
       )}
 
-      {loading && !data && (
+      {isLoading && !data && (
         <div className="flex items-center justify-center py-16">
           <RefreshCw className="h-5 w-5 text-muted-foreground animate-spin" />
         </div>

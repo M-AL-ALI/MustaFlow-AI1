@@ -410,6 +410,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/TriggerChecksResult"
 
+  /projects/{id}/health:
+    get:
+      operationId: getProjectHealth
+      tags: [projects]
+      summary: Get aggregated build metrics, task failure rates, and recent incidents for a project.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Project health metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectHealthResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /security/cve:
     get:
       operationId: listCveFindings
@@ -10494,6 +10514,61 @@ components:
           default: standard
         projectId:
           type: integer
+
+    ProjectHealthTaskMetrics:
+      type: object
+      required: [total, succeeded, failed, successRate]
+      properties:
+        total: { type: integer }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        successRate: { type: number }
+        avgDurationMs: { type: integer, nullable: true }
+        p50DurationMs: { type: integer, nullable: true }
+        p95DurationMs: { type: integer, nullable: true }
+        p99DurationMs: { type: integer, nullable: true }
+
+    ProjectHealthWindow:
+      type: object
+      required: [window, windowLabel, tasks, deployments]
+      properties:
+        window:
+          type: string
+          enum: ["24h", "7d", "30d"]
+        windowLabel: { type: string }
+        tasks:
+          $ref: "#/components/schemas/ProjectHealthTaskMetrics"
+        deployments:
+          type: object
+          required: [published, unpublished]
+          properties:
+            published: { type: integer }
+            unpublished: { type: integer }
+
+    ProjectHealthIncident:
+      type: object
+      required: [at, kind, message]
+      properties:
+        at: { type: string, format: date-time }
+        kind:
+          type: string
+          enum: [build_failure, publish_failure]
+        message: { type: string }
+
+    ProjectHealthResponse:
+      type: object
+      required: [projectId, generatedAt, windows, recentIncidents]
+      properties:
+        projectId: { type: integer }
+        generatedAt: { type: string, format: date-time }
+        windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectHealthWindow"
+        recentIncidents:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectHealthIncident"
 
     DeveloperModeRuntimeStatus:
       type: object

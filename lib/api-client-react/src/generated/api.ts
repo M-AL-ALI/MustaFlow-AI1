@@ -211,6 +211,7 @@ import type {
   ProjectFileRename,
   ProjectFileSummary,
   ProjectFileUpdate,
+  ProjectHealthResponse,
   ProjectInput,
   ProjectSuggestion,
   ProjectUpdate,
@@ -1608,6 +1609,83 @@ export const useTriggerCheckRuns = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getTriggerCheckRunsMutationOptions(options));
     }
+
+export const getGetProjectHealthUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/health`
+}
+
+/**
+ * @summary Get aggregated build metrics, task failure rates, and recent incidents for a project.
+ */
+export const getProjectHealth = async (id: number, options?: RequestInit): Promise<ProjectHealthResponse> => {
+
+  return customFetch<ProjectHealthResponse>(getGetProjectHealthUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectHealthQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/health`
+    ] as const;
+    }
+
+
+export const getGetProjectHealthQueryOptions = <TData = Awaited<ReturnType<typeof getProjectHealth>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectHealthQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectHealth>>> = ({ signal }) => getProjectHealth(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectHealth>>>
+export type GetProjectHealthQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get aggregated build metrics, task failure rates, and recent incidents for a project.
+ */
+
+export function useGetProjectHealth<TData = Awaited<ReturnType<typeof getProjectHealth>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectHealthQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListCveFindingsUrl = (params?: ListCveFindingsParams,) => {
   const normalizedParams = new URLSearchParams();

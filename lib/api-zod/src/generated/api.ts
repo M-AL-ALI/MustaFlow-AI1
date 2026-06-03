@@ -375,6 +375,42 @@ export const TriggerCheckRunsResponse = zod.object({
 
 
 /**
+ * @summary Get aggregated build metrics, task failure rates, and recent incidents for a project.
+ */
+export const GetProjectHealthParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectHealthResponse = zod.object({
+  "projectId": zod.number(),
+  "generatedAt": zod.coerce.date(),
+  "windows": zod.array(zod.object({
+  "window": zod.enum(['24h', '7d', '30d']),
+  "windowLabel": zod.string(),
+  "tasks": zod.object({
+  "total": zod.number(),
+  "succeeded": zod.number(),
+  "failed": zod.number(),
+  "successRate": zod.number(),
+  "avgDurationMs": zod.number().nullish(),
+  "p50DurationMs": zod.number().nullish(),
+  "p95DurationMs": zod.number().nullish(),
+  "p99DurationMs": zod.number().nullish()
+}),
+  "deployments": zod.object({
+  "published": zod.number(),
+  "unpublished": zod.number()
+})
+})),
+  "recentIncidents": zod.array(zod.object({
+  "at": zod.coerce.date(),
+  "kind": zod.enum(['build_failure', 'publish_failure']),
+  "message": zod.string()
+}))
+})
+
+
+/**
  * @summary List stored CVE findings from the last npm audit scan.
  */
 export const ListCveFindingsQueryParams = zod.object({
