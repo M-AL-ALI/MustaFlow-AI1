@@ -360,8 +360,15 @@ export async function customFetch<T = unknown>(
 
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
-  if (_authTokenGetter && !headers.has("authorization")) {
-    const token = await _authTokenGetter();
+  //
+  // Use getAuthToken() (not the raw getter) so a throwing/rejecting getter —
+  // e.g. Clerk's getToken() failing a token refresh in the embedded preview
+  // iframe or under an expired dev-key session — degrades gracefully to null
+  // instead of rejecting the whole request before it is even sent. Without
+  // this guard a transient getToken() failure surfaces as a generic request
+  // error and never falls back to the cookie-based auth path below.
+  if (!headers.has("authorization")) {
+    const token = await getAuthToken();
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }

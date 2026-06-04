@@ -36,4 +36,36 @@ describe("customFetch auth transport", () => {
     await customFetch("/api/projects", { responseType: "json" });
     expect(new Headers(lastInit().headers).get("authorization")).toBe("Bearer fresh-token");
   });
+
+  it("still sends the request (cookie fallback) when the token getter throws", async () => {
+    setAuthTokenGetter(() => {
+      throw new Error("getToken failed");
+    });
+    await expect(customFetch("/api/projects", { responseType: "json" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(new Headers(lastInit().headers).has("authorization")).toBe(false);
+    expect(lastInit().credentials).toBe("include");
+  });
+
+  it("still sends the request (cookie fallback) when the token getter rejects", async () => {
+    setAuthTokenGetter(() => Promise.reject(new Error("getToken rejected")));
+    await expect(customFetch("/api/projects", { responseType: "json" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(new Headers(lastInit().headers).has("authorization")).toBe(false);
+  });
+
+  it("does not invoke the token getter when an Authorization header is already provided", async () => {
+    const getter = vi.fn(() => "fresh-token");
+    setAuthTokenGetter(getter);
+    await customFetch("/api/projects", {
+      responseType: "json",
+      headers: { authorization: "Bearer caller-supplied" },
+    });
+    expect(getter).not.toHaveBeenCalled();
+    expect(new Headers(lastInit().headers).get("authorization")).toBe("Bearer caller-supplied");
+  });
 });
