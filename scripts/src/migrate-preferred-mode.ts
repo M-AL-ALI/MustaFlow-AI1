@@ -4,7 +4,7 @@
  * Adds an optional mode preference column to the user_preferences table:
  *   preferred_mode  TEXT  (nullable, no default)
  *
- * Valid values: 'builder' | 'developer' | NULL (not yet chosen)
+ * Valid values: 'builder' | 'developer' | 'ora' | NULL (not yet chosen)
  *
  * Uses ALTER TABLE … ADD COLUMN IF NOT EXISTS — safe to re-run.
  *
@@ -32,7 +32,7 @@ async function run(): Promise<void> {
     await client.query(`
       ALTER TABLE user_preferences
         ADD CONSTRAINT user_preferences_preferred_mode_check
-          CHECK (preferred_mode IN ('builder', 'developer'))
+          CHECK (preferred_mode IN ('builder', 'developer', 'ora'))
     `);
 
     await client.query("COMMIT");

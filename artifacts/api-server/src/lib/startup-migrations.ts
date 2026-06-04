@@ -2338,7 +2338,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
         `ALTER TABLE user_preferences DROP CONSTRAINT IF EXISTS user_preferences_preferred_mode_check`,
       );
       await client.query(
-        `ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_preferred_mode_check CHECK (preferred_mode IN ('builder','developer'))`,
+        `ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_preferred_mode_check CHECK (preferred_mode IN ('builder','developer','ora'))`,
       );
     },
   },
