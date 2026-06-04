@@ -12,7 +12,7 @@ helper, **never** by calling the raw `_authTokenGetter()` inline.
 **Why:** the registered getter is Clerk's `() => getToken()`, which can reject
 (token refresh failure inside the embedded preview iframe, expired ~60s dev-key
 session, transient network). If the getter is awaited without try/catch,
-`customFetch` rejects *before* `fetch()` runs, so the request never leaves the
+`customFetch` rejects _before_ `fetch()` runs, so the request never leaves the
 client. Symptoms: a generic mutation error (e.g. mode-select "Could not save
 your preference") with **no matching request in the server logs**, and the
 cookie-auth fallback (`credentials: "include"`) never gets a chance. Any Orval
