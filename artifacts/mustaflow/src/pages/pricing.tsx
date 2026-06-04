@@ -6,44 +6,57 @@ import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@clerk/react";
 
-const STARTER_FEATURES = [
-  "100 starter credits on sign-up",
+const FREE_FEATURES = [
+  "150 credits / month",
+  "Instant replies",
+  "3 AI images / month",
   "1 concurrent build",
   '"Built with MustaFlow" badge on published apps',
-  "Shared compute",
   "Static, React SPA, and full-stack projects",
   "Community support",
 ];
 
 const CORE_FEATURES = [
-  "500 credits / month",
+  "1,500 credits / month",
+  "Instant + Deep Thinking",
+  "Connectors (GitHub & more)",
+  "12 AI images / month",
   "3 concurrent builds",
   "No badge on published apps",
-  "Autoscale deployment",
-  "8 GiB RAM / 4 vCPU",
   "Priority build queue",
   "Email support",
+];
+
+const WAVE_FEATURES = [
+  "4,000 credits / month",
+  "Instant + Deep Thinking",
+  "Connectors (GitHub & more)",
+  "30 AI images / month",
+  "10 concurrent builds",
+  "No badge on published apps",
+  "Priority build queue",
+  "Priority support",
 ];
 
 export default function PricingPage() {
   const { isSignedIn } = useUser();
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<string | null>(null);
 
-  async function handleGetCore() {
+  async function handleSubscribe(tier: "core" | "wave") {
     if (!isSignedIn) {
       navigate("/sign-up?redirect=/pricing");
       return;
     }
 
-    setLoading(true);
+    setLoading(tier);
     try {
       const res = await authFetch("/api/billing/subscription/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tier: "core",
+          tier,
           successUrl: `${window.location.origin}/billing?subscribed=1`,
           cancelUrl: `${window.location.origin}/pricing`,
         }),
@@ -70,7 +83,7 @@ export default function PricingPage() {
     } catch {
       toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
@@ -92,21 +105,22 @@ export default function PricingPage() {
 
       {/* Plan cards */}
       <div className="max-w-3xl mx-auto px-6 mb-16">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Starter */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Free */}
           <div className="relative rounded-2xl border border-border bg-card p-7 flex flex-col gap-5">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                Starter
+                Free
               </p>
               <div className="flex items-baseline gap-1 mb-1">
-                <span className="text-4xl font-extrabold">Free</span>
+                <span className="text-4xl font-extrabold">$0</span>
+                <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">No credit card required</p>
             </div>
 
             <ul className="space-y-2 flex-1">
-              {STARTER_FEATURES.map((f) => (
+              {FREE_FEATURES.map((f) => (
                 <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
                   {f}
@@ -121,7 +135,7 @@ export default function PricingPage() {
             </Button>
           </div>
 
-          {/* Core */}
+          {/* Core Pack */}
           <div className="relative rounded-2xl border-2 border-primary bg-primary/5 p-7 flex flex-col gap-5 shadow-lg">
             <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full bg-primary text-primary-foreground whitespace-nowrap">
               <Star className="h-3 w-3" />
@@ -130,7 +144,7 @@ export default function PricingPage() {
 
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-primary/80 mb-1">
-                MustaFlow Core
+                Core Pack
               </p>
               <div className="flex items-baseline gap-1 mb-1">
                 <span className="text-4xl font-extrabold">$20</span>
@@ -150,14 +164,56 @@ export default function PricingPage() {
 
             <Button
               className="w-full gap-2"
-              onClick={() => void handleGetCore()}
-              disabled={loading}
+              onClick={() => void handleSubscribe("core")}
+              disabled={loading !== null}
             >
-              {loading ? (
+              {loading === "core" ? (
                 "Redirecting…"
               ) : isSignedIn ? (
                 <>
-                  Get Core <ArrowRight className="h-4 w-4" />
+                  Get Core Pack <ArrowRight className="h-4 w-4" />
+                </>
+              ) : (
+                <>
+                  Get started <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </div>
+
+          {/* Deep Wave */}
+          <div className="relative rounded-2xl border border-border bg-card p-7 flex flex-col gap-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                Deep Wave
+              </p>
+              <div className="flex items-baseline gap-1 mb-1">
+                <span className="text-4xl font-extrabold">$40</span>
+                <span className="text-sm text-muted-foreground">/month</span>
+              </div>
+              <p className="text-sm text-muted-foreground">For power builders</p>
+            </div>
+
+            <ul className="space-y-2 flex-1">
+              {WAVE_FEATURES.map((f) => (
+                <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() => void handleSubscribe("wave")}
+              disabled={loading !== null}
+            >
+              {loading === "wave" ? (
+                "Redirecting…"
+              ) : isSignedIn ? (
+                <>
+                  Get Deep Wave <ArrowRight className="h-4 w-4" />
                 </>
               ) : (
                 <>

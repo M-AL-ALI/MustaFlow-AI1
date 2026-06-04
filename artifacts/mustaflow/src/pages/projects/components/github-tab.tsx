@@ -40,7 +40,9 @@ import {
   getListGithubRepositoriesQueryKey,
   getListGithubBranchesQueryKey,
   getListGithubCommitsQueryKey,
+  useGetBillingSubscription,
 } from "@workspace/api-client-react";
+import { Link } from "wouter";
 import type { GithubConnection, GithubRepository } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -982,6 +984,10 @@ export function GithubTab({ projectId }: { projectId: number }) {
     query: { queryKey: getGetGithubStatusQueryKey(projectId) },
   });
 
+  const { data: subscription } = useGetBillingSubscription();
+  const tier = subscription?.tier ?? "free";
+  const connectorsAllowed = tier === "core" || tier === "wave";
+
   const invalidate = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: getGetGithubStatusQueryKey(projectId) });
     await refetch();
@@ -1022,6 +1028,26 @@ export function GithubTab({ projectId }: { projectId: number }) {
 
   const connected = data?.connected ?? false;
   const connection = data?.connection;
+
+  if (!connected && !connectorsAllowed) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center py-12 px-6 gap-3">
+        <div className="h-11 w-11 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+          <Lock className="h-5 w-5 text-primary" />
+        </div>
+        <p className="text-sm font-semibold">Connectors are a paid feature</p>
+        <p className="text-xs text-muted-foreground max-w-xs">
+          Connect GitHub and other services to sync code, open pull requests, and more. Upgrade to
+          Core Pack or Deep Wave to enable connectors.
+        </p>
+        <Button asChild size="sm" className="gap-1.5 mt-1">
+          <Link href="/pricing">
+            Upgrade to connect <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+        </Button>
+      </div>
+    );
+  }
 
   if (!connected) {
     return (

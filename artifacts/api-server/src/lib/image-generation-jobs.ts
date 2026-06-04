@@ -15,7 +15,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
-import { db, generatedImagesTable, userCreditsTable } from "@workspace/db";
+import {
+  db,
+  generatedImagesTable,
+  userCreditsTable,
+  userSubscriptionsTable,
+  TIER_MONTHLY_IMAGE_CAP,
+  type SubscriptionTier,
+} from "@workspace/db";
 import {
   generateImage,
   editImage,
@@ -92,6 +99,55 @@ export function getJob(jobId: string): ImageJob | undefined {
  *
  * Callers MUST call this before Promise.all([enqueueImageJob, …]) when count > 1.
  */
+/**
+ * Resolve the user's active subscription tier (defaults to "free" when no
+ * active subscription row exists). Used to enforce the monthly image cap.
+ */
+async function resolveImageTier(userId: string): Promise<SubscriptionTier> {
+  try {
+    const [sub] = await db
+      .select({ tier: userSubscriptionsTable.tier, status: userSubscriptionsTable.status })
+      .from(userSubscriptionsTable)
+      .where(eq(userSubscriptionsTable.userId, userId));
+    const activeStatuses = new Set(["active", "trialing", "grace_period"]);
+    if (sub && activeStatuses.has(sub.status) && sub.tier in TIER_MONTHLY_IMAGE_CAP) {
+      return sub.tier as SubscriptionTier;
+    }
+  } catch {
+    // user_subscriptions may be unavailable — fall back to the free cap.
+  }
+  return "free";
+}
+
+/**
+ * Enforce the per-tier monthly image-generation cap (calendar month).
+ * Throws a MONTHLY_CAP_REACHED error when generating `jobCount` more images
+ * would exceed the user's tier allowance.
+ */
+export async function enforceMonthlyImageCap(userId: string, jobCount: number): Promise<void> {
+  const tier = await resolveImageTier(userId);
+  const cap = TIER_MONTHLY_IMAGE_CAP[tier];
+  const [monthlyResult] = await db
+    .select({ c: count() })
+    .from(generatedImagesTable)
+    .where(
+      and(
+        eq(generatedImagesTable.userId, userId),
+        gte(generatedImagesTable.createdAt, sql`date_trunc('month', now())`),
+        isNull(generatedImagesTable.deletedAt),
+      ),
+    );
+  const used = monthlyResult?.c ?? 0;
+  if (used + jobCount > cap) {
+    throw Object.assign(
+      new Error(
+        `You've used ${used} of your ${cap} monthly AI images on the ${tier} plan. Upgrade your plan for a higher monthly image allowance.`,
+      ),
+      { code: "MONTHLY_CAP_REACHED", scope: "monthly", used, cap, tier, upgradeCta: true },
+    );
+  }
+}
+
 export async function preflightImageJobs(
   userId: string,
   jobCount: number,
@@ -99,6 +155,9 @@ export async function preflightImageJobs(
 ): Promise<void> {
   const creditCostPer = IMAGE_CREDIT_COSTS[quality] ?? 3;
   const totalCost = creditCostPer * jobCount;
+
+  // Monthly per-tier cap (calendar month) — checked first so the message is clear.
+  await enforceMonthlyImageCap(userId, jobCount);
 
   // Rate-limit: hourly — ensure existing + new count stays within the limit
   const [hourlyResult] = await db
@@ -180,7 +239,9 @@ export async function enqueueImageJob(
     });
   }
 
-  // Step 2: Rate-limit check — zero cost
+  // Step 2: Monthly per-tier cap + rate-limit check — zero cost
+  await enforceMonthlyImageCap(userId, 1);
+
   const [hourlyResult] = await db
     .select({ c: count() })
     .from(generatedImagesTable)

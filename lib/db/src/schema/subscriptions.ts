@@ -1,7 +1,11 @@
 import { pgTable, serial, text, boolean, timestamp, index } from "drizzle-orm/pg-core";
 
-export const SUBSCRIPTION_TIERS = ["free", "core", "pro", "team"] as const;
+export const SUBSCRIPTION_TIERS = ["free", "core", "wave"] as const;
 export type SubscriptionTier = (typeof SUBSCRIPTION_TIERS)[number];
+
+// Tiers permitted to use Deep Thinking and connectors (GitHub, etc.).
+// Free is Instant-only with no connectors.
+export const PAID_TIERS: ReadonlySet<SubscriptionTier> = new Set(["core", "wave"]);
 
 export const SUBSCRIPTION_STATUSES = [
   "active",
@@ -14,24 +18,28 @@ export const SUBSCRIPTION_STATUSES = [
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
 export const TIER_MONTHLY_CREDITS: Record<SubscriptionTier, number> = {
-  free: 100,
-  core: 500,
-  pro: 2000,
-  team: 5000,
+  free: 150,
+  core: 1500,
+  wave: 4000,
 };
 
 export const TIER_MAX_CONCURRENT_BUILDS: Record<SubscriptionTier, number> = {
   free: 1,
   core: 3,
-  pro: 3,
-  team: 10,
+  wave: 10,
 };
 
 export const TIER_PRICE_USD: Record<SubscriptionTier, number> = {
   free: 0,
   core: 20,
-  pro: 19,
-  team: 49,
+  wave: 40,
+};
+
+// Monthly image-generation caps per tier (Image Studio + inline Ora images).
+export const TIER_MONTHLY_IMAGE_CAP: Record<SubscriptionTier, number> = {
+  free: 3,
+  core: 12,
+  wave: 30,
 };
 
 // Per-user subscription row. Created on first subscribe or free-tier initialisation.

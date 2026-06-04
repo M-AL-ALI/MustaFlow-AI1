@@ -132,9 +132,27 @@ router.post("/images/generate", async (req, res): Promise<void> => {
       });
     }
   } catch (err) {
-    const e = err as { code?: string; message?: string; balance?: number; category?: string };
+    const e = err as {
+      code?: string;
+      message?: string;
+      balance?: number;
+      category?: string;
+      cap?: number;
+      used?: number;
+      tier?: string;
+    };
     if (e.code === "INSUFFICIENT_CREDITS") {
       res.status(402).json({ error: "Insufficient credits", balance: e.balance });
+      return;
+    }
+    if (e.code === "MONTHLY_CAP_REACHED") {
+      res.status(429).json({
+        error: e.message ?? "Monthly image limit reached",
+        upgradeCta: true,
+        cap: e.cap,
+        used: e.used,
+        tier: e.tier,
+      });
       return;
     }
     if (e.code === "SAFETY_BLOCKED") {
@@ -556,9 +574,27 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       status: "pending",
     });
   } catch (err) {
-    const e = err as { code?: string; message?: string; balance?: number; category?: string };
+    const e = err as {
+      code?: string;
+      message?: string;
+      balance?: number;
+      category?: string;
+      cap?: number;
+      used?: number;
+      tier?: string;
+    };
     if (e.code === "INSUFFICIENT_CREDITS") {
       res.status(402).json({ error: "Insufficient credits", balance: e.balance });
+      return;
+    }
+    if (e.code === "MONTHLY_CAP_REACHED") {
+      res.status(429).json({
+        error: e.message ?? "Monthly image limit reached",
+        upgradeCta: true,
+        cap: e.cap,
+        used: e.used,
+        tier: e.tier,
+      });
       return;
     }
     if (e.code === "SAFETY_BLOCKED") {

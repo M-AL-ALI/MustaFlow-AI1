@@ -3075,6 +3075,23 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-tier-rename ─────────────────────────────────────────────────
+  // Collapse legacy paid tiers (pro, team) into the new top tier (wave) so
+  // existing paying customers keep their highest benefits under the GPT-style
+  // pricing model (free / core / wave). Idempotent.
+  {
+    name: "migrate-tier-rename",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        UPDATE user_subscriptions
+          SET tier = 'wave', updated_at = now()
+          WHERE tier IN ('pro', 'team')
+      `);
+      await client.query("COMMIT");
+    },
+  },
+
   // ── migrate-knowledge-usage-events ──────────────────────────────────────
   {
     name: "migrate-knowledge-usage-events",

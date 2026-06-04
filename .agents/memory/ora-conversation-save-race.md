@@ -9,11 +9,11 @@ Ora's chat hook (`use-ora-chat.ts`) debounces saving messages and can switch
 between conversations. Two races must be guarded:
 
 1. **Cross-conversation write.** Capture the target conversation id at the
-   moment the save is *scheduled* (in `saveToServer`), never resolve it from the
+   moment the save is _scheduled_ (in `saveToServer`), never resolve it from the
    mutable context ref at flush time. Otherwise sending in conversation A then
    switching to B before the debounce fires persists A's messages into B.
    For a brand-new chat (target id null) only create-on-first-message if the user
-   is *still* on a new chat; if they navigated to an existing conversation
+   is _still_ on a new chat; if they navigated to an existing conversation
    meanwhile, drop the save rather than clobber it.
 
 2. **Stale GET overwrite.** The load effect fetches a conversation's messages on

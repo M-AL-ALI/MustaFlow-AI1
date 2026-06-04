@@ -18,7 +18,14 @@ import {
   FileSpreadsheet,
   Download,
   LogIn,
+  Zap,
+  Brain,
+  Lock,
 } from "lucide-react";
+import {
+  useGetBillingSubscription,
+  getGetBillingSubscriptionQueryKey,
+} from "@workspace/api-client-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { cn } from "@/lib/utils";
@@ -200,6 +207,8 @@ export function OraPanel({ chat }: OraPanelProps) {
     atLimit,
     language,
     setLanguage,
+    mode,
+    setMode,
     sendMessage,
     generateFile,
     clearError,
@@ -217,6 +226,14 @@ export function OraPanel({ chat }: OraPanelProps) {
   } = chat;
 
   const { isSignedIn } = useUser();
+  const { data: subscription } = useGetBillingSubscription({
+    query: {
+      queryKey: getGetBillingSubscriptionQueryKey(),
+      enabled: Boolean(isSignedIn),
+    },
+  });
+  const tier = subscription?.tier ?? "free";
+  const deepAllowed = tier === "core" || tier === "wave";
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
@@ -1135,6 +1152,51 @@ export function OraPanel({ chat }: OraPanelProps) {
                     aria-hidden
                     onChange={handleFileChange}
                   />
+                  {/* Instant vs Deep Thinking toggle */}
+                  <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setMode("instant")}
+                      title="Instant — fast everyday replies (1 credit)"
+                      aria-pressed={mode === "instant"}
+                      className={cn(
+                        "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
+                        mode === "instant"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <Zap className="h-3 w-3" />
+                      Instant
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (deepAllowed) {
+                          setMode("deep");
+                        } else {
+                          setLocation("/billing?tier=core");
+                        }
+                      }}
+                      title={
+                        deepAllowed
+                          ? "Deep Thinking — slower, step-by-step reasoning (5 credits)"
+                          : "Deep Thinking is available on Core Pack and Deep Wave"
+                      }
+                      aria-pressed={mode === "deep" && deepAllowed}
+                      className={cn(
+                        "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
+                        mode === "deep" && deepAllowed
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                        !deepAllowed && "opacity-70",
+                      )}
+                    >
+                      {deepAllowed ? <Brain className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                      Deep
+                    </button>
+                  </div>
+
                   {/* Attachment button */}
                   <button
                     type="button"

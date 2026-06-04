@@ -3,6 +3,7 @@ import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
 import { useOraConversationsOptional } from "@/hooks/use-ora-conversations";
+import { getReferenceSavedMemories, getReferenceChatHistory } from "@/lib/ora-memory-settings";
 
 export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 
@@ -65,6 +66,8 @@ export interface AttachedFile {
   hiddenSheetsSkipped?: number;
 }
 
+export type OraMode = "instant" | "deep";
+
 export interface UseOraChatReturn {
   messages: OraMessage[];
   session: OraSession | null;
@@ -73,6 +76,8 @@ export interface UseOraChatReturn {
   atLimit: boolean;
   language: string;
   setLanguage: (lang: string) => void;
+  mode: OraMode;
+  setMode: (mode: OraMode) => void;
   sendMessage: (
     content: string,
     opts?: { truncateTo?: number; editedFrom?: boolean },
@@ -155,6 +160,14 @@ function getStoredLanguage(): string {
     return sessionStorage.getItem("ora_language") ?? "auto";
   } catch {
     return "auto";
+  }
+}
+
+function getStoredMode(): OraMode {
+  try {
+    return sessionStorage.getItem("ora_mode") === "deep" ? "deep" : "instant";
+  } catch {
+    return "instant";
   }
 }
 
@@ -308,6 +321,7 @@ export function useOraChat(): UseOraChatReturn {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [pendingImageAnalysis, setPendingImageAnalysis] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [mode, setModeState] = useState<OraMode>(getStoredMode);
 
   // Conversation context is present only on the standalone /ora page (signed-in,
   // per-conversation persistence). On the public landing trial the provider is
@@ -333,6 +347,15 @@ export function useOraChat(): UseOraChatReturn {
     setLanguageState(lang);
     try {
       sessionStorage.setItem("ora_language", lang);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setMode = useCallback((next: OraMode) => {
+    setModeState(next);
+    try {
+      sessionStorage.setItem("ora_mode", next);
     } catch {
       /* ignore */
     }
@@ -861,7 +884,13 @@ export function useOraChat(): UseOraChatReturn {
             );
           }
         } else {
-          const body: Record<string, unknown> = { message: content, messages: history };
+          const body: Record<string, unknown> = {
+            message: content,
+            messages: history,
+            mode,
+            referenceSavedMemories: getReferenceSavedMemories(),
+            referenceChatHistory: getReferenceChatHistory(),
+          };
           if (language && language !== "auto") {
             body.language = language;
           } else {
@@ -980,7 +1009,7 @@ export function useOraChat(): UseOraChatReturn {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, language, attachedFile, isSignedIn, saveToServer],
+    [isLoading, messages, language, attachedFile, isSignedIn, saveToServer, mode],
   );
 
   const generateFile = useCallback(
@@ -1222,6 +1251,8 @@ export function useOraChat(): UseOraChatReturn {
     atLimit,
     language,
     setLanguage,
+    mode,
+    setMode,
     sendMessage,
     generateFile,
     clearError: () => setError(null),

@@ -720,34 +720,56 @@ function SubscriptionTab({
 
   const currentTier = subscription?.tier ?? "free";
 
-  // Hardcoded plan definitions — only Starter and Core are user-level plans.
+  // Hardcoded plan definitions — Free, Core Pack, Deep Wave.
   const PLANS = [
     {
       id: "free",
-      name: "Starter",
+      name: "Free",
       priceUsd: 0,
       features: [
-        "100 starter credits on sign-up",
+        "150 credits / month",
+        "Instant replies",
+        "3 AI images / month",
         "1 concurrent build",
         '"Built with MustaFlow" badge on published apps',
-        "Shared compute",
         "Community support",
       ],
     },
     {
       id: "core",
-      name: "MustaFlow Core",
+      name: "Core Pack",
       priceUsd: 20,
       features: [
-        "500 credits / month",
+        "1,500 credits / month",
+        "Instant + Deep Thinking",
+        "Connectors (GitHub & more)",
+        "12 AI images / month",
         "3 concurrent builds",
         "No badge on published apps",
-        "Autoscale deployment",
         "Priority build queue",
-        "Email support",
+      ],
+    },
+    {
+      id: "wave",
+      name: "Deep Wave",
+      priceUsd: 40,
+      features: [
+        "4,000 credits / month",
+        "Instant + Deep Thinking",
+        "Connectors (GitHub & more)",
+        "30 AI images / month",
+        "10 concurrent builds",
+        "No badge on published apps",
+        "Priority support",
       ],
     },
   ] as const;
+
+  const TIER_LABELS: Record<string, string> = {
+    free: "Free",
+    core: "Core Pack",
+    wave: "Deep Wave",
+  };
 
   return (
     <div className="space-y-6">
@@ -760,7 +782,7 @@ function SubscriptionTab({
             </p>
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg capitalize">
-                {subscription.tier === "core" ? "MustaFlow Core" : "Starter"}
+                {TIER_LABELS[subscription.tier] ?? "Free"}
               </span>
               <span
                 className={cn(
@@ -792,19 +814,20 @@ function SubscriptionTab({
         </div>
       )}
 
-      {/* Starter vs Core plan cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Free / Core Pack / Deep Wave plan cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {PLANS.map((plan) => {
           const isCurrent =
             plan.id === currentTier || (plan.id === "free" && currentTier === "free");
-          const isCore = plan.id === "core";
+          const isPaid = plan.id !== "free";
+          const isHighlight = plan.id === "core";
           return (
             <div
               key={plan.id}
               id={`plan-card-${plan.id}`}
               className={cn(
                 "border rounded-xl bg-card p-5 flex flex-col gap-3 relative",
-                isCore
+                isHighlight
                   ? isCurrent
                     ? "border-primary ring-1 ring-primary/20"
                     : "border-primary/60 ring-1 ring-primary/20"
@@ -819,7 +842,7 @@ function SubscriptionTab({
                 </div>
               )}
               <div className="flex items-center gap-2">
-                {isCore ? (
+                {isPaid ? (
                   <Crown className="h-4 w-4 text-primary" />
                 ) : (
                   <Zap className="h-4 w-4 text-muted-foreground" />
@@ -844,22 +867,27 @@ function SubscriptionTab({
                   </li>
                 ))}
               </ul>
-              {!isCurrent && isCore && (
+              {!isCurrent && isPaid && (
                 <button
-                  onClick={() => onSubscribe("core")}
-                  disabled={checkoutLoading === "core"}
-                  className="w-full py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors bg-primary text-primary-foreground hover:bg-primary/90"
+                  onClick={() => onSubscribe(plan.id)}
+                  disabled={checkoutLoading === plan.id}
+                  className={cn(
+                    "w-full py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors",
+                    isHighlight
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "border border-border text-foreground hover:bg-muted",
+                  )}
                 >
-                  {checkoutLoading === "core" ? (
+                  {checkoutLoading === plan.id ? (
                     <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <>
-                      Upgrade to Core <ArrowUpRight className="h-3 w-3" />
+                      Upgrade to {plan.name} <ArrowUpRight className="h-3 w-3" />
                     </>
                   )}
                 </button>
               )}
-              {isCurrent && isCore && !subscription?.cancelAtPeriodEnd && (
+              {isCurrent && isPaid && !subscription?.cancelAtPeriodEnd && (
                 <button
                   onClick={onCancel}
                   disabled={cancelLoading}
@@ -872,7 +900,7 @@ function SubscriptionTab({
                   )}
                 </button>
               )}
-              {isCurrent && isCore && subscription?.cancelAtPeriodEnd && (
+              {isCurrent && isPaid && subscription?.cancelAtPeriodEnd && (
                 <p className="text-xs text-center text-yellow-500">
                   Cancels{" "}
                   {subscription.currentPeriodEnd

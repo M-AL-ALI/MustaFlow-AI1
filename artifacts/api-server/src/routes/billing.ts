@@ -28,7 +28,7 @@ import {
   projectsTable,
   userSubscriptionsTable,
 } from "@workspace/db";
-import { TIER_MONTHLY_CREDITS, TIER_PRICE_USD } from "@workspace/db";
+import { TIER_MONTHLY_CREDITS, TIER_PRICE_USD, TIER_MONTHLY_IMAGE_CAP } from "@workspace/db";
 import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
@@ -83,61 +83,53 @@ export const SUBSCRIPTION_TIERS_META = [
     monthlyCredits: TIER_MONTHLY_CREDITS.free,
     priceUsd: TIER_PRICE_USD.free,
     maxConcurrentBuilds: 1,
+    monthlyImageCap: TIER_MONTHLY_IMAGE_CAP.free,
     priceIdEnv: null,
     features: [
-      "100 credits / month",
+      "150 credits / month",
+      "Instant replies",
+      "3 AI images / month",
       "1 concurrent build",
       '"Built with MustaFlow" badge on published apps',
-      "Shared compute",
       "Community support",
     ],
   },
   {
     id: "core" as const,
-    name: "MustaFlow Core",
+    name: "Core Pack",
     monthlyCredits: TIER_MONTHLY_CREDITS.core,
     priceUsd: TIER_PRICE_USD.core,
     maxConcurrentBuilds: 3,
+    monthlyImageCap: TIER_MONTHLY_IMAGE_CAP.core,
     priceIdEnv: "STRIPE_CORE_PRICE_ID",
     features: [
-      "500 credits / month",
+      "1,500 credits / month",
+      "Instant + Deep Thinking",
+      "Connectors (GitHub & more)",
+      "12 AI images / month",
       "3 concurrent builds",
       "No badge on published apps",
-      "Autoscale deployment",
-      "8 GiB RAM / 4 vCPU",
       "Priority queue",
       "Email support",
     ],
   },
   {
-    id: "pro" as const,
-    name: "Pro",
-    monthlyCredits: TIER_MONTHLY_CREDITS.pro,
-    priceUsd: TIER_PRICE_USD.pro,
-    maxConcurrentBuilds: 3,
-    priceIdEnv: "STRIPE_PRICE_PRO_MONTHLY",
-    features: [
-      "2,000 credits / month",
-      "3 concurrent builds",
-      "Priority queue",
-      "Email support",
-      "Stripe Tax support",
-    ],
-  },
-  {
-    id: "team" as const,
-    name: "Team",
-    monthlyCredits: TIER_MONTHLY_CREDITS.team,
-    priceUsd: TIER_PRICE_USD.team,
+    id: "wave" as const,
+    name: "Deep Wave",
+    monthlyCredits: TIER_MONTHLY_CREDITS.wave,
+    priceUsd: TIER_PRICE_USD.wave,
     maxConcurrentBuilds: 10,
-    priceIdEnv: "STRIPE_PRICE_TEAM_MONTHLY",
+    monthlyImageCap: TIER_MONTHLY_IMAGE_CAP.wave,
+    priceIdEnv: "STRIPE_WAVE_PRICE_ID",
     features: [
-      "5,000 credits / month",
+      "4,000 credits / month",
+      "Instant + Deep Thinking",
+      "Connectors (GitHub & more)",
+      "30 AI images / month",
       "10 concurrent builds",
+      "No badge on published apps",
       "Priority queue",
-      "10 team seats",
-      "Dedicated support",
-      "Custom domain bandwidth",
+      "Priority support",
     ],
   },
 ] as const;
@@ -705,7 +697,7 @@ async function handleCheckoutCompleted(
   if (mode === "subscription") {
     // Subscription checkout — provision the subscription row
     const userId = (session.metadata as Record<string, string> | undefined)?.userId;
-    const tier = (session.metadata as Record<string, string> | undefined)?.tier ?? "pro";
+    const tier = (session.metadata as Record<string, string> | undefined)?.tier ?? "core";
     const customerId = session.customer as string | null;
     const subscriptionId = session.subscription as string | null;
     if (!userId || !customerId || !subscriptionId) {

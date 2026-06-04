@@ -17,6 +17,101 @@ import {
 
 import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
 import { classifyIntent, type OraTopic } from "../../lib/public-ai/classifier";
+import { getAuth } from "@clerk/express";
+import { eq, and, or, isNull, desc } from "drizzle-orm";
+import { db, userSubscriptionsTable, knowledgeEntriesTable, projectsTable } from "@workspace/db";
+import { deductCreditsAtomic, getOrCreateCredits } from "../credits";
+
+// Authenticated Ora users are not subject to the anonymous visitor message cap;
+// they draw on their monthly credit balance instead. We still return a numeric
+// limit to the client so the UI's "messages remaining" affordance has a value.
+const UNLIMITED_MSGS = 1_000_000;
+
+// Per-action credit costs for authenticated Ora users (Step 7 pricing).
+const CREDIT_COST_INSTANT = 1;
+const CREDIT_COST_DEEP = 5;
+const CREDIT_COST_FILE = 2;
+
+// Tiers permitted to use Deep Thinking + connectors. Free is Instant-only.
+const PAID_TIERS = new Set(["core", "wave"]);
+
+const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
+
+interface AuthedOraUser {
+  userId: string;
+  tier: string;
+  isPaid: boolean;
+}
+
+/**
+ * Optionally resolve the signed-in Clerk user on the public Ora endpoint.
+ * clerkMiddleware() runs before all routes, so getAuth(req) works here even
+ * though this route sits in front of the auth wall. Returns null for visitors.
+ */
+async function resolveAuthedOraUser(req: import("express").Request): Promise<AuthedOraUser | null> {
+  const auth = getAuth(req);
+  const userId = (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId;
+  if (!userId) return null;
+  let tier = "free";
+  try {
+    const [sub] = await db
+      .select({ tier: userSubscriptionsTable.tier, status: userSubscriptionsTable.status })
+      .from(userSubscriptionsTable)
+      .where(eq(userSubscriptionsTable.userId, userId));
+    const activeStatuses = new Set(["active", "trialing", "grace_period"]);
+    if (sub && activeStatuses.has(sub.status)) tier = sub.tier ?? "free";
+  } catch {
+    // user_subscriptions may be unavailable in some envs — default to free.
+  }
+  return { userId, tier, isPaid: PAID_TIERS.has(tier) };
+}
+
+/**
+ * Fetch the user's saved Ora memories (user-scoped knowledge + any entries for
+ * the current project) and format them as a compact context block for the
+ * system prompt. Returns an empty string when there is nothing to inject.
+ */
+async function buildMemoryContext(userId: string, projectId: number | undefined): Promise<string> {
+  try {
+    const scopeConditions = [
+      and(eq(knowledgeEntriesTable.userId, userId), eq(knowledgeEntriesTable.scope, "user")),
+    ];
+    if (projectId !== undefined) {
+      // Only inject project-scoped memories the user actually owns.
+      const [owned] = await db
+        .select({ id: projectsTable.id })
+        .from(projectsTable)
+        .where(
+          and(
+            eq(projectsTable.id, projectId),
+            eq(projectsTable.ownerId, userId),
+            isNull(projectsTable.deletedAt),
+          ),
+        );
+      if (owned) {
+        scopeConditions.push(eq(knowledgeEntriesTable.projectId, projectId));
+      }
+    }
+
+    const rows = await db
+      .select({
+        title: knowledgeEntriesTable.title,
+        content: knowledgeEntriesTable.content,
+      })
+      .from(knowledgeEntriesTable)
+      .where(and(or(...scopeConditions), isNull(knowledgeEntriesTable.archivedAt)))
+      .orderBy(desc(knowledgeEntriesTable.createdAt))
+      .limit(15);
+
+    if (rows.length === 0) return "";
+
+    const lines = rows.map((r) => `- ${r.title}${r.content ? `: ${r.content}` : ""}`).join("\n");
+    return `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation:\n${lines}`;
+  } catch {
+    // Memory injection is best-effort — never block a reply on it.
+    return "";
+  }
+}
 
 const IMAGE_GENERATE_CTA =
   "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including the Image Studio with quality presets, aspect ratios, and style controls.";
@@ -46,6 +141,10 @@ const bodySchema = z.object({
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
   languageHint: z.string().max(20).optional(),
+  mode: z.enum(["instant", "deep"]).default("instant"),
+  referenceSavedMemories: z.boolean().default(true),
+  referenceChatHistory: z.boolean().default(true),
+  projectId: z.number().int().positive().optional(),
 });
 
 /**
@@ -106,7 +205,16 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  const { message, messages, language, languageHint } = parsed.data;
+  const {
+    message,
+    messages,
+    language,
+    languageHint,
+    mode,
+    referenceSavedMemories,
+    referenceChatHistory,
+    projectId,
+  } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
@@ -120,7 +228,12 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  if (session.msgCount >= MSG_LIMIT_VALUE) {
+  // Resolve the signed-in user (if any). Authenticated users draw on their
+  // monthly credit balance and are exempt from the anonymous visitor cap.
+  const authed = await resolveAuthedOraUser(req);
+  const effectiveMsgLimit = authed ? UNLIMITED_MSGS : MSG_LIMIT_VALUE;
+
+  if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
       error:
         "You have reached the message limit for this session. Start a new session to continue.",
@@ -137,6 +250,41 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
+  // Deep Thinking is gated to paid tiers (Core Pack / Deep Wave). Visitors and
+  // Free-tier users requesting Deep get an upgrade prompt instead — we do this
+  // before any model call so blocked requests are never charged or counted.
+  const wantsDeep = mode === "deep";
+  const deepAllowed = wantsDeep && !!authed && authed.isPaid;
+  if (wantsDeep && !deepAllowed) {
+    res.json({
+      reply: authed
+        ? "Deep Thinking is available on the Core Pack and Deep Wave plans. It reasons step by step for more thorough, considered answers. Upgrade to unlock it — or keep chatting in Instant mode."
+        : "Deep Thinking is available to signed-in MustaFlow members on the Core Pack and Deep Wave plans. Sign up to unlock slower, more thorough reasoning — or keep chatting here in Instant mode.",
+      handoffCta: true,
+      upgradeCta: true,
+      mode: "instant",
+      msgCount: session.msgCount,
+      msgLimit: effectiveMsgLimit,
+    });
+    return;
+  }
+
+  // Per-message credit cost for authenticated users (Free tier included — Free
+  // draws on its monthly grant). Visitors are metered by the session cap only.
+  const messageCost = deepAllowed ? CREDIT_COST_DEEP : CREDIT_COST_INSTANT;
+  if (authed) {
+    const credits = await getOrCreateCredits(authed.userId);
+    if (credits.balance < messageCost) {
+      res.status(402).json({
+        error: "You're out of credits. Top up or upgrade your plan to keep chatting with Ora.",
+        upgradeCta: true,
+        balance: credits.balance,
+        cost: messageCost,
+      });
+      return;
+    }
+  }
+
   // Auto-detect file generation requests and handle them inline so users
   // don't need to use the format picker — typing "make me a CSV" just works.
   const detectedFormat = detectFileRequest(message);
@@ -146,6 +294,12 @@ router.post("/public-ai/chat", async (req, res) => {
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     try {
       const result = await generateFileFromPrompt(message, detectedFormat, history, language);
+      if (authed) {
+        await deductCreditsAtomic(authed.userId, CREDIT_COST_FILE, {
+          type: "converse",
+          description: `Ora file generation (${detectedFormat})`,
+        });
+      }
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       res.json({
@@ -154,7 +308,7 @@ router.post("/public-ai/chat", async (req, res) => {
         fileData: result.fileData,
         mimeType: result.mimeType,
         msgCount: payload.msgCount,
-        msgLimit: MSG_LIMIT_VALUE,
+        msgLimit: effectiveMsgLimit,
       });
     } catch (err) {
       logger.error(
@@ -174,7 +328,7 @@ router.post("/public-ai/chat", async (req, res) => {
       reply: IMAGE_GENERATE_CTA,
       handoffCta: true,
       msgCount: payload.msgCount,
-      msgLimit: MSG_LIMIT_VALUE,
+      msgLimit: effectiveMsgLimit,
     });
     return;
   }
@@ -186,7 +340,7 @@ router.post("/public-ai/chat", async (req, res) => {
       reply: BUILDER_REFUSAL,
       handoffCta: true,
       msgCount: payload.msgCount,
-      msgLimit: MSG_LIMIT_VALUE,
+      msgLimit: effectiveMsgLimit,
     });
     return;
   }
@@ -200,26 +354,40 @@ router.post("/public-ai/chat", async (req, res) => {
       reply: BUILDER_REFUSAL,
       handoffCta: true,
       msgCount: payload.msgCount,
-      msgLimit: MSG_LIMIT_VALUE,
+      msgLimit: effectiveMsgLimit,
     });
     return;
   }
 
   const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
+  const deepModel = process.env.ORA_DEEP_MODEL ?? premiumModel;
   const fallbackModel = "claude-sonnet-4-6";
 
-  // Use mini only when the classifier is highly confident this is a simple FAQ.
-  // All other intents — including low-confidence simple_faq — use the premium model.
+  // Deep Thinking always uses the strongest model with a larger token budget so
+  // the step-by-step reasoning has room to land. Otherwise fall back to the
+  // mini model only when the classifier is highly confident this is a simple FAQ.
   const usesMini =
-    classifierResult.intent === "simple_faq" && classifierResult.confidence === "high";
-  const primaryModel = usesMini ? "gpt-5-mini" : premiumModel;
-  const maxTokens = usesMini ? 400 : 1200;
+    !deepAllowed &&
+    classifierResult.intent === "simple_faq" &&
+    classifierResult.confidence === "high";
+  const primaryModel = deepAllowed ? deepModel : usesMini ? "gpt-5-mini" : premiumModel;
+  const maxTokens = deepAllowed ? 2400 : usesMini ? 400 : 1200;
 
-  const historyMessages: Array<{ role: "user" | "assistant"; content: string }> = messages
-    .slice(-20)
-    .map((m) => ({ role: m.role, content: m.content }));
+  // Chat history is opt-out: when the user turns off "reference chat history"
+  // in their memory settings, each message is treated as a fresh conversation.
+  const historyMessages: Array<{ role: "user" | "assistant"; content: string }> =
+    referenceChatHistory
+      ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
+      : [];
 
-  const systemPrompt = buildSystemPrompt(language, languageHint);
+  // Saved memories are opt-out and only available to signed-in users.
+  const memoryContext =
+    authed && referenceSavedMemories ? await buildMemoryContext(authed.userId, projectId) : "";
+
+  const systemPrompt =
+    buildSystemPrompt(language, languageHint) +
+    (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
+    memoryContext;
 
   const callMessages = [
     { role: "system" as const, content: systemPrompt },
@@ -361,6 +529,16 @@ router.post("/public-ai/chat", async (req, res) => {
     );
   }
 
+  // Charge credits for authenticated users now that the reply succeeded, so a
+  // failed generation never costs the user. Best-effort: the atomic helper
+  // no-ops when enforcement is disabled and we already pre-flighted the balance.
+  if (authed) {
+    await deductCreditsAtomic(authed.userId, messageCost, {
+      type: "converse",
+      description: deepAllowed ? "Ora Deep Thinking message" : "Ora message",
+    });
+  }
+
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
@@ -378,8 +556,9 @@ router.post("/public-ai/chat", async (req, res) => {
     reply,
     handoffCta,
     suggestions,
+    mode: deepAllowed ? "deep" : "instant",
     msgCount: payload.msgCount,
-    msgLimit: MSG_LIMIT_VALUE,
+    msgLimit: effectiveMsgLimit,
   });
 });
 
