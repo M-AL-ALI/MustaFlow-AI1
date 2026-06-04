@@ -1,0 +1,408 @@
+import { Router } from "express";
+import { z } from "zod";
+import { and, eq, desc, isNull } from "drizzle-orm";
+import { db, oraConversationsTable, oraProjectsTable } from "@workspace/db";
+import { logger } from "../lib/logger";
+
+const router = Router();
+
+/* ─── Message validation (mirrors ora-transcript.ts) ──────────────────────── */
+
+const generatedFileSchema = z
+  .object({
+    fileName: z.string(),
+    fileData: z.string().optional(),
+    mimeType: z.string(),
+    format: z.string(),
+  })
+  .transform(({ fileData: _fileData, ...rest }) => rest);
+
+const datasetResultSchema = z
+  .object({
+    summary: z.string().optional(),
+    columnCount: z.number().optional(),
+    rowCount: z.number().optional(),
+    truncated: z.boolean().optional(),
+  })
+  .catchall(z.unknown())
+  .transform(({ summary, columnCount, rowCount, truncated }) => ({
+    summary,
+    columnCount,
+    rowCount,
+    truncated,
+  }));
+
+const messageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().max(32000),
+  handoffCta: z.boolean().optional(),
+  datasetResult: datasetResultSchema.optional(),
+  messageKind: z.enum(["image-analysis", "document-analysis"]).optional(),
+  suggestions: z.array(z.string()).optional(),
+  generatedFile: generatedFileSchema.optional(),
+  hadAttachment: z.boolean().optional(),
+  editedFrom: z.boolean().optional(),
+});
+
+const MAX_STORED = 100;
+const MAX_PAYLOAD_BYTES = 256_000;
+const MAX_TITLE_LEN = 120;
+const MAX_NAME_LEN = 80;
+
+/* ─── Conversations ───────────────────────────────────────────────────────── */
+
+// List the signed-in user's conversations (lightweight — no message bodies).
+router.get("/ora/conversations", async (req, res) => {
+  const userId = req.userId!;
+  try {
+    const rows = await db
+      .select({
+        id: oraConversationsTable.id,
+        title: oraConversationsTable.title,
+        projectId: oraConversationsTable.projectId,
+        createdAt: oraConversationsTable.createdAt,
+        updatedAt: oraConversationsTable.updatedAt,
+        lastMessageAt: oraConversationsTable.lastMessageAt,
+      })
+      .from(oraConversationsTable)
+      .where(
+        and(eq(oraConversationsTable.userId, userId), isNull(oraConversationsTable.archivedAt)),
+      )
+      .orderBy(desc(oraConversationsTable.lastMessageAt));
+
+    res.json({ conversations: rows });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to list conversations");
+    res.status(500).json({ error: "Failed to load conversations" });
+  }
+});
+
+const createConversationSchema = z.object({
+  title: z.string().max(MAX_TITLE_LEN).optional(),
+  projectId: z.number().int().positive().nullable().optional(),
+});
+
+// Create a new conversation (optionally inside a project).
+router.post("/ora/conversations", async (req, res) => {
+  const userId = req.userId!;
+  const parsed = createConversationSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  try {
+    // Validate project ownership if a projectId was supplied.
+    if (parsed.data.projectId != null) {
+      const [proj] = await db
+        .select({ id: oraProjectsTable.id })
+        .from(oraProjectsTable)
+        .where(
+          and(
+            eq(oraProjectsTable.id, parsed.data.projectId),
+            eq(oraProjectsTable.userId, userId),
+            isNull(oraProjectsTable.archivedAt),
+          ),
+        );
+      if (!proj) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+    }
+
+    const [row] = await db
+      .insert(oraConversationsTable)
+      .values({
+        userId,
+        title: parsed.data.title ?? null,
+        projectId: parsed.data.projectId ?? null,
+        messages: [],
+      })
+      .returning();
+
+    res.status(201).json({ conversation: row });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to create conversation");
+    res.status(500).json({ error: "Failed to create conversation" });
+  }
+});
+
+// Fetch a single conversation including its messages.
+router.get("/ora/conversations/:id", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid conversation id" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .select()
+      .from(oraConversationsTable)
+      .where(
+        and(
+          eq(oraConversationsTable.id, id),
+          eq(oraConversationsTable.userId, userId),
+          isNull(oraConversationsTable.archivedAt),
+        ),
+      );
+    if (!row) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.json({ conversation: row });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to fetch conversation");
+    res.status(500).json({ error: "Failed to load conversation" });
+  }
+});
+
+const patchConversationSchema = z.object({
+  title: z.string().max(MAX_TITLE_LEN).nullable().optional(),
+  projectId: z.number().int().positive().nullable().optional(),
+});
+
+// Rename a conversation or move it between projects (null = standalone).
+router.patch("/ora/conversations/:id", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid conversation id" });
+    return;
+  }
+  const parsed = patchConversationSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  const updates: Partial<typeof oraConversationsTable.$inferInsert> = { updatedAt: new Date() };
+  if (parsed.data.title !== undefined) updates.title = parsed.data.title;
+  if (parsed.data.projectId !== undefined) updates.projectId = parsed.data.projectId;
+
+  try {
+    if (parsed.data.projectId != null) {
+      const [proj] = await db
+        .select({ id: oraProjectsTable.id })
+        .from(oraProjectsTable)
+        .where(
+          and(
+            eq(oraProjectsTable.id, parsed.data.projectId),
+            eq(oraProjectsTable.userId, userId),
+            isNull(oraProjectsTable.archivedAt),
+          ),
+        );
+      if (!proj) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+    }
+
+    const [row] = await db
+      .update(oraConversationsTable)
+      .set(updates)
+      .where(
+        and(
+          eq(oraConversationsTable.id, id),
+          eq(oraConversationsTable.userId, userId),
+          isNull(oraConversationsTable.archivedAt),
+        ),
+      )
+      .returning();
+    if (!row) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.json({ conversation: row });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to update conversation");
+    res.status(500).json({ error: "Failed to update conversation" });
+  }
+});
+
+const saveMessagesSchema = z.object({
+  messages: z.array(messageSchema).max(MAX_STORED),
+});
+
+// Replace a conversation's message history (debounced save from the client).
+router.put("/ora/conversations/:id/messages", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid conversation id" });
+    return;
+  }
+  const parsed = saveMessagesSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  const messages = parsed.data.messages.slice(-MAX_STORED);
+  const payloadSize = Buffer.byteLength(JSON.stringify(messages), "utf8");
+  if (payloadSize > MAX_PAYLOAD_BYTES) {
+    res.status(413).json({
+      error: `Transcript payload too large (${payloadSize} bytes). Maximum allowed is ${MAX_PAYLOAD_BYTES} bytes after stripping.`,
+    });
+    return;
+  }
+
+  try {
+    const now = new Date();
+    const [row] = await db
+      .update(oraConversationsTable)
+      .set({ messages, updatedAt: now, lastMessageAt: now })
+      .where(
+        and(
+          eq(oraConversationsTable.id, id),
+          eq(oraConversationsTable.userId, userId),
+          isNull(oraConversationsTable.archivedAt),
+        ),
+      )
+      .returning({ id: oraConversationsTable.id });
+    if (!row) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to save messages");
+    res.status(500).json({ error: "Failed to save conversation" });
+  }
+});
+
+// Soft-delete a conversation.
+router.delete("/ora/conversations/:id", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid conversation id" });
+    return;
+  }
+  try {
+    await db
+      .update(oraConversationsTable)
+      .set({ archivedAt: new Date() })
+      .where(and(eq(oraConversationsTable.id, id), eq(oraConversationsTable.userId, userId)));
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to delete conversation");
+    res.status(500).json({ error: "Failed to delete conversation" });
+  }
+});
+
+/* ─── Projects ────────────────────────────────────────────────────────────── */
+
+// List the user's projects.
+router.get("/ora/projects", async (req, res) => {
+  const userId = req.userId!;
+  try {
+    const rows = await db
+      .select({
+        id: oraProjectsTable.id,
+        name: oraProjectsTable.name,
+        createdAt: oraProjectsTable.createdAt,
+        updatedAt: oraProjectsTable.updatedAt,
+      })
+      .from(oraProjectsTable)
+      .where(and(eq(oraProjectsTable.userId, userId), isNull(oraProjectsTable.archivedAt)))
+      .orderBy(desc(oraProjectsTable.updatedAt));
+    res.json({ projects: rows });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to list projects");
+    res.status(500).json({ error: "Failed to load projects" });
+  }
+});
+
+const createProjectSchema = z.object({
+  name: z.string().trim().min(1).max(MAX_NAME_LEN),
+});
+
+// Create a project.
+router.post("/ora/projects", async (req, res) => {
+  const userId = req.userId!;
+  const parsed = createProjectSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Project name is required" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .insert(oraProjectsTable)
+      .values({ userId, name: parsed.data.name })
+      .returning();
+    res.status(201).json({ project: row });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to create project");
+    res.status(500).json({ error: "Failed to create project" });
+  }
+});
+
+const patchProjectSchema = z.object({
+  name: z.string().trim().min(1).max(MAX_NAME_LEN),
+});
+
+// Rename a project.
+router.patch("/ora/projects/:id", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+  const parsed = patchProjectSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Project name is required" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .update(oraProjectsTable)
+      .set({ name: parsed.data.name, updatedAt: new Date() })
+      .where(
+        and(
+          eq(oraProjectsTable.id, id),
+          eq(oraProjectsTable.userId, userId),
+          isNull(oraProjectsTable.archivedAt),
+        ),
+      )
+      .returning();
+    if (!row) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.json({ project: row });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to update project");
+    res.status(500).json({ error: "Failed to update project" });
+  }
+});
+
+// Soft-delete a project. Its conversations are detached (kept as standalone).
+router.delete("/ora/projects/:id", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+  try {
+    await db
+      .update(oraProjectsTable)
+      .set({ archivedAt: new Date() })
+      .where(and(eq(oraProjectsTable.id, id), eq(oraProjectsTable.userId, userId)));
+    // Detach conversations so they remain accessible as standalone chats.
+    await db
+      .update(oraConversationsTable)
+      .set({ projectId: null })
+      .where(
+        and(eq(oraConversationsTable.projectId, id), eq(oraConversationsTable.userId, userId)),
+      );
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to delete project");
+    res.status(500).json({ error: "Failed to delete project" });
+  }
+});
+
+export default router;

@@ -96,6 +96,7 @@
     "migrate-image-studio": "tsx ./src/migrate-image-studio.ts",
     "migrate-image-studio-v2": "tsx ./src/migrate-image-studio-v2.ts",
     "migrate-image-edit-lineage": "tsx ./src/migrate-image-edit-lineage.ts",
+    "migrate-ora-conversations": "tsx ./src/migrate-ora-conversations.ts",
     "migrate-task-events-data": "tsx ./src/migrate-task-events-data.ts",
     "migrate-ora-transcript-cleanup": "tsx ./src/migrate-ora-transcript-cleanup.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",

@@ -57,7 +57,7 @@ export default function ModeSelectPage() {
             Where would you like to start?
           </h1>
           <p className="text-muted-foreground text-lg max-w-md mx-auto">
-            Choose your experience. You can switch at any time from Settings.
+            Choose your experience. You can switch at any time from the sidebar.
           </p>
         </div>
 

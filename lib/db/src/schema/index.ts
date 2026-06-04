@@ -65,6 +65,7 @@ export * from "./preview-sessions";
 export * from "./credit-grants";
 export * from "./agent-tool-calls";
 export * from "./ora-transcripts";
+export * from "./ora-conversations";
 export * from "./vault";
 export * from "./vault-embeddings";
 export * from "./generated-images";

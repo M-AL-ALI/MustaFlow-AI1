@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
+import { authFetch } from "@/lib/api-fetch";
+import { useOraConversationsOptional } from "@/hooks/use-ora-conversations";
 
 export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 
@@ -307,9 +309,25 @@ export function useOraChat(): UseOraChatReturn {
   const [pendingImageAnalysis, setPendingImageAnalysis] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
 
+  // Conversation context is present only on the standalone /ora page (signed-in,
+  // per-conversation persistence). On the public landing trial the provider is
+  // absent, so `conv` is null and the hook keeps its legacy single-transcript
+  // behavior (sessionStorage + /api/ora/transcript).
+  const conv = useOraConversationsOptional();
+  const convRef = useRef(conv);
+  convRef.current = conv;
+  const conversationMode = conv != null;
+
   const sessionInitRef = useRef(false);
   const transcriptRestoredRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the conversation id whose messages are currently loaded, so the load
+  // effect can skip re-fetching a conversation we just created locally.
+  const loadedConvRef = useRef<number | null>(null);
+  // Bumped on every local edit (each saveToServer call). An in-flight load
+  // captures this value and discards its server result if a local edit happened
+  // while the fetch was outstanding — prevents a stale GET clobbering new input.
+  const editGenRef = useRef(0);
 
   const setLanguage = useCallback((lang: string) => {
     setLanguageState(lang);
@@ -320,14 +338,58 @@ export function useOraChat(): UseOraChatReturn {
     }
   }, []);
 
-  const saveToServer = useCallback((msgs: OraMessage[]) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      apiPost("/api/ora/transcript", { messages: serializeForStorage(msgs) }).catch(() => {
-        /* best-effort; silent on failure */
+  // Persist a message snapshot to a specific conversation. `targetId` is captured
+  // at schedule time (NOT resolved from the mutable context at flush time) so
+  // switching conversations during the debounce window can never write one
+  // conversation's messages into another. When `targetId` is null the snapshot
+  // belongs to a brand-new chat: create it — but only if the user is still on a
+  // new chat (currentConversationId === null). If they navigated to an existing
+  // conversation meanwhile, drop the save rather than clobber that conversation.
+  const saveToConversation = useCallback(async (msgs: OraMessage[], targetId: number | null) => {
+    const c = convRef.current;
+    if (!c) return;
+    let id = targetId;
+    if (id == null) {
+      if (c.currentConversationId != null) return;
+      const firstUser = msgs.find((m) => m.role === "user");
+      id = await c.ensureConversation(firstUser?.content ?? "New chat");
+    }
+    if (id == null) return;
+    // Skip the load effect re-fetching the conversation we are actively writing.
+    loadedConvRef.current = id;
+    try {
+      const res = await authFetch(`${BASE}/api/ora/conversations/${id}/messages`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: serializeForStorage(msgs) }),
       });
-    }, 800);
+      if (res.ok) c.notifyPersisted();
+    } catch {
+      /* best-effort; silent on failure */
+    }
   }, []);
+
+  const saveToServer = useCallback(
+    (msgs: OraMessage[]) => {
+      editGenRef.current += 1;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const c = convRef.current;
+      if (c) {
+        // Snapshot the target conversation id NOW, before the debounce window.
+        const targetId = c.currentConversationId;
+        saveTimerRef.current = setTimeout(() => {
+          void saveToConversation(msgs, targetId);
+        }, 800);
+      } else {
+        saveTimerRef.current = setTimeout(() => {
+          apiPost("/api/ora/transcript", { messages: serializeForStorage(msgs) }).catch(() => {
+            /* best-effort; silent on failure */
+          });
+        }, 800);
+      }
+    },
+    [saveToConversation],
+  );
 
   // Phase 1: Session init — runs once on mount regardless of auth state
   useEffect(() => {
@@ -361,9 +423,11 @@ export function useOraChat(): UseOraChatReturn {
             imageAnalysisCount: data.imageAnalysisCount ?? 0,
             imageAnalysisLimit: data.imageAnalysisLimit ?? 2,
           });
-          const stored = getStoredTranscript();
-          if (stored.length > 0) {
-            setMessages(stored);
+          if (!convRef.current) {
+            const stored = getStoredTranscript();
+            if (stored.length > 0) {
+              setMessages(stored);
+            }
           }
           return;
         } catch (err: unknown) {
@@ -400,9 +464,11 @@ export function useOraChat(): UseOraChatReturn {
           fileCount: data.fileCount ?? 0,
           fileLimit: data.fileLimit ?? FILE_LIMIT,
         });
-        const stored = getStoredTranscript();
-        if (stored.length > 0) {
-          setMessages(stored);
+        if (!convRef.current) {
+          const stored = getStoredTranscript();
+          if (stored.length > 0) {
+            setMessages(stored);
+          }
         }
       } catch (err: unknown) {
         const msg = (err as Error).message ?? "Could not start Ora session.";
@@ -413,9 +479,11 @@ export function useOraChat(): UseOraChatReturn {
     void init();
   }, []);
 
-  // Phase 2: Server transcript restore — runs once Clerk confirms the user is signed in
+  // Phase 2: Server transcript restore — runs once Clerk confirms the user is
+  // signed in. Skipped in conversation mode (the load effect below is the source
+  // of truth for per-conversation message history).
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || transcriptRestoredRef.current) return;
+    if (conversationMode || !isLoaded || !isSignedIn || transcriptRestoredRef.current) return;
     transcriptRestoredRef.current = true;
 
     const restoreTranscript = async () => {
@@ -448,7 +516,44 @@ export function useOraChat(): UseOraChatReturn {
     };
 
     void restoreTranscript();
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, conversationMode]);
+
+  // Conversation mode: load the selected conversation's messages whenever the
+  // current id changes. A null id (new chat) clears the transcript. The
+  // conversation we just created locally is skipped via loadedConvRef so a fresh
+  // first-message exchange isn't clobbered by a server re-fetch.
+  useEffect(() => {
+    if (!conv) return;
+    const id = conv.currentConversationId;
+    if (id == null) {
+      loadedConvRef.current = null;
+      setMessages([]);
+      return;
+    }
+    if (id === loadedConvRef.current) return;
+    loadedConvRef.current = id;
+    // Snapshot the edit generation before fetching. If the user types/sends a
+    // message while this GET is in flight, editGenRef advances and we discard the
+    // (now stale) server payload rather than overwriting the unsaved local edit.
+    const genAtStart = editGenRef.current;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch(`${BASE}/api/ora/conversations/${id}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { conversation: { messages: OraMessage[] } };
+        if (!cancelled && loadedConvRef.current === id && editGenRef.current === genAtStart) {
+          setMessages(data.conversation.messages ?? []);
+        }
+      } catch {
+        /* best-effort */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [conv, conv?.currentConversationId]);
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -1046,6 +1151,22 @@ export function useOraChat(): UseOraChatReturn {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+
+    // Conversation mode: starting a new chat just resets to a blank conversation
+    // (current id → null). The prior conversation stays in the sidebar; nothing
+    // is deleted server-side and the rate-limit session is preserved.
+    if (convRef.current) {
+      loadedConvRef.current = null;
+      setMessages([]);
+      setError(null);
+      setSessionExpired(false);
+      setAttachedFile(null);
+      setUploadState("idle");
+      setUploadError(null);
+      convRef.current.newConversation();
+      return;
+    }
+
     clearStoredTranscript();
     clearStoredSessionId();
     setMessages([]);

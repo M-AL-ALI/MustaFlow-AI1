@@ -1,6 +1,7 @@
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraPanel } from "@/components/ora-panel";
 import { useOraChat } from "@/hooks/use-ora-chat";
+import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
@@ -9,8 +10,11 @@ import { ThemeToggle } from "@/components/theme-toggle";
  * A focused, full-screen chat experience with its own slide-out sidebar
  * (toggled by the logo button top-left). This is the foundation the rest of
  * the Ora product layers onto.
+ *
+ * Wrapped in OraConversationsProvider so both the chat hook and the sidebar
+ * share the same projects/conversations state (per-conversation persistence).
  */
-export default function OraPage() {
+function OraPageInner() {
   const oraChat = useOraChat();
 
   return (
@@ -37,5 +41,13 @@ export default function OraPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function OraPage() {
+  return (
+    <OraConversationsProvider>
+      <OraPageInner />
+    </OraConversationsProvider>
   );
 }

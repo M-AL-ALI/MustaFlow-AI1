@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   LayoutDashboard,
   ImagePlus,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -307,6 +308,20 @@ export function SlideOutNav() {
           </div>
 
           <DrawerAdminNavItem onClose={close} />
+
+          <hr className="border-border mx-3 my-2" />
+
+          {/* Switch to the Ora assistant experience */}
+          <div className="px-3 py-2">
+            <Link
+              href="/ora"
+              onClick={close}
+              className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer no-underline"
+            >
+              <MessageCircle className="h-4 w-4 shrink-0" />
+              Switch to Ora
+            </Link>
+          </div>
         </div>
 
         <hr className="border-border mx-3" />
