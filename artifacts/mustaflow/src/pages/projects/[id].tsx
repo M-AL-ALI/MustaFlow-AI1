@@ -86,29 +86,28 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-function SubscriptionTierBadge({ tier }: { tier: "free" | "pro" | "team" }) {
-  const tierLabel = tier === "team" ? "Team" : tier === "pro" ? "Pro" : "Free";
-  const isPaid = tier === "pro" || tier === "team";
+function SubscriptionTierBadge({ tier }: { tier: "free" | "core" | "wave" }) {
+  const tierLabel = tier === "wave" ? "Deep Wave" : tier === "core" ? "Core Pack" : "Free";
+  const isPaid = tier === "core" || tier === "wave";
   return (
-    <Link href="/billing">
-      <a
-        className={cn(
-          "flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition-colors",
-          tier === "team"
-            ? "border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500/15"
-            : tier === "pro"
-              ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
-              : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-        )}
-        title={
-          isPaid
-            ? `${tierLabel} plan — all builder modes unlocked`
-            : "Free plan — upgrade to unlock Power and Pro builder modes"
-        }
-      >
-        <Crown style={{ width: 10, height: 10 }} className="shrink-0" />
-        {tierLabel}
-      </a>
+    <Link
+      href="/billing"
+      className={cn(
+        "flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition-colors no-underline",
+        tier === "wave"
+          ? "border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500/15"
+          : tier === "core"
+            ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
+            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+      title={
+        isPaid
+          ? `${tierLabel} plan — all builder modes unlocked`
+          : "Free plan — upgrade to unlock Power and Pro builder modes"
+      }
+    >
+      <Crown style={{ width: 10, height: 10 }} className="shrink-0" />
+      {tierLabel}
     </Link>
   );
 }
@@ -1061,7 +1060,7 @@ export default function ProjectWorkspacePage() {
   const [_batchTotalCount, setBatchTotalCount] = useState(0);
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>("power");
-  const [subscriptionTier, setSubscriptionTier] = useState<"free" | "pro" | "team">("free");
+  const [subscriptionTier, setSubscriptionTier] = useState<"free" | "core" | "wave">("free");
   const [showCreditConfirm, setShowCreditConfirm] = useState<{
     mode: string;
     cost: number;
@@ -1074,7 +1073,7 @@ export default function ProjectWorkspacePage() {
       try {
         const data = await getBillingSubscription();
         if (cancelled) return;
-        const t = data.tier === "pro" || data.tier === "team" ? data.tier : "free";
+        const t = data.tier === "core" || data.tier === "wave" ? data.tier : "free";
         setSubscriptionTier(t);
         if (t === "free" && (agentMode === "power" || agentMode === "pro")) {
           setAgentMode("eco");

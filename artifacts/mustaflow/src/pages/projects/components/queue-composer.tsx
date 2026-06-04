@@ -163,7 +163,7 @@ interface QueueComposerProps {
   projectId: number;
   agentMode: AgentMode;
   onAgentModeChange: (mode: AgentMode) => void;
-  subscriptionTier?: "free" | "pro" | "team";
+  subscriptionTier?: "free" | "core" | "wave";
   planMode: boolean;
   onPlanModeChange: (v: boolean) => void;
   runInBackground: boolean;

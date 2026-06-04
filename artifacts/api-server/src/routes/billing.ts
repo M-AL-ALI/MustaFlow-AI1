@@ -1110,7 +1110,7 @@ router.post("/billing/subscribe", async (req, res): Promise<void> => {
 
   const tierMeta = SUBSCRIPTION_TIERS_META.find((t) => t.id === tier);
   if (!tierMeta || tier === "free") {
-    res.status(400).json({ error: "Invalid tier. Choose 'core', 'pro', or 'team'." });
+    res.status(400).json({ error: "Invalid tier. Choose 'core' or 'wave'." });
     return;
   }
 
