@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 
 const SESSION_EXPIRY_SECONDS = 30 * 60;
-const MSG_LIMIT = 20;
+const MSG_LIMIT = 15;
 const FILE_LIMIT = 3;
 const IMAGE_LIMIT = 2;
 const IMAGE_ANALYSIS_LIMIT = 2;

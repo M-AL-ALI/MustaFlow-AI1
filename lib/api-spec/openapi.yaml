@@ -8067,7 +8067,7 @@ components:
         dismissedOnboarding: { type: boolean }
         preferredMode:
           type: string
-          enum: [builder, developer]
+          enum: [builder, developer, ora]
           nullable: true
         voiceLang:
           type: string
@@ -8081,7 +8081,7 @@ components:
         dismissedOnboarding: { type: boolean }
         preferredMode:
           type: string
-          enum: [builder, developer]
+          enum: [builder, developer, ora]
           nullable: true
         voiceLang:
           type: string

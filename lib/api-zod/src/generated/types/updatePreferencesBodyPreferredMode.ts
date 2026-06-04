@@ -12,4 +12,5 @@ export type UpdatePreferencesBodyPreferredMode = typeof UpdatePreferencesBodyPre
 export const UpdatePreferencesBodyPreferredMode = {
   builder: 'builder',
   developer: 'developer',
+  ora: 'ora',
 } as const;

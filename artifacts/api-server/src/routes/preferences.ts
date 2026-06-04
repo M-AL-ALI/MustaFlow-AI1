@@ -44,7 +44,7 @@ router.get("/me/preferences", async (req, res): Promise<void> => {
 
 const updatePreferencesSchema = z.object({
   dismissedOnboarding: z.boolean().optional(),
-  preferredMode: z.enum(["builder", "developer"]).nullable().optional(),
+  preferredMode: z.enum(["builder", "developer", "ora"]).nullable().optional(),
   voiceLang: z.string().nullable().optional(),
 });
 

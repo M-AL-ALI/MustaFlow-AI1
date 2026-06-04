@@ -4,22 +4,22 @@ import { useUpdateMyPreferences, getGetMyPreferencesQueryKey } from "@workspace/
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Sparkles, Code2, ArrowRight, Loader2 } from "lucide-react";
+import { Sparkles, MessageCircle, ArrowRight, Loader2 } from "lucide-react";
 
 export default function ModeSelectPage() {
   const [, setLocation] = useLocation();
-  const [selecting, setSelecting] = useState<"builder" | "developer" | null>(null);
+  const [selecting, setSelecting] = useState<"builder" | "ora" | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updatePreferences = useUpdateMyPreferences();
 
-  async function handleSelect(mode: "builder" | "developer") {
+  async function handleSelect(mode: "builder" | "ora") {
     if (selecting) return;
     setSelecting(mode);
     try {
       await updatePreferences.mutateAsync({ data: { preferredMode: mode } });
       await queryClient.invalidateQueries({ queryKey: getGetMyPreferencesQueryKey() });
-      setLocation(mode === "builder" ? "/projects" : "/dev");
+      setLocation(mode === "builder" ? "/projects" : "/ora");
     } catch {
       toast({
         title: "Something went wrong",
@@ -54,7 +54,7 @@ export default function ModeSelectPage() {
             Welcome — let's get started
           </p>
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4">
-            How do you want to build?
+            Where would you like to start?
           </h1>
           <p className="text-muted-foreground text-lg max-w-md mx-auto">
             Choose your experience. You can switch at any time from Settings.
@@ -75,12 +75,12 @@ export default function ModeSelectPage() {
             onSelect={handleSelect}
           />
 
-          {/* Developer Mode */}
+          {/* Ora */}
           <ModeCard
-            mode="developer"
-            icon={Code2}
-            title="Developer Mode"
-            description="A full cloud IDE powered by Zero. File tree, terminal, AI agent, and live preview — built for developers."
+            mode="ora"
+            icon={MessageCircle}
+            title="Ora"
+            description="Your AI assistant. Ask questions, think things through, and get work done in a simple chat — no building required."
             accent="from-violet-500/20 via-violet-500/5 to-transparent"
             borderHover="hover:border-violet-500/60"
             glowColor="shadow-violet-500/10"
@@ -94,15 +94,15 @@ export default function ModeSelectPage() {
 }
 
 interface ModeCardProps {
-  mode: "builder" | "developer";
+  mode: "builder" | "ora";
   icon: React.ElementType;
   title: string;
   description: string;
   accent: string;
   borderHover: string;
   glowColor: string;
-  selecting: "builder" | "developer" | null;
-  onSelect: (mode: "builder" | "developer") => void;
+  selecting: "builder" | "ora" | null;
+  onSelect: (mode: "builder" | "ora") => void;
 }
 
 function ModeCard({

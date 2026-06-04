@@ -1999,6 +1999,7 @@ export type UserPreferencesPreferredMode = typeof UserPreferencesPreferredMode[k
 export const UserPreferencesPreferredMode = {
   builder: 'builder',
   developer: 'developer',
+  ora: 'ora',
 } as const;
 
 export interface UserPreferences {
@@ -2016,6 +2017,7 @@ export type UpdatePreferencesBodyPreferredMode = typeof UpdatePreferencesBodyPre
 export const UpdatePreferencesBodyPreferredMode = {
   builder: 'builder',
   developer: 'developer',
+  ora: 'ora',
 } as const;
 
 export interface UpdatePreferencesBody {

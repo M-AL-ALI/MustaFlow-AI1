@@ -21,6 +21,8 @@ import NotFound from "@/pages/not-found";
 import HomePage from "./pages/home";
 import ProjectsPage from "./pages/projects";
 import ProjectWorkspacePage from "./pages/projects/[id]";
+import ModeSelectPage from "./pages/mode-select";
+import OraPage from "./pages/ora";
 import KnowledgePage from "./pages/knowledge";
 import VaultPage from "./pages/vault";
 import MemoryPage from "./pages/memory";
@@ -372,8 +374,15 @@ function SmartSignedInRedirect() {
     );
   }
 
-  // All authenticated users go to AI Builder — there is no separate mode choice.
-  return <Redirect to="/projects" />;
+  // Route by the user's chosen experience:
+  //   "ora"      → standalone Ora assistant
+  //   "builder"  → AI Builder dashboard
+  //   "developer"→ legacy value, treated as AI Builder
+  //   null/unset → first-run mode chooser
+  const mode = prefsQuery.data?.preferredMode ?? null;
+  if (mode === "ora") return <Redirect to="/ora" />;
+  if (mode === "builder" || mode === "developer") return <Redirect to="/projects" />;
+  return <Redirect to="/mode-select" />;
 }
 
 // Home: public landing for visitors; authenticated users redirect to their mode dashboard.
@@ -425,6 +434,16 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
 
               {/* ── Protected routes ── */}
+              <Route path="/mode-select">
+                <Protected>
+                  <ModeSelectPage />
+                </Protected>
+              </Route>
+              <Route path="/ora">
+                <Protected>
+                  <OraPage />
+                </Protected>
+              </Route>
               <Route path="/projects">
                 <Protected>
                   <AppLayout>

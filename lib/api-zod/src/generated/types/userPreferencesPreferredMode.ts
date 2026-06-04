@@ -12,4 +12,5 @@ export type UserPreferencesPreferredMode = typeof UserPreferencesPreferredMode[k
 export const UserPreferencesPreferredMode = {
   builder: 'builder',
   developer: 'developer',
+  ora: 'ora',
 } as const;
