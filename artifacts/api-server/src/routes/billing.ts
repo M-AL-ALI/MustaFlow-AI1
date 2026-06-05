@@ -380,8 +380,7 @@ async function handleSubscriptionEvent(event: {
     event.type === "customer.subscription.deleted" ? "canceled" : (sub.status ?? "inactive");
   if (status === "canceled") planTier = "free";
 
-  const currentPeriodEnd =
-    typeof sub.current_period_end === "number" ? new Date(sub.current_period_end * 1000) : null;
+  const currentPeriodEnd = extractSubscriptionPeriod(sub).end;
 
   await db
     .insert(workspaceSubscriptionsTable)
@@ -687,6 +686,45 @@ async function handleStripeWebhook(
   }
 }
 
+/**
+ * Extract the current billing period from a Stripe subscription object.
+ *
+ * Newer Stripe API versions expose `current_period_start`/`current_period_end`
+ * on each subscription *item* (`items.data[0]`) rather than on the top-level
+ * subscription. We read the item first and fall back to the legacy top-level
+ * fields so the handler works across API versions. Returns `null` for either
+ * boundary when no usable value is present (caller supplies a sane default).
+ */
+function extractSubscriptionPeriod(stripeSub: unknown): {
+  start: Date | null;
+  end: Date | null;
+} {
+  const sub = stripeSub as {
+    current_period_start?: number;
+    current_period_end?: number;
+    items?: {
+      data?: Array<{ current_period_start?: number; current_period_end?: number }>;
+    };
+  };
+  const item = sub.items?.data?.[0];
+  const startSec =
+    typeof item?.current_period_start === "number"
+      ? item.current_period_start
+      : typeof sub.current_period_start === "number"
+        ? sub.current_period_start
+        : null;
+  const endSec =
+    typeof item?.current_period_end === "number"
+      ? item.current_period_end
+      : typeof sub.current_period_end === "number"
+        ? sub.current_period_end
+        : null;
+  return {
+    start: startSec !== null ? new Date(startSec * 1000) : null,
+    end: endSec !== null ? new Date(endSec * 1000) : null,
+  };
+}
+
 async function handleCheckoutCompleted(
   stripe: NonNullable<Awaited<ReturnType<typeof getUncachableStripeClient>>>,
   event: { id: string; type: string; data: { object: Record<string, unknown> } },
@@ -707,14 +745,20 @@ async function handleCheckoutCompleted(
       );
       return;
     }
-    // Fetch current period from Stripe
+    // Fetch current period from Stripe. In newer Stripe API versions the
+    // current_period_start/current_period_end fields live on the subscription
+    // *item*, not the top-level subscription object; fall back to the legacy
+    // top-level fields for older API versions.
     const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-    const rawSub = stripeSub as unknown as {
-      current_period_start: number;
-      current_period_end: number;
-    };
-    const currentPeriodStart = new Date(rawSub.current_period_start * 1000);
-    const currentPeriodEnd = new Date(rawSub.current_period_end * 1000);
+    const period = extractSubscriptionPeriod(stripeSub);
+    // Deterministic fallback anchor (subscription start_date/created) so a
+    // retried webhook can't compute a different period and double-grant credits
+    // when Stripe omits the period boundaries.
+    const subAnchor = stripeSub as unknown as { start_date?: number; created?: number };
+    const anchorSec = subAnchor.start_date ?? subAnchor.created ?? Math.floor(Date.now() / 1000);
+    const anchorMs = anchorSec * 1000;
+    const currentPeriodStart = period.start ?? new Date(anchorMs);
+    const currentPeriodEnd = period.end ?? new Date(anchorMs + 30 * 24 * 60 * 60 * 1000);
 
     await db
       .update(userSubscriptionsTable)
@@ -880,9 +924,7 @@ async function handleSubscriptionUpdated(event: {
   const subscriptionId = stripeSub.id as string;
   const status = stripeSub.status as string;
   const cancelAtPeriodEnd = (stripeSub.cancel_at_period_end as boolean) ?? false;
-  const currentPeriodEnd = stripeSub.current_period_end
-    ? new Date((stripeSub.current_period_end as number) * 1000)
-    : null;
+  const currentPeriodEnd = extractSubscriptionPeriod(stripeSub).end;
 
   const [sub] = await db
     .select()

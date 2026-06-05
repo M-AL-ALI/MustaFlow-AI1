@@ -682,3 +682,22 @@ Phase 6 accepted as complete by the user on 2026-05-29, subject to the staging n
            containerId:        e826310a0e9458
            neonProjectId:      (none)
   ```
+
+## Task #1275 — Stripe test-mode subscription checkout (Core Pack / Deep Wave)
+
+Enabled end-to-end subscription checkout in dev against the Stripe **test** connection (livemode:false).
+
+### Configuration (dev / DEVELOPMENT scope)
+- Created test-mode products + recurring prices in Stripe: **Core Pack** ($20/mo) and **Deep Wave** ($40/mo).
+- Set env vars `STRIPE_CORE_PRICE_ID` and `STRIPE_WAVE_PRICE_ID` (price IDs are not secrets). Existing `STRIPE_PRICE_STARTER/BUILDER/POWER` are live-mode IDs and absent from the test account — they are for the separate workspace-plan system, not user Core/Wave subs.
+- Registered a test webhook endpoint → `/api/billing/webhook` for `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.created/updated/deleted`. In dev, `STRIPE_WEBHOOK_SECRET` is intentionally unset, so the webhook route accepts unverified payloads (DEV ONLY guard in `billing.ts`).
+
+### Bug fixed
+`handleCheckoutCompleted` threw `Invalid time value` (500) because it read `current_period_start/end` off the top-level Stripe subscription, but newer Stripe API versions moved those onto the subscription **item** (`items.data[0]`). Added `extractSubscriptionPeriod()` (item-first, legacy top-level fallback, null-safe) used by `handleCheckoutCompleted`, `handleSubscriptionUpdated`, and `handleSubscriptionEvent`. Checkout fallback period anchors on the subscription's `start_date`/`created` so a retried webhook can't double-grant credits.
+
+### How to test in the browser (dev)
+1. Open the app → Billing/Pricing → choose **Core Pack** or **Deep Wave** → Subscribe. A real Stripe test checkout page (`checkout.stripe.com`) opens.
+2. Pay with test card **4242 4242 4242 4242**, any future expiry, any CVC, any ZIP. (Decline test card: `4000 0000 0000 0002`.)
+3. On completion, Stripe fires `checkout.session.completed` to the webhook; the user's subscription flips to the purchased tier with `status=active` (Core → 1500 monthly credits / 3 concurrent builds; Wave → 4000 / 10). Verify via Billing page or `GET /api/billing/subscription`.
+
+Verified end-to-end for both tiers via real test subscriptions + delivered webhook events; test Stripe objects were canceled/deleted and the test-user DB row reset afterward.
