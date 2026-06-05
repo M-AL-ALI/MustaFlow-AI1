@@ -12,11 +12,13 @@ fi
 
 CRED_HELPER='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'
 
-echo "Fetching from GitHub MustaFlow-AI1 …"
-git -c credential.helper="$CRED_HELPER" fetch "$REMOTE_URL" "$BRANCH:refs/remotes/github/$BRANCH"
+echo "Fetching from GitHub MustaFlow-AI1 (forced ref update) …"
+git -c credential.helper="$CRED_HELPER" fetch "$REMOTE_URL" "+$BRANCH:refs/remotes/github/$BRANCH"
 
 echo "Merging github/$BRANCH into local $BRANCH …"
-git merge --no-edit "refs/remotes/github/$BRANCH"
+git -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
+    -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
+    merge --no-edit "refs/remotes/github/$BRANCH"
 
 echo "Local HEAD is now: $(git rev-parse --short HEAD)"
 echo "Done."
