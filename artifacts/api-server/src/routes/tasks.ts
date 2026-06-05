@@ -99,7 +99,7 @@ router.post("/projects/:id/tasks", requireProjectOwnership, async (req, res): Pr
     .where(
       and(
         eq(agentTasksTable.projectId, project.id),
-        inArray(agentTasksTable.status, ["building", "planning"]),
+        inArray(agentTasksTable.status, ["building", "planning", "needs_review", "needs_fix"]),
         ne(agentTasksTable.kind, "background"),
       ),
     )
@@ -290,7 +290,8 @@ router.post(
       return;
     }
 
-    // Cancel any currently active (building/planning) tasks for this project.
+    // Cancel any currently active executable tasks for this project. Review/fix
+    // gates are user decisions and should be resolved from their own controls.
     const activeTasks = await db
       .select({ id: agentTasksTable.id })
       .from(agentTasksTable)

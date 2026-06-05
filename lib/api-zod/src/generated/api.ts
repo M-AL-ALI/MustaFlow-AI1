@@ -758,7 +758,7 @@ export const ListProjectsResponseItem = zod.object({
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(listProjectsResponseHealthScoreMin).max(listProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
-  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "stack": zod.enum(['static-html', 'react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
@@ -854,7 +854,7 @@ export const GetProjectResponse = zod.object({
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(getProjectResponseHealthScoreMin).max(getProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
-  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "stack": zod.enum(['static-html', 'react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
@@ -950,7 +950,7 @@ export const UpdateProjectResponse = zod.object({
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(updateProjectResponseHealthScoreMin).max(updateProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
-  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "stack": zod.enum(['static-html', 'react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
@@ -1026,7 +1026,7 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(listTrashedProjectsResponseHealthScoreMin).max(listTrashedProjectsResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
-  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "stack": zod.enum(['static-html', 'react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
@@ -1102,7 +1102,7 @@ export const RestoreProjectResponse = zod.object({
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(restoreProjectResponseHealthScoreMin).max(restoreProjectResponseHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
-  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "stack": zod.enum(['static-html', 'react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
@@ -1177,7 +1177,7 @@ export const GetProjectsSummaryResponse = zod.object({
   "prodContainerStatus": zod.enum(['stopped', 'starting', 'running', 'hibernated', 'error', 'deploying']).optional().describe('Current production container lifecycle state.'),
   "prodContainerUrl": zod.string().nullish().describe('Proxy URL to reach the production container. Null = not deployed.'),
   "healthScore": zod.number().min(getProjectsSummaryResponseRecentItemHealthScoreMin).max(getProjectsSummaryResponseRecentItemHealthScoreMax).nullish().describe('0–100 score derived from generated file quality: accessibility (alt\/ARIA\/semantic), SEO (title\/description\/h1), performance (script count\/lazy), security (no eval\/document.write). Null if no files built yet.'),
-  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "defaultAgent": zod.enum(['planning', 'task', 'main']).optional().describe('User\'s preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.'),
   "projectFormat": zod.enum(['static-html', 'react-vite']).optional().describe('Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects).'),
   "stack": zod.enum(['static-html', 'react-vite', 'nextjs', 'node-api', 'python-flask', 'python-fastapi', 'go-gin']).optional().describe('Technology stack chosen at project creation. Immutable — duplicate the project to change stack.'),
   "dbProvider": zod.enum(['none', 'postgres', 'sqlite']).optional().describe('Which database engine is provisioned for this project. none = no DB.'),
@@ -1366,7 +1366,7 @@ export const SendMessageBody = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
   "background": zod.boolean().optional(),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.'),
   "attachments": zod.array(zod.object({
   "kind": zod.enum(['image']),
@@ -1490,7 +1490,7 @@ export const StreamMessageBody = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "planMode": zod.boolean(),
   "background": zod.boolean().optional(),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug\/refactor\/review\/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build\/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean.'),
   "attachments": zod.array(zod.object({
   "kind": zod.enum(['image']),
@@ -1661,9 +1661,9 @@ export const ListTasksResponseItem = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -1723,7 +1723,7 @@ export const ListTasksResponseItem = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -1766,9 +1766,9 @@ export const ReorderTasksResponseItem = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -1828,7 +1828,7 @@ export const ReorderTasksResponseItem = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -1850,9 +1850,9 @@ export const CancelTaskResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -1912,7 +1912,7 @@ export const CancelTaskResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -1933,9 +1933,9 @@ export const ForceStartTaskResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -1995,7 +1995,7 @@ export const ForceStartTaskResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -2020,9 +2020,9 @@ export const UpdateTaskResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -2082,7 +2082,7 @@ export const UpdateTaskResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -2105,7 +2105,7 @@ export const RerunTaskTestsResponse = zod.object({
 
 
 /**
- * @summary Apply Task Agent staging snapshot to live project files
+ * @summary Apply staged-review snapshot to live project files
  */
 export const ApplyTaskStagingParams = zod.object({
   "id": zod.coerce.number(),
@@ -2118,9 +2118,9 @@ export const ApplyTaskStagingResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -2180,7 +2180,7 @@ export const ApplyTaskStagingResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -2222,7 +2222,7 @@ export const ExplainTaskChangeBody = zod.object({
 
 
 /**
- * @summary Discard Task Agent staging snapshot — no files changed
+ * @summary Discard staged-review snapshot - no files changed
  */
 export const DiscardTaskStagingParams = zod.object({
   "id": zod.coerce.number(),
@@ -2235,9 +2235,9 @@ export const DiscardTaskStagingResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -2297,7 +2297,7 @@ export const DiscardTaskStagingResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -2339,9 +2339,9 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -2401,7 +2401,7 @@ export const SubmitTaskFeedbackResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')
@@ -5391,7 +5391,7 @@ export const StreamTaskEventsParams = zod.object({
 /**
  * Project-scoped Server-Sent Events stream emitting `project_files_changed`,
 `preview_ready`, and `preview_sync_failed` events. Live-only — no DB replay.
-Guards: requires project ownership. Task Agent `needs_review` output does NOT
+Guards: requires project ownership. Staged-review `needs_review` output does NOT
 emit here; only Apply does.
 
  * @summary SSE live stream of project-level preview events (text/event-stream)
@@ -5488,7 +5488,7 @@ export const SubmitProjectQueueBody = zod.object({
   "messages": zod.array(zod.string()),
   "agentMode": zod.string(),
   "planMode": zod.boolean().optional(),
-  "agentIdentity": zod.string().optional()
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Legacy client hint. Queued build work executes through Main Agent; task is accepted only for backward compatibility.')
 })
 
 export const SubmitProjectQueueResponse = zod.object({
@@ -5527,9 +5527,9 @@ export const GetProjectQueueBatchResponse = zod.object({
   "title": zod.string(),
   "kind": zod.enum(['main', 'background', 'plan', 'converse', 'rollback']),
   "status": zod.enum(['queued', 'planning', 'building', 'testing', 'needs_approval', 'needs_review', 'needs_fix', 'completed', 'failed', 'canceled', 'discarded']),
-  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).'),
+  "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.'),
   "origin": zod.string().nullish().describe('Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.'),
-  "stagingSnapshot": zod.unknown().nullish().describe('Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object.'),
+  "stagingSnapshot": zod.unknown().nullish().describe('Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files.'),
   "prompt": zod.string().nullish(),
   "result": zod.string().nullish(),
   "queueBatchId": zod.string().nullish(),
@@ -5589,7 +5589,7 @@ export const GetProjectQueueBatchResponse = zod.object({
   "wallClockCapMs": zod.number().nullish().describe('Optional per-task wall-clock cap (ms) passed into the agent loop. Set for background tasks.'),
   "creditsReserved": zod.number().nullish().describe('Credits deducted upfront for background tasks. Refunded on cancel\/discard; cleared on apply\/complete.'),
   "pausedAt": zod.coerce.date().nullish(),
-  "appliedAt": zod.coerce.date().nullish().describe('Set when a Task Agent staging snapshot is applied.'),
+  "appliedAt": zod.coerce.date().nullish().describe('Set when a staged-review snapshot is applied.'),
   "discardedAt": zod.coerce.date().nullish(),
   "hasBrainstormContext": zod.boolean().optional().describe('True when the task was created with brainstorm conversation context forwarded to the builder.'),
   "brainstormTurnCount": zod.number().nullish().describe('Number of brainstorm conversation turns (user + assistant messages) included as context.')

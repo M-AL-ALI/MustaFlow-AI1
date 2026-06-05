@@ -413,16 +413,15 @@ export const agentTasksTable = pgTable(
     title: text("title").notNull(),
     kind: text("kind").notNull().default("main"),
     status: text("status").notNull().default("queued"),
-    // agentIdentity: which of the three agents handled this task.
-    // "planning" = Planning Agent (plan mode), "task" = Task Agent (staging gate),
-    // "main" = Main Agent (direct fast edit). Default "main" for backward compat.
+    // agentIdentity: visible executor for this task.
+    // "planning" = Planner, "main" = Main Agent. "task" is retained only for
+    // legacy staging rows so old apply/discard flows remain readable.
     agentIdentity: text("agent_identity").notNull().default("main"),
     // origin: source surface that created the task. Mirrors chat_messages.origin
     // so queued/background task reports can be written back to the same thread.
     origin: text("origin"),
-    // stagingSnapshot: Task Agent stores generated files here before the user
-    // approves. Null for Main Agent (files are written directly). Promoted to
-    // project_files on Apply; discarded on Discard.
+    // stagingSnapshot: legacy staged files awaiting user approval. Null for
+    // Main Agent rows because files are written directly to project_files.
     stagingSnapshot:
       jsonb("staging_snapshot").$type<Array<{ path: string; content: string; mimeType: string }>>(),
     prompt: text("prompt"),

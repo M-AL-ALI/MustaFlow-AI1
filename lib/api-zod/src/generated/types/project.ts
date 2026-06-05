@@ -87,7 +87,7 @@ export interface Project {
      * @nullable
      */
   healthScore?: number | null;
-  /** User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  /** User's preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility. */
   defaultAgent?: ProjectDefaultAgent;
   /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
   projectFormat?: ProjectProjectFormat;

@@ -507,6 +507,7 @@ export * from './submitAbuseReport201';
 export * from './submitAbuseReportBody';
 export * from './submitProjectQueue200';
 export * from './submitProjectQueueBody';
+export * from './submitProjectQueueBodyAgentIdentity';
 export * from './suggestionAcceptResult';
 export * from './taskEvent';
 export * from './taskEventEventType';

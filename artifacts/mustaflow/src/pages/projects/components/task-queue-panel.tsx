@@ -16,7 +16,8 @@ interface TaskQueuePanelProps {
   onStop: () => void;
 }
 
-const ACTIVE_STATUSES = ["planning", "building", "testing"] as const;
+const ACTIVE_STATUSES = ["planning", "building", "testing", "needs_review", "needs_fix"] as const;
+const WAITING_STATUSES = new Set(["needs_review", "needs_fix"]);
 const PAUSED_STATUS = "paused-insufficient-credits";
 
 export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
@@ -56,6 +57,7 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
   }, [projectId, invalidate]);
 
   const activeTask = tasks.find((t) => (ACTIVE_STATUSES as readonly string[]).includes(t.status));
+  const activeTaskIsWaiting = activeTask ? WAITING_STATUSES.has(activeTask.status) : false;
   const rawQueuedTasks = tasks.filter((t) => t.status === "queued");
   const pausedTasks = tasks.filter((t) => (t.status as string) === PAUSED_STATUS);
 
@@ -70,7 +72,7 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
   const hasActivity = activeTask != null || rawQueuedTasks.length > 0 || pausedTasks.length > 0;
 
   const summaryParts = [
-    activeTask ? "1 active" : null,
+    activeTask ? (activeTaskIsWaiting ? "1 waiting" : "1 active") : null,
     rawQueuedTasks.length > 0 ? `${rawQueuedTasks.length} queued` : null,
     pausedTasks.length > 0 ? `${pausedTasks.length} paused` : null,
   ].filter(Boolean);
@@ -145,18 +147,28 @@ export function TaskQueuePanel({ projectId, onStop }: TaskQueuePanelProps) {
       <div className="divide-y divide-border/40">
         {activeTask && (
           <div className="px-3 py-2 flex items-center gap-2">
-            <Loader2 className="h-3 w-3 text-primary animate-spin shrink-0" />
+            {activeTaskIsWaiting ? (
+              <Clock className="h-3 w-3 text-amber-400 shrink-0" />
+            ) : (
+              <Loader2 className="h-3 w-3 text-primary animate-spin shrink-0" />
+            )}
             <span className="flex-1 text-[11px] text-foreground truncate min-w-0">
               {activeTask.title}
             </span>
-            <button
-              onClick={onStop}
-              title="Stop current task"
-              className="h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium bg-destructive/80 text-destructive-foreground hover:bg-destructive transition-colors shrink-0"
-            >
-              <Square className="h-2.5 w-2.5 fill-current" />
-              Stop
-            </button>
+            {activeTaskIsWaiting ? (
+              <span className="h-5 px-1.5 rounded-md flex items-center text-[10px] font-medium bg-amber-500/15 text-amber-300 shrink-0">
+                {activeTask.status === "needs_fix" ? "Needs fix" : "Awaiting apply"}
+              </span>
+            ) : (
+              <button
+                onClick={onStop}
+                title="Stop current task"
+                className="h-5 px-1.5 rounded-md flex items-center gap-1 text-[10px] font-medium bg-destructive/80 text-destructive-foreground hover:bg-destructive transition-colors shrink-0"
+              >
+                <Square className="h-2.5 w-2.5 fill-current" />
+                Stop
+              </button>
+            )}
           </div>
         )}
 

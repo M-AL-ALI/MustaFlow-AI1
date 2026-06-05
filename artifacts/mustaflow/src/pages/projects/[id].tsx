@@ -1128,7 +1128,8 @@ export default function ProjectWorkspacePage() {
     const activeTask = (tasksForFeed as Array<{ id: number; status: string }>).find(
       (t) => t.id === activeTaskId,
     );
-    activeTaskNeedsReviewRef.current = activeTask?.status === "needs_review";
+    activeTaskNeedsReviewRef.current =
+      activeTask?.status === "needs_review" || activeTask?.status === "needs_fix";
   }, [tasksForFeed, activeTaskId]);
 
   // Auto-clear the Zero background pill when its task reaches a terminal status.
@@ -1138,7 +1139,10 @@ export default function ProjectWorkspacePage() {
     const task = (tasksForFeed as Array<{ id: number; status: string }>).find(
       (t) => t.id === zeroBgTaskId,
     );
-    if (task && ["completed", "failed", "cancelled", "canceled"].includes(task.status)) {
+    if (
+      task &&
+      ["completed", "failed", "cancelled", "canceled", "discarded"].includes(task.status)
+    ) {
       setZeroBgTaskId(null);
     }
   }, [tasksForFeed, zeroBgTaskId]);
@@ -1202,9 +1206,9 @@ export default function ProjectWorkspacePage() {
     }
     return "chat";
   });
-  const [agentIdentity, setAgentIdentity] = useState<"planning" | "task" | "main">(() => {
+  const [agentIdentity, setAgentIdentity] = useState<"planning" | "main">(() => {
     const stored = localStorage.getItem(`mustaflow_agent_type_${projectId}`);
-    return (stored as "planning" | "task" | "main" | null) ?? "main";
+    return stored === "planning" ? "planning" : "main";
   });
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [showAllRecent, setShowAllRecent] = useState(false);
@@ -2094,6 +2098,7 @@ export default function ProjectWorkspacePage() {
           | "fix_types"
           | "fix_lint";
         attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
+        agentIdentity?: "planning" | "main";
         idempotencyKey?: string;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
       },
@@ -2109,7 +2114,7 @@ export default function ProjectWorkspacePage() {
             agentMode: effectiveMode,
             planMode: effectivePlanMode,
             background: opts?.background ?? runInBackground,
-            agentIdentity,
+            agentIdentity: opts?.agentIdentity ?? agentIdentity,
             ...(effectiveAgentIntent ? { agentIntent: effectiveAgentIntent } : {}),
             ...(opts?.attachments && opts.attachments.length > 0
               ? { attachments: opts.attachments }
@@ -2183,8 +2188,8 @@ export default function ProjectWorkspacePage() {
           | "fix_tests"
           | "fix_types"
           | "fix_lint";
-        /** Override agent identity — pass "task" for auto-fix retries from QualityGateFailureCard. */
-        agentIdentity?: string;
+        /** Override visible executor for explicit plan/main handoffs. */
+        agentIdentity?: "planning" | "main";
         attachments?: Array<{
           kind: "image";
           url: string;
@@ -3510,10 +3515,9 @@ export default function ProjectWorkspacePage() {
                       send(text);
                     }}
                     onAutoFix={(text) => {
-                      // Always send auto-fix prompts with task agent identity so
-                      // the retry runs the same persona as the original build.
+                      // Auto-fix retries now use Main Agent so preview receives committed files.
                       setShowChatHistory(false);
-                      send(text, { agentIdentity: "task" });
+                      send(text, { agentIdentity: "main" });
                     }}
                     onNavigateToSecret={handleAddKey}
                   />

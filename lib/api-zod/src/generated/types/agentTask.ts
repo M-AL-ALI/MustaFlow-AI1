@@ -18,14 +18,14 @@ export interface AgentTask {
   title: string;
   kind: AgentTaskKind;
   status: AgentTaskStatus;
-  /** Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  /** Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility. */
   agentIdentity?: AgentTaskAgentIdentity;
   /**
      * Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.
      * @nullable
      */
   origin?: string | null;
-  /** Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object. */
+  /** Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files. */
   stagingSnapshot?: unknown | null;
   /** @nullable */
   prompt?: string | null;
@@ -65,7 +65,7 @@ export interface AgentTask {
   /** @nullable */
   pausedAt?: Date | null;
   /**
-     * Set when a Task Agent staging snapshot is applied.
+     * Set when a staged-review snapshot is applied.
      * @nullable
      */
   appliedAt?: Date | null;

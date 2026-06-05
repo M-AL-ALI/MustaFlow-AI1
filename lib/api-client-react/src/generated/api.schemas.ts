@@ -216,7 +216,7 @@ export const ProjectProdContainerStatus = {
 } as const;
 
 /**
- * User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
+ * User's preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.
  */
 export type ProjectDefaultAgent = typeof ProjectDefaultAgent[keyof typeof ProjectDefaultAgent];
 
@@ -419,7 +419,7 @@ export interface Project {
      * @nullable
      */
   healthScore?: number | null;
-  /** User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  /** User's preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility. */
   defaultAgent?: ProjectDefaultAgent;
   /** Builder output format. static-html = CDN-based single HTML blob (legacy). react-vite = multi-file React + Vite npm project (default for new web projects). */
   projectFormat?: ProjectProjectFormat;
@@ -1078,7 +1078,7 @@ export const ChatMessageInputAgentMode = {
 } as const;
 
 /**
- * Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.
+ * Optional visible executor override. New work should use planning or main; task is legacy compatibility only.
  */
 export type ChatMessageInputAgentIdentity = typeof ChatMessageInputAgentIdentity[keyof typeof ChatMessageInputAgentIdentity];
 
@@ -1127,7 +1127,7 @@ export interface ChatMessageInput {
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
   background?: boolean;
-  /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
+  /** Optional visible executor override. New work should use planning or main; task is legacy compatibility only. */
   agentIdentity?: ChatMessageInputAgentIdentity;
   /** Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean. */
   agentIntent?: ChatMessageInputAgentIntent;
@@ -1270,7 +1270,7 @@ export const AgentTaskStatus = {
 } as const;
 
 /**
- * Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
+ * Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.
  */
 export type AgentTaskAgentIdentity = typeof AgentTaskAgentIdentity[keyof typeof AgentTaskAgentIdentity];
 
@@ -1371,14 +1371,14 @@ export interface AgentTask {
   title: string;
   kind: AgentTaskKind;
   status: AgentTaskStatus;
-  /** Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit). */
+  /** Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility. */
   agentIdentity?: AgentTaskAgentIdentity;
   /**
      * Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread.
      * @nullable
      */
   origin?: string | null;
-  /** Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object. */
+  /** Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files. */
   stagingSnapshot?: unknown | null;
   /** @nullable */
   prompt?: string | null;
@@ -1418,7 +1418,7 @@ export interface AgentTask {
   /** @nullable */
   pausedAt?: string | null;
   /**
-     * Set when a Task Agent staging snapshot is applied.
+     * Set when a staged-review snapshot is applied.
      * @nullable
      */
   appliedAt?: string | null;
@@ -5135,11 +5135,24 @@ export type StopContainer200 = {
   containerStatus: string;
 };
 
+/**
+ * Legacy client hint. Queued build work executes through Main Agent; task is accepted only for backward compatibility.
+ */
+export type SubmitProjectQueueBodyAgentIdentity = typeof SubmitProjectQueueBodyAgentIdentity[keyof typeof SubmitProjectQueueBodyAgentIdentity];
+
+
+export const SubmitProjectQueueBodyAgentIdentity = {
+  planning: 'planning',
+  task: 'task',
+  main: 'main',
+} as const;
+
 export type SubmitProjectQueueBody = {
   messages: string[];
   agentMode: string;
   planMode?: boolean;
-  agentIdentity?: string;
+  /** Legacy client hint. Queued build work executes through Main Agent; task is accepted only for backward compatibility. */
+  agentIdentity?: SubmitProjectQueueBodyAgentIdentity;
 };
 
 export type SubmitProjectQueue200 = {

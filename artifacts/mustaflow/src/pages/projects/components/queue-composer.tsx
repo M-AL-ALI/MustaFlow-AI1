@@ -10,7 +10,6 @@ import {
   Paperclip,
   Mic,
   MicOff,
-  Paintbrush2,
   Image as ImageIcon,
   Layers2,
   FlaskConical,
@@ -49,7 +48,7 @@ import type { StructuredPlan } from "./plan-card";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
-type AgentType = "planning" | "task" | "main";
+type AgentType = "planning" | "main";
 
 interface QueueRow {
   id: string;
@@ -239,7 +238,7 @@ export function QueueComposer({
   const lsKey = `mustaflow_agent_type_${projectId}`;
   const [agentType, setAgentTypeRaw] = useState<AgentType>(() => {
     const stored = localStorage.getItem(lsKey);
-    return (stored as AgentType | null) ?? "main";
+    return stored === "planning" ? "planning" : "main";
   });
 
   // ── Persistent developer intent ────────────────────────────────────────────
@@ -310,19 +309,11 @@ export function QueueComposer({
       setAgentTypeRaw(type);
       localStorage.setItem(lsKey, type);
       onPlanModeChange(type === "planning");
-      onRunInBackgroundChange(type === "task");
       onAgentIdentityChange?.(type);
       // Persist to server so the preference survives across devices/sessions
       updateProject({ id: projectId, data: { defaultAgent: type } });
     },
-    [
-      lsKey,
-      onPlanModeChange,
-      onRunInBackgroundChange,
-      onAgentIdentityChange,
-      updateProject,
-      projectId,
-    ],
+    [lsKey, onPlanModeChange, onAgentIdentityChange, updateProject, projectId],
   );
 
   // Debounced prompt for routing hint
@@ -1755,25 +1746,6 @@ export function QueueComposer({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setImagePanelOpen((v) => !v)}
-                  className={cn(
-                    "w-6 h-6 flex items-center justify-center rounded-md transition-colors",
-                    imagePanelOpen
-                      ? "text-secondary bg-secondary/15"
-                      : "text-muted-foreground hover:text-foreground hover:bg-background/60",
-                  )}
-                  title="Generate an image with AI"
-                >
-                  <ImageIcon className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
-                  title="Attach design"
-                >
-                  <Paintbrush2 className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
                   onClick={startVoiceDictation}
                   disabled={!voiceSupported}
                   className={cn(
@@ -1820,13 +1792,46 @@ export function QueueComposer({
                     ))}
                   </select>
                 )}
-                <button
-                  onClick={addRow}
-                  className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
-                  title="Add task to queue (Shift+Enter)"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
+                      title="More composer actions"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="top" className="w-52">
+                    <DropdownMenuItem onSelect={() => setImagePanelOpen((v) => !v)}>
+                      <ImageIcon className="mr-2 h-3.5 w-3.5" />
+                      {imagePanelOpen ? "Close image generator" : "Generate image"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowBrainstorm((v) => !v)}>
+                      <Lightbulb className="mr-2 h-3.5 w-3.5" />
+                      {showBrainstorm ? "Close brainstorm" : "Brainstorm"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={addRow}>
+                      <Plus className="mr-2 h-3.5 w-3.5" />
+                      Add queued task
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {(
+                      [
+                        { mode: "lite", label: "Lite", desc: "Minimal change" },
+                        { mode: "eco", label: "Eco", desc: "Clean typed code" },
+                        { mode: "power", label: "Power", desc: "Production-ready" },
+                        { mode: "pro", label: "Pro", desc: "Strict review" },
+                      ] as const
+                    ).map(({ mode, label, desc }) => (
+                      <DropdownMenuItem key={mode} onSelect={() => onAgentModeChange(mode)}>
+                        <Sparkles className="mr-2 h-3.5 w-3.5" />
+                        <span className="flex-1">{label}</span>
+                        <span className="text-[10px] text-muted-foreground">{desc}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             )}
             {/* Plan first / Run in background checkboxes */}
@@ -1861,15 +1866,15 @@ export function QueueComposer({
             </button>
             <button
               type="button"
-              onClick={() => setAgentType(agentType === "task" ? "main" : "task")}
+              onClick={() => onRunInBackgroundChange(!_runInBackground)}
               title={
-                agentType === "task"
-                  ? "Run in background is on — tasks queue instead of blocking"
-                  : "Enable Run in background — tasks queue instead of blocking"
+                _runInBackground
+                  ? "Run in background is on — Main Agent will run asynchronously"
+                  : "Enable background — Main Agent will run asynchronously"
               }
               className={cn(
                 "flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium border transition-colors",
-                agentType === "task"
+                _runInBackground
                   ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
                   : "border-transparent text-muted-foreground hover:text-foreground",
               )}
@@ -1877,19 +1882,17 @@ export function QueueComposer({
               <span
                 className={cn(
                   "h-3 w-3 rounded-sm border flex items-center justify-center shrink-0",
-                  agentType === "task"
+                  _runInBackground
                     ? "border-amber-400 bg-amber-500/20"
                     : "border-muted-foreground/40",
                 )}
               >
-                {agentType === "task" && (
-                  <span className="h-1.5 w-1.5 rounded-sm bg-amber-400 block" />
-                )}
+                {_runInBackground && <span className="h-1.5 w-1.5 rounded-sm bg-amber-400 block" />}
               </span>
               Background
             </button>
             <div className="ml-auto flex items-center gap-2">
-              <div className="flex flex-col items-end gap-0.5">
+              <div className="hidden">
                 {/* Discuss / Brainstorm pill — opens the full BrainstormPanel */}
                 <button
                   type="button"
@@ -2247,17 +2250,15 @@ export function QueueComposer({
           )}
 
           {/* Routing hint badge — updates as user types */}
-          {routingHint?.agentIdentity &&
-            routingHint.agentIdentity !== agentType &&
-            routingHint.agentIdentity !== "planning" && (
-              <button
-                onClick={() => setAgentType(routingHint.agentIdentity as AgentType)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
-                title={routingHint.reason ?? ""}
-              >
-                Switch to {routingHint.agentIdentity === "task" ? "Task" : "Main"} Agent
-              </button>
-            )}
+          {routingHint?.agentIdentity === "main" && agentType !== "main" && (
+            <button
+              onClick={() => setAgentType(routingHint.agentIdentity as AgentType)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
+              title={routingHint.reason ?? ""}
+            >
+              Switch to Main
+            </button>
+          )}
         </div>
       )}
 

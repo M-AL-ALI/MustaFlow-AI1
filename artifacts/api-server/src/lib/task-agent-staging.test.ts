@@ -16,18 +16,18 @@ describe("resolveAgentIdentity", () => {
     });
   });
 
-  describe("returns 'task' for any condition that requires the staging gate", () => {
-    it("background job always → task", () => {
-      expect(resolveAgentIdentity("short", true, true, false, false)).toBe("task");
+  describe("returns 'main' for build execution signals", () => {
+    it("background job always → main", () => {
+      expect(resolveAgentIdentity("short", true, true, false, false)).toBe("main");
     });
 
-    it("batch-queued task always → task", () => {
-      expect(resolveAgentIdentity("short", true, false, true, false)).toBe("task");
+    it("batch-queued task always → main", () => {
+      expect(resolveAgentIdentity("short", true, false, true, false)).toBe("main");
     });
 
-    it("prompt > 120 chars → task (complex change deserves review)", () => {
+    it("prompt > 120 chars → main", () => {
       const longPrompt = "a".repeat(121);
-      expect(resolveAgentIdentity(longPrompt, true, false, false, false)).toBe("task");
+      expect(resolveAgentIdentity(longPrompt, true, false, false, false)).toBe("main");
     });
 
     it("prompt exactly 120 chars → main (boundary is exclusive)", () => {
@@ -35,21 +35,21 @@ describe("resolveAgentIdentity", () => {
       expect(resolveAgentIdentity(boundaryPrompt, true, false, false, false)).toBe("main");
     });
 
-    it("initial build (no files) always → task", () => {
-      expect(resolveAgentIdentity("build me an app", false, false, false, false)).toBe("task");
+    it("initial build (no files) always → main", () => {
+      expect(resolveAgentIdentity("build me an app", false, false, false, false)).toBe("main");
     });
 
-    it("background + long prompt → task (background flag wins)", () => {
+    it("background + long prompt → main", () => {
       const longPrompt = "a".repeat(200);
-      expect(resolveAgentIdentity(longPrompt, true, true, false, false)).toBe("task");
+      expect(resolveAgentIdentity(longPrompt, true, true, false, false)).toBe("main");
     });
 
-    it("batch + no files → task (multiple conditions, still task)", () => {
-      expect(resolveAgentIdentity("rebuild", false, false, true, false)).toBe("task");
+    it("batch + no files → main", () => {
+      expect(resolveAgentIdentity("rebuild", false, false, true, false)).toBe("main");
     });
   });
 
-  describe("returns 'main' only for short foreground prompts on existing projects", () => {
+  describe("returns 'main' for normal direct execution", () => {
     it("short prompt, has files, foreground, not batch → main", () => {
       expect(resolveAgentIdentity("fix typo", true, false, false, false)).toBe("main");
     });
@@ -64,26 +64,26 @@ describe("resolveAgentIdentity", () => {
     });
   });
 
-  describe("Task Agent never routes to 'main' for dangerous conditions", () => {
-    it("background flag alone is sufficient to block direct file writes", () => {
+  describe("Task Agent is no longer selected by routing", () => {
+    it("background flag alone still routes to Main Agent", () => {
       for (const hasFiles of [true, false]) {
         for (const isBatch of [true, false]) {
           const identity = resolveAgentIdentity("short", hasFiles, true, isBatch, false);
-          expect(identity).not.toBe("main");
+          expect(identity).toBe("main");
         }
       }
     });
 
-    it("batch flag alone is sufficient to block direct file writes", () => {
+    it("batch flag alone still routes to Main Agent", () => {
       for (const hasFiles of [true, false]) {
         const identity = resolveAgentIdentity("short", hasFiles, false, true, false);
-        expect(identity).not.toBe("main");
+        expect(identity).toBe("main");
       }
     });
 
-    it("initial build (no files) always blocks direct file writes", () => {
+    it("initial build routes to Main Agent", () => {
       const identity = resolveAgentIdentity("short", false, false, false, false);
-      expect(identity).not.toBe("main");
+      expect(identity).toBe("main");
     });
   });
 });
@@ -133,16 +133,13 @@ describe("DB context injection status guard", () => {
 });
 
 // ─── Staging isolation invariants ────────────────────────────────────────────
-// These tests document the file-mutation contract the Task Agent must satisfy.
-// The invariant is enforced by the `if (agentIdentity === "task")` branch in
-// runBuildPipeline / runRefinePipeline (jobs.ts ~line 2558).
-//
-// The tests below use the resolveAgentIdentity decision function as the
-// boundary: if the resolved identity is "task", the pipeline MUST stage files
-// to stagingSnapshot instead of writing to project_files.
+// New routing no longer selects Task Agent. Background, batch, long prompts,
+// and initial builds all execute through Main Agent so preview reads committed
+// project_files. Legacy rows with agentIdentity="task" are still handled by
+// the old staging branch for apply/discard compatibility.
 
-describe("staging isolation invariants", () => {
-  const STAGING_SCENARIOS: Array<{
+describe("Agent Zero v2 routing invariants", () => {
+  const MAIN_AGENT_SCENARIOS: Array<{
     label: string;
     prompt: string;
     hasFiles: boolean;
@@ -179,8 +176,8 @@ describe("staging isolation invariants", () => {
     },
   ];
 
-  for (const scenario of STAGING_SCENARIOS) {
-    it(`${scenario.label} resolves to 'task' identity (files must go to staging, not live)`, () => {
+  for (const scenario of MAIN_AGENT_SCENARIOS) {
+    it(`${scenario.label} resolves to Main Agent`, () => {
       const identity = resolveAgentIdentity(
         scenario.prompt,
         scenario.hasFiles,
@@ -188,19 +185,12 @@ describe("staging isolation invariants", () => {
         scenario.isBatchQueued,
         false,
       );
-      expect(identity).toBe("task");
+      expect(identity).toBe("main");
     });
   }
 
-  it("drainNextBatchTask must preserve agentIdentity — 'task' identity is NOT lost on drain", () => {
-    // This is a documentation test. The fix in drainNextBatchTask (item 1) ensures
-    // that nextTask.agentIdentity is forwarded to enqueueJob instead of being dropped.
-    // If a batch task had agentIdentity="task" stored, it must run as "task" after drain.
-    //
-    // Invariant: if resolveAgentIdentity returns "task" for a set of conditions,
-    // and those conditions were present when the task was first enqueued, then
-    // the drain must not downgrade the identity to "main".
+  it("batch routing no longer creates new Task Agent rows", () => {
     const batchIdentity = resolveAgentIdentity("add feature", true, false, true, false);
-    expect(batchIdentity).toBe("task");
+    expect(batchIdentity).toBe("main");
   });
 });

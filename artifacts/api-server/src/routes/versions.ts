@@ -6,7 +6,6 @@ import {
   projectVersionsTable,
   projectFilesTable,
   chatMessagesTable,
-  knowledgeEntriesTable,
   agentTasksTable,
   taskEventsTable,
   secretsTable,
@@ -32,6 +31,7 @@ import { downloadSnapshotBlob } from "../lib/snapshot-storage";
 import { publishTaskEvent } from "../lib/event-bus";
 import { EventTypes } from "../lib/event-types";
 import { publishProjectFilesChanged } from "../lib/preview-events";
+import { writeKnowledge } from "../lib/knowledge";
 
 const router: IRouter = Router();
 
@@ -390,6 +390,15 @@ router.post(
       content: `Rolled back to version "${version.label}" (${snapshot.length} files restored).`,
       agentMode: "eco",
       planMode: false,
+      checkpointId: version.id,
+      plan: {
+        kind: "rollback",
+        taskId,
+        versionId: version.id,
+        versionLabel: version.label,
+        filesRestored: snapshot.length,
+        removedPaths: rollbackRemovedPaths,
+      },
     });
 
     await db
@@ -409,6 +418,18 @@ router.post(
         .set({
           status: "completed",
           result: `Rolled back to "${version.label}"`,
+          report: {
+            userRequest: `Restore project to version: ${version.label}`,
+            filesCreated: [],
+            filesChanged: snapshot.map((file) => file.path),
+            filesRemoved: rollbackRemovedPaths,
+            warnings: [],
+            integrationsNeeded: [],
+            previewSyncQueued: true,
+            previewUpdated: false,
+            versionId: version.id,
+            nextRecommendation: `Preview sync was requested after rollback to "${version.label}". Test the preview before publishing.`,
+          },
           completedAt: sql`now()`,
         })
         .where(eq(agentTasksTable.id, rollbackTask.id));
@@ -430,10 +451,23 @@ router.post(
 
     // Write a rollback signal to the Knowledge Vault so the AI can learn from it
     try {
-      await db.insert(knowledgeEntriesTable).values({
+      await writeKnowledge({
         title: `Rollback to "${version.label}"`,
-        category: "diagnostic",
-        content: `User rolled back to version "${version.label}" (${snapshot.length} files). The subsequent build may have had issues worth addressing differently next time.`,
+        category: "rollback",
+        content: [
+          `Rollback task #${taskId} restored checkpoint #${version.id} ("${version.label}").`,
+          `${snapshot.length} file(s) restored.`,
+          rollbackRemovedPaths.length > 0
+            ? `Removed paths: ${rollbackRemovedPaths.join(", ")}`
+            : "No paths were removed.",
+        ].join("\n"),
+        type: "rollback",
+        severity: "info",
+        projectId,
+        userId: req.userId ?? undefined,
+        relatedTaskId: taskId,
+        relatedVersionId: version.id,
+        tags: ["agent-zero", "task-memory", "rollback", "checkpoint"],
       });
     } catch {
       // best-effort — don't fail the rollback if knowledge write fails

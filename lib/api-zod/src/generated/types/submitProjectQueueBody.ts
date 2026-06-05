@@ -5,10 +5,12 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { SubmitProjectQueueBodyAgentIdentity } from './submitProjectQueueBodyAgentIdentity';
 
 export type SubmitProjectQueueBody = {
   messages: string[];
   agentMode: string;
   planMode?: boolean;
-  agentIdentity?: string;
+  /** Legacy client hint. Queued build work executes through Main Agent; task is accepted only for backward compatibility. */
+  agentIdentity?: SubmitProjectQueueBodyAgentIdentity;
 };

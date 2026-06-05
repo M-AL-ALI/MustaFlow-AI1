@@ -48,6 +48,39 @@ function checkpointIdFromPlan(plan: Record<string, unknown> | null): number | nu
   return typeof versionId === "number" && Number.isFinite(versionId) ? versionId : null;
 }
 
+function compactTaskMemoryText(value: string, maxLength = 900): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function rememberCompletedAgentTask(opts: {
+  projectId: number;
+  userId?: string | null;
+  taskId: number;
+  intent: string;
+  userPrompt: string;
+  assistantSummary: string;
+  category: string;
+  tags: string[];
+}): void {
+  void writeKnowledge({
+    title: `Agent Zero ${opts.intent}: ${compactTaskMemoryText(opts.userPrompt, 80)}`,
+    content: [
+      `Task #${opts.taskId} completed.`,
+      `User request: ${compactTaskMemoryText(opts.userPrompt, 700)}`,
+      `Agent Zero response: ${compactTaskMemoryText(opts.assistantSummary, 1200)}`,
+    ].join("\n\n"),
+    type: "note",
+    category: opts.category,
+    severity: "info",
+    projectId: opts.projectId,
+    userId: opts.userId ?? undefined,
+    relatedTaskId: opts.taskId,
+    tags: ["agent-zero", "task-memory", ...opts.tags],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Idempotency store — in-memory dedup for retried POSTs caused by network blips
 // ---------------------------------------------------------------------------
@@ -473,6 +506,16 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
           streaming: true,
         } as unknown as Record<string, unknown>;
       }
+      rememberCompletedAgentTask({
+        projectId: project.id,
+        userId: req.userId ?? project.ownerId,
+        taskId,
+        intent: resolvedIntent,
+        userPrompt: content,
+        assistantSummary: converseResult.markdown,
+        category: resolvedIntent === "converse" ? "conversation" : resolvedIntent,
+        tags: ["chat", resolvedIntent],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Conversation failed";
       if (converseTask) {
@@ -606,6 +649,16 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
 
       assistantContent = result.summary;
       plan = result.plan;
+      rememberCompletedAgentTask({
+        projectId: project.id,
+        userId: req.userId ?? project.ownerId,
+        taskId,
+        intent: "plan",
+        userPrompt: content,
+        assistantSummary: result.summary,
+        category: "plan",
+        tags: ["plan"],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Plan generation failed";
       await emitPlanEvent(taskId, "failed", msg);
@@ -679,8 +732,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     }
 
     // Check for an active build/refine — prevent concurrent runs for the same project.
-    // needs_review is included so a queued Task Agent staging that hasn't been
-    // applied/discarded yet blocks new runs (Task #509 review-gate serialization).
+    // Review/fix gates are included so staged output cannot be overwritten before
+    // the user applies, fixes, or discards it.
     // Background tasks (provisioning, blueprint npm-install, etc.) are excluded so
     // they do not block user-initiated runs.
     const [activeTask] = await db
@@ -689,7 +742,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
       .where(
         and(
           eq(agentTasksTable.projectId, project.id),
-          inArray(agentTasksTable.status, ["building", "planning", "needs_review"]),
+          inArray(agentTasksTable.status, ["building", "planning", "needs_review", "needs_fix"]),
           ne(agentTasksTable.kind, "background"),
         ),
       )
@@ -697,8 +750,14 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
     const hasActiveTask = activeTask !== undefined;
 
     // Create a task row to track the work
+    const safeExplicitAgentIdentity: AgentIdentity | undefined =
+      explicitAgentIdentity === "planning" && Boolean(planMode)
+        ? "planning"
+        : explicitAgentIdentity === "main"
+          ? "main"
+          : undefined;
     const resolvedAgentIdentity: AgentIdentity =
-      (explicitAgentIdentity as AgentIdentity | undefined) ??
+      safeExplicitAgentIdentity ??
       resolveAgentIdentity(content, hasFiles, runInBackground, hasActiveTask, Boolean(planMode));
 
     // Per-mode wall-clock cap for background runs (Task #509).
@@ -797,7 +856,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         runMode: "background",
         wallClockCapMs: wallClockCapMs ?? undefined,
       });
-      assistantContent = `I've queued this in the Background Agent. Task #${task.id} is running and I'll post the report back here when it's done.`;
+      assistantContent = `I've queued this in the background. Task #${task.id} is running and I'll post the report back here when it's done.`;
       plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
     } else {
       await runJob({
@@ -1508,6 +1567,17 @@ router.post(
         .returning();
 
       if (!assistantMessage) throw new Error("Failed to save assistant message");
+
+      rememberCompletedAgentTask({
+        projectId: project.id,
+        userId: req.userId ?? project.ownerId,
+        taskId,
+        intent: resolvedIntent,
+        userPrompt: content,
+        assistantSummary: converseResult.markdown,
+        category: resolvedIntent === "converse" ? "conversation" : resolvedIntent,
+        tags: ["chat", "stream", resolvedIntent],
+      });
 
       // Update project activity timestamp
       await db

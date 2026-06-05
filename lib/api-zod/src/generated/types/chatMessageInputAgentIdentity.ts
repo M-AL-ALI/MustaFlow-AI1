@@ -7,7 +7,7 @@
  */
 
 /**
- * Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically.
+ * Optional visible executor override. New work should use planning or main; task is legacy compatibility only.
  */
 export type ChatMessageInputAgentIdentity = typeof ChatMessageInputAgentIdentity[keyof typeof ChatMessageInputAgentIdentity];
 

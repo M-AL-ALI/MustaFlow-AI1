@@ -1218,7 +1218,8 @@ export default function HomeScreen() {
     // Kick off the initial build immediately — mirrors the background-build path
     // in POST /api/projects/:id/messages so the pipeline actually runs instead of
     // returning a canned greeting that leaves the project permanently unbuilt.
-    // New project has no files yet → resolveAgentIdentity always returns "task".
+    // Agent Zero v2: initial builds execute on Main Agent so preview receives
+    // committed project_files immediately instead of hidden staging output.
     const resolvedIdentity = resolveAgentIdentity(initialPrompt, false, false, false, false);
     const [initialTask] = await db
       .insert(agentTasksTable)
@@ -1642,8 +1643,8 @@ router.get(
 );
 
 // ── Agent routing hint ─────────────────────────────────────────────────────────
-// Returns the recommended agentIdentity for a given prompt + project state.
-// Used by the frontend composer to show a live "Recommended: X Agent" badge.
+// Returns the recommended visible executor for a given prompt + project state.
+// Used by the frontend composer for lightweight guidance.
 router.get(
   "/projects/:id/agent-routing",
   requireProjectAccess("viewer"),
@@ -1669,14 +1670,11 @@ router.get(
     const agentIdentity = resolveAgentIdentity(prompt, hasFiles, false, false, false);
 
     const reasonMap: Record<string, string> = {
-      planning: "Plan mode — Planning Agent investigates first then builds a structured plan",
-      task:
-        prompt.length > 120
-          ? "Long prompt — Task Agent will stage changes for your review before applying"
-          : !hasFiles
-            ? "New project — Task Agent will stage the initial build for review"
-            : "Task Agent will stage changes for your review before applying",
-      main: "Short edit on existing project — Main Agent applies changes directly",
+      planning: "Plan first — Agent Zero will create a plan before building",
+      task: "Legacy staged-review mode is no longer used for new work",
+      main: hasFiles
+        ? "Main Agent will apply changes directly and update preview"
+        : "Main Agent will build the first version and update preview",
     };
 
     res.json(

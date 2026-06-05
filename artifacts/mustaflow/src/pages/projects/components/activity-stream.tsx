@@ -216,7 +216,7 @@ const PILL_STYLE_CLASSES: Record<string, string> = {
   warn: "bg-amber-500/10 border-amber-500/20 text-amber-400",
 };
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "canceled", "cancelled", "discarded"]);
 
 // ─── Agent badge ──────────────────────────────────────────────────────────────
 
@@ -227,7 +227,7 @@ const AGENT_BADGE: Record<string, { label: string; icon: React.ElementType; clas
     className: "text-blue-400 bg-blue-500/10 border-blue-500/20",
   },
   task: {
-    label: "Task Agent",
+    label: "Legacy review",
     icon: Cpu,
     className: "text-amber-400 bg-amber-500/10 border-amber-500/20",
   },
@@ -262,7 +262,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
   const isTerminal = lastEvent ? TERMINAL_STATUSES.has(lastEvent.eventType) : false;
   const isDone = lastEvent?.eventType === "completed";
   const isFailed = lastEvent?.eventType === "failed";
-  const isNeedsReview = taskStatus === "needs_review";
+  const isNeedsReview = taskStatus === "needs_review" || taskStatus === "needs_fix";
 
   // Auto-scroll pill row to the right as new events arrive
   useEffect(() => {
@@ -278,7 +278,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
     }
   }, [events, expanded]);
 
-  // Auto-dismiss 6 s after completion (skip for Task Agent needing review)
+  // Auto-dismiss 6 s after completion, except when staged output needs a decision.
   useEffect(() => {
     if (!isDone || autoDismissed || isNeedsReview) return;
     const t = setTimeout(() => {
@@ -495,7 +495,7 @@ export function ActivityStream({ projectId, taskId, taskStatus, agentIdentity, o
       {expanded && isDone && isNeedsReview && (
         <div className="px-3 py-1.5 border-t border-border bg-amber-500/5 text-[10px] text-amber-400 font-medium flex items-center gap-1.5">
           <Cpu className="h-3 w-3 shrink-0" />
-          Task Agent staged changes for review — see the chat to Apply or Discard.
+          Changes are waiting for review - see the chat to Apply or Discard.
         </div>
       )}
       {expanded && isFailed && (

@@ -42,8 +42,8 @@ export type BgTask = {
   completedAt: string | null;
 };
 
-const ACTIVE_STATUSES = new Set(["planning", "building", "testing"]);
-const TERMINAL_STATUSES = new Set(["completed", "failed", "canceled"]);
+const ACTIVE_STATUSES = new Set(["planning", "building", "testing", "needs_review", "needs_fix"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "canceled", "cancelled", "discarded"]);
 const PAUSED_STATUS = "paused-insufficient-credits";
 
 function LiveEvents({ projectId, taskId }: { projectId: number; taskId: number }) {

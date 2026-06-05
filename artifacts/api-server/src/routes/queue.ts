@@ -14,8 +14,8 @@ const SubmitQueueBody = z.object({
   messages: z.array(z.string().min(1)).min(1).max(20),
   agentMode: z.enum(["lite", "eco", "power", "pro"]),
   planMode: z.boolean().optional().default(false),
-  /** Explicit agent identity for all tasks in this batch. Defaults to "task" since batch jobs always go through the staging gate. */
-  agentIdentity: z.enum(["planning", "task", "main"]).optional().default("task"),
+  /** Legacy client hint. New queued work always executes through Main Agent. */
+  agentIdentity: z.enum(["planning", "task", "main"]).optional().default("main"),
 });
 
 const CREDIT_COST: Record<string, number> = {
@@ -44,9 +44,9 @@ router.post("/projects/:id/queue", requireProjectOwnership, async (req, res): Pr
     return;
   }
 
-  const { messages, agentMode, planMode, agentIdentity } = parsed.data;
+  const { messages, agentMode, planMode } = parsed.data;
   const mode = agentMode as AgentMode;
-  const batchAgentIdentity = (agentIdentity ?? "task") as AgentIdentity;
+  const batchAgentIdentity: AgentIdentity = "main";
 
   const batchId = crypto.randomUUID();
   const taskIds: number[] = [];

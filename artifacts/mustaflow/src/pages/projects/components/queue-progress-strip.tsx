@@ -18,10 +18,14 @@ type TaskStatus =
   | "building"
   | "testing"
   | "needs_approval"
+  | "needs_review"
+  | "needs_fix"
   | "paused-insufficient-credits"
   | "completed"
   | "failed"
-  | "canceled";
+  | "canceled"
+  | "cancelled"
+  | "discarded";
 
 interface BatchTask {
   id: number;
@@ -54,6 +58,8 @@ const ACTIVE_STATUSES: Set<string> = new Set([
   "building",
   "testing",
   "needs_approval",
+  "needs_review",
+  "needs_fix",
 ]);
 
 function TaskStepIcon({ status }: { status: TaskStatus }) {
@@ -63,7 +69,7 @@ function TaskStepIcon({ status }: { status: TaskStatus }) {
   if (status === "failed") {
     return <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />;
   }
-  if (status === "canceled") {
+  if (status === "canceled" || status === "cancelled" || status === "discarded") {
     return <Ban className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />;
   }
   if (ACTIVE_STATUSES.has(status) && status !== "queued") {

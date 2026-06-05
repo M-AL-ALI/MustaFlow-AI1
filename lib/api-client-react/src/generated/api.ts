@@ -5042,7 +5042,7 @@ export const getApplyTaskStagingUrl = (id: number,
 }
 
 /**
- * @summary Apply Task Agent staging snapshot to live project files
+ * @summary Apply staged-review snapshot to live project files
  */
 export const applyTaskStaging = async (id: number,
     taskId: number, options?: RequestInit): Promise<AgentTask> => {
@@ -5091,7 +5091,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApplyTaskStagingMutationError = ErrorType<ApiError>
 
     /**
- * @summary Apply Task Agent staging snapshot to live project files
+ * @summary Apply staged-review snapshot to live project files
  */
 export const useApplyTaskStaging = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyTaskStaging>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -5264,7 +5264,7 @@ export const getDiscardTaskStagingUrl = (id: number,
 }
 
 /**
- * @summary Discard Task Agent staging snapshot — no files changed
+ * @summary Discard staged-review snapshot - no files changed
  */
 export const discardTaskStaging = async (id: number,
     taskId: number, options?: RequestInit): Promise<AgentTask> => {
@@ -5313,7 +5313,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DiscardTaskStagingMutationError = ErrorType<ApiError>
 
     /**
- * @summary Discard Task Agent staging snapshot — no files changed
+ * @summary Discard staged-review snapshot - no files changed
  */
 export const useDiscardTaskStaging = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardTaskStaging>>, TError,{id: number;taskId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -14421,7 +14421,7 @@ export const getStreamProjectPreviewEventsUrl = (id: number,) => {
 /**
  * Project-scoped Server-Sent Events stream emitting `project_files_changed`,
 `preview_ready`, and `preview_sync_failed` events. Live-only — no DB replay.
-Guards: requires project ownership. Task Agent `needs_review` output does NOT
+Guards: requires project ownership. Staged-review `needs_review` output does NOT
 emit here; only Apply does.
 
  * @summary SSE live stream of project-level preview events (text/event-stream)

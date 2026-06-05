@@ -17,7 +17,7 @@ export interface ChatMessageInput {
   agentMode: ChatMessageInputAgentMode;
   planMode: boolean;
   background?: boolean;
-  /** Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically. */
+  /** Optional visible executor override. New work should use planning or main; task is legacy compatibility only. */
   agentIdentity?: ChatMessageInputAgentIdentity;
   /** Optional explicit intent override. If provided, skips server-side intent detection. Developer intents (debug/refactor/review/explain) route to the converse pipeline with a specialised system prompt. fix_tests routes to the build/refine pipeline with a test-fix loop instruction prepended to the user prompt. fix_types runs tsc --noEmit, reads errors, and patches until clean. fix_lint runs eslint, reads violations, and patches until clean. */
   agentIntent?: ChatMessageInputAgentIntent;

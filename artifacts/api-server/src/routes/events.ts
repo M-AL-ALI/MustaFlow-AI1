@@ -183,7 +183,7 @@ router.get(
  * This is a LIVE-ONLY stream (no DB replay). The frontend subscribes here so
  * Quick Preview updates even when the AI Builder panel is closed.
  *
- * Guard: Task Agent `needs_review` output does NOT emit here — only Apply does.
+ * Guard: staged-review `needs_review` output does NOT emit here - only Apply does.
  */
 router.get(
   "/projects/:id/preview-events/stream",

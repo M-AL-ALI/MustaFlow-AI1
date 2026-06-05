@@ -1359,7 +1359,7 @@ paths:
     post:
       operationId: applyTaskStaging
       tags: [tasks]
-      summary: Apply Task Agent staging snapshot to live project files
+      summary: Apply staged-review snapshot to live project files
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: taskId, in: path, required: true, schema: { type: integer } }
@@ -1465,7 +1465,7 @@ paths:
     post:
       operationId: discardTaskStaging
       tags: [tasks]
-      summary: Discard Task Agent staging snapshot — no files changed
+      summary: Discard staged-review snapshot - no files changed
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: taskId, in: path, required: true, schema: { type: integer } }
@@ -4474,7 +4474,7 @@ paths:
       description: |
         Project-scoped Server-Sent Events stream emitting `project_files_changed`,
         `preview_ready`, and `preview_sync_failed` events. Live-only — no DB replay.
-        Guards: requires project ownership. Task Agent `needs_review` output does NOT
+        Guards: requires project ownership. Staged-review `needs_review` output does NOT
         emit here; only Apply does.
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -4657,7 +4657,10 @@ paths:
                   items: { type: string }
                 agentMode: { type: string }
                 planMode: { type: boolean }
-                agentIdentity: { type: string }
+                agentIdentity:
+                  type: string
+                  enum: [planning, task, main]
+                  description: "Legacy client hint. Queued build work executes through Main Agent; task is accepted only for backward compatibility."
       responses:
         "200":
           description: Queue batch created
@@ -6713,7 +6716,7 @@ components:
         defaultAgent:
           type: string
           enum: [planning, task, main]
-          description: "User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit)."
+          description: "User's preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility."
         projectFormat:
           type: string
           enum: [static-html, react-vite]
@@ -7265,7 +7268,7 @@ components:
         agentIdentity:
           type: string
           enum: [planning, task, main]
-          description: "Optional explicit agent override. If not provided, the server calls resolveAgentIdentity to pick one automatically."
+          description: "Optional visible executor override. New work should use planning or main; task is legacy compatibility only."
         agentIntent:
           type: string
           enum:
@@ -7441,13 +7444,13 @@ components:
         agentIdentity:
           type: string
           enum: [planning, task, main]
-          description: "Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit)."
+          description: "Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility."
         origin:
           type: ["string", "null"]
           description: "Surface that created this task. Mirrors chat_messages.origin so delayed reports can be written back to the correct thread."
         stagingSnapshot:
           nullable: true
-          description: "Task Agent stores generated files here before user approval. Null for Main Agent (files written directly). Promoted to project_files on Apply; cleared on Discard. May be an array of file entries [{path, content, mimeType}] or a keyed object."
+          description: "Legacy staged files awaiting user approval. Null for Main Agent rows because files are written directly to project_files."
         prompt: { type: ["string", "null"] }
         result: { type: ["string", "null"] }
         queueBatchId: { type: ["string", "null"] }
@@ -7544,7 +7547,7 @@ components:
         appliedAt:
           type: ["string", "null"]
           format: date-time
-          description: "Set when a Task Agent staging snapshot is applied."
+          description: "Set when a staged-review snapshot is applied."
         discardedAt:
           type: ["string", "null"]
           format: date-time

@@ -664,7 +664,7 @@ export interface JobInput {
   kind: JobKind;
   userPrompt: string;
   agentMode: AgentMode;
-  /** Which of the three agents handles this task. Default "main". */
+  /** Which visible executor handles this task. New work uses planning or main; task is legacy. */
   agentIdentity?: AgentIdentity;
   /** Source surface that created the task. Mirrors chat_messages.origin. */
   origin?: string | null;
@@ -687,27 +687,18 @@ export interface JobInput {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Determine which agent should handle a request based on context signals.
- * Rules (in priority order):
- *   1. planMode = true          → planning
- *   2. background = true        → task  (always staged for batch review)
- *   3. batchQueued = true       → task  (batch tasks go through staging gate)
- *   4. long prompt (>120 chars) → task  (complex change, worth reviewing)
- *   5. projectHasFiles = false  → task  (initial build, always worth reviewing)
- *   6. otherwise                → main  (short fast direct edit)
+ * Determine which visible executor should handle a request.
+ * Agent Zero v2 keeps background, batch, and initial builds on Main Agent so
+ * preview receives committed project_files instead of hidden staging snapshots.
  */
 export function resolveAgentIdentity(
-  prompt: string,
-  projectHasFiles: boolean,
-  isBackground: boolean,
-  isBatchQueued: boolean,
+  _prompt: string,
+  _projectHasFiles: boolean,
+  _isBackground: boolean,
+  _isBatchQueued: boolean,
   planMode: boolean,
 ): AgentIdentity {
   if (planMode) return "planning";
-  if (isBackground) return "task";
-  if (isBatchQueued) return "task";
-  if (prompt.length > 120) return "task";
-  if (!projectHasFiles) return "task";
   return "main";
 }
 
@@ -1604,14 +1595,14 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     .where(
       and(
         eq(agentTasksTable.queueBatchId, completedTask.queueBatchId),
-        eq(agentTasksTable.status, "needs_review"),
+        inArray(agentTasksTable.status, ["needs_review", "needs_fix"]),
       ),
     )
     .limit(1);
   if (batchBlocked) {
     logger.info(
       { completedTaskId, blockedByTaskId: batchBlocked.id, batchId: completedTask.queueBatchId },
-      "drainNextBatchTask: blocked — Task Agent awaiting review",
+      "drainNextBatchTask: blocked - staged output awaiting review/fix",
     );
     return;
   }
@@ -1715,13 +1706,16 @@ export async function drainNextProjectTask(
     .select({ id: agentTasksTable.id })
     .from(agentTasksTable)
     .where(
-      and(eq(agentTasksTable.projectId, projectId), eq(agentTasksTable.status, "needs_review")),
+      and(
+        eq(agentTasksTable.projectId, projectId),
+        inArray(agentTasksTable.status, ["needs_review", "needs_fix"]),
+      ),
     )
     .limit(1);
   if (blocked) {
     logger.info(
       { projectId, blockedByTaskId: blocked.id },
-      "drainNextProjectTask: blocked — Task Agent awaiting review",
+      "drainNextProjectTask: blocked - staged output awaiting review/fix",
     );
     return;
   }
@@ -2292,9 +2286,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       let nextVersionLabel: string;
       let diffSummary: DiffSummary | undefined;
       let filesToSmellScan: BuilderFile[] = [];
-      // Task Agent: collect files to stage (populated below; not written to project_files)
+      // Legacy staged-review path: collect files before writing to project_files.
       let stagingData: Array<{ path: string; content: string; mimeType: string }> = [];
-      // Task Agent refine: keep a reference to existing files for building the full merged snapshot
+      // Staged-review refine: keep existing files for building the full merged snapshot.
       let existingFilesSnapshot: BuilderFile[] = [];
       let _refineChangedFiles: BuilderFile[] = [];
       let _refineRemovedPaths: string[] = [];
@@ -4055,8 +4049,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         report.knowledgeApplied = knowledgeApplied;
       }
 
-      // ── Task Agent staging gate ────────────────────────────────────────────
-      // If this job runs as the Task Agent, write files to stagingSnapshot
+      // ── Legacy staged-review gate ──────────────────────────────────────────
+      // Legacy compatibility: old rows with agentIdentity="task" write to stagingSnapshot
       // instead of committing directly to project_files.
       // Quality gate (TypeScript, ESLint, smoke test), env-var scan, and a
       // blocking architect review all run here before the final status is set.
@@ -4204,7 +4198,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                       onEvent: async () => {},
                       signal: new AbortController().signal,
                     },
-                    brief: `Architect review for task #${taskId} (task agent staging)`,
+                    brief: `Architect review for task #${taskId} (staged review)`,
                     reviewer: {
                       diff: reviewDiff,
                       commandsRun,
@@ -4253,7 +4247,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     verdict: reviewResult.verdict,
                     findings: reviewResult.findings.length,
                   },
-                  "Architect review complete (task agent path)",
+                  "Architect review complete (legacy staged review path)",
                 );
               }
             } catch (architectErr) {
@@ -4362,19 +4356,22 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           });
 
           void writeKnowledge({
-            title: `Task Agent quality gate failed: "${userPrompt.slice(0, 60)}"`,
-            content: `Task Agent completed "${userPrompt.slice(0, 100)}" but quality checks failed. Status set to needs_fix.`,
+            title: `Staged review quality gate failed: "${userPrompt.slice(0, 60)}"`,
+            content: `Staged review completed "${userPrompt.slice(0, 100)}" but quality checks failed. Status set to needs_fix.`,
             type: kind,
             category: kind === "build" ? "build" : "refinement",
             severity: "warning",
             projectId,
             userId: project.ownerId,
             relatedTaskId: taskId,
-            tags: ["task-agent", "needs-fix", "quality-gate"],
+            tags: ["staged-review", "needs-fix", "quality-gate"],
           });
 
           void drainNextBatchTask(taskId).catch((err) =>
-            logger.warn({ err, taskId }, "Failed to drain next batch task (task agent needs_fix)"),
+            logger.warn(
+              { err, taskId },
+              "Failed to drain next batch task (staged review needs_fix)",
+            ),
           );
 
           return;
@@ -4425,7 +4422,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         await emitEvent(
           taskId,
           "completed",
-          `Task Agent: ${stagingData.length} file(s) staged for review — apply or discard.`,
+          `Staged review: ${stagingData.length} file(s) ready - apply or discard.`,
         );
 
         await db.insert(chatMessagesTable).values({
@@ -4446,25 +4443,25 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         });
 
         void writeKnowledge({
-          title: `Task Agent staged: "${userPrompt.slice(0, 60)}"`,
-          content: `Task Agent completed "${userPrompt.slice(0, 100)}" and staged ${stagingData.length} file(s) for review.`,
+          title: `Staged review ready: "${userPrompt.slice(0, 60)}"`,
+          content: `Staged review completed "${userPrompt.slice(0, 100)}" with ${stagingData.length} file(s) ready for review.`,
           type: kind,
           category: kind === "build" ? "build" : "refinement",
           severity: "info",
           projectId,
           userId: project.ownerId,
           relatedTaskId: taskId,
-          tags: ["task-agent", "staged"],
+          tags: ["staged-review", "staged"],
         });
 
         // Drain batch tasks but keep project queue blocked until apply/discard
         void drainNextBatchTask(taskId).catch((err) =>
-          logger.warn({ err, taskId }, "Failed to drain next batch task (task agent staged)"),
+          logger.warn({ err, taskId }, "Failed to drain next batch task (staged review)"),
         );
 
         return;
       }
-      // ── End Task Agent staging gate ────────────────────────────────────────
+      // ── End legacy staged-review gate ──────────────────────────────────────
 
       // ── Auto-fix ESLint warnings after build ──────────────────────────────
       // When project.autoFixWarningsAfterBuild is enabled, run project-wide
@@ -4498,8 +4495,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       // ── End auto-fix ESLint warnings after build ──────────────────────────
 
-      // ── Quality gate — non-task-agent path ────────────────────────────────
-      // Mirrors the quality gate that runs in the task-agent staging path, but
+      // ── Quality gate - direct Main Agent path ──────────────────────────────
+      // Mirrors the quality gate that runs in the legacy staged-review path, but
       // is non-blocking here: files are already persisted, so failures surface
       // as warnings rather than routing the task to needs_fix.
       {
@@ -4546,18 +4543,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               ];
               logger.info(
                 { projectId, taskId, failedChecks: failedLabels },
-                "Quality gate detected issues on non-task-agent build (non-blocking)",
+                "Quality gate detected issues on direct Main Agent build (non-blocking)",
               );
             }
           } catch (gateErr) {
             logger.warn(
               { err: gateErr, projectId, taskId },
-              "Quality gate threw on non-task-agent path — skipping (non-fatal)",
+              "Quality gate threw on direct Main Agent path - skipping (non-fatal)",
             );
           }
         }
       }
-      // ── End quality gate — non-task-agent path ────────────────────────────
+      // ── End quality gate - direct Main Agent path ──────────────────────────
 
       await emitEvent(
         taskId,
@@ -6183,18 +6180,18 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Task Agent: Apply & Discard staging snapshots
+// Legacy staged review: Apply & Discard staging snapshots
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Apply a Task Agent staging snapshot to the live project files.
+ * Apply a staged-review snapshot to the live project files.
  * Called by POST /projects/:id/tasks/:taskId/apply.
  * Fires all post-build hooks: version save, quality audit, knowledge vault,
  * suggestion generation, credit deduction.
  */
 /**
- * After project files have been written (either by direct execution or by Task
- * Agent Apply), sync them to the project's container and run any pending Drizzle
+ * After project files have been written (either by direct execution or by staged
+ * review apply), sync them to the project's container and run any pending Drizzle
  * migrations.
  *
  * Emits task-event narrations so the user sees live progress.  Returns:
@@ -6832,10 +6829,10 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     }
   }
 
-  // Staging gate: project_files are NOT modified until this point. The Task Agent
-  // works entirely against task.stagingSnapshot while the job is in "needs_review".
+  // Staging gate: project_files are NOT modified until this point. Legacy staged
+  // output lives in task.stagingSnapshot while the job is in "needs_review".
   // Quick Preview and Full App Preview both read from project_files only, so draft
-  // Task Agent changes are invisible in any preview mode until the user clicks Apply.
+  // Staged changes are invisible in any preview mode until the user clicks Apply.
   // This guarantees test #10 and #11 in the preview-security test suite.
   void emitEvent(taskId, "narration", `Syncing ${builderFiles.length} file(s) to your project…`);
   const currentFileRows = await db
@@ -6890,7 +6887,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
   void emitEvent(taskId, "narration", "Saving version snapshot…");
   const snapshot = await snapshotFilesForVersion(projectId);
   const planSnapshot = await loadLatestPlanSnapshot(projectId);
-  const changelogEntry = `**Task Agent Apply**\n${(assistantSummary ?? "").slice(0, 180)}`;
+  const changelogEntry = `**Staged Review Apply**\n${(assistantSummary ?? "").slice(0, 180)}`;
   let version: { id: number } | undefined;
   try {
     const inserted = await db
@@ -7089,8 +7086,8 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
 
   // Knowledge vault entry
   void writeKnowledge({
-    title: `Task Agent applied: "${userPrompt.slice(0, 60)}"`,
-    content: `User approved and applied Task Agent staging for "${userPrompt.slice(0, 100)}". ${stagingFiles.length} file(s) promoted to live.`,
+    title: `Staged review applied: "${userPrompt.slice(0, 60)}"`,
+    content: `User approved and applied staged review output for "${userPrompt.slice(0, 100)}". ${stagingFiles.length} file(s) promoted to live.`,
     type: "refine",
     category: "refinement",
     severity: "info",
@@ -7098,7 +7095,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     userId: project.ownerId,
     relatedTaskId: taskId,
     relatedVersionId: version?.id,
-    tags: ["task-agent", "applied"],
+    tags: ["staged-review", "applied"],
   });
 
   // Credit deduction (post-success, non-fatal).
@@ -7109,30 +7106,30 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     const creditCost = creditCostFor(agentMode, costProvider);
     void deductCreditsAtomic(project.ownerId, creditCost, {
       type: "refine",
-      description: `Task Agent apply — Task #${taskId}, project ${projectId}`,
+      description: `Staged review apply - Task #${taskId}, project ${projectId}`,
       projectId,
     })
       .then((result) => {
         if ("insufficient" in result) {
           logger.warn(
             { projectId, taskId, creditCost, agentMode },
-            "Task Agent apply credit deduction: insufficient balance — changes already applied",
+            "Staged review apply credit deduction: insufficient balance - changes already applied",
           );
           void emitEvent(
             taskId,
             "credit_insufficient",
-            `Insufficient credits to charge for Task Agent apply — balance ${result.balance} < ${creditCost}`,
+            `Insufficient credits to charge for staged review apply - balance ${result.balance} < ${creditCost}`,
           );
         }
       })
       .catch((err) => logger.warn({ err }, "Credit deduction failed after apply (non-fatal)"));
   }
 
-  logger.info({ taskId, projectId, fileCount: stagingFiles.length }, "Task Agent staging applied");
+  logger.info({ taskId, projectId, fileCount: stagingFiles.length }, "Staged review applied");
 }
 
 /**
- * Discard a Task Agent staging snapshot.
+ * Discard a staged-review snapshot.
  * No project files are changed; the task moves to "discarded" status.
  * Called by POST /projects/:id/tasks/:taskId/discard.
  */
@@ -7189,17 +7186,17 @@ export async function discardTaskAgentStaging(taskId: number, projectId: number)
   }
 
   void writeKnowledge({
-    title: `Task Agent discarded: Task #${taskId}`,
-    content: `User discarded Task Agent staging for Task #${taskId}. No files were changed.`,
+    title: `Staged review discarded: Task #${taskId}`,
+    content: `User discarded staged review output for Task #${taskId}. No files were changed.`,
     type: "refine",
     category: "refinement",
     severity: "info",
     projectId,
     relatedTaskId: taskId,
-    tags: ["task-agent", "discarded"],
+    tags: ["staged-review", "discarded"],
   });
 
-  logger.info({ taskId, projectId }, "Task Agent staging discarded");
+  logger.info({ taskId, projectId }, "Staged review discarded");
 }
 
 // ── Bounded-concurrency background job runner ──────────────────────────────────

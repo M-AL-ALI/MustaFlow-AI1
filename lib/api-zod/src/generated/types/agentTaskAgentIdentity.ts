@@ -7,7 +7,7 @@
  */
 
 /**
- * Which of the three agents handled this task. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
+ * Visible executor for this task. planning = Planner, main = Main Agent, task = legacy staging compatibility.
  */
 export type AgentTaskAgentIdentity = typeof AgentTaskAgentIdentity[keyof typeof AgentTaskAgentIdentity];
 

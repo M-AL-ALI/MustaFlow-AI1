@@ -677,7 +677,7 @@ export function PlanCard({
   };
   const AGENT_LABELS: Record<string, string> = {
     planning: "Planning Agent",
-    task: "Task Agent",
+    task: "Legacy review mode",
     main: "Main Agent",
   };
 
@@ -1392,15 +1392,7 @@ export function PlanCard({
               }}
               disabled={disabled}
             >
-              {recommendedAgent === "task" ? (
-                <>
-                  <Cpu className="h-3 w-3 mr-1" /> Build with Task Agent
-                </>
-              ) : (
-                <>
-                  <Zap className="h-3 w-3 mr-1" /> Build now
-                </>
-              )}
+              <Zap className="h-3 w-3 mr-1" /> Build now
             </Button>
             <Button
               size="sm"

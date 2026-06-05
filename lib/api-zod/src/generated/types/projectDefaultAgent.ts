@@ -7,7 +7,7 @@
  */
 
 /**
- * User's preferred agent for this project. planning = Planning Agent, task = Task Agent (staging gate), main = Main Agent (direct fast edit).
+ * User's preferred visible executor for this project. planning = Planner, main = Main Agent, task = legacy compatibility.
  */
 export type ProjectDefaultAgent = typeof ProjectDefaultAgent[keyof typeof ProjectDefaultAgent];
 

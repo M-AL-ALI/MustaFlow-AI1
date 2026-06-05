@@ -74,9 +74,8 @@ export const projectsTable = pgTable(
     // python-fastapi = Python + FastAPI
     // Immutable after creation — duplicate the project to change stack.
     stack: text("stack").notNull().default("react-vite"),
-    // defaultAgent: user's preferred agent for this project.
-    // "planning" = Planning Agent, "task" = Task Agent (staging gate),
-    // "main" = Main Agent (direct fast edit). Default "main".
+    // defaultAgent: user's preferred visible executor for this project.
+    // "planning" = Planner, "main" = Main Agent. "task" is legacy compatibility.
     defaultAgent: text("default_agent").notNull().default("main"),
     // Container infrastructure (Phase C — dev containers).
     // containerId: Fly.io Machine ID for this project's dev container. Null = not provisioned.

@@ -179,7 +179,7 @@ const AGENT_MODES: { value: AgentMode; label: string; credits: string }[] = [
   { value: "pro", label: "Pro", credits: "10 cr" },
 ];
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled", "discarded"]);
 
 function getModeStyle(mode: AgentMode) {
   if (mode === "pro") return "text-purple-400 border-purple-500/30 bg-purple-500/10";

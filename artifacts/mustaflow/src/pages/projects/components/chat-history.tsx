@@ -79,11 +79,11 @@ type TaskReport = {
   filesCreated: string[];
   filesChanged: string[];
   filesRemoved: string[];
-  /** Alias used by Task Agent staging gate */
+  /** Alias used by the staged review gate */
   filesModified?: string[];
-  /** Alias used by Task Agent staging gate */
+  /** Alias used by the staged review gate */
   filesDeleted?: string[];
-  /** Summary of what changed (Task Agent staging gate) */
+  /** Summary of what changed in the staged review gate */
   summary?: string;
   filesUnchanged?: string[];
   previewUpdated: boolean;
@@ -390,7 +390,7 @@ function formatBytes(n: number): string {
 }
 
 /**
- * Task #531: per-file diff row in the Task Agent staging review. Lazy-fetches
+ * Task #531: per-file diff row in the staged review. Lazy-fetches
  * the current file content from the project (the "before" side) and diffs it
  * against the staged content (the "after" side) when the user expands it.
  * Net-new files render as add-only; deleted files as del-only.
@@ -2519,7 +2519,7 @@ function MessageRow({
   onViewFile?: (path: string, line?: number) => void;
   onApply?: (code: string) => void;
   onSendMessage?: (text: string) => void;
-  /** Forwarded to QualityGateFailureCard; always sends with task agent identity. */
+  /** Forwarded to QualityGateFailureCard; always sends with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
 }) {
@@ -2941,7 +2941,7 @@ function SubagentActivityPanel({ projectId, taskId }: { projectId: number; taskI
 }
 
 // ── Quality Gate Failure Card ─────────────────────────────────────────────────
-// Shown when the task agent's TypeScript / ESLint / smoke-test checks fail.
+// Shown when staged TypeScript / ESLint / smoke-test checks fail.
 // Includes an "Auto-fix" button that submits a targeted refine prompt and a
 // "Discard" button to abandon the staged changes.
 
@@ -2957,7 +2957,7 @@ function QualityGateFailureCard({
   taskId: number;
   report: TaskReport;
   onSendMessage?: (text: string) => void;
-  /** Called when the user clicks Auto-fix; always routed with task agent identity. */
+  /** Called when the user clicks Auto-fix; always routed with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
 }) {
@@ -2995,7 +2995,7 @@ function QualityGateFailureCard({
       {/* Header */}
       <div className="flex items-center gap-2 px-2.5 py-2 bg-rose-500/10 border-b border-rose-500/20">
         <XCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-        <span className="font-semibold text-rose-400 flex-1">Task Agent — Quality Gate Failed</span>
+        <span className="font-semibold text-rose-400 flex-1">Quality Gate Failed</span>
         <span className="text-[9px] text-rose-400/60 font-medium">Staged · not applied</span>
       </div>
 
@@ -3095,8 +3095,7 @@ function QualityGateFailureCard({
         <button
           onClick={() => {
             const prompt = buildAutoFixPrompt();
-            // onAutoFix is wired to send with "task" agent identity so the retry
-            // uses the same agent persona as the original build.
+            // onAutoFix is wired to Main Agent so the retry updates the live project path.
             (onAutoFix ?? onSendMessage)?.(prompt);
           }}
           disabled={!onAutoFix && !onSendMessage}
@@ -3390,7 +3389,7 @@ function TaskReviewCard({
       {/* Header */}
       <div className="flex items-center gap-2 px-2.5 py-2 bg-amber-500/10 border-b border-amber-500/20">
         <Cpu className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-        <span className="font-semibold text-amber-400 flex-1">Task Agent — Review Required</span>
+        <span className="font-semibold text-amber-400 flex-1">Review Required</span>
         <span className="text-[9px] text-amber-400/60 font-medium">Staged · not applied</span>
       </div>
 
@@ -4019,7 +4018,7 @@ export function ChatHistory({
   onClose: () => void;
   onApplyCode?: (code: string) => void;
   onSendMessage?: (text: string) => void;
-  /** Forwarded to QualityGateFailureCard Auto-fix button with task agent identity. */
+  /** Forwarded to QualityGateFailureCard Auto-fix button with Main Agent identity. */
   onAutoFix?: (text: string) => void;
   onNavigateToSecret?: (secretName: string) => void;
 }) {
