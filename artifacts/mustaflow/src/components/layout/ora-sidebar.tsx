@@ -23,7 +23,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
-import { useOraConversations, type OraConversationSummary } from "@/hooks/use-ora-conversations";
+import {
+  useOraConversations,
+  type OraConversationSummary,
+} from "@/hooks/ora-conversations-context";
 
 const NAV_ITEMS = [
   { name: "Library", href: "/ora/library", icon: BookOpen },

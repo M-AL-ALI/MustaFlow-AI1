@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
-import { useOraConversationsOptional } from "@/hooks/use-ora-conversations";
+import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { getReferenceSavedMemories, getReferenceChatHistory } from "@/lib/ora-memory-settings";
 
 export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";

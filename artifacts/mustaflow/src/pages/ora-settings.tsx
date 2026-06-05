@@ -14,7 +14,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
-import { OraConversationsProvider, useOraConversations } from "@/hooks/use-ora-conversations";
+import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
+import { useOraConversations } from "@/hooks/ora-conversations-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Switch } from "@/components/ui/switch";
 import { setVoiceLang, VOICE_LANGUAGES } from "@/hooks/use-voice-input";
