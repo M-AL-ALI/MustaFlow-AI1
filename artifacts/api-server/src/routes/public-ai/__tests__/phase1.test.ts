@@ -577,16 +577,30 @@ describe("Ora orchestrator plan gating", () => {
 
 // ─── Ora orchestrator: memory-save candidate detection ────────────────────────
 describe("Ora memory-save candidate detection", () => {
-  it("detects explicit 'remember that' facts and strips the preamble", async () => {
+  it("detects explicit 'remember that' facts, strips the preamble, and marks high confidence", async () => {
     const { detectMemorySaveCandidate } = await import("../../../lib/public-ai/orchestrator");
     const c = detectMemorySaveCandidate("Please remember that my company is Acme Corp");
     expect(c).not.toBeNull();
     expect(c?.fact).toBe("my company is Acme Corp");
+    expect(c?.confidence).toBe("high");
   });
 
-  it("detects preference statements", async () => {
+  it("marks 'don't forget' and 'keep a note' as high confidence", async () => {
     const { detectMemorySaveCandidate } = await import("../../../lib/public-ai/orchestrator");
-    expect(detectMemorySaveCandidate("I prefer dark mode everywhere")).not.toBeNull();
+    expect(detectMemorySaveCandidate("Don't forget I ship to the EU")?.confidence).toBe("high");
+    expect(detectMemorySaveCandidate("keep a note that my budget is $5k")?.confidence).toBe("high");
+  });
+
+  it("detects preference statements as low confidence", async () => {
+    const { detectMemorySaveCandidate } = await import("../../../lib/public-ai/orchestrator");
+    const c = detectMemorySaveCandidate("I prefer dark mode everywhere");
+    expect(c).not.toBeNull();
+    expect(c?.confidence).toBe("low");
+  });
+
+  it("marks implicit 'my X is' facts as low confidence", async () => {
+    const { detectMemorySaveCandidate } = await import("../../../lib/public-ai/orchestrator");
+    expect(detectMemorySaveCandidate("my timezone is PST")?.confidence).toBe("low");
   });
 
   it("returns null for ordinary messages", async () => {

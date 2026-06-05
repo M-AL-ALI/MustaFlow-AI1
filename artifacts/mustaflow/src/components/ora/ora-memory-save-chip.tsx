@@ -1,0 +1,68 @@
+import { useState } from "react";
+import { Brain, Check, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/**
+ * Inline "Save to memory" affordance shown beneath an assistant message that
+ * carries a memory candidate (a durable fact Ora detected). Once saved it
+ * collapses to a small confirmation. The actual persistence + transcript update
+ * is owned by the parent via `onSave`; this component only manages its own
+ * in-flight / error UI.
+ */
+export function OraMemorySaveChip({
+  fact,
+  saved,
+  onSave,
+}: {
+  fact: string;
+  saved: boolean;
+  onSave: () => Promise<void>;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
+
+  if (saved) {
+    return (
+      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Check className="h-3.5 w-3.5 text-emerald-500" />
+        Saved to memory
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.05)] px-3 py-2">
+      <Brain className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] text-muted-foreground">Save this to memory?</p>
+        <p className="text-xs text-foreground/85 break-words mt-0.5">{fact}</p>
+        {status === "error" && (
+          <p className="text-[11px] text-destructive mt-1">Couldn&apos;t save. Try again.</p>
+        )}
+      </div>
+      <button
+        type="button"
+        disabled={status === "saving"}
+        onClick={async () => {
+          setStatus("saving");
+          try {
+            await onSave();
+          } catch {
+            setStatus("error");
+          }
+        }}
+        className={cn(
+          "shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors",
+          "bg-[hsl(265_85%_65%/0.15)] text-[hsl(265_85%_65%)] hover:bg-[hsl(265_85%_65%/0.25)]",
+          status === "saving" && "opacity-60",
+        )}
+      >
+        {status === "saving" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Brain className="h-3.5 w-3.5" />
+        )}
+        Save
+      </button>
+    </div>
+  );
+}

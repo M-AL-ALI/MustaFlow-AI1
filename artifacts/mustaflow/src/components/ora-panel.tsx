@@ -23,12 +23,19 @@ import {
   Lock,
   ExternalLink,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetBillingSubscription,
   getGetBillingSubscriptionQueryKey,
+  getListKnowledgeQueryKey,
 } from "@workspace/api-client-react";
+import { useToast } from "@/hooks/use-toast";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
+import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
+import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
+import { saveOraMemory } from "@/lib/ora-memory-save";
+import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
 import { cn } from "@/lib/utils";
 import type {
   UseOraChatReturn,
@@ -283,9 +290,12 @@ export function OraPanel({ chat }: OraPanelProps) {
     clearConversation,
     sessionExpired,
     dismissSessionExpired,
+    markMemorySaved,
   } = chat;
 
   const { isSignedIn } = useUser();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: subscription } = useGetBillingSubscription({
     query: {
       queryKey: getGetBillingSubscriptionQueryKey(),
@@ -294,7 +304,58 @@ export function OraPanel({ chat }: OraPanelProps) {
   });
   const tier = subscription?.tier ?? "free";
   const deepAllowed = tier === "core" || tier === "wave";
+
+  // Persist a memory candidate, then mark its message saved so the inline chip
+  // collapses and the transcript records the saved state. Shared by the manual
+  // save chip and the opt-in auto-save effect below.
+  const autoSaveInFlight = useRef<Set<string>>(new Set());
+  const handleSaveMemory = useCallback(
+    async (fact: string, content: string) => {
+      await saveOraMemory(fact);
+      markMemorySaved(fact, content);
+      void queryClient.invalidateQueries({
+        queryKey: getListKnowledgeQueryKey({ scope: "user", archived: false, limit: 100 }),
+      });
+    },
+    [markMemorySaved, queryClient],
+  );
+
+  // Opt-in auto-save: when the user explicitly asked Ora to remember something
+  // (high-confidence candidate) AND both the auto-save and reference-memories
+  // preferences are on, save it without an extra click. Low-confidence
+  // candidates always require a manual click.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    if (!getAutoSaveMemories() || !getReferenceSavedMemories()) return;
+    messages.forEach((msg) => {
+      const candidate = msg.memorySaveCandidate;
+      if (
+        msg.role === "assistant" &&
+        candidate &&
+        msg.memorySaveCandidateConfidence === "high" &&
+        !msg.memorySaved
+      ) {
+        // Key the in-flight guard by content identity, not array index, so a
+        // transcript edit/truncation mid-save can't collide with a stale index.
+        const key = `${msg.content}\u0000${candidate}`;
+        if (autoSaveInFlight.current.has(key)) return;
+        autoSaveInFlight.current.add(key);
+        handleSaveMemory(candidate, msg.content)
+          .then(() => {
+            toast({ title: "Saved to memory" });
+          })
+          .catch(() => {
+            // Leave the candidate in place so the user can retry via the chip.
+          })
+          .finally(() => {
+            autoSaveInFlight.current.delete(key);
+          });
+      }
+    });
+  }, [messages, isSignedIn, handleSaveMemory, toast]);
+
   const [input, setInput] = useState("");
+  const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
   const [showFormatMenu, setShowFormatMenu] = useState(false);
@@ -779,6 +840,18 @@ export function OraPanel({ chat }: OraPanelProps) {
             </button>
           )}
 
+          {/* Memory manager — review & delete saved memories */}
+          {isSignedIn && (
+            <button
+              type="button"
+              onClick={() => setMemoryManagerOpen(true)}
+              title="Ora memory"
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+            >
+              <Brain className="h-3.5 w-3.5" />
+            </button>
+          )}
+
           {/* Export + clear conversation */}
           {hasMessages && (
             <>
@@ -942,6 +1015,16 @@ export function OraPanel({ chat }: OraPanelProps) {
                   {msg.role === "assistant" &&
                     Array.isArray(msg.sources) &&
                     msg.sources.length > 0 && <OraSourceCards sources={msg.sources} />}
+
+                  {msg.role === "assistant" &&
+                    isSignedIn &&
+                    (msg.memorySaveCandidate || msg.memorySaved) && (
+                      <OraMemorySaveChip
+                        fact={msg.memorySaveCandidate ?? ""}
+                        saved={Boolean(msg.memorySaved)}
+                        onSave={() => handleSaveMemory(msg.memorySaveCandidate ?? "", msg.content)}
+                      />
+                    )}
 
                   {msg.editedFrom && (
                     <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">
@@ -1389,6 +1472,8 @@ export function OraPanel({ chat }: OraPanelProps) {
           </>
         )}
       </div>
+
+      <OraMemoryManager open={memoryManagerOpen} onOpenChange={setMemoryManagerOpen} />
     </div>
   );
 }

@@ -11,12 +11,12 @@ API** with `tools: [{ type: "web_search" }]` on a model that supports it
 (`gpt-4o`, override via `ORA_SEARCH_MODEL`).
 
 **Why:** The Replit AI-integrations proxy (the env used elsewhere, routing
-gpt-5.x) *accepts* the `web_search` tool param but returns unreliable/ungrounded
+gpt-5.x) _accepts_ the `web_search` tool param but returns unreliable/ungrounded
 results — no real fetch, missing URL citations. The direct OpenAI key against
 gpt-4o reliably returns grounded `output_text` plus URL citations in
 `output[].content[].annotations[]` (`{type:"url_citation", url, title}`).
 
-**How to apply:** When a feature needs *real* web grounding, do not assume the
+**How to apply:** When a feature needs _real_ web grounding, do not assume the
 integration proxy executes server-side tools. Use the direct key + Responses API
 and parse `output[].content[].annotations[]` for citations. Both
 `OPENAI_API_KEY` and the proxy env are present in this repo — pick the direct key

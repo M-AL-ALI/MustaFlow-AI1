@@ -31,6 +31,8 @@ export interface OraMessage {
   generatedFile?: GeneratedFile;
   imageUrl?: string;
   memorySaveCandidate?: string;
+  memorySaveCandidateConfidence?: "high" | "low";
+  memorySaved?: boolean;
   sources?: OraSource[];
 }
 
@@ -102,6 +104,7 @@ export interface UseOraChatReturn {
   clearConversation: () => Promise<void>;
   sessionExpired: boolean;
   dismissSessionExpired: () => void;
+  markMemorySaved: (candidate: string, content: string) => void;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -304,6 +307,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   datasetResult?: DatasetAnalysisResult;
   imageUrl?: string;
   memorySaveCandidate?: string;
+  memorySaveCandidateConfidence?: "high" | "low";
+  memorySaved?: boolean;
   sources?: OraSource[];
 }> {
   return messages.map((m) => ({
@@ -320,6 +325,10 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     // Persist inline image + memory-save candidate so they survive reload
     ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}),
     ...(m.memorySaveCandidate ? { memorySaveCandidate: m.memorySaveCandidate } : {}),
+    ...(m.memorySaveCandidateConfidence
+      ? { memorySaveCandidateConfidence: m.memorySaveCandidateConfidence }
+      : {}),
+    ...(m.memorySaved ? { memorySaved: true } : {}),
     // Persist cited web-search sources so the source cards survive reload
     ...(m.sources && m.sources.length > 0 ? { sources: m.sources } : {}),
   }));
@@ -924,6 +933,7 @@ export function useOraChat(): UseOraChatReturn {
             imageUrl?: string;
             // Present when Ora detected a durable fact worth saving to memory
             memorySaveCandidate?: string;
+            memorySaveCandidateConfidence?: "high" | "low";
             // Present when the chat route ran a live web search
             sources?: OraSource[];
             msgCount: number;
@@ -941,7 +951,12 @@ export function useOraChat(): UseOraChatReturn {
                 ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
                 ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
                 ...(data.memorySaveCandidate
-                  ? { memorySaveCandidate: data.memorySaveCandidate }
+                  ? {
+                      memorySaveCandidate: data.memorySaveCandidate,
+                      ...(data.memorySaveCandidateConfidence
+                        ? { memorySaveCandidateConfidence: data.memorySaveCandidateConfidence }
+                        : {}),
+                    }
                   : {}),
                 ...(data.fileName && data.fileData && data.mimeType
                   ? {
@@ -1262,6 +1277,35 @@ export function useOraChat(): UseOraChatReturn {
 
   const atLimit = (session?.msgCount ?? 0) >= (session?.msgLimit ?? 20);
 
+  // Mark a message's memory candidate as saved: flips memorySaved on, drops the
+  // candidate so the inline save chip collapses to a confirmation, and persists
+  // the transcript so the saved state survives reload.
+  const markMemorySaved = useCallback(
+    (candidate: string, content: string) => {
+      setMessages((prev) => {
+        // Match by content identity, not array index: the transcript can be
+        // truncated/rebased (edit flow) between scheduling a save and it
+        // resolving, so an index captured earlier may point at a different
+        // message by the time we mark it.
+        const matchIdx = prev.findIndex(
+          (m) =>
+            m.role === "assistant" &&
+            !m.memorySaved &&
+            m.memorySaveCandidate === candidate &&
+            m.content === content,
+        );
+        if (matchIdx === -1) return prev;
+        const next = prev.map((m, i) =>
+          i === matchIdx ? { ...m, memorySaved: true, memorySaveCandidate: undefined } : m,
+        );
+        storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
+        return next;
+      });
+    },
+    [isSignedIn, saveToServer],
+  );
+
   const oraStatus = deriveOraStatus(
     isLoading,
     uploadState,
@@ -1293,5 +1337,6 @@ export function useOraChat(): UseOraChatReturn {
     clearConversation,
     sessionExpired,
     dismissSessionExpired: () => setSessionExpired(false),
+    markMemorySaved,
   };
 }

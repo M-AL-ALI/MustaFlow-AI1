@@ -600,7 +600,12 @@ router.post("/public-ai/chat", async (req, res) => {
   res.json({
     reply,
     suggestions,
-    ...(memoryCandidate ? { memorySaveCandidate: memoryCandidate.fact } : {}),
+    ...(memoryCandidate
+      ? {
+          memorySaveCandidate: memoryCandidate.fact,
+          memorySaveCandidateConfidence: memoryCandidate.confidence,
+        }
+      : {}),
     mode: deepAllowed ? "deep" : "instant",
     msgCount: payload.msgCount,
     msgLimit: effectiveMsgLimit,

@@ -5,6 +5,7 @@
 
 const SAVED_MEMORIES_KEY = "ora_reference_saved_memories";
 const CHAT_HISTORY_KEY = "ora_reference_chat_history";
+const AUTO_SAVE_MEMORIES_KEY = "ora_auto_save_memories";
 
 function readBool(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;
@@ -29,4 +30,18 @@ export function getReferenceChatHistory(): boolean {
 export function setReferenceChatHistory(value: boolean): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(CHAT_HISTORY_KEY, String(value));
+}
+
+// When enabled, high-confidence memory candidates (the user explicitly said
+// "remember that…") are saved automatically without an extra click. Defaults to
+// off so saving stays an opt-in, deliberate action. Auto-save additionally
+// requires reference-saved-memories to be on, since saving is pointless if Ora
+// will never read the memory back.
+export function getAutoSaveMemories(): boolean {
+  return readBool(AUTO_SAVE_MEMORIES_KEY, false);
+}
+
+export function setAutoSaveMemories(value: boolean): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(AUTO_SAVE_MEMORIES_KEY, String(value));
 }

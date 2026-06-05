@@ -329,11 +329,18 @@ export function checkToolAccess(tool: OraTool, ctx: OraAccessContext): OraAccess
 
 // ── Memory-save candidate detection (foundation) ────────────────────────────
 
-const MEMORY_SAVE_PATTERNS: RegExp[] = [
+// Explicit imperative "save this" phrasing. A match here is a HIGH-confidence
+// signal the user actively wants this remembered — eligible for opt-in auto-save.
+const MEMORY_SAVE_EXPLICIT_PATTERNS: RegExp[] = [
   /\b(?:please\s+)?remember\s+(?:that\s+)?/i,
   /\bdon'?t\s+forget\s+(?:that\s+)?/i,
   /\b(?:keep|make)\s+a\s+note\s+(?:that|of)\b/i,
   /\bfor\s+future\s+reference\b/i,
+];
+
+// Implicit durable facts the user stated in passing. Worth offering to save,
+// but only as a LOW-confidence suggestion — never auto-saved.
+const MEMORY_SAVE_IMPLICIT_PATTERNS: RegExp[] = [
   /\bmy\s+(?:name|company|business|product|preference|budget|timezone|stack)\s+is\b/i,
   /\bi\s+(?:prefer|always|usually)\b/i,
 ];
@@ -341,6 +348,12 @@ const MEMORY_SAVE_PATTERNS: RegExp[] = [
 export interface MemorySaveCandidate {
   /** A short, declarative fact extracted from the user's message. */
   fact: string;
+  /**
+   * "high" when the user used explicit imperative phrasing ("remember that…",
+   * "don't forget…"), making this eligible for opt-in auto-save. "low" for
+   * facts merely stated in passing — surfaced as a suggestion only.
+   */
+  confidence: "high" | "low";
 }
 
 /**
@@ -351,7 +364,9 @@ export interface MemorySaveCandidate {
 export function detectMemorySaveCandidate(message: string): MemorySaveCandidate | null {
   const trimmed = message.trim();
   if (trimmed.length < 6 || trimmed.length > 400) return null;
-  if (!MEMORY_SAVE_PATTERNS.some((p) => p.test(trimmed))) return null;
+  const isExplicit = MEMORY_SAVE_EXPLICIT_PATTERNS.some((p) => p.test(trimmed));
+  const isImplicit = MEMORY_SAVE_IMPLICIT_PATTERNS.some((p) => p.test(trimmed));
+  if (!isExplicit && !isImplicit) return null;
 
   // Strip a leading "remember that" / "don't forget" preamble so the stored
   // candidate reads as a clean fact.
@@ -361,5 +376,5 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
     .replace(/^\s*(?:keep|make)\s+a\s+note\s+(?:that|of)\s+/i, "")
     .trim();
 
-  return { fact: fact.length > 0 ? fact : trimmed };
+  return { fact: fact.length > 0 ? fact : trimmed, confidence: isExplicit ? "high" : "low" };
 }

@@ -42,6 +42,9 @@ const messageSchema = z.object({
   generatedFile: generatedFileSchema.optional(),
   hadAttachment: z.boolean().optional(),
   editedFrom: z.boolean().optional(),
+  memorySaveCandidate: z.string().max(400).optional(),
+  memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
+  memorySaved: z.boolean().optional(),
 });
 
 const MAX_STORED = 100;
