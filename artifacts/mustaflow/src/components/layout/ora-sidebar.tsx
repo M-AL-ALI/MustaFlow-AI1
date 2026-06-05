@@ -8,7 +8,6 @@ import {
   Blocks,
   Settings,
   CreditCard,
-  Sparkles,
   LogOut,
   ChevronDown,
   ChevronRight,
@@ -29,7 +28,7 @@ import { useOraConversations, type OraConversationSummary } from "@/hooks/use-or
 const NAV_ITEMS = [
   { name: "Library", href: "/ora/library", icon: BookOpen },
   { name: "Apps", href: "/integrations", icon: Blocks },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Settings", href: "/ora/settings", icon: Settings },
 ];
 
 const LOW_CREDITS_THRESHOLD = 10;
@@ -610,20 +609,6 @@ export function OraSidebar({ onNewConversation }: OraSidebarProps) {
                 </Link>
               );
             })}
-          </div>
-
-          <hr className="border-border mx-3 my-2" />
-
-          {/* Switch to the AI Builder experience */}
-          <div className="px-3 py-2">
-            <Link
-              href="/projects"
-              onClick={close}
-              className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer no-underline"
-            >
-              <Sparkles className="h-4 w-4 shrink-0" />
-              Switch to AI Builder
-            </Link>
           </div>
         </div>
 

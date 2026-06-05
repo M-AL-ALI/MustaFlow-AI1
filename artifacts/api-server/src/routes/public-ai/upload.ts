@@ -21,6 +21,8 @@ import {
   MAX_TOTAL_CHARS_PER_SESSION,
 } from "../../lib/public-ai/file-store";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import { persistOraAsset } from "../../lib/ora-assets";
 import { logger } from "../../lib/logger";
 
 const router = Router();
@@ -68,6 +70,10 @@ router.post(
       res.status(400).json({ error: "No file was attached. Please select a file to upload." });
       return;
     }
+
+    // Signed-in users get their uploads copied into the durable Ora asset
+    // library so they show up under Library across devices. Best-effort.
+    const authed = await resolveAuthedOraUser(req);
 
     // ── Image branch ────────────────────────────────────────────────────────
     if (isImageExtension(file.originalname)) {
@@ -138,6 +144,16 @@ router.post(
         },
         "Ora image uploaded and processed",
       );
+
+      if (authed) {
+        void persistOraAsset({
+          userId: authed.userId,
+          kind: "image",
+          fileName: validation.sanitizedName,
+          mimeType: validation.mimeType,
+          base64: processed.base64.replace(/^data:[^;]+;base64,/, ""),
+        });
+      }
 
       res.json({
         imageRef: storeResult.imageRef,
@@ -230,6 +246,16 @@ router.post(
         "Ora dataset uploaded and profiled",
       );
 
+      if (authed) {
+        void persistOraAsset({
+          userId: authed.userId,
+          kind: "file",
+          fileName: validation.sanitizedName,
+          mimeType: file.mimetype,
+          base64: file.buffer.toString("base64"),
+        });
+      }
+
       res.json({
         fileRef,
         filename: validation.sanitizedName,
@@ -304,6 +330,16 @@ router.post(
       },
       "Ora file uploaded and extracted",
     );
+
+    if (authed) {
+      void persistOraAsset({
+        userId: authed.userId,
+        kind: "file",
+        fileName: validation.sanitizedName,
+        mimeType: file.mimetype,
+        base64: file.buffer.toString("base64"),
+      });
+    }
 
     res.json({
       fileRef,

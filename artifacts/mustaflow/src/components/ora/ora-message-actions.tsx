@@ -5,7 +5,6 @@ import {
   Download,
   Volume2,
   RefreshCw,
-  ArrowRight,
   MoreHorizontal,
   FileText,
   FileSpreadsheet,
@@ -31,7 +30,6 @@ export interface OraMessageActionsProps {
   isLatestAssistant?: boolean;
   onEdit?: (text: string) => void;
   onRegenerate?: () => void;
-  onContinueInBuilder?: () => void;
   onReadAloud?: (text: string) => void;
   isTtsAvailable?: boolean;
   hasAttachment?: boolean;
@@ -100,7 +98,6 @@ export function OraMessageActions({
   isLatestAssistant = false,
   onEdit,
   onRegenerate,
-  onContinueInBuilder,
   onReadAloud,
   isTtsAvailable = false,
   hasAttachment = false,
@@ -203,14 +200,6 @@ export function OraMessageActions({
           icon={<RefreshCw className="h-3.5 w-3.5" />}
           label="Regenerate"
           onClick={onRegenerate}
-        />
-      )}
-
-      {isLatestAssistant && message.handoffCta && onContinueInBuilder && (
-        <ActionButton
-          icon={<ArrowRight className="h-3.5 w-3.5" />}
-          label="Continue in Builder"
-          onClick={onContinueInBuilder}
         />
       )}
     </div>
@@ -342,15 +331,6 @@ export function OraMessageActions({
               icon={<RefreshCw className="h-3.5 w-3.5" />}
               label="Regenerate"
               onClick={onRegenerate}
-              onClose={() => setMobileOpen(false)}
-            />
-          )}
-
-          {isLatestAssistant && message.handoffCta && onContinueInBuilder && (
-            <MobileActionItem
-              icon={<ArrowRight className="h-3.5 w-3.5" />}
-              label="Continue in Builder"
-              onClick={onContinueInBuilder}
               onClose={() => setMobileOpen(false)}
             />
           )}

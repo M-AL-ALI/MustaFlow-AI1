@@ -710,32 +710,6 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     }, 40);
   }, []);
 
-  const handleContinueInBuilder = useCallback(async () => {
-    try {
-      const safeMessages = messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .filter((m) => !m.datasetResult)
-        .slice(-8)
-        .map((m) => ({ role: m.role, content: m.content.slice(0, 300) }));
-      const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-      const res = await fetch(`${BASE}/api/public-ai/handoff/create`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ messages: safeMessages }),
-      });
-      if (!res.ok) throw new Error("Could not create handoff");
-      const { token } = (await res.json()) as { token: string };
-      setLocation(
-        isSignedIn
-          ? `/projects?handoff=${encodeURIComponent(token)}`
-          : `/sign-up?handoff=${encodeURIComponent(token)}`,
-      );
-    } catch {
-      setLocation("/sign-up");
-    }
-  }, [messages, isSignedIn, setLocation]);
-
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -1198,11 +1172,6 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                               ? () => void sendMessage(prevUser.content, { truncateTo: i })
                               : undefined;
                           })()
-                        : undefined
-                    }
-                    onContinueInBuilder={
-                      isLatestAssistant && msg.handoffCta
-                        ? () => void handleContinueInBuilder()
                         : undefined
                     }
                     onReadAloud={

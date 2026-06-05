@@ -84,6 +84,13 @@ export interface EnqueueImageJobOpts {
   style?: ImageStyle;
   transparentBackground?: boolean;
   projectId?: number;
+  /**
+   * When true, the completed image is also copied into the signed-in user's
+   * durable Ora asset library (best-effort, after the DB row is finalized).
+   * Set only for Ora-chat-originated generations — NOT for Image Studio, which
+   * has its own gallery backed by `generated_images`.
+   */
+  persistToOraLibrary?: boolean;
 }
 
 export function getJob(jobId: string): ImageJob | undefined {
@@ -596,6 +603,29 @@ async function runImageJob(
     job.status = "completed";
     job.fileUrl = fileUrl;
     job.thumbnailUrl = thumbnailUrl ?? undefined;
+
+    // Copy into the durable Ora asset library when requested (Ora-chat path).
+    // Best-effort: never let a persist failure affect the job outcome.
+    if (opts.persistToOraLibrary) {
+      try {
+        const buffer = await getImageBuffer(storageKey, fileUrl);
+        const { persistOraAsset } = await import("./ora-assets");
+        await persistOraAsset({
+          userId,
+          kind: "image",
+          fileName: `ora-image-${Date.now()}.png`,
+          mimeType: "image/png",
+          format: "png",
+          prompt,
+          base64: buffer.toString("base64"),
+        });
+      } catch (persistErr) {
+        logger.warn(
+          { jobId, imageId, err: persistErr },
+          "image-jobs: failed to persist image to Ora library",
+        );
+      }
+    }
 
     logger.info({ jobId, imageId }, "image-jobs: completed");
   } catch (err) {

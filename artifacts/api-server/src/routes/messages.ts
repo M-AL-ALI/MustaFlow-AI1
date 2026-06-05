@@ -558,6 +558,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
             aspectRatio: "1:1",
             style: "vivid",
             projectId: project.id,
+            persistToOraLibrary: true,
           });
 
           assistantContent = "Your image is being generated. It will appear here once ready.";
