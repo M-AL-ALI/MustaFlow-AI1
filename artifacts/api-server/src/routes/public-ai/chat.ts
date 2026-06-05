@@ -18,8 +18,8 @@ import {
   ORA_TOOL_REGISTRY,
 } from "../../lib/public-ai/orchestrator";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { eq, and, or, isNull, desc, sql } from "drizzle-orm";
-import { db, knowledgeEntriesTable, projectsTable, generatedImagesTable } from "@workspace/db";
+import { eq, and, isNull, desc, sql } from "drizzle-orm";
+import { db, knowledgeEntriesTable, generatedImagesTable } from "@workspace/db";
 import { deductCreditsAtomic, getOrCreateCredits } from "../credits";
 
 // Authenticated Ora users are not subject to the anonymous visitor message cap;
@@ -33,39 +33,31 @@ const UNLIMITED_MSGS = 1_000_000;
 const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
 
 /**
- * Fetch the user's saved Ora memories (user-scoped knowledge + any entries for
- * the current project) and format them as a compact context block for the
- * system prompt. Returns an empty string when there is nothing to inject.
+ * Fetch the user's saved Ora memories and format them as a compact context
+ * block for the system prompt. Returns an empty string when there is nothing
+ * to inject.
+ *
+ * ISOLATION: Ora is a standalone assistant kept fully separate from the AI
+ * Builder. This intentionally injects ONLY user-scoped Ora memories
+ * (scope="user"). It must never pull project-scoped Knowledge Vault entries
+ * (scope="project", auto-populated by the Builder's build/refine pipeline) into
+ * Ora's context — doing so would leak Builder project knowledge into Ora.
  */
-async function buildMemoryContext(userId: string, projectId: number | undefined): Promise<string> {
+async function buildMemoryContext(userId: string): Promise<string> {
   try {
-    const scopeConditions = [
-      and(eq(knowledgeEntriesTable.userId, userId), eq(knowledgeEntriesTable.scope, "user")),
-    ];
-    if (projectId !== undefined) {
-      // Only inject project-scoped memories the user actually owns.
-      const [owned] = await db
-        .select({ id: projectsTable.id })
-        .from(projectsTable)
-        .where(
-          and(
-            eq(projectsTable.id, projectId),
-            eq(projectsTable.ownerId, userId),
-            isNull(projectsTable.deletedAt),
-          ),
-        );
-      if (owned) {
-        scopeConditions.push(eq(knowledgeEntriesTable.projectId, projectId));
-      }
-    }
-
     const rows = await db
       .select({
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
       })
       .from(knowledgeEntriesTable)
-      .where(and(or(...scopeConditions), isNull(knowledgeEntriesTable.archivedAt)))
+      .where(
+        and(
+          eq(knowledgeEntriesTable.userId, userId),
+          eq(knowledgeEntriesTable.scope, "user"),
+          isNull(knowledgeEntriesTable.archivedAt),
+        ),
+      )
       .orderBy(desc(knowledgeEntriesTable.createdAt))
       .limit(15);
 
@@ -100,7 +92,6 @@ const bodySchema = z.object({
   mode: z.enum(["instant", "deep"]).default("instant"),
   referenceSavedMemories: z.boolean().default(true),
   referenceChatHistory: z.boolean().default(true),
-  projectId: z.number().int().positive().optional(),
 });
 
 /**
@@ -169,7 +160,6 @@ router.post("/public-ai/chat", async (req, res) => {
     mode,
     referenceSavedMemories,
     referenceChatHistory,
-    projectId,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -537,7 +527,7 @@ router.post("/public-ai/chat", async (req, res) => {
 
   // Saved memories are opt-out and only available to signed-in users.
   const memoryContext =
-    authed && referenceSavedMemories ? await buildMemoryContext(authed.userId, projectId) : "";
+    authed && referenceSavedMemories ? await buildMemoryContext(authed.userId) : "";
 
   const systemPrompt =
     buildSystemPrompt(language, languageHint) +
