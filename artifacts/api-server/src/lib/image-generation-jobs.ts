@@ -520,6 +520,32 @@ async function runImageEditJob(
     job.fileUrl = fileUrl;
     job.thumbnailUrl = thumbnailUrl ?? undefined;
 
+    // Ora-origin inline edits are mirrored into the durable Ora asset library so
+    // the edited result shows up under Library across devices/sessions. Image
+    // Studio edits (billingMode "credits") are NOT copied — they already live in
+    // generated_images and are surfaced by the Studio. Best-effort: a persist
+    // failure must never affect the job outcome.
+    if (opts.billingMode === "ora") {
+      try {
+        const buffer = await getImageBuffer(storageKey, fileUrl);
+        const { persistOraAsset } = await import("./ora-assets");
+        await persistOraAsset({
+          userId,
+          kind: "image",
+          fileName: `ora-edit-${Date.now()}.png`,
+          mimeType: "image/png",
+          format: "png",
+          prompt: instruction,
+          base64: buffer.toString("base64"),
+        });
+      } catch (persistErr) {
+        logger.warn(
+          { jobId, imageId, err: persistErr },
+          "image-jobs: failed to persist edited image to Ora library",
+        );
+      }
+    }
+
     logger.info({ jobId, imageId }, "image-jobs: edit completed");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

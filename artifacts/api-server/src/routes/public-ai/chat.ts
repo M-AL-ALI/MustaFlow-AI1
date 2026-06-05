@@ -759,6 +759,7 @@ router.post("/public-ai/chat", async (req, res) => {
       ? {
           memorySaveCandidate: memoryCandidate.fact,
           memorySaveCandidateConfidence: memoryCandidate.confidence,
+          memorySaveCandidateSensitive: memoryCandidate.sensitive,
         }
       : {}),
     mode: deepAllowed ? "deep" : "instant",

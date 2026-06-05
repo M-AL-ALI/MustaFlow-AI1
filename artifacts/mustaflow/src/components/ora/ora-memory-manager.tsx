@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Brain, Loader2, Trash2 } from "lucide-react";
+import { Brain, Check, Loader2, Pencil, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListKnowledge,
@@ -39,6 +39,9 @@ export function OraMemoryManager({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
 
   // Mirror the persisted toggles in local state so the switches react instantly.
   const [referenceSaved, setReferenceSavedState] = useState(getReferenceSavedMemories);
@@ -65,6 +68,44 @@ export function OraMemoryManager({
       toast({ title: "Memory forgotten" });
     } catch {
       toast({ title: "Failed to forget memory", variant: "destructive" });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleEditStart = (m: KnowledgeEntry) => {
+    setEditingId(m.id);
+    setEditTitle(m.title);
+    setEditContent(m.content);
+  };
+
+  const handleEditCancel = () => {
+    setEditingId(null);
+    setEditTitle("");
+    setEditContent("");
+  };
+
+  const handleEditSave = async (id: number) => {
+    const title = editTitle.trim();
+    const content = editContent.trim();
+    if (!content) {
+      toast({ title: "Memory can't be empty", variant: "destructive" });
+      return;
+    }
+    setBusyId(id);
+    try {
+      const res = await authFetch(`/api/knowledge/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title || content, content }),
+      });
+      if (!res.ok) throw new Error(`Update failed with status ${res.status}`);
+      void refetch();
+      void queryClient.invalidateQueries({ queryKey: getListKnowledgeQueryKey(params) });
+      toast({ title: "Memory updated" });
+      handleEditCancel();
+    } catch {
+      toast({ title: "Failed to update memory", variant: "destructive" });
     } finally {
       setBusyId(null);
     }
@@ -139,30 +180,83 @@ export function OraMemoryManager({
             </p>
           ) : (
             <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {memories.map((m: KnowledgeEntry) => (
-                <li
-                  key={m.id}
-                  className="flex items-start justify-between gap-2 rounded-lg border border-border/60 px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{m.title}</p>
-                    <p className="text-xs text-muted-foreground break-words mt-0.5">{m.content}</p>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="Forget memory"
-                    disabled={busyId === m.id}
-                    onClick={() => void handleForget(m.id)}
-                    className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              {memories.map((m: KnowledgeEntry) =>
+                editingId === m.id ? (
+                  <li key={m.id} className="rounded-lg border border-border/60 px-3 py-2 space-y-2">
+                    <textarea
+                      aria-label="Edit memory"
+                      value={editContent}
+                      onChange={(e) => {
+                        setEditContent(e.target.value);
+                        setEditTitle(e.target.value);
+                      }}
+                      rows={3}
+                      className="w-full resize-none rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-[hsl(265_85%_65%)]"
+                    />
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="Cancel edit"
+                        onClick={handleEditCancel}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/60 transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Save memory edit"
+                        disabled={busyId === m.id}
+                        onClick={() => void handleEditSave(m.id)}
+                        className="inline-flex items-center gap-1 rounded-md bg-[hsl(265_85%_65%/0.15)] px-2 py-1 text-[11px] font-medium text-[hsl(265_85%_65%)] hover:bg-[hsl(265_85%_65%/0.25)] transition-colors disabled:opacity-50"
+                      >
+                        {busyId === m.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
+                        Save
+                      </button>
+                    </div>
+                  </li>
+                ) : (
+                  <li
+                    key={m.id}
+                    className="flex items-start justify-between gap-2 rounded-lg border border-border/60 px-3 py-2"
                   >
-                    {busyId === m.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </button>
-                </li>
-              ))}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{m.title}</p>
+                      <p className="text-xs text-muted-foreground break-words mt-0.5">
+                        {m.content}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        aria-label="Edit memory"
+                        disabled={busyId === m.id}
+                        onClick={() => handleEditStart(m)}
+                        className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Forget memory"
+                        disabled={busyId === m.id}
+                        onClick={() => void handleForget(m.id)}
+                        className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                      >
+                        {busyId === m.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </li>
+                ),
+              )}
             </ul>
           )}
         </div>

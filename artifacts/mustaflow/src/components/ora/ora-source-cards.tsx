@@ -1,0 +1,63 @@
+import { Globe, ExternalLink } from "lucide-react";
+import type { OraSource } from "@/hooks/use-ora-chat";
+
+/** Best-effort hostname for a source URL, used as the secondary label. */
+export function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** Only http(s) links may be rendered as clickable anchors. */
+export function isSafeHttpUrl(url: string): boolean {
+  try {
+    const proto = new URL(url).protocol;
+    return proto === "http:" || proto === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Renders the cited web-search sources beneath an Ora answer as compact,
+ * clickable cards. Each opens the source in a new tab. Non-http(s) URLs are
+ * defensively dropped so a poisoned citation can never become a live link.
+ */
+export function OraSourceCards({ sources }: { sources: OraSource[] }) {
+  const safeSources = sources.filter((s) => isSafeHttpUrl(s.url));
+  if (safeSources.length === 0) return null;
+  return (
+    <div className="mt-2.5" data-testid="ora-source-cards">
+      <div className="flex items-center gap-1.5 mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+        <Globe className="h-3 w-3" />
+        Sources
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {safeSources.map((s, si) => (
+          <a
+            key={si}
+            href={s.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/60 hover:border-border px-3 py-2 transition-all"
+          >
+            <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded-md bg-[hsl(265_85%_65%/0.12)]">
+              <Globe className="h-3.5 w-3.5 text-[hsl(265_85%_65%)]" />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-xs font-medium truncate text-foreground/90">
+                {s.title}
+              </span>
+              <span className="block text-[10px] text-muted-foreground/70 truncate">
+                {sourceHostname(s.url)}
+              </span>
+            </span>
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 group-hover:text-foreground/70 transition-colors" />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}

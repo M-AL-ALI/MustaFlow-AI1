@@ -345,15 +345,52 @@ const MEMORY_SAVE_IMPLICIT_PATTERNS: RegExp[] = [
   /\bi\s+(?:prefer|always|usually)\b/i,
 ];
 
+// Sensitive-data signals. A candidate matching ANY of these is treated as
+// containing PII / credentials and is NEVER auto-saved — it always requires an
+// explicit user click, even when the user used imperative "remember…" phrasing
+// and has auto-save turned on. The patterns are deliberately broad (favouring a
+// false positive that costs one extra click over silently auto-saving a secret).
+const SENSITIVE_FACT_PATTERNS: RegExp[] = [
+  // Email addresses
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+  // Phone numbers (7+ digits, optional country code / separators incl. "(415) ")
+  /(?:\+?\d[\s().-]{0,2}){7,}\d/,
+  // Credit-card-like sequences (13–16 digits, optionally space/dash grouped)
+  /\b(?:\d[ -]?){13,16}\b/,
+  // US SSN-like
+  /\b\d{3}-\d{2}-\d{4}\b/,
+  // Explicit secret labels followed by a value
+  /\b(?:password|passcode|pin|api[\s_-]?key|secret|access[\s_-]?token|auth[\s_-]?token|private[\s_-]?key|seed[\s_-]?phrase|credit[\s_-]?card|card[\s_-]?number|cvv|routing[\s_-]?number|account[\s_-]?number|social[\s_-]?security)\b\s*(?:is|=|:|->)?\s*\S+/i,
+  // Common API-key shapes (provider prefixes + long random token)
+  /\b(?:sk|pk|rk|ghp|gho|xox[bap]|AKIA)[-_][A-Za-z0-9]{12,}\b/,
+  /\bBearer\s+[A-Za-z0-9._-]{20,}\b/i,
+];
+
+/**
+ * Returns true when a piece of text looks like it contains sensitive
+ * information (PII or credentials). Used to block auto-saving such facts to
+ * memory without explicit confirmation.
+ */
+export function detectSensitiveFact(text: string): boolean {
+  return SENSITIVE_FACT_PATTERNS.some((p) => p.test(text));
+}
+
 export interface MemorySaveCandidate {
   /** A short, declarative fact extracted from the user's message. */
   fact: string;
   /**
    * "high" when the user used explicit imperative phrasing ("remember that…",
    * "don't forget…"), making this eligible for opt-in auto-save. "low" for
-   * facts merely stated in passing — surfaced as a suggestion only.
+   * facts merely stated in passing — surfaced as a suggestion only. A fact
+   * flagged `sensitive` is always forced to "low" so it is never auto-saved.
    */
   confidence: "high" | "low";
+  /**
+   * True when the fact appears to contain PII or credentials. The UI surfaces a
+   * warning and the auto-save path is disabled for these — they require an
+   * explicit click to persist.
+   */
+  sensitive: boolean;
 }
 
 /**
@@ -376,5 +413,14 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
     .replace(/^\s*(?:keep|make)\s+a\s+note\s+(?:that|of)\s+/i, "")
     .trim();
 
-  return { fact: fact.length > 0 ? fact : trimmed, confidence: isExplicit ? "high" : "low" };
+  const cleanFact = fact.length > 0 ? fact : trimmed;
+  // Check the FULL message for sensitive data — the value may live in the
+  // stripped preamble (e.g. "remember my password is …"). A sensitive fact is
+  // always forced to low confidence so it can never be auto-saved.
+  const sensitive = detectSensitiveFact(trimmed) || detectSensitiveFact(cleanFact);
+  return {
+    fact: cleanFact,
+    confidence: sensitive ? "low" : isExplicit ? "high" : "low",
+    sensitive,
+  };
 }

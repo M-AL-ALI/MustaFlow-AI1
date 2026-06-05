@@ -38,22 +38,19 @@ Two ordering rules that are easy to get wrong:
    Only the authed reservation (consume) is deferred. Collapsing both into one
    `if (authed) {...} else if (session.count >= LIMIT)` block placed after
    validation regresses anon behavior: an at-limit anon user with a bad
-   `fileRef` then gets 404 instead of the expected 429 (a phase3 route test pins
-   this). Split them: anon-limit 429 early, authed consume late.
+   `fileRef` then gets 404 instead of the expected 429. Split them: anon-limit
+   429 early, authed consume late.
 
 **How to apply:** when adding/auditing any metered Ora route, confirm there is no
 `return` between the reservation and the model call that lacks a refund, and that
 the anon cap is signaled before file/image validation.
 
-## Caveat 1 — `/images/:id/edit` is SHARED but now branches by origin (RESOLVED)
+## Caveat 1 — `/images/:id/edit` is SHARED but branches by origin
 
-Ora's inline image **edit** (frontend `editInlineImage` -> `POST /api/images/:id/edit`
-in `routes/image-gen.ts`) shares the Image Studio endpoint, but image editing is now
-decoupled by `origin`: requests with `origin:"ora"` (`isOraEdit`) meter through the
-daily IMAGE quota (`consumeOraQuota(userId, tier, "image")`, `billingMode:"ora"`)
+Ora's inline image **edit** shares the Image Studio edit endpoint, but billing is
+decoupled by `origin`: `origin:"ora"` requests meter through the daily IMAGE quota
 and NEVER deduct Builder credits; Image Studio edits (`origin:"image_studio"`)
-still charge credits (`IMAGE_CREDIT_COSTS`). `ora-image-edit.test.ts` asserts the
-Ora-origin path uses the daily quota (not a credit debit).
+still charge credits. The `origin` discriminator is the single source of truth.
 
 **How to apply:** keep the `origin` discriminator as the single source of truth for
 billing mode on this shared endpoint. Do not collapse the two paths — Image Studio's

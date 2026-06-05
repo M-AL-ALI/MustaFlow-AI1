@@ -36,6 +36,8 @@ export interface OraMessage {
   editInstruction?: string;
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
+  /** True when the candidate looks like PII/credentials — never auto-saved. */
+  memorySaveCandidateSensitive?: boolean;
   memorySaved?: boolean;
   sources?: OraSource[];
 }
@@ -315,6 +317,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   editInstruction?: string;
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
+  memorySaveCandidateSensitive?: boolean;
   memorySaved?: boolean;
   sources?: OraSource[];
 }> {
@@ -337,6 +340,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.memorySaveCandidateConfidence
       ? { memorySaveCandidateConfidence: m.memorySaveCandidateConfidence }
       : {}),
+    ...(m.memorySaveCandidateSensitive ? { memorySaveCandidateSensitive: true } : {}),
     ...(m.memorySaved ? { memorySaved: true } : {}),
     // Persist cited web-search sources so the source cards survive reload
     ...(m.sources && m.sources.length > 0 ? { sources: m.sources } : {}),
@@ -955,6 +959,7 @@ export function useOraChat(): UseOraChatReturn {
             // Present when Ora detected a durable fact worth saving to memory
             memorySaveCandidate?: string;
             memorySaveCandidateConfidence?: "high" | "low";
+            memorySaveCandidateSensitive?: boolean;
             // Present when the chat route ran a live web search
             sources?: OraSource[];
             msgCount: number;
@@ -977,6 +982,9 @@ export function useOraChat(): UseOraChatReturn {
                       memorySaveCandidate: data.memorySaveCandidate,
                       ...(data.memorySaveCandidateConfidence
                         ? { memorySaveCandidateConfidence: data.memorySaveCandidateConfidence }
+                        : {}),
+                      ...(data.memorySaveCandidateSensitive
+                        ? { memorySaveCandidateSensitive: true }
                         : {}),
                     }
                   : {}),

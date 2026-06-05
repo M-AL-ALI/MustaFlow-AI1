@@ -1,0 +1,171 @@
+/**
+ * Web-search routing + source-safety tests for the Ora public-AI assistant.
+ *
+ * Covers:
+ *   - orchestrator.ts: isWebSearchRequest patterns, routeOraMessage picks the
+ *     `search` tool for current-info questions, and checkToolAccess denies an
+ *     anonymous visitor with the `search_signin_required` code.
+ *   - web-search.ts: isSafeHttpUrl, cleanSourceUrl, extractSources, dedupeSources
+ *     — the citation safety + de-duplication helpers.
+ *
+ * These are pure-function tests (no DB, no network).
+ */
+
+import { describe, it, expect } from "vitest";
+import {
+  isWebSearchRequest,
+  routeOraMessage,
+  checkToolAccess,
+  isImageGenerationRequest,
+} from "../../../lib/public-ai/orchestrator";
+import {
+  isSafeHttpUrl,
+  cleanSourceUrl,
+  extractSources,
+  dedupeSources,
+  type OraSource,
+} from "../../../lib/public-ai/web-search";
+
+// ─── isWebSearchRequest ───────────────────────────────────────────────────────
+
+describe("isWebSearchRequest", () => {
+  it("matches explicit search-the-web phrasing", () => {
+    expect(isWebSearchRequest("search the web for the best laptops")).toBe(true);
+    expect(isWebSearchRequest("can you look up online what time it is in Tokyo")).toBe(true);
+    expect(isWebSearchRequest("google the latest react release")).toBe(true);
+  });
+
+  it("matches current/live-information questions", () => {
+    expect(isWebSearchRequest("what's the latest news on the election")).toBe(true);
+    expect(isWebSearchRequest("what is the current bitcoin price")).toBe(true);
+    expect(isWebSearchRequest("who won the game today")).toBe(true);
+    expect(isWebSearchRequest("what's the weather in Paris tomorrow")).toBe(true);
+  });
+
+  it("does NOT hijack ordinary product / how-to questions", () => {
+    expect(isWebSearchRequest("how do I build a todo app with MustaFlow?")).toBe(false);
+    expect(isWebSearchRequest("explain how closures work in JavaScript")).toBe(false);
+    expect(isWebSearchRequest("write me a poem about the ocean")).toBe(false);
+    expect(isWebSearchRequest("what can I build here")).toBe(false);
+  });
+});
+
+// ─── routeOraMessage → search ─────────────────────────────────────────────────
+
+describe("routeOraMessage picks the search tool for live-info questions", () => {
+  it("routes a current-info question to `search` regardless of mode", async () => {
+    const instant = await routeOraMessage({
+      message: "what is the current bitcoin price",
+      mode: "instant",
+    });
+    expect(instant.tool).toBe("search");
+
+    const deep = await routeOraMessage({
+      message: "what is the current bitcoin price",
+      mode: "deep",
+    });
+    // Search beats the instant/deep classifier — a grounded answer always wins.
+    expect(deep.tool).toBe("search");
+  });
+
+  it("prefers an image-generation request over search when both could match", async () => {
+    // Sanity: image fast-path runs before search, so a clear image request wins.
+    expect(isImageGenerationRequest("generate an image of a sunset")).toBe(true);
+    const decision = await routeOraMessage({
+      message: "generate an image of a sunset",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("image_generation");
+  });
+});
+
+// ─── checkToolAccess for search ───────────────────────────────────────────────
+
+describe("checkToolAccess('search')", () => {
+  it("denies an anonymous visitor with search_signin_required", () => {
+    const result = checkToolAccess("search", { authed: false, isPaid: false });
+    expect(result.allowed).toBe(false);
+    expect(result.denyCode).toBe("search_signin_required");
+  });
+
+  it("allows a signed-in free user", () => {
+    const result = checkToolAccess("search", { authed: true, isPaid: false });
+    expect(result.allowed).toBe(true);
+    expect(result.denyCode).toBeUndefined();
+  });
+});
+
+// ─── web-search.ts safety helpers ─────────────────────────────────────────────
+
+describe("isSafeHttpUrl", () => {
+  it("accepts http and https URLs", () => {
+    expect(isSafeHttpUrl("https://example.com/article")).toBe(true);
+    expect(isSafeHttpUrl("http://example.com")).toBe(true);
+  });
+
+  it("rejects javascript:, data:, file:, and malformed URLs", () => {
+    expect(isSafeHttpUrl("javascript:alert(1)")).toBe(false);
+    expect(isSafeHttpUrl("data:text/html;base64,PHNjcmlwdD4=")).toBe(false);
+    expect(isSafeHttpUrl("file:///etc/passwd")).toBe(false);
+    expect(isSafeHttpUrl("not a url")).toBe(false);
+    expect(isSafeHttpUrl("")).toBe(false);
+  });
+});
+
+describe("cleanSourceUrl", () => {
+  it("returns a normalized http(s) URL", () => {
+    expect(cleanSourceUrl("https://example.com/a")).toBe("https://example.com/a");
+  });
+
+  it("returns null for unsafe schemes", () => {
+    expect(cleanSourceUrl("javascript:alert(1)")).toBeNull();
+    expect(cleanSourceUrl("data:text/plain,hi")).toBeNull();
+  });
+});
+
+describe("dedupeSources", () => {
+  it("removes duplicate URLs and caps the count", () => {
+    const sources: OraSource[] = [
+      { title: "A", url: "https://example.com/1" },
+      { title: "A again", url: "https://example.com/1" },
+      { title: "B", url: "https://example.com/2" },
+      { title: "C", url: "https://example.com/3" },
+    ];
+    const deduped = dedupeSources(sources, 2);
+    expect(deduped.length).toBe(2);
+    expect(deduped[0].url).toBe("https://example.com/1");
+    expect(deduped[1].url).toBe("https://example.com/2");
+  });
+});
+
+describe("extractSources never returns unsafe links", () => {
+  it("drops citations with non-http(s) schemes", () => {
+    // Shape mirrors the OpenAI Responses API url_citation annotations.
+    const output = [
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text: "answer",
+            annotations: [
+              {
+                type: "url_citation",
+                url: "https://good.example.com/article",
+                title: "Good source",
+              },
+              {
+                type: "url_citation",
+                url: "javascript:alert(1)",
+                title: "Evil source",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const sources = extractSources(output);
+    expect(sources.every((s) => isSafeHttpUrl(s.url))).toBe(true);
+    expect(sources.some((s) => s.url.startsWith("javascript:"))).toBe(false);
+  });
+});

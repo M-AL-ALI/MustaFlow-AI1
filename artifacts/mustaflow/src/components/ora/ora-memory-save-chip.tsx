@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Brain, Check, Loader2 } from "lucide-react";
+import { Brain, Check, Loader2, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -12,10 +12,13 @@ import { cn } from "@/lib/utils";
 export function OraMemorySaveChip({
   fact,
   saved,
+  sensitive = false,
   onSave,
 }: {
   fact: string;
   saved: boolean;
+  /** When true, the fact looks like PII/credentials — warn and never auto-save. */
+  sensitive?: boolean;
   onSave: () => Promise<void>;
 }) {
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
@@ -35,6 +38,12 @@ export function OraMemorySaveChip({
       <div className="flex-1 min-w-0">
         <p className="text-[11px] text-muted-foreground">Save this to memory?</p>
         <p className="text-xs text-foreground/85 break-words mt-0.5">{fact}</p>
+        {sensitive && (
+          <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-500">
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+            This looks like sensitive info. It won&apos;t be saved unless you confirm.
+          </p>
+        )}
         {status === "error" && (
           <p className="text-[11px] text-destructive mt-1">Couldn&apos;t save. Try again.</p>
         )}

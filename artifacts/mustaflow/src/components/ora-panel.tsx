@@ -22,7 +22,8 @@ import {
   Brain,
   Lock,
   Wand2,
-  ExternalLink,
+  GitBranch,
+  Plus,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -44,7 +45,6 @@ import type {
   AttachedFile,
   FileFormat,
   GeneratedFile,
-  OraSource,
 } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
 import { useWhisperRecorder } from "@/hooks/use-whisper-recorder";
@@ -57,6 +57,7 @@ import {
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
+import { OraSourceCards } from "@/components/ora/ora-source-cards";
 
 function downloadOraFile(file: GeneratedFile) {
   const byteChars = atob(file.fileData);
@@ -75,66 +76,6 @@ function downloadOraFile(file: GeneratedFile) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, 2000);
-}
-
-function sourceHostname(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
-/** Only http(s) links may be rendered as clickable anchors. */
-function isSafeHttpUrl(url: string): boolean {
-  try {
-    const proto = new URL(url).protocol;
-    return proto === "http:" || proto === "https:";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Renders the cited web-search sources beneath an Ora answer as compact,
- * clickable cards. Each opens the source in a new tab. Non-http(s) URLs are
- * defensively dropped so a poisoned citation can never become a live link.
- */
-function OraSourceCards({ sources }: { sources: OraSource[] }) {
-  const safeSources = sources.filter((s) => isSafeHttpUrl(s.url));
-  if (safeSources.length === 0) return null;
-  return (
-    <div className="mt-2.5">
-      <div className="flex items-center gap-1.5 mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
-        <Globe className="h-3 w-3" />
-        Sources
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {safeSources.map((s, si) => (
-          <a
-            key={si}
-            href={s.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/60 hover:border-border px-3 py-2 transition-all"
-          >
-            <span className="shrink-0 flex h-6 w-6 items-center justify-center rounded-md bg-[hsl(265_85%_65%/0.12)]">
-              <Globe className="h-3.5 w-3.5 text-[hsl(265_85%_65%)]" />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-xs font-medium truncate text-foreground/90">
-                {s.title}
-              </span>
-              <span className="block text-[10px] text-muted-foreground/70 truncate">
-                {sourceHostname(s.url)}
-              </span>
-            </span>
-            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 group-hover:text-foreground/70 transition-colors" />
-          </a>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] = [
@@ -382,7 +323,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
-  const [showFormatMenu, setShowFormatMenu] = useState(false);
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -394,7 +335,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const langMenuRef = useRef<HTMLDivElement>(null);
-  const formatMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasMessages = messages.length > 0;
 
@@ -579,15 +520,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   }, [showLangMenu]);
 
   useEffect(() => {
-    if (!showFormatMenu) return;
+    if (!showPlusMenu) return;
     function handleClickOutside(e: MouseEvent) {
-      if (formatMenuRef.current && !formatMenuRef.current.contains(e.target as Node)) {
-        setShowFormatMenu(false);
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
+        setShowPlusMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showFormatMenu]);
+  }, [showPlusMenu]);
 
   // Auto-clear drop error after 4 s
   useEffect(() => {
@@ -1046,8 +987,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         loading="lazy"
                       />
                       {msg.editInstruction && (
-                        <p className="mt-1 text-[11px] text-muted-foreground italic break-words">
-                          Edited: {msg.editInstruction}
+                        <p className="mt-1 flex items-start gap-1 text-[11px] text-muted-foreground break-words">
+                          <GitBranch className="h-3 w-3 shrink-0 mt-px" />
+                          <span>
+                            Edited from original
+                            <span className="italic"> — &ldquo;{msg.editInstruction}&rdquo;</span>
+                          </span>
                         </p>
                       )}
                       {msg.imageId != null && isSignedIn && (
@@ -1150,6 +1095,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       <OraMemorySaveChip
                         fact={msg.memorySaveCandidate ?? ""}
                         saved={Boolean(msg.memorySaved)}
+                        sensitive={Boolean(msg.memorySaveCandidateSensitive)}
                         onSave={() => handleSaveMemory(msg.memorySaveCandidate ?? "", msg.content)}
                       />
                     )}
@@ -1472,59 +1418,63 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         </button>
                       </div>
 
-                      {/* Attachment button */}
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isLoading || uploadState === "uploading" || atAllLimits}
-                        title={
-                          atAllLimits
-                            ? "Upload limit reached for this session"
-                            : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX)"
-                        }
-                        aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
-                        className={cn(
-                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
-                          uploadState === "attached"
-                            ? "text-[hsl(265_85%_65%)]"
-                            : "text-muted-foreground hover:text-foreground",
-                          (isLoading || uploadState === "uploading" || atAllLimits) &&
-                            "opacity-40 cursor-not-allowed",
-                        )}
-                      >
-                        <Paperclip className="h-4 w-4" />
-                      </button>
-
-                      {/* Generate file button */}
-                      <div className="relative shrink-0" ref={formatMenuRef}>
+                      {/* Overflow "+" menu — collapses upload + generate-file into one
+                          control to keep the composer clean (ChatGPT/Codex style). */}
+                      <div className="relative shrink-0" ref={plusMenuRef}>
                         <button
                           type="button"
-                          onClick={() => setShowFormatMenu((v) => !v)}
+                          onClick={() => setShowPlusMenu((v) => !v)}
                           disabled={isLoading}
-                          title="Generate a file (CSV, Excel, Word, PDF)"
-                          aria-label="Generate file"
+                          title="Add attachment or generate a file"
+                          aria-label="Add attachment or generate a file"
+                          aria-haspopup="menu"
+                          aria-expanded={showPlusMenu}
                           className={cn(
                             "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
-                            selectedFormat
+                            uploadState === "attached" || selectedFormat
                               ? "text-[hsl(265_85%_65%)] bg-[hsl(265_85%_65%/0.12)]"
                               : "text-muted-foreground hover:text-foreground",
                             isLoading && "opacity-40 cursor-not-allowed",
                           )}
                         >
-                          <FileSpreadsheet className="h-4 w-4" />
+                          <Plus className="h-4 w-4" />
                         </button>
-                        {showFormatMenu && (
-                          <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[160px]">
-                            <p className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        {showPlusMenu && (
+                          <div
+                            role="menu"
+                            className="absolute bottom-full mb-1.5 left-0 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[200px]"
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={isLoading || uploadState === "uploading" || atAllLimits}
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                fileInputRef.current?.click();
+                              }}
+                              className={cn(
+                                "w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2",
+                                (isLoading || uploadState === "uploading" || atAllLimits) &&
+                                  "opacity-40 cursor-not-allowed",
+                              )}
+                            >
+                              <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                              <span className="flex-1">
+                                {atAllLimits ? "Upload limit reached" : "Upload image or file"}
+                              </span>
+                            </button>
+                            <div className="my-1 h-px bg-border/60" />
+                            <p className="px-3 pt-1 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                               Generate file
                             </p>
                             {FILE_FORMAT_OPTIONS.map((opt) => (
                               <button
                                 key={opt.value}
                                 type="button"
+                                role="menuitem"
                                 onClick={() => {
                                   setSelectedFormat(opt.value);
-                                  setShowFormatMenu(false);
+                                  setShowPlusMenu(false);
                                   textareaRef.current?.focus();
                                 }}
                                 className={cn(
@@ -1533,7 +1483,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                                     "text-[hsl(265_85%_65%)] font-medium",
                                 )}
                               >
-                                <span>{opt.label}</span>
+                                <span className="flex items-center gap-2">
+                                  <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+                                  {opt.label}
+                                </span>
                                 <span className="text-[10px] text-muted-foreground/60 shrink-0">
                                   {opt.ext}
                                 </span>
