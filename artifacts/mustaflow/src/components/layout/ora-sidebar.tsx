@@ -5,7 +5,6 @@ import logoUrl from "/logo.png";
 import {
   MessageCirclePlus,
   BookOpen,
-  Blocks,
   Settings,
   CreditCard,
   LogOut,
@@ -28,9 +27,10 @@ import {
   type OraConversationSummary,
 } from "@/hooks/ora-conversations-context";
 
+// Ora is a standalone assistant — it must NOT link into the AI Builder's
+// /integrations page. Only Ora-scoped destinations belong here.
 const NAV_ITEMS = [
   { name: "Library", href: "/ora/library", icon: BookOpen },
-  { name: "Apps", href: "/integrations", icon: Blocks },
   { name: "Settings", href: "/ora/settings", icon: Settings },
 ];
 
