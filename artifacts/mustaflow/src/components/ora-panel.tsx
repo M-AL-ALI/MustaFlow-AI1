@@ -187,6 +187,12 @@ const STATUS_LABELS: Record<string, string> = {
 
 interface OraPanelProps {
   chat: UseOraChatReturn;
+  /**
+   * "card" (default) — compact bounded card used in the landing-page embed.
+   * "full" — full-height, centered single-column ChatGPT-style layout used on
+   * the standalone /ora page.
+   */
+  layout?: "card" | "full";
 }
 
 function DatasetChip({
@@ -267,7 +273,8 @@ function DatasetChip({
   );
 }
 
-export function OraPanel({ chat }: OraPanelProps) {
+export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
+  const isFull = layout === "full";
   const {
     messages,
     isLoading,
@@ -784,7 +791,12 @@ export function OraPanel({ chat }: OraPanelProps) {
 
   return (
     <div
-      className="relative rounded-2xl border border-border/60 bg-card shadow-lg flex flex-col max-h-[70dvh] transition-all duration-500"
+      className={cn(
+        "relative flex flex-col",
+        isFull
+          ? "h-full min-h-0 bg-background"
+          : "rounded-2xl border border-border/60 bg-card shadow-lg max-h-[70dvh] transition-all duration-500",
+      )}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -806,7 +818,12 @@ export function OraPanel({ chat }: OraPanelProps) {
         </div>
       )}
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+      <div
+        className={cn(
+          "flex items-center justify-between px-4 py-3 border-b border-border/50",
+          isFull && "sticky top-0 z-20 bg-background/85 backdrop-blur pl-14 pr-14",
+        )}
+      >
         <div className="flex items-center gap-2.5">
           <DynamicAtom state={atomState} size={28} />
           <div className="flex items-baseline gap-2">
@@ -924,26 +941,55 @@ export function OraPanel({ chat }: OraPanelProps) {
         </div>
       </div>
 
-      {/* Example chips — shown before first message */}
-      {!hasMessages && (
-        <div className="px-4 py-4">
-          <p className="text-xs text-muted-foreground mb-3">
-            Ask Ora anything about planning your app, strategy, or MustaFlow:
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {EXAMPLE_CHIPS.map((chip) => (
-              <button
-                key={chip}
-                type="button"
-                onClick={() => handleChip(chip)}
-                className="text-xs px-3 py-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.5)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all"
-              >
-                {chip}
-              </button>
-            ))}
+      {/* Empty state — shown before first message */}
+      {!hasMessages &&
+        (isFull ? (
+          /* Full layout: centered greeting that fills the available space */
+          <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-4 py-8">
+            <div className="w-full max-w-3xl mx-auto text-center">
+              <div className="flex justify-center mb-5">
+                <DynamicAtom state={atomState} size={52} />
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                Hi, I&apos;m <span className="text-[hsl(265_85%_65%)]">Ora</span>
+              </h1>
+              <p className="text-sm text-muted-foreground mt-2.5 max-w-md mx-auto leading-relaxed">
+                Ask anything, think things through, or get work done — planning, strategy, files,
+                images, and more, all in one chat.
+              </p>
+              <div className="mt-7 flex flex-wrap justify-center gap-2">
+                {EXAMPLE_CHIPS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => handleChip(chip)}
+                    className="text-xs px-3.5 py-2 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.5)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="px-4 py-4">
+            <p className="text-xs text-muted-foreground mb-3">
+              Ask Ora anything about planning your app, strategy, or MustaFlow:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {EXAMPLE_CHIPS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => handleChip(chip)}
+                  className="text-xs px-3 py-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.5)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
 
       {/* Message feed — `flex-1 min-h-0 overflow-y-auto` directly on the scroll
            element so the flex algorithm assigns it a real height before overflow
@@ -957,7 +1003,12 @@ export function OraPanel({ chat }: OraPanelProps) {
         ref={feedRef}
         onScroll={handleFeedScroll}
       >
-        <div className="px-4 py-4 space-y-5">
+        <div
+          className={cn(
+            "px-4 py-4",
+            isFull ? "max-w-3xl mx-auto w-full space-y-6 pt-6 pb-8" : "space-y-5",
+          )}
+        >
           {messages.map((msg, i) => {
             const isLastMessage = i === messages.length - 1;
             const showSuggestions =
@@ -980,11 +1031,18 @@ export function OraPanel({ chat }: OraPanelProps) {
                 {msg.role === "assistant" && (
                   <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
                 )}
-                <div className="max-w-[85%]">
+                <div
+                  className={cn(
+                    msg.role === "user" ? "max-w-[85%]" : isFull ? "flex-1 min-w-0" : "max-w-[85%]",
+                  )}
+                >
                   {msg.role === "user" ? (
                     <div
                       dir="auto"
-                      className="bg-muted/60 text-sm rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed"
+                      className={cn(
+                        "bg-muted/60 rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed",
+                        isFull ? "text-[15px]" : "text-sm",
+                      )}
                     >
                       {msg.content}
                     </div>
@@ -993,7 +1051,10 @@ export function OraPanel({ chat }: OraPanelProps) {
                   ) : (
                     <div
                       dir="auto"
-                      className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
+                      className={cn(
+                        "leading-relaxed whitespace-pre-wrap break-words",
+                        isFull ? "text-[15px] text-foreground/90" : "text-sm text-foreground/85",
+                      )}
                     >
                       {msg.content}
                     </div>
@@ -1210,357 +1271,370 @@ export function OraPanel({ chat }: OraPanelProps) {
         )}
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="mx-4 mb-3 rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={clearError}
-            className="shrink-0 opacity-60 hover:opacity-100"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Session-expired nudge — only shown to guests whose anonymous session timed out */}
-      {sessionExpired && !isSignedIn && (
-        <div className="mx-4 mb-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-3.5 py-2.5 text-xs flex items-start justify-between gap-2">
-          <div className="flex items-start gap-2 min-w-0">
-            <LogIn className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-            <span className="text-amber-800 dark:text-amber-300 leading-snug">
-              Your session expired — your conversation is still visible, but will be lost when you
-              leave.{" "}
+      {/* Footer — banners + composer. In full mode this is a full-width bar with a
+          centered max-w-3xl column so the composer aligns with the message thread. */}
+      <div className={cn("shrink-0", isFull && "border-t border-border/40 bg-background")}>
+        <div className={cn(isFull && "mx-auto w-full max-w-3xl")}>
+          {/* Error */}
+          {error && (
+            <div className="mx-4 mb-3 mt-3 rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
+              <span>{error}</span>
               <button
                 type="button"
-                onClick={() => setLocation("/sign-up")}
-                className="font-medium underline underline-offset-2 hover:no-underline"
+                onClick={clearError}
+                className="shrink-0 opacity-60 hover:opacity-100"
               >
-                Sign in to save it permanently.
+                <X className="h-3.5 w-3.5" />
               </button>
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={dismissSessionExpired}
-            className="shrink-0 opacity-60 hover:opacity-100 transition-opacity mt-0.5"
-            aria-label="Dismiss"
-          >
-            <X className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
-          </button>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* Editing indicator */}
-      {editingFromIdx !== null && (
-        <div className="mx-4 mb-1 flex items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-          <span>Editing earlier message — reply will be added to conversation</span>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingFromIdx(null);
-              setInput("");
-              setTimeout(() => textareaRef.current?.focus(), 0);
-            }}
-            className="shrink-0 opacity-60 hover:opacity-100"
-            aria-label="Cancel edit"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-
-      {/* Composer — pb uses safe-area-inset-bottom so iPhone home bar never clips input */}
-      <div
-        className="border-t border-border/40 px-4 pt-3 shrink-0"
-        style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}
-      >
-        {atLimit ? (
-          <div className="text-center py-2">
-            <p className="text-xs text-muted-foreground">
-              Session limit reached.{" "}
-              <button
-                type="button"
-                onClick={() => setLocation("/sign-up")}
-                className="text-[hsl(265_85%_65%)] hover:underline"
-              >
-                Sign up for unlimited conversations
-              </button>
-            </p>
-          </div>
-        ) : (
-          <>
-            {attachedFile?.isImage || previewObjectUrl !== null ? (
-              <OraImageChip
-                uploadState={uploadState}
-                uploadError={uploadError}
-                filename={attachedFile?.filename}
-                sizeBytes={attachedFile?.sizeBytes}
-                width={attachedFile?.width}
-                height={attachedFile?.height}
-                previewObjectUrl={previewObjectUrl}
-                onClear={handleClearAttachment}
-              />
-            ) : (
-              <DatasetChip
-                file={attachedFile}
-                uploadState={uploadState}
-                uploadError={uploadError}
-                onClear={handleClearAttachment}
-                fileType={attachedFile?.fileType}
-              />
-            )}
-
-            {voiceConvActive ? (
-              /* ─── Voice Conversation Mode panel ─────────────────────────── */
-              <OraVoiceConvPanel
-                voiceState={voice.voiceState}
-                interimTranscript={voice.interimTranscript}
-                isLoading={isLoading}
-                isTtsMuted={voiceConvTtsMuted}
-                onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
-                onExit={handleExitVoiceConvMode}
-                onInterrupt={() => voiceRef.current.stopSpeaking()}
-                size="md"
-                whisperState={whisperConv.state}
-                whisperSupported={whisperConv.isSupported}
-                whisperError={whisperConv.error}
-                onWhisperStart={whisperConv.startRecording}
-                onWhisperStop={whisperConv.stopRecording}
-                onWhisperCancel={whisperConv.cancelRecording}
-              />
-            ) : (
-              /* ─── Normal dictation + text input ─────────────────────────── */
-              <>
-                {/* Voice live area — dictation feedback only */}
-                <OraVoiceLiveArea
-                  voiceState={voice.voiceState}
-                  interimTranscript={voice.interimTranscript}
-                  voiceReady={voiceReady}
-                  voiceErrorMsg={voiceErrorMsg}
-                  size="md"
-                />
-
-                {/* Selected format chip */}
-                {selectedFormat && (
-                  <div className="flex items-center gap-2 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2 text-xs mb-2">
-                    <FileSpreadsheet className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0" />
-                    <span className="flex-1 text-foreground">
-                      Generate: {FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFormat(null)}
-                      className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
-                      aria-label="Cancel file generation"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
-
-                {/* Unified input bar */}
-                <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
-                    className="sr-only"
-                    aria-hidden
-                    onChange={handleFileChange}
-                  />
-                  {/* Instant vs Deep Thinking toggle */}
-                  <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setMode("instant")}
-                      title="Instant — fast everyday replies (1 credit)"
-                      aria-pressed={mode === "instant"}
-                      className={cn(
-                        "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
-                        mode === "instant"
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <Zap className="h-3 w-3" />
-                      Instant
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (deepAllowed) {
-                          setMode("deep");
-                        } else {
-                          setLocation("/billing?tier=core");
-                        }
-                      }}
-                      title={
-                        deepAllowed
-                          ? "Deep Thinking — slower, step-by-step reasoning (5 credits)"
-                          : "Deep Thinking is available on Core Pack and Deep Wave"
-                      }
-                      aria-pressed={mode === "deep" && deepAllowed}
-                      className={cn(
-                        "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
-                        mode === "deep" && deepAllowed
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
-                        !deepAllowed && "opacity-70",
-                      )}
-                    >
-                      {deepAllowed ? <Brain className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                      Deep
-                    </button>
-                  </div>
-
-                  {/* Attachment button */}
+          {/* Session-expired nudge — only shown to guests whose anonymous session timed out */}
+          {sessionExpired && !isSignedIn && (
+            <div className="mx-4 mb-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-3.5 py-2.5 text-xs flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 min-w-0">
+                <LogIn className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                <span className="text-amber-800 dark:text-amber-300 leading-snug">
+                  Your session expired — your conversation is still visible, but will be lost when
+                  you leave.{" "}
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading || uploadState === "uploading" || atAllLimits}
-                    title={
-                      atAllLimits
-                        ? "Upload limit reached for this session"
-                        : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX)"
-                    }
-                    aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
-                    className={cn(
-                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
-                      uploadState === "attached"
-                        ? "text-[hsl(265_85%_65%)]"
-                        : "text-muted-foreground hover:text-foreground",
-                      (isLoading || uploadState === "uploading" || atAllLimits) &&
-                        "opacity-40 cursor-not-allowed",
-                    )}
+                    onClick={() => setLocation("/sign-up")}
+                    className="font-medium underline underline-offset-2 hover:no-underline"
                   >
-                    <Paperclip className="h-4 w-4" />
+                    Sign in to save it permanently.
                   </button>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={dismissSessionExpired}
+                className="shrink-0 opacity-60 hover:opacity-100 transition-opacity mt-0.5"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
+              </button>
+            </div>
+          )}
 
-                  {/* Generate file button */}
-                  <div className="relative shrink-0" ref={formatMenuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setShowFormatMenu((v) => !v)}
-                      disabled={isLoading}
-                      title="Generate a file (CSV, Excel, Word, PDF)"
-                      aria-label="Generate file"
-                      className={cn(
-                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
-                        selectedFormat
-                          ? "text-[hsl(265_85%_65%)] bg-[hsl(265_85%_65%/0.12)]"
-                          : "text-muted-foreground hover:text-foreground",
-                        isLoading && "opacity-40 cursor-not-allowed",
-                      )}
-                    >
-                      <FileSpreadsheet className="h-4 w-4" />
-                    </button>
-                    {showFormatMenu && (
-                      <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[160px]">
-                        <p className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                          Generate file
-                        </p>
-                        {FILE_FORMAT_OPTIONS.map((opt) => (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => {
-                              setSelectedFormat(opt.value);
-                              setShowFormatMenu(false);
-                              textareaRef.current?.focus();
-                            }}
-                            className={cn(
-                              "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center justify-between gap-2",
-                              selectedFormat === opt.value && "text-[hsl(265_85%_65%)] font-medium",
-                            )}
-                          >
-                            <span>{opt.label}</span>
-                            <span className="text-[10px] text-muted-foreground/60 shrink-0">
-                              {opt.ext}
-                            </span>
-                          </button>
-                        ))}
+          {/* Editing indicator */}
+          {editingFromIdx !== null && (
+            <div className="mx-4 mb-1 flex items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+              <span>Editing earlier message — reply will be added to conversation</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingFromIdx(null);
+                  setInput("");
+                  setTimeout(() => textareaRef.current?.focus(), 0);
+                }}
+                className="shrink-0 opacity-60 hover:opacity-100"
+                aria-label="Cancel edit"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Composer — pb uses safe-area-inset-bottom so iPhone home bar never clips input */}
+          <div
+            className={cn("px-4 pt-3 shrink-0", isFull ? "pt-2" : "border-t border-border/40")}
+            style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}
+          >
+            {atLimit ? (
+              <div className="text-center py-2">
+                <p className="text-xs text-muted-foreground">
+                  Session limit reached.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setLocation("/sign-up")}
+                    className="text-[hsl(265_85%_65%)] hover:underline"
+                  >
+                    Sign up for unlimited conversations
+                  </button>
+                </p>
+              </div>
+            ) : (
+              <>
+                {attachedFile?.isImage || previewObjectUrl !== null ? (
+                  <OraImageChip
+                    uploadState={uploadState}
+                    uploadError={uploadError}
+                    filename={attachedFile?.filename}
+                    sizeBytes={attachedFile?.sizeBytes}
+                    width={attachedFile?.width}
+                    height={attachedFile?.height}
+                    previewObjectUrl={previewObjectUrl}
+                    onClear={handleClearAttachment}
+                  />
+                ) : (
+                  <DatasetChip
+                    file={attachedFile}
+                    uploadState={uploadState}
+                    uploadError={uploadError}
+                    onClear={handleClearAttachment}
+                    fileType={attachedFile?.fileType}
+                  />
+                )}
+
+                {voiceConvActive ? (
+                  /* ─── Voice Conversation Mode panel ─────────────────────────── */
+                  <OraVoiceConvPanel
+                    voiceState={voice.voiceState}
+                    interimTranscript={voice.interimTranscript}
+                    isLoading={isLoading}
+                    isTtsMuted={voiceConvTtsMuted}
+                    onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
+                    onExit={handleExitVoiceConvMode}
+                    onInterrupt={() => voiceRef.current.stopSpeaking()}
+                    size="md"
+                    whisperState={whisperConv.state}
+                    whisperSupported={whisperConv.isSupported}
+                    whisperError={whisperConv.error}
+                    onWhisperStart={whisperConv.startRecording}
+                    onWhisperStop={whisperConv.stopRecording}
+                    onWhisperCancel={whisperConv.cancelRecording}
+                  />
+                ) : (
+                  /* ─── Normal dictation + text input ─────────────────────────── */
+                  <>
+                    {/* Voice live area — dictation feedback only */}
+                    <OraVoiceLiveArea
+                      voiceState={voice.voiceState}
+                      interimTranscript={voice.interimTranscript}
+                      voiceReady={voiceReady}
+                      voiceErrorMsg={voiceErrorMsg}
+                      size="md"
+                    />
+
+                    {/* Selected format chip */}
+                    {selectedFormat && (
+                      <div className="flex items-center gap-2 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2 text-xs mb-2">
+                        <FileSpreadsheet className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0" />
+                        <span className="flex-1 text-foreground">
+                          Generate:{" "}
+                          {FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFormat(null)}
+                          className="shrink-0 opacity-50 hover:opacity-100 transition-opacity"
+                          aria-label="Cancel file generation"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     )}
-                  </div>
 
-                  {/* Dictation button — speech-to-text only; transcript lands in textarea */}
-                  <OraDictationButton
-                    voiceState={voice.voiceState}
-                    isSupported={voice.isSupported}
-                    onStart={() => voice.startListening(language)}
-                    onStop={() => voice.stopListening()}
-                    disabled={isLoading || atLimit}
-                    size="md"
-                  />
+                    {/* Unified input bar */}
+                    <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.docx,.txt,.csv,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
+                        className="sr-only"
+                        aria-hidden
+                        onChange={handleFileChange}
+                      />
+                      {/* Instant vs Deep Thinking toggle */}
+                      <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setMode("instant")}
+                          title="Instant — fast everyday replies (1 credit)"
+                          aria-pressed={mode === "instant"}
+                          className={cn(
+                            "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
+                            mode === "instant"
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Zap className="h-3 w-3" />
+                          Instant
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (deepAllowed) {
+                              setMode("deep");
+                            } else {
+                              setLocation("/billing?tier=core");
+                            }
+                          }}
+                          title={
+                            deepAllowed
+                              ? "Deep Thinking — slower, step-by-step reasoning (5 credits)"
+                              : "Deep Thinking is available on Core Pack and Deep Wave"
+                          }
+                          aria-pressed={mode === "deep" && deepAllowed}
+                          className={cn(
+                            "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
+                            mode === "deep" && deepAllowed
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                            !deepAllowed && "opacity-70",
+                          )}
+                        >
+                          {deepAllowed ? (
+                            <Brain className="h-3 w-3" />
+                          ) : (
+                            <Lock className="h-3 w-3" />
+                          )}
+                          Deep
+                        </button>
+                      </div>
 
-                  <textarea
-                    ref={textareaRef}
-                    value={input}
-                    onChange={(e) => {
-                      setInput(e.target.value);
-                      if (voiceReady) setVoiceReady(false);
-                    }}
-                    onKeyDown={handleKeyDown}
-                    placeholder={
-                      selectedFormat
-                        ? `Describe the ${FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label} you want…`
-                        : uploadState === "attached"
-                          ? attachedFile?.isImage
-                            ? `Ask about ${attachedFile.filename ?? "this image"}…`
-                            : `Ask about ${attachedFile?.filename ?? "this file"}…`
-                          : "Ask Ora anything…"
-                    }
-                    rows={1}
-                    dir="auto"
-                    className="flex-1 resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
-                    style={{ maxHeight: "96px" }}
-                    disabled={isLoading}
-                    onPaste={handlePaste}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSend}
-                    disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                      {/* Attachment button */}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoading || uploadState === "uploading" || atAllLimits}
+                        title={
+                          atAllLimits
+                            ? "Upload limit reached for this session"
+                            : "Upload image or file (PNG, JPG, WEBP, PDF, DOCX, PPTX, TXT, CSV, XLSX)"
+                        }
+                        aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
+                        className={cn(
+                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+                          uploadState === "attached"
+                            ? "text-[hsl(265_85%_65%)]"
+                            : "text-muted-foreground hover:text-foreground",
+                          (isLoading || uploadState === "uploading" || atAllLimits) &&
+                            "opacity-40 cursor-not-allowed",
+                        )}
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </button>
 
-                {input.length >= 2000 && (
-                  <p className="text-[10px] text-amber-500 dark:text-amber-400 mt-1.5">
-                    {input.length.toLocaleString()} chars · {input.split("\n").length} lines — very
-                    long messages may reduce response quality
-                  </p>
+                      {/* Generate file button */}
+                      <div className="relative shrink-0" ref={formatMenuRef}>
+                        <button
+                          type="button"
+                          onClick={() => setShowFormatMenu((v) => !v)}
+                          disabled={isLoading}
+                          title="Generate a file (CSV, Excel, Word, PDF)"
+                          aria-label="Generate file"
+                          className={cn(
+                            "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+                            selectedFormat
+                              ? "text-[hsl(265_85%_65%)] bg-[hsl(265_85%_65%/0.12)]"
+                              : "text-muted-foreground hover:text-foreground",
+                            isLoading && "opacity-40 cursor-not-allowed",
+                          )}
+                        >
+                          <FileSpreadsheet className="h-4 w-4" />
+                        </button>
+                        {showFormatMenu && (
+                          <div className="absolute bottom-full mb-1.5 left-0 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[160px]">
+                            <p className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                              Generate file
+                            </p>
+                            {FILE_FORMAT_OPTIONS.map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedFormat(opt.value);
+                                  setShowFormatMenu(false);
+                                  textareaRef.current?.focus();
+                                }}
+                                className={cn(
+                                  "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center justify-between gap-2",
+                                  selectedFormat === opt.value &&
+                                    "text-[hsl(265_85%_65%)] font-medium",
+                                )}
+                              >
+                                <span>{opt.label}</span>
+                                <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                                  {opt.ext}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dictation button — speech-to-text only; transcript lands in textarea */}
+                      <OraDictationButton
+                        voiceState={voice.voiceState}
+                        isSupported={voice.isSupported}
+                        onStart={() => voice.startListening(language)}
+                        onStop={() => voice.stopListening()}
+                        disabled={isLoading || atLimit}
+                        size="md"
+                      />
+
+                      <textarea
+                        ref={textareaRef}
+                        value={input}
+                        onChange={(e) => {
+                          setInput(e.target.value);
+                          if (voiceReady) setVoiceReady(false);
+                        }}
+                        onKeyDown={handleKeyDown}
+                        placeholder={
+                          selectedFormat
+                            ? `Describe the ${FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label} you want…`
+                            : uploadState === "attached"
+                              ? attachedFile?.isImage
+                                ? `Ask about ${attachedFile.filename ?? "this image"}…`
+                                : `Ask about ${attachedFile?.filename ?? "this file"}…`
+                              : "Ask Ora anything…"
+                        }
+                        rows={1}
+                        dir="auto"
+                        className="flex-1 resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
+                        style={{ maxHeight: "96px" }}
+                        disabled={isLoading}
+                        onPaste={handlePaste}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={!input.trim() || isLoading || uploadState === "uploading"}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    {input.length >= 2000 && (
+                      <p className="text-[10px] text-amber-500 dark:text-amber-400 mt-1.5">
+                        {input.length.toLocaleString()} chars · {input.split("\n").length} lines —
+                        very long messages may reduce response quality
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between mt-2">
+                      {dropError ? (
+                        <p className="text-[10px] text-destructive">{dropError}</p>
+                      ) : language === "ar" ? (
+                        <p className="text-[10px] text-muted-foreground/50">
+                          Arabic voice depends on your browser — review the transcript before
+                          sending
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-muted-foreground/50">
+                          Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
+                          {voice.isSupported
+                            ? "Voice or type in any language"
+                            : "Voice unavailable on this browser — typing still works"}
+                        </p>
+                      )}
+                      {session && !isSignedIn && (
+                        <span className="text-[10px] text-muted-foreground/50 shrink-0 ml-2">
+                          {session.msgLimit - session.msgCount} messages left
+                        </span>
+                      )}
+                    </div>
+                  </>
                 )}
-
-                <div className="flex items-center justify-between mt-2">
-                  {dropError ? (
-                    <p className="text-[10px] text-destructive">{dropError}</p>
-                  ) : language === "ar" ? (
-                    <p className="text-[10px] text-muted-foreground/50">
-                      Arabic voice depends on your browser — review the transcript before sending
-                    </p>
-                  ) : (
-                    <p className="text-[10px] text-muted-foreground/50">
-                      Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
-                      {voice.isSupported
-                        ? "Voice or type in any language"
-                        : "Voice unavailable on this browser — typing still works"}
-                    </p>
-                  )}
-                  {session && !isSignedIn && (
-                    <span className="text-[10px] text-muted-foreground/50 shrink-0 ml-2">
-                      {session.msgLimit - session.msgCount} messages left
-                    </span>
-                  )}
-                </div>
               </>
             )}
-          </>
-        )}
+          </div>
+        </div>
       </div>
 
       <OraMemoryManager open={memoryManagerOpen} onOpenChange={setMemoryManagerOpen} />

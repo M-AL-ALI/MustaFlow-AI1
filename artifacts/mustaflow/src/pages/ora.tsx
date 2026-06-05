@@ -18,7 +18,7 @@ function OraPageInner() {
   const oraChat = useOraChat();
 
   return (
-    <div className="min-h-[100dvh] bg-background flex flex-col">
+    <div className="h-[100dvh] bg-background flex flex-col overflow-hidden">
       <OraSidebar onNewConversation={() => void oraChat.clearConversation()} />
 
       {/* Theme toggle, top-right */}
@@ -26,19 +26,11 @@ function OraPageInner() {
         <ThemeToggle />
       </div>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-16">
-        <div className="w-full max-w-2xl space-y-6">
-          <div className="text-center">
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-              Hi, I'm <span className="text-primary">Ora</span>
-            </h1>
-            <p className="text-muted-foreground mt-2">
-              Ask me anything, think things through, or get work done — all in one chat.
-            </p>
-          </div>
-
-          <OraPanel chat={oraChat} />
-        </div>
+      {/* Full-height ChatGPT-style chat. The greeting now lives in OraPanel's
+          empty state, so the thread fills from the top and the composer pins to
+          the bottom. */}
+      <main className="flex-1 flex flex-col min-h-0">
+        <OraPanel chat={oraChat} layout="full" />
       </main>
     </div>
   );
