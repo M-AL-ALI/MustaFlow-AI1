@@ -7,16 +7,16 @@ import {
   setSessionCookie,
   MSG_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
-import {
-  scanUserInput,
-  isBuilderRequest,
-  detectFileRequest,
-  ORA_SYSTEM_PROMPT,
-  BUILDER_REFUSAL,
-} from "../../lib/public-ai/prompt";
+import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 
 import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
-import { classifyIntent, type OraTopic } from "../../lib/public-ai/classifier";
+import { type OraTopic } from "../../lib/public-ai/classifier";
+import {
+  routeOraMessage,
+  checkToolAccess,
+  detectMemorySaveCandidate,
+  ORA_TOOL_REGISTRY,
+} from "../../lib/public-ai/orchestrator";
 import { getAuth } from "@clerk/express";
 import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { db, userSubscriptionsTable, knowledgeEntriesTable, projectsTable } from "@workspace/db";
@@ -27,10 +27,8 @@ import { deductCreditsAtomic, getOrCreateCredits } from "../credits";
 // limit to the client so the UI's "messages remaining" affordance has a value.
 const UNLIMITED_MSGS = 1_000_000;
 
-// Per-action credit costs for authenticated Ora users (Step 7 pricing).
-const CREDIT_COST_INSTANT = 1;
-const CREDIT_COST_DEEP = 5;
-const CREDIT_COST_FILE = 2;
+// Per-action credit costs now come from the orchestrator tool registry
+// (ORA_TOOL_REGISTRY[tool].creditCost) so chat.ts no longer hard-codes them.
 
 // Tiers permitted to use Deep Thinking + connectors. Free is Instant-only.
 const PAID_TIERS = new Set(["core", "wave"]);
@@ -49,8 +47,15 @@ interface AuthedOraUser {
  * though this route sits in front of the auth wall. Returns null for visitors.
  */
 async function resolveAuthedOraUser(req: import("express").Request): Promise<AuthedOraUser | null> {
-  const auth = getAuth(req);
-  const userId = (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId;
+  let userId: string | undefined;
+  try {
+    const auth = getAuth(req);
+    userId = (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId ?? undefined;
+  } catch {
+    // getAuth throws when clerkMiddleware hasn't run (e.g. isolated tests).
+    // Treat as an anonymous visitor rather than failing the whole request.
+    return null;
+  }
   if (!userId) return null;
   let tier = "free";
   try {
@@ -114,20 +119,7 @@ async function buildMemoryContext(userId: string, projectId: number | undefined)
 }
 
 const IMAGE_GENERATE_CTA =
-  "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including the Image Studio with quality presets, aspect ratios, and style controls.";
-
-const ORA_IMAGE_PATTERNS: RegExp[] = [
-  // Verb + optional filler + singular or plural visual noun
-  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?)\b/i,
-  // Visual noun + preposition (describing what's in it)
-  /\b(images?|photos?|pictures?|illustrations?|artworks?|graphic)\s+(of|showing|depicting|featuring|with)\b/i,
-  // Image generation feature references
-  /\bimage\s+(generation|studio|ai)\b/i,
-  // AI art tool references
-  /\b(dall-?e|stable\s+diffusion|midjourney|ai\s+art)\b/i,
-  // "Can you generate/make/draw a picture/image/graphic"
-  /\bcan\s+you\s+(generate|create|make|draw|render|produce|design)\b.*\b(images?|pictures?|photos?|visuals?|graphics?|illustrations?)\b/i,
-];
+  "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including inline images here in Ora and the full Image Studio with quality presets, aspect ratios, and style controls.";
 
 const router = Router();
 
@@ -250,28 +242,53 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  // Deep Thinking is gated to paid tiers (Core Pack / Deep Wave). Visitors and
-  // Free-tier users requesting Deep get an upgrade prompt instead — we do this
-  // before any model call so blocked requests are never charged or counted.
-  const wantsDeep = mode === "deep";
-  const deepAllowed = wantsDeep && !!authed && authed.isPaid;
-  if (wantsDeep && !deepAllowed) {
+  // Route the message through the Ora orchestrator. Ora is a STANDALONE
+  // assistant: build/"make me an app" requests are answered as normal
+  // conversation — never refused, never auto-handed-off to the Builder.
+  const decision = await routeOraMessage({ message, mode });
+  const toolMeta = ORA_TOOL_REGISTRY[decision.tool];
+  const deepAllowed = decision.tool === "deep_thinking";
+
+  // Plan gating is derived entirely from the selected tool's required access
+  // level. Denied requests return a CTA without charging or counting them.
+  const access = checkToolAccess(decision.tool, {
+    authed: !!authed,
+    isPaid: authed?.isPaid ?? false,
+  });
+  if (!access.allowed) {
+    if (access.denyCode === "deep_paid_only") {
+      res.json({
+        reply: authed
+          ? "Deep Thinking is available on the Core Pack and Deep Wave plans. It reasons step by step for more thorough, considered answers. Upgrade to unlock it — or keep chatting in Instant mode."
+          : "Deep Thinking is available to signed-in MustaFlow members on the Core Pack and Deep Wave plans. Sign up to unlock slower, more thorough reasoning — or keep chatting here in Instant mode.",
+        upgradeCta: true,
+        mode: "instant",
+        msgCount: session.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
+    if (access.denyCode === "image_signin_required") {
+      res.json({
+        reply: IMAGE_GENERATE_CTA,
+        upgradeCta: true,
+        msgCount: session.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
     res.json({
-      reply: authed
-        ? "Deep Thinking is available on the Core Pack and Deep Wave plans. It reasons step by step for more thorough, considered answers. Upgrade to unlock it — or keep chatting in Instant mode."
-        : "Deep Thinking is available to signed-in MustaFlow members on the Core Pack and Deep Wave plans. Sign up to unlock slower, more thorough reasoning — or keep chatting here in Instant mode.",
-      handoffCta: true,
-      upgradeCta: true,
-      mode: "instant",
+      reply:
+        "That capability isn't available yet. I can still help you plan it, analyze your data, generate files, or talk it through.",
       msgCount: session.msgCount,
       msgLimit: effectiveMsgLimit,
     });
     return;
   }
 
-  // Per-message credit cost for authenticated users (Free tier included — Free
+  // Per-action credit cost for authenticated users (Free tier included — Free
   // draws on its monthly grant). Visitors are metered by the session cap only.
-  const messageCost = deepAllowed ? CREDIT_COST_DEEP : CREDIT_COST_INSTANT;
+  const messageCost = toolMeta.creditCost;
   if (authed) {
     const credits = await getOrCreateCredits(authed.userId);
     if (credits.balance < messageCost) {
@@ -285,17 +302,16 @@ router.post("/public-ai/chat", async (req, res) => {
     }
   }
 
-  // Auto-detect file generation requests and handle them inline so users
-  // don't need to use the format picker — typing "make me a CSV" just works.
-  const detectedFormat = detectFileRequest(message);
-  if (detectedFormat) {
+  // ── File generation tool ────────────────────────────────────────────────────
+  if (decision.tool === "file_generation" && decision.fileFormat) {
+    const detectedFormat = decision.fileFormat;
     const history = messages
       .slice(-10)
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     try {
       const result = await generateFileFromPrompt(message, detectedFormat, history, language);
       if (authed) {
-        await deductCreditsAtomic(authed.userId, CREDIT_COST_FILE, {
+        await deductCreditsAtomic(authed.userId, messageCost, {
           type: "converse",
           description: `Ora file generation (${detectedFormat})`,
         });
@@ -320,44 +336,55 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  // Guard: image generation is not available to public/anonymous users.
-  if (ORA_IMAGE_PATTERNS.some((p) => p.test(message))) {
-    const { token, payload } = incrementMessageCount(session);
-    setSessionCookie(res, token);
-    res.json({
-      reply: IMAGE_GENERATE_CTA,
-      handoffCta: true,
-      msgCount: payload.msgCount,
-      msgLimit: effectiveMsgLimit,
-    });
+  // ── Image generation tool (inline, signed-in users) ─────────────────────────
+  // Anonymous visitors are caught by checkToolAccess above (image_signin_required).
+  if (decision.tool === "image_generation") {
+    const { generateImage, isImageProviderConfigured } = await import("../../lib/image-provider");
+    if (!isImageProviderConfigured()) {
+      const { token, payload } = incrementMessageCount(session);
+      setSessionCookie(res, token);
+      res.json({
+        reply:
+          "Image generation isn't configured on this server right now. Please try again later.",
+        msgCount: payload.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
+    try {
+      const result = await generateImage({
+        prompt: message,
+        quality: "standard",
+        aspectRatio: "1:1",
+        style: "vivid",
+      });
+      if (authed) {
+        await deductCreditsAtomic(authed.userId, messageCost, {
+          type: "creative",
+          description: "Ora inline image generation",
+        });
+      }
+      const { token, payload } = incrementMessageCount(session);
+      setSessionCookie(res, token);
+      res.json({
+        reply: "Here's the image you asked for. Ask for tweaks and I'll regenerate it.",
+        imageUrl: result.openaiUrl,
+        msgCount: payload.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+    } catch (err) {
+      logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
+      res.status(500).json({ error: "Failed to generate the image. Please try again." });
+    }
     return;
   }
 
-  if (isBuilderRequest(message)) {
-    const { token, payload } = incrementMessageCount(session);
-    setSessionCookie(res, token);
-    res.json({
-      reply: BUILDER_REFUSAL,
-      handoffCta: true,
-      msgCount: payload.msgCount,
-      msgLimit: effectiveMsgLimit,
-    });
-    return;
-  }
-
-  const classifierResult = await classifyIntent(message);
-
-  if (classifierResult.intent === "builder_request") {
-    const { token, payload } = incrementMessageCount(session);
-    setSessionCookie(res, token);
-    res.json({
-      reply: BUILDER_REFUSAL,
-      handoffCta: true,
-      msgCount: payload.msgCount,
-      msgLimit: effectiveMsgLimit,
-    });
-    return;
-  }
+  // ── Conversational answer / deep thinking ───────────────────────────────────
+  const classifierResult = {
+    intent: decision.intent,
+    confidence: decision.confidence,
+    topic: decision.topic,
+  };
 
   const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
   const deepModel = process.env.ORA_DEEP_MODEL ?? premiumModel;
@@ -542,20 +569,19 @@ router.post("/public-ai/chat", async (req, res) => {
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
-  // Show the CTA only when the topic signals a build intent, OR after at least
-  // 3 messages have been exchanged (conversation is substantive). Always suppress
-  // for high-confidence simple FAQ answers — those are informational, not build-intent.
-  const BUILDER_TOPICS: OraTopic[] = ["app-planning", "saas", "ecommerce", "mobile", "technical"];
-  const isHighConfidenceFaq =
-    classifierResult.intent === "simple_faq" && classifierResult.confidence === "high";
-  const handoffCta =
-    !isHighConfidenceFaq &&
-    (BUILDER_TOPICS.includes(classifierResult.topic) || payload.msgCount >= 3);
+  // Ora is a standalone assistant. It NEVER proactively pushes the AI Builder —
+  // no topic- or message-count-based handoff. The Builder handoff stays an
+  // explicit, user-initiated action handled by a separate endpoint.
+
+  // Surface a memory-save candidate when the user stated a durable fact. This is
+  // a non-binding suggestion for signed-in users; the client decides whether to
+  // offer the save. It never persists anything on its own.
+  const memoryCandidate = authed ? detectMemorySaveCandidate(message) : null;
 
   res.json({
     reply,
-    handoffCta,
     suggestions,
+    ...(memoryCandidate ? { memorySaveCandidate: memoryCandidate.fact } : {}),
     mode: deepAllowed ? "deep" : "instant",
     msgCount: payload.msgCount,
     msgLimit: effectiveMsgLimit,

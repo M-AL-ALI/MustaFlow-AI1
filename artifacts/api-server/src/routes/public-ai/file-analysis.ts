@@ -201,7 +201,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
 
   res.json({
     reply,
-    handoffCta: true,
+    handoffCta: false,
     msgCount: payload.msgCount,
     msgLimit: MSG_LIMIT_VALUE,
   });

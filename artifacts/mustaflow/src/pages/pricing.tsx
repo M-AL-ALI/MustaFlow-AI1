@@ -229,12 +229,17 @@ export default function PricingPage() {
       <div className="border-t border-border bg-muted/20">
         <div className="max-w-3xl mx-auto px-6 py-16">
           <div className="text-center mb-8">
-            <h2 className="text-xl font-bold mb-2">How credits work</h2>
-            <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Each build consumes credits based on the agent mode you choose.
+            <h2 className="text-xl font-bold mb-2">What's included in your plan</h2>
+            <p className="text-sm text-muted-foreground max-w-lg mx-auto">
+              Chatting with Ora is plan-based — pick a plan and use the assistant as much as your
+              plan allows, no per-message math. Building and deploying full apps with the AI Builder
+              uses credits, so heavier builds cost a little more.
             </p>
           </div>
           <div className="border border-border rounded-xl bg-card overflow-hidden">
+            <div className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30">
+              AI Builder — credits per build
+            </div>
             <div className="divide-y divide-border">
               {[
                 { mode: "Lite", cost: 1, desc: "Fast, lightweight builds" },
@@ -254,7 +259,7 @@ export default function PricingPage() {
             </div>
           </div>
           <p className="text-center text-xs text-muted-foreground mt-4">
-            Need more credits? Top them up anytime from your{" "}
+            Building heavily? Top up Builder credits anytime from your{" "}
             <Link href="/billing" className="text-primary hover:underline">
               billing dashboard
             </Link>

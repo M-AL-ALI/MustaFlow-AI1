@@ -1,0 +1,34 @@
+Please pull the latest GitHub main first and confirm the local Replit commit SHA matches GitHub.
+
+We need to productionize Ora as a standalone AI assistant, separate from AI Builder / Agent Zero. Do not make a project-specific fix and do not merge Ora logic into Builder.
+
+Start with Phase 1 and Phase 2 only:
+
+1. Stabilize Ora contracts
+- Fix Free / Core Pack / Deep Wave plan logic across backend and frontend.
+- Fix Deep Wave checkout. Pricing sends tier="wave", but /api/billing/subscription/checkout currently only handles tier="core" before falling into legacy workspace plan logic.
+- Remove visible credit-first language from Ora UI where possible. Ora should feel plan-based like ChatGPT, not pay-per-credit.
+- Update stale Ora tests, especially public-ai session limit tests where implementation and test expectations disagree.
+- Keep AI Builder credits/build billing separate unless there is an intentional shared entitlement service.
+
+2. Build the Ora agent runtime foundation
+- Replace the direct one-shot Ora chat model call with an Ora orchestrator/service.
+- Ora should choose between: answer normally, deep thinking, search, file analysis, dataset analysis, image analysis, image generation, image editing, file generation, memory lookup, memory save candidate, or Builder handoff.
+- Keep Ora separate from Builder. Builder handoff should stay explicit and safe.
+- Add tests for tool routing and plan gating.
+
+Important current gaps found:
+- Ora chat currently calls the model directly in public-ai/chat.ts and is not truly agentic.
+- Ora prompt says it cannot access external systems, which conflicts with search/troubleshooting goals.
+- Image generation exists in Image Studio but is not wired inline into Ora chat.
+- Memory exists but does not automatically extract useful long-term memories from Ora conversations.
+- Generated files are stripped from saved chat payloads instead of saved as durable library assets.
+
+Acceptance criteria for this first pass:
+- GitHub and Replit are synced before work starts.
+- Deep Wave checkout works.
+- Ora plans are consistently Free / Core Pack / Deep Wave.
+- Ora has a backend orchestrator abstraction ready for tools.
+- Existing chat/file/image-analysis behavior still works.
+- Tests pass.
+- Push the completed changes to GitHub.

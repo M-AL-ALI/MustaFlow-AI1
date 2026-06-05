@@ -24,6 +24,8 @@ export interface OraMessage {
   hadAttachment?: boolean;
   editedFrom?: boolean;
   generatedFile?: GeneratedFile;
+  imageUrl?: string;
+  memorySaveCandidate?: string;
 }
 
 export interface OraSession {
@@ -294,6 +296,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   editedFrom?: boolean;
   generatedFile?: GeneratedFile;
   datasetResult?: DatasetAnalysisResult;
+  imageUrl?: string;
+  memorySaveCandidate?: string;
 }> {
   return messages.map((m) => ({
     role: m.role,
@@ -306,6 +310,9 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     // Include generatedFile so the download card persists across re-renders
     ...(m.generatedFile ? { generatedFile: m.generatedFile } : {}),
     ...(m.datasetResult !== undefined ? { datasetResult: m.datasetResult } : {}),
+    // Persist inline image + memory-save candidate so they survive reload
+    ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}),
+    ...(m.memorySaveCandidate ? { memorySaveCandidate: m.memorySaveCandidate } : {}),
   }));
 }
 
@@ -904,6 +911,10 @@ export function useOraChat(): UseOraChatReturn {
             fileName?: string;
             fileData?: string;
             mimeType?: string;
+            // Present when the chat route generated an image inline
+            imageUrl?: string;
+            // Present when Ora detected a durable fact worth saving to memory
+            memorySaveCandidate?: string;
             msgCount: number;
             msgLimit: number;
           }>("/api/public-ai/chat", body);
@@ -916,6 +927,10 @@ export function useOraChat(): UseOraChatReturn {
                 content: data.reply,
                 handoffCta: data.handoffCta,
                 suggestions: data.suggestions ?? [],
+                ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+                ...(data.memorySaveCandidate
+                  ? { memorySaveCandidate: data.memorySaveCandidate }
+                  : {}),
                 ...(data.fileName && data.fileData && data.mimeType
                   ? {
                       generatedFile: {

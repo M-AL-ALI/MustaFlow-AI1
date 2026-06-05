@@ -1569,13 +1569,18 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     return;
   }
 
-  // ── Mode 1: User-level Core subscription ────────────────────────────────────
-  if (tier === "core") {
-    const corePriceId = process.env.STRIPE_CORE_PRICE_ID?.trim();
-    if (!corePriceId) {
+  // ── Mode 1: User-level subscription (Core Pack / Deep Wave) ──────────────────
+  // Any tier defined in SUBSCRIPTION_TIERS_META with a configured Stripe price is
+  // handled here. Free has no price; the workspace-legacy path (Mode 2) is only
+  // reached when no recognized user-level `tier` is supplied.
+  if (tier === "core" || tier === "wave") {
+    const tierMeta = SUBSCRIPTION_TIERS_META.find((t) => t.id === tier);
+    const tierPriceId = priceIdForTier(tierMeta ?? { priceIdEnv: null });
+    if (!tierPriceId) {
+      const envName = tierMeta?.priceIdEnv ?? "the Stripe price";
       res.json({
         setupRequired: true,
-        message: "STRIPE_CORE_PRICE_ID is not configured. Contact your administrator.",
+        message: `${envName} is not configured. Contact your administrator.`,
       });
       return;
     }
@@ -1599,11 +1604,11 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
             stripe.checkout.sessions.create({
               mode: "subscription",
               customer: customerId,
-              line_items: [{ price: corePriceId, quantity: 1 }],
+              line_items: [{ price: tierPriceId, quantity: 1 }],
               success_url: successUrl,
               cancel_url: cancelUrl,
-              metadata: { userId, tier: "core" },
-              subscription_data: { metadata: { userId, tier: "core" } },
+              metadata: { userId, tier },
+              subscription_data: { metadata: { userId, tier } },
               allow_promotion_codes: true,
               automatic_tax: { enabled: process.env.STRIPE_TAX_ENABLED === "true" },
             }),
@@ -1611,11 +1616,11 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
             maxAttempts: 2,
             baseDelayMs: 1_000,
             shouldRetry: isTransientError,
-            label: "stripe:core.subscription.checkout",
+            label: `stripe:${tier}.subscription.checkout`,
           },
         ),
       );
-      res.json({ sessionId: session.id, checkoutUrl: session.url ?? undefined, tier: "core" });
+      res.json({ sessionId: session.id, checkoutUrl: session.url ?? undefined, tier });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unexpected error";
       if (/api key|authentication|invalid_api_key/i.test(msg)) invalidateStripeCredentialCache();
