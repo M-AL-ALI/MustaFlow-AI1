@@ -30,6 +30,10 @@ export interface OraMessage {
   editedFrom?: boolean;
   generatedFile?: GeneratedFile;
   imageUrl?: string;
+  /** generated_images id for an Ora-generated image — present when editable. */
+  imageId?: number;
+  /** Edit instruction that produced this derived image (lineage display). */
+  editInstruction?: string;
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaved?: boolean;
@@ -93,6 +97,7 @@ export interface UseOraChatReturn {
     opts?: { truncateTo?: number; editedFrom?: boolean },
   ) => Promise<void>;
   generateFile: (content: string, format: FileFormat) => Promise<void>;
+  editInlineImage: (sourceImageId: number, instruction: string) => Promise<void>;
   clearError: () => void;
   uploadFile: (file: File) => Promise<void>;
   clearAttachment: () => void;
@@ -306,6 +311,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   generatedFile?: GeneratedFile;
   datasetResult?: DatasetAnalysisResult;
   imageUrl?: string;
+  imageId?: number;
+  editInstruction?: string;
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaved?: boolean;
@@ -324,6 +331,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.datasetResult !== undefined ? { datasetResult: m.datasetResult } : {}),
     // Persist inline image + memory-save candidate so they survive reload
     ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}),
+    ...(m.imageId != null ? { imageId: m.imageId } : {}),
+    ...(m.editInstruction ? { editInstruction: m.editInstruction } : {}),
     ...(m.memorySaveCandidate ? { memorySaveCandidate: m.memorySaveCandidate } : {}),
     ...(m.memorySaveCandidateConfidence
       ? { memorySaveCandidateConfidence: m.memorySaveCandidateConfidence }
@@ -360,6 +369,16 @@ export function useOraChat(): UseOraChatReturn {
   const sessionInitRef = useRef(false);
   const transcriptRestoredRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Session-local object URLs created for edited images in dev (auth-walled file
+  // route). Tracked so we can revoke them on unmount / conversation clear and
+  // avoid leaking blob memory across repeated edits.
+  const objectUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const urls = objectUrlsRef.current;
+    return () => {
+      for (const u of urls) URL.revokeObjectURL(u);
+    };
+  }, []);
   // Tracks the conversation id whose messages are currently loaded, so the load
   // effect can skip re-fetching a conversation we just created locally.
   const loadedConvRef = useRef<number | null>(null);
@@ -931,6 +950,8 @@ export function useOraChat(): UseOraChatReturn {
             mimeType?: string;
             // Present when the chat route generated an image inline
             imageUrl?: string;
+            // Present (authed) when the inline image is editable (generated_images id)
+            imageId?: number;
             // Present when Ora detected a durable fact worth saving to memory
             memorySaveCandidate?: string;
             memorySaveCandidateConfidence?: "high" | "low";
@@ -949,6 +970,7 @@ export function useOraChat(): UseOraChatReturn {
                 handoffCta: data.handoffCta,
                 suggestions: data.suggestions ?? [],
                 ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+                ...(data.imageId != null ? { imageId: data.imageId } : {}),
                 ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
                 ...(data.memorySaveCandidate
                   ? {
@@ -1217,11 +1239,133 @@ export function useOraChat(): UseOraChatReturn {
     [isLoading, messages, language, isSignedIn, saveToServer],
   );
 
+  // Inline image editing: refine an Ora-generated image with a text instruction.
+  // Reuses the Image Studio edit pipeline (POST /images/:id/edit → poll status),
+  // which records parent/source/instruction lineage and deducts image credits.
+  // The derived image carries its own generated_images id so it is re-editable.
+  const editInlineImage = useCallback(
+    async (sourceImageId: number, instruction: string) => {
+      const trimmed = instruction.trim();
+      if (!trimmed || isLoading) return;
+      if (!isSignedIn) {
+        setError("Sign in to edit images.");
+        return;
+      }
+
+      const userMsg: OraMessage = { role: "user", content: `Edit image: ${trimmed}` };
+      setMessages((prev) => {
+        const next = [...prev, userMsg];
+        storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
+        return next;
+      });
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const enqueueRes = await authFetch(`${BASE}/api/images/${sourceImageId}/edit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction: trimmed, quality: "standard" }),
+        });
+        if (!enqueueRes.ok) {
+          const data = (await enqueueRes.json().catch(() => ({}))) as { error?: string };
+          throw Object.assign(new Error(data.error ?? `HTTP ${enqueueRes.status}`), {
+            status: enqueueRes.status,
+          });
+        }
+        const { jobId, imageId: newImageId } = (await enqueueRes.json()) as {
+          jobId: string;
+          imageId: number;
+        };
+
+        // Poll the in-process job until it completes (~90s ceiling).
+        let fileUrl: string | null = null;
+        for (let attempt = 0; attempt < 60; attempt++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const statusRes = await authFetch(`${BASE}/api/images/status/${jobId}`);
+          if (!statusRes.ok) continue;
+          const s = (await statusRes.json()) as {
+            status: string;
+            fileUrl?: string | null;
+            error?: string | null;
+          };
+          if (s.status === "completed") {
+            fileUrl = s.fileUrl ?? null;
+            break;
+          }
+          if (s.status === "failed") {
+            throw new Error(s.error ?? "Image edit failed.");
+          }
+        }
+        if (!fileUrl) throw new Error("Image edit timed out. Please try again.");
+
+        // Prefer the durable public URL when the storage layer returns one
+        // (production R2 → absolute https URL, safe to persist + survives
+        // reload). The dev file route is auth-walled and relative, so it can't
+        // be used directly in an <img src>; fall back to a session-local object
+        // URL there (tracked for revocation to avoid a memory leak).
+        let displayUrl: string;
+        if (fileUrl.startsWith("http")) {
+          displayUrl = fileUrl;
+        } else {
+          const imgRes = await authFetch(`${BASE}${fileUrl}`);
+          if (!imgRes.ok) throw new Error("Could not load the edited image.");
+          const blob = await imgRes.blob();
+          displayUrl = URL.createObjectURL(blob);
+          objectUrlsRef.current.push(displayUrl);
+        }
+
+        setMessages((prev) => {
+          const next = [
+            ...prev,
+            {
+              role: "assistant" as const,
+              content: "Here's the edited image. Tap Edit to refine it further.",
+              imageUrl: displayUrl,
+              imageId: newImageId,
+              editInstruction: trimmed,
+            } satisfies OraMessage,
+          ];
+          storeTranscript(next);
+          if (isSignedIn) saveToServer(next);
+          return next;
+        });
+      } catch (err: unknown) {
+        const status = (err as { status?: number }).status;
+        const msg = (err as Error).message;
+        if (status === 402) {
+          setError(msg ?? "You don't have enough credits to edit this image.");
+        } else if (status === 429) {
+          setError(msg ?? "Image limit reached. Please try again later.");
+        } else if (status === 422) {
+          setError(msg ?? "This image can't be edited.");
+        } else {
+          setError(msg ?? "Failed to edit the image. Please try again.");
+        }
+        // Roll back the optimistic user message so the failed edit doesn't linger.
+        setMessages((prev) => {
+          const next = prev.slice(0, -1);
+          storeTranscript(next);
+          return next;
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isLoading, isSignedIn, saveToServer],
+  );
+
   const clearConversation = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+
+    // Free any session-local edited-image blob URLs before the transcript that
+    // referenced them is dropped, so they don't leak for the rest of the session.
+    for (const u of objectUrlsRef.current) URL.revokeObjectURL(u);
+    objectUrlsRef.current = [];
 
     // Conversation mode: starting a new chat just resets to a blank conversation
     // (current id → null). The prior conversation stays in the sidebar; nothing
@@ -1326,6 +1470,7 @@ export function useOraChat(): UseOraChatReturn {
     setMode,
     sendMessage,
     generateFile,
+    editInlineImage,
     clearError: () => setError(null),
     uploadFile,
     clearAttachment,

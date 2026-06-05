@@ -18,8 +18,8 @@ import {
   ORA_TOOL_REGISTRY,
 } from "../../lib/public-ai/orchestrator";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { eq, and, or, isNull, desc } from "drizzle-orm";
-import { db, knowledgeEntriesTable, projectsTable } from "@workspace/db";
+import { eq, and, or, isNull, desc, sql } from "drizzle-orm";
+import { db, knowledgeEntriesTable, projectsTable, generatedImagesTable } from "@workspace/db";
 import { deductCreditsAtomic, getOrCreateCredits } from "../credits";
 
 // Authenticated Ora users are not subject to the anonymous visitor message cap;
@@ -355,17 +355,64 @@ router.post("/public-ai/chat", async (req, res) => {
         aspectRatio: "1:1",
         style: "vivid",
       });
+      let editableImageId: number | undefined;
       if (authed) {
         await deductCreditsAtomic(authed.userId, messageCost, {
           type: "creative",
           description: "Ora inline image generation",
         });
+        // Persist the image into generated_images so it carries an editable id.
+        // This is what powers inline editing: the existing /images/:id/edit
+        // pipeline keys off a generated_images row (parent fileUrl + ownership).
+        // Credits were already charged via the Ora message cost above, so this
+        // record is creditCost:0 to avoid double-billing.
+        try {
+          const { storeGeneratedImage } = await import("../../lib/image-storage");
+          const [imageRow] = await db
+            .insert(generatedImagesTable)
+            .values({
+              userId: authed.userId,
+              prompt: message,
+              quality: "standard",
+              aspectRatio: "1:1",
+              style: "vivid",
+              providerName: "openai",
+              modelName: process.env.IMAGE_MODEL ?? "gpt-image-1",
+              status: "pending",
+              safetyStatus: "passed",
+              creditCost: 0,
+              sourceType: "generated",
+            })
+            .returning({ id: generatedImagesTable.id });
+          if (imageRow) {
+            const stored = await storeGeneratedImage(result.openaiUrl, imageRow.id);
+            await db
+              .update(generatedImagesTable)
+              .set({
+                status: "completed",
+                fileUrl: stored.fileUrl,
+                thumbnailUrl: stored.thumbnailUrl,
+                storageKey: stored.storageKey,
+                updatedAt: sql`now()`,
+              })
+              .where(eq(generatedImagesTable.id, imageRow.id));
+            editableImageId = imageRow.id;
+          }
+        } catch (storeErr) {
+          // Non-fatal: the user still sees the inline image; it just won't be
+          // editable. The durable Library copy (ora_assets) is handled below.
+          logger.error(
+            { component: "ora-chat-image", err: storeErr },
+            "Failed to create editable generated_images record for Ora image",
+          );
+        }
       }
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       res.json({
-        reply: "Here's the image you asked for. Ask for tweaks and I'll regenerate it.",
+        reply: "Here's the image you asked for. Tap Edit to refine it with an instruction.",
         imageUrl: result.openaiUrl,
+        ...(editableImageId ? { imageId: editableImageId } : {}),
         msgCount: payload.msgCount,
         msgLimit: effectiveMsgLimit,
       });
