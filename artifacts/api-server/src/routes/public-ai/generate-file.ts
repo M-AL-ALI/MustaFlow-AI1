@@ -9,6 +9,8 @@ import {
 } from "../../lib/public-ai/session";
 import { scanUserInput } from "../../lib/public-ai/prompt";
 import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import { persistOraAsset } from "../../lib/ora-assets";
 
 const router = Router();
 
@@ -63,6 +65,21 @@ router.post("/public-ai/generate-file", async (req, res) => {
 
   try {
     const result = await generateFileFromPrompt(message, format, history, language);
+
+    // Persist to the durable asset library for signed-in users so the file
+    // survives chat resets, reloads, and other devices. Best-effort.
+    const authed = await resolveAuthedOraUser(req);
+    if (authed) {
+      await persistOraAsset({
+        userId: authed.userId,
+        kind: "file",
+        fileName: result.fileName,
+        mimeType: result.mimeType,
+        format,
+        prompt: message,
+        base64: result.fileData,
+      });
+    }
 
     const { token, payload } = incrementMessageCount(session);
     setSessionCookie(res, token);

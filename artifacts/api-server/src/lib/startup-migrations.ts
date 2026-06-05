@@ -3188,6 +3188,32 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  // ── migrate-ora-assets (Task #1278) ─────────────────────────────────────────
+  {
+    name: "migrate-ora-assets",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ora_assets (
+          id          SERIAL PRIMARY KEY,
+          user_id     TEXT NOT NULL,
+          kind        TEXT NOT NULL,
+          file_name   TEXT NOT NULL,
+          mime_type   TEXT NOT NULL,
+          format      TEXT,
+          prompt      TEXT,
+          data        TEXT NOT NULL,
+          size_bytes  INTEGER NOT NULL DEFAULT 0,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_at  TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_assets_user_id_idx ON ora_assets (user_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

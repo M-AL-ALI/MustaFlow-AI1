@@ -27,7 +27,7 @@ import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import { useOraConversations, type OraConversationSummary } from "@/hooks/use-ora-conversations";
 
 const NAV_ITEMS = [
-  { name: "Library", href: "/library", icon: BookOpen },
+  { name: "Library", href: "/ora/library", icon: BookOpen },
   { name: "Apps", href: "/integrations", icon: Blocks },
   { name: "Settings", href: "/settings", icon: Settings },
 ];

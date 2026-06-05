@@ -93,6 +93,7 @@ import apiDocsRouter from "./api-docs";
 import publicAiRouter from "./public-ai/index";
 import oraTranscriptRouter from "./ora-transcript";
 import oraConversationsRouter from "./ora-conversations";
+import oraAssetsRouter from "./ora-assets";
 import builderHandoffRouter from "./builder-handoff";
 import vaultKnowledgeRouter from "./vault-knowledge";
 import developerModeRouter from "./developer-mode";
@@ -316,6 +317,7 @@ router.use(gdprRouter); // GET /me/export, DELETE /me
 router.use(tokensRouter); // GET/POST/DELETE /me/tokens
 router.use(oraTranscriptRouter); // GET/POST/DELETE /ora/transcript
 router.use(oraConversationsRouter); // CRUD /ora/conversations + /ora/projects
+router.use(oraAssetsRouter); // GET/DELETE /ora/assets (durable asset library)
 router.use(developerModeRouter); // GET /projects/:id/developer-mode/runtime-status
 
 // JSON 404 fallback for authenticated users hitting unmatched routes

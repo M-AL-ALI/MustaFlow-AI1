@@ -23,6 +23,7 @@ import ProjectsPage from "./pages/projects";
 import ProjectWorkspacePage from "./pages/projects/[id]";
 import ModeSelectPage from "./pages/mode-select";
 import OraPage from "./pages/ora";
+import OraLibraryPage from "./pages/ora-library";
 import KnowledgePage from "./pages/knowledge";
 import VaultPage from "./pages/vault";
 import MemoryPage from "./pages/memory";
@@ -437,6 +438,11 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               <Route path="/mode-select">
                 <Protected>
                   <ModeSelectPage />
+                </Protected>
+              </Route>
+              <Route path="/ora/library">
+                <Protected>
+                  <OraLibraryPage />
                 </Protected>
               </Route>
               <Route path="/ora">

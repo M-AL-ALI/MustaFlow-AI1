@@ -299,6 +299,30 @@ router.post("/public-ai/chat", async (req, res) => {
         msgCount: payload.msgCount,
         msgLimit: effectiveMsgLimit,
       });
+      // Persist to the durable asset library (best-effort, after the response so
+      // it never adds latency) so the generated file survives chat resets,
+      // reloads, and other devices. Only for signed-in users.
+      if (authed && result.fileData) {
+        void (async () => {
+          try {
+            const { persistOraAsset } = await import("../../lib/ora-assets");
+            await persistOraAsset({
+              userId: authed.userId,
+              kind: "file",
+              fileName: result.fileName,
+              mimeType: result.mimeType,
+              format: detectedFormat,
+              prompt: message,
+              base64: result.fileData,
+            });
+          } catch (persistErr) {
+            logger.error(
+              { component: "ora-chat-file", err: persistErr },
+              "Failed to persist generated file to asset library",
+            );
+          }
+        })();
+      }
     } catch (err) {
       logger.error(
         { component: "ora-chat-file", format: detectedFormat, err },
@@ -345,6 +369,44 @@ router.post("/public-ai/chat", async (req, res) => {
         msgCount: payload.msgCount,
         msgLimit: effectiveMsgLimit,
       });
+      // Persist to the durable asset library (best-effort, after the response so
+      // the remote-URL fetch never adds latency) so the image survives chat
+      // resets, reloads, and other devices (the OpenAI CDN URL expires).
+      if (authed) {
+        void (async () => {
+          try {
+            const { persistOraAsset, parseDataUri } = await import("../../lib/ora-assets");
+            const parsed = parseDataUri(result.openaiUrl);
+            let base64: string | null = parsed?.base64 ?? null;
+            let mimeType = parsed?.mimeType ?? "image/png";
+            if (!base64) {
+              const imgRes = await fetch(result.openaiUrl);
+              if (imgRes.ok) {
+                const buf = Buffer.from(await imgRes.arrayBuffer());
+                base64 = buf.toString("base64");
+                mimeType = imgRes.headers.get("content-type") ?? mimeType;
+              }
+            }
+            if (base64) {
+              const ext = mimeType.split("/")[1]?.split("+")[0] ?? "png";
+              await persistOraAsset({
+                userId: authed.userId,
+                kind: "image",
+                fileName: `ora-image-${Date.now()}.${ext}`,
+                mimeType,
+                format: ext,
+                prompt: message,
+                base64,
+              });
+            }
+          } catch (persistErr) {
+            logger.error(
+              { component: "ora-chat-image", err: persistErr },
+              "Failed to persist Ora image to library",
+            );
+          }
+        })();
+      }
     } catch (err) {
       logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
       res.status(500).json({ error: "Failed to generate the image. Please try again." });
