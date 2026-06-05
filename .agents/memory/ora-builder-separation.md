@@ -8,6 +8,7 @@ Ora (the public-AI assistant) is a fully standalone product, separate from AI Bu
 **Why:** The user explicitly required this — Ora is "a SEPARATE model," not a funnel into the Builder. Treating build-intent as a reason to nudge the user toward the Builder breaks that product contract.
 
 **How to apply — every surface that can leak a proactive handoff:**
+
 - `routes/public-ai/chat.ts` — route ALL messages through `routeOraMessage` (orchestrator). Do NOT re-add classifier/topic/msg-count auto-handoff. A `builder_request` intent must be answered normally (plan/advise), not refused or redirected. Deep/image gating denials use an upgrade CTA, never a handoff CTA.
 - `routes/public-ai/file-analysis.ts` and `image-analysis.ts` — keep `handoffCta: false` in responses. These previously returned `true`.
 - `components/ora-panel.tsx` and `ora-bubble.tsx` — do NOT render the build-intent `OraHandoffCard` (the `hasBuildIntent(...)`-triggered card). It was removed. The only handoff path left is the explicit `onContinueInBuilder` action gated on `msg.handoffCta`, which no backend path sets proactively.
