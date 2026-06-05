@@ -45,19 +45,19 @@ Two ordering rules that are easy to get wrong:
 `return` between the reservation and the model call that lacks a refund, and that
 the anon cap is signaled before file/image validation.
 
-## Caveat 1 — `/images/:id/edit` is SHARED with Image Studio and still charges credits
+## Caveat 1 — `/images/:id/edit` is SHARED but now branches by origin (RESOLVED)
 
 Ora's inline image **edit** (frontend `editInlineImage` -> `POST /api/images/:id/edit`
-in `routes/image-gen.ts`) reuses the Image Studio pipeline, which deducts Builder
-credits (`IMAGE_CREDIT_COSTS`). This is a **deliberate, test-asserted** behavior
-(`routes/__tests__/ora-image-edit.test.ts` asserts a credit debit). So Ora inline
-edits are NOT yet on the daily IMAGE quota — a residual credit coupling.
+in `routes/image-gen.ts`) shares the Image Studio endpoint, but image editing is now
+decoupled by `origin`: requests with `origin:"ora"` (`isOraEdit`) meter through the
+daily IMAGE quota (`consumeOraQuota(userId, tier, "image")`, `billingMode:"ora"`)
+and NEVER deduct Builder credits; Image Studio edits (`origin:"image_studio"`)
+still charge credits (`IMAGE_CREDIT_COSTS`). `ora-image-edit.test.ts` asserts the
+Ora-origin path uses the daily quota (not a credit debit).
 
-**How to apply:** if asked to fully decouple Ora image editing, distinguish
-Ora-origin edits from Image Studio edits (e.g. source row `creditCost===0` /
-`sourceType`) and route Ora ones through the daily IMAGE quota — and update/replace
-`ora-image-edit.test.ts`. Do not silently change the shared endpoint; it breaks
-Image Studio's intentional credit pricing.
+**How to apply:** keep the `origin` discriminator as the single source of truth for
+billing mode on this shared endpoint. Do not collapse the two paths — Image Studio's
+credit pricing is intentional. Any new shared image endpoint must branch the same way.
 
 ## Caveat 2 — `session.imageCount`/`imageLimit` is overloaded by auth state
 
