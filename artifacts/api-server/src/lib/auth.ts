@@ -83,11 +83,24 @@ declare global {
   }
 }
 
+/**
+ * True only when the explicit, non-production end-to-end test auth bypass is
+ * active. Requires BOTH NODE_ENV !== "production" AND E2E_TEST_ENABLED === "true"
+ * so the bypass can never be silently enabled in production or shared staging.
+ *
+ * Shared so any pre-auth-wall route (e.g. the public Ora chat endpoint, which
+ * reads the Clerk session directly and never runs attachUser) can honour the
+ * same `x-e2e-test-user` header under identical guard conditions.
+ */
+export function isE2ETestAuthEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true";
+}
+
 export function attachUser(req: Request, res: Response, next: NextFunction): void {
   // E2E test bypass: only active when both E2E_TEST_ENABLED=true and NODE_ENV !== "production"
   // are set. Requiring an explicit opt-in env flag prevents the bypass from
   // being silently active in shared staging / non-prod deployments.
-  if (process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true") {
+  if (isE2ETestAuthEnabled()) {
     const testUser = req.headers["x-e2e-test-user"];
     if (typeof testUser === "string" && testUser.length > 0) {
       req.userId = testUser;

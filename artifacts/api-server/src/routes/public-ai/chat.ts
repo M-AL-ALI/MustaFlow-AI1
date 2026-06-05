@@ -17,9 +17,9 @@ import {
   detectMemorySaveCandidate,
   ORA_TOOL_REGISTRY,
 } from "../../lib/public-ai/orchestrator";
-import { getAuth } from "@clerk/express";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
 import { eq, and, or, isNull, desc } from "drizzle-orm";
-import { db, userSubscriptionsTable, knowledgeEntriesTable, projectsTable } from "@workspace/db";
+import { db, knowledgeEntriesTable, projectsTable } from "@workspace/db";
 import { deductCreditsAtomic, getOrCreateCredits } from "../credits";
 
 // Authenticated Ora users are not subject to the anonymous visitor message cap;
@@ -30,46 +30,7 @@ const UNLIMITED_MSGS = 1_000_000;
 // Per-action credit costs now come from the orchestrator tool registry
 // (ORA_TOOL_REGISTRY[tool].creditCost) so chat.ts no longer hard-codes them.
 
-// Tiers permitted to use Deep Thinking + connectors. Free is Instant-only.
-const PAID_TIERS = new Set(["core", "wave"]);
-
 const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
-
-interface AuthedOraUser {
-  userId: string;
-  tier: string;
-  isPaid: boolean;
-}
-
-/**
- * Optionally resolve the signed-in Clerk user on the public Ora endpoint.
- * clerkMiddleware() runs before all routes, so getAuth(req) works here even
- * though this route sits in front of the auth wall. Returns null for visitors.
- */
-async function resolveAuthedOraUser(req: import("express").Request): Promise<AuthedOraUser | null> {
-  let userId: string | undefined;
-  try {
-    const auth = getAuth(req);
-    userId = (auth?.sessionClaims?.["userId"] as string | undefined) ?? auth?.userId ?? undefined;
-  } catch {
-    // getAuth throws when clerkMiddleware hasn't run (e.g. isolated tests).
-    // Treat as an anonymous visitor rather than failing the whole request.
-    return null;
-  }
-  if (!userId) return null;
-  let tier = "free";
-  try {
-    const [sub] = await db
-      .select({ tier: userSubscriptionsTable.tier, status: userSubscriptionsTable.status })
-      .from(userSubscriptionsTable)
-      .where(eq(userSubscriptionsTable.userId, userId));
-    const activeStatuses = new Set(["active", "trialing", "grace_period"]);
-    if (sub && activeStatuses.has(sub.status)) tier = sub.tier ?? "free";
-  } catch {
-    // user_subscriptions may be unavailable in some envs — default to free.
-  }
-  return { userId, tier, isPaid: PAID_TIERS.has(tier) };
-}
 
 /**
  * Fetch the user's saved Ora memories (user-scoped knowledge + any entries for

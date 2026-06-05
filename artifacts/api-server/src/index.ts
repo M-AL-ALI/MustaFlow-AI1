@@ -261,6 +261,21 @@ void runStartupMigrations()
     }),
   )
   .finally(() => {
+    // Safety: the E2E test-auth bypass (x-e2e-test-user / x-e2e-test-tier) is
+    // double-gated and inert in production, but a deployment that leaves
+    // E2E_TEST_ENABLED=true would honor impersonation headers in any non-prod
+    // NODE_ENV. Emit a loud, structured marker at boot so accidental enablement
+    // is immediately visible in logs.
+    if (process.env.E2E_TEST_ENABLED === "true") {
+      const inProd = process.env.NODE_ENV === "production";
+      logger.warn(
+        { nodeEnv: process.env.NODE_ENV ?? "(unset)", e2eAuthActive: !inProd },
+        inProd
+          ? "E2E_TEST_ENABLED=true but NODE_ENV=production — test auth bypass is IGNORED"
+          : "E2E_TEST_ENABLED=true — test auth bypass is ACTIVE (x-e2e-test-user honored). Never set this in a deployed/shared environment.",
+      );
+    }
+
     server.listen(port, (err?: Error) => {
       if (err) {
         logger.error({ err }, "Error listening on port");
