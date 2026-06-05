@@ -15,20 +15,50 @@ import {
   routeOraMessage,
   checkToolAccess,
   detectMemorySaveCandidate,
-  ORA_TOOL_REGISTRY,
 } from "../../lib/public-ai/orchestrator";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
-import { db, knowledgeEntriesTable, generatedImagesTable } from "@workspace/db";
-import { deductCreditsAtomic, getOrCreateCredits } from "../credits";
+import {
+  db,
+  knowledgeEntriesTable,
+  generatedImagesTable,
+  TIER_DAILY_MESSAGE_LIMIT,
+  type SubscriptionTier,
+} from "@workspace/db";
+import {
+  checkOraQuota,
+  incrementOraMessage,
+  incrementOraImage,
+  getTodayOraUsage,
+  type OraQuotaKind,
+} from "../../lib/public-ai/ora-usage";
 
-// Authenticated Ora users are not subject to the anonymous visitor message cap;
-// they draw on their monthly credit balance instead. We still return a numeric
-// limit to the client so the UI's "messages remaining" affordance has a value.
-const UNLIMITED_MSGS = 1_000_000;
+// Authenticated Ora users are metered by message-based DAILY quotas per
+// subscription tier (TIER_DAILY_MESSAGE_LIMIT / TIER_DAILY_IMAGE_LIMIT) — NOT by
+// the AI Builder credit wallet. Anonymous visitors keep the per-session cap.
 
-// Per-action credit costs now come from the orchestrator tool registry
-// (ORA_TOOL_REGISTRY[tool].creditCost) so chat.ts no longer hard-codes them.
+function dailyMessageLimit(tier: string): number {
+  return TIER_DAILY_MESSAGE_LIMIT[tier as SubscriptionTier] ?? TIER_DAILY_MESSAGE_LIMIT.free;
+}
+
+/**
+ * Build the usage fields returned to the client. For signed-in users this
+ * reflects today's DAILY message/image usage; for anonymous visitors it
+ * reflects the per-session message counter.
+ */
+async function oraUsageResponse(
+  authed: AuthedOraUser | null,
+  sessionMsgCount: number,
+): Promise<Record<string, number>> {
+  if (!authed) return { msgCount: sessionMsgCount, msgLimit: MSG_LIMIT_VALUE };
+  const u = await getTodayOraUsage(authed.userId, authed.tier);
+  return {
+    msgCount: u.messageCount,
+    msgLimit: u.messageLimit,
+    imageCount: u.imageCount,
+    imageLimit: u.imageLimit,
+  };
+}
 
 const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
 
@@ -177,7 +207,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // Resolve the signed-in user (if any). Authenticated users draw on their
   // monthly credit balance and are exempt from the anonymous visitor cap.
   const authed = await resolveAuthedOraUser(req);
-  const effectiveMsgLimit = authed ? UNLIMITED_MSGS : MSG_LIMIT_VALUE;
+  const effectiveMsgLimit = authed ? dailyMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
@@ -200,7 +230,6 @@ router.post("/public-ai/chat", async (req, res) => {
   // assistant: build/"make me an app" requests are answered as normal
   // conversation — never refused, never auto-handed-off to the Builder.
   const decision = await routeOraMessage({ message, mode });
-  const toolMeta = ORA_TOOL_REGISTRY[decision.tool];
   const deepAllowed = decision.tool === "deep_thinking";
 
   // Plan gating is derived entirely from the selected tool's required access
@@ -249,17 +278,22 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  // Per-action credit cost for authenticated users (Free tier included — Free
-  // draws on its monthly grant). Visitors are metered by the session cap only.
-  const messageCost = toolMeta.creditCost;
+  // Ora is metered by message-based DAILY quotas per tier — never by the AI
+  // Builder credit wallet. Image generation/edit draws on the daily IMAGE
+  // bucket; everything else (answer, deep, search, file gen, analysis) draws on
+  // the daily MESSAGE bucket. Uploads are unlimited (handled in the upload route).
+  const quotaKind: OraQuotaKind = decision.tool === "image_generation" ? "image" : "message";
   if (authed) {
-    const credits = await getOrCreateCredits(authed.userId);
-    if (credits.balance < messageCost) {
-      res.status(402).json({
-        error: "You're out of credits. Top up or upgrade your plan to keep chatting with Ora.",
+    const quota = await checkOraQuota(authed.userId, authed.tier, quotaKind);
+    if (!quota.allowed) {
+      const usage = await oraUsageResponse(authed, session.msgCount);
+      res.status(429).json({
+        error:
+          quotaKind === "image"
+            ? `You've reached today's image limit (${quota.limit}/day) on your plan. Upgrade for more daily images, or come back tomorrow.`
+            : `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
         upgradeCta: true,
-        balance: credits.balance,
-        cost: messageCost,
+        ...usage,
       });
       return;
     }
@@ -273,21 +307,16 @@ router.post("/public-ai/chat", async (req, res) => {
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     try {
       const result = await generateFileFromPrompt(message, detectedFormat, history, language);
-      if (authed) {
-        await deductCreditsAtomic(authed.userId, messageCost, {
-          type: "converse",
-          description: `Ora file generation (${detectedFormat})`,
-        });
-      }
+      if (authed) await incrementOraMessage(authed.userId);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
+      const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply: result.reply,
         fileName: result.fileName,
         fileData: result.fileData,
         mimeType: result.mimeType,
-        msgCount: payload.msgCount,
-        msgLimit: effectiveMsgLimit,
+        ...usage,
       });
       // Persist to the durable asset library (best-effort, after the response so
       // it never adds latency) so the generated file survives chat resets,
@@ -330,11 +359,11 @@ router.post("/public-ai/chat", async (req, res) => {
     if (!isImageProviderConfigured()) {
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
+      const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply:
           "Image generation isn't configured on this server right now. Please try again later.",
-        msgCount: payload.msgCount,
-        msgLimit: effectiveMsgLimit,
+        ...usage,
       });
       return;
     }
@@ -347,15 +376,11 @@ router.post("/public-ai/chat", async (req, res) => {
       });
       let editableImageId: number | undefined;
       if (authed) {
-        await deductCreditsAtomic(authed.userId, messageCost, {
-          type: "creative",
-          description: "Ora inline image generation",
-        });
         // Persist the image into generated_images so it carries an editable id.
         // This is what powers inline editing: the existing /images/:id/edit
         // pipeline keys off a generated_images row (parent fileUrl + ownership).
-        // Credits were already charged via the Ora message cost above, so this
-        // record is creditCost:0 to avoid double-billing.
+        // Ora images are metered by the daily IMAGE quota (incremented below),
+        // NOT the Builder credit wallet, so this record is creditCost:0.
         try {
           const { storeGeneratedImage } = await import("../../lib/image-storage");
           const [imageRow] = await db
@@ -397,14 +422,15 @@ router.post("/public-ai/chat", async (req, res) => {
           );
         }
       }
+      if (authed) await incrementOraImage(authed.userId);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
+      const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply: "Here's the image you asked for. Tap Edit to refine it with an instruction.",
         imageUrl: result.openaiUrl,
         ...(editableImageId ? { imageId: editableImageId } : {}),
-        msgCount: payload.msgCount,
-        msgLimit: effectiveMsgLimit,
+        ...usage,
       });
       // Persist to the durable asset library (best-effort, after the response so
       // the remote-URL fetch never adds latency) so the image survives chat
@@ -459,11 +485,11 @@ router.post("/public-ai/chat", async (req, res) => {
     if (!isWebSearchConfigured()) {
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
+      const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply:
           "Live web search isn't configured on this server right now. I can still help from what I already know.",
-        msgCount: payload.msgCount,
-        msgLimit: effectiveMsgLimit,
+        ...usage,
       });
       return;
     }
@@ -476,19 +502,14 @@ router.post("/public-ai/chat", async (req, res) => {
     ).filter((m) => m.content.trim().length > 0);
     try {
       const result = await runOraWebSearch({ query: message, history, language });
-      if (authed) {
-        await deductCreditsAtomic(authed.userId, messageCost, {
-          type: "converse",
-          description: "Ora web search",
-        });
-      }
+      if (authed) await incrementOraMessage(authed.userId);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
+      const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply: result.reply,
         sources: result.sources,
-        msgCount: payload.msgCount,
-        msgLimit: effectiveMsgLimit,
+        ...usage,
       });
     } catch (err) {
       logger.error({ component: "ora-chat-search", err }, "Ora web search failed");
@@ -674,15 +695,9 @@ router.post("/public-ai/chat", async (req, res) => {
     );
   }
 
-  // Charge credits for authenticated users now that the reply succeeded, so a
-  // failed generation never costs the user. Best-effort: the atomic helper
-  // no-ops when enforcement is disabled and we already pre-flighted the balance.
-  if (authed) {
-    await deductCreditsAtomic(authed.userId, messageCost, {
-      type: "converse",
-      description: deepAllowed ? "Ora Deep Thinking message" : "Ora message",
-    });
-  }
+  // Count this against the user's daily MESSAGE quota now that the reply
+  // succeeded, so a failed generation never costs the user a message.
+  if (authed) await incrementOraMessage(authed.userId);
 
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
@@ -695,6 +710,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // a non-binding suggestion for signed-in users; the client decides whether to
   // offer the save. It never persists anything on its own.
   const memoryCandidate = authed ? detectMemorySaveCandidate(message) : null;
+  const usage = await oraUsageResponse(authed, payload.msgCount);
 
   res.json({
     reply,
@@ -706,8 +722,7 @@ router.post("/public-ai/chat", async (req, res) => {
         }
       : {}),
     mode: deepAllowed ? "deep" : "instant",
-    msgCount: payload.msgCount,
-    msgLimit: effectiveMsgLimit,
+    ...usage,
   });
 });
 

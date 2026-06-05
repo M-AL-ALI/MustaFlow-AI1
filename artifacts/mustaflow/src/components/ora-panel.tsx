@@ -493,8 +493,11 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
-  const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
-  const atImageLimit = (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
+  // Uploads are unlimited for signed-in users — only anonymous visitors hit the
+  // per-session upload caps. Daily image-generation quota is enforced server-side
+  // (429 + upgrade prompt), not by disabling the upload affordance.
+  const atFileLimit = !isSignedIn && (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
+  const atImageLimit = !isSignedIn && (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
   const atAllLimits = atFileLimit || atImageLimit;
 
   const atomState: AtomState =
@@ -1313,14 +1316,29 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
             {atLimit ? (
               <div className="text-center py-2">
                 <p className="text-xs text-muted-foreground">
-                  Session limit reached.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setLocation("/sign-up")}
-                    className="text-[hsl(265_85%_65%)] hover:underline"
-                  >
-                    Sign up for unlimited conversations
-                  </button>
+                  {isSignedIn ? (
+                    <>
+                      You&apos;ve hit today&apos;s message limit.{" "}
+                      <button
+                        type="button"
+                        onClick={() => setLocation("/pricing")}
+                        className="text-[hsl(265_85%_65%)] hover:underline"
+                      >
+                        Upgrade for more daily messages
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      Session limit reached.{" "}
+                      <button
+                        type="button"
+                        onClick={() => setLocation("/sign-up")}
+                        className="text-[hsl(265_85%_65%)] hover:underline"
+                      >
+                        Sign up for unlimited conversations
+                      </button>
+                    </>
+                  )}
                 </p>
               </div>
             ) : (

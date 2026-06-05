@@ -7,9 +7,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@clerk/react";
 
 const FREE_FEATURES = [
-  "150 credits / month",
-  "Instant replies",
-  "3 AI images / month",
+  "15 Ora messages / day",
+  "3 Ora images / day",
+  "Unlimited file uploads to Ora",
+  "Ora Instant replies",
+  "150 Builder credits / month",
   "1 concurrent build",
   '"Built with MustaFlow" badge on published apps',
   "Static, React SPA, and full-stack projects",
@@ -17,10 +19,12 @@ const FREE_FEATURES = [
 ];
 
 const CORE_FEATURES = [
-  "1,500 credits / month",
-  "Instant + Deep Thinking",
+  "30 Ora messages / day",
+  "10 Ora images / day",
+  "Unlimited file uploads to Ora",
+  "Ora Instant + Deep Thinking",
+  "1,500 Builder credits / month",
   "Connectors (GitHub & more)",
-  "12 AI images / month",
   "3 concurrent builds",
   "No badge on published apps",
   "Priority build queue",
@@ -28,14 +32,22 @@ const CORE_FEATURES = [
 ];
 
 const WAVE_FEATURES = [
-  "4,000 credits / month",
-  "Instant + Deep Thinking",
+  "55 Ora messages / day",
+  "20 Ora images / day",
+  "Unlimited file uploads to Ora",
+  "Ora Instant + Deep Thinking",
+  "4,000 Builder credits / month",
   "Connectors (GitHub & more)",
-  "30 AI images / month",
   "10 concurrent builds",
   "No badge on published apps",
   "Priority build queue",
   "Priority support",
+];
+
+const ORA_PLAN_LIMITS = [
+  { plan: "Free", messages: "15 / day", images: "3 / day", deep: "—" },
+  { plan: "Core", messages: "30 / day", images: "10 / day", deep: "Included" },
+  { plan: "Wave", messages: "55 / day", images: "20 / day", deep: "Included" },
 ];
 
 export default function PricingPage() {
@@ -234,6 +246,30 @@ export default function PricingPage() {
               Chatting with Ora is plan-based — pick a plan and use the assistant as much as your
               plan allows, no per-message math. Building and deploying full apps with the AI Builder
               uses credits, so heavier builds cost a little more.
+            </p>
+          </div>
+          <div className="border border-border rounded-xl bg-card overflow-hidden mb-6">
+            <div className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30">
+              Ora assistant — daily limits by plan
+            </div>
+            <div className="grid grid-cols-4 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border">
+              <span>Plan</span>
+              <span className="text-right">Messages</span>
+              <span className="text-right">Images</span>
+              <span className="text-right">Deep Thinking</span>
+            </div>
+            <div className="divide-y divide-border">
+              {ORA_PLAN_LIMITS.map((row) => (
+                <div key={row.plan} className="grid grid-cols-4 px-5 py-3 text-sm">
+                  <span className="font-semibold text-foreground">{row.plan}</span>
+                  <span className="text-right text-muted-foreground">{row.messages}</span>
+                  <span className="text-right text-muted-foreground">{row.images}</span>
+                  <span className="text-right text-muted-foreground">{row.deep}</span>
+                </div>
+              ))}
+            </div>
+            <p className="px-5 py-3 text-xs text-muted-foreground border-t border-border">
+              Daily limits reset at midnight UTC. File uploads are always unlimited.
             </p>
           </div>
           <div className="border border-border rounded-xl bg-card overflow-hidden">

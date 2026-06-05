@@ -84,9 +84,11 @@ router.post(
       });
       if (res.headersSent) return;
 
-      // Check session image count limit BEFORE validating file bytes.
-      // Only increment after successful store so rejected files don't consume the limit.
-      if (session.imageCount >= IMAGE_LIMIT_VALUE) {
+      // Uploads are unlimited for signed-in users — Ora meters them only by the
+      // daily message/image quotas, never by upload counts. Anonymous visitors
+      // keep the per-session cap. Check BEFORE validating file bytes; only
+      // increment after a successful store so rejected files don't consume it.
+      if (!authed && session.imageCount >= IMAGE_LIMIT_VALUE) {
         res.status(429).json({
           error: `You have reached the image limit for this session (${IMAGE_LIMIT_VALUE} images). Start a new session to upload more.`,
           imageCount: session.imageCount,
@@ -170,7 +172,8 @@ router.post(
     }
 
     // ── Document / dataset branch ────────────────────────────────────────────
-    if (session.fileCount >= FILE_LIMIT_VALUE) {
+    // Uploads are unlimited for signed-in users; anonymous visitors keep the cap.
+    if (!authed && session.fileCount >= FILE_LIMIT_VALUE) {
       res.status(429).json({
         error: `You have reached the file limit for this session (${FILE_LIMIT_VALUE} files). Start a new session to upload more.`,
         fileCount: session.fileCount,

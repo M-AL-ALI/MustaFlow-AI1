@@ -10,6 +10,8 @@ import {
   IMAGE_ANALYSIS_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { oraSessionLimiter } from "../../lib/rateLimit";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import { getTodayOraUsage } from "../../lib/public-ai/ora-usage";
 import { logger } from "../../lib/logger";
 
 const router = Router();
@@ -22,7 +24,7 @@ function hashIp(ip: string): string {
   return createHash("sha256").update(ip).digest("hex").slice(0, 8);
 }
 
-router.post("/public-ai/session", oraSessionLimiter, (req, res) => {
+router.post("/public-ai/session", oraSessionLimiter, async (req, res) => {
   const ip =
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
     req.socket.remoteAddress ??
@@ -32,6 +34,23 @@ router.post("/public-ai/session", oraSessionLimiter, (req, res) => {
 
   const { token, payload } = createSession();
   setSessionCookie(res, token);
+
+  // Signed-in users are metered by daily quotas per tier; surface today's usage
+  // so the indicator is accurate from the first paint. Anonymous visitors get
+  // the per-session cap.
+  const authed = await resolveAuthedOraUser(req);
+  if (authed) {
+    const usage = await getTodayOraUsage(authed.userId, authed.tier);
+    res.json({
+      sessionId: payload.sessionId,
+      msgCount: usage.messageCount,
+      msgLimit: usage.messageLimit,
+      imageCount: usage.imageCount,
+      imageLimit: usage.imageLimit,
+    });
+    return;
+  }
+
   res.json({
     sessionId: payload.sessionId,
     msgCount: 0,
@@ -39,7 +58,7 @@ router.post("/public-ai/session", oraSessionLimiter, (req, res) => {
   });
 });
 
-router.get("/public-ai/session", (req, res) => {
+router.get("/public-ai/session", async (req, res) => {
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
     res.status(401).json({ error: "No session cookie found" });
@@ -50,14 +69,18 @@ router.get("/public-ai/session", (req, res) => {
     res.status(401).json({ error: "Session expired or invalid" });
     return;
   }
+
+  const authed = await resolveAuthedOraUser(req);
+  const daily = authed ? await getTodayOraUsage(authed.userId, authed.tier) : null;
+
   res.json({
     sessionId: session.sessionId,
-    msgCount: session.msgCount,
-    msgLimit: MSG_LIMIT_VALUE,
+    msgCount: daily ? daily.messageCount : session.msgCount,
+    msgLimit: daily ? daily.messageLimit : MSG_LIMIT_VALUE,
     fileCount: session.fileCount,
     fileLimit: FILE_LIMIT_VALUE,
-    imageCount: session.imageCount,
-    imageLimit: IMAGE_LIMIT_VALUE,
+    imageCount: daily ? daily.imageCount : session.imageCount,
+    imageLimit: daily ? daily.imageLimit : IMAGE_LIMIT_VALUE,
     imageAnalysisCount: session.imageAnalysisCount,
     imageAnalysisLimit: IMAGE_ANALYSIS_LIMIT_VALUE,
   });

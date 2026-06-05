@@ -99,6 +99,7 @@
     "migrate-tier-rename": "tsx ./src/migrate-tier-rename.ts",
     "migrate-ora-conversations": "tsx ./src/migrate-ora-conversations.ts",
     "migrate-ora-assets": "tsx ./src/migrate-ora-assets.ts",
+    "migrate-ora-daily-usage": "tsx ./src/migrate-ora-daily-usage.ts",
     "migrate-task-events-data": "tsx ./src/migrate-task-events-data.ts",
     "migrate-ora-transcript-cleanup": "tsx ./src/migrate-ora-transcript-cleanup.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",

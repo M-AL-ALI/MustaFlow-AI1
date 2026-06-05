@@ -8,6 +8,12 @@ import {
 } from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import {
+  checkOraQuota,
+  incrementOraMessage,
+  oraMessageFields,
+} from "../../lib/public-ai/ora-usage";
 import { logger } from "../../lib/logger";
 
 const router = Router();
@@ -85,7 +91,21 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     return;
   }
 
-  if (session.msgCount >= MSG_LIMIT_VALUE) {
+  // Signed-in users are metered by daily quotas (MESSAGE bucket); anonymous
+  // visitors keep the per-session cap.
+  const authed = await resolveAuthedOraUser(req);
+  if (authed) {
+    const quota = await checkOraQuota(authed.userId, authed.tier, "message");
+    if (!quota.allowed) {
+      res.status(429).json({
+        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        upgradeCta: true,
+        msgCount: quota.used,
+        msgLimit: quota.limit,
+      });
+      return;
+    }
+  } else if (session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
       error:
         "You have reached the message limit for this session. Start a new session to continue.",
@@ -196,14 +216,15 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     return;
   }
 
+  if (authed) await incrementOraMessage(authed.userId);
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
+  const usage = await oraMessageFields(authed, payload.msgCount);
   res.json({
     reply,
     handoffCta: false,
-    msgCount: payload.msgCount,
-    msgLimit: MSG_LIMIT_VALUE,
+    ...usage,
   });
 });
 

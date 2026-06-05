@@ -10,6 +10,11 @@ import {
 import { scanUserInput } from "../../lib/public-ai/prompt";
 import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import {
+  checkOraQuota,
+  incrementOraMessage,
+  oraMessageFields,
+} from "../../lib/public-ai/ora-usage";
 import { persistOraAsset } from "../../lib/ora-assets";
 
 const router = Router();
@@ -47,7 +52,21 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  if (session.msgCount >= MSG_LIMIT_VALUE) {
+  // Ora is metered by daily quotas per tier for signed-in users; anonymous
+  // visitors keep the per-session cap. File generation draws on the MESSAGE bucket.
+  const authed = await resolveAuthedOraUser(req);
+  if (authed) {
+    const quota = await checkOraQuota(authed.userId, authed.tier, "message");
+    if (!quota.allowed) {
+      res.status(429).json({
+        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        upgradeCta: true,
+        msgCount: quota.used,
+        msgLimit: quota.limit,
+      });
+      return;
+    }
+  } else if (session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
       error: "You have reached the message limit for this session.",
       msgCount: session.msgCount,
@@ -68,7 +87,6 @@ router.post("/public-ai/generate-file", async (req, res) => {
 
     // Persist to the durable asset library for signed-in users so the file
     // survives chat resets, reloads, and other devices. Best-effort.
-    const authed = await resolveAuthedOraUser(req);
     if (authed) {
       await persistOraAsset({
         userId: authed.userId,
@@ -81,6 +99,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       });
     }
 
+    if (authed) await incrementOraMessage(authed.userId);
     const { token, payload } = incrementMessageCount(session);
     setSessionCookie(res, token);
 
@@ -94,13 +113,13 @@ router.post("/public-ai/generate-file", async (req, res) => {
       "File generated",
     );
 
+    const usage = await oraMessageFields(authed, payload.msgCount);
     res.json({
       reply: result.reply,
       fileName: result.fileName,
       fileData: result.fileData,
       mimeType: result.mimeType,
-      msgCount: payload.msgCount,
-      msgLimit: MSG_LIMIT_VALUE,
+      ...usage,
     });
   } catch (err) {
     logger.error({ component: "ora-generate-file", format, err }, "File generation failed");

@@ -348,8 +348,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
-  const atFileLimit = (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
-  const atImageLimit = (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
+  // Uploads are unlimited for signed-in users — only anonymous visitors hit the
+  // per-session upload caps.
+  const atFileLimit = !isSignedIn && (session?.fileCount ?? 0) >= (session?.fileLimit ?? 3);
+  const atImageLimit = !isSignedIn && (session?.imageCount ?? 0) >= (session?.imageLimit ?? 2);
   const atAllLimits = atFileLimit || atImageLimit;
 
   const atomState: AtomState =
@@ -1198,14 +1200,29 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           {atLimit ? (
             <div className="text-center py-1">
               <p className="text-xs text-muted-foreground">
-                Session limit reached.{" "}
-                <button
-                  type="button"
-                  onClick={() => setLocation("/sign-up")}
-                  className="text-[hsl(265_85%_65%)] hover:underline"
-                >
-                  Sign up for unlimited
-                </button>
+                {isSignedIn ? (
+                  <>
+                    Daily message limit reached.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setLocation("/pricing")}
+                      className="text-[hsl(265_85%_65%)] hover:underline"
+                    >
+                      Upgrade plan
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Session limit reached.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setLocation("/sign-up")}
+                      className="text-[hsl(265_85%_65%)] hover:underline"
+                    >
+                      Sign up for unlimited
+                    </button>
+                  </>
+                )}
               </p>
             </div>
           ) : (

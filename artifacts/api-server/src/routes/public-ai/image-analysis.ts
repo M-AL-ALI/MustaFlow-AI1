@@ -10,6 +10,12 @@ import {
 } from "../../lib/public-ai/session";
 import { getImage } from "../../lib/public-ai/image-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import {
+  checkOraQuota,
+  incrementOraMessage,
+  getTodayOraUsage,
+} from "../../lib/public-ai/ora-usage";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
 
 const router = Router();
@@ -79,9 +85,22 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     return;
   }
 
-  // Check image analysis count limit BEFORE doing any model work.
-  // Only increment after a successful model call.
-  if (session.imageAnalysisCount >= IMAGE_ANALYSIS_LIMIT_VALUE) {
+  // Check the usage cap BEFORE doing any model work; only increment after a
+  // successful model call. Image analysis counts against the signed-in user's
+  // daily MESSAGE bucket; anonymous visitors keep the per-session cap.
+  const authed = await resolveAuthedOraUser(req);
+  if (authed) {
+    const quota = await checkOraQuota(authed.userId, authed.tier, "message");
+    if (!quota.allowed) {
+      res.status(429).json({
+        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        upgradeCta: true,
+        imageAnalysisCount: quota.used,
+        imageAnalysisLimit: quota.limit,
+      });
+      return;
+    }
+  } else if (session.imageAnalysisCount >= IMAGE_ANALYSIS_LIMIT_VALUE) {
     res.status(429).json({
       error:
         "You have reached the image analysis limit for this session. Start a new session to analyze more images.",
@@ -189,9 +208,11 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     return;
   }
 
-  // Increment imageAnalysisCount ONLY after a successful model call.
+  // Increment usage ONLY after a successful model call.
+  if (authed) await incrementOraMessage(authed.userId);
   const { token, payload } = incrementImageAnalysisCount(session);
   setSessionCookie(res, token);
+  const dailyUsage = authed ? await getTodayOraUsage(authed.userId, authed.tier) : null;
 
   logger.info(
     {
@@ -210,8 +231,8 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
   res.json({
     reply,
     handoffCta: false,
-    imageAnalysisCount: payload.imageAnalysisCount,
-    imageAnalysisLimit: IMAGE_ANALYSIS_LIMIT_VALUE,
+    imageAnalysisCount: dailyUsage ? dailyUsage.messageCount : payload.imageAnalysisCount,
+    imageAnalysisLimit: dailyUsage ? dailyUsage.messageLimit : IMAGE_ANALYSIS_LIMIT_VALUE,
   });
 });
 

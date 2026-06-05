@@ -1,4 +1,13 @@
-import { pgTable, serial, text, boolean, timestamp, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  text,
+  boolean,
+  timestamp,
+  index,
+  integer,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 export const SUBSCRIPTION_TIERS = ["free", "core", "wave"] as const;
 export type SubscriptionTier = (typeof SUBSCRIPTION_TIERS)[number];
@@ -42,6 +51,23 @@ export const TIER_MONTHLY_IMAGE_CAP: Record<SubscriptionTier, number> = {
   wave: 30,
 };
 
+// ── Ora message-based daily quotas ──────────────────────────────────────────
+// The standalone Ora assistant is metered by DAILY message + image limits per
+// subscription tier — NOT by the AI Builder credit wallet. Limits reset at
+// midnight UTC. The Builder keeps its separate credit system untouched.
+export const TIER_DAILY_MESSAGE_LIMIT: Record<SubscriptionTier, number> = {
+  free: 15,
+  core: 30,
+  wave: 55,
+};
+
+// Daily image generation/edit caps per tier (inline Ora images).
+export const TIER_DAILY_IMAGE_LIMIT: Record<SubscriptionTier, number> = {
+  free: 3,
+  core: 10,
+  wave: 20,
+};
+
 // Per-user subscription row. Created on first subscribe or free-tier initialisation.
 export const userSubscriptionsTable = pgTable(
   "user_subscriptions",
@@ -67,3 +93,24 @@ export const userSubscriptionsTable = pgTable(
 
 export type UserSubscription = typeof userSubscriptionsTable.$inferSelect;
 export type InsertUserSubscription = typeof userSubscriptionsTable.$inferInsert;
+
+// Per-user, per-UTC-day Ora usage counters. Drives Ora's message-based daily
+// quotas (decoupled from the AI Builder credit wallet). One row per user/day;
+// counters are bumped atomically via upsert. Old rows are harmless history.
+export const oraDailyUsageTable = pgTable(
+  "ora_daily_usage",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    // Calendar day in UTC, formatted YYYY-MM-DD.
+    usageDate: text("usage_date").notNull(),
+    messageCount: integer("message_count").notNull().default(0),
+    imageCount: integer("image_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ora_daily_usage_user_date_uniq").on(t.userId, t.usageDate)],
+);
+
+export type OraDailyUsage = typeof oraDailyUsageTable.$inferSelect;
+export type InsertOraDailyUsage = typeof oraDailyUsageTable.$inferInsert;
