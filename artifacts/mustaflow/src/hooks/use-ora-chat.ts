@@ -14,6 +14,11 @@ export interface GeneratedFile {
   format: FileFormat;
 }
 
+export interface OraSource {
+  title: string;
+  url: string;
+}
+
 export interface OraMessage {
   role: "user" | "assistant";
   content: string;
@@ -26,6 +31,7 @@ export interface OraMessage {
   generatedFile?: GeneratedFile;
   imageUrl?: string;
   memorySaveCandidate?: string;
+  sources?: OraSource[];
 }
 
 export interface OraSession {
@@ -298,6 +304,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   datasetResult?: DatasetAnalysisResult;
   imageUrl?: string;
   memorySaveCandidate?: string;
+  sources?: OraSource[];
 }> {
   return messages.map((m) => ({
     role: m.role,
@@ -313,6 +320,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     // Persist inline image + memory-save candidate so they survive reload
     ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}),
     ...(m.memorySaveCandidate ? { memorySaveCandidate: m.memorySaveCandidate } : {}),
+    // Persist cited web-search sources so the source cards survive reload
+    ...(m.sources && m.sources.length > 0 ? { sources: m.sources } : {}),
   }));
 }
 
@@ -915,6 +924,8 @@ export function useOraChat(): UseOraChatReturn {
             imageUrl?: string;
             // Present when Ora detected a durable fact worth saving to memory
             memorySaveCandidate?: string;
+            // Present when the chat route ran a live web search
+            sources?: OraSource[];
             msgCount: number;
             msgLimit: number;
           }>("/api/public-ai/chat", body);
@@ -928,6 +939,7 @@ export function useOraChat(): UseOraChatReturn {
                 handoffCta: data.handoffCta,
                 suggestions: data.suggestions ?? [],
                 ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+                ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
                 ...(data.memorySaveCandidate
                   ? { memorySaveCandidate: data.memorySaveCandidate }
                   : {}),

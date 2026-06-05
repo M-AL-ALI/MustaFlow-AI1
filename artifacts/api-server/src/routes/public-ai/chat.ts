@@ -82,6 +82,9 @@ async function buildMemoryContext(userId: string, projectId: number | undefined)
 const IMAGE_GENERATE_CTA =
   "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including inline images here in Ora and the full Image Studio with quality presets, aspect ratios, and style controls.";
 
+const SEARCH_SIGNIN_CTA =
+  "Live web search is available for signed-in MustaFlow users. Sign up at mustaflow.app and I'll search the web for you, then answer with up-to-date information and cited sources.";
+
 const router = Router();
 
 const messageItemSchema = z.object({
@@ -238,6 +241,15 @@ router.post("/public-ai/chat", async (req, res) => {
       });
       return;
     }
+    if (access.denyCode === "search_signin_required") {
+      res.json({
+        reply: SEARCH_SIGNIN_CTA,
+        upgradeCta: true,
+        msgCount: session.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
     res.json({
       reply:
         "That capability isn't available yet. I can still help you plan it, analyze your data, generate files, or talk it through.",
@@ -336,6 +348,52 @@ router.post("/public-ai/chat", async (req, res) => {
     } catch (err) {
       logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
       res.status(500).json({ error: "Failed to generate the image. Please try again." });
+    }
+    return;
+  }
+
+  // ── Web search tool (live, grounded, cited) ─────────────────────────────────
+  // Anonymous visitors are caught by checkToolAccess above (search_signin_required).
+  if (decision.tool === "search") {
+    const { isWebSearchConfigured, runOraWebSearch } =
+      await import("../../lib/public-ai/web-search");
+    if (!isWebSearchConfigured()) {
+      const { token, payload } = incrementMessageCount(session);
+      setSessionCookie(res, token);
+      res.json({
+        reply:
+          "Live web search isn't configured on this server right now. I can still help from what I already know.",
+        msgCount: payload.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
+    const history = (
+      referenceChatHistory
+        ? messages
+            .slice(-6)
+            .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+        : []
+    ).filter((m) => m.content.trim().length > 0);
+    try {
+      const result = await runOraWebSearch({ query: message, history, language });
+      if (authed) {
+        await deductCreditsAtomic(authed.userId, messageCost, {
+          type: "converse",
+          description: "Ora web search",
+        });
+      }
+      const { token, payload } = incrementMessageCount(session);
+      setSessionCookie(res, token);
+      res.json({
+        reply: result.reply,
+        sources: result.sources,
+        msgCount: payload.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+    } catch (err) {
+      logger.error({ component: "ora-chat-search", err }, "Ora web search failed");
+      res.status(500).json({ error: "Web search failed. Please try again." });
     }
     return;
   }

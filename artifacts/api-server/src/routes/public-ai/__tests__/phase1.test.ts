@@ -375,6 +375,144 @@ describe("Ora orchestrator routing", () => {
     expect(decision.tool).not.toBe("builder_handoff");
     expect(decision.tool).toBe("answer");
   });
+
+  it("routes current-info questions to search (instant)", async () => {
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    const decision = await routeOraMessage({
+      message: "what is the latest news about AI today?",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("search");
+  });
+
+  it("routes a 'search the web' request to search even in deep mode", async () => {
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    const decision = await routeOraMessage({
+      message: "search the web for the current price of bitcoin",
+      mode: "deep",
+    });
+    expect(decision.tool).toBe("search");
+  });
+});
+
+// ─── Ora web-search intent detection ──────────────────────────────────────────
+describe("Ora web-search intent detection", () => {
+  it("flags explicit and time-anchored current-info requests", async () => {
+    const { isWebSearchRequest } = await import("../../../lib/public-ai/orchestrator");
+    const positives = [
+      "search the web for node.js releases",
+      "look up online who won the game last night",
+      "what is the latest version of react?",
+      "give me the current bitcoin price",
+      "what's the weather in Paris today?",
+      "latest news about the election",
+      "who won the world cup",
+    ];
+    for (const msg of positives) {
+      expect(isWebSearchRequest(msg)).toBe(true);
+    }
+  });
+
+  it("does NOT hijack ordinary product/planning questions", async () => {
+    const { isWebSearchRequest } = await import("../../../lib/public-ai/orchestrator");
+    const negatives = [
+      "what is a good database for a todo app?",
+      "help me plan a SaaS pricing model",
+      "build me an app for tracking expenses",
+      "how do I add authentication to my project?",
+      "explain how MustaFlow publishing works",
+    ];
+    for (const msg of negatives) {
+      expect(isWebSearchRequest(msg)).toBe(false);
+    }
+  });
+});
+
+// ─── Ora web-search helpers (pure) ────────────────────────────────────────────
+describe("Ora web-search source helpers", () => {
+  it("extracts url citations from a Responses-API output payload", async () => {
+    const { extractSources } = await import("../../../lib/public-ai/web-search");
+    const output = [
+      {
+        content: [
+          {
+            annotations: [
+              { type: "url_citation", url: "https://example.com/a", title: "Example A" },
+              { type: "url_citation", url: "https://nodejs.org/en", title: "Node" },
+            ],
+          },
+        ],
+      },
+    ];
+    const sources = extractSources(output);
+    expect(sources).toEqual([
+      { title: "Example A", url: "https://example.com/a" },
+      { title: "Node", url: "https://nodejs.org/en" },
+    ]);
+  });
+
+  it("falls back to hostname when a citation has no title and returns [] on junk", async () => {
+    const { extractSources } = await import("../../../lib/public-ai/web-search");
+    const out = extractSources([
+      { content: [{ annotations: [{ type: "url_citation", url: "https://www.foo.com/x" }] }] },
+    ]);
+    expect(out).toEqual([{ title: "foo.com", url: "https://www.foo.com/x" }]);
+    expect(extractSources(null)).toEqual([]);
+    expect(extractSources({})).toEqual([]);
+  });
+
+  it("strips utm tracking params from cited urls", async () => {
+    const { cleanSourceUrl } = await import("../../../lib/public-ai/web-search");
+    expect(cleanSourceUrl("https://example.com/a?utm_source=openai&id=5")).toBe(
+      "https://example.com/a?id=5",
+    );
+  });
+
+  it("rejects dangerous URL schemes everywhere they could be rendered", async () => {
+    const { cleanSourceUrl, isSafeHttpUrl, extractSources } =
+      await import("../../../lib/public-ai/web-search");
+    for (const bad of [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "file:///etc/passwd",
+      "mailto:a@b.com",
+      "not a url",
+    ]) {
+      expect(isSafeHttpUrl(bad)).toBe(false);
+      expect(cleanSourceUrl(bad)).toBeNull();
+    }
+    expect(isSafeHttpUrl("https://example.com")).toBe(true);
+    // Malicious citations are dropped at extraction time.
+    const out = extractSources([
+      {
+        content: [
+          {
+            annotations: [
+              { type: "url_citation", url: "javascript:alert(1)", title: "evil" },
+              { type: "url_citation", url: "https://safe.com/x", title: "Safe" },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(out).toEqual([{ title: "Safe", url: "https://safe.com/x" }]);
+  });
+
+  it("dedupes by normalized host+path and caps the result", async () => {
+    const { dedupeSources } = await import("../../../lib/public-ai/web-search");
+    const deduped = dedupeSources(
+      [
+        { title: "A", url: "https://www.example.com/a" },
+        { title: "A dup", url: "https://example.com/a/" },
+        { title: "B", url: "https://example.com/b" },
+      ],
+      2,
+    );
+    expect(deduped).toEqual([
+      { title: "A", url: "https://www.example.com/a" },
+      { title: "B", url: "https://example.com/b" },
+    ]);
+  });
 });
 
 // ─── Ora orchestrator: plan gating ────────────────────────────────────────────
@@ -416,10 +554,24 @@ describe("Ora orchestrator plan gating", () => {
 
   it("blocks planned (not-live) tools with tool_unavailable", async () => {
     const { checkToolAccess } = await import("../../../lib/public-ai/orchestrator");
-    expect(checkToolAccess("search", { authed: true, isPaid: true })).toEqual({
+    // image_editing is still status:"planned" — search is now live (Task #1276).
+    expect(checkToolAccess("image_editing", { authed: true, isPaid: true })).toEqual({
       allowed: false,
       denyCode: "tool_unavailable",
     });
+  });
+
+  it("blocks search for anon with search_signin_required", async () => {
+    const { checkToolAccess } = await import("../../../lib/public-ai/orchestrator");
+    expect(checkToolAccess("search", { authed: false, isPaid: false })).toEqual({
+      allowed: false,
+      denyCode: "search_signin_required",
+    });
+  });
+
+  it("allows search for any signed-in user", async () => {
+    const { checkToolAccess } = await import("../../../lib/public-ai/orchestrator");
+    expect(checkToolAccess("search", { authed: true, isPaid: false }).allowed).toBe(true);
   });
 });
 

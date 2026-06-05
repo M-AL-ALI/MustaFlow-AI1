@@ -108,10 +108,10 @@ export const ORA_TOOL_REGISTRY: Record<OraTool, OraToolMeta> = {
   },
   search: {
     tool: "search",
-    description: "Retrieve external/live information. Reserved for a later phase.",
+    description: "Search the live web and answer grounded in cited sources.",
     minAccess: "free",
     creditCost: 1,
-    status: "planned",
+    status: "live",
   },
   memory_lookup: {
     tool: "memory_lookup",
@@ -158,6 +158,37 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
 
 export function isImageGenerationRequest(message: string): boolean {
   return ORA_IMAGE_PATTERNS.some((p) => p.test(message));
+}
+
+// ── Web-search intent detection ─────────────────────────────────────────────
+
+/**
+ * Conservative signals that a message needs CURRENT/live information and should
+ * be answered by a real web search rather than the model's static knowledge.
+ * Kept narrow on purpose so ordinary MustaFlow/product questions are NOT
+ * hijacked into search.
+ */
+export const ORA_SEARCH_PATTERNS: RegExp[] = [
+  // Explicit "search/look up/google the web/online/internet"
+  /\b(search|look\s+up|google|browse|check)\s+(?:(?:on|the)\s+)?(?:web|online|internet|google)\b/i,
+  /\bsearch\s+(?:for|the\s+web)\b/i,
+  // "latest/current/recent/newest <thing>" where it implies fresh data
+  /\b(latest|current|recent|newest|up[-\s]?to[-\s]?date|most\s+recent)\b.*\b(news|version|release|releases?|price|prices?|update|updates?|score|scores?|results?|stats?|standings?|data|figures?|rates?|headlines?)\b/i,
+  /\bwhat(?:'?s| is| are)\s+(?:the\s+)?(?:latest|current|newest|most\s+recent)\b/i,
+  // Time-anchored questions about volatile topics
+  /\b(today|today'?s|this\s+(?:week|month|morning|year)|right\s+now|currently|at\s+the\s+moment)\b.*\b(news|weather|price|prices?|stock|stocks?|score|scores?|happening|headlines?|forecast|rate|rates?)\b/i,
+  /\b(news|headlines?)\s+(?:about|on|for|today|this\s+week|right\s+now)\b/i,
+  // Weather / forecast
+  /\b(weather|forecast|temperature)\b.*\b(today|tomorrow|now|tonight|this\s+(?:week|weekend)|in\s+[a-z])/i,
+  // Markets / finance
+  /\b(stock\s+price|share\s+price|exchange\s+rate|crypto\s+price|bitcoin\s+price|ethereum\s+price|market\s+cap)\b/i,
+  // Sports / events outcomes
+  /\bwho\s+won\b/i,
+  /\bas\s+of\s+(?:today|now|this\s+(?:week|month|year))\b/i,
+];
+
+export function isWebSearchRequest(message: string): boolean {
+  return ORA_SEARCH_PATTERNS.some((p) => p.test(message));
 }
 
 // ── Routing ─────────────────────────────────────────────────────────────────
@@ -216,7 +247,20 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
     };
   }
 
-  // 3. Conversational answer — classify for model selection + suggestion topic.
+  // 3. Web-search fast-path — current-info questions need live results. Runs
+  //    before the instant/deep classifier so a grounded answer always wins over
+  //    a (possibly stale) model-only reply, regardless of the selected mode.
+  if (isWebSearchRequest(message)) {
+    return {
+      tool: "search",
+      reason: "Detected a request for current/live information.",
+      intent: "premium",
+      confidence: "high",
+      topic: "general",
+    };
+  }
+
+  // 4. Conversational answer — classify for model selection + suggestion topic.
   const classifier = input.classifier ?? (await classifyIntent(message));
   const tool: OraTool = mode === "deep" ? "deep_thinking" : "answer";
   return {
@@ -239,7 +283,11 @@ export interface OraAccessContext {
 }
 
 /** Why a tool was denied, so the route can render the right CTA copy. */
-export type OraDenyCode = "deep_paid_only" | "image_signin_required" | "tool_unavailable";
+export type OraDenyCode =
+  | "deep_paid_only"
+  | "image_signin_required"
+  | "search_signin_required"
+  | "tool_unavailable";
 
 export interface OraAccessResult {
   allowed: boolean;
@@ -263,8 +311,12 @@ export function checkToolAccess(tool: OraTool, ctx: OraAccessContext): OraAccess
       return { allowed: true };
     case "free":
       if (!ctx.authed) {
-        // image_generation is the only free-min tool a visitor hits via routing.
-        return { allowed: false, denyCode: "image_signin_required" };
+        // Free-min tools a visitor can hit via routing are image_generation and
+        // search; surface the matching sign-in CTA for each.
+        return {
+          allowed: false,
+          denyCode: tool === "search" ? "search_signin_required" : "image_signin_required",
+        };
       }
       return { allowed: true };
     case "paid":
