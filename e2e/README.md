@@ -10,11 +10,11 @@ through the shared proxy at `http://localhost:80`.
   they only activate when `NODE_ENV !== "production"` **and** `E2E_TEST_ENABLED === "true"`.
   They can never run in production.
 
-| Env var (on the API server) | Required for | Purpose |
-| --- | --- | --- |
-| `E2E_TEST_ENABLED=true` | all specs | Enables the `x-e2e-test-user` auth bypass and Ora authed test path |
-| `ORA_SESSION_SECRET` | `ora-auth` | Required to mint Ora chat sessions |
-| `DEV_SLOW_BUILD_DELAY_MS` | `stop-button` | Makes the build pipeline sleep so cancellation is observable |
+| Env var (on the API server) | Required for  | Purpose                                                            |
+| --------------------------- | ------------- | ------------------------------------------------------------------ |
+| `E2E_TEST_ENABLED=true`     | all specs     | Enables the `x-e2e-test-user` auth bypass and Ora authed test path |
+| `ORA_SESSION_SECRET`        | `ora-auth`    | Required to mint Ora chat sessions                                 |
+| `DEV_SLOW_BUILD_DELAY_MS`   | `stop-button` | Makes the build pipeline sleep so cancellation is observable       |
 
 Optional on the test runner: `E2E_BASE_URL` (defaults to `http://localhost:80`).
 
@@ -36,7 +36,7 @@ Two complementary bypasses share the exact same guard
 1. **Auth-walled routes** — `attachUser()` reads `x-e2e-test-user` and sets
    `req.userId`, so any `/api/...` route behind the auth wall sees a signed-in
    user.
-2. **Ora chat (`/api/public-ai/chat`)** — this route sits *in front* of the auth
+2. **Ora chat (`/api/public-ai/chat`)** — this route sits _in front_ of the auth
    wall and reads the Clerk session directly, so `attachUser()` never runs for
    it. `resolveAuthedOraUser()`
    (`artifacts/api-server/src/lib/public-ai/authed-user.ts`) honours the same
@@ -46,11 +46,11 @@ Two complementary bypasses share the exact same guard
 
 Send an optional `x-e2e-test-tier` header alongside `x-e2e-test-user`:
 
-| Header value | Effect |
-| --- | --- |
-| `core` or `wave` | Treated as a paid user → Deep mode allowed |
-| `free` | Treated as a free user → Deep mode denied (Instant + upgrade CTA) |
-| (omitted / invalid) | Falls back to the real `user_subscriptions` lookup |
+| Header value        | Effect                                                            |
+| ------------------- | ----------------------------------------------------------------- |
+| `core` or `wave`    | Treated as a paid user → Deep mode allowed                        |
+| `free`              | Treated as a free user → Deep mode denied (Instant + upgrade CTA) |
+| (omitted / invalid) | Falls back to the real `user_subscriptions` lookup                |
 
 This lets a test exercise paid-only gating **without writing to the database**.
 
