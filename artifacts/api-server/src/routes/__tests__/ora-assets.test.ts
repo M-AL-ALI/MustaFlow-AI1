@@ -199,10 +199,20 @@ describe("DELETE /ora/assets/:id", () => {
 describe("chat.ts persists generated outputs to the asset library", () => {
   const chatSrc = readFileSync(path.join(__dirname, "../public-ai/chat.ts"), "utf8");
 
-  it("both file- and image-generation branches call persistOraAsset", () => {
-    const occurrences = chatSrc.match(/persistOraAsset/g) ?? [];
-    // One import + one call in each of the two branches.
-    expect(occurrences.length).toBeGreaterThanOrEqual(2);
+  it("the file_generation branch persists generated files", () => {
+    const branch = chatSrc.slice(chatSrc.indexOf('decision.tool === "file_generation"'));
+    const next = branch.indexOf('decision.tool === "image_generation"');
+    const fileBranch = next > 0 ? branch.slice(0, next) : branch;
+    expect(fileBranch).toContain("persistOraAsset");
+    expect(fileBranch).toContain('kind: "file"');
+  });
+
+  it("the image_generation branch persists generated images", () => {
+    const branch = chatSrc.slice(chatSrc.indexOf('decision.tool === "image_generation"'));
+    const next = branch.indexOf('decision.tool === "search"');
+    const imageBranch = next > 0 ? branch.slice(0, next) : branch;
+    expect(imageBranch).toContain("persistOraAsset");
+    expect(imageBranch).toContain('kind: "image"');
   });
 
   it("generate-file route persists too", () => {
