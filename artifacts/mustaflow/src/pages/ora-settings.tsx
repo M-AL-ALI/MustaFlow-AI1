@@ -9,8 +9,9 @@ import {
   Mic,
   Save,
   Brain,
-  CreditCard,
-  Zap,
+  Gauge,
+  ImageIcon,
+  MessageSquare,
   Loader2,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
@@ -32,12 +33,12 @@ import {
   useGetMyPreferences,
   useUpdateMyPreferences,
   getGetMyPreferencesQueryKey,
-  useGetUserCredits,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { cn } from "@/lib/utils";
+import { authFetch } from "@/lib/api-fetch";
 
 function SectionCard({
   icon: Icon,
@@ -309,43 +310,106 @@ function MemorySection() {
   );
 }
 
-function CreditsSection() {
+interface OraPlanUsage {
+  msgCount: number;
+  msgLimit: number;
+  imageCount?: number;
+  imageLimit?: number;
+  tier?: string;
+}
+
+function planLabel(tier: string | undefined): string {
+  if (tier === "core") return "Core Pack";
+  if (tier === "wave") return "Deep Wave";
+  return "Free";
+}
+
+function remaining(count: number | undefined, limit: number | undefined): number {
+  return Math.max((limit ?? 0) - (count ?? 0), 0);
+}
+
+function PlanLimitsSection() {
   const { isSignedIn } = useClerkUser();
-  const creditsQuery = useGetUserCredits({
-    query: { queryKey: ["/api/me/credits"], enabled: isSignedIn === true },
-  });
-  const balance = creditsQuery.data?.balance ?? null;
+  const [usage, setUsage] = useState<OraPlanUsage | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      try {
+        let res = await authFetch("/api/public-ai/session");
+        if (res.status === 401) {
+          res = await authFetch("/api/public-ai/session", { method: "POST" });
+        }
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as OraPlanUsage;
+        if (!cancelled) setUsage(data);
+      } catch {
+        if (!cancelled) setUsage(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   return (
     <SectionCard
-      icon={CreditCard}
-      title="Credits"
-      description="Credits power Ora's image generation, file creation, and web search."
+      icon={Gauge}
+      title="Plan & daily limits"
+      description="Ora uses plan-based daily message and image limits."
     >
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-            <Zap className="h-4 w-4 text-primary" />
-          </span>
-          <div>
-            <p className="text-sm font-medium text-foreground">Available balance</p>
-            <p className="text-xs text-muted-foreground">Used as you chat and create with Ora.</p>
+      {!isSignedIn ? (
+        <p className="text-sm text-muted-foreground">
+          Sign in to see your Ora plan and daily usage.
+        </p>
+      ) : loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading plan usage
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-border/60 px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Current plan</p>
+            <p className="mt-1 text-lg font-bold text-foreground">{planLabel(usage?.tier)}</p>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-border/60 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <MessageSquare className="h-4 w-4 text-primary" />
+                Messages
+              </div>
+              <p className="mt-2 text-2xl font-bold">
+                {remaining(usage?.msgCount, usage?.msgLimit)}
+              </p>
+              <p className="text-xs text-muted-foreground">left today of {usage?.msgLimit ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-border/60 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <ImageIcon className="h-4 w-4 text-primary" />
+                Images
+              </div>
+              <p className="mt-2 text-2xl font-bold">
+                {remaining(usage?.imageCount, usage?.imageLimit)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                left today of {usage?.imageLimit ?? 0}
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/billing?tab=subscription"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+          >
+            Manage Ora plan
+          </Link>
         </div>
-        <div className="text-right">
-          {creditsQuery.isPending && isSignedIn ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          ) : (
-            <span className="text-lg font-bold text-foreground">{balance ?? 0}</span>
-          )}
-        </div>
-      </div>
-      <Link
-        href="/settings?tab=credits"
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-      >
-        Manage credits & billing
-      </Link>
+      )}
     </SectionCard>
   );
 }
@@ -393,7 +457,7 @@ function OraSettingsInner() {
           <AppearanceSection />
           <VoiceLanguageSection />
           <MemorySection />
-          <CreditsSection />
+          <PlanLimitsSection />
         </div>
       </main>
     </div>

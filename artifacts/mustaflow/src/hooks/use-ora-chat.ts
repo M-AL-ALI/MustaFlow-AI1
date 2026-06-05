@@ -1241,7 +1241,7 @@ export function useOraChat(): UseOraChatReturn {
 
   // Inline image editing: refine an Ora-generated image with a text instruction.
   // Reuses the Image Studio edit pipeline (POST /images/:id/edit → poll status),
-  // which records parent/source/instruction lineage and deducts image credits.
+  // which records parent/source/instruction lineage while Ora consumes daily image quota.
   // The derived image carries its own generated_images id so it is re-editable.
   const editInlineImage = useCallback(
     async (sourceImageId: number, instruction: string) => {
@@ -1266,7 +1266,7 @@ export function useOraChat(): UseOraChatReturn {
         const enqueueRes = await authFetch(`${BASE}/api/images/${sourceImageId}/edit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ instruction: trimmed, quality: "standard" }),
+          body: JSON.stringify({ instruction: trimmed, quality: "standard", origin: "ora" }),
         });
         if (!enqueueRes.ok) {
           const data = (await enqueueRes.json().catch(() => ({}))) as { error?: string };
@@ -1335,7 +1335,7 @@ export function useOraChat(): UseOraChatReturn {
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;
         if (status === 402) {
-          setError(msg ?? "You don't have enough credits to edit this image.");
+          setError(msg ?? "Your plan does not allow this image edit right now.");
         } else if (status === 429) {
           setError(msg ?? "Image limit reached. Please try again later.");
         } else if (status === 422) {

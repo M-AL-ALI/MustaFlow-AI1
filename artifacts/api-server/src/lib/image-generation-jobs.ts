@@ -368,6 +368,8 @@ export interface EnqueueImageEditJobOpts {
   instruction: string;
   quality?: ImageQuality;
   projectId?: number;
+  /** Image Studio edits use credits; Ora inline edits use Ora's daily image quota. */
+  billingMode?: "credits" | "ora";
 }
 
 export async function enqueueImageEditJob(
@@ -380,6 +382,7 @@ export async function enqueueImageEditJob(
     quality = "standard",
     parentAspectRatio,
     projectId,
+    billingMode = "credits",
   } = opts;
 
   // Safety check on instruction text
@@ -391,7 +394,7 @@ export async function enqueueImageEditJob(
     });
   }
 
-  const creditCost = IMAGE_CREDIT_COSTS[quality] ?? 3;
+  const creditCost = billingMode === "ora" ? 0 : (IMAGE_CREDIT_COSTS[quality] ?? 3);
   const providerName = "openai";
   const modelName = process.env.IMAGE_MODEL ?? "gpt-image-1";
 
@@ -418,26 +421,28 @@ export async function enqueueImageEditJob(
   if (!imageRow) throw new Error("Failed to create edit image record");
   const imageId = imageRow.id;
 
-  // Deduct credits atomically
-  const deduction = await deductCreditsAtomic(userId, creditCost, {
-    type: "creative",
-    description: `Image edit (${quality} quality) — image #${imageId}`,
-  });
-
-  if ("insufficient" in deduction) {
-    await db
-      .update(generatedImagesTable)
-      .set({
-        status: "failed",
-        errorMessage: "Insufficient credits",
-        errorCategory: "credits",
-        updatedAt: sql`now()`,
-      })
-      .where(eq(generatedImagesTable.id, imageId));
-    throw Object.assign(new Error("Insufficient credits for image editing"), {
-      code: "INSUFFICIENT_CREDITS",
-      balance: deduction.balance,
+  if (billingMode === "credits") {
+    // Deduct credits atomically
+    const deduction = await deductCreditsAtomic(userId, creditCost, {
+      type: "creative",
+      description: `Image edit (${quality} quality) — image #${imageId}`,
     });
+
+    if ("insufficient" in deduction) {
+      await db
+        .update(generatedImagesTable)
+        .set({
+          status: "failed",
+          errorMessage: "Insufficient credits",
+          errorCategory: "credits",
+          updatedAt: sql`now()`,
+        })
+        .where(eq(generatedImagesTable.id, imageId));
+      throw Object.assign(new Error("Insufficient credits for image editing"), {
+        code: "INSUFFICIENT_CREDITS",
+        balance: deduction.balance,
+      });
+    }
   }
 
   const jobId = randomUUID();
@@ -450,7 +455,12 @@ export async function enqueueImageEditJob(
   };
   jobs.set(jobId, job);
 
-  void runImageEditJob(job, opts, creditCost, CREDITS_ENFORCEMENT_ENABLED);
+  void runImageEditJob(
+    job,
+    opts,
+    creditCost,
+    billingMode === "credits" && CREDITS_ENFORCEMENT_ENABLED,
+  );
 
   return { jobId, imageId };
 }

@@ -8,7 +8,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // state must live inside vi.hoisted to be referenceable from the factory.
 const h = vi.hoisted(() => {
   const selectWhere = vi.fn<(...args: unknown[]) => Promise<unknown[]>>();
-  const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+  const returning = vi.fn().mockResolvedValue([{ messageCount: 1, imageCount: 0 }]);
+  const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+  const updateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
   const capturedInsertValues: Array<Record<string, unknown>> = [];
   const mockDb = {
     select: () => ({
@@ -22,20 +24,23 @@ const h = vi.hoisted(() => {
         return { onConflictDoUpdate: (cfg: unknown) => onConflictDoUpdate(cfg) };
       },
     }),
+    update: () => ({ set: updateSet }),
   };
-  return { selectWhere, onConflictDoUpdate, capturedInsertValues, mockDb };
+  return { selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues, mockDb };
 });
-const { selectWhere, onConflictDoUpdate, capturedInsertValues } = h;
+const { selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues } = h;
 
-vi.mock("@workspace/db", async (importActual) => {
-  const actual = await importActual<typeof import("@workspace/db")>();
-  return { ...actual, db: h.mockDb };
+vi.mock("@workspace/db", async () => {
+  const schema = await import("../../../../../../lib/db/src/schema/index");
+  return { ...schema, db: h.mockDb };
 });
 
 import {
   oraUsageDate,
   getTodayOraUsage,
   checkOraQuota,
+  consumeOraQuota,
+  refundOraQuota,
   incrementOraMessage,
   incrementOraImage,
   oraMessageFields,
@@ -45,6 +50,9 @@ import { MSG_LIMIT_VALUE } from "../../../lib/public-ai/session";
 beforeEach(() => {
   selectWhere.mockReset();
   selectWhere.mockResolvedValue([]);
+  returning.mockReset();
+  returning.mockResolvedValue([{ messageCount: 1, imageCount: 0 }]);
+  updateSet.mockClear();
   onConflictDoUpdate.mockClear();
   capturedInsertValues.length = 0;
 });
@@ -152,6 +160,28 @@ describe("increment helpers — atomic upsert payloads", () => {
       imageCount: 1,
     });
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("consumeOraQuota", () => {
+  it("returns the atomic reservation result from the database", async () => {
+    returning.mockResolvedValue([{ messageCount: 15, imageCount: 0 }]);
+    const res = await consumeOraQuota("u1", "free", "message");
+    expect(res).toEqual({ allowed: true, used: 15, limit: 15, kind: "message" });
+    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks when the conditional update did not reserve capacity", async () => {
+    returning.mockResolvedValue([]);
+    selectWhere.mockResolvedValue([{ messageCount: 15, imageCount: 0 }]);
+    const res = await consumeOraQuota("u1", "free", "message");
+    expect(res.allowed).toBe(false);
+    expect(res.used).toBe(15);
+  });
+
+  it("refunds quota best-effort without throwing", async () => {
+    await refundOraQuota("u1", "image");
+    expect(updateSet).toHaveBeenCalledTimes(1);
   });
 });
 

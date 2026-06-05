@@ -2,7 +2,13 @@ import { describe, it, expect, afterAll } from "vitest";
 import express from "express";
 import request from "supertest";
 import { and, eq, like } from "drizzle-orm";
-import { db, generatedImagesTable, creditTransactionsTable, userCreditsTable } from "@workspace/db";
+import {
+  db,
+  generatedImagesTable,
+  creditTransactionsTable,
+  userCreditsTable,
+  oraDailyUsageTable,
+} from "@workspace/db";
 import imageGenRouter from "../image-gen";
 import { CREDITS_ENFORCEMENT_ENABLED } from "../credits";
 
@@ -68,6 +74,7 @@ afterAll(async () => {
     await db.delete(generatedImagesTable).where(eq(generatedImagesTable.userId, u));
     await db.delete(creditTransactionsTable).where(eq(creditTransactionsTable.userId, u));
     await db.delete(userCreditsTable).where(eq(userCreditsTable.userId, u));
+    await db.delete(oraDailyUsageTable).where(eq(oraDailyUsageTable.userId, u));
   }
 });
 
@@ -138,6 +145,45 @@ describe("POST /images/:id/edit — inline image editing", () => {
       expect(debit).toBeDefined();
       expect(debit!.type).toBe("creative");
     }
+  });
+
+  it("Ora-originated edits use Ora daily image quota instead of credits", async () => {
+    const parentId = await insertParentImage(USER_A);
+
+    const res = await request(appAs(USER_A)).post(`/images/${parentId}/edit`).send({
+      instruction: "make the water look like glass",
+      quality: "standard",
+      origin: "ora",
+    });
+
+    expect(res.status).toBe(202);
+    expect(res.body.creditCost).toBe(0);
+    expect(res.body.imageCount).toBe(1);
+    expect(res.body.imageLimit).toBe(3);
+
+    const childId = res.body.imageId as number;
+    const [child] = await db
+      .select()
+      .from(generatedImagesTable)
+      .where(eq(generatedImagesTable.id, childId));
+
+    expect(child.userId).toBe(USER_A);
+    expect(child.parentImageId).toBe(parentId);
+    expect(child.sourceType).toBe("edited");
+    expect(child.editInstruction).toBe("make the water look like glass");
+    expect(child.creditCost).toBe(0);
+  });
+
+  it("rejects Ora-origin quota mode for non-Ora image lineage", async () => {
+    const parentId = await insertParentImage(USER_A, { sourceType: "uploaded", creditCost: 0 });
+
+    const res = await request(appAs(USER_A)).post(`/images/${parentId}/edit`).send({
+      instruction: "make the sky orange",
+      quality: "standard",
+      origin: "ora",
+    });
+
+    expect(res.status).toBe(403);
   });
 
   it("returns 404 for a non-existent image id", async () => {

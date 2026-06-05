@@ -47,6 +47,8 @@ router.post("/public-ai/session", oraSessionLimiter, async (req, res) => {
       msgLimit: usage.messageLimit,
       imageCount: usage.imageCount,
       imageLimit: usage.imageLimit,
+      tier: authed.tier,
+      isPaid: authed.isPaid,
     });
     return;
   }
@@ -83,6 +85,7 @@ router.get("/public-ai/session", async (req, res) => {
     imageLimit: daily ? daily.imageLimit : IMAGE_LIMIT_VALUE,
     imageAnalysisCount: session.imageAnalysisCount,
     imageAnalysisLimit: IMAGE_ANALYSIS_LIMIT_VALUE,
+    ...(authed ? { tier: authed.tier, isPaid: authed.isPaid } : {}),
   });
 });
 

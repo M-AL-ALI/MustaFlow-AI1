@@ -33,6 +33,8 @@ import {
 import { storeUploadedImage } from "../lib/image-storage";
 import { IMAGE_CREDIT_COSTS } from "./image-credits";
 import { logger } from "../lib/logger";
+import { resolveTierForUser } from "../lib/public-ai/authed-user";
+import { consumeOraQuota, refundOraQuota } from "../lib/public-ai/ora-usage";
 
 const router: IRouter = Router();
 
@@ -492,6 +494,7 @@ const ImageEditBody = z.object({
   instruction: z.string().min(1).max(4000),
   quality: z.enum(["standard", "high"]).default("standard"),
   projectId: z.number().int().optional(),
+  origin: z.enum(["image_studio", "ora"]).optional(),
 });
 
 router.post("/images/:id/edit", async (req, res): Promise<void> => {
@@ -520,7 +523,8 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
     return;
   }
 
-  const { instruction, quality, projectId } = parsed.data;
+  const { instruction, quality, projectId, origin } = parsed.data;
+  const isOraEdit = origin === "ora";
 
   // Fetch parent image and verify ownership
   const [parent] = await db
@@ -530,6 +534,9 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       storageKey: generatedImagesTable.storageKey,
       aspectRatio: generatedImagesTable.aspectRatio,
       status: generatedImagesTable.status,
+      projectId: generatedImagesTable.projectId,
+      creditCost: generatedImagesTable.creditCost,
+      sourceType: generatedImagesTable.sourceType,
     })
     .from(generatedImagesTable)
     .where(
@@ -555,7 +562,37 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
     return;
   }
 
+  if (
+    isOraEdit &&
+    (parent.projectId !== null ||
+      parent.creditCost !== 0 ||
+      (parent.sourceType !== "generated" && parent.sourceType !== "edited"))
+  ) {
+    res.status(403).json({ error: "This image is not eligible for Ora inline editing." });
+    return;
+  }
+
+  let reservedOraImageQuota = false;
+  let oraImageCount: number | undefined;
+  let oraImageLimit: number | undefined;
   try {
+    if (isOraEdit) {
+      const oraUser = await resolveTierForUser(userId);
+      const quota = await consumeOraQuota(userId, oraUser.tier, "image");
+      if (!quota.allowed) {
+        res.status(429).json({
+          error: `You've reached today's image limit (${quota.limit}/day) on your plan. Upgrade for more daily images, or come back tomorrow.`,
+          upgradeCta: true,
+          imageCount: quota.used,
+          imageLimit: quota.limit,
+        });
+        return;
+      }
+      reservedOraImageQuota = true;
+      oraImageCount = quota.used;
+      oraImageLimit = quota.limit;
+    }
+
     const { jobId, imageId } = await enqueueImageEditJob({
       userId,
       parentImageId: parentId,
@@ -565,15 +602,18 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       instruction: instruction.trim(),
       quality,
       projectId,
+      billingMode: isOraEdit ? "ora" : "credits",
     });
 
     res.status(202).json({
       jobId,
       imageId,
-      creditCost: IMAGE_CREDIT_COSTS[quality] ?? 3,
+      creditCost: isOraEdit ? 0 : (IMAGE_CREDIT_COSTS[quality] ?? 3),
       status: "pending",
+      ...(isOraEdit ? { imageCount: oraImageCount, imageLimit: oraImageLimit } : {}),
     });
   } catch (err) {
+    if (reservedOraImageQuota) await refundOraQuota(userId, "image");
     const e = err as {
       code?: string;
       message?: string;

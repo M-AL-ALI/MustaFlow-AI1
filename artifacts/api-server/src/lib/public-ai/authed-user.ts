@@ -24,7 +24,7 @@ export interface AuthedOraUser {
  * Resolve the effective subscription tier for a user from user_subscriptions.
  * Defaults to "free" if there is no active row or the table is unavailable.
  */
-async function resolveTierForUser(userId: string): Promise<AuthedOraUser> {
+export async function resolveTierForUser(userId: string): Promise<AuthedOraUser> {
   let tier = "free";
   try {
     const [sub] = await db
