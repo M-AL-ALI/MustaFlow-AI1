@@ -1,4 +1,5 @@
 import { db, oraAssetsTable, type OraAssetKind } from "@workspace/db";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 /**
@@ -7,6 +8,27 @@ import { logger } from "./logger";
  * in-chat copy still works) rather than bloating the table.
  */
 const MAX_ASSET_BYTES = 12 * 1024 * 1024; // 12 MB of decoded bytes
+
+/**
+ * Per-user total storage cap for the durable Ora library. The base64 `data`
+ * blobs live in Postgres, so an unbounded library would grow the table without
+ * limit. When a user is at/over this cap we skip persisting (the in-chat copy
+ * still works) and surface a clear reason via the returned result.
+ */
+export const PER_USER_STORAGE_BYTES = 200 * 1024 * 1024; // 200 MB of decoded bytes per user
+
+/**
+ * Sum the decoded bytes of a user's live (non-deleted) library assets.
+ */
+export async function getUserStorageBytes(userId: string): Promise<number> {
+  const [row] = await db
+    .select({
+      total: sql<number>`COALESCE(SUM(${oraAssetsTable.sizeBytes}), 0)`,
+    })
+    .from(oraAssetsTable)
+    .where(and(eq(oraAssetsTable.userId, userId), isNull(oraAssetsTable.deletedAt)));
+  return Number(row?.total ?? 0);
+}
 
 export interface PersistOraAssetInput {
   userId: string;
@@ -47,6 +69,20 @@ export async function persistOraAsset(input: PersistOraAssetInput): Promise<numb
       logger.warn(
         { component: "ora-assets", sizeBytes, fileName: input.fileName },
         "Skipping oversized Ora asset",
+      );
+      return null;
+    }
+    const usedBytes = await getUserStorageBytes(input.userId);
+    if (usedBytes + sizeBytes > PER_USER_STORAGE_BYTES) {
+      logger.warn(
+        {
+          component: "ora-assets",
+          userId: input.userId,
+          usedBytes,
+          sizeBytes,
+          capBytes: PER_USER_STORAGE_BYTES,
+        },
+        "Skipping Ora asset: per-user storage quota exceeded",
       );
       return null;
     }

@@ -26,9 +26,8 @@ import {
   type SubscriptionTier,
 } from "@workspace/db";
 import {
-  checkOraQuota,
-  incrementOraMessage,
-  incrementOraImage,
+  consumeOraQuota,
+  refundOraQuota,
   getTodayOraUsage,
   type OraQuotaKind,
 } from "../../lib/public-ai/ora-usage";
@@ -282,9 +281,12 @@ router.post("/public-ai/chat", async (req, res) => {
   // Builder credit wallet. Image generation/edit draws on the daily IMAGE
   // bucket; everything else (answer, deep, search, file gen, analysis) draws on
   // the daily MESSAGE bucket. Uploads are unlimited (handled in the upload route).
+  // Atomically reserve the quota slot up-front so concurrent requests cannot
+  // overshoot the tier limit. Every branch below that does NOT complete the
+  // metered action MUST refund this reservation (see refundOraQuota calls).
   const quotaKind: OraQuotaKind = decision.tool === "image_generation" ? "image" : "message";
   if (authed) {
-    const quota = await checkOraQuota(authed.userId, authed.tier, quotaKind);
+    const quota = await consumeOraQuota(authed.userId, authed.tier, quotaKind);
     if (!quota.allowed) {
       const usage = await oraUsageResponse(authed, session.msgCount);
       res.status(429).json({
@@ -307,7 +309,6 @@ router.post("/public-ai/chat", async (req, res) => {
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     try {
       const result = await generateFileFromPrompt(message, detectedFormat, history, language);
-      if (authed) await incrementOraMessage(authed.userId);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -343,6 +344,7 @@ router.post("/public-ai/chat", async (req, res) => {
         })();
       }
     } catch (err) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
       logger.error(
         { component: "ora-chat-file", format: detectedFormat, err },
         "Auto file generation failed",
@@ -355,8 +357,23 @@ router.post("/public-ai/chat", async (req, res) => {
   // ── Image generation tool (inline, signed-in users) ─────────────────────────
   // Anonymous visitors are caught by checkToolAccess above (image_signin_required).
   if (decision.tool === "image_generation") {
-    const { generateImage, isImageProviderConfigured } = await import("../../lib/image-provider");
+    let imageProviderModule: typeof import("../../lib/image-provider");
+    try {
+      imageProviderModule = await import("../../lib/image-provider");
+    } catch (importErr) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      logger.error(
+        { component: "ora-chat-image", err: importErr },
+        "Failed to load image provider module",
+      );
+      res
+        .status(500)
+        .json({ error: "Image generation is temporarily unavailable. Please try again." });
+      return;
+    }
+    const { generateImage, isImageProviderConfigured } = imageProviderModule;
     if (!isImageProviderConfigured()) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -422,7 +439,6 @@ router.post("/public-ai/chat", async (req, res) => {
           );
         }
       }
-      if (authed) await incrementOraImage(authed.userId);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -471,6 +487,7 @@ router.post("/public-ai/chat", async (req, res) => {
         })();
       }
     } catch (err) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
       logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
       res.status(500).json({ error: "Failed to generate the image. Please try again." });
     }
@@ -480,9 +497,21 @@ router.post("/public-ai/chat", async (req, res) => {
   // ── Web search tool (live, grounded, cited) ─────────────────────────────────
   // Anonymous visitors are caught by checkToolAccess above (search_signin_required).
   if (decision.tool === "search") {
-    const { isWebSearchConfigured, runOraWebSearch } =
-      await import("../../lib/public-ai/web-search");
+    let webSearchModule: typeof import("../../lib/public-ai/web-search");
+    try {
+      webSearchModule = await import("../../lib/public-ai/web-search");
+    } catch (importErr) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      logger.error(
+        { component: "ora-chat-search", err: importErr },
+        "Failed to load web search module",
+      );
+      res.status(500).json({ error: "Web search is temporarily unavailable. Please try again." });
+      return;
+    }
+    const { isWebSearchConfigured, runOraWebSearch } = webSearchModule;
     if (!isWebSearchConfigured()) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -502,7 +531,6 @@ router.post("/public-ai/chat", async (req, res) => {
     ).filter((m) => m.content.trim().length > 0);
     try {
       const result = await runOraWebSearch({ query: message, history, language });
-      if (authed) await incrementOraMessage(authed.userId);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -512,6 +540,7 @@ router.post("/public-ai/chat", async (req, res) => {
         ...usage,
       });
     } catch (err) {
+      if (authed) await refundOraQuota(authed.userId, quotaKind);
       logger.error({ component: "ora-chat-search", err }, "Ora web search failed");
       res.status(500).json({ error: "Web search failed. Please try again." });
     }
@@ -575,7 +604,18 @@ router.post("/public-ai/chat", async (req, res) => {
   ].join("\n");
 
   const recentHistory = historyMessages.slice(-4);
-  const { createChatCompletion } = await import("../../lib/ai-providers");
+  let aiProvidersModule: typeof import("../../lib/ai-providers");
+  try {
+    aiProvidersModule = await import("../../lib/ai-providers");
+  } catch (importErr) {
+    if (authed) await refundOraQuota(authed.userId, quotaKind);
+    logger.error({ component: "ora-chat", err: importErr }, "Failed to load AI providers module");
+    res
+      .status(502)
+      .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });
+    return;
+  }
+  const { createChatCompletion } = aiProvidersModule;
 
   // Run the main reply and suggestion generation in parallel to reduce latency.
   // Suggestions use the conversation history + current message + topic context;
@@ -668,6 +708,7 @@ router.post("/public-ai/chat", async (req, res) => {
   );
 
   if (!reply) {
+    if (authed) await refundOraQuota(authed.userId, quotaKind);
     res
       .status(502)
       .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });
@@ -695,10 +736,9 @@ router.post("/public-ai/chat", async (req, res) => {
     );
   }
 
-  // Count this against the user's daily MESSAGE quota now that the reply
-  // succeeded, so a failed generation never costs the user a message.
-  if (authed) await incrementOraMessage(authed.userId);
-
+  // The daily MESSAGE quota was already reserved atomically at the top of the
+  // handler (consumeOraQuota). Since the reply succeeded we keep the reservation
+  // — no extra increment here, and no refund.
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 

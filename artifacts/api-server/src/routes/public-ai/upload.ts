@@ -77,12 +77,18 @@ router.post(
 
     // ── Image branch ────────────────────────────────────────────────────────
     if (isImageExtension(file.originalname)) {
-      // Apply image-specific per-IP rate limit inline (middleware already ran oraUploadLimiter)
-      // The oraImageUploadLimiter is applied as a separate middleware via a sub-handler.
-      await new Promise<void>((resolve) => {
-        oraImageUploadLimiter(req, res, () => resolve());
+      // Apply the image-specific per-IP rate limit inline (the broader
+      // oraUploadLimiter already ran as route middleware). createLimiter is
+      // SYNCHRONOUS: it either calls next() (under the limit) or sends a 429
+      // itself WITHOUT calling next(). The old `new Promise` that resolved only
+      // from the next() callback therefore hung forever on the 429 path. A
+      // synchronous "passed" flag captures whether next() fired; if not (or a
+      // response was already sent), the limiter handled the 429 and we return.
+      let passedImageLimiter = false;
+      oraImageUploadLimiter(req, res, () => {
+        passedImageLimiter = true;
       });
-      if (res.headersSent) return;
+      if (!passedImageLimiter || res.headersSent) return;
 
       // Uploads are unlimited for signed-in users — Ora meters them only by the
       // daily message/image quotas, never by upload counts. Anonymous visitors

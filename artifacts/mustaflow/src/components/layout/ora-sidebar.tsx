@@ -10,8 +10,6 @@ import {
   LogOut,
   ChevronDown,
   ChevronRight,
-  Zap,
-  AlertTriangle,
   Plus,
   Pencil,
   Trash2,
@@ -19,6 +17,7 @@ import {
   X,
   Folder,
   MessageSquare,
+  Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -34,18 +33,26 @@ const NAV_ITEMS = [
   { name: "Settings", href: "/ora/settings", icon: Settings },
 ];
 
-const LOW_CREDITS_THRESHOLD = 10;
+interface OraDailyUsage {
+  messageCount: number;
+  messageLimit: number;
+  imageCount: number;
+  imageLimit: number;
+}
 
-function OraCreditsWidget() {
+// Ora is metered by DAILY message/image quotas per tier — NOT the AI Builder
+// credit wallet. This widget intentionally reads /api/public-ai/usage and must
+// never call /api/credits or link to Builder billing.
+function OraUsageWidget() {
   const { isSignedIn } = useClerkUser();
-  const [balance, setBalance] = useState<number | null>(null);
+  const [usage, setUsage] = useState<OraDailyUsage | null>(null);
 
-  const fetchBalance = useCallback(async () => {
+  const fetchUsage = useCallback(async () => {
     try {
-      const res = await authFetch("/api/credits");
+      const res = await authFetch("/api/public-ai/usage");
       if (res.ok) {
-        const data = (await res.json()) as { balance: number };
-        setBalance(data.balance);
+        const data = (await res.json()) as OraDailyUsage;
+        setUsage(data);
       }
     } catch {
       /* ignore */
@@ -54,46 +61,53 @@ function OraCreditsWidget() {
 
   useEffect(() => {
     if (!isSignedIn) return;
-    void fetchBalance();
-    const id = setInterval(() => void fetchBalance(), 60_000);
-    const onFocus = () => void fetchBalance();
+    void fetchUsage();
+    const id = setInterval(() => void fetchUsage(), 60_000);
+    const onFocus = () => void fetchUsage();
     window.addEventListener("focus", onFocus);
     return () => {
       clearInterval(id);
       window.removeEventListener("focus", onFocus);
     };
-  }, [isSignedIn, fetchBalance]);
+  }, [isSignedIn, fetchUsage]);
 
-  if (!isSignedIn || balance === null) return null;
+  if (!isSignedIn || !usage) return null;
 
-  const isLow = balance < LOW_CREDITS_THRESHOLD;
+  const msgRemaining = Math.max(0, usage.messageLimit - usage.messageCount);
+  const msgLow = msgRemaining <= Math.max(1, Math.ceil(usage.messageLimit * 0.1));
 
   return (
     <div className="px-3 py-2">
-      <Link href="/billing">
-        <div
-          className={cn(
-            "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer border",
-            isLow
-              ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-600 hover:bg-yellow-500/15"
-              : "bg-muted/50 border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-          )}
-        >
-          {isLow ? (
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          ) : (
-            <Zap className="h-3.5 w-3.5 shrink-0" />
-          )}
+      <div
+        className={cn(
+          "rounded-lg px-3 py-2.5 text-xs border",
+          msgLow
+            ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-600"
+            : "bg-muted/50 border-border text-muted-foreground",
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-3.5 w-3.5 shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="font-semibold">{balance.toLocaleString()}</span>
-            <span className="ml-1">credits</span>
-            {isLow && (
-              <p className="text-[10px] leading-tight mt-0.5 font-normal">Running low — buy more</p>
-            )}
+            <span className="font-semibold text-foreground">{usage.messageCount}</span>
+            <span className="ml-1">/ {usage.messageLimit} messages today</span>
           </div>
-          <CreditCard className="h-3 w-3 shrink-0 opacity-60" />
         </div>
-      </Link>
+        {usage.imageLimit > 0 && (
+          <div className="flex items-center gap-2 mt-1.5">
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground">{usage.imageCount}</span>
+              <span className="ml-1">/ {usage.imageLimit} images today</span>
+            </div>
+          </div>
+        )}
+        {msgLow && (
+          <p className="text-[10px] leading-tight mt-1.5 font-normal">
+            Almost at today&apos;s limit — resets tomorrow
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -617,8 +631,8 @@ export function OraSidebar({ onNewConversation }: OraSidebarProps) {
 
         <hr className="border-border mx-3" />
 
-        {/* Bottom: credits + user */}
-        <OraCreditsWidget />
+        {/* Bottom: Ora daily usage + user */}
+        <OraUsageWidget />
         <OraUserSection />
       </div>
     </>

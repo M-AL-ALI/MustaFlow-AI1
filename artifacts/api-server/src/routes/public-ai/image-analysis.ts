@@ -11,11 +11,7 @@ import {
 import { getImage } from "../../lib/public-ai/image-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import {
-  checkOraQuota,
-  incrementOraMessage,
-  getTodayOraUsage,
-} from "../../lib/public-ai/ora-usage";
+import { consumeOraQuota, refundOraQuota, getTodayOraUsage } from "../../lib/public-ai/ora-usage";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
 
 const router = Router();
@@ -85,22 +81,12 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     return;
   }
 
-  // Check the usage cap BEFORE doing any model work; only increment after a
-  // successful model call. Image analysis counts against the signed-in user's
-  // daily MESSAGE bucket; anonymous visitors keep the per-session cap.
+  // Resolve the signed-in Ora user up-front. The anonymous per-session cap is a
+  // side-effect-free read, so it can be signaled early; only the authed daily
+  // quota is RESERVED (consumed), and that reservation is deferred until after
+  // cheap validation so rejected/stale requests never consume a user's allowance.
   const authed = await resolveAuthedOraUser(req);
-  if (authed) {
-    const quota = await checkOraQuota(authed.userId, authed.tier, "message");
-    if (!quota.allowed) {
-      res.status(429).json({
-        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
-        upgradeCta: true,
-        imageAnalysisCount: quota.used,
-        imageAnalysisLimit: quota.limit,
-      });
-      return;
-    }
-  } else if (session.imageAnalysisCount >= IMAGE_ANALYSIS_LIMIT_VALUE) {
+  if (!authed && session.imageAnalysisCount >= IMAGE_ANALYSIS_LIMIT_VALUE) {
     res.status(429).json({
       error:
         "You have reached the image analysis limit for this session. Start a new session to analyze more images.",
@@ -124,6 +110,22 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
       error: "This image is no longer available. It may have expired. Please upload it again.",
     });
     return;
+  }
+
+  // Image analysis counts against the signed-in user's daily MESSAGE bucket.
+  // consumeOraQuota is atomic; the reservation is held below and only released
+  // via refundOraQuota on model failure.
+  if (authed) {
+    const quota = await consumeOraQuota(authed.userId, authed.tier, "message");
+    if (!quota.allowed) {
+      res.status(429).json({
+        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        upgradeCta: true,
+        imageAnalysisCount: quota.used,
+        imageAnalysisLimit: quota.limit,
+      });
+      return;
+    }
   }
 
   const systemPrompt = buildImageSystemPrompt(language);
@@ -201,6 +203,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
       },
       "Ora image-analysis model failure",
     );
+    if (authed) await refundOraQuota(authed.userId, "message");
     res.status(502).json({
       error:
         "Image analysis is temporarily unavailable. Please try again in a moment or describe your question in text instead.",
@@ -208,8 +211,8 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     return;
   }
 
-  // Increment usage ONLY after a successful model call.
-  if (authed) await incrementOraMessage(authed.userId);
+  // The MESSAGE quota was reserved atomically up-front (consumeOraQuota); the
+  // model call succeeded so we keep the reservation — no extra increment.
   const { token, payload } = incrementImageAnalysisCount(session);
   setSessionCookie(res, token);
   const dailyUsage = authed ? await getTodayOraUsage(authed.userId, authed.tier) : null;

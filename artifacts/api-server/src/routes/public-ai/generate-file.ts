@@ -10,11 +10,7 @@ import {
 import { scanUserInput } from "../../lib/public-ai/prompt";
 import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import {
-  checkOraQuota,
-  incrementOraMessage,
-  oraMessageFields,
-} from "../../lib/public-ai/ora-usage";
+import { consumeOraQuota, refundOraQuota, oraMessageFields } from "../../lib/public-ai/ora-usage";
 import { persistOraAsset } from "../../lib/ora-assets";
 
 const router = Router();
@@ -52,21 +48,12 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  // Ora is metered by daily quotas per tier for signed-in users; anonymous
-  // visitors keep the per-session cap. File generation draws on the MESSAGE bucket.
+  // Resolve the signed-in Ora user up-front. The anonymous per-session cap is a
+  // side-effect-free read, so it can be signaled early; only the authed daily
+  // quota is RESERVED (consumed), and that reservation is deferred until after
+  // cheap validation so rejected requests never consume a user's allowance.
   const authed = await resolveAuthedOraUser(req);
-  if (authed) {
-    const quota = await checkOraQuota(authed.userId, authed.tier, "message");
-    if (!quota.allowed) {
-      res.status(429).json({
-        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
-        upgradeCta: true,
-        msgCount: quota.used,
-        msgLimit: quota.limit,
-      });
-      return;
-    }
-  } else if (session.msgCount >= MSG_LIMIT_VALUE) {
+  if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
       error: "You have reached the message limit for this session.",
       msgCount: session.msgCount,
@@ -78,6 +65,21 @@ router.post("/public-ai/generate-file", async (req, res) => {
   if (!scanUserInput(message)) {
     res.status(400).json({ error: "Message contains patterns that cannot be processed." });
     return;
+  }
+
+  // File generation draws on the daily MESSAGE bucket. consumeOraQuota is atomic;
+  // the reservation is held below and only released via refundOraQuota on failure.
+  if (authed) {
+    const quota = await consumeOraQuota(authed.userId, authed.tier, "message");
+    if (!quota.allowed) {
+      res.status(429).json({
+        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        upgradeCta: true,
+        msgCount: quota.used,
+        msgLimit: quota.limit,
+      });
+      return;
+    }
   }
 
   const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
@@ -99,7 +101,6 @@ router.post("/public-ai/generate-file", async (req, res) => {
       });
     }
 
-    if (authed) await incrementOraMessage(authed.userId);
     const { token, payload } = incrementMessageCount(session);
     setSessionCookie(res, token);
 
@@ -122,6 +123,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       ...usage,
     });
   } catch (err) {
+    if (authed) await refundOraQuota(authed.userId, "message");
     logger.error({ component: "ora-generate-file", format, err }, "File generation failed");
     res.status(500).json({ error: "Failed to generate file. Please try again." });
   }

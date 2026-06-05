@@ -105,6 +105,17 @@ function OraImageThumb({ assetId, alt }: { assetId: number; alt: string }) {
   return <img src={url} alt={alt} className="h-full w-full object-cover" />;
 }
 
+const PAGE_SIZE = 30;
+
+interface OraAssetsResponse {
+  assets: OraAsset[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  storage: { usedBytes: number; capBytes: number };
+}
+
 function OraLibraryInner() {
   const { toast } = useToast();
   const { newConversation } = useOraConversations();
@@ -112,20 +123,45 @@ function OraLibraryInner() {
   const [assets, setAssets] = useState<OraAsset[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
   const downloadingRef = useRef<Set<number>>(new Set());
+
+  const fetchPage = useCallback(async (offset: number): Promise<OraAssetsResponse> => {
+    const res = await authFetch(`${BASE}/api/ora/assets?limit=${PAGE_SIZE}&offset=${offset}`);
+    if (!res.ok) throw new Error(String(res.status));
+    return (await res.json()) as OraAssetsResponse;
+  }, []);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await authFetch(`${BASE}/api/ora/assets`);
-      if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { assets: OraAsset[] };
+      const data = await fetchPage(0);
       setAssets(data.assets);
+      setHasMore(data.hasMore);
+      setStorage(data.storage);
     } catch {
       setError("Failed to load your library. Please try again.");
       setAssets([]);
+      setHasMore(false);
     }
-  }, []);
+  }, [fetchPage]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await fetchPage(assets?.length ?? 0);
+      setAssets((prev) => [...(prev ?? []), ...data.assets]);
+      setHasMore(data.hasMore);
+      setStorage(data.storage);
+    } catch {
+      toast({ title: "Could not load more assets", variant: "destructive" });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [assets, fetchPage, loadingMore, toast]);
 
   useEffect(() => {
     void load();
@@ -232,6 +268,11 @@ function OraLibraryInner() {
                 </p>
               </div>
             </div>
+            {storage && storage.usedBytes > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Storage used: {formatBytes(storage.usedBytes)} of {formatBytes(storage.capBytes)}
+              </p>
+            )}
           </div>
 
           {assets === null && (
@@ -341,6 +382,20 @@ function OraLibraryInner() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {assets !== null && assets.length > 0 && hasMore && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-lg border border-border/70 px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                {loadingMore && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Load more
+              </button>
             </div>
           )}
         </div>

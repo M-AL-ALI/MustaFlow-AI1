@@ -127,6 +127,105 @@ export async function incrementOraImage(userId: string): Promise<void> {
 }
 
 /**
+ * Atomically reserve one unit of today's quota for the given bucket. Combines
+ * the check + increment into a SINGLE SQL statement so concurrent requests can
+ * never overshoot the tier limit (the previous check-then-increment pattern
+ * allowed N concurrent callers to all pass the read before any of them wrote).
+ *
+ * Semantics: an INSERT ... ON CONFLICT DO UPDATE ... WHERE count < limit.
+ *  - No row for today yet  → INSERT a row with count = 1 (allowed).
+ *  - Row exists, count < limit → DO UPDATE bumps count, RETURNING the new value
+ *    (allowed).
+ *  - Row exists, count >= limit → the setWhere excludes the row, nothing is
+ *    written, RETURNING is empty (NOT allowed).
+ *
+ * Callers MUST refund (see refundOraQuota) on any path where the metered action
+ * does not actually complete (model failure, capability not configured, etc.),
+ * preserving the "a failed generation never costs the user" guarantee while
+ * still reserving the slot for the duration of the request.
+ *
+ * Fail-open on DB error: if the usage table is unavailable we allow the request
+ * rather than hard-blocking Ora (matches the read-path degradation elsewhere).
+ */
+export async function consumeOraQuota(
+  userId: string,
+  tier: string,
+  kind: OraQuotaKind,
+): Promise<OraQuotaResult> {
+  const date = oraUsageDate();
+  const key = tierKey(tier);
+  const isMessage = kind === "message";
+  const limit = isMessage ? TIER_DAILY_MESSAGE_LIMIT[key] : TIER_DAILY_IMAGE_LIMIT[key];
+  try {
+    const rows = await db
+      .insert(oraDailyUsageTable)
+      .values({
+        userId,
+        usageDate: date,
+        messageCount: isMessage ? 1 : 0,
+        imageCount: isMessage ? 0 : 1,
+      })
+      .onConflictDoUpdate({
+        target: [oraDailyUsageTable.userId, oraDailyUsageTable.usageDate],
+        set: isMessage
+          ? { messageCount: sql`${oraDailyUsageTable.messageCount} + 1`, updatedAt: sql`now()` }
+          : { imageCount: sql`${oraDailyUsageTable.imageCount} + 1`, updatedAt: sql`now()` },
+        setWhere: isMessage
+          ? sql`${oraDailyUsageTable.messageCount} < ${limit}`
+          : sql`${oraDailyUsageTable.imageCount} < ${limit}`,
+      })
+      .returning({
+        messageCount: oraDailyUsageTable.messageCount,
+        imageCount: oraDailyUsageTable.imageCount,
+      });
+    if (rows.length > 0) {
+      const used = isMessage ? rows[0]!.messageCount : rows[0]!.imageCount;
+      return { allowed: true, used, limit, kind };
+    }
+    // setWhere excluded the row → already at limit. Read the current snapshot so
+    // the response can show the accurate used/limit values.
+    const snap = await getTodayOraUsage(userId, tier);
+    return {
+      allowed: false,
+      used: isMessage ? snap.messageCount : snap.imageCount,
+      limit,
+      kind,
+    };
+  } catch {
+    // Usage table unavailable — fail open rather than blocking Ora.
+    return { allowed: true, used: 0, limit, kind };
+  }
+}
+
+/**
+ * Give back one unit previously reserved by consumeOraQuota when the metered
+ * action did not complete. Floored at 0 so a refund can never drive the counter
+ * negative. Best-effort: never throws into the request path.
+ */
+export async function refundOraQuota(userId: string, kind: OraQuotaKind): Promise<void> {
+  const date = oraUsageDate();
+  const isMessage = kind === "message";
+  try {
+    await db
+      .update(oraDailyUsageTable)
+      .set(
+        isMessage
+          ? {
+              messageCount: sql`GREATEST(${oraDailyUsageTable.messageCount} - 1, 0)`,
+              updatedAt: sql`now()`,
+            }
+          : {
+              imageCount: sql`GREATEST(${oraDailyUsageTable.imageCount} - 1, 0)`,
+              updatedAt: sql`now()`,
+            },
+      )
+      .where(and(eq(oraDailyUsageTable.userId, userId), eq(oraDailyUsageTable.usageDate, date)));
+  } catch {
+    // Best-effort refund — a missed refund only risks under-counting one unit.
+  }
+}
+
+/**
  * Message-bucket usage fields for the client. Signed-in users get today's DAILY
  * message usage + tier limit; anonymous visitors get the per-session counter.
  * Accepts a structural {userId, tier} so callers can pass an AuthedOraUser.

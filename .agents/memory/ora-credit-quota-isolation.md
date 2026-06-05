@@ -17,8 +17,33 @@ separate credit wallet. These two must never be coupled again.
 - Anonymous visitors are unchanged: they keep the per-session caps (msg/file/image).
 
 **Why:** the prior design deducted Builder credits for Ora usage, which conflated
-two unrelated products. Any future Ora endpoint must call `checkOraQuota` +
-`incrementOraMessage`/`incrementOraImage`, never `deductCreditsAtomic`.
+two unrelated products. Any future Ora endpoint must meter through the daily-quota
+helpers in `ora-usage.ts`, never `deductCreditsAtomic`.
+
+## Quota enforcement must be atomic reserve-then-refund, reserved AFTER validation
+
+For the authed daily quota, use the **atomic** reserve helper (increment-if-under-
+limit in one SQL statement) and **refund on every path that does not complete the
+metered action** — model 502s, "not configured" branches, `catch` blocks, and even
+a bare `await import("../../lib/<module>")` that could throw (wrap those in
+try/catch + refund). A check-then-increment pattern races: concurrent requests
+overshoot the tier limit.
+
+Two ordering rules that are easy to get wrong:
+
+1. **Reserve AFTER cheap deterministic validation** (`scanUserInput`, `getFile`/
+   `getImage` existence, dataset-vs-doc checks). Reserving before a 400/404 branch
+   leaks a daily slot on every rejected/stale request.
+2. **The anonymous per-session cap is a side-effect-free read — keep it EARLY.**
+   Only the authed reservation (consume) is deferred. Collapsing both into one
+   `if (authed) {...} else if (session.count >= LIMIT)` block placed after
+   validation regresses anon behavior: an at-limit anon user with a bad
+   `fileRef` then gets 404 instead of the expected 429 (a phase3 route test pins
+   this). Split them: anon-limit 429 early, authed consume late.
+
+**How to apply:** when adding/auditing any metered Ora route, confirm there is no
+`return` between the reservation and the model call that lacks a refund, and that
+the anon cap is signaled before file/image validation.
 
 ## Caveat 1 — `/images/:id/edit` is SHARED with Image Studio and still charges credits
 

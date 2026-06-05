@@ -86,4 +86,26 @@ router.get("/public-ai/session", async (req, res) => {
   });
 });
 
+/**
+ * Today's Ora DAILY usage for the signed-in user. This is the ONLY usage signal
+ * the standalone Ora UI surfaces — it must NEVER read the AI Builder credit
+ * wallet. Unlike GET /public-ai/session it does not require an ora-session
+ * cookie, so the sidebar usage indicator works regardless of chat session
+ * state. Returns 401 for anonymous callers (the sidebar simply hides itself).
+ */
+router.get("/public-ai/usage", async (req, res) => {
+  const authed = await resolveAuthedOraUser(req);
+  if (!authed) {
+    res.status(401).json({ error: "Not signed in" });
+    return;
+  }
+  const usage = await getTodayOraUsage(authed.userId, authed.tier);
+  res.json({
+    messageCount: usage.messageCount,
+    messageLimit: usage.messageLimit,
+    imageCount: usage.imageCount,
+    imageLimit: usage.imageLimit,
+  });
+});
+
 export default router;

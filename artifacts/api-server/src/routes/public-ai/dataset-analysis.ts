@@ -9,11 +9,7 @@ import {
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput } from "../../lib/public-ai/prompt";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import {
-  checkOraQuota,
-  incrementOraMessage,
-  oraMessageFields,
-} from "../../lib/public-ai/ora-usage";
+import { consumeOraQuota, refundOraQuota, oraMessageFields } from "../../lib/public-ai/ora-usage";
 import {
   DATASET_SYSTEM_PROMPT,
   buildDatasetContextBlock,
@@ -68,21 +64,12 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
     return;
   }
 
-  // Signed-in users are metered by daily quotas (MESSAGE bucket); anonymous
-  // visitors keep the per-session cap.
+  // Resolve the signed-in Ora user up-front. The anonymous per-session cap is a
+  // side-effect-free read, so it can be signaled early; only the authed daily
+  // quota is RESERVED (consumed), and that reservation is deferred until after
+  // cheap validation so rejected/stale requests never consume a user's allowance.
   const authed = await resolveAuthedOraUser(req);
-  if (authed) {
-    const quota = await checkOraQuota(authed.userId, authed.tier, "message");
-    if (!quota.allowed) {
-      res.status(429).json({
-        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
-        upgradeCta: true,
-        msgCount: quota.used,
-        msgLimit: quota.limit,
-      });
-      return;
-    }
-  } else if (session.msgCount >= MSG_LIMIT_VALUE) {
+  if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
       error:
         "You have reached the message limit for this session. Start a new session to continue.",
@@ -113,6 +100,22 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
         "This file is a document, not a dataset. Please use the document analysis endpoint instead.",
     });
     return;
+  }
+
+  // Signed-in users are metered by daily quotas (MESSAGE bucket). consumeOraQuota
+  // is atomic; the reservation is held below and only released via refundOraQuota
+  // on model failure.
+  if (authed) {
+    const quota = await consumeOraQuota(authed.userId, authed.tier, "message");
+    if (!quota.allowed) {
+      res.status(429).json({
+        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        upgradeCta: true,
+        msgCount: quota.used,
+        msgLimit: quota.limit,
+      });
+      return;
+    }
   }
 
   const summary = fileEntry.datasetSummary;
@@ -209,13 +212,15 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
   );
 
   if (!aiOutput) {
+    if (authed) await refundOraQuota(authed.userId, "message");
     res.status(502).json({
       error: "Ora is temporarily unavailable. Please try again in a moment.",
     });
     return;
   }
 
-  if (authed) await incrementOraMessage(authed.userId);
+  // The MESSAGE quota was reserved atomically up-front (consumeOraQuota); the
+  // analysis succeeded so we keep the reservation — no extra increment.
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
