@@ -781,7 +781,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
             <DynamicAtom state={atomState} size={26} />
             <div>
               <span className="text-sm font-semibold tracking-tight">Ora</span>
-              <span className="ml-1.5 text-[10px] text-muted-foreground/70">Free · No sign-in</span>
+              {!isSignedIn && (
+                <span className="ml-1.5 text-[10px] text-muted-foreground/70">
+                  Free · No sign-in
+                </span>
+              )}
             </div>
             {oraStatus !== "idle" && (
               <span className="text-[11px] text-muted-foreground animate-pulse">

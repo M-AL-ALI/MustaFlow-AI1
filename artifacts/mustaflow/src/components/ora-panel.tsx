@@ -24,6 +24,7 @@ import {
   Wand2,
   GitBranch,
   Plus,
+  MoreHorizontal,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -321,7 +322,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
 
   const [input, setInput] = useState("");
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
-  const [showLangMenu, setShowLangMenu] = useState(false);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
@@ -334,7 +335,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const prevMsgCountRef = useRef(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const langMenuRef = useRef<HTMLDivElement>(null);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasMessages = messages.length > 0;
@@ -509,17 +510,6 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   }, [input]);
 
   useEffect(() => {
-    if (!showLangMenu) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
-        setShowLangMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showLangMenu]);
-
-  useEffect(() => {
     if (!showPlusMenu) return;
     function handleClickOutside(e: MouseEvent) {
       if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
@@ -529,6 +519,17 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showPlusMenu]);
+
+  useEffect(() => {
+    if (!showHeaderMenu) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target as Node)) {
+        setShowHeaderMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showHeaderMenu]);
 
   // Auto-clear drop error after 4 s
   useEffect(() => {
@@ -703,8 +704,6 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currentLangLabel = LANGUAGES.find((l) => l.value === language)?.label ?? "Auto Detect";
-
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -746,9 +745,11 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           <DynamicAtom state={atomState} size={28} />
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold tracking-tight">Ora</span>
-            <span className="text-[10px] text-muted-foreground/70 font-medium border border-border/50 rounded-full px-1.5 py-0.5">
-              Free · No sign-in required
-            </span>
+            {!isSignedIn && (
+              <span className="text-[10px] text-muted-foreground/70 font-medium border border-border/50 rounded-full px-1.5 py-0.5">
+                Free · No sign-in required
+              </span>
+            )}
           </div>
           {oraStatus !== "idle" && (
             <span className="text-[11px] text-muted-foreground animate-pulse">
@@ -757,7 +758,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
           {voice.isSupported && (
             <OraVoiceModeButton
@@ -770,89 +771,136 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
             />
           )}
 
-          {/* TTS toggle — only shown when speechSynthesis is available */}
-          {voice.isSpeechSynthesisSupported && (
-            <button
-              type="button"
-              onClick={voice.toggleTts}
-              title={voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"}
-              aria-label={voice.isTtsEnabled ? "Disable voice responses" : "Enable voice responses"}
-              className={cn(
-                "flex items-center justify-center h-6 w-6 rounded-lg transition-colors",
-                voice.isTtsEnabled
-                  ? "text-[hsl(265_85%_65%)] hover:text-[hsl(265_85%_55%)]"
-                  : "text-muted-foreground/40 hover:text-muted-foreground",
-              )}
-            >
-              {voice.isTtsEnabled ? (
-                <Volume2 className="h-3.5 w-3.5" />
-              ) : (
-                <VolumeX className="h-3.5 w-3.5" />
-              )}
-            </button>
-          )}
-
-          {/* Memory manager — review & delete saved memories */}
-          {isSignedIn && (
-            <button
-              type="button"
-              onClick={() => setMemoryManagerOpen(true)}
-              title="Ora memory"
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-            >
-              <Brain className="h-3.5 w-3.5" />
-            </button>
-          )}
-
-          {/* Export + clear conversation */}
+          {/* Export conversation (contextual — only with messages) */}
           {hasMessages && (
-            <>
-              <OraExportMenu
-                source={{ kind: "conversation", messages }}
-                disabled={isLoading}
-                variant="header"
-              />
-              <button
-                type="button"
-                onClick={() => void clearConversation()}
-                disabled={isLoading}
-                title="Clear conversation"
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </>
+            <OraExportMenu
+              source={{ kind: "conversation", messages }}
+              disabled={isLoading}
+              variant="header"
+            />
           )}
 
-          {/* Language selector */}
-          <div className="relative" ref={langMenuRef}>
+          {/* Overflow menu — consolidates language, voice responses, memory, and
+              clear so the header stays calm (ChatGPT/Codex style). */}
+          <div className="relative" ref={headerMenuRef}>
             <button
               type="button"
-              onClick={() => setShowLangMenu((v) => !v)}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/50 rounded-full px-2.5 py-1 hover:bg-muted/40 transition-colors"
+              onClick={() => setShowHeaderMenu((v) => !v)}
+              title="More options"
+              aria-label="More options"
+              aria-haspopup="menu"
+              aria-expanded={showHeaderMenu}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
+                showHeaderMenu
+                  ? "text-foreground bg-muted/50"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+              )}
             >
-              <Globe className="h-3 w-3" />
-              {currentLangLabel}
-              <ChevronDown className="h-3 w-3" />
+              <MoreHorizontal className="h-4 w-4" />
             </button>
-            {showLangMenu && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-popover border border-border rounded-xl shadow-lg py-1">
+            {showHeaderMenu && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1.5 z-50 min-w-[200px] bg-popover border border-border rounded-xl shadow-xl py-1"
+              >
+                {/* Language */}
+                <p className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Language
+                </p>
                 {LANGUAGES.map((l) => (
                   <button
                     key={l.value}
                     type="button"
+                    role="menuitemradio"
+                    aria-checked={language === l.value}
                     onClick={() => {
                       setLanguage(l.value);
-                      setShowLangMenu(false);
+                      setShowHeaderMenu(false);
                     }}
-                    className={cn(
-                      "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors",
-                      language === l.value && "text-[hsl(265_85%_65%)] font-medium",
-                    )}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
                   >
-                    {l.label}
+                    <Globe
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        language === l.value
+                          ? "text-[hsl(265_85%_65%)]"
+                          : "text-muted-foreground/60",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "flex-1",
+                        language === l.value && "text-[hsl(265_85%_65%)] font-medium",
+                      )}
+                    >
+                      {l.label}
+                    </span>
                   </button>
                 ))}
+
+                {(voice.isSpeechSynthesisSupported || isSignedIn || hasMessages) && (
+                  <div className="my-1 h-px bg-border/60" />
+                )}
+
+                {/* Voice responses (TTS) */}
+                {voice.isSpeechSynthesisSupported && (
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={voice.isTtsEnabled}
+                    onClick={() => {
+                      voice.toggleTts();
+                      setShowHeaderMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
+                  >
+                    {voice.isTtsEnabled ? (
+                      <Volume2 className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                    ) : (
+                      <VolumeX className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                    )}
+                    <span className="flex-1">
+                      {voice.isTtsEnabled ? "Voice responses on" : "Voice responses off"}
+                    </span>
+                  </button>
+                )}
+
+                {/* Memory manager */}
+                {isSignedIn && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMemoryManagerOpen(true);
+                      setShowHeaderMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
+                  >
+                    <Brain className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                    <span className="flex-1">Ora memory</span>
+                  </button>
+                )}
+
+                {/* Clear conversation */}
+                {hasMessages && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isLoading}
+                    onClick={() => {
+                      void clearConversation();
+                      setShowHeaderMenu(false);
+                    }}
+                    className={cn(
+                      "w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-2 text-destructive hover:bg-destructive/10",
+                      isLoading && "opacity-40 cursor-not-allowed",
+                    )}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="flex-1">Clear conversation</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
