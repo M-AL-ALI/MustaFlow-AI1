@@ -362,7 +362,11 @@ vi.mock("./logger", () => ({
   },
 }));
 
-vi.mock("./knowledge", () => ({ writeKnowledge: vi.fn() }));
+vi.mock("./knowledge", () => ({
+  writeKnowledge: vi.fn(),
+  getInstalledBlueprintKnowledge: vi.fn().mockResolvedValue(null),
+  inferStyleForUser: vi.fn().mockResolvedValue({ inferred: 0 }),
+}));
 vi.mock("./embeddings", () => ({
   generateEmbedding: vi.fn().mockResolvedValue(null),
   cosineSimilarity: vi.fn().mockReturnValue(0),
