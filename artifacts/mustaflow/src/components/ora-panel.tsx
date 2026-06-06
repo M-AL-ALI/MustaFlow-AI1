@@ -61,6 +61,7 @@ import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraSourceCards } from "@/components/ora/ora-source-cards";
 
 function downloadOraFile(file: GeneratedFile) {
+  if (!file.fileData) return;
   const byteChars = atob(file.fileData);
   const byteNums = new Uint8Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
@@ -1112,26 +1113,44 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     </div>
                   )}
 
-                  {msg.generatedFile && (
-                    <button
-                      type="button"
-                      onClick={() => downloadOraFile(msg.generatedFile!)}
-                      className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3.5 py-3 transition-all cursor-pointer"
-                    >
-                      <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
-                        <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(265_85%_65%)]" />
+                  {msg.generatedFile &&
+                    (msg.generatedFile.fileData ? (
+                      <button
+                        type="button"
+                        onClick={() => downloadOraFile(msg.generatedFile!)}
+                        className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3.5 py-3 transition-all cursor-pointer"
+                      >
+                        <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
+                          <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(265_85%_65%)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate text-foreground">
+                            {msg.generatedFile.fileName}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            {msg.generatedFile.format.toUpperCase()} · Click to download
+                          </p>
+                        </div>
+                        <Download className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                    ) : (
+                      // Reloaded message: the base64 bytes are not stored, so the
+                      // file is no longer downloadable. Render a non-interactive
+                      // card instead of a dead download button.
+                      <div className="mt-2 w-full flex items-center gap-3 rounded-xl border border-border/60 bg-muted/20 px-3.5 py-3">
+                        <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-muted/40">
+                          <FileSpreadsheet className="h-4.5 w-4.5 text-muted-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate text-muted-foreground">
+                            {msg.generatedFile.fileName}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                            {msg.generatedFile.format.toUpperCase()} · Regenerate to download
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold truncate text-foreground">
-                          {msg.generatedFile.fileName}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                          {msg.generatedFile.format.toUpperCase()} · Click to download
-                        </p>
-                      </div>
-                      <Download className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
-                    </button>
-                  )}
+                    ))}
 
                   {msg.role === "assistant" &&
                     Array.isArray(msg.sources) &&

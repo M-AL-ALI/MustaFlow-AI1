@@ -32,6 +32,11 @@ const datasetResultSchema = z
     truncated,
   }));
 
+const sourceSchema = z.object({
+  title: z.string().max(500),
+  url: z.string().max(2000),
+});
+
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32000),
@@ -42,8 +47,16 @@ const messageSchema = z.object({
   generatedFile: generatedFileSchema.optional(),
   hadAttachment: z.boolean().optional(),
   editedFrom: z.boolean().optional(),
+  // Web-search citation cards — persisted so they survive reload.
+  sources: z.array(sourceSchema).max(20).optional(),
+  // Inline image fields — imageUrl is a hosted/remote URL (never base64), so it
+  // is safe to persist; imageId/editInstruction restore the editable lineage.
+  imageUrl: z.string().max(4000).optional(),
+  imageId: z.number().int().optional(),
+  editInstruction: z.string().max(2000).optional(),
   memorySaveCandidate: z.string().max(400).optional(),
   memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
+  memorySaveCandidateSensitive: z.boolean().optional(),
   memorySaved: z.boolean().optional(),
 });
 

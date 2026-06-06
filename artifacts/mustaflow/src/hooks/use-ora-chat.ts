@@ -9,7 +9,13 @@ export type FileFormat = "csv" | "xlsx" | "docx" | "pdf" | "pptx";
 
 export interface GeneratedFile {
   fileName: string;
-  fileData: string;
+  /**
+   * Raw base64 bytes for an in-session generated file. Intentionally NOT
+   * persisted to conversation storage (it would bloat the row), so a message
+   * reloaded from the server has the file metadata but no `fileData`. Download
+   * cards must guard on this being present and degrade gracefully when absent.
+   */
+  fileData?: string;
   mimeType: string;
   format: FileFormat;
 }
@@ -641,7 +647,14 @@ export function useOraChat(): UseOraChatReturn {
       const isImg = isImageExt(ext);
 
       if (isImg) {
-        if (session && (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)) {
+        // Anonymous-session image cap applies ONLY to not-signed-in visitors.
+        // Signed-in users are unlimited on the backend, so don't block them on
+        // the per-session counter here.
+        if (
+          !isSignedIn &&
+          session &&
+          (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)
+        ) {
           setUploadState("error");
           setUploadError(
             `Image limit reached (${session.imageLimit ?? IMAGE_LIMIT}/${session.imageLimit ?? IMAGE_LIMIT}). Start a new session to upload more images.`,
@@ -649,6 +662,7 @@ export function useOraChat(): UseOraChatReturn {
           return;
         }
       } else {
+        // File size cap applies to everyone (signed-in or not).
         if (file.size > MAX_FILE_SIZE) {
           setUploadState("error");
           setUploadError(
@@ -656,7 +670,8 @@ export function useOraChat(): UseOraChatReturn {
           );
           return;
         }
-        if (session && session.fileCount >= session.fileLimit) {
+        // Anonymous-session file count cap applies ONLY to not-signed-in visitors.
+        if (!isSignedIn && session && session.fileCount >= session.fileLimit) {
           setUploadState("error");
           setUploadError(
             `File limit reached (${session.fileLimit}/${session.fileLimit}). Start a new session to upload more files.`,
@@ -780,7 +795,7 @@ export function useOraChat(): UseOraChatReturn {
         setUploadError(msg);
       }
     },
-    [session],
+    [session, isSignedIn],
   );
 
   const clearAttachment = useCallback(() => {

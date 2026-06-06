@@ -40,6 +40,7 @@ import {
   IMAGE_DAILY_LIMIT,
 } from "../routes/image-credits";
 import { CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
+import { refundOraQuota } from "./public-ai/ora-usage";
 import { logger } from "./logger";
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
@@ -570,6 +571,14 @@ async function runImageEditJob(
       await refundCredits(userId, creditCost, {
         description: `Image edit failed — image #${imageId}: ${message.slice(0, 100)}`,
       });
+    }
+
+    // Ora-origin edits are metered by the daily Ora image quota (not credits).
+    // The slot was reserved at enqueue time, so a failed edit must refund it —
+    // mirroring the synchronous enqueue-path refund and the Builder credit
+    // refund above. Best-effort: refundOraQuota never throws.
+    if (opts.billingMode === "ora") {
+      await refundOraQuota(userId, "image");
     }
 
     job.status = "failed";

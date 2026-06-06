@@ -364,6 +364,14 @@ const SENSITIVE_FACT_PATTERNS: RegExp[] = [
   // Common API-key shapes (provider prefixes + long random token)
   /\b(?:sk|pk|rk|ghp|gho|xox[bap]|AKIA)[-_][A-Za-z0-9]{12,}\b/,
   /\bBearer\s+[A-Za-z0-9._-]{20,}\b/i,
+  // Street addresses: a house number followed by a street name + a street-type
+  // suffix (e.g. "742 Evergreen Terrace", "10 Downing St"). The leading number
+  // keeps benign location mentions like "I live in Berlin" from matching.
+  /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}\s+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl|terrace|ter|circle|cir|square|sq|highway|hwy|parkway|pkwy|suite|ste|apartment|apt|unit)\b\.?/i,
+  // Explicit address labels followed by a value.
+  /\b(?:home\s+address|street\s+address|mailing\s+address|shipping\s+address|billing\s+address|zip\s*code|postal\s+code)\b\s*(?:is|=|:)?\s*\S+/i,
+  // IBAN-style bank account identifiers (2-letter country + 2 check digits + body).
+  /\b[A-Z]{2}\d{2}[ ]?(?:[A-Z0-9]{4}[ ]?){3,7}[A-Z0-9]{1,4}\b/,
 ];
 
 /**

@@ -42,3 +42,4 @@
 - [Ora vs AI Builder separation](ora-builder-separation.md) — Ora must NEVER proactively recommend/hand off to Builder; lists every surface (chat/file/image routes + ora-panel/bubble cards) that can leak a proactive handoff.
 - [Vitest cold-import timeout](vitest-cold-import-timeout.md) — first test importing a heavy router tree can exceed the 5s default; give it a per-test timeout (30000) instead of chasing a phantom hang.
 - [Ora asset R2 offload](ora-asset-r2-offload.md) — gate Ora byte offload on ORA_ASSETS_R2_ENABLED (not r2Enabled alone, creds shared w/ snapshots); data/storage_key XOR enforced by CHECK; persist must stay exception-safe w/ DB fallback.
+- [Ora message persistence schema mirroring](ora-message-persistence-schema.md) — backend messageSchema (ora-conversations.ts + ora-transcript.ts) must mirror the frontend serializeForStorage shape or rich per-message UI state (sources/imageUrl/imageId/memory fields) is silently stripped on save.

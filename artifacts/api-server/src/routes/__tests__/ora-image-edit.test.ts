@@ -30,6 +30,7 @@ import { CREDITS_ENFORCEMENT_ENABLED } from "../credits";
 
 const USER_A = `test-img-edit-a-${Date.now()}`;
 const USER_B = `test-img-edit-b-${Date.now()}`;
+const USER_C = `test-img-edit-c-${Date.now()}`;
 
 function appAs(userId: string) {
   const app = express();
@@ -70,7 +71,7 @@ async function insertParentImage(
 }
 
 afterAll(async () => {
-  for (const u of [USER_A, USER_B]) {
+  for (const u of [USER_A, USER_B, USER_C]) {
     await db.delete(generatedImagesTable).where(eq(generatedImagesTable.userId, u));
     await db.delete(creditTransactionsTable).where(eq(creditTransactionsTable.userId, u));
     await db.delete(userCreditsTable).where(eq(userCreditsTable.userId, u));
@@ -173,6 +174,45 @@ describe("POST /images/:id/edit — inline image editing", () => {
     expect(child.editInstruction).toBe("make the water look like glass");
     expect(child.creditCost).toBe(0);
   });
+
+  it("refunds the Ora daily image quota when an async edit job fails", async () => {
+    // Fresh user so the daily-usage row is uncontaminated by other tests'
+    // async failures. The parent's bogus fileUrl makes the background edit job
+    // fail fast (getImageBuffer can't fetch it), exercising the refund path.
+    const parentId = await insertParentImage(USER_C);
+
+    const res = await request(appAs(USER_C)).post(`/images/${parentId}/edit`).send({
+      instruction: "make the water look like glass",
+      quality: "standard",
+      origin: "ora",
+    });
+    expect(res.status).toBe(202);
+    // Slot reserved at enqueue time.
+    expect(res.body.imageCount).toBe(1);
+
+    const jobId = res.body.jobId as string;
+
+    // Poll the status route until the async job lands in a terminal "failed"
+    // state. The refund runs inside the catch *before* status flips to failed,
+    // so once we observe "failed" the quota has already been returned.
+    let status = "pending";
+    for (let attempt = 0; attempt < 60; attempt++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const s = await request(appAs(USER_C)).get(`/images/status/${jobId}`);
+      if (s.status === 200) {
+        status = s.body.status as string;
+        if (status === "failed" || status === "completed") break;
+      }
+    }
+    expect(status).toBe("failed");
+
+    // The reserved slot was refunded — the daily image count is back to 0.
+    const [usage] = await db
+      .select()
+      .from(oraDailyUsageTable)
+      .where(eq(oraDailyUsageTable.userId, USER_C));
+    expect(usage?.imageCount ?? 0).toBe(0);
+  }, 30000);
 
   it("rejects Ora-origin quota mode for non-Ora image lineage", async () => {
     const parentId = await insertParentImage(USER_A, { sourceType: "uploaded", creditCost: 0 });

@@ -16,6 +16,11 @@ describe("detectSensitiveFact", () => {
     ["pin", "pin: 4827"],
     ["stripe-style key", "use sk-ABCDEFGH12345678"],
     ["bearer token", "Authorization Bearer abcdefghijklmnopqrstuvwxyz123"],
+    ["street address", "I live at 742 Evergreen Terrace"],
+    ["street address (abbrev)", "ship it to 10 Downing St"],
+    ["address label", "my home address is somewhere private"],
+    ["zip code label", "zip code: 90210"],
+    ["iban", "my account is GB29 NWBK 6016 1331 9268 19"],
   ];
 
   it.each(sensitive)("flags %s as sensitive", (_label, text) => {
@@ -28,6 +33,7 @@ describe("detectSensitiveFact", () => {
     "I live in Berlin",
     "remember that I'm a vegetarian",
     "the project ships next quarter",
+    "I have three meetings tomorrow",
   ];
 
   it.each(benign)("does not flag benign fact: %s", (text) => {
@@ -48,6 +54,13 @@ describe("detectMemorySaveCandidate sensitive gate", () => {
     // "remember my email is …" — the email survives in the cleaned fact too,
     // but the gate must catch it regardless of which copy carries the PII.
     const c = detectMemorySaveCandidate("remember my email is jane@example.com");
+    expect(c?.sensitive).toBe(true);
+    expect(c?.confidence).toBe("low");
+  });
+
+  it("forces a sensitive address candidate to low confidence even with explicit phrasing", () => {
+    const c = detectMemorySaveCandidate("remember that I live at 742 Evergreen Terrace");
+    expect(c).not.toBeNull();
     expect(c?.sensitive).toBe(true);
     expect(c?.confidence).toBe("low");
   });

@@ -220,3 +220,22 @@ describe("chat.ts persists generated outputs to the asset library", () => {
     expect(genSrc).toContain("persistOraAsset");
   });
 });
+
+/**
+ * Regression guard: Ora-origin inline image *edits* run as a background job
+ * (heavy provider/storage deps), so the repo convention is a static source
+ * assertion. The successful-edit branch must mirror the edited result into the
+ * durable Ora asset library so it shows up under Library — and only for
+ * Ora-billed edits (Image Studio edits already live in generated_images).
+ */
+describe("image-generation-jobs.ts persists Ora-edited images to the asset library", () => {
+  const jobsSrc = readFileSync(path.join(__dirname, "../../lib/image-generation-jobs.ts"), "utf8");
+
+  it("the edit-success path persists Ora edits to the library", () => {
+    const editFn = jobsSrc.slice(jobsSrc.indexOf("async function runImageEditJob"));
+    const body = editFn.slice(0, editFn.indexOf("async function runImageJob"));
+    expect(body).toContain('opts.billingMode === "ora"');
+    expect(body).toContain("persistOraAsset");
+    expect(body).toContain('kind: "image"');
+  });
+});
