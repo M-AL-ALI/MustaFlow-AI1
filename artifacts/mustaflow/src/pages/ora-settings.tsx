@@ -15,6 +15,10 @@ import {
   Loader2,
   Crown,
   ExternalLink,
+  User as UserIcon,
+  Mail,
+  KeyRound,
+  CalendarClock,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -312,12 +316,397 @@ function MemorySection() {
   );
 }
 
+type EmailResource = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof useClerkUser>["user"]>["createEmailAddress"]>
+>;
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === "object" && "errors" in err) {
+    const clerkErrors = (err as { errors?: Array<{ longMessage?: string; message?: string }> })
+      .errors;
+    const first = clerkErrors?.[0];
+    if (first?.longMessage) return first.longMessage;
+    if (first?.message) return first.message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+function AccountSection() {
+  const { user, isLoaded, isSignedIn } = useClerkUser();
+  const { toast } = useToast();
+
+  // Email change flow
+  const [emailMode, setEmailMode] = useState<"idle" | "input" | "verify">("idle");
+  const [newEmail, setNewEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const pendingEmailRef = useRef<EmailResource | null>(null);
+
+  // Password change flow
+  const [pwOpen, setPwOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+
+  function resetEmailFlow() {
+    setEmailMode("idle");
+    setNewEmail("");
+    setCode("");
+    pendingEmailRef.current = null;
+  }
+
+  function resetPasswordFlow() {
+    setPwOpen(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+  }
+
+  async function sendEmailCode() {
+    if (!user) return;
+    const trimmed = newEmail.trim();
+    if (!/.+@.+\..+/.test(trimmed)) {
+      toast({
+        title: "Enter a valid email",
+        description: "Please provide a valid email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (typeof user.createEmailAddress !== "function") {
+      toast({
+        title: "Not available",
+        description: "Email changes are not available in this environment.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      const emailResource = await user.createEmailAddress({ email: trimmed });
+      await emailResource.prepareVerification({ strategy: "email_code" });
+      pendingEmailRef.current = emailResource;
+      setEmailMode("verify");
+      toast({
+        title: "Verification code sent",
+        description: `We sent a code to ${trimmed}. Enter it below to confirm.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Could not start email change",
+        description: errorMessage(err, "Please try again."),
+        variant: "destructive",
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  async function confirmEmailCode() {
+    if (!user) return;
+    const emailResource = pendingEmailRef.current;
+    if (!emailResource) return;
+    const trimmedCode = code.trim();
+    if (!trimmedCode) {
+      toast({
+        title: "Enter the code",
+        description: "Please enter the verification code we emailed you.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      await emailResource.attemptVerification({ code: trimmedCode });
+      await user.update({ primaryEmailAddressId: emailResource.id });
+      await user.reload();
+      toast({
+        title: "Email updated",
+        description: "Your primary email address has been changed.",
+      });
+      resetEmailFlow();
+    } catch (err) {
+      toast({
+        title: "Could not verify email",
+        description: errorMessage(err, "The code may be incorrect or expired."),
+        variant: "destructive",
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  async function changePassword() {
+    if (!user) return;
+    if (newPassword.length < 8) {
+      toast({
+        title: "Password too short",
+        description: "Your new password must be at least 8 characters.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Passwords don't match",
+        description: "The new password and confirmation must match.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (typeof user.updatePassword !== "function") {
+      toast({
+        title: "Not available",
+        description: "Password changes are not available in this environment.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await user.updatePassword({ currentPassword, newPassword });
+      toast({
+        title: "Password updated",
+        description: "Your password has been changed.",
+      });
+      resetPasswordFlow();
+    } catch (err) {
+      toast({
+        title: "Could not change password",
+        description: errorMessage(err, "Check your current password and try again."),
+        variant: "destructive",
+      });
+    } finally {
+      setPwBusy(false);
+    }
+  }
+
+  if (!isLoaded) {
+    return (
+      <SectionCard icon={UserIcon} title="Account" description="Your profile and sign-in details.">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading account
+        </div>
+      </SectionCard>
+    );
+  }
+
+  if (!isSignedIn || !user) {
+    return (
+      <SectionCard icon={UserIcon} title="Account" description="Your profile and sign-in details.">
+        <p className="text-sm text-muted-foreground">Sign in to view and manage your account.</p>
+      </SectionCard>
+    );
+  }
+
+  const displayName = user.fullName ?? user.primaryEmailAddress?.emailAddress ?? "Your account";
+  const primaryEmail =
+    user.primaryEmailAddress?.emailAddress ??
+    user.emailAddresses[0]?.emailAddress ??
+    "No email on file";
+  const initials = displayName
+    .split(" ")
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const inputClass =
+    "w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+  return (
+    <SectionCard icon={UserIcon} title="Account" description="Your profile and sign-in details.">
+      <div className="flex items-center gap-4">
+        {user.imageUrl ? (
+          <img
+            src={user.imageUrl}
+            alt={displayName}
+            className="h-12 w-12 rounded-full object-cover shrink-0"
+          />
+        ) : (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/15 text-base font-bold text-primary">
+            {initials}
+          </div>
+        )}
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
+          <p className="truncate text-sm text-muted-foreground">{primaryEmail}</p>
+        </div>
+      </div>
+
+      {/* Change email */}
+      <div className="rounded-lg border border-border/60 px-4 py-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            Email address
+          </div>
+          {emailMode === "idle" && (
+            <button
+              type="button"
+              onClick={() => setEmailMode("input")}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Change
+            </button>
+          )}
+        </div>
+
+        {emailMode === "input" && (
+          <div className="space-y-2">
+            <input
+              type="email"
+              autoFocus
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="new@email.com"
+              className={inputClass}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void sendEmailCode()}
+                disabled={emailBusy}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {emailBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Send code
+              </button>
+              <button
+                type="button"
+                onClick={resetEmailFlow}
+                disabled={emailBusy}
+                className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {emailMode === "verify" && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Enter the verification code sent to{" "}
+              <span className="font-medium text-foreground">{newEmail.trim()}</span>.
+            </p>
+            <input
+              inputMode="numeric"
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="Verification code"
+              className={inputClass}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void confirmEmailCode()}
+                disabled={emailBusy}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {emailBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Verify &amp; update
+              </button>
+              <button
+                type="button"
+                onClick={resetEmailFlow}
+                disabled={emailBusy}
+                className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Change password */}
+      <div className="rounded-lg border border-border/60 px-4 py-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <KeyRound className="h-4 w-4 text-muted-foreground" />
+            Password
+          </div>
+          {!pwOpen && (
+            <button
+              type="button"
+              onClick={() => setPwOpen(true)}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Change
+            </button>
+          )}
+        </div>
+
+        {pwOpen && (
+          <div className="space-y-2">
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="Current password"
+              className={inputClass}
+            />
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="New password"
+              className={inputClass}
+            />
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirm new password"
+              className={inputClass}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void changePassword()}
+                disabled={pwBusy}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {pwBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Update password
+              </button>
+              <button
+                type="button"
+                onClick={resetPasswordFlow}
+                disabled={pwBusy}
+                className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
 interface OraPlanUsage {
   msgCount: number;
   msgLimit: number;
   imageCount?: number;
   imageLimit?: number;
   tier?: string;
+}
+
+interface BillingSubscription {
+  tier?: string;
+  status?: string;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
 }
 
 function planLabel(tier: string | undefined): string {
@@ -330,10 +719,32 @@ function remaining(count: number | undefined, limit: number | undefined): number
   return Math.max((limit ?? 0) - (count ?? 0), 0);
 }
 
+function formatRenewalDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+/** Human-readable renewal/billing line for the Ora plan card. */
+function renewalLabel(tier: string | undefined, subscription: BillingSubscription | null): string {
+  const isPaid = tier === "core" || tier === "wave";
+  if (!isPaid) return "Free plan — no renewal date";
+  const formatted = formatRenewalDate(subscription?.currentPeriodEnd);
+  if (!formatted) return "Renewal date unavailable";
+  if (subscription?.cancelAtPeriodEnd) return `Access ends on ${formatted}`;
+  return `Renews on ${formatted}`;
+}
+
 function PlanLimitsSection() {
   const { isSignedIn } = useClerkUser();
   const { toast } = useToast();
   const [usage, setUsage] = useState<OraPlanUsage | null>(null);
+  const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [loading, setLoading] = useState(false);
   const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | null>(null);
 
@@ -354,6 +765,16 @@ function PlanLimitsSection() {
         if (!cancelled) setUsage(null);
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    })();
+    void (async () => {
+      try {
+        const res = await authFetch("/api/billing/subscription");
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as BillingSubscription;
+        if (!cancelled) setSubscription(data);
+      } catch {
+        if (!cancelled) setSubscription(null);
       }
     })();
     return () => {
@@ -457,6 +878,10 @@ function PlanLimitsSection() {
           <div className="rounded-lg border border-border/60 px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Current plan</p>
             <p className="mt-1 text-lg font-bold text-foreground">{planLabel(usage?.tier)}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+              {renewalLabel(usage?.tier ?? subscription?.tier, subscription)}
+            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-border/60 px-4 py-3">
@@ -575,6 +1000,7 @@ function OraSettingsInner() {
             </div>
           </div>
 
+          <AccountSection />
           <AppearanceSection />
           <VoiceLanguageSection />
           <MemorySection />
