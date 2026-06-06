@@ -340,9 +340,10 @@ describe("POST /help/support/chat", () => {
     expect(system).not.toContain("Current project");
     expect(system).not.toContain("My App");
     // Strongest guarantee: the projects table was never queried at all.
-    const queriedProjects = vi
-      .mocked(dbMock.from)
-      .mock.calls.some((c) => (c[0] as { _name?: string })?._name === "projects");
+    const fromMock = dbMock.from as unknown as { mock: { calls: unknown[][] } };
+    const queriedProjects = fromMock.mock.calls.some(
+      (c: unknown[]) => (c[0] as { _name?: string })?._name === "projects",
+    );
     expect(queriedProjects).toBe(false);
   });
 

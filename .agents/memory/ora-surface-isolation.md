@@ -13,7 +13,7 @@ When a column partitions rows into isolated surfaces (e.g. `ora_conversations.su
 
 ## Related: gate cross-domain context on relevance, not availability
 
-Support Mode (Task #1312) injects a project's context into the prompt ONLY when the issue is AI-Builder related (`isBuilderRelatedIssue(category, message)` — explicit builder category OR keyword intent), even though a `projectId` is supplied on every chat. Ownership being verified is necessary but NOT sufficient.
+Support Mode injects a project's context into the prompt ONLY when the issue is AI-Builder related (`isBuilderRelatedIssue(category, message)` — explicit builder category OR keyword intent), even though a `projectId` is supplied on every chat. Ownership being verified is necessary but NOT sufficient.
 
 **Why:** billing/account/general support chats that happen to carry a `projectId` must not leak project details into the support LLM context. "Have the data + own the data" is not a license to inject it; the issue must actually concern that data.
 
