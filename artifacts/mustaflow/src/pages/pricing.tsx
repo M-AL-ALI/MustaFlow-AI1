@@ -69,7 +69,7 @@ export default function PricingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tier,
-          successUrl: `${window.location.origin}/billing?subscribed=1`,
+          successUrl: `${window.location.origin}/ora/settings?subscribed=1`,
           cancelUrl: `${window.location.origin}/pricing`,
         }),
       });

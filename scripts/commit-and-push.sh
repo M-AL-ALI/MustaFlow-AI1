@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Push current main branch to GitHub (M-AL-ALI/MustaFlow-AI1).
-# Usage:
-#   bash scripts/push-to-github.sh           # normal push (after first sync)
-#   bash scripts/push-to-github.sh --force   # force-push (initial sync only)
+# Stage, commit, and push the current working tree to GitHub.
+# Used by the agent to persist changes that the bash tool cannot commit
+# directly. Safe to run with a clean tree (commit is skipped).
 set -euo pipefail
 
 REMOTE_URL="https://github.com/M-AL-ALI/MustaFlow-AI1.git"
 BRANCH="main"
-FORCE_FLAG="${1:-}"
+MESSAGE="${1:-Cleanup: prettier, Stripe return URLs, setup hardening}"
 
 if [ -z "${GITHUB_PAT:-}" ]; then
   echo "ERROR: GITHUB_PAT env var is not set — cannot push to GitHub" >&2
@@ -15,19 +14,19 @@ if [ -z "${GITHUB_PAT:-}" ]; then
 fi
 
 git add -A
+
 if git diff --cached --quiet; then
   echo "No staged changes — skipping commit."
 else
   git -c user.name="Replit Agent" -c user.email="agent@replit.com" \
-    commit -m "Cleanup: prettier, Stripe return URLs, payment-method setup hardening"
-  echo "Committed working changes."
+    commit -m "$MESSAGE"
+  echo "Committed: $MESSAGE"
 fi
 
-echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub $FORCE_FLAG …"
-
+echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub …"
 git \
   -c credential.helper='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f' \
-  push "$REMOTE_URL" "$BRANCH:$BRANCH" $FORCE_FLAG
+  push "$REMOTE_URL" "$BRANCH:$BRANCH"
 
 echo "HEAD_SHA=$(git rev-parse HEAD)"
 echo "Done."

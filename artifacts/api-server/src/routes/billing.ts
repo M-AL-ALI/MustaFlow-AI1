@@ -1358,11 +1358,18 @@ router.post("/billing/payment-method/setup", async (req, res): Promise<void> => 
     return;
   }
 
+  // Stripe rejects relative return URLs, so never fall back to one. Use the
+  // caller-supplied returnUrl, else an absolute PLATFORM_DOMAIN URL, else 400.
   const { returnUrl } = req.body as { returnUrl?: string };
-  const fallback = process.env.PLATFORM_DOMAIN
-    ? `https://${process.env.PLATFORM_DOMAIN}/ora/settings`
-    : "/ora/settings";
-  const returnTo = returnUrl ?? fallback;
+  let returnTo: string;
+  if (returnUrl && typeof returnUrl === "string") {
+    returnTo = returnUrl;
+  } else if (process.env.PLATFORM_DOMAIN) {
+    returnTo = `https://${process.env.PLATFORM_DOMAIN}/ora/settings`;
+  } else {
+    res.status(400).json({ error: "returnUrl is required" });
+    return;
+  }
   try {
     const customerId = await ensureStripeCustomer(userId, stripe);
     const session = await stripe.checkout.sessions.create({

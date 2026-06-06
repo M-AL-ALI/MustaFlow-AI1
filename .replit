@@ -34,10 +34,6 @@ args = "quality-gate"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "typecheck"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "push-to-github"
 
 [[workflows.workflow.tasks]]
@@ -87,17 +83,6 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run lint && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck"
-
-[[workflows.workflow]]
-name = "typecheck"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run typecheck"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "push-to-github"
