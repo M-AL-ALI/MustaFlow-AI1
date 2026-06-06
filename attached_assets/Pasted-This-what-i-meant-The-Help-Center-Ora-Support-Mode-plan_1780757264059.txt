@@ -1,0 +1,47 @@
+This what i meant : The Help Center + Ora Support Mode plan is approved.
+
+Please proceed, but tighten these requirements:
+
+1. Prefer dedicated support routes:
+   - /api/help/articles
+   - /api/help/support/chat
+   - /api/help/support/conversations
+   - /api/help/support/escalate
+
+   These can reuse Ora internals, but should not rely only on normal /public-ai/chat with a client-provided support flag.
+
+2. Add surface='normal' | 'support' to ora_conversations and backfill all existing rows to normal.
+
+3. Support conversations must use separate server queries and separate frontend localStorage/session keys from normal Ora chat.
+
+4. Help Center browsing is public, but Ask Ora Support and escalation require sign-in.
+
+5. If projectId is attached to support context or ticket, verify project ownership server-side.
+
+6. Attachments/screenshots need file size limits, MIME type allowlist, and safe storage. Email should include links/metadata, not unsafe raw file handling.
+
+7. Email failure must not prevent ticket creation. Persist the ticket with emailStatus = sent/skipped/failed.
+
+8. Support Mode must not expose destructive tools. Billing changes, data deletion, and account setting changes should be blocked at backend/tool level unless a later explicit-confirmation flow is built.
+
+9. Add tests for:
+   - Help Center public load/search.
+   - Signed-out users cannot start support chat or escalate.
+   - Support conversation does not appear in normal Ora history.
+   - Normal Ora conversation does not appear in support history.
+   - Support chat uses help articles and safe account context only.
+   - AI Builder/project Knowledge Vault is not injected unless the issue is explicitly AI Builder-related.
+   - Escalation persists ticket even if email is unconfigured.
+   - Ticket validates user ownership of projectId.
+   - Attachments enforce size/type limits. Set the default support escalation email to:
+
+Mustafa_alali74@yahoo.com
+
+All Help Center / Ora Support Mode escalations should be emailed to this address.
+
+Implementation requirement:
+- Use env var SUPPORT_EMAIL when configured.
+- Default fallback should be Mustafa_alali74@yahoo.com.
+- Persist every support ticket even if email sending fails.
+- Store emailStatus as sent / skipped / failed.
+- Include the target email address used on the ticket record for auditability. SUPPORT_EMAIL || "Mustafa_alali74@yahoo.com"
