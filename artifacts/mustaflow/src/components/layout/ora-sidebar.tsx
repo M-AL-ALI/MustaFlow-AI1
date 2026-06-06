@@ -6,7 +6,6 @@ import {
   MessageCirclePlus,
   BookOpen,
   Settings,
-  CreditCard,
   LogOut,
   ChevronDown,
   ChevronRight,
@@ -160,12 +159,12 @@ function OraUserSection() {
       {menuOpen && (
         <div className="mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
           <Link
-            href="/billing"
+            href="/ora/settings"
             onClick={() => setMenuOpen(false)}
             className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-muted transition-colors no-underline"
           >
-            <CreditCard className="h-3.5 w-3.5" />
-            Billing
+            <Settings className="h-3.5 w-3.5" />
+            Ora settings
           </Link>
           <button
             onClick={() => {
