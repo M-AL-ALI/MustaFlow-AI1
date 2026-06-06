@@ -20,6 +20,7 @@ controls are all still present and working. Either update phase4.test.ts to the
 Whisper contract or delete the obsolete assertions.
 
 # Other full-suite api-server failures that are NOT bugs
+
 - `phase6.test.ts` ("…route file still exports a router") and `phase2.test.ts`
   ("upload returns 401 with no session cookie") fail ONLY under full-suite
   parallel load — cold dynamic-import timeouts (>13s). They pass in isolation.
