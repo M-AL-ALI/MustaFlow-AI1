@@ -15,6 +15,7 @@ import { persistOraAsset } from "../lib/ora-assets";
 import { sendEmailWithStatus, type EmailDeliveryStatus } from "../lib/emailClient";
 import { supportTicketTemplate } from "../lib/emailTemplates";
 import { getClerkUserById } from "../lib/clerk-users";
+import { broadcastNewTicket } from "../lib/support-alerts";
 
 async function resolveUserEmail(userId: string): Promise<string | null> {
   try {
@@ -732,6 +733,21 @@ router.post("/help/support/escalate", async (req, res) => {
     logger.error({ component: "help-support", err }, "Failed to persist support ticket");
     res.status(500).json({ error: "Could not create your support ticket. Please try again." });
     return;
+  }
+
+  // Push a real-time alert to any connected admins so support staff can respond
+  // faster than the 60s polling interval. Best-effort and exception-safe — never
+  // let an alerting failure affect the ticket-creation response.
+  try {
+    broadcastNewTicket({
+      id: ticketId,
+      subject,
+      category: category ?? "other",
+      plan: authed.tier ?? null,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.warn({ component: "help-support", err }, "Failed to broadcast new-ticket alert");
   }
 
   // 2) Attempt the email AFTER the ticket exists; record the outcome.

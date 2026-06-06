@@ -6,3 +6,5 @@ lib/api-zod/src/generated/
 artifacts/mustaflow/src/components/ui/
 artifacts/mockup-sandbox/src/.generated/
 pnpm-lock.yaml
+.config/
+.agents/

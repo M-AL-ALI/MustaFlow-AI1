@@ -1168,9 +1168,7 @@ function SupportTicketsTile() {
         )}
       </div>
       <div className="text-2xl font-bold">{data ? newCount : "…"}</div>
-      <div className="text-xs text-muted-foreground">
-        new · {openCount} open — view inbox
-      </div>
+      <div className="text-xs text-muted-foreground">new · {openCount} open — view inbox</div>
     </a>
   );
 }

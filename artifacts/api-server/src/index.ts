@@ -6,6 +6,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
+import { createSupportAlertsServer } from "./lib/support-alerts";
 import { createDebugServer } from "./routes/debug";
 import { ensureFlyApp, runContainerSelfCheck } from "./lib/container";
 import { warmSemgrepRuleCache } from "./lib/checks/semgrep";
@@ -104,9 +105,11 @@ const server = createServer(app);
 const terminalServer = createTerminalServer();
 const multiplayerServer = createMultiplayerServer();
 const debugServer = createDebugServer();
+const supportAlertsServer = createSupportAlertsServer();
 const MULTIPLAYER_PATH = /^\/api\/projects\/\d+\/multiplayer$/;
 const TERMINAL_PATH = /^\/api\/projects\/\d+\/terminal$/;
 const DEBUG_PATH = /^\/api\/projects\/\d+\/debug$/;
+const SUPPORT_ALERTS_PATH = /^\/api\/admin\/support-alerts$/;
 server.on("upgrade", (req, socket, head) => {
   const netSocket = socket as unknown as import("node:net").Socket;
   let pathname: string;
@@ -222,6 +225,8 @@ server.on("upgrade", (req, socket, head) => {
     terminalServer.handleUpgrade(req, netSocket, head);
   } else if (DEBUG_PATH.test(pathname)) {
     debugServer.handleUpgrade(req, netSocket, head);
+  } else if (SUPPORT_ALERTS_PATH.test(pathname)) {
+    supportAlertsServer.handleUpgrade(req, netSocket, head);
   } else {
     // Task #740: forward WebSocket upgrades on /api/projects/:id/preview/...
     // to the project's live container so Vite HMR works inside the iframe.

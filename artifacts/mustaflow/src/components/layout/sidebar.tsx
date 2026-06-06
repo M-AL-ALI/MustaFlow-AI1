@@ -28,6 +28,7 @@ import {
   useListAdminSupportTickets,
   getListAdminSupportTicketsQueryKey,
 } from "@workspace/api-client-react";
+import { useAdminTicketAlerts } from "@/hooks/use-admin-ticket-alerts";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
 import { OrgSwitcher } from "@/components/org-switcher";
@@ -183,6 +184,10 @@ function AdminNavItem() {
     },
   );
   const newTicketCount = newTicketsQuery.data?.statusCounts.new ?? 0;
+
+  // Real-time push alerts for admins (toast + optional browser notification).
+  // Falls back to the 60s polling above when the WebSocket is unavailable.
+  useAdminTicketAlerts(isAdmin);
 
   if (!isAdmin) return null;
 

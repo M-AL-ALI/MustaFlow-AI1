@@ -17,6 +17,8 @@ import {
   AlertCircle,
   StickyNote,
   Lock,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import {
   useListAdminSupportTickets,
@@ -35,8 +37,53 @@ import type {
 import { useQueryClient } from "@tanstack/react-query";
 import { authFetch } from "../lib/api-fetch";
 import { cn } from "../lib/utils";
+import {
+  useSupportAlertsPref,
+  requestSupportAlertNotifications,
+} from "@/hooks/use-admin-ticket-alerts";
+import { toast } from "@/hooks/use-toast";
 
 type StatusFilter = "all" | "new" | "open" | "resolved";
+
+// Header control: toggle real-time new-ticket alerts on/off and (when enabling)
+// offer to turn on native browser notifications.
+function AlertsToggle() {
+  const [enabled, setEnabled] = useSupportAlertsPref();
+
+  async function handleToggle() {
+    const next = !enabled;
+    setEnabled(next);
+    if (next) {
+      const result = await requestSupportAlertNotifications();
+      if (result === "denied") {
+        toast({
+          title: "In-app alerts on",
+          description: "Browser notifications are blocked, so you'll see in-app toasts only.",
+        });
+      }
+    }
+  }
+
+  return (
+    <button
+      onClick={() => void handleToggle()}
+      className={cn(
+        "flex items-center gap-1.5 text-sm transition-colors",
+        enabled
+          ? "text-foreground hover:text-foreground"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+      title={
+        enabled
+          ? "Real-time alerts on — click to disable"
+          : "Real-time alerts off — click to enable"
+      }
+    >
+      {enabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+      {enabled ? "Alerts on" : "Alerts off"}
+    </button>
+  );
+}
 
 const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -129,13 +176,16 @@ export default function SupportInboxPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => refetchList()}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", listFetching && "animate-spin")} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-4">
+          <AlertsToggle />
+          <button
+            onClick={() => refetchList()}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", listFetching && "animate-spin")} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-6">
