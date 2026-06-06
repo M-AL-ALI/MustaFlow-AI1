@@ -13,6 +13,7 @@ import { db, projectsTable, deploymentLogsTable, secretsTable } from "@workspace
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
 import { getOrCreateCredits, deductCreditsAtomic, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
+import { isSuperuser } from "../lib/superusers";
 import { logger } from "../lib/logger";
 import { getEasBuildLogs } from "../lib/eas";
 import { enqueueEasJob, EAS_BUILD_CREDIT_COST, extractAppJsonSummary } from "../lib/jobs";
@@ -72,7 +73,12 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
   // Credit pre-flight check
   if (project.ownerId) {
     const credits = await getOrCreateCredits(project.ownerId);
-    if (CREDITS_ENFORCEMENT_ENABLED && credits.balance < EAS_BUILD_CREDIT_COST) {
+    const ownerIsSuperuser = await isSuperuser(project.ownerId);
+    if (
+      CREDITS_ENFORCEMENT_ENABLED &&
+      !ownerIsSuperuser &&
+      credits.balance < EAS_BUILD_CREDIT_COST
+    ) {
       res.status(402).json({
         error: `Insufficient credits. An EAS build costs ${EAS_BUILD_CREDIT_COST} credits but your balance is ${credits.balance}. Top up in Billing to continue.`,
       });

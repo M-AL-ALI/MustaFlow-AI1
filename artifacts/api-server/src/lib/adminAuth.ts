@@ -10,6 +10,7 @@
 import { eq } from "drizzle-orm";
 import { db, userRolesTable } from "@workspace/db";
 import type { Request, Response, NextFunction } from "express";
+import { isSuperuser } from "./superusers";
 
 // Comma-separated list of user IDs that are always admin (no DB lookup needed).
 const ADMIN_USER_IDS: Set<string> = new Set(
@@ -21,6 +22,8 @@ const ADMIN_USER_IDS: Set<string> = new Set(
 
 /** Returns true if the user is an admin or owner (env var or DB). */
 export async function isAdminUser(userId: string): Promise<boolean> {
+  // Superusers (hard-coded allowlist) are always admin.
+  if (await isSuperuser(userId)) return true;
   if (ADMIN_USER_IDS.has(userId)) return true;
 
   const [row] = await db

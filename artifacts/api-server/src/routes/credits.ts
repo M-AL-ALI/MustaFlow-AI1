@@ -10,6 +10,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
 import { sendWelcomeEmail, sendLowCreditEmail } from "../lib/emailClient";
 import { getClerkUserById } from "../lib/clerk-users";
+import { isSuperuser } from "../lib/superusers";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -115,6 +116,12 @@ export async function deductCredits(
   );
   const credits = await getOrCreateCredits(userId);
 
+  // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. No
+  // deduction, no transaction row, never "insufficient".
+  if (await isSuperuser(userId)) {
+    return { newBalance: credits.balance };
+  }
+
   // When credit enforcement is disabled, no-op: don't deduct, don't write
   // a transaction row, and never return "insufficient". Lets users test
   // the builder for free until charging is explicitly enabled.
@@ -158,6 +165,12 @@ export async function deductCreditsAtomic(
   },
 ): Promise<{ newBalance: number } | { insufficient: true; balance: number }> {
   const credits = await getOrCreateCredits(userId);
+
+  // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. No
+  // deduction, no transaction row, never "insufficient".
+  if (await isSuperuser(userId)) {
+    return { newBalance: credits.balance };
+  }
 
   if (!CREDITS_ENFORCEMENT_ENABLED) {
     return { newBalance: credits.balance };

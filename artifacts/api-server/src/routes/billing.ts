@@ -42,7 +42,9 @@ import {
   type PlanTier,
   planTierForStripePriceId,
   stripePriceIdForPlan,
+  resolveWorkspacePlan,
 } from "../lib/plans";
+import { isSuperuser } from "../lib/superusers";
 import { logger } from "../lib/logger";
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
@@ -1687,6 +1689,7 @@ router.get("/billing/subscription/:workspaceId", async (req, res): Promise<void>
   res.json({
     workspaceId,
     effectivePlan,
+    isSuperuser: await isSuperuser(userId),
     subscription: sub
       ? {
           planTier: sub.planTier,
@@ -1792,7 +1795,66 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     res.status(400).json({ error: "workspaceId is required for workspace plan upgrades" });
     return;
   }
-  if (!planTier || !(PLAN_TIERS as readonly string[]).includes(planTier) || planTier === "free") {
+  // Validate the target tier. Superusers may select any tier (including free);
+  // normal users cannot "checkout" the free tier (handled below).
+  if (!planTier || !(PLAN_TIERS as readonly string[]).includes(planTier)) {
+    res.status(400).json({
+      error: "planTier must be one of: free, starter, pro, enterprise",
+    });
+    return;
+  }
+
+  // Ownership check (needed before any plan change, Stripe or superuser bypass).
+  const [ws] = await db
+    .select({ id: workspacesTable.id, ownerUserId: workspacesTable.ownerUserId })
+    .from(workspacesTable)
+    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)));
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.ownerUserId !== userId) {
+    res.status(403).json({ error: "You do not own this workspace" });
+    return;
+  }
+
+  // ── Superuser bypass: apply the chosen tier instantly, no Stripe payment ────
+  // Persist an active workspace_subscriptions row with no Stripe IDs so
+  // resolveWorkspacePlan() reflects the selected tier immediately. Accepts any
+  // tier including 'free' (switch back down). NO checkout session is created.
+  if (await isSuperuser(userId)) {
+    await db
+      .insert(workspaceSubscriptionsTable)
+      .values({
+        workspaceId,
+        planTier,
+        status: "active",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        stripePriceId: null,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: null,
+      })
+      .onConflictDoUpdate({
+        target: workspaceSubscriptionsTable.workspaceId,
+        set: {
+          planTier,
+          status: "active",
+          stripeSubscriptionId: null,
+          stripePriceId: null,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: null,
+          updatedAt: sql`now()`,
+        },
+      });
+    const effectivePlan = await resolveWorkspacePlan(workspaceId);
+    res.json({ ok: true, applied: true, workspaceId, planTier, effectivePlan });
+    return;
+  }
+
+  // Normal users: the free tier is not a checkout target, and a Stripe price
+  // must be configured for the requested plan.
+  if (planTier === "free") {
     res.status(400).json({
       error: "planTier must be one of: starter, pro, enterprise",
     });
@@ -1804,20 +1866,6 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     res.status(400).json({
       error: `Stripe Price ID for plan '${planTier}' is not configured. Set the PLAN_PRICE_${planTier.toUpperCase()} env var.`,
     });
-    return;
-  }
-
-  // Ownership check
-  const [ws] = await db
-    .select({ id: workspacesTable.id, ownerUserId: workspacesTable.ownerUserId })
-    .from(workspacesTable)
-    .where(and(eq(workspacesTable.id, workspaceId), isNull(workspacesTable.deletedAt)));
-  if (!ws) {
-    res.status(404).json({ error: "Workspace not found" });
-    return;
-  }
-  if (ws.ownerUserId !== userId) {
-    res.status(403).json({ error: "You do not own this workspace" });
     return;
   }
 

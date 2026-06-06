@@ -144,6 +144,13 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - Existing projects are untouched — they keep `builder_mode = 'static-legacy'` and `provisioning_status = 'idle'` so the badge stays hidden.
 - **Verification status (Task #763, 2026-05-25): PASS end-to-end.** `createNeonProject` in `provisioning.ts` now includes `org_id` in the POST body. The value is resolved by `resolveNeonOrgId` — explicit `NEON_ORG_ID` env var wins, otherwise we auto-detect via `GET /api/v2/users/me/organizations` and cache for the process lifetime (a null cache means "personal API key, no org needed" so we don't keep re-checking). Re-running `pnpm --filter @workspace/api-server exec tsx src/verify-agentic-provisioning.ts` now reports PASS on both Fly and Neon, including a real `SELECT 1` against the newly created Neon DB.
 
+## Superuser allowlist (full free access)
+
+- A hard-coded email allowlist in `artifacts/api-server/src/lib/superusers.ts` grants matching accounts complete free full-access: admin everywhere `requireAdmin` is enforced, unlimited usage with zero credit charges (regardless of `CREDITS_ENFORCEMENT`), and instant free switching between all four workspace plan tiers (free/starter/pro/enterprise) with no Stripe payment.
+- Resolves email → Clerk userId lazily via `findClerkUserByEmail`, cached for the process lifetime. Consulted by `adminAuth.isAdminUser`, `credits.deductCredits`/`deductCreditsAtomic`, the direct-balance preflights in `jobs.ts`/`builds.ts`/`image-generation-jobs.ts`, and the Mode 2 plan checkout in `billing.ts` (superuser branch upserts an active `workspace_subscriptions` row with null Stripe IDs).
+- Frontend: `SuperuserPlanSwitcher` in `pages/billing.tsx` renders four instant tier buttons only when `isSuperuser` is true on `GET /api/billing/subscription/:workspaceId`; renders nothing for everyone else. **No other user's behavior changes.**
+- **Any new credit/admin/plan gate that reads balance or role directly (bypassing the deduct helpers) must also consult `isSuperuser`.**
+
 ## Known limitations (honest status)
 
 - **Mobile generation**: fully enabled — `mobile-cross` Expo SDK pipeline runs automatically when the prompt describes a mobile app.

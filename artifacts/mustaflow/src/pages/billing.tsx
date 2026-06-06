@@ -505,6 +505,9 @@ export default function BillingPage() {
           </div>
         )}
 
+        {/* Superuser-only: instant workspace plan switcher (no payment). */}
+        <SuperuserPlanSwitcher workspaceId={_workspaceId} />
+
         {/* Tabs */}
         <div className="flex border-b border-border gap-1">
           {TABS.map((tab) => {
@@ -555,6 +558,117 @@ export default function BillingPage() {
         {activeTab === "usage" && <UsageTab usage={usage} />}
 
         {activeTab === "invoices" && <InvoicesTab invoices={invoices} />}
+      </div>
+    </div>
+  );
+}
+
+// ── Superuser-only workspace plan switcher ──────────────────────────────────
+// Renders nothing for normal users. For an allowlisted superuser it shows four
+// tier buttons (free/starter/pro/enterprise) that apply instantly with no
+// Stripe payment, via the Mode 2 checkout endpoint's superuser bypass.
+const WORKSPACE_PLAN_TIERS = ["free", "starter", "pro", "enterprise"] as const;
+
+function SuperuserPlanSwitcher({ workspaceId }: { workspaceId?: number }) {
+  const { toast } = useToast();
+  const [isSuperuser, setIsSuperuser] = useState(false);
+  const [effectivePlan, setEffectivePlan] = useState<string | null>(null);
+  const [applying, setApplying] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!workspaceId) return;
+    try {
+      const res = await authFetch(`/api/billing/subscription/${workspaceId}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { isSuperuser?: boolean; effectivePlan?: string };
+      setIsSuperuser(Boolean(data.isSuperuser));
+      setEffectivePlan(data.effectivePlan ?? null);
+    } catch {
+      /* ignore */
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function applyTier(tier: string) {
+    if (!workspaceId) return;
+    setApplying(tier);
+    try {
+      const res = await authFetch("/api/billing/subscription/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId,
+          planTier: tier,
+          successUrl: `${window.location.origin}/billing`,
+          cancelUrl: `${window.location.origin}/billing`,
+        }),
+      });
+      const data = (await res.json()) as {
+        applied?: boolean;
+        effectivePlan?: string;
+        checkoutUrl?: string;
+        error?: string;
+      };
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
+      if (data.applied) {
+        setEffectivePlan(data.effectivePlan ?? tier);
+        toast({ title: "Plan updated", description: `Workspace switched to ${tier}.` });
+        void refresh();
+      } else {
+        toast({
+          title: "Could not switch plan",
+          description: data.error ?? "Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch {
+      toast({
+        title: "Could not switch plan",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setApplying(null);
+    }
+  }
+
+  if (!isSuperuser || !workspaceId) return null;
+
+  return (
+    <div className="border border-primary/30 bg-primary/5 rounded-xl p-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <Crown className="h-4 w-4 text-primary" />
+        <h3 className="text-sm font-semibold text-foreground">Workspace plan (full access)</h3>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Switch this workspace to any plan tier instantly — no payment required. Current tier:{" "}
+        <span className="font-semibold text-foreground capitalize">{effectivePlan ?? "free"}</span>.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {WORKSPACE_PLAN_TIERS.map((tier) => {
+          const isCurrent = effectivePlan === tier;
+          return (
+            <button
+              key={tier}
+              onClick={() => void applyTier(tier)}
+              disabled={applying !== null}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors capitalize disabled:opacity-50",
+                isCurrent
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-foreground hover:border-primary",
+              )}
+            >
+              {applying === tier ? "Applying…" : tier}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

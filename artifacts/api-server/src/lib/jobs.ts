@@ -69,6 +69,7 @@ import {
   refundCredits,
   CREDITS_ENFORCEMENT_ENABLED,
 } from "../routes/credits";
+import { isSuperuser } from "./superusers";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import {
@@ -2231,7 +2232,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .where(eq(agentTasksTable.id, taskId))
         .limit(1)
         .then((r) => (r[0]?.reserved ?? null) !== null));
-    if (CREDITS_ENFORCEMENT_ENABLED && project.ownerId && !creditsAlreadyReserved) {
+    if (
+      CREDITS_ENFORCEMENT_ENABLED &&
+      project.ownerId &&
+      !creditsAlreadyReserved &&
+      !(await isSuperuser(project.ownerId))
+    ) {
       const credits = await getOrCreateCredits(project.ownerId);
       if (credits.balance < creditCost) {
         const msg = `Insufficient credits. This ${agentMode} build costs ${creditCost} credit(s) but your balance is ${credits.balance}. Top up in Billing to continue.`;
