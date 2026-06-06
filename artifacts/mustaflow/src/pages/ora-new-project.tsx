@@ -3,7 +3,9 @@ import { useLocation } from "wouter";
 import { ArrowLeft, FolderPlus, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { authFetch } from "@/lib/api-fetch";
+import { setPendingOraProjectId } from "@/hooks/use-ora-conversations";
 import { useToast } from "@/hooks/use-toast";
+import type { OraProjectSummary } from "@/hooks/ora-conversations-context";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -45,6 +47,10 @@ export default function OraNewProjectPage() {
         });
         return;
       }
+      const data = (await res.json()) as { project: OraProjectSummary };
+      // Scope the next chat to the freshly created project so the first
+      // message is saved under it instead of as a standalone conversation.
+      setPendingOraProjectId(data.project.id);
       setLocation("/ora");
     } catch {
       toast({

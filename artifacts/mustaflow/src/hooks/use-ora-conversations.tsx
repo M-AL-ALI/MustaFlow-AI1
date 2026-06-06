@@ -10,6 +10,9 @@ import {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const CURRENT_ID_KEY = "ora_current_conversation_id";
+// Set by the dedicated "New project" page so the first chat opened after
+// creating a project is scoped to that project (not saved as standalone).
+const PENDING_PROJECT_KEY = "ora_pending_project_id";
 
 function storeCurrentId(id: number | null): void {
   try {
@@ -17,6 +20,27 @@ function storeCurrentId(id: number | null): void {
     else sessionStorage.setItem(CURRENT_ID_KEY, String(id));
   } catch {
     /* ignore */
+  }
+}
+
+/** Stash a project id so the next Ora session opens a fresh chat under it. */
+export function setPendingOraProjectId(id: number): void {
+  try {
+    sessionStorage.setItem(PENDING_PROJECT_KEY, String(id));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Read (without clearing) the pending project id, if any. */
+function getStoredPendingProjectId(): number | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_PROJECT_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) ? n : null;
+  } catch {
+    return null;
   }
 }
 
@@ -35,8 +59,8 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
   const { isSignedIn } = useClerkUser();
   const [projects, setProjects] = useState<OraProjectSummary[]>([]);
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
-  const [currentConversationId, setCurrentConversationId] = useState<number | null>(
-    getStoredCurrentId,
+  const [currentConversationId, setCurrentConversationId] = useState<number | null>(() =>
+    getStoredPendingProjectId() != null ? null : getStoredCurrentId(),
   );
   const [loading, setLoading] = useState(true);
 
@@ -83,6 +107,26 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // When arriving from the dedicated "New project" page, open a fresh chat
+  // scoped to that project so the first message is saved under it (not as a
+  // standalone conversation). Consume the stashed id once on mount.
+  const pendingConsumedRef = useRef(false);
+  useEffect(() => {
+    if (pendingConsumedRef.current) return;
+    pendingConsumedRef.current = true;
+    const pid = getStoredPendingProjectId();
+    if (pid != null) {
+      pendingProjectIdRef.current = pid;
+      setCurrentConversationId(null);
+      storeCurrentId(null);
+      try {
+        sessionStorage.removeItem(PENDING_PROJECT_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
 
   const selectConversation = useCallback((id: number | null) => {
     pendingProjectIdRef.current = null;
