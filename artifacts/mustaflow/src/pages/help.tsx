@@ -77,6 +77,24 @@ export function ticketDetailPath(ticketId: number): string {
   return `/support/tickets/${ticketId}`;
 }
 
+/**
+ * Decide whether the page should open in "Report Issue" mode (escalation form
+ * auto-opened + focused) and which project the report is about. Pure so the
+ * routing contract — sidebar "Report Issue" links to /help?mode=report — is
+ * unit-tested without mounting the component.
+ */
+export function parseSupportReportParams(
+  searchString: string,
+  hash: string,
+): { reportMode: boolean; initialProjectId: number | null } {
+  const params = new URLSearchParams(searchString);
+  const pid = params.get("projectId");
+  return {
+    reportMode: params.get("mode") === "report" || hash === "#support",
+    initialProjectId: pid && /^\d+$/.test(pid) ? Number(pid) : null,
+  };
+}
+
 /** Best-effort, non-identifying browser/device context attached to a ticket. */
 function collectDeviceInfo(): Record<string, unknown> {
   try {
@@ -221,13 +239,8 @@ function SupportChat() {
 
   // ?mode=report (or #support) opens the page focused on contacting the team.
   const { reportMode, initialProjectId } = useMemo(() => {
-    const params = new URLSearchParams(searchString);
     const hash = typeof window !== "undefined" ? window.location.hash : "";
-    const pid = params.get("projectId");
-    return {
-      reportMode: params.get("mode") === "report" || hash === "#support",
-      initialProjectId: pid && /^\d+$/.test(pid) ? Number(pid) : null,
-    };
+    return parseSupportReportParams(searchString, hash);
   }, [searchString]);
 
   const [messages, setMessages] = useState<SupportMessage[]>([]);

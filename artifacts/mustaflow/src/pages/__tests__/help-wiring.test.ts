@@ -16,12 +16,35 @@ import {
   loadStoredMessages,
   persistMessages,
   clearStoredMessages,
+  parseSupportReportParams,
 } from "../help";
 
 describe("ticketDetailPath", () => {
   it("builds the /support/tickets/:id route for a created ticket", () => {
     expect(ticketDetailPath(123)).toBe("/support/tickets/123");
     expect(ticketDetailPath(1)).toBe("/support/tickets/1");
+  });
+});
+
+describe("parseSupportReportParams (Report Issue opens /help?mode=report)", () => {
+  it("enters report mode for ?mode=report (the sidebar Report Issue link)", () => {
+    expect(parseSupportReportParams("?mode=report", "").reportMode).toBe(true);
+    expect(parseSupportReportParams("mode=report", "").reportMode).toBe(true);
+  });
+
+  it("also enters report mode for the #support hash", () => {
+    expect(parseSupportReportParams("", "#support").reportMode).toBe(true);
+  });
+
+  it("stays in normal (non-report) mode without the cue", () => {
+    expect(parseSupportReportParams("", "").reportMode).toBe(false);
+    expect(parseSupportReportParams("?mode=browse", "#other").reportMode).toBe(false);
+  });
+
+  it("extracts a numeric projectId and rejects non-numeric ones", () => {
+    expect(parseSupportReportParams("?mode=report&projectId=42", "").initialProjectId).toBe(42);
+    expect(parseSupportReportParams("?projectId=abc", "").initialProjectId).toBeNull();
+    expect(parseSupportReportParams("", "").initialProjectId).toBeNull();
   });
 });
 
