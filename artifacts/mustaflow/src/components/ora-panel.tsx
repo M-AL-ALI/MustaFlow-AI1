@@ -27,12 +27,9 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  useGetBillingSubscription,
-  getGetBillingSubscriptionQueryKey,
-  getListKnowledgeQueryKey,
-} from "@workspace/api-client-react";
+import { getListKnowledgeQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { authFetch } from "@/lib/api-fetch";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
@@ -248,13 +245,34 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const { isSignedIn } = useUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: subscription } = useGetBillingSubscription({
-    query: {
-      queryKey: getGetBillingSubscriptionQueryKey(),
-      enabled: Boolean(isSignedIn),
-    },
-  });
-  const tier = subscription?.tier ?? "free";
+  const [tier, setTier] = useState("free");
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setTier("free");
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        let res = await authFetch("/api/public-ai/session");
+        if (res.status === 401) {
+          res = await authFetch("/api/public-ai/session", { method: "POST" });
+        }
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as { tier?: string };
+        if (!cancelled) setTier(data.tier ?? "free");
+      } catch {
+        if (!cancelled) setTier("free");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
+
   const deepAllowed = tier === "core" || tier === "wave";
 
   // Inline image editing: which editable image's edit box is open, and its draft
@@ -1441,7 +1459,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         <button
                           type="button"
                           onClick={() => setMode("instant")}
-                          title="Instant — fast everyday replies (1 credit)"
+                          title="Instant — fast everyday replies"
                           aria-pressed={mode === "instant"}
                           className={cn(
                             "flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors",
@@ -1459,13 +1477,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                             if (deepAllowed) {
                               setMode("deep");
                             } else {
-                              setLocation("/billing?tier=core");
+                              setLocation("/ora/settings");
                             }
                           }}
                           title={
                             deepAllowed
-                              ? "Deep Thinking — slower, step-by-step reasoning (5 credits)"
-                              : "Deep Thinking is available on Core Pack and Deep Wave"
+                              ? "Deep Thinking — slower, step-by-step reasoning"
+                              : "Deep Thinking is available with an Ora Core Pack or Deep Wave plan"
                           }
                           aria-pressed={mode === "deep" && deepAllowed}
                           className={cn(

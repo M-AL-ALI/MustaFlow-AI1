@@ -13,6 +13,8 @@ import {
   ImageIcon,
   MessageSquare,
   Loader2,
+  Crown,
+  ExternalLink,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -330,8 +332,10 @@ function remaining(count: number | undefined, limit: number | undefined): number
 
 function PlanLimitsSection() {
   const { isSignedIn } = useClerkUser();
+  const { toast } = useToast();
   const [usage, setUsage] = useState<OraPlanUsage | null>(null);
   const [loading, setLoading] = useState(false);
+  const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -356,6 +360,82 @@ function PlanLimitsSection() {
       cancelled = true;
     };
   }, [isSignedIn]);
+
+  async function startOraCheckout(tier: "core" | "wave") {
+    setPlanAction(tier);
+    try {
+      const res = await authFetch("/api/billing/subscription/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tier,
+          successUrl: `${window.location.origin}/ora/settings?subscribed=1`,
+          cancelUrl: `${window.location.origin}/ora/settings`,
+        }),
+      });
+      const data = (await res.json()) as {
+        setupRequired?: boolean;
+        checkoutUrl?: string;
+        error?: string;
+        message?: string;
+      };
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
+      toast({
+        title: data.setupRequired ? "Ora plans are not configured" : "Could not open checkout",
+        description: data.message ?? data.error ?? "Please try again.",
+        variant: "destructive",
+      });
+    } catch {
+      toast({
+        title: "Could not open checkout",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPlanAction(null);
+    }
+  }
+
+  async function openOraBillingPortal() {
+    setPlanAction("portal");
+    try {
+      const res = await authFetch("/api/billing/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ returnUrl: `${window.location.origin}/ora/settings` }),
+      });
+      const data = (await res.json()) as {
+        url?: string;
+        setupRequired?: boolean;
+        error?: string;
+      };
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      toast({
+        title: data.setupRequired ? "Ora plans are not configured" : "Could not open plan portal",
+        description: data.error ?? "Please try again.",
+        variant: "destructive",
+      });
+    } catch {
+      toast({
+        title: "Could not open plan portal",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPlanAction(null);
+    }
+  }
+
+  const tier = usage?.tier;
+  const isPaid = tier === "core" || tier === "wave";
+  const canUpgradeToCore = !isPaid;
+  const canUpgradeToWave = tier !== "wave";
 
   return (
     <SectionCard
@@ -402,12 +482,53 @@ function PlanLimitsSection() {
               </p>
             </div>
           </div>
-          <Link
-            href="/billing?tab=subscription"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-          >
-            Manage Ora plan
-          </Link>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {canUpgradeToCore && (
+              <button
+                type="button"
+                onClick={() => void startOraCheckout("core")}
+                disabled={planAction !== null}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {planAction === "core" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Crown className="h-3.5 w-3.5" />
+                )}
+                Upgrade to Core Pack
+              </button>
+            )}
+            {canUpgradeToWave && (
+              <button
+                type="button"
+                onClick={() => void startOraCheckout("wave")}
+                disabled={planAction !== null}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {planAction === "wave" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Crown className="h-3.5 w-3.5" />
+                )}
+                Upgrade to Deep Wave
+              </button>
+            )}
+            {isPaid && (
+              <button
+                type="button"
+                onClick={() => void openOraBillingPortal()}
+                disabled={planAction !== null}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {planAction === "portal" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ExternalLink className="h-3.5 w-3.5" />
+                )}
+                Manage Ora plan
+              </button>
+            )}
+          </div>
         </div>
       )}
     </SectionCard>
