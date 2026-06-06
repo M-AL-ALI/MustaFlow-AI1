@@ -24,6 +24,10 @@ import {
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import { useState, useEffect, useCallback } from "react";
+import {
+  useListAdminSupportTickets,
+  getListAdminSupportTicketsQueryKey,
+} from "@workspace/api-client-react";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
 import { OrgSwitcher } from "@/components/org-switcher";
@@ -167,6 +171,19 @@ function AdminNavItem() {
       .catch(() => {});
   }, [isLoaded, isSignedIn]);
 
+  const newTicketsQuery = useListAdminSupportTickets(
+    { limit: 1 },
+    {
+      query: {
+        queryKey: getListAdminSupportTicketsQueryKey({ limit: 1 }),
+        enabled: isAdmin,
+        refetchInterval: 60_000,
+        refetchOnWindowFocus: true,
+      },
+    },
+  );
+  const newTicketCount = newTicketsQuery.data?.statusCounts.new ?? 0;
+
   if (!isAdmin) return null;
 
   const adminActive = location === "/admin";
@@ -199,8 +216,16 @@ function AdminNavItem() {
                 : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
             )}
           >
-            <LifeBuoy className="h-4 w-4" />
-            Support Inbox
+            <LifeBuoy className="h-4 w-4 shrink-0" />
+            <span className="flex-1">Support Inbox</span>
+            {newTicketCount > 0 && (
+              <span
+                className="ml-auto inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold leading-none text-primary-foreground"
+                title={`${newTicketCount} new ticket${newTicketCount === 1 ? "" : "s"}`}
+              >
+                {newTicketCount > 99 ? "99+" : newTicketCount}
+              </span>
+            )}
           </div>
         </Link>
       </div>

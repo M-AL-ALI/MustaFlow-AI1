@@ -21,6 +21,7 @@ import {
   Inbox,
   Bug,
   Layers,
+  LifeBuoy,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -45,6 +46,8 @@ import {
   getAdminEvalResults,
   listAdminRecentUnreadInbox,
   getAdminJobQueue,
+  useListAdminSupportTickets,
+  getListAdminSupportTicketsQueryKey,
 } from "@workspace/api-client-react";
 
 import type {
@@ -202,6 +205,7 @@ export default function AdminPage() {
       <InboxRecentUnreadTile />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <SupportTicketsTile />
         <StatCard
           icon={FolderKanban}
           label="Total Projects"
@@ -1129,6 +1133,45 @@ function ArchitectMetric({
         {label}
       </div>
     </div>
+  );
+}
+
+function SupportTicketsTile() {
+  const { data } = useListAdminSupportTickets(
+    { limit: 1 },
+    {
+      query: {
+        queryKey: getListAdminSupportTicketsQueryKey({ limit: 1 }),
+        refetchInterval: 60_000,
+        refetchOnWindowFocus: true,
+      },
+    },
+  );
+  const counts = data?.statusCounts;
+  const newCount = counts?.new ?? 0;
+  const openCount = counts?.open ?? 0;
+
+  return (
+    <a
+      href="/admin/support"
+      className="block border border-border rounded-xl p-4 bg-card space-y-2 transition-colors hover:bg-muted/40 hover:border-border/80"
+    >
+      <div className="flex items-center justify-between text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <LifeBuoy className="h-4 w-4" />
+          <span className="text-xs">Support Tickets</span>
+        </div>
+        {newCount > 0 && (
+          <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold leading-none text-primary-foreground">
+            {newCount > 99 ? "99+" : newCount}
+          </span>
+        )}
+      </div>
+      <div className="text-2xl font-bold">{data ? newCount : "…"}</div>
+      <div className="text-xs text-muted-foreground">
+        new · {openCount} open — view inbox
+      </div>
+    </a>
   );
 }
 
