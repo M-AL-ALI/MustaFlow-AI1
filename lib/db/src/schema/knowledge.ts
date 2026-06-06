@@ -83,6 +83,11 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   // pgvector column (1536 dims = OpenAI text-embedding-3-small).
   // Null when not yet computed — loadKnowledgeContext falls back to TF-IDF.
   embedding: vector("embedding", { dimensions: KNOWLEDGE_EMBEDDING_DIM }),
+  // Ora Memory Center: when false, the memory is kept but excluded from Ora's
+  // context injection (user "paused" it). User-scope memories only.
+  enabled: boolean("enabled").notNull().default(true),
+  // Ora Memory Center: the Ora conversation a memory was captured from (if any).
+  sourceConversationId: integer("source_conversation_id"),
   // Soft-delete: when set, the entry is archived and hidden by default
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   // When set, this entry's contributor has already been rewarded for crossing

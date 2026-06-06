@@ -1,0 +1,93 @@
+Build Phase 3B.1: Ora Memory + History Center.
+
+Goal:
+Create a clean ChatGPT-style Memory/History area for Ora, separate from AI Builder.
+
+Important:
+Do not mix memory, profile, history, library, or AI Builder projects together.
+Do not route any Ora memory/history UI to AI Builder billing or AI Builder project pages unless the user explicitly opens a Builder project.
+
+Routes / UI:
+1. Add sidebar item:
+- Memory
+
+2. Add route:
+- /ora/memory
+
+3. Move recent conversations out of the main sidebar into this Memory/History area.
+- Sidebar should stay simpler.
+- /ora/memory should contain the recent conversations/history list.
+
+Page structure:
+Use tabs or sections:
+
+A. Profile
+Optional user profile fields:
+- preferred name
+- occupation
+- industry/background
+- goals
+- skill level
+- preferred language
+- preferred response style
+- things Ora should avoid
+
+Purpose:
+Ora can use this context to personalize replies.
+
+B. Saved Memories
+Show memories Ora has saved.
+Each memory card should support:
+- view
+- edit
+- delete
+- disable/enable
+- source conversation if available
+- created/updated date if available
+
+C. Preferences
+Controls:
+- Use saved memory in replies: on/off
+- Reference chat history: on/off
+- Auto-save clear memories: on/off
+- Ask before saving personal/sensitive memories: on/off
+
+D. History
+Show recent Ora conversations here instead of cluttering the sidebar.
+Features:
+- search conversations
+- open conversation
+- rename conversation
+- delete conversation
+- show last updated date
+- show short preview/summary
+
+E. Data Controls
+- clear all saved memories
+- clear conversation history
+- export Ora data if easy
+- privacy note explaining what Ora remembers
+
+Backend:
+Use existing Ora memory/conversation tables where possible.
+Add missing fields only if needed:
+- profile fields
+- memory enabled/disabled
+- source conversation id
+- memory metadata
+- user preferences
+
+AI behavior:
+- Ora should use profile + enabled memories + selected history context only when allowed by settings.
+- Do not save sensitive memories automatically.
+- If memory confidence is low or personal/sensitive, ask user before saving.
+- Keep conversation history separate from permanent memory.
+
+Acceptance:
+- /ora/memory exists and works.
+- Sidebar has Memory link.
+- Recent conversations are shown under /ora/memory History section.
+- Main Ora sidebar is less cluttered.
+- User can manage profile, memories, preferences, and history.
+- Ora uses these settings without leaking to AI Builder.
+- Typecheck, lint, format, and relevant tests pass.

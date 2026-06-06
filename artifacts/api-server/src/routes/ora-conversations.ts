@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, desc, isNull } from "drizzle-orm";
+import { and, eq, desc, isNull, sql } from "drizzle-orm";
 import { db, oraConversationsTable, oraProjectsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -79,6 +79,11 @@ router.get("/ora/conversations", async (req, res) => {
         createdAt: oraConversationsTable.createdAt,
         updatedAt: oraConversationsTable.updatedAt,
         lastMessageAt: oraConversationsTable.lastMessageAt,
+        // Short preview = last message's text, truncated. Computed in SQL so we
+        // never transfer full message bodies just to render the History list.
+        preview: sql<
+          string | null
+        >`left((${oraConversationsTable.messages} -> (jsonb_array_length(${oraConversationsTable.messages}) - 1) ->> 'content'), 140)`,
       })
       .from(oraConversationsTable)
       .where(
@@ -304,6 +309,23 @@ router.delete("/ora/conversations/:id", async (req, res) => {
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to delete conversation");
     res.status(500).json({ error: "Failed to delete conversation" });
+  }
+});
+
+// Clear ALL of the user's conversation history (Data Controls).
+router.delete("/ora/conversations", async (req, res) => {
+  const userId = req.userId!;
+  try {
+    await db
+      .update(oraConversationsTable)
+      .set({ archivedAt: new Date() })
+      .where(
+        and(eq(oraConversationsTable.userId, userId), isNull(oraConversationsTable.archivedAt)),
+      );
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "ora-conversations", err }, "Failed to clear conversations");
+    res.status(500).json({ error: "Failed to clear conversations" });
   }
 });
 

@@ -21,6 +21,7 @@ import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import {
   db,
   knowledgeEntriesTable,
+  oraProfilesTable,
   generatedImagesTable,
   TIER_DAILY_MESSAGE_LIMIT,
   type SubscriptionTier,
@@ -84,6 +85,9 @@ async function buildMemoryContext(userId: string): Promise<string> {
         and(
           eq(knowledgeEntriesTable.userId, userId),
           eq(knowledgeEntriesTable.scope, "user"),
+          // Respect the Memory Center "pause" toggle: paused memories are kept
+          // but excluded from Ora's context.
+          eq(knowledgeEntriesTable.enabled, true),
           isNull(knowledgeEntriesTable.archivedAt),
         ),
       )
@@ -96,6 +100,39 @@ async function buildMemoryContext(userId: string): Promise<string> {
     return `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation:\n${lines}`;
   } catch {
     // Memory injection is best-effort — never block a reply on it.
+    return "";
+  }
+}
+
+/**
+ * Fetch the user's Ora profile ("About you" / custom instructions) and format
+ * it as a compact context block for the system prompt. Returns an empty string
+ * when the user has no profile.
+ *
+ * ISOLATION: like buildMemoryContext, this is Ora-only. The profile lives in
+ * its own `ora_profiles` table and is injected only here, never into the AI
+ * Builder.
+ */
+async function buildProfileContext(userId: string): Promise<string> {
+  try {
+    const [p] = await db.select().from(oraProfilesTable).where(eq(oraProfilesTable.userId, userId));
+    if (!p) return "";
+
+    const lines: string[] = [];
+    if (p.preferredName) lines.push(`- Preferred name: ${p.preferredName}`);
+    if (p.occupation) lines.push(`- Occupation: ${p.occupation}`);
+    if (p.industry) lines.push(`- Industry: ${p.industry}`);
+    if (p.skillLevel) lines.push(`- Skill level: ${p.skillLevel}`);
+    if (p.preferredLanguage) lines.push(`- Preferred language: ${p.preferredLanguage}`);
+    if (p.goals) lines.push(`- Goals: ${p.goals}`);
+    if (p.responseStyle) lines.push(`- Preferred response style: ${p.responseStyle}`);
+    if (p.avoid) lines.push(`- Things to avoid: ${p.avoid}`);
+
+    if (lines.length === 0) return "";
+
+    return `\n\n## About the user\nThe user has shared these details about themselves and how they'd like you to respond. Honor them throughout the conversation, but defer to anything they say in the current message:\n${lines.join("\n")}`;
+  } catch {
+    // Profile injection is best-effort — never block a reply on it.
     return "";
   }
 }
@@ -579,9 +616,14 @@ router.post("/public-ai/chat", async (req, res) => {
   const memoryContext =
     authed && referenceSavedMemories ? await buildMemoryContext(authed.userId) : "";
 
+  // The Ora profile ("About you") is custom instructions — always applied for
+  // signed-in users when present, independent of the saved-memories toggle.
+  const profileContext = authed ? await buildProfileContext(authed.userId) : "";
+
   const systemPrompt =
     buildSystemPrompt(language, languageHint) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
+    profileContext +
     memoryContext;
 
   const callMessages = [

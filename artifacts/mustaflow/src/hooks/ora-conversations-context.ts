@@ -7,6 +7,8 @@ export interface OraConversationSummary {
   createdAt: string;
   updatedAt: string;
   lastMessageAt: string;
+  /** Short snippet of the last message, for the History list. */
+  preview?: string | null;
 }
 
 export interface OraProjectSummary {

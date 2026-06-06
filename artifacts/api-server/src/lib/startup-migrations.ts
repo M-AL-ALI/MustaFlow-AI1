@@ -3261,6 +3261,37 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-memory-center (Phase 3B.1) ──────────────────────────────────
+  {
+    name: "migrate-ora-memory-center",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ora_profiles (
+          id                 SERIAL PRIMARY KEY,
+          user_id            TEXT NOT NULL UNIQUE,
+          preferred_name     TEXT,
+          occupation         TEXT,
+          industry           TEXT,
+          goals              TEXT,
+          skill_level        TEXT,
+          preferred_language TEXT,
+          response_style     TEXT,
+          avoid              TEXT,
+          created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(
+        `ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE`,
+      );
+      await client.query(
+        `ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS source_conversation_id INTEGER`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

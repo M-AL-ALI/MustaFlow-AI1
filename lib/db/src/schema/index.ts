@@ -38,6 +38,7 @@ export * from "./agent-inbox";
 export * from "./webhooks";
 export * from "./personal-access-tokens";
 export * from "./domain-serve-events";
+export * from "./ora-profiles";
 export * from "./abuse-reports";
 export * from "./workspace-domains";
 export * from "./workspace-domain-roles";

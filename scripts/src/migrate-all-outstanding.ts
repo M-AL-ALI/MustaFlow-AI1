@@ -81,6 +81,7 @@ const MIGRATIONS = [
   "migrate-voice-lang",
   "migrate-ora-transcripts",
   "migrate-vault-embeddings",
+  "migrate-ora-memory-center",
 ] as const;
 
 async function main(): Promise<void> {

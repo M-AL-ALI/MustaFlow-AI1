@@ -6,6 +6,7 @@
 const SAVED_MEMORIES_KEY = "ora_reference_saved_memories";
 const CHAT_HISTORY_KEY = "ora_reference_chat_history";
 const AUTO_SAVE_MEMORIES_KEY = "ora_auto_save_memories";
+const ASK_BEFORE_SENSITIVE_KEY = "ora_ask_before_sensitive";
 
 function readBool(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;
@@ -44,4 +45,18 @@ export function getAutoSaveMemories(): boolean {
 export function setAutoSaveMemories(value: boolean): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(AUTO_SAVE_MEMORIES_KEY, String(value));
+}
+
+// When enabled (the default), Ora always asks for confirmation before saving a
+// memory it detects as sensitive (passwords, financial details, etc.) instead
+// of auto-saving it. The server independently forces sensitive candidates to
+// low confidence so they are never auto-saved — this toggle is the client-side
+// expression of that safeguard.
+export function getAskBeforeSensitive(): boolean {
+  return readBool(ASK_BEFORE_SENSITIVE_KEY, true);
+}
+
+export function setAskBeforeSensitive(value: boolean): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ASK_BEFORE_SENSITIVE_KEY, String(value));
 }
