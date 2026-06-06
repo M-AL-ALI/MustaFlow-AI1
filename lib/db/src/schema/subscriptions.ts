@@ -56,7 +56,7 @@ export const TIER_MONTHLY_IMAGE_CAP: Record<SubscriptionTier, number> = {
 // subscription tier — NOT by the AI Builder credit wallet. Limits reset at
 // midnight UTC. The Builder keeps its separate credit system untouched.
 export const TIER_DAILY_MESSAGE_LIMIT: Record<SubscriptionTier, number> = {
-  free: 15,
+  free: 20,
   core: 30,
   wave: 55,
 };
