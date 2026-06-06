@@ -1365,6 +1365,7 @@ router.post("/billing/payment-method/setup", async (req, res): Promise<void> => 
     const customerId = await ensureStripeCustomer(userId, stripe);
     const session = await stripe.checkout.sessions.create({
       mode: "setup" as const,
+      currency: "usd",
       customer: customerId,
       success_url: `${returnTo}?pm=added`,
       cancel_url: returnTo,
