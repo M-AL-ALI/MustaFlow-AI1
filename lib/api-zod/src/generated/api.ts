@@ -7267,3 +7267,98 @@ export const EditImageBody = zod.object({
 })
 
 
+/**
+ * @summary List/search public Help Center articles and FAQs.
+ */
+export const ListHelpArticlesQueryParams = zod.object({
+  "q": zod.coerce.string().optional().describe('Optional free-text search across title, body, and tags.'),
+  "category": zod.coerce.string().optional().describe('Optional category filter.')
+})
+
+export const ListHelpArticlesResponse = zod.object({
+  "articles": zod.array(zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "category": zod.string(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "tags": zod.array(zod.string()),
+  "isFaq": zod.boolean(),
+  "sortOrder": zod.number()
+})),
+  "faqs": zod.array(zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "category": zod.string(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "tags": zod.array(zod.string()),
+  "isFaq": zod.boolean(),
+  "sortOrder": zod.number()
+}))
+})
+
+
+/**
+ * @summary Send a message to Ora Support Mode (requires sign-in).
+ */
+
+
+
+export const SupportChatBody = zod.object({
+  "message": zod.string().min(1),
+  "messages": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})).optional(),
+  "projectId": zod.number().nullish(),
+  "category": zod.string().optional(),
+  "language": zod.string().optional(),
+  "languageHint": zod.string().optional()
+})
+
+export const SupportChatResponse = zod.object({
+  "reply": zod.string(),
+  "suggestions": zod.array(zod.string()).optional(),
+  "canEscalate": zod.boolean()
+})
+
+
+/**
+ * @summary List the signed-in user's Support Mode conversations.
+ */
+export const ListSupportConversationsResponse = zod.object({
+  "conversations": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "lastMessageAt": zod.string().optional(),
+  "preview": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Escalate a support conversation to a human (creates a ticket + email).
+ */
+
+
+
+export const EscalateSupportBody = zod.object({
+  "subject": zod.string().min(1),
+  "category": zod.string().optional(),
+  "transcript": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})),
+  "projectId": zod.number().nullish(),
+  "attachments": zod.array(zod.object({
+  "fileName": zod.string(),
+  "mimeType": zod.string(),
+  "dataBase64": zod.string()
+})).optional(),
+  "deviceInfo": zod.record(zod.string(), zod.unknown()).nullish()
+})
+
+

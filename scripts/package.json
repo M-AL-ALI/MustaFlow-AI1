@@ -106,6 +106,7 @@
     "migrate-ora-daily-usage": "tsx ./src/migrate-ora-daily-usage.ts",
     "migrate-task-events-data": "tsx ./src/migrate-task-events-data.ts",
     "migrate-ora-transcript-cleanup": "tsx ./src/migrate-ora-transcript-cleanup.ts",
+    "migrate-help-center": "tsx ./src/migrate-help-center.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "validate-developer-mode": "tsx ./src/validate-developer-mode.ts",
     "verify-developer-mode-runtime": "tsx ./src/verify-developer-mode-runtime.ts",

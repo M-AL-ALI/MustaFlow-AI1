@@ -109,6 +109,8 @@ import type {
   DryRunProjectDomainDnsChanges200,
   DryRunProjectDomainDnsChangesBody,
   DuplicateProjectResult,
+  EscalateSupportInput,
+  EscalateSupportOutput,
   ExplainChangeInput,
   ExportKnowledge200,
   FileBlocksResponse,
@@ -148,6 +150,7 @@ import type {
   GithubSyncStatusResult,
   GrantAdminRole200,
   HealthStatus,
+  HelpArticlesOutput,
   ImageEditRequest,
   ImageGenerateRequest,
   ImageGenerateResponse,
@@ -174,6 +177,7 @@ import type {
   ListGithubBranches200,
   ListGithubCommitsParams,
   ListGithubRepositoriesParams,
+  ListHelpArticlesParams,
   ListImagesParams,
   ListKnowledgeParams,
   ListMobileBuilds200,
@@ -290,6 +294,9 @@ import type {
   SubmitProjectQueue200,
   SubmitProjectQueueBody,
   SuggestionAcceptResult,
+  SupportChatInput,
+  SupportChatOutput,
+  SupportConversationsOutput,
   TaskEvent,
   TaskFeedbackInput,
   ToggleAdminSkill200,
@@ -20385,5 +20392,308 @@ export const useEditImage = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getEditImageMutationOptions(options));
+    }
+
+export const getListHelpArticlesUrl = (params?: ListHelpArticlesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/help/articles?${stringifiedParams}` : `/api/help/articles`
+}
+
+/**
+ * @summary List/search public Help Center articles and FAQs.
+ */
+export const listHelpArticles = async (params?: ListHelpArticlesParams, options?: RequestInit): Promise<HelpArticlesOutput> => {
+
+  return customFetch<HelpArticlesOutput>(getListHelpArticlesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListHelpArticlesQueryKey = (params?: ListHelpArticlesParams,) => {
+    return [
+    `/api/help/articles`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListHelpArticlesQueryOptions = <TData = Awaited<ReturnType<typeof listHelpArticles>>, TError = ErrorType<unknown>>(params?: ListHelpArticlesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listHelpArticles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListHelpArticlesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listHelpArticles>>> = ({ signal }) => listHelpArticles(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listHelpArticles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListHelpArticlesQueryResult = NonNullable<Awaited<ReturnType<typeof listHelpArticles>>>
+export type ListHelpArticlesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List/search public Help Center articles and FAQs.
+ */
+
+export function useListHelpArticles<TData = Awaited<ReturnType<typeof listHelpArticles>>, TError = ErrorType<unknown>>(
+ params?: ListHelpArticlesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listHelpArticles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListHelpArticlesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSupportChatUrl = () => {
+
+
+
+
+  return `/api/help/support/chat`
+}
+
+/**
+ * @summary Send a message to Ora Support Mode (requires sign-in).
+ */
+export const supportChat = async (supportChatInput: SupportChatInput, options?: RequestInit): Promise<SupportChatOutput> => {
+
+  return customFetch<SupportChatOutput>(getSupportChatUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      supportChatInput,)
+  }
+);}
+
+
+
+
+export const getSupportChatMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof supportChat>>, TError,{data: BodyType<SupportChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof supportChat>>, TError,{data: BodyType<SupportChatInput>}, TContext> => {
+
+const mutationKey = ['supportChat'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof supportChat>>, {data: BodyType<SupportChatInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  supportChat(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SupportChatMutationResult = NonNullable<Awaited<ReturnType<typeof supportChat>>>
+    export type SupportChatMutationBody = BodyType<SupportChatInput>
+    export type SupportChatMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Send a message to Ora Support Mode (requires sign-in).
+ */
+export const useSupportChat = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof supportChat>>, TError,{data: BodyType<SupportChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof supportChat>>,
+        TError,
+        {data: BodyType<SupportChatInput>},
+        TContext
+      > => {
+      return useMutation(getSupportChatMutationOptions(options));
+    }
+
+export const getListSupportConversationsUrl = () => {
+
+
+
+
+  return `/api/help/support/conversations`
+}
+
+/**
+ * @summary List the signed-in user's Support Mode conversations.
+ */
+export const listSupportConversations = async ( options?: RequestInit): Promise<SupportConversationsOutput> => {
+
+  return customFetch<SupportConversationsOutput>(getListSupportConversationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSupportConversationsQueryKey = () => {
+    return [
+    `/api/help/support/conversations`
+    ] as const;
+    }
+
+
+export const getListSupportConversationsQueryOptions = <TData = Awaited<ReturnType<typeof listSupportConversations>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSupportConversations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSupportConversationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSupportConversations>>> = ({ signal }) => listSupportConversations({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSupportConversations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSupportConversationsQueryResult = NonNullable<Awaited<ReturnType<typeof listSupportConversations>>>
+export type ListSupportConversationsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List the signed-in user's Support Mode conversations.
+ */
+
+export function useListSupportConversations<TData = Awaited<ReturnType<typeof listSupportConversations>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSupportConversations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSupportConversationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getEscalateSupportUrl = () => {
+
+
+
+
+  return `/api/help/support/escalate`
+}
+
+/**
+ * @summary Escalate a support conversation to a human (creates a ticket + email).
+ */
+export const escalateSupport = async (escalateSupportInput: EscalateSupportInput, options?: RequestInit): Promise<EscalateSupportOutput> => {
+
+  return customFetch<EscalateSupportOutput>(getEscalateSupportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      escalateSupportInput,)
+  }
+);}
+
+
+
+
+export const getEscalateSupportMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof escalateSupport>>, TError,{data: BodyType<EscalateSupportInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof escalateSupport>>, TError,{data: BodyType<EscalateSupportInput>}, TContext> => {
+
+const mutationKey = ['escalateSupport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof escalateSupport>>, {data: BodyType<EscalateSupportInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  escalateSupport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EscalateSupportMutationResult = NonNullable<Awaited<ReturnType<typeof escalateSupport>>>
+    export type EscalateSupportMutationBody = BodyType<EscalateSupportInput>
+    export type EscalateSupportMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Escalate a support conversation to a human (creates a ticket + email).
+ */
+export const useEscalateSupport = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof escalateSupport>>, TError,{data: BodyType<EscalateSupportInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof escalateSupport>>,
+        TError,
+        {data: BodyType<EscalateSupportInput>},
+        TContext
+      > => {
+      return useMutation(getEscalateSupportMutationOptions(options));
     }
 

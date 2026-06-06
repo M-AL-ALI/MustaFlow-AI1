@@ -11,6 +11,7 @@ import {
   Settings,
   GraduationCap,
   BookOpen,
+  LifeBuoy,
   LayoutDashboard,
   LogOut,
   ChevronDown,
@@ -40,7 +41,8 @@ const NAV_ITEMS = [
 
 const BOTTOM_NAV_ITEMS = [
   { name: "Learn", href: "/learn", icon: GraduationCap },
-  { name: "Documentation", href: "/help", icon: BookOpen },
+  { name: "Help Center", href: "/help", icon: LifeBuoy },
+  { name: "Domains & API", href: "/help/domains-api", icon: BookOpen },
 ];
 
 function NavGroup({

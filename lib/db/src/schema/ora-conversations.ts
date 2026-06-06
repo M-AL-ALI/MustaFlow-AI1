@@ -25,6 +25,15 @@ export const oraProjectsTable = pgTable(
  * shape). `projectId` is null for standalone/one-off chats.
  * Soft-deleted via `archivedAt`.
  */
+/**
+ * `surface` separates normal Ora chats ("normal") from Help Center support
+ * conversations ("support"). Support conversations must NEVER appear in the
+ * normal Ora sidebar/history and vice versa — every query is filtered by this
+ * column. Existing rows are backfilled to "normal" in the migration.
+ */
+export const ORA_CONVERSATION_SURFACES = ["normal", "support"] as const;
+export type OraConversationSurface = (typeof ORA_CONVERSATION_SURFACES)[number];
+
 export const oraConversationsTable = pgTable(
   "ora_conversations",
   {
@@ -32,6 +41,7 @@ export const oraConversationsTable = pgTable(
     userId: text("user_id").notNull(),
     projectId: integer("project_id"),
     title: text("title"),
+    surface: text("surface").notNull().default("normal"),
     messages: jsonb("messages").notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -41,6 +51,7 @@ export const oraConversationsTable = pgTable(
   (t) => [
     index("ora_conversations_user_id_idx").on(t.userId),
     index("ora_conversations_project_id_idx").on(t.projectId),
+    index("ora_conversations_surface_idx").on(t.userId, t.surface),
   ],
 );
 

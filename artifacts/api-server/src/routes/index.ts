@@ -99,6 +99,7 @@ import oraAssetsRouter from "./ora-assets";
 import builderHandoffRouter from "./builder-handoff";
 import vaultKnowledgeRouter from "./vault-knowledge";
 import developerModeRouter from "./developer-mode";
+import helpRouter from "./help";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -141,6 +142,12 @@ router.use(brainstormRouter);
 // ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────
 router.post("/public-ai/chat", oraLimiter);
 router.use(publicAiRouter);
+
+// ── Help Center + Ora Support Mode ────────────────────────────────────────────
+// Articles are public; chat/conversations/escalate self-resolve Clerk auth and
+// 401 when signed out. Mounted before the auth wall so public browse works.
+router.post("/help/support/chat", oraLimiter);
+router.use(helpRouter);
 
 // ── 404 guard — return JSON 404 for unknown route prefixes BEFORE auth ────────
 // This ensures truly non-existent routes get 404, not 401, regardless of auth.
@@ -202,6 +209,7 @@ const KNOWN_PREFIXES = [
   "/ora",
   "/builder",
   "/images",
+  "/help",
 ];
 
 router.use((req, res, next) => {

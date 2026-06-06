@@ -204,3 +204,98 @@ export function domainRenewalFailureTemplate(opts: {
 
   return { subject, html, text: `${subject}\n\nReason: ${reason}\n\nRenew at: ${renewUrl}` };
 }
+
+// ── Support ticket (Task #1312) ───────────────────────────────────────────────
+
+export function supportTicketTemplate(opts: {
+  ticketId: number;
+  userEmail: string | null;
+  userId: string;
+  plan: string;
+  category: string;
+  subject: string;
+  transcript: { role: string; content: string }[];
+  attachments: { fileName: string; mimeType: string; size: number; url: string }[];
+  projectId: number | null;
+  deviceInfo: Record<string, unknown> | null;
+}): EmailTemplate {
+  const {
+    ticketId,
+    userEmail,
+    userId,
+    plan,
+    category,
+    subject,
+    transcript,
+    attachments,
+    projectId,
+    deviceInfo,
+  } = opts;
+
+  const esc = (s: string): string =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const transcriptHtml =
+    transcript.length === 0
+      ? '<p style="color:#9ca3af">(no transcript)</p>'
+      : transcript
+          .map(
+            (m) =>
+              `<p style="margin:0 0 10px"><strong style="color:${
+                m.role === "user" ? "#111" : "#6366f1"
+              }">${m.role === "user" ? "User" : "Ora"}:</strong><br/>${esc(m.content)}</p>`,
+          )
+          .join("\n");
+
+  const attachmentsHtml =
+    attachments.length === 0
+      ? '<p style="color:#9ca3af;font-size:13px">No attachments.</p>'
+      : `<ul style="font-size:13px;padding-left:18px">${attachments
+          .map(
+            (a) =>
+              `<li><a href="${a.url}">${esc(a.fileName)}</a> (${a.mimeType}, ${Math.round(
+                a.size / 1024,
+              )} KB)</li>`,
+          )
+          .join("")}</ul>`;
+
+  const emailSubject = `[Support #${ticketId}] ${subject}`;
+
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">New support ticket #${ticketId}</h2>
+  <p style="font-size:13px;color:#4b5563;margin:0 0 4px"><strong>From:</strong> ${
+    userEmail ? esc(userEmail) : "(no email on file)"
+  } (user ${esc(userId)})</p>
+  <p style="font-size:13px;color:#4b5563;margin:0 0 4px"><strong>Plan:</strong> ${esc(
+    plan,
+  )} &nbsp;|&nbsp; <strong>Category:</strong> ${esc(category)}${
+    projectId != null ? ` &nbsp;|&nbsp; <strong>Project:</strong> ${projectId}` : ""
+  }</p>
+  ${
+    deviceInfo
+      ? `<p style="font-size:12px;color:#9ca3af;margin:0 0 12px"><strong>Device:</strong> ${esc(
+          JSON.stringify(deviceInfo),
+        )}</p>`
+      : ""
+  }
+  <h3 style="color:#111;margin:18px 0 8px;font-size:15px">Conversation</h3>
+  <div style="font-size:13px;line-height:1.5;color:#111">${transcriptHtml}</div>
+  <h3 style="color:#111;margin:18px 0 8px;font-size:15px">Attachments</h3>
+  ${attachmentsHtml}`);
+
+  const textLines = [
+    `New support ticket #${ticketId}: ${subject}`,
+    `From: ${userEmail ?? "(no email)"} (user ${userId})`,
+    `Plan: ${plan} | Category: ${category}${projectId != null ? ` | Project: ${projectId}` : ""}`,
+    "",
+    "Conversation:",
+    ...transcript.map((m) => `${m.role === "user" ? "User" : "Ora"}: ${m.content}`),
+    "",
+    "Attachments:",
+    ...(attachments.length === 0
+      ? ["(none)"]
+      : attachments.map((a) => `- ${a.fileName} (${a.mimeType}): ${a.url}`)),
+  ];
+
+  return { subject: emailSubject, html, text: textLines.join("\n") };
+}

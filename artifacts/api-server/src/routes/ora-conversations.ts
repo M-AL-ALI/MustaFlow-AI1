@@ -87,7 +87,13 @@ router.get("/ora/conversations", async (req, res) => {
       })
       .from(oraConversationsTable)
       .where(
-        and(eq(oraConversationsTable.userId, userId), isNull(oraConversationsTable.archivedAt)),
+        and(
+          eq(oraConversationsTable.userId, userId),
+          // Support Mode conversations live on a separate surface and must never
+          // appear in the normal Ora sidebar/history (Task #1312).
+          eq(oraConversationsTable.surface, "normal"),
+          isNull(oraConversationsTable.archivedAt),
+        ),
       )
       .orderBy(desc(oraConversationsTable.lastMessageAt));
 
@@ -164,6 +170,9 @@ router.get("/ora/conversations/:id", async (req, res) => {
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
+          // Support Mode conversations are isolated — never reachable via the
+          // normal Ora single-conversation endpoints (Task #1312).
+          eq(oraConversationsTable.surface, "normal"),
           isNull(oraConversationsTable.archivedAt),
         ),
       );
@@ -226,6 +235,8 @@ router.patch("/ora/conversations/:id", async (req, res) => {
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
+          // Support Mode conversations are isolated (Task #1312).
+          eq(oraConversationsTable.surface, "normal"),
           isNull(oraConversationsTable.archivedAt),
         ),
       )
@@ -277,6 +288,8 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
+          // Support Mode conversations are isolated (Task #1312).
+          eq(oraConversationsTable.surface, "normal"),
           isNull(oraConversationsTable.archivedAt),
         ),
       )
@@ -304,7 +317,14 @@ router.delete("/ora/conversations/:id", async (req, res) => {
     await db
       .update(oraConversationsTable)
       .set({ archivedAt: new Date() })
-      .where(and(eq(oraConversationsTable.id, id), eq(oraConversationsTable.userId, userId)));
+      .where(
+        and(
+          eq(oraConversationsTable.id, id),
+          eq(oraConversationsTable.userId, userId),
+          // Support Mode conversations are isolated (Task #1312).
+          eq(oraConversationsTable.surface, "normal"),
+        ),
+      );
     res.json({ ok: true });
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to delete conversation");

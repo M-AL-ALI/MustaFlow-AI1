@@ -29,6 +29,97 @@ export interface ApiError {
   error: string;
 }
 
+export interface HelpArticle {
+  id: number;
+  slug: string;
+  category: string;
+  title: string;
+  body: string;
+  tags: string[];
+  isFaq: boolean;
+  sortOrder: number;
+}
+
+export interface HelpArticlesOutput {
+  articles: HelpArticle[];
+  faqs: HelpArticle[];
+}
+
+export type SupportMessageRole = typeof SupportMessageRole[keyof typeof SupportMessageRole];
+
+
+export const SupportMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface SupportMessage {
+  role: SupportMessageRole;
+  content: string;
+}
+
+export interface SupportChatInput {
+  /** @minLength 1 */
+  message: string;
+  messages?: SupportMessage[];
+  projectId?: number | null;
+  category?: string;
+  language?: string;
+  languageHint?: string;
+}
+
+export interface SupportChatOutput {
+  reply: string;
+  suggestions?: string[];
+  canEscalate: boolean;
+}
+
+export interface SupportConversationSummary {
+  id: number;
+  title?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  lastMessageAt?: string;
+  preview?: string | null;
+}
+
+export interface SupportConversationsOutput {
+  conversations: SupportConversationSummary[];
+}
+
+export interface SupportAttachmentInput {
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+export type EscalateSupportInputDeviceInfo = { [key: string]: unknown } | null;
+
+export interface EscalateSupportInput {
+  /** @minLength 1 */
+  subject: string;
+  category?: string;
+  transcript: SupportMessage[];
+  projectId?: number | null;
+  attachments?: SupportAttachmentInput[];
+  deviceInfo?: EscalateSupportInputDeviceInfo;
+}
+
+export type EscalateSupportOutputEmailStatus = typeof EscalateSupportOutputEmailStatus[keyof typeof EscalateSupportOutputEmailStatus];
+
+
+export const EscalateSupportOutputEmailStatus = {
+  sent: 'sent',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export interface EscalateSupportOutput {
+  ticketId: number;
+  emailStatus: EscalateSupportOutputEmailStatus;
+  supportEmailUsed?: string | null;
+}
+
 export type BrainstormMessageRole = typeof BrainstormMessageRole[keyof typeof BrainstormMessageRole];
 
 
@@ -5457,5 +5548,16 @@ export type DeleteGeneratedImage200 = {
 
 export type UploadImageBody = {
   image: Blob;
+};
+
+export type ListHelpArticlesParams = {
+/**
+ * Optional free-text search across title, body, and tags.
+ */
+q?: string;
+/**
+ * Optional category filter.
+ */
+category?: string;
 };
 

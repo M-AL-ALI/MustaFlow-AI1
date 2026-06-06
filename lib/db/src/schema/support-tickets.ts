@@ -1,0 +1,46 @@
+import { pgTable, serial, text, integer, jsonb, timestamp, index } from "drizzle-orm/pg-core";
+
+/**
+ * Support tickets — created when Ora Support Mode escalates an unresolved issue
+ * to a human. The ticket is the durable record: it is persisted BEFORE any email
+ * attempt so a mail failure can never lose the user's request.
+ *
+ * `transcript` is a JSONB array of the support conversation (role/content), so
+ * the human reader has full context. `attachments` is a JSONB array of validated
+ * safe link/metadata objects ({ fileName, mimeType, size, url }) — never raw or
+ * executable file bytes. `supportEmailUsed` records the address the ticket was
+ * actually sent to for auditability. `emailStatus` records delivery outcome.
+ */
+export const SUPPORT_TICKET_STATUSES = ["open", "closed"] as const;
+export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
+
+export const SUPPORT_EMAIL_STATUSES = ["sent", "skipped", "failed"] as const;
+export type SupportEmailStatus = (typeof SUPPORT_EMAIL_STATUSES)[number];
+
+export const supportTicketsTable = pgTable(
+  "support_tickets",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    userEmail: text("user_email"),
+    plan: text("plan").notNull().default("free"),
+    category: text("category").notNull().default("other"),
+    status: text("status").notNull().default("open"),
+    subject: text("subject").notNull(),
+    transcript: jsonb("transcript").notNull().default([]),
+    projectId: integer("project_id"),
+    attachments: jsonb("attachments").notNull().default([]),
+    deviceInfo: jsonb("device_info"),
+    supportEmailUsed: text("support_email_used"),
+    emailStatus: text("email_status").notNull().default("skipped"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("support_tickets_user_id_idx").on(t.userId, t.createdAt),
+    index("support_tickets_status_idx").on(t.status, t.createdAt),
+  ],
+);
+
+export type SupportTicket = typeof supportTicketsTable.$inferSelect;
+export type InsertSupportTicket = typeof supportTicketsTable.$inferInsert;

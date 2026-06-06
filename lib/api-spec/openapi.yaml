@@ -6528,6 +6528,106 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } },
           }
 
+  /help/articles:
+    get:
+      operationId: listHelpArticles
+      tags: [help]
+      summary: List/search public Help Center articles and FAQs.
+      parameters:
+        - in: query
+          name: q
+          required: false
+          schema: { type: string }
+          description: Optional free-text search across title, body, and tags.
+        - in: query
+          name: category
+          required: false
+          schema: { type: string }
+          description: Optional category filter.
+      responses:
+        "200":
+          description: Help articles and FAQs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HelpArticlesOutput"
+
+  /help/support/chat:
+    post:
+      operationId: supportChat
+      tags: [help]
+      summary: Send a message to Ora Support Mode (requires sign-in).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportChatInput"
+      responses:
+        "200":
+          description: Support assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportChatOutput"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /help/support/conversations:
+    get:
+      operationId: listSupportConversations
+      tags: [help]
+      summary: List the signed-in user's Support Mode conversations.
+      responses:
+        "200":
+          description: Support conversation summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportConversationsOutput"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /help/support/escalate:
+    post:
+      operationId: escalateSupport
+      tags: [help]
+      summary: Escalate a support conversation to a human (creates a ticket + email).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscalateSupportInput"
+      responses:
+        "201":
+          description: Ticket created (email attempted after persistence)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EscalateSupportOutput"
+        "400":
+          description: Invalid request body or attachment validation failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
 components:
   schemas:
     HealthStatus:
@@ -6549,6 +6649,129 @@ components:
       properties:
         error: { type: string }
       required: [error]
+
+    HelpArticle:
+      type: object
+      required: [id, slug, category, title, body, tags, isFaq, sortOrder]
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        category: { type: string }
+        title: { type: string }
+        body: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        isFaq: { type: boolean }
+        sortOrder: { type: integer }
+
+    HelpArticlesOutput:
+      type: object
+      required: [articles, faqs]
+      properties:
+        articles:
+          type: array
+          items: { $ref: "#/components/schemas/HelpArticle" }
+        faqs:
+          type: array
+          items: { $ref: "#/components/schemas/HelpArticle" }
+
+    SupportMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content: { type: string }
+
+    SupportChatInput:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string, minLength: 1 }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/SupportMessage" }
+        projectId:
+          type: integer
+          nullable: true
+        category: { type: string }
+        language: { type: string }
+        languageHint: { type: string }
+
+    SupportChatOutput:
+      type: object
+      required: [reply, canEscalate]
+      properties:
+        reply: { type: string }
+        suggestions:
+          type: array
+          items: { type: string }
+        canEscalate: { type: boolean }
+
+    SupportConversationSummary:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer }
+        title:
+          type: string
+          nullable: true
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        lastMessageAt: { type: string }
+        preview:
+          type: string
+          nullable: true
+
+    SupportConversationsOutput:
+      type: object
+      required: [conversations]
+      properties:
+        conversations:
+          type: array
+          items: { $ref: "#/components/schemas/SupportConversationSummary" }
+
+    SupportAttachmentInput:
+      type: object
+      required: [fileName, mimeType, dataBase64]
+      properties:
+        fileName: { type: string }
+        mimeType: { type: string }
+        dataBase64: { type: string }
+
+    EscalateSupportInput:
+      type: object
+      required: [subject, transcript]
+      properties:
+        subject: { type: string, minLength: 1 }
+        category: { type: string }
+        transcript:
+          type: array
+          items: { $ref: "#/components/schemas/SupportMessage" }
+        projectId:
+          type: integer
+          nullable: true
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/SupportAttachmentInput" }
+        deviceInfo:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    EscalateSupportOutput:
+      type: object
+      required: [ticketId, emailStatus]
+      properties:
+        ticketId: { type: integer }
+        emailStatus:
+          type: string
+          enum: [sent, skipped, failed]
+        supportEmailUsed:
+          type: string
+          nullable: true
 
     BrainstormMessage:
       type: object

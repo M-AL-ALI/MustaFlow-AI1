@@ -71,3 +71,5 @@ export * from "./ora-assets";
 export * from "./vault";
 export * from "./vault-embeddings";
 export * from "./generated-images";
+export * from "./help-articles";
+export * from "./support-tickets";

@@ -59,6 +59,37 @@ export async function sendEmail(opts: {
   }
 }
 
+export type EmailDeliveryStatus = "sent" | "skipped" | "failed";
+
+/**
+ * Like sendEmail, but reports the delivery outcome so callers (e.g. support
+ * ticket escalation) can persist an accurate emailStatus. Never throws.
+ *   - "skipped" — SMTP is not configured (no SMTP_HOST).
+ *   - "sent"    — the message was handed to the transport successfully.
+ *   - "failed"  — the transport threw while sending.
+ */
+export async function sendEmailWithStatus(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}): Promise<EmailDeliveryStatus> {
+  if (!smtpEnabled()) {
+    logger.debug({ to: opts.to, subject: opts.subject }, "email: SMTP not configured; skipping");
+    return "skipped";
+  }
+  try {
+    const from = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+    const transport = createTransport();
+    await transport.sendMail({ from, ...opts });
+    logger.info({ to: opts.to, subject: opts.subject }, "email: sent");
+    return "sent";
+  } catch (err) {
+    logger.warn({ err, to: opts.to, subject: opts.subject }, "email: send failed (non-fatal)");
+    return "failed";
+  }
+}
+
 // ── Domain-specific email senders ─────────────────────────────────────────────
 
 export async function sendWelcomeEmail(opts: {
