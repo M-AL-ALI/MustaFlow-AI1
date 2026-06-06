@@ -93,8 +93,8 @@ describe("Session management", () => {
     expect(p3.msgCount).toBe(2);
   });
 
-  it("MSG_LIMIT_VALUE is 15", () => {
-    expect(MSG_LIMIT_VALUE).toBe(15);
+  it("MSG_LIMIT_VALUE is 20", () => {
+    expect(MSG_LIMIT_VALUE).toBe(20);
   });
 });
 
@@ -250,7 +250,7 @@ describe("Route-level: session endpoints", () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("sessionId");
     expect(res.body).toHaveProperty("msgCount", 0);
-    expect(res.body).toHaveProperty("msgLimit", 15);
+    expect(res.body).toHaveProperty("msgLimit", 20);
     expect(res.headers["set-cookie"]).toBeDefined();
   });
 

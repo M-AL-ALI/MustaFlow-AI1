@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // ─── Mock @workspace/db: keep the REAL tier limit constants + table object, but
 // replace `db` with an in-memory stub so the quota logic is exercised without a
 // live Postgres connection. importActual preserves TIER_DAILY_* so we genuinely
-// assert the shipped limits (free 15/3, core 30/10, wave 55/20). ────────────────
+// assert the shipped limits (free 20/3, core 30/10, wave 55/20). ────────────────
 // vi.mock factories are hoisted above top-level declarations, so the shared mock
 // state must live inside vi.hoisted to be referenceable from the factory.
 const h = vi.hoisted(() => {
@@ -72,7 +72,7 @@ describe("oraUsageDate — UTC calendar day", () => {
 describe("getTodayOraUsage — tier limits + counts", () => {
   it("maps each tier to its shipped daily limits", async () => {
     const free = await getTodayOraUsage("u1", "free");
-    expect(free.messageLimit).toBe(15);
+    expect(free.messageLimit).toBe(20);
     expect(free.imageLimit).toBe(3);
 
     const core = await getTodayOraUsage("u1", "core");
@@ -86,7 +86,7 @@ describe("getTodayOraUsage — tier limits + counts", () => {
 
   it("defaults an unknown tier to free limits", async () => {
     const usage = await getTodayOraUsage("u1", "enterprise-typo");
-    expect(usage.messageLimit).toBe(15);
+    expect(usage.messageLimit).toBe(20);
     expect(usage.imageLimit).toBe(3);
   });
 
@@ -116,17 +116,17 @@ describe("getTodayOraUsage — tier limits + counts", () => {
 
 describe("checkOraQuota — bucket routing + cap", () => {
   it("allows a message when under the message limit", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 14, imageCount: 0 }]);
+    selectWhere.mockResolvedValue([{ messageCount: 19, imageCount: 0 }]);
     const res = await checkOraQuota("u1", "free", "message");
-    expect(res).toEqual({ allowed: true, used: 14, limit: 15, kind: "message" });
+    expect(res).toEqual({ allowed: true, used: 19, limit: 20, kind: "message" });
   });
 
   it("blocks a message exactly at the message limit", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 15, imageCount: 0 }]);
+    selectWhere.mockResolvedValue([{ messageCount: 20, imageCount: 0 }]);
     const res = await checkOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(false);
-    expect(res.used).toBe(15);
-    expect(res.limit).toBe(15);
+    expect(res.used).toBe(20);
+    expect(res.limit).toBe(20);
   });
 
   it("routes the image bucket to the image counter/limit, independent of messages", async () => {
@@ -165,18 +165,18 @@ describe("increment helpers — atomic upsert payloads", () => {
 
 describe("consumeOraQuota", () => {
   it("returns the atomic reservation result from the database", async () => {
-    returning.mockResolvedValue([{ messageCount: 15, imageCount: 0 }]);
+    returning.mockResolvedValue([{ messageCount: 20, imageCount: 0 }]);
     const res = await consumeOraQuota("u1", "free", "message");
-    expect(res).toEqual({ allowed: true, used: 15, limit: 15, kind: "message" });
+    expect(res).toEqual({ allowed: true, used: 20, limit: 20, kind: "message" });
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("blocks when the conditional update did not reserve capacity", async () => {
     returning.mockResolvedValue([]);
-    selectWhere.mockResolvedValue([{ messageCount: 15, imageCount: 0 }]);
+    selectWhere.mockResolvedValue([{ messageCount: 20, imageCount: 0 }]);
     const res = await consumeOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(false);
-    expect(res.used).toBe(15);
+    expect(res.used).toBe(20);
   });
 
   it("refunds quota best-effort without throwing", async () => {
