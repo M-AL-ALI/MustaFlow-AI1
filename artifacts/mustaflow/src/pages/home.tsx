@@ -314,15 +314,10 @@ export default function HomePage() {
           <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
             <a
               href={import.meta.env.BASE_URL || "/"}
-              className="flex items-center gap-2.5 group"
+              className="flex items-center group"
               aria-label="MustaFlow AI home"
             >
-              <img
-                src={`${import.meta.env.BASE_URL}logo.png`}
-                alt="MustaFlow AI"
-                className="h-9 w-9 rounded-lg shadow-sm group-hover:scale-105 transition-transform"
-              />
-              <span className="text-lg font-bold tracking-tight hidden sm:inline">
+              <span className="text-lg font-bold tracking-tight">
                 MustaFlow <span className="text-primary">AI</span>
               </span>
             </a>
