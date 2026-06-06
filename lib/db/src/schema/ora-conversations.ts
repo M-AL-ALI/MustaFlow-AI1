@@ -11,6 +11,7 @@ export const oraProjectsTable = pgTable(
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
     name: text("name").notNull(),
+    description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),

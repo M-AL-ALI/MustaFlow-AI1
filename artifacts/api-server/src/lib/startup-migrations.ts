@@ -2313,6 +2313,14 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-ora-project-description ───────────────────────────────────────────
+  {
+    name: "migrate-ora-project-description",
+    async run(client) {
+      await client.query(`ALTER TABLE ora_projects ADD COLUMN IF NOT EXISTS description TEXT`);
+    },
+  },
+
   // ── migrate-mobile-deployment-columns (Task #776) ────────────────────────────
   {
     name: "migrate-mobile-deployment-columns",

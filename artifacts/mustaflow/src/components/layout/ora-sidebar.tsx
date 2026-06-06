@@ -295,14 +295,12 @@ function ProjectsSection({ close }: { close: () => void }) {
     newConversation,
     renameConversation,
     deleteConversation,
-    createProject,
     renameProject,
     deleteProject,
   } = useOraConversations();
+  const [, setLocation] = useLocation();
 
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
 
@@ -314,18 +312,6 @@ function ProjectsSection({ close }: { close: () => void }) {
       return next;
     });
 
-  const submitNew = async () => {
-    const name = newName.trim();
-    if (!name) {
-      setCreating(false);
-      return;
-    }
-    const project = await createProject(name);
-    setNewName("");
-    setCreating(false);
-    if (project) setExpanded((prev) => new Set(prev).add(project.id));
-  };
-
   return (
     <div className="px-3 py-2">
       <div className="flex items-center justify-between px-2 pb-1">
@@ -333,39 +319,16 @@ function ProjectsSection({ close }: { close: () => void }) {
           Projects
         </p>
         <button
-          onClick={() => setCreating((c) => !c)}
+          onClick={() => {
+            setLocation("/ora/projects/new");
+            close();
+          }}
           aria-label="New project"
           className="p-0.5 text-muted-foreground hover:text-foreground"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
-
-      {creating && (
-        <div className="flex items-center gap-1 px-2 pb-1">
-          <input
-            autoFocus
-            value={newName}
-            placeholder="Project name"
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void submitNew();
-              if (e.key === "Escape") {
-                setCreating(false);
-                setNewName("");
-              }
-            }}
-            className="flex-1 min-w-0 rounded bg-background border border-border px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <button
-            onClick={() => void submitNew()}
-            aria-label="Create project"
-            className="p-1 text-muted-foreground hover:text-foreground"
-          >
-            <Check className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
 
       <div className="space-y-0.5">
         {projects.map((p) => {
@@ -405,6 +368,7 @@ function ProjectsSection({ close }: { close: () => void }) {
                 <div className="group flex items-center rounded-md hover:bg-muted transition-colors">
                   <button
                     onClick={() => toggle(p.id)}
+                    title={p.description ?? undefined}
                     className="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-foreground"
                   >
                     {isOpen ? (
@@ -413,7 +377,14 @@ function ProjectsSection({ close }: { close: () => void }) {
                       <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
                     )}
                     <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{p.name}</span>
+                    <span className="min-w-0 flex flex-col">
+                      <span className="truncate">{p.name}</span>
+                      {p.description ? (
+                        <span className="truncate text-[10px] font-normal text-muted-foreground">
+                          {p.description}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                   <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
                     <button

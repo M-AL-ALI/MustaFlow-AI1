@@ -339,6 +339,7 @@ router.get("/ora/projects", async (req, res) => {
       .select({
         id: oraProjectsTable.id,
         name: oraProjectsTable.name,
+        description: oraProjectsTable.description,
         createdAt: oraProjectsTable.createdAt,
         updatedAt: oraProjectsTable.updatedAt,
       })
@@ -354,6 +355,7 @@ router.get("/ora/projects", async (req, res) => {
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_LEN),
+  description: z.string().trim().max(500).optional(),
 });
 
 // Create a project.
@@ -367,7 +369,7 @@ router.post("/ora/projects", async (req, res) => {
   try {
     const [row] = await db
       .insert(oraProjectsTable)
-      .values({ userId, name: parsed.data.name })
+      .values({ userId, name: parsed.data.name, description: parsed.data.description ?? null })
       .returning();
     res.status(201).json({ project: row });
   } catch (err) {
