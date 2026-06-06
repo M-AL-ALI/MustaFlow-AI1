@@ -27,6 +27,8 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - **GitHub OAuth**: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URL`
 - **Namecheap (domain purchase)**: `NAMECHEAP_API_USER`, `NAMECHEAP_API_KEY`, `NAMECHEAP_USERNAME`, `NAMECHEAP_CLIENT_IP`, `NAMECHEAP_SANDBOX`, `NS1_HOSTNAME`, `NS2_HOSTNAME`, `DOMAIN_MARKUP_PERCENT`
 - **Cloudflare edge CDN**: `CF_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`, `CF_R2_BUCKET`, `CF_KV_NAMESPACE_ID`, `EDGE_SERVING_ENABLED`
+- **Ora asset R2 offload**: `ORA_ASSETS_R2_ENABLED` (default off). When `true` AND CF R2 credentials are present, Ora library asset bytes are uploaded to R2 under `ora-assets/{userId}/{uuid}.{ext}` (row stores only `storage_key`, `data` is null); on any upload failure it falls back to DB base64. Download resolves either source. Strictly additive — leave unset to keep the prior DB-only behavior.
+- **Distributed rate limiting**: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`. When present, `rateLimit.ts` counters are backed by Upstash Redis (atomic Lua window increment); falls back to the in-memory store on any error or when unset.
 - **Managed Redis**: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 - **Knowledge Vault tuning**: `KNOWLEDGE_RETRIEVAL_ENABLED` (default `true`), `KNOWLEDGE_TOKEN_BUDGET` (default `2400`)
 - **Containers (Fly.io)**: `FLY_API_TOKEN`, `FLY_APP_NAME`, `FLY_ORG_SLUG`, `FLY_REGION`
@@ -57,6 +59,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-image-studio` — creates `generated_images` table (Task #1178 Phase 9A-1; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-image-studio-v2` — adds negativePrompt, purpose, providerName, modelName, thumbnailUrl columns to `generated_images` (Phase 9A-1 completion; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-image-edit-lineage` — adds parentImageId, sourceType, editInstruction columns to `generated_images` (Phase 9A-2 image editing; run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-ora-asset-storage` — adds `storage_key` to `ora_assets`, makes `data` nullable, and adds a `data`/`storage_key` XOR CHECK constraint (Phase 6 R2 offload; run before deploy)
 
 ## Stack
 

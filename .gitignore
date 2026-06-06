@@ -60,3 +60,8 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Playwright (e2e) generated artifacts
+test-results/
+playwright-report/
+.playwright/

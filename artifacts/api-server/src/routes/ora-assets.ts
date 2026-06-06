@@ -2,6 +2,7 @@ import { Router } from "express";
 import { and, eq, isNull, desc, sql } from "drizzle-orm";
 import { db, oraAssetsTable } from "@workspace/db";
 import { PER_USER_STORAGE_BYTES, getUserStorageBytes } from "../lib/ora-assets";
+import { r2GetObject } from "../lib/cloudflare";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -105,7 +106,24 @@ router.get("/ora/assets/:id/download", async (req, res) => {
       return;
     }
 
-    const buf = Buffer.from(row.data, "base64");
+    // Resolve bytes from R2 (offloaded assets) or the DB base64 blob. R2 is
+    // tried first when a key is present; on a miss we fall back to `data` if it
+    // exists so a partial migration can never strand an asset.
+    let buf: Buffer | null = null;
+    if (row.storageKey) {
+      const obj = await r2GetObject(row.storageKey);
+      if (obj) buf = obj.body;
+    }
+    if (!buf && row.data) buf = Buffer.from(row.data, "base64");
+    if (!buf) {
+      logger.error(
+        { component: "ora-assets", id, storageKey: row.storageKey },
+        "Asset bytes unavailable from both R2 and DB",
+      );
+      res.status(502).json({ error: "Asset temporarily unavailable" });
+      return;
+    }
+
     const disposition = req.query.download === "1" ? "attachment" : "inline";
     const safeName = row.fileName.replace(/[\r\n"]/g, "_");
     res.setHeader("Content-Type", row.mimeType);

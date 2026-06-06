@@ -414,7 +414,7 @@ async function handleSubscriptionEvent(event: {
   );
 }
 
-async function handleStripeWebhook(
+export async function handleStripeWebhook(
   req: Parameters<Parameters<IRouter["post"]>[1]>[0],
   res: Parameters<Parameters<IRouter["post"]>[1]>[1],
 ): Promise<void> {
@@ -695,7 +695,7 @@ async function handleStripeWebhook(
  * fields so the handler works across API versions. Returns `null` for either
  * boundary when no usable value is present (caller supplies a sane default).
  */
-function extractSubscriptionPeriod(stripeSub: unknown): {
+export function extractSubscriptionPeriod(stripeSub: unknown): {
   start: Date | null;
   end: Date | null;
 } {

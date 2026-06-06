@@ -1,6 +1,19 @@
+import { randomUUID } from "node:crypto";
 import { db, oraAssetsTable, type OraAssetKind } from "@workspace/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./logger";
+import { r2Enabled, r2PutObject } from "./cloudflare";
+
+/**
+ * R2 offload is opt-in via `ORA_ASSETS_R2_ENABLED=true` AND configured R2
+ * credentials (`r2Enabled()`). The flag is intentional: CF R2 credentials may
+ * already be present for snapshot serving, but offloading Ora bytes is a
+ * separate, additive decision. When the flag is off, bytes stay base64 in the
+ * DB exactly as before — preserving prior behavior in dev and existing tests.
+ */
+export function oraR2OffloadEnabled(): boolean {
+  return process.env.ORA_ASSETS_R2_ENABLED === "true" && r2Enabled();
+}
 
 /**
  * Largest asset we will persist to the durable Ora library. Generated files and
@@ -86,6 +99,40 @@ export async function persistOraAsset(input: PersistOraAssetInput): Promise<numb
       );
       return null;
     }
+    // R2 offload (opt-in). On success, bytes live in R2 and `data` is null. On
+    // any failure we fall back to the DB path so persistence never silently
+    // drops the asset.
+    let storageKey: string | null = null;
+    let data: string | null = input.base64;
+    if (oraR2OffloadEnabled()) {
+      // Guard the upload so a thrown r2PutObject can never drop the asset — any
+      // failure (returned false OR exception) leaves data=base64 (DB fallback).
+      try {
+        const ext = (input.format ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+        const key = `ora-assets/${input.userId}/${randomUUID()}${ext ? `.${ext}` : ""}`;
+        const uploaded = await r2PutObject(
+          key,
+          Buffer.from(input.base64, "base64"),
+          input.mimeType,
+          "private, max-age=300",
+        );
+        if (uploaded) {
+          storageKey = key;
+          data = null;
+        } else {
+          logger.warn(
+            { component: "ora-assets", userId: input.userId, fileName: input.fileName },
+            "R2 offload failed; falling back to DB storage for Ora asset",
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          { component: "ora-assets", err, userId: input.userId, fileName: input.fileName },
+          "R2 offload threw; falling back to DB storage for Ora asset",
+        );
+      }
+    }
+
     const [row] = await db
       .insert(oraAssetsTable)
       .values({
@@ -95,7 +142,8 @@ export async function persistOraAsset(input: PersistOraAssetInput): Promise<numb
         mimeType: input.mimeType,
         format: input.format ?? null,
         prompt: input.prompt ?? null,
-        data: input.base64,
+        data,
+        storageKey,
         sizeBytes,
       })
       .returning({ id: oraAssetsTable.id });

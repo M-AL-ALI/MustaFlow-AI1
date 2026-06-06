@@ -3214,6 +3214,30 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  // ── migrate-ora-asset-storage (R2 offload, additive) ────────────────────────
+  {
+    name: "migrate-ora-asset-storage",
+    async run(client) {
+      await client.query("BEGIN");
+      // Record the R2 object key when bytes are offloaded to object storage.
+      await client.query(`ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS storage_key TEXT`);
+      // `data` becomes nullable: offloaded rows store bytes in R2, not the DB.
+      await client.query(`ALTER TABLE ora_assets ALTER COLUMN data DROP NOT NULL`);
+      // Enforce the storage invariant: exactly one of `data` / `storage_key`.
+      await client.query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'ora_assets_storage_xor'
+          ) THEN
+            ALTER TABLE ora_assets
+              ADD CONSTRAINT ora_assets_storage_xor
+              CHECK ((data IS NOT NULL) <> (storage_key IS NOT NULL));
+          END IF;
+        END $$;
+      `);
+      await client.query("COMMIT");
+    },
+  },
   // ── migrate-ora-daily-usage (Ora message-based daily quotas) ────────────────
   {
     name: "migrate-ora-daily-usage",

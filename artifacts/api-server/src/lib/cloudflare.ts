@@ -1062,6 +1062,51 @@ const R2_RETRY_DELAYS_MS = [500, 1000, 2000];
 const R2_MAX_ATTEMPTS = R2_RETRY_DELAYS_MS.length + 1;
 
 /**
+ * Upload a single object to R2 by key, retried with the same exponential
+ * backoff as snapshot uploads (500 ms → 1 s → 2 s; 4 attempts total).
+ *
+ * Returns true on success, false when R2 is not configured or all attempts
+ * fail — callers are expected to fall back to their own durable store.
+ */
+export async function r2PutObject(
+  key: string,
+  body: Buffer,
+  contentType?: string,
+  cacheControl?: string,
+): Promise<boolean> {
+  if (!r2Enabled()) return false;
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < R2_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, R2_RETRY_DELAYS_MS[attempt - 1]));
+    }
+    const result = await r2Request({ method: "PUT", key, body, contentType, cacheControl });
+    if (result.ok) return true;
+    lastStatus = result.status;
+    logger.warn(
+      { key, status: result.status, attempt: attempt + 1 },
+      "R2 putObject attempt failed",
+    );
+  }
+  logger.warn({ key, status: lastStatus, attempts: R2_MAX_ATTEMPTS }, "R2 putObject failed");
+  return false;
+}
+
+/**
+ * Delete a single object from R2 by key. Best-effort: returns true on a 2xx
+ * (R2 treats DELETE of a missing key as success), false when not configured or
+ * on error. Callers should not treat a false return as fatal.
+ */
+export async function r2DeleteObject(key: string): Promise<boolean> {
+  if (!r2Enabled()) return false;
+  const result = await r2Request({ method: "DELETE", key });
+  if (!result.ok) {
+    logger.warn({ key, status: result.status }, "R2 deleteObject failed");
+  }
+  return result.ok;
+}
+
+/**
  * Derive the correct Cache-Control value for an R2 file path.
  * HTML entry points use `no-cache` so browsers always revalidate.
  * All other assets (JS, CSS, images, etc.) use long-lived immutable caching.
