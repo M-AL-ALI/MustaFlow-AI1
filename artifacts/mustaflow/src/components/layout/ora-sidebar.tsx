@@ -486,6 +486,71 @@ function ProjectsSection({ close }: { close: () => void }) {
   );
 }
 
+/**
+ * Recent conversations dropdown — surfaces standalone chats (those not filed
+ * under a project) ordered by most-recent activity. Without this, conversations
+ * created from the "New conversation" button (projectId === null) had no home in
+ * the sidebar and appeared to "disappear" from history.
+ */
+function RecentConversationsSection({ close }: { close: () => void }) {
+  const {
+    conversations,
+    currentConversationId,
+    selectConversation,
+    renameConversation,
+    deleteConversation,
+  } = useOraConversations();
+
+  const [open, setOpen] = useState(true);
+
+  // Backend already returns conversations ordered by lastMessageAt desc.
+  // Standalone chats (no project) live here; project chats live under Projects.
+  const recent = conversations.filter((c) => c.projectId == null);
+
+  return (
+    <div className="px-3 py-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-1.5 px-2 pb-1 text-left"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Recent conversations
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-0.5">
+          {recent.length === 0 ? (
+            <p className="px-2 py-1 text-[10px] text-muted-foreground">No recent conversations</p>
+          ) : (
+            recent.map((c) => (
+              <ConversationRow
+                key={c.id}
+                conversation={c}
+                active={c.id === currentConversationId}
+                onSelect={() => {
+                  selectConversation(c.id);
+                  close();
+                }}
+                onRename={(title) => void renameConversation(c.id, title)}
+                onDelete={() => {
+                  if (window.confirm("Delete this conversation?")) void deleteConversation(c.id);
+                }}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface OraSidebarProps {
   /** Clears the current conversation to start a fresh one. */
   onNewConversation: () => void;
@@ -563,6 +628,10 @@ export function OraSidebar({ onNewConversation }: OraSidebarProps) {
 
         {/* Conversations + projects history */}
         <div className="flex-1 overflow-y-auto py-2">
+          <RecentConversationsSection close={close} />
+
+          <hr className="border-border mx-3 my-2" />
+
           <ProjectsSection close={close} />
 
           <hr className="border-border mx-3 my-2" />

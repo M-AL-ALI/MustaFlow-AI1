@@ -47,3 +47,4 @@
 - [Stripe setup-mode Checkout requires currency](stripe-setup-mode-currency.md) — mode:"setup" Checkout sessions need a currency param or Stripe 400s "Missing required param: currency" (no line items to infer it from).
 - [Superuser full-access allowlist](superuser-allowlist.md) — hard-coded email allowlist (lib/superusers.ts) grants one account admin + zero-credit + free plan-switching; every new balance/role/plan gate must consult isSuperuser.
 - [Ora file-detection ↔ system-prompt coupling](ora-file-detection-promise-coupling.md) — Ora promises files auto-deliver, so any detectFileRequest gap yields a confident reply with NO file (silent fail); verb-gate new ambiguous cues, never add to the bare-noun gate.
+- [Ora sidebar standalone conversations](ora-sidebar-standalone-conversations.md) — Ora "New conversation" chats default to projectId=null; sidebar must always show a standalone/"Recent" section or they look deleted despite being persisted.
