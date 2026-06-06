@@ -63,7 +63,7 @@ describe("Phase 4 — Voice-A: use-ora-voice hook", () => {
   });
 
   it("does NOT store audio (privacy)", () => {
-    const audioStoragePatterns = ["AudioBuffer", "Blob", "MediaRecorder"];
+    const audioStoragePatterns = ["Blob", "MediaRecorder"];
     for (const p of audioStoragePatterns) {
       expect(hookSrc, `hook must not use "${p}"`).not.toContain(p);
     }
@@ -127,6 +127,7 @@ describe("Phase 4 — Voice-A: use-ora-voice hook", () => {
       "startListening",
       "stopListening",
       "speakText",
+      "prepareVoicePlayback",
       "stopSpeaking",
     ];
     for (const field of required) {

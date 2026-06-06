@@ -57,6 +57,9 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(hook).not.toContain("sendMessage(");
     expect(hook).toContain('fetch("/api/public-ai/tts"');
     expect(hook).toContain("speakTextForce");
+    expect(hook).toContain("prepareVoicePlayback");
+    expect(hook).toContain("decodeAudioData");
+    expect(hook).not.toContain("new Audio(");
   });
 
   it("does not require browser SpeechRecognition or speechSynthesis for Talk to Ora mode", () => {
@@ -66,6 +69,7 @@ describe("Talk to Ora voice-session wiring", () => {
     for (const src of [panel, bubble]) {
       expect(src).toContain("voice.isSupported || whisperConv.isSupported");
       expect(src).toContain("active={voiceConvActive}");
+      expect(src).toContain("prepareVoicePlayback()");
       expect(src).toContain("startWhisperRecording({ autoStop: true })");
       const autoSpeakSection = src.slice(
         src.indexOf("Auto-TTS: speak each new Ora reply"),

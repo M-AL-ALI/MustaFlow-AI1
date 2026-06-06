@@ -218,6 +218,8 @@ export interface UseOraVoiceReturn {
   stopListening: () => void;
   /** Speak only when the user's TTS toggle is on (regular read-aloud button). */
   speakText: (text: string, lang: string) => void;
+  /** Unlock browser audio playback inside the user's Talk to Ora start gesture. */
+  prepareVoicePlayback: () => Promise<void>;
   /**
    * Speak unconditionally — ignores the isTtsEnabled preference flag.
    * Used by Voice Conversation Mode, which has its own mute control.
@@ -288,31 +290,69 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
   selectedVoiceURIRef.current = selectedVoiceURI;
   const availableVoicesRef = useRef(availableVoices);
   availableVoicesRef.current = availableVoices;
-  const serverAudioRef = useRef<HTMLAudioElement | null>(null);
-  const serverAudioUrlRef = useRef<string | null>(null);
+  const serverAudioContextRef = useRef<AudioContext | null>(null);
+  const serverAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const serverTtsAbortRef = useRef<AbortController | null>(null);
   const serverSpeakSeqRef = useRef(0);
+
+  const getServerAudioContext = useCallback(async (): Promise<AudioContext | null> => {
+    if (typeof window === "undefined") return null;
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ??
+      null;
+    if (!AudioContextCtor) return null;
+
+    let ctx = serverAudioContextRef.current;
+    if (!ctx || ctx.state === "closed") {
+      ctx = new AudioContextCtor();
+      serverAudioContextRef.current = ctx;
+    }
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+    return ctx;
+  }, []);
 
   const stopServerAudio = useCallback(() => {
     serverTtsAbortRef.current?.abort();
     serverTtsAbortRef.current = null;
-    const audio = serverAudioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.src = "";
-      serverAudioRef.current = null;
-    }
-    if (serverAudioUrlRef.current) {
-      URL.revokeObjectURL(serverAudioUrlRef.current);
-      serverAudioUrlRef.current = null;
+    const source = serverAudioSourceRef.current;
+    if (source) {
+      source.onended = null;
+      try {
+        source.stop();
+      } catch {
+        /* already stopped */
+      }
+      try {
+        source.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      serverAudioSourceRef.current = null;
     }
   }, []);
+
+  const prepareVoicePlayback = useCallback(async () => {
+    const ctx = await getServerAudioContext();
+    if (!ctx) return;
+    const source = ctx.createBufferSource();
+    source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+    source.connect(ctx.destination);
+    source.start();
+  }, [getServerAudioContext]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       recognitionRef.current?.abort();
       stopServerAudio();
+      const ctx = serverAudioContextRef.current;
+      serverAudioContextRef.current = null;
+      if (ctx && ctx.state !== "closed") {
+        void ctx.close().catch(() => undefined);
+      }
       if (isSpeechSynthesisAvailable()) {
         window.speechSynthesis.cancel();
       }
@@ -498,23 +538,24 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
             body: JSON.stringify({ text: trimmed, language: lang }),
           });
           if (!resp.ok) throw new Error(`TTS failed (${resp.status})`);
-          const blob = await resp.blob();
+          const arr = await resp.arrayBuffer();
           if (serverSpeakSeqRef.current !== seq || abort.signal.aborted) return;
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          serverAudioUrlRef.current = url;
-          serverAudioRef.current = audio;
-          audio.onended = () => {
+
+          const ctx = await getServerAudioContext();
+          if (!ctx) throw new Error("Web Audio is unavailable");
+          const audioBuffer = await ctx.decodeAudioData(arr.slice(0));
+          if (serverSpeakSeqRef.current !== seq || abort.signal.aborted) return;
+
+          const source = ctx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(ctx.destination);
+          serverAudioSourceRef.current = source;
+          source.onended = () => {
             if (serverSpeakSeqRef.current !== seq) return;
             stopServerAudio();
             setVoiceState((s) => (s === "speaking" ? "idle" : s));
           };
-          audio.onerror = () => {
-            if (serverSpeakSeqRef.current !== seq) return;
-            stopServerAudio();
-            setVoiceState((s) => (s === "speaking" ? "idle" : s));
-          };
-          await audio.play();
+          source.start();
         } catch (_err) {
           if (abort.signal.aborted) return;
           stopServerAudio();
@@ -526,7 +567,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
         }
       })();
     },
-    [stopServerAudio],
+    [getServerAudioContext, stopServerAudio],
   );
 
   const toggleTts = useCallback(() => {
@@ -554,6 +595,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     startListening,
     stopListening,
     speakText,
+    prepareVoicePlayback,
     speakTextForce,
     stopSpeaking,
   };
