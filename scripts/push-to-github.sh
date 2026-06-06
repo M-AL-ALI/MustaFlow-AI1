@@ -14,20 +14,10 @@ if [ -z "${GITHUB_PAT:-}" ]; then
   exit 1
 fi
 
-git add -A
-if git diff --cached --quiet; then
-  echo "No staged changes — skipping commit."
-else
-  git -c user.name="Replit Agent" -c user.email="agent@replit.com" \
-    commit -m "Cleanup: prettier, Stripe return URLs, payment-method setup hardening"
-  echo "Committed working changes."
-fi
-
 echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub $FORCE_FLAG …"
 
 git \
   -c credential.helper='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f' \
   push "$REMOTE_URL" "$BRANCH:$BRANCH" $FORCE_FLAG
 
-echo "HEAD_SHA=$(git rev-parse HEAD)"
 echo "Done."
