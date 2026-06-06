@@ -1,7 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useParams, Link, useLocation } from "wouter";
 import { useWebContainer } from "@/hooks/use-web-container";
-import { CreateProjectModal } from "@/components/create-project-modal";
 import {
   useGetProject,
   useListMessages,
@@ -1188,7 +1187,6 @@ export default function ProjectWorkspacePage() {
   });
   const [prefillSecretName, setPrefillSecretName] = useState<string | null>(null);
   const [viewingHistoryPlan, setViewingHistoryPlan] = useState<StructuredPlan | null>(null);
-  const [newProjectOpen, setNewProjectOpen] = useState(false);
   // Active artifact (Task #544). Initialised from ?artifactId in the URL;
   // ArtifactTabs auto-selects the primary artifact if no value is set.
   const [activeArtifactId, setActiveArtifactId] = useState<number | null>(() => {
@@ -2968,8 +2966,6 @@ export default function ProjectWorkspacePage() {
         open={keyboardShortcutsOpen}
         onClose={() => setKeyboardShortcutsOpen(false)}
       />
-
-      <CreateProjectModal open={newProjectOpen} onOpenChange={setNewProjectOpen} />
 
       <LowCreditsBanner projectId={projectId} onBuyCredits={() => setBuyCreditsOpen(true)} />
 

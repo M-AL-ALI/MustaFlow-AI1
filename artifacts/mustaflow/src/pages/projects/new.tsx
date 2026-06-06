@@ -38,7 +38,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TemplatePicker } from "@/components/template-picker";
-import { type TemplateDefinition } from "@/lib/templates";
+import {
+  type TemplateDefinition,
+  TEMPLATES,
+  STARTER_PACKS,
+  SLIDES_TEMPLATES,
+  ANIMATION_TEMPLATES,
+  AUTOMATION_TEMPLATES,
+} from "@/lib/templates";
 import { useToast } from "@/hooks/use-toast";
 
 type Stack = "react-vite" | "nextjs" | "node-api" | "python-flask" | "python-fastapi" | "go-gin";
@@ -146,6 +153,16 @@ function isMobileKind(k: string): boolean {
   return k === "mobile-cross" || k === "mobile-ios" || k === "mobile-android";
 }
 
+function findTemplateById(id: string): TemplateDefinition | undefined {
+  return [
+    ...TEMPLATES,
+    ...STARTER_PACKS,
+    ...SLIDES_TEMPLATES,
+    ...ANIMATION_TEMPLATES,
+    ...AUTOMATION_TEMPLATES,
+  ].find((t) => t.id === id);
+}
+
 export default function NewProjectPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -153,28 +170,39 @@ export default function NewProjectPage() {
   const { currentWorkspace } = useWorkspace();
   const { toast } = useToast();
 
-  // Read pre-fill hints from the URL (?prompt=…&platform=web|mobile) so the
-  // dashboard hero and other entry points can hand off a typed idea.
+  // Read pre-fill hints from the URL (?prompt=…&platform=web|mobile&template=<id>)
+  // so the dashboard hero, landing page templates, and other entry points can
+  // hand off a typed idea or a chosen template.
   const initialParams = new URLSearchParams(
     typeof window !== "undefined" ? window.location.search : "",
   );
   const initialPrompt = initialParams.get("prompt") ?? "";
   const initialPlatform: PlatformTab =
     initialParams.get("platform") === "mobile" ? "mobile" : "web";
+  const initialTemplateId = initialParams.get("template");
+  const initialTemplate = initialTemplateId ? findTemplateById(initialTemplateId) : undefined;
+  const initialKind: ProjectKind = initialTemplate
+    ? (initialTemplate.projectKind as ProjectKind)
+    : initialPlatform === "mobile"
+      ? "mobile-cross"
+      : "web";
+  const initialPlatformTab: PlatformTab = initialTemplate
+    ? isMobileKind(initialTemplate.projectKind)
+      ? "mobile"
+      : "web"
+    : initialPlatform;
 
   const [view, setView] = useState<View>("form");
-  const [platformTab, setPlatformTab] = useState<PlatformTab>(initialPlatform);
+  const [platformTab, setPlatformTab] = useState<PlatformTab>(initialPlatformTab);
   const [stack, setStack] = useState<Stack>("react-vite");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialTemplate?.title ?? "");
   const [nameDirty, setNameDirty] = useState(false);
-  const [kind, setKind] = useState<ProjectKind>(
-    initialPlatform === "mobile" ? "mobile-cross" : "web",
-  );
-  const [prompt, setPrompt] = useState(initialPrompt);
+  const [kind, setKind] = useState<ProjectKind>(initialKind);
+  const [prompt, setPrompt] = useState(initialTemplate?.seedPrompt ?? initialPrompt);
   const [appMode, setAppMode] = useState<AppMode>("simple");
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>(
-    undefined,
+    initialTemplate,
   );
 
   // Strip the query params from the URL once consumed so a refresh starts clean.

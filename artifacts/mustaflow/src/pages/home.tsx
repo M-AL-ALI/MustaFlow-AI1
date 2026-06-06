@@ -52,7 +52,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { TemplatePicker } from "@/components/template-picker";
-import { CreateProjectModal } from "@/components/create-project-modal";
 import { OnboardingWizard, hasCompletedOnboarding } from "@/components/onboarding-wizard";
 import { type TemplateDefinition } from "@/lib/templates";
 import { INDUSTRY_PERSONAS } from "@/lib/templates";
@@ -240,8 +239,6 @@ export default function HomePage() {
   const [, setLocation] = useLocation();
   const [prompt, setPrompt] = useState("");
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [activePersona, setActivePersona] = useState(0);
   const [activeChipLabel, setActiveChipLabel] = useState<string | undefined>();
@@ -332,16 +329,8 @@ export default function HomePage() {
   };
 
   function handleTemplateSelect(template: TemplateDefinition) {
-    setSelectedTemplate(template);
     setShowTemplateBrowser(false);
-    setModalOpen(true);
-  }
-
-  function handleModalClose(open: boolean) {
-    setModalOpen(open);
-    if (!open) {
-      setSelectedTemplate(undefined);
-    }
+    setLocation(`/projects/new?template=${encodeURIComponent(template.id)}`);
   }
 
   return (
@@ -1144,13 +1133,6 @@ export default function HomePage() {
           onSkip={() => setShowOnboarding(false)}
         />
       )}
-
-      {/* Create project modal — opened with a pre-applied template */}
-      <CreateProjectModal
-        open={modalOpen}
-        onOpenChange={handleModalClose}
-        initialTemplate={selectedTemplate}
-      />
 
       {/* Ora floating bubble — signed-out visitors only */}
       <Show when="signed-out">
