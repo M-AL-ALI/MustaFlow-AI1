@@ -504,10 +504,15 @@ router.get("/help/support/tickets/:id", async (req, res) => {
       return;
     }
 
+    // Internal staff notes (internalNote === true) are admin-only and must never
+    // reach the requester — exclude them from this requester-facing endpoint.
     const transcript = Array.isArray(row.transcript)
-      ? (row.transcript as { role: string; content: string }[]).filter(
+      ? (row.transcript as { role: string; content: string; internalNote?: boolean }[]).filter(
           (m) =>
-            m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+            m &&
+            m.internalNote !== true &&
+            (m.role === "user" || m.role === "assistant") &&
+            typeof m.content === "string",
         )
       : [];
     const attachments = Array.isArray(row.attachments)

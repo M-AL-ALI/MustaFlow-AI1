@@ -2943,6 +2943,8 @@ export interface AdminSupportTicketMessage {
   role: AdminSupportTicketMessageRole;
   content: string;
   staffReply?: boolean;
+  internalNote?: boolean;
+  authorId?: string;
   at?: string;
 }
 
@@ -5636,6 +5638,19 @@ export type ReplyAdminSupportTicket200 = {
   ok: boolean;
   emailStatus: ReplyAdminSupportTicket200EmailStatus;
   status: ReplyAdminSupportTicket200Status;
+};
+
+export type AddAdminSupportTicketNoteBody = {
+  /**
+     * @minLength 1
+     * @maxLength 8000
+     */
+  note: string;
+};
+
+export type AddAdminSupportTicketNote200 = {
+  ok: boolean;
+  message: AdminSupportTicketMessage;
 };
 
 export type ListAdminSkills200SkillsItem = { [key: string]: unknown };

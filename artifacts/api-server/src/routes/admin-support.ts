@@ -40,6 +40,8 @@ interface TranscriptMessage {
   role: "user" | "assistant";
   content: string;
   staffReply?: boolean;
+  internalNote?: boolean;
+  authorId?: string;
   at?: string;
 }
 
@@ -58,6 +60,8 @@ function asTranscript(raw: unknown): TranscriptMessage[] {
       role: m.role === "user" ? "user" : "assistant",
       content: typeof m.content === "string" ? m.content : "",
       staffReply: m.staffReply === true ? true : undefined,
+      internalNote: m.internalNote === true ? true : undefined,
+      authorId: typeof m.authorId === "string" ? m.authorId : undefined,
       at: typeof m.at === "string" ? m.at : undefined,
     }));
 }
@@ -367,6 +371,61 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
   } catch (err) {
     logger.error({ component: "admin-support", err }, "Failed to send support reply");
     res.status(500).json({ error: "Failed to send reply" });
+  }
+});
+
+// ── POST /api/admin/support-tickets/:id/note ──────────────────────────────────
+// Body: { note: string }. Records an internal, staff-only note in the ticket
+// transcript with `internalNote: true`. Unlike /reply, this NEVER sends an email
+// and is only ever surfaced through the admin-gated detail endpoint, so the
+// requester can never see it. Adding a note does not change ticket status.
+router.post("/admin/support-tickets/:id/note", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid ticket id" });
+    return;
+  }
+  const note = (req.body as { note?: string })?.note;
+  if (typeof note !== "string" || !note.trim()) {
+    res.status(400).json({ error: "note is required" });
+    return;
+  }
+  const body = note.trim().slice(0, 8000);
+
+  try {
+    const [row] = await db
+      .select({
+        id: supportTicketsTable.id,
+        transcript: supportTicketsTable.transcript,
+      })
+      .from(supportTicketsTable)
+      .where(eq(supportTicketsTable.id, id));
+    if (!row) {
+      res.status(404).json({ error: "Ticket not found" });
+      return;
+    }
+
+    const authorId = req.userId ?? undefined;
+    const message: TranscriptMessage = {
+      role: "assistant",
+      content: body,
+      internalNote: true,
+      authorId,
+      at: new Date().toISOString(),
+    };
+
+    const transcript = asTranscript(row.transcript);
+    transcript.push(message);
+
+    await db
+      .update(supportTicketsTable)
+      .set({ transcript, updatedAt: new Date() })
+      .where(eq(supportTicketsTable.id, id));
+
+    res.json({ ok: true, message });
+  } catch (err) {
+    logger.error({ component: "admin-support", err }, "Failed to add support note");
+    res.status(500).json({ error: "Failed to add note" });
   }
 });
 

@@ -11,5 +11,7 @@ export interface AdminSupportTicketMessage {
   role: AdminSupportTicketMessageRole;
   content: string;
   staffReply?: boolean;
+  internalNote?: boolean;
+  authorId?: string;
   at?: string;
 }

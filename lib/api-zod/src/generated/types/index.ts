@@ -14,6 +14,8 @@ export * from './accountSecurityFindingStatus';
 export * from './acknowledgeCveScan200';
 export * from './activityItem';
 export * from './activityItemKind';
+export * from './addAdminSupportTicketNote200';
+export * from './addAdminSupportTicketNoteBody';
 export * from './addDomainInput';
 export * from './addDomainResponse';
 export * from './adminAuditLogEntry';

@@ -6213,6 +6213,8 @@ export const GetAdminSupportTicketResponse = zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string(),
   "staffReply": zod.boolean().optional(),
+  "internalNote": zod.boolean().optional(),
+  "authorId": zod.string().optional(),
   "at": zod.string().optional()
 })),
   "projectId": zod.number().nullish(),
@@ -6269,6 +6271,34 @@ export const ReplyAdminSupportTicketResponse = zod.object({
   "ok": zod.boolean(),
   "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
   "status": zod.enum(['new', 'open', 'resolved'])
+})
+
+
+/**
+ * @summary Add an internal staff-only note to a ticket (never emailed to the requester)
+ */
+export const AddAdminSupportTicketNoteParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const addAdminSupportTicketNoteBodyNoteMax = 8000;
+
+
+
+export const AddAdminSupportTicketNoteBody = zod.object({
+  "note": zod.string().min(1).max(addAdminSupportTicketNoteBodyNoteMax)
+})
+
+export const AddAdminSupportTicketNoteResponse = zod.object({
+  "ok": zod.boolean(),
+  "message": zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "staffReply": zod.boolean().optional(),
+  "internalNote": zod.boolean().optional(),
+  "authorId": zod.string().optional(),
+  "at": zod.string().optional()
+})
 })
 
 

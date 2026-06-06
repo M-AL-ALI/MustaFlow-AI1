@@ -15,12 +15,15 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
+  StickyNote,
+  Lock,
 } from "lucide-react";
 import {
   useListAdminSupportTickets,
   useGetAdminSupportTicket,
   useUpdateAdminSupportTicket,
   useReplyAdminSupportTicket,
+  useAddAdminSupportTicketNote,
   getListAdminSupportTicketsQueryKey,
   getGetAdminSupportTicketQueryKey,
 } from "@workspace/api-client-react";
@@ -289,11 +292,14 @@ function TicketDetail({
 }) {
   const queryClient = useQueryClient();
   const { data: ticket, isLoading, isError, refetch } = useGetAdminSupportTicket(ticketId);
+  const [composerMode, setComposerMode] = useState<"reply" | "note">("reply");
   const [reply, setReply] = useState("");
+  const [note, setNote] = useState("");
   const [feedback, setFeedback] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const updateStatus = useUpdateAdminSupportTicket();
   const sendReply = useReplyAdminSupportTicket();
+  const addNote = useAddAdminSupportTicketNote();
 
   function invalidateDetail() {
     queryClient.invalidateQueries({ queryKey: getGetAdminSupportTicketQueryKey(ticketId) });
@@ -340,6 +346,27 @@ function TicketDetail({
         },
         onError: () => {
           setFeedback({ kind: "err", text: "Could not send the reply. Please try again." });
+        },
+      },
+    );
+  }
+
+  function submitNote(e: React.FormEvent) {
+    e.preventDefault();
+    const body = note.trim();
+    if (!body) return;
+    setFeedback(null);
+    addNote.mutate(
+      { id: ticketId, data: { note: body } },
+      {
+        onSuccess: () => {
+          setNote("");
+          invalidateDetail();
+          onMutated();
+          setFeedback({ kind: "ok", text: "Internal note added. The requester cannot see it." });
+        },
+        onError: () => {
+          setFeedback({ kind: "err", text: "Could not add the note. Please try again." });
         },
       },
     );
@@ -446,7 +473,43 @@ function TicketDetail({
       </div>
 
       {/* Reply box */}
-      <form onSubmit={submitReply} className="px-5 py-4 border-t border-border space-y-2">
+      <div className="px-5 py-4 border-t border-border space-y-3">
+        {/* Composer mode toggle: customer-facing reply vs. internal note */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setComposerMode("reply");
+              setFeedback(null);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              composerMode === "reply"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Reply to requester
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setComposerMode("note");
+              setFeedback(null);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              composerMode === "note"
+                ? "bg-amber-500 text-white"
+                : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <StickyNote className="h-3.5 w-3.5" />
+            Internal note
+          </button>
+        </div>
+
         {feedback && (
           <div
             className={cn(
@@ -464,39 +527,89 @@ function TicketDetail({
             <span>{feedback.text}</span>
           </div>
         )}
-        {!ticket.userEmail && (
-          <p className="text-xs text-amber-600 flex items-center gap-1.5">
-            <AlertCircle className="h-3.5 w-3.5" />
-            No email on file — a reply cannot be emailed to this requester.
-          </p>
-        )}
-        <textarea
-          value={reply}
-          onChange={(e) => setReply(e.target.value)}
-          placeholder="Write a reply to the requester…"
-          rows={3}
-          className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-        />
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={sendReply.isPending || !reply.trim() || !ticket.userEmail}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            {sendReply.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
+
+        {composerMode === "reply" ? (
+          <form onSubmit={submitReply} className="space-y-2">
+            {!ticket.userEmail && (
+              <p className="text-xs text-amber-600 flex items-center gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5" />
+                No email on file — a reply cannot be emailed to this requester.
+              </p>
             )}
-            Send reply
-          </button>
-        </div>
-      </form>
+            <textarea
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              placeholder="Write a reply to the requester…"
+              rows={3}
+              className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={sendReply.isPending || !reply.trim() || !ticket.userEmail}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {sendReply.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send reply
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={submitNote} className="space-y-2">
+            <p className="text-xs text-amber-600 flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5" />
+              Visible only to support staff — never emailed to the requester.
+            </p>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Add an internal note (e.g. waiting on engineering, duplicate of #42)…"
+              rows={3}
+              className="w-full resize-y rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={addNote.isPending || !note.trim()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 transition-colors disabled:opacity-50"
+              >
+                {addNote.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <StickyNote className="h-4 w-4" />
+                )}
+                Add note
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
 
 function TranscriptBubble({ message }: { message: AdminSupportTicketMessage }) {
+  // Internal staff notes are rendered as a full-width, visually distinct band so
+  // they can never be mistaken for a customer-facing message.
+  if (message.internalNote === true) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 mb-1">
+          <Lock className="h-3 w-3" />
+          Internal note — not visible to the requester
+        </div>
+        <p className="text-sm whitespace-pre-wrap break-words text-foreground">{message.content}</p>
+        <p className="mt-1 text-[10px] text-amber-600/80">
+          {message.at ? formatDate(message.at) : ""}
+        </p>
+      </div>
+    );
+  }
+
   const isUser = message.role === "user";
   const isStaff = message.staffReply === true;
   return (

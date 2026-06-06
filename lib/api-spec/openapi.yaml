@@ -5609,6 +5609,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /admin/support-tickets/{id}/note:
+    post:
+      operationId: addAdminSupportTicketNote
+      tags: [admin]
+      summary: Add an internal staff-only note to a ticket (never emailed to the requester)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 1, maxLength: 8000 }
+      responses:
+        "200":
+          description: Note added
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, message]
+                properties:
+                  ok: { type: boolean }
+                  message:
+                    $ref: "#/components/schemas/AdminSupportTicketMessage"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /admin/skills:
     get:
       operationId: listAdminSkills
@@ -9374,6 +9415,8 @@ components:
         role: { type: string, enum: [user, assistant] }
         content: { type: string }
         staffReply: { type: boolean }
+        internalNote: { type: boolean }
+        authorId: { type: string }
         at: { type: string }
 
     AdminSupportTicketAttachment:

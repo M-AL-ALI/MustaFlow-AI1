@@ -24,6 +24,8 @@ import type {
   AccountSecurityFindingsResponse,
   AcknowledgeCveScan200,
   ActivityItem,
+  AddAdminSupportTicketNote200,
+  AddAdminSupportTicketNoteBody,
   AddDomainInput,
   AddDomainResponse,
   AdminAuditLogPage,
@@ -17643,6 +17645,78 @@ export const useReplyAdminSupportTicket = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getReplyAdminSupportTicketMutationOptions(options));
+    }
+
+export const getAddAdminSupportTicketNoteUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/support-tickets/${id}/note`
+}
+
+/**
+ * @summary Add an internal staff-only note to a ticket (never emailed to the requester)
+ */
+export const addAdminSupportTicketNote = async (id: number,
+    addAdminSupportTicketNoteBody: AddAdminSupportTicketNoteBody, options?: RequestInit): Promise<AddAdminSupportTicketNote200> => {
+
+  return customFetch<AddAdminSupportTicketNote200>(getAddAdminSupportTicketNoteUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      addAdminSupportTicketNoteBody,)
+  }
+);}
+
+
+
+
+export const getAddAdminSupportTicketNoteMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addAdminSupportTicketNote>>, TError,{id: number;data: BodyType<AddAdminSupportTicketNoteBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof addAdminSupportTicketNote>>, TError,{id: number;data: BodyType<AddAdminSupportTicketNoteBody>}, TContext> => {
+
+const mutationKey = ['addAdminSupportTicketNote'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addAdminSupportTicketNote>>, {id: number;data: BodyType<AddAdminSupportTicketNoteBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  addAdminSupportTicketNote(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddAdminSupportTicketNoteMutationResult = NonNullable<Awaited<ReturnType<typeof addAdminSupportTicketNote>>>
+    export type AddAdminSupportTicketNoteMutationBody = BodyType<AddAdminSupportTicketNoteBody>
+    export type AddAdminSupportTicketNoteMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Add an internal staff-only note to a ticket (never emailed to the requester)
+ */
+export const useAddAdminSupportTicketNote = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addAdminSupportTicketNote>>, TError,{id: number;data: BodyType<AddAdminSupportTicketNoteBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof addAdminSupportTicketNote>>,
+        TError,
+        {id: number;data: BodyType<AddAdminSupportTicketNoteBody>},
+        TContext
+      > => {
+      return useMutation(getAddAdminSupportTicketNoteMutationOptions(options));
     }
 
 export const getListAdminSkillsUrl = () => {

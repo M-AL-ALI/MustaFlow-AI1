@@ -160,6 +160,47 @@ describe("Support tickets are scoped to their owner", () => {
   });
 });
 
+describe("Internal staff notes are never exposed to the requester", () => {
+  it("excludes internalNote transcript entries from GET /help/support/tickets/:id", async () => {
+    const app = await buildApp();
+
+    // Create a ticket for USER_A with a customer-visible transcript message.
+    const res = await escalateAs(app, USER_A, {
+      subject: "Ticket with internal note",
+      transcript: [{ role: "user", content: "Customer visible message" }],
+    });
+    expect(res.status).toBe(201);
+    const ticketId = res.body.ticketId as number;
+
+    // Simulate an admin adding an internal staff-only note straight into the
+    // transcript (mirrors POST /admin/support-tickets/:id/note).
+    await db
+      .update(supportTicketsTable)
+      .set({
+        transcript: [
+          { role: "user", content: "Customer visible message" },
+          {
+            role: "assistant",
+            content: "SECRET internal note — duplicate of #42",
+            internalNote: true,
+            authorId: "admin-user",
+            at: new Date().toISOString(),
+          },
+        ],
+      })
+      .where(eq(supportTicketsTable.id, ticketId));
+
+    // The requester reads their own ticket — the internal note must not appear.
+    actAs(USER_A);
+    const detail = await request(app).get(`/help/support/tickets/${ticketId}`);
+    expect(detail.status).toBe(200);
+    const transcript = detail.body.transcript as { role: string; content: string }[];
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.content).toBe("Customer visible message");
+    expect(JSON.stringify(detail.body)).not.toContain("SECRET internal note");
+  });
+});
+
 describe("Escalation drops a cross-user projectId", () => {
   it("drops a projectId the requesting user does not own", async () => {
     const app = await buildApp();
