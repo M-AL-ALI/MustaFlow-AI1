@@ -512,14 +512,16 @@ export function OraSidebar({ onNewConversation }: OraSidebarProps) {
 
   return (
     <>
-      {/* Fixed logo button — always visible */}
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Open Ora menu"
-        className="fixed top-3 left-3 z-50 h-9 w-9 rounded-xl bg-sidebar border border-border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
-      >
-        <img src={logoUrl} alt="Ora" className="h-6 w-auto object-contain" />
-      </button>
+      {/* Fixed logo button — visible only while the drawer is closed. */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Open Ora menu"
+          className="fixed top-3 left-3 z-50 h-9 w-9 rounded-xl bg-sidebar border border-border shadow-md flex items-center justify-center hover:bg-muted transition-colors"
+        >
+          <img src={logoUrl} alt="Ora" className="h-6 w-auto object-contain" />
+        </button>
+      )}
 
       {/* Backdrop */}
       {open && (
