@@ -49,7 +49,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
   }
 
   // Resolve the signed-in Ora user up-front. The anonymous per-session cap is a
-  // side-effect-free read, so it can be signaled early; only the authed daily
+  // side-effect-free read, so it can be signaled early; only the authed rolling-window
   // quota is RESERVED (consumed), and that reservation is deferred until after
   // cheap validation so rejected requests never consume a user's allowance.
   const authed = await resolveAuthedOraUser(req);
@@ -67,7 +67,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  // File generation draws on the daily MESSAGE bucket. consumeOraQuota is atomic;
+  // File generation draws on the rolling-window MESSAGE bucket. consumeOraQuota is atomic;
   // the reservation is held below and only released via refundOraQuota on failure.
   if (authed) {
     const quota = await consumeOraQuota(authed.userId, authed.tier, "message");

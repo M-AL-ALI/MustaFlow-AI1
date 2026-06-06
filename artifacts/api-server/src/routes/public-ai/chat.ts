@@ -437,7 +437,7 @@ router.post("/public-ai/chat", async (req, res) => {
         // Persist the image into generated_images so it carries an editable id.
         // This is what powers inline editing: the existing /images/:id/edit
         // pipeline keys off a generated_images row (parent fileUrl + ownership).
-        // Ora images are metered by the daily IMAGE quota (incremented below),
+        // Ora images are metered by the rolling-window IMAGE quota (incremented below),
         // NOT the Builder credit wallet, so this record is creditCost:0.
         try {
           const { storeGeneratedImage } = await import("../../lib/image-storage");
@@ -782,7 +782,7 @@ router.post("/public-ai/chat", async (req, res) => {
     );
   }
 
-  // The daily MESSAGE quota was already reserved atomically at the top of the
+  // The rolling-window MESSAGE quota was already reserved atomically at the top of the
   // handler (consumeOraQuota). Since the reply succeeded we keep the reservation
   // — no extra increment here, and no refund.
   const { token, payload } = incrementMessageCount(session);

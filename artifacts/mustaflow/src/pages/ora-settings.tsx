@@ -951,9 +951,7 @@ function PlanLimitsSection() {
       description="Ora uses plan-based rolling-window message and image limits that refill together."
     >
       {!isSignedIn ? (
-        <p className="text-sm text-muted-foreground">
-          Sign in to see your Ora plan and usage.
-        </p>
+        <p className="text-sm text-muted-foreground">Sign in to see your Ora plan and usage.</p>
       ) : loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -988,9 +986,7 @@ function PlanLimitsSection() {
               <p className="mt-2 text-2xl font-bold">
                 {remaining(usage?.imageCount, usage?.imageLimit)}
               </p>
-              <p className="text-xs text-muted-foreground">
-                left of {usage?.imageLimit ?? 0}
-              </p>
+              <p className="text-xs text-muted-foreground">left of {usage?.imageLimit ?? 0}</p>
             </div>
           </div>
           {(() => {

@@ -30,7 +30,15 @@ const h = vi.hoisted(() => {
     }),
     update: () => ({ set: updateSet }),
   };
-  return { NOW, selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues, mockDb };
+  return {
+    NOW,
+    selectWhere,
+    onConflictDoUpdate,
+    returning,
+    updateSet,
+    capturedInsertValues,
+    mockDb,
+  };
 });
 const { NOW, selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues } = h;
 
@@ -112,9 +120,7 @@ describe("getOraUsage — tier limits + window counts", () => {
   });
 
   it("reflects stored counts + resetsAt when an ACTIVE window row exists", async () => {
-    selectWhere.mockResolvedValue([
-      { messageCount: 7, imageCount: 2, windowStart: ACTIVE_START },
-    ]);
+    selectWhere.mockResolvedValue([{ messageCount: 7, imageCount: 2, windowStart: ACTIVE_START }]);
     const usage = await getOraUsage("u1", "core");
     expect(usage.messageCount).toBe(7);
     expect(usage.imageCount).toBe(2);
@@ -146,9 +152,7 @@ describe("getOraUsage — tier limits + window counts", () => {
 
 describe("checkOraQuota — bucket routing + cap", () => {
   it("allows a message when under the message limit in an active window", async () => {
-    selectWhere.mockResolvedValue([
-      { messageCount: 29, imageCount: 0, windowStart: ACTIVE_START },
-    ]);
+    selectWhere.mockResolvedValue([{ messageCount: 29, imageCount: 0, windowStart: ACTIVE_START }]);
     const res = await checkOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(true);
     expect(res.used).toBe(29);
@@ -158,9 +162,7 @@ describe("checkOraQuota — bucket routing + cap", () => {
   });
 
   it("blocks a message exactly at the message limit", async () => {
-    selectWhere.mockResolvedValue([
-      { messageCount: 30, imageCount: 0, windowStart: ACTIVE_START },
-    ]);
+    selectWhere.mockResolvedValue([{ messageCount: 30, imageCount: 0, windowStart: ACTIVE_START }]);
     const res = await checkOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(false);
     expect(res.used).toBe(30);
@@ -212,9 +214,7 @@ describe("consumeOraQuota — atomic reservation", () => {
 
   it("blocks when the conditional update did not reserve capacity", async () => {
     returning.mockResolvedValue([]);
-    selectWhere.mockResolvedValue([
-      { messageCount: 30, imageCount: 0, windowStart: ACTIVE_START },
-    ]);
+    selectWhere.mockResolvedValue([{ messageCount: 30, imageCount: 0, windowStart: ACTIVE_START }]);
     const res = await consumeOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(false);
     expect(res.used).toBe(30);
@@ -236,9 +236,7 @@ describe("oraMessageFields — anon vs authed", () => {
   });
 
   it("signed-in users get their rolling-window message usage + tier limit + reset", async () => {
-    selectWhere.mockResolvedValue([
-      { messageCount: 9, imageCount: 1, windowStart: ACTIVE_START },
-    ]);
+    selectWhere.mockResolvedValue([{ messageCount: 9, imageCount: 1, windowStart: ACTIVE_START }]);
     const fields = await oraMessageFields({ userId: "u1", tier: "core" }, 4);
     expect(fields).toEqual({
       msgCount: 9,

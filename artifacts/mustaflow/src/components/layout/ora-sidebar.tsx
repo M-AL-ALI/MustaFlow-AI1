@@ -161,9 +161,7 @@ function OraUsageWidget() {
             </div>
           </div>
         ) : (
-          <p className="text-[10px] leading-tight mt-1.5 font-normal">
-            Full allowance available
-          </p>
+          <p className="text-[10px] leading-tight mt-1.5 font-normal">Full allowance available</p>
         )}
       </div>
     </div>
