@@ -11,14 +11,14 @@
 import { Router } from "express";
 import { speechToText } from "@workspace/integrations-openai-ai-server/audio";
 import { validateSession } from "../../lib/public-ai/session";
-import { oraUploadLimiter } from "../../lib/rateLimit";
+import { oraVoiceTranscribeLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 
 const router = Router();
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB
 
-router.post("/public-ai/transcribe", oraUploadLimiter, async (req, res) => {
+router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res) => {
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
     res.status(401).json({ error: "No active session. Please start a session first." });

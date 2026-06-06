@@ -303,6 +303,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   }, []);
 
   const whisperConv = useWhisperRecorder(handleWhisperTranscript, () => languageRef.current);
+  const whisperState = whisperConv.state;
+  const whisperSupported = whisperConv.isSupported;
+  const startWhisperRecording = whisperConv.startRecording;
+  const cancelWhisperRecording = whisperConv.cancelRecording;
 
   // Auto-clear the transcript-ready hint after 5 s (dictation mode only)
   useEffect(() => {
@@ -325,7 +329,6 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   // Voice Conversation Mode has its own mute control (voiceConvTtsMuted).
   useEffect(() => {
     if (!voiceConvActive || voiceConvTtsMuted || isLoading) return;
-    if (!voiceRef.current.isSpeechSynthesisSupported) return;
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg || lastMsg.role !== "assistant") return;
     if (lastMsg.content === lastConvAssistantMsgRef.current) return;
@@ -333,9 +336,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     voiceRef.current.speakTextForce(lastMsg.content, languageRef.current);
   }, [messages, isLoading, voiceConvActive, voiceConvTtsMuted]);
 
-  // Conversation cycling: track when Ora finishes speaking so the UI can
-  // re-show the push-to-talk button. No auto-start listening — Whisper mode
-  // is push-to-talk: the user holds the "Hold to speak" button themselves.
+  // Conversation cycling: track when Ora finishes speaking so the automatic
+  // listener can resume.
   useEffect(() => {
     if (!voiceConvActive) return;
     if (voice.voiceState === "speaking") {
@@ -346,6 +348,29 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       wasConvSpeakingRef.current = false;
     }
   }, [voice.voiceState, voiceConvActive]);
+
+  useEffect(() => {
+    if (!voiceConvActive) {
+      cancelWhisperRecording();
+      return;
+    }
+    if (!whisperSupported) return;
+    if (isLoading || voice.voiceState === "speaking") return;
+    if (whisperState !== "idle") return;
+
+    const t = window.setTimeout(() => {
+      void startWhisperRecording({ autoStop: true });
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [
+    cancelWhisperRecording,
+    isLoading,
+    startWhisperRecording,
+    voice.voiceState,
+    voiceConvActive,
+    whisperState,
+    whisperSupported,
+  ]);
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
@@ -796,10 +821,16 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           </div>
           <div className="flex items-center gap-2">
             {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
-            {voice.isSupported && (
+            {(voice.isSupported || whisperConv.isSupported) && (
               <OraVoiceModeButton
-                voiceState={voiceConvActive ? voice.voiceState : "idle"}
-                isSupported={voice.isSupported}
+                voiceState={
+                  voiceConvActive &&
+                  !(voice.voiceState === "unsupported" && whisperConv.isSupported)
+                    ? voice.voiceState
+                    : "idle"
+                }
+                isSupported={voice.isSupported || whisperConv.isSupported}
+                active={voiceConvActive}
                 onStart={handleEnterVoiceConvMode}
                 onStop={handleExitVoiceConvMode}
                 disabled={!voiceConvActive && isLoading}
@@ -1274,7 +1305,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               {voiceConvActive ? (
                 /* ─── Voice Conversation Mode panel ─────────────────── */
                 <OraVoiceConvPanel
-                  voiceState={voice.voiceState}
+                  voiceState={
+                    voice.voiceState === "unsupported" && whisperConv.isSupported
+                      ? "idle"
+                      : voice.voiceState
+                  }
                   interimTranscript={voice.interimTranscript}
                   isLoading={isLoading}
                   isTtsMuted={voiceConvTtsMuted}
@@ -1455,7 +1490,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     ) : (
                       <p className="text-[9px] text-muted-foreground/50">
                         Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
-                        {voice.isSupported
+                        {voice.isSupported || whisperConv.isSupported
                           ? "Voice or type in any language"
                           : "Voice unavailable on this browser — typing still works"}
                       </p>

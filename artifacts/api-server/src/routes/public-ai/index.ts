@@ -9,6 +9,7 @@ import datasetAnalysisRouter from "./dataset-analysis";
 import imageAnalysisRouter from "./image-analysis";
 import handoffRouter from "./handoff";
 import transcribeRouter from "./transcribe";
+import ttsRouter from "./tts";
 import generateFileRouter from "./generate-file";
 
 const router = Router();
@@ -33,6 +34,7 @@ router.use(datasetAnalysisRouter);
 router.use(imageAnalysisRouter);
 router.use(handoffRouter);
 router.use(transcribeRouter);
+router.use(ttsRouter);
 router.use(generateFileRouter);
 
 export default router;

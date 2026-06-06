@@ -308,6 +308,25 @@ export const oraUploadLimiter = createLimiter({
   message: "You have uploaded too many files recently. Please wait before uploading again.",
 });
 
+// Voice Conversation Mode transcription uses short push-to-talk clips. Keep it
+// separate from file uploads so a normal Talk to Ora session does not exhaust
+// the generic upload bucket after a few turns.
+export const oraVoiceTranscribeLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 60,
+  keyPrefix: "ora_voice_transcribe",
+  message: "Voice transcription is temporarily at capacity. Please wait before trying again.",
+});
+
+// Natural voice replies for Talk to Ora. Separate from text chat and uploads so
+// users can have a real voice discussion without consuming unrelated buckets.
+export const oraVoiceTtsLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 60,
+  keyPrefix: "ora_voice_tts",
+  message: "Ora voice replies are temporarily at capacity. Please wait before trying again.",
+});
+
 // Sliding-window counter: 10 image uploads per IP per hour (images only)
 export const oraImageUploadLimiter = createLimiter({
   windowMs: 60 * 60_000,

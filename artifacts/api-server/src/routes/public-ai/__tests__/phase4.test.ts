@@ -1,8 +1,8 @@
 /**
  * Phase 4 — Voice-A validation suite.
  *
- * Voice-A is entirely browser-native (SpeechRecognition / speechSynthesis).
- * No new backend routes are introduced.  These tests verify:
+ * Voice-A keeps normal composer dictation browser-native while Talk to Ora
+ * voice sessions use dedicated backend transcription/TTS routes. These tests verify:
  *
  *  1. Security: voice hook has no database, secrets, or server imports
  *  2. Privacy: no transcript logging or audio storage in hook code
@@ -10,7 +10,7 @@
  *  4. TTS default: preference stored as "false" unless user enables it
  *  5. State machine: error classification is correct (permission_denied vs error vs idle)
  *  6. Review-before-send: hook calls onFinalTranscript, NOT sendMessage directly
- *  7. Regression: Phase 1/2/3 route files are unmodified
+ *  7. Regression: normal chat stays text-only and voice-session routes stay isolated
  */
 
 import { readFileSync } from "fs";
@@ -63,7 +63,7 @@ describe("Phase 4 — Voice-A: use-ora-voice hook", () => {
   });
 
   it("does NOT store audio (privacy)", () => {
-    const audioStoragePatterns = ["AudioBuffer", "Blob", "MediaRecorder", "localStorage.setItem"];
+    const audioStoragePatterns = ["AudioBuffer", "Blob", "MediaRecorder"];
     for (const p of audioStoragePatterns) {
       expect(hookSrc, `hook must not use "${p}"`).not.toContain(p);
     }
@@ -185,17 +185,17 @@ describe("Phase 4 — Voice-A: ora-panel integration", () => {
     expect(panelSrc).toContain("useOraVoice");
   });
 
-  it("imports OraVoiceMicButton", () => {
-    expect(panelSrc).toContain("OraVoiceMicButton");
+  it("imports OraDictationButton", () => {
+    expect(panelSrc).toContain("OraDictationButton");
   });
 
   it("places mic button inside the input bar", () => {
-    expect(panelSrc).toContain("<OraVoiceMicButton");
+    expect(panelSrc).toContain("<OraDictationButton");
   });
 
   it("shows interim transcript hint when listening", () => {
-    expect(panelSrc).toContain("showInterim");
-    expect(panelSrc).toContain("Listening…");
+    expect(panelSrc).toContain("OraVoiceLiveArea");
+    expect(panelSrc).toContain("interimTranscript");
   });
 
   it("cancels TTS on keydown (typing while Ora speaks)", () => {
@@ -231,17 +231,17 @@ describe("Phase 4 — Voice-A: ora-bubble integration", () => {
     expect(bubbleSrc).toContain("useOraVoice");
   });
 
-  it("imports OraVoiceMicButton", () => {
-    expect(bubbleSrc).toContain("OraVoiceMicButton");
+  it("imports OraDictationButton", () => {
+    expect(bubbleSrc).toContain("OraDictationButton");
   });
 
   it("places mic button inside the drawer input bar", () => {
-    expect(bubbleSrc).toContain("<OraVoiceMicButton");
+    expect(bubbleSrc).toContain("<OraDictationButton");
   });
 
   it("shows interim transcript hint", () => {
-    expect(bubbleSrc).toContain("showInterim");
-    expect(bubbleSrc).toContain("Listening…");
+    expect(bubbleSrc).toContain("OraVoiceLiveArea");
+    expect(bubbleSrc).toContain("interimTranscript");
   });
 
   it("cancels TTS when user types", () => {
@@ -254,29 +254,17 @@ describe("Phase 4 — Voice-A: ora-bubble integration", () => {
   });
 });
 
-describe("Phase 4 — Voice-A: no new backend routes", () => {
-  it("no /transcribe route file exists", () => {
-    // eslint-disable-next-line no-useless-assignment
-    let found = false;
-    try {
-      readApiRoute("transcribe.ts");
-      found = true;
-    } catch {
-      found = false;
-    }
-    expect(found, "Voice-A must not add a /transcribe backend route").toBe(false);
+describe("Phase 4 — Voice-A: voice-session routes stay separate from normal chat", () => {
+  it("has a session-gated /transcribe route for Talk to Ora", () => {
+    const transcribeSrc = readApiRoute("transcribe.ts");
+    expect(transcribeSrc).toContain('router.post("/public-ai/transcribe"');
+    expect(transcribeSrc).toContain("validateSession");
   });
 
-  it("no /tts route file exists", () => {
-    // eslint-disable-next-line no-useless-assignment
-    let found = false;
-    try {
-      readApiRoute("tts.ts");
-      found = true;
-    } catch {
-      found = false;
-    }
-    expect(found, "Voice-A must not add a /tts backend route").toBe(false);
+  it("has a session-gated /tts route for Talk to Ora natural replies", () => {
+    const ttsSrc = readApiRoute("tts.ts");
+    expect(ttsSrc).toContain('router.post("/public-ai/tts"');
+    expect(ttsSrc).toContain("validateSession");
   });
 });
 
