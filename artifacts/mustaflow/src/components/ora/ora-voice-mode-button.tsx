@@ -228,6 +228,7 @@ export interface OraVoiceModeButtonProps {
   isSupported: boolean;
   onStart: () => void;
   onStop: () => void;
+  active?: boolean;
   disabled?: boolean;
   /** "md" for OraPanel (h-7 w-7), "sm" for OraBubble (h-6 w-6) */
   size?: "sm" | "md";
@@ -238,6 +239,7 @@ export function OraVoiceModeButton({
   isSupported,
   onStart,
   onStop,
+  active,
   disabled = false,
   size = "md",
 }: OraVoiceModeButtonProps) {
@@ -249,12 +251,13 @@ export function OraVoiceModeButton({
   const isDenied = voiceState === "permission_denied";
   const isError = voiceState === "error";
   const isInert = isUnsupported || isDenied;
-  const isActive = isListening || isSpeaking;
+  const isActive = active ?? (isListening || isSpeaking);
 
   const dim = size === "sm" ? "h-6 w-6" : "h-7 w-7";
   const waveScale = size === "sm" ? 0.75 : 1;
 
   let ariaLabel = "Start voice conversation with Ora";
+  if (isActive && !isListening && !isSpeaking) ariaLabel = "Voice mode active - tap to end";
   if (isListening) ariaLabel = "Ora is listening — tap to end voice mode";
   if (isSpeaking) ariaLabel = "Ora is speaking — tap to end voice mode";
   if (isUnsupported) ariaLabel = "Voice input is not supported in this browser";
@@ -262,6 +265,7 @@ export function OraVoiceModeButton({
   if (isError) ariaLabel = "Voice failed — tap to try again";
 
   let title = "Talk with Ora — voice conversation mode";
+  if (isActive && !isListening && !isSpeaking) title = "Voice mode active - tap to end";
   if (isListening) title = "Ora is listening — tap to end voice mode";
   if (isSpeaking) title = "Ora is speaking — tap to end voice mode";
   if (isUnsupported) title = "Voice is not supported in this browser. You can still type.";
@@ -326,11 +330,7 @@ export function OraVoiceModeButton({
       ) : isError ? (
         <AlertCircle className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} />
       ) : (
-        <WaveformBars
-          animated={isListening || isSpeaking}
-          colorClass="bg-white/90"
-          scale={waveScale}
-        />
+        <WaveformBars animated={isActive} colorClass="bg-white/90" scale={waveScale} />
       )}
     </button>
   );
@@ -350,7 +350,7 @@ export interface OraVoiceConvPanelProps {
   onExit: () => void;
   onInterrupt?: () => void;
   size?: "sm" | "md";
-  /** Whisper push-to-talk state — when provided, replaces auto-listen with a hold-to-speak button */
+  /** Whisper session state for automatic Talk to Ora listening. */
   whisperState?: WhisperState;
   whisperSupported?: boolean;
   whisperError?: string | null;
@@ -371,8 +371,6 @@ export function OraVoiceConvPanel({
   whisperState,
   whisperSupported,
   whisperError,
-  onWhisperStart,
-  onWhisperStop,
 }: OraVoiceConvPanelProps) {
   useEffect(injectKeyframes, []);
 
@@ -392,10 +390,10 @@ export function OraVoiceConvPanel({
       ? "Ora is speaking…"
       : useWhisper
         ? whisperRecording
-          ? "Recording…"
+          ? "Listening…"
           : whisperTranscribing
             ? "Transcribing…"
-            : "Voice Mode Active"
+            : "Listening…"
         : isListening
           ? "Listening…"
           : "Voice Mode Active";
@@ -406,12 +404,12 @@ export function OraVoiceConvPanel({
       ? "Tap interrupt to speak"
       : useWhisper
         ? whisperRecording
-          ? "Release to send — Whisper AI will transcribe your words"
+          ? "Speak naturally — Ora will answer when you pause"
           : whisperTranscribing
             ? "Processing your speech…"
             : whisperError
               ? whisperError
-              : "Hold the button below and speak — release to send"
+              : "Speak naturally — Ora is ready"
         : isListening
           ? interimTranscript
             ? `"${interimTranscript}"`
@@ -472,24 +470,16 @@ export function OraVoiceConvPanel({
           {isTtsMuted ? "Muted" : "Voice on"}
         </button>
 
-        {/* Whisper push-to-talk button */}
+        {/* Whisper automatic listening status */}
         {useWhisper && !isSpeaking && !isLoading && (
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              void onWhisperStart?.();
-            }}
-            onPointerUp={onWhisperStop}
-            onPointerLeave={onWhisperStop}
-            disabled={whisperTranscribing}
+          <span
             className={cn(
               "flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-medium transition-colors select-none touch-none",
               whisperRecording
                 ? "border-red-400/60 bg-red-400/10 text-red-400"
                 : whisperTranscribing
                   ? "border-border/40 text-muted-foreground/50 cursor-wait"
-                  : "border-[hsl(265_85%_65%/0.45)] bg-[hsl(265_85%_65%/0.08)] text-[hsl(265_85%_65%)] hover:border-[hsl(265_85%_65%/0.7)] hover:bg-[hsl(265_85%_65%/0.14)] active:scale-95",
+                  : "border-[hsl(265_85%_65%/0.45)] bg-[hsl(265_85%_65%/0.08)] text-[hsl(265_85%_65%)]",
             )}
           >
             {whisperTranscribing ? (
@@ -498,11 +488,11 @@ export function OraVoiceConvPanel({
               <Mic className={cn("h-3 w-3", whisperRecording && "animate-pulse")} />
             )}
             {whisperRecording
-              ? "Recording…"
+              ? "Listening…"
               : whisperTranscribing
                 ? "Transcribing…"
-                : "Hold to speak"}
-          </button>
+                : "Auto listening"}
+          </span>
         )}
 
         {/* Interrupt button (visible while Ora is speaking, whisper or not) */}

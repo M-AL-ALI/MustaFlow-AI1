@@ -22,12 +22,23 @@ import { useState, useRef, useCallback } from "react";
 
 export type WhisperState = "idle" | "recording" | "transcribing" | "error";
 
+export interface WhisperStartOptions {
+  /** Automatically stop after speech followed by silence. Used by Talk to Ora sessions. */
+  autoStop?: boolean;
+  /** Silence duration after speech before the clip is finalized. */
+  silenceMs?: number;
+  /** How long to listen with no speech before restarting the listener. */
+  noSpeechMs?: number;
+  /** Hard cap for a single utterance. */
+  maxMs?: number;
+}
+
 export interface UseWhisperRecorderReturn {
   state: WhisperState;
   /** True when MediaRecorder + getUserMedia are available on this device. */
   isSupported: boolean;
   /** Start capturing audio from the microphone. */
-  startRecording: () => Promise<void>;
+  startRecording: (options?: WhisperStartOptions) => Promise<void>;
   /** Stop capturing and send audio to Whisper for transcription. */
   stopRecording: () => void;
   /** Stop capturing and discard — no transcript produced. */
@@ -63,6 +74,10 @@ function mimeTypeToFormat(mimeType: string): string {
 }
 
 const MIN_AUDIO_BYTES = 5_000;
+const DEFAULT_SILENCE_MS = 1300;
+const DEFAULT_NO_SPEECH_MS = 18_000;
+const DEFAULT_MAX_UTTERANCE_MS = 30_000;
+const SPEECH_RMS_THRESHOLD = 0.03;
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -88,7 +103,10 @@ export function useWhisperRecorder(
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const analyserContextRef = useRef<AudioContext | null>(null);
+  const analyserFrameRef = useRef<number | null>(null);
   const cancelledRef = useRef(false);
+  const transcribeAbortRef = useRef<AbortController | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
 
@@ -99,12 +117,27 @@ export function useWhisperRecorder(
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
+  const stopAnalyser = useCallback(() => {
+    if (analyserFrameRef.current !== null) {
+      cancelAnimationFrame(analyserFrameRef.current);
+      analyserFrameRef.current = null;
+    }
+    const ctx = analyserContextRef.current;
+    analyserContextRef.current = null;
+    if (ctx && ctx.state !== "closed") {
+      void ctx.close().catch(() => undefined);
+    }
+  }, []);
+
   const cleanup = useCallback(() => {
+    transcribeAbortRef.current?.abort();
+    transcribeAbortRef.current = null;
+    stopAnalyser();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     mediaRecorderRef.current = null;
     chunksRef.current = [];
-  }, []);
+  }, [stopAnalyser]);
 
   const handleError = useCallback(
     (msg: string) => {
@@ -119,107 +152,208 @@ export function useWhisperRecorder(
     [cleanup],
   );
 
-  // ── Public API ─────────────────────────────────────────────────────────────
+  const startAutoStopMonitor = useCallback(
+    (stream: MediaStream, recorder: MediaRecorder, options: WhisperStartOptions) => {
+      stopAnalyser();
 
-  const startRecording = useCallback(async () => {
-    if (!isSupported) return;
-    cancelledRef.current = false;
-    setError(null);
-    chunksRef.current = [];
+      const AudioContextCtor =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ??
+        null;
 
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // Hints to help the OS/browser reduce background noise.
-          // Most browsers honour at least some of these.
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-    } catch (err) {
-      const name = err instanceof DOMException ? err.name : "";
-      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        handleError("Microphone access denied. Please allow microphone access and try again.");
-      } else if (name === "NotFoundError") {
-        handleError("No microphone found on this device.");
-      } else {
-        handleError("Could not start recording. Please check your microphone.");
-      }
-      return;
-    }
-
-    if (cancelledRef.current) {
-      stream.getTracks().forEach((t) => t.stop());
-      return;
-    }
-
-    streamRef.current = stream;
-    const mimeType = getBestMimeType();
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-
-    recorder.onstop = async () => {
-      const wasCancelled = cancelledRef.current;
-      const chunks = chunksRef.current.slice();
-      cleanup();
-
-      if (wasCancelled || chunks.length === 0) {
-        setState("idle");
+      if (!AudioContextCtor) {
+        window.setTimeout(() => {
+          if (recorder.state === "recording") recorder.stop();
+        }, options.maxMs ?? DEFAULT_MAX_UTTERANCE_MS);
         return;
       }
-
-      const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
-      if (blob.size === 0) {
-        setState("idle");
-        return;
-      }
-
-      // Reject accidental taps — clips this small are always silent noise
-      if (blob.size < MIN_AUDIO_BYTES) {
-        setState("idle");
-        return;
-      }
-
-      setState("transcribing");
-
-      const audioFormat = mimeTypeToFormat(mimeType);
 
       try {
-        const lang = getLanguageRef.current?.();
-        const langParam = lang && lang !== "auto" ? `&lang=${encodeURIComponent(lang)}` : "";
-        const resp = await fetch(`/api/public-ai/transcribe?format=${audioFormat}${langParam}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: blob,
-          credentials: "include",
-        });
+        const ctx = new AudioContextCtor();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        analyserContextRef.current = ctx;
 
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
+        const data = new Uint8Array(analyser.fftSize);
+        const startedAt = performance.now();
+        let heardSpeech = false;
+        let silentSince = startedAt;
 
-        const data = (await resp.json()) as { text?: string; error?: string };
-        const text = data.text?.trim() ?? "";
+        const silenceMs = options.silenceMs ?? DEFAULT_SILENCE_MS;
+        const noSpeechMs = options.noSpeechMs ?? DEFAULT_NO_SPEECH_MS;
+        const maxMs = options.maxMs ?? DEFAULT_MAX_UTTERANCE_MS;
 
-        if (text) {
-          onTranscriptRef.current(text);
-        }
-        setState("idle");
+        const tick = () => {
+          if (recorder.state !== "recording") return;
+
+          const now = performance.now();
+          analyser.getByteTimeDomainData(data);
+          let sumSq = 0;
+          for (const sample of data) {
+            const centered = (sample - 128) / 128;
+            sumSq += centered * centered;
+          }
+          const rms = Math.sqrt(sumSq / data.length);
+          const speaking = rms >= SPEECH_RMS_THRESHOLD;
+
+          if (speaking) {
+            heardSpeech = true;
+            silentSince = now;
+          }
+
+          if (heardSpeech && now - silentSince >= silenceMs) {
+            recorder.stop();
+            return;
+          }
+
+          if (!heardSpeech && now - startedAt >= noSpeechMs) {
+            cancelledRef.current = true;
+            recorder.stop();
+            return;
+          }
+
+          if (now - startedAt >= maxMs) {
+            recorder.stop();
+            return;
+          }
+
+          analyserFrameRef.current = requestAnimationFrame(tick);
+        };
+
+        analyserFrameRef.current = requestAnimationFrame(tick);
       } catch {
-        handleError("Transcription failed. Please try again.");
+        window.setTimeout(() => {
+          if (recorder.state === "recording") recorder.stop();
+        }, options.maxMs ?? DEFAULT_MAX_UTTERANCE_MS);
       }
-    };
+    },
+    [stopAnalyser],
+  );
 
-    // Collect chunks every 200 ms so we always have data even for short clips.
-    recorder.start(200);
-    setState("recording");
-  }, [isSupported, cleanup, handleError]);
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  const startRecording = useCallback(
+    async (options: WhisperStartOptions = {}) => {
+      if (!isSupported) return;
+      if (state === "recording" || state === "transcribing") return;
+      cancelledRef.current = false;
+      setError(null);
+      chunksRef.current = [];
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            // Hints to help the OS/browser reduce background noise.
+            // Most browsers honour at least some of these.
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (err) {
+        const name = err instanceof DOMException ? err.name : "";
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          handleError("Microphone access denied. Please allow microphone access and try again.");
+        } else if (name === "NotFoundError") {
+          handleError("No microphone found on this device.");
+        } else {
+          handleError("Could not start recording. Please check your microphone.");
+        }
+        return;
+      }
+
+      if (cancelledRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+      const mimeType = getBestMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const wasCancelled = cancelledRef.current;
+        const chunks = chunksRef.current.slice();
+        cleanup();
+
+        if (wasCancelled || chunks.length === 0) {
+          setState("idle");
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+        if (blob.size === 0) {
+          setState("idle");
+          return;
+        }
+
+        // Reject accidental taps — clips this small are always silent noise
+        if (blob.size < MIN_AUDIO_BYTES) {
+          setState("idle");
+          return;
+        }
+
+        setState("transcribing");
+
+        const audioFormat = mimeTypeToFormat(mimeType);
+
+        try {
+          const lang = getLanguageRef.current?.();
+          const langParam = lang && lang !== "auto" ? `&lang=${encodeURIComponent(lang)}` : "";
+          const abort = new AbortController();
+          transcribeAbortRef.current = abort;
+          const resp = await fetch(`/api/public-ai/transcribe?format=${audioFormat}${langParam}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: blob,
+            credentials: "include",
+            signal: abort.signal,
+          });
+
+          if (!resp.ok) {
+            let message = `Transcription failed (HTTP ${resp.status}).`;
+            try {
+              const errBody = (await resp.json()) as { error?: string };
+              if (errBody.error) message = errBody.error;
+            } catch {
+              /* ignore JSON parse failure */
+            }
+            throw new Error(message);
+          }
+
+          const data = (await resp.json()) as { text?: string; error?: string };
+          const text = data.text?.trim() ?? "";
+
+          if (text) {
+            onTranscriptRef.current(text);
+          }
+          setState("idle");
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          handleError(
+            err instanceof Error ? err.message : "Transcription failed. Please try again.",
+          );
+        } finally {
+          transcribeAbortRef.current = null;
+        }
+      };
+
+      // Collect chunks every 200 ms so we always have data even for short clips.
+      recorder.start(200);
+      setState("recording");
+      if (options.autoStop) {
+        startAutoStopMonitor(stream, recorder, options);
+      }
+    },
+    [isSupported, state, cleanup, handleError, startAutoStopMonitor],
+  );
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
