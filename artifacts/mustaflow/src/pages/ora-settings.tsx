@@ -19,6 +19,9 @@ import {
   Mail,
   KeyRound,
   CalendarClock,
+  CreditCard,
+  ShieldAlert,
+  Plus,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -709,6 +712,25 @@ interface BillingSubscription {
   cancelAtPeriodEnd?: boolean;
 }
 
+interface PaymentMethodInfo {
+  hasPaymentMethod: boolean;
+  brand?: string;
+  last4?: string;
+  expMonth?: number;
+  expYear?: number;
+  customerId?: string;
+  plan?: string;
+  renewalDate?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  status?: "active" | "expired";
+}
+
+/** Title-case a Stripe card brand (e.g. "visa" -> "Visa", "amex" -> "Amex"). */
+function formatCardBrand(brand: string | undefined): string {
+  if (!brand) return "Card";
+  return brand.charAt(0).toUpperCase() + brand.slice(1);
+}
+
 function planLabel(tier: string | undefined): string {
   if (tier === "core") return "Core Pack";
   if (tier === "wave") return "Deep Wave";
@@ -745,8 +767,9 @@ function PlanLimitsSection() {
   const { toast } = useToast();
   const [usage, setUsage] = useState<OraPlanUsage | null>(null);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodInfo | null>(null);
   const [loading, setLoading] = useState(false);
-  const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | null>(null);
+  const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | "addpm" | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -775,6 +798,16 @@ function PlanLimitsSection() {
         if (!cancelled) setSubscription(data);
       } catch {
         if (!cancelled) setSubscription(null);
+      }
+    })();
+    void (async () => {
+      try {
+        const res = await authFetch("/api/billing/payment-method");
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as PaymentMethodInfo;
+        if (!cancelled) setPaymentMethod(data);
+      } catch {
+        if (!cancelled) setPaymentMethod(null);
       }
     })();
     return () => {
@@ -845,6 +878,39 @@ function PlanLimitsSection() {
     } catch {
       toast({
         title: "Could not open plan portal",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPlanAction(null);
+    }
+  }
+
+  async function addPaymentMethod() {
+    setPlanAction("addpm");
+    try {
+      const res = await authFetch("/api/billing/payment-method/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ returnUrl: `${window.location.origin}/ora/settings` }),
+      });
+      const data = (await res.json()) as {
+        url?: string;
+        setupRequired?: boolean;
+        error?: string;
+      };
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      toast({
+        title: data.setupRequired ? "Payments are not configured" : "Could not start card setup",
+        description: data.error ?? "Please try again.",
+        variant: "destructive",
+      });
+    } catch {
+      toast({
+        title: "Could not start card setup",
         description: "Please try again.",
         variant: "destructive",
       });
@@ -952,6 +1018,93 @@ function PlanLimitsSection() {
                 )}
                 Manage Ora plan
               </button>
+            )}
+          </div>
+          <div className="rounded-lg border border-border/60 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <CreditCard className="h-4 w-4 text-primary" />
+              Payment method
+            </div>
+            {paymentMethod?.hasPaymentMethod ? (
+              <div className="mt-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-foreground">
+                    {formatCardBrand(paymentMethod.brand)} •••• {paymentMethod.last4}
+                  </span>
+                  {paymentMethod.expMonth && paymentMethod.expYear && (
+                    <span className="text-xs text-muted-foreground">
+                      Expires {String(paymentMethod.expMonth).padStart(2, "0")}/
+                      {paymentMethod.expYear}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-xs font-medium",
+                      paymentMethod.status === "expired"
+                        ? "bg-destructive/15 text-destructive"
+                        : "bg-emerald-500/15 text-emerald-500",
+                    )}
+                  >
+                    {paymentMethod.status === "expired" ? "Expired" : "Active"}
+                  </span>
+                </div>
+                {paymentMethod.status === "expired" && (
+                  <p className="flex items-center gap-1.5 text-xs text-destructive">
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                    This card has expired. Update it to keep your plan active.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void openOraBillingPortal()}
+                    disabled={planAction !== null}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    {planAction === "portal" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-3.5 w-3.5" />
+                    )}
+                    Change payment method
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void openOraBillingPortal()}
+                    disabled={planAction !== null}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Manage billing
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {isPaid ? (
+                  <p className="flex items-center gap-1.5 text-xs text-destructive">
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                    Payment method required to keep your plan active.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No payment method on file.</p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void addPaymentMethod()}
+                    disabled={planAction !== null}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    {planAction === "addpm" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
+                    Add payment method
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

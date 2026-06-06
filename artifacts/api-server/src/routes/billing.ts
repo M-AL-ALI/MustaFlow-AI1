@@ -15,6 +15,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
+import type Stripe from "stripe";
 import { eq, desc, sql, and, like, isNull, gte } from "drizzle-orm";
 import {
   db,
@@ -1258,6 +1259,120 @@ router.post("/billing/portal", async (req, res): Promise<void> => {
     res.json({ url: session.url });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
+    res.status(502).json({ error: `Stripe error: ${msg}` });
+  }
+});
+
+// GET /api/billing/payment-method — default card + plan summary for Ora Settings.
+// No raw card data ever passes through MustaFlow — Stripe returns only the safe
+// brand/last4/expiry fields. Free users and users without a Stripe customer
+// simply report hasPaymentMethod:false alongside their plan summary.
+router.get("/billing/payment-method", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const sub = await getOrCreateSubscription(userId);
+  const base = {
+    hasPaymentMethod: false as boolean,
+    customerId: sub.stripeCustomerId ?? undefined,
+    plan: sub.tier ?? "free",
+    renewalDate: sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toISOString() : null,
+    cancelAtPeriodEnd: sub.cancelAtPeriodEnd ?? false,
+  };
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe || !sub.stripeCustomerId) {
+    res.json(base);
+    return;
+  }
+
+  try {
+    // Prefer the customer's default invoice payment method, then fall back to
+    // the most recent card on file.
+    let card: Stripe.PaymentMethod.Card | null = null;
+    const customer = await stripe.customers.retrieve(sub.stripeCustomerId, {
+      expand: ["invoice_settings.default_payment_method"],
+    });
+    if (!("deleted" in customer)) {
+      const dpm = customer.invoice_settings?.default_payment_method;
+      if (dpm && typeof dpm !== "string" && dpm.card) {
+        card = dpm.card;
+      }
+    }
+    if (!card) {
+      const list = await stripe.paymentMethods.list({
+        customer: sub.stripeCustomerId,
+        type: "card",
+        limit: 1,
+      });
+      const first = list.data[0];
+      if (first?.card) card = first.card;
+    }
+
+    if (!card) {
+      res.json(base);
+      return;
+    }
+
+    const now = new Date();
+    const expired =
+      card.exp_year < now.getFullYear() ||
+      (card.exp_year === now.getFullYear() && card.exp_month < now.getMonth() + 1);
+
+    res.json({
+      ...base,
+      hasPaymentMethod: true,
+      brand: card.brand,
+      last4: card.last4,
+      expMonth: card.exp_month,
+      expYear: card.exp_year,
+      status: expired ? "expired" : "active",
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication/i.test(msg)) invalidateStripeCredentialCache();
+    logger.warn({ err: msg, userId }, "Failed to fetch payment method");
+    res.json(base);
+  }
+});
+
+// POST /api/billing/payment-method/setup — Stripe-hosted Checkout in "setup"
+// mode so a user can add/replace a card without upgrading. Used for free users
+// and paid users whose default card is missing. Raw card details are collected
+// only on Stripe's hosted page, never by MustaFlow.
+router.post("/billing/payment-method/setup", async (req, res): Promise<void> => {
+  const userId = req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+
+  const stripe = await getUncachableStripeClient();
+  if (!stripe) {
+    res.json({ setupRequired: true });
+    return;
+  }
+
+  const { returnUrl } = req.body as { returnUrl?: string };
+  const fallback = process.env.PLATFORM_DOMAIN
+    ? `https://${process.env.PLATFORM_DOMAIN}/ora/settings`
+    : "/ora/settings";
+  const returnTo = returnUrl ?? fallback;
+  try {
+    const customerId = await ensureStripeCustomer(userId, stripe);
+    const session = await stripe.checkout.sessions.create({
+      mode: "setup" as const,
+      customer: customerId,
+      success_url: `${returnTo}?pm=added`,
+      cancel_url: returnTo,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    if (/api key|authentication/i.test(msg)) invalidateStripeCredentialCache();
     res.status(502).json({ error: `Stripe error: ${msg}` });
   }
 });
