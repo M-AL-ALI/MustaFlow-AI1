@@ -6149,6 +6149,130 @@ export const GetAdminJobQueueResponse = zod.object({
 
 
 /**
+ * @summary List support tickets for the admin support inbox (filter + search)
+ */
+export const listAdminSupportTicketsQueryStatusDefault = `all`;
+export const listAdminSupportTicketsQueryLimitDefault = 50;
+export const listAdminSupportTicketsQueryLimitMax = 100;
+
+export const listAdminSupportTicketsQueryOffsetDefault = 0;
+export const listAdminSupportTicketsQueryOffsetMin = 0;
+
+
+
+export const ListAdminSupportTicketsQueryParams = zod.object({
+  "status": zod.enum(['all', 'new', 'open', 'resolved']).default(listAdminSupportTicketsQueryStatusDefault),
+  "q": zod.coerce.string().optional(),
+  "limit": zod.coerce.number().min(1).max(listAdminSupportTicketsQueryLimitMax).default(listAdminSupportTicketsQueryLimitDefault),
+  "offset": zod.coerce.number().min(listAdminSupportTicketsQueryOffsetMin).default(listAdminSupportTicketsQueryOffsetDefault)
+})
+
+export const ListAdminSupportTicketsResponse = zod.object({
+  "tickets": zod.array(zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "userEmail": zod.string().nullish(),
+  "plan": zod.string(),
+  "category": zod.string(),
+  "status": zod.enum(['new', 'open', 'resolved']),
+  "subject": zod.string(),
+  "projectId": zod.number().nullish(),
+  "projectName": zod.string().nullish(),
+  "attachmentCount": zod.number(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "total": zod.number(),
+  "statusCounts": zod.object({
+  "new": zod.number(),
+  "open": zod.number(),
+  "resolved": zod.number()
+}),
+  "limit": zod.number(),
+  "offset": zod.number()
+})
+
+
+/**
+ * @summary Full support ticket detail (transcript + attachments)
+ */
+export const GetAdminSupportTicketParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetAdminSupportTicketResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.string(),
+  "userEmail": zod.string().nullish(),
+  "plan": zod.string(),
+  "category": zod.string(),
+  "status": zod.enum(['new', 'open', 'resolved']),
+  "subject": zod.string(),
+  "transcript": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "staffReply": zod.boolean().optional(),
+  "at": zod.string().optional()
+})),
+  "projectId": zod.number().nullish(),
+  "projectName": zod.string().nullish(),
+  "attachments": zod.array(zod.object({
+  "fileName": zod.string(),
+  "mimeType": zod.string(),
+  "size": zod.number(),
+  "assetId": zod.number().nullish(),
+  "downloadUrl": zod.string().nullish()
+})),
+  "deviceInfo": zod.unknown().optional(),
+  "supportEmailUsed": zod.string().nullish(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update a support ticket's status
+ */
+export const UpdateAdminSupportTicketParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateAdminSupportTicketBody = zod.object({
+  "status": zod.enum(['new', 'open', 'resolved'])
+})
+
+export const UpdateAdminSupportTicketResponse = zod.object({
+  "ok": zod.boolean(),
+  "id": zod.number(),
+  "status": zod.enum(['new', 'open', 'resolved'])
+})
+
+
+/**
+ * @summary Email a reply to the ticket requester and record it in the transcript
+ */
+export const ReplyAdminSupportTicketParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const replyAdminSupportTicketBodyMessageMax = 8000;
+
+
+
+export const ReplyAdminSupportTicketBody = zod.object({
+  "message": zod.string().min(1).max(replyAdminSupportTicketBodyMessageMax)
+})
+
+export const ReplyAdminSupportTicketResponse = zod.object({
+  "ok": zod.boolean(),
+  "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
+  "status": zod.enum(['new', 'open', 'resolved'])
+})
+
+
+/**
  * @summary List all builder skills with enable/disable state and load counts
  */
 export const ListAdminSkillsResponse = zod.object({

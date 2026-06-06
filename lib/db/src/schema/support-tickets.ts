@@ -11,7 +11,11 @@ import { pgTable, serial, text, integer, jsonb, timestamp, index } from "drizzle
  * executable file bytes. `supportEmailUsed` records the address the ticket was
  * actually sent to for auditability. `emailStatus` records delivery outcome.
  */
-export const SUPPORT_TICKET_STATUSES = ["open", "closed"] as const;
+// Triage lifecycle: a freshly escalated ticket starts as "new" (untouched),
+// support staff move it to "open" (being worked) and finally "resolved".
+// "closed" is accepted as a legacy alias for "resolved" so pre-existing rows
+// keep loading; new transitions only ever write new/open/resolved.
+export const SUPPORT_TICKET_STATUSES = ["new", "open", "resolved"] as const;
 export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
 
 export const SUPPORT_EMAIL_STATUSES = ["sent", "skipped", "failed"] as const;
@@ -25,7 +29,7 @@ export const supportTicketsTable = pgTable(
     userEmail: text("user_email"),
     plan: text("plan").notNull().default("free"),
     category: text("category").notNull().default("other"),
-    status: text("status").notNull().default("open"),
+    status: text("status").notNull().default("new"),
     subject: text("subject").notNull(),
     transcript: jsonb("transcript").notNull().default([]),
     projectId: integer("project_id"),

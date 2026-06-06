@@ -5467,6 +5467,148 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminJobQueue"
 
+  /admin/support-tickets:
+    get:
+      operationId: listAdminSupportTickets
+      tags: [admin]
+      summary: List support tickets for the admin support inbox (filter + search)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, new, open, resolved]
+            default: all
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        "200":
+          description: Support ticket list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSupportTicketPage"
+        "403":
+          description: Forbidden — not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/support-tickets/{id}:
+    get:
+      operationId: getAdminSupportTicket
+      tags: [admin]
+      summary: Full support ticket detail (transcript + attachments)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Support ticket detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSupportTicketDetail"
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateAdminSupportTicket
+      tags: [admin]
+      summary: Update a support ticket's status
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [new, open, resolved]
+      responses:
+        "200":
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, id, status]
+                properties:
+                  ok: { type: boolean }
+                  id: { type: integer }
+                  status: { type: string, enum: [new, open, resolved] }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/support-tickets/{id}/reply:
+    post:
+      operationId: replyAdminSupportTicket
+      tags: [admin]
+      summary: Email a reply to the ticket requester and record it in the transcript
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, minLength: 1, maxLength: 8000 }
+      responses:
+        "200":
+          description: Reply sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, emailStatus, status]
+                properties:
+                  ok: { type: boolean }
+                  emailStatus: { type: string, enum: [sent, skipped, failed] }
+                  status: { type: string, enum: [new, open, resolved] }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /admin/skills:
     get:
       operationId: listAdminSkills
@@ -9061,6 +9203,114 @@ components:
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
+
+    AdminSupportTicketSummary:
+      type: object
+      required:
+        [
+          id,
+          userId,
+          plan,
+          category,
+          status,
+          subject,
+          attachmentCount,
+          emailStatus,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: integer }
+        userId: { type: string }
+        userEmail: { type: ["string", "null"] }
+        plan: { type: string }
+        category: { type: string }
+        status: { type: string, enum: [new, open, resolved] }
+        subject: { type: string }
+        projectId: { type: ["integer", "null"] }
+        projectName: { type: ["string", "null"] }
+        attachmentCount: { type: integer }
+        emailStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AdminSupportTicketPage:
+      type: object
+      required: [tickets, total, statusCounts, limit, offset]
+      properties:
+        tickets:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminSupportTicketSummary"
+        total: { type: integer }
+        statusCounts:
+          type: object
+          required: [new, open, resolved]
+          properties:
+            new: { type: integer }
+            open: { type: integer }
+            resolved: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    AdminSupportTicketMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        staffReply: { type: boolean }
+        at: { type: string }
+
+    AdminSupportTicketAttachment:
+      type: object
+      required: [fileName, mimeType, size]
+      properties:
+        fileName: { type: string }
+        mimeType: { type: string }
+        size: { type: integer }
+        assetId: { type: ["integer", "null"] }
+        downloadUrl: { type: ["string", "null"] }
+
+    AdminSupportTicketDetail:
+      type: object
+      required:
+        [
+          id,
+          userId,
+          plan,
+          category,
+          status,
+          subject,
+          transcript,
+          attachments,
+          emailStatus,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: integer }
+        userId: { type: string }
+        userEmail: { type: ["string", "null"] }
+        plan: { type: string }
+        category: { type: string }
+        status: { type: string, enum: [new, open, resolved] }
+        subject: { type: string }
+        transcript:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminSupportTicketMessage"
+        projectId: { type: ["integer", "null"] }
+        projectName: { type: ["string", "null"] }
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminSupportTicketAttachment"
+        deviceInfo: {}
+        supportEmailUsed: { type: ["string", "null"] }
+        emailStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     AuditFinding:
       type: object

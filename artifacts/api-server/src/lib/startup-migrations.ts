@@ -3343,7 +3343,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
           user_email text,
           plan text NOT NULL DEFAULT 'free',
           category text NOT NULL DEFAULT 'other',
-          status text NOT NULL DEFAULT 'open',
+          status text NOT NULL DEFAULT 'new',
           subject text NOT NULL,
           transcript jsonb NOT NULL DEFAULT '[]'::jsonb,
           project_id integer,
@@ -3361,6 +3361,9 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query(
         `CREATE INDEX IF NOT EXISTS support_tickets_status_idx ON support_tickets(status, created_at)`,
       );
+      // Triage lifecycle moved to new/open/resolved; align the column default
+      // for any table created under the old 'open' default.
+      await client.query(`ALTER TABLE support_tickets ALTER COLUMN status SET DEFAULT 'new'`);
       await client.query(
         `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS surface text NOT NULL DEFAULT 'normal'`,
       );

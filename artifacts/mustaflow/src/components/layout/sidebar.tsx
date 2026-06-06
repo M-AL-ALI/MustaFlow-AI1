@@ -169,24 +169,42 @@ function AdminNavItem() {
 
   if (!isAdmin) return null;
 
-  const isActive = location === "/admin" || location.startsWith("/admin");
+  const adminActive = location === "/admin";
+  const supportActive = location === "/admin/support" || location.startsWith("/admin/support");
 
   return (
-    <div className="px-3 py-1">
-      <Link href="/admin">
-        <div
-          className={cn(
-            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
-            isActive
-              ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-              : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-          )}
-        >
-          <LayoutDashboard className="h-4 w-4" />
-          Admin
-        </div>
-      </Link>
-    </div>
+    <>
+      <div className="px-3 py-1">
+        <Link href="/admin">
+          <div
+            className={cn(
+              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
+              adminActive
+                ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+            )}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            Admin
+          </div>
+        </Link>
+      </div>
+      <div className="px-3 py-1">
+        <Link href="/admin/support">
+          <div
+            className={cn(
+              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
+              supportActive
+                ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+            )}
+          >
+            <LifeBuoy className="h-4 w-4" />
+            Support Inbox
+          </div>
+        </Link>
+      </div>
+    </>
   );
 }
 

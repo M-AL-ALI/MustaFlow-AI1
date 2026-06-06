@@ -299,3 +299,37 @@ export function supportTicketTemplate(opts: {
 
   return { subject: emailSubject, html, text: textLines.join("\n") };
 }
+
+// ── Support reply (staff → requester) ─────────────────────────────────────────
+
+export function supportReplyTemplate(opts: {
+  ticketId: number;
+  subject: string;
+  replyBody: string;
+}): EmailTemplate {
+  const { ticketId, subject, replyBody } = opts;
+  const esc = (s: string): string =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const emailSubject = `Re: [Support #${ticketId}] ${subject}`;
+  const bodyHtml = esc(replyBody).replace(/\n/g, "<br/>");
+
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">A reply from MustaFlow Support</h2>
+  <p style="font-size:13px;color:#4b5563;margin:0 0 16px">Regarding your request: <strong>${esc(
+    subject,
+  )}</strong> (ticket #${ticketId})</p>
+  <div style="font-size:14px;line-height:1.6;color:#111;border-left:3px solid #6366f1;padding-left:14px">${bodyHtml}</div>
+  <p style="font-size:13px;color:#4b5563;margin-top:20px">You can reply directly to this email to continue the conversation.</p>`);
+
+  const text = [
+    `A reply from MustaFlow Support — ticket #${ticketId}`,
+    `Regarding: ${subject}`,
+    "",
+    replyBody,
+    "",
+    "You can reply directly to this email to continue the conversation.",
+  ].join("\n");
+
+  return { subject: emailSubject, html, text };
+}

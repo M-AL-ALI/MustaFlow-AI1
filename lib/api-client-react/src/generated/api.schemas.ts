@@ -2815,6 +2815,105 @@ export interface AdminAuditLogPage {
   offset: number;
 }
 
+export type AdminSupportTicketSummaryStatus = typeof AdminSupportTicketSummaryStatus[keyof typeof AdminSupportTicketSummaryStatus];
+
+
+export const AdminSupportTicketSummaryStatus = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+} as const;
+
+export interface AdminSupportTicketSummary {
+  id: number;
+  userId: string;
+  /** @nullable */
+  userEmail?: string | null;
+  plan: string;
+  category: string;
+  status: AdminSupportTicketSummaryStatus;
+  subject: string;
+  /** @nullable */
+  projectId?: number | null;
+  /** @nullable */
+  projectName?: string | null;
+  attachmentCount: number;
+  emailStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AdminSupportTicketPageStatusCounts = {
+  new: number;
+  open: number;
+  resolved: number;
+};
+
+export interface AdminSupportTicketPage {
+  tickets: AdminSupportTicketSummary[];
+  total: number;
+  statusCounts: AdminSupportTicketPageStatusCounts;
+  limit: number;
+  offset: number;
+}
+
+export type AdminSupportTicketMessageRole = typeof AdminSupportTicketMessageRole[keyof typeof AdminSupportTicketMessageRole];
+
+
+export const AdminSupportTicketMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface AdminSupportTicketMessage {
+  role: AdminSupportTicketMessageRole;
+  content: string;
+  staffReply?: boolean;
+  at?: string;
+}
+
+export interface AdminSupportTicketAttachment {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  /** @nullable */
+  assetId?: number | null;
+  /** @nullable */
+  downloadUrl?: string | null;
+}
+
+export type AdminSupportTicketDetailStatus = typeof AdminSupportTicketDetailStatus[keyof typeof AdminSupportTicketDetailStatus];
+
+
+export const AdminSupportTicketDetailStatus = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+} as const;
+
+export interface AdminSupportTicketDetail {
+  id: number;
+  userId: string;
+  /** @nullable */
+  userEmail?: string | null;
+  plan: string;
+  category: string;
+  status: AdminSupportTicketDetailStatus;
+  subject: string;
+  transcript: AdminSupportTicketMessage[];
+  /** @nullable */
+  projectId?: number | null;
+  /** @nullable */
+  projectName?: string | null;
+  attachments: AdminSupportTicketAttachment[];
+  deviceInfo?: unknown;
+  /** @nullable */
+  supportEmailUsed?: string | null;
+  emailStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type AuditFindingCategory = typeof AuditFindingCategory[keyof typeof AuditFindingCategory];
 
 
@@ -5379,6 +5478,90 @@ offset?: number;
 
 export type GetAdminJobQueueParams = {
 recentLimit?: number;
+};
+
+export type ListAdminSupportTicketsParams = {
+status?: ListAdminSupportTicketsStatus;
+q?: string;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * @minimum 0
+ */
+offset?: number;
+};
+
+export type ListAdminSupportTicketsStatus = typeof ListAdminSupportTicketsStatus[keyof typeof ListAdminSupportTicketsStatus];
+
+
+export const ListAdminSupportTicketsStatus = {
+  all: 'all',
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateAdminSupportTicketBodyStatus = typeof UpdateAdminSupportTicketBodyStatus[keyof typeof UpdateAdminSupportTicketBodyStatus];
+
+
+export const UpdateAdminSupportTicketBodyStatus = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateAdminSupportTicketBody = {
+  status: UpdateAdminSupportTicketBodyStatus;
+};
+
+export type UpdateAdminSupportTicket200Status = typeof UpdateAdminSupportTicket200Status[keyof typeof UpdateAdminSupportTicket200Status];
+
+
+export const UpdateAdminSupportTicket200Status = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateAdminSupportTicket200 = {
+  ok: boolean;
+  id: number;
+  status: UpdateAdminSupportTicket200Status;
+};
+
+export type ReplyAdminSupportTicketBody = {
+  /**
+     * @minLength 1
+     * @maxLength 8000
+     */
+  message: string;
+};
+
+export type ReplyAdminSupportTicket200EmailStatus = typeof ReplyAdminSupportTicket200EmailStatus[keyof typeof ReplyAdminSupportTicket200EmailStatus];
+
+
+export const ReplyAdminSupportTicket200EmailStatus = {
+  sent: 'sent',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export type ReplyAdminSupportTicket200Status = typeof ReplyAdminSupportTicket200Status[keyof typeof ReplyAdminSupportTicket200Status];
+
+
+export const ReplyAdminSupportTicket200Status = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+} as const;
+
+export type ReplyAdminSupportTicket200 = {
+  ok: boolean;
+  emailStatus: ReplyAdminSupportTicket200EmailStatus;
+  status: ReplyAdminSupportTicket200Status;
 };
 
 export type ListAdminSkills200SkillsItem = { [key: string]: unknown };

@@ -598,7 +598,7 @@ router.post("/help/support/escalate", async (req, res) => {
         userEmail,
         plan: authed.tier,
         category: category ?? "other",
-        status: "open",
+        status: "new",
         subject,
         transcript,
         projectId: safeProjectId,

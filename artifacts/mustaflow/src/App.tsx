@@ -40,6 +40,7 @@ import HelpPage from "./pages/help";
 import HelpDomainsApiPage from "./pages/help-domains-api";
 import StatusPage from "./pages/status";
 import AdminPage from "./pages/admin";
+import SupportInboxPage from "./pages/support-inbox";
 import TrashPage from "./pages/trash";
 import BillingPage from "./pages/billing";
 import PublishedPage from "./pages/published";
@@ -568,6 +569,17 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                     <AppLayout>
                       <SettingsPage />
                     </AppLayout>
+                  </BuilderGuard>
+                </Protected>
+              </Route>
+              <Route path="/admin/support">
+                <Protected>
+                  <BuilderGuard>
+                    <AdminGuard>
+                      <AppLayout>
+                        <SupportInboxPage />
+                      </AppLayout>
+                    </AdminGuard>
                   </BuilderGuard>
                 </Protected>
               </Route>
