@@ -41,6 +41,7 @@ import {
   Mic,
   Image as ImageIcon,
   SlidersHorizontal,
+  Brain,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import {
@@ -60,7 +61,6 @@ import { DemoAnimation } from "@/components/demo-animation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TechnologyEcosystemBanner } from "@/components/technology-ecosystem-banner";
 import { Show } from "@clerk/react";
-import { OraPanel } from "@/components/ora-panel";
 import { OraBubble } from "@/components/ora-bubble";
 import { useOraChat } from "@/hooks/use-ora-chat";
 
@@ -72,6 +72,44 @@ const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>>
   contractor: Wrench,
   nonprofit: Heart,
 };
+
+// Ora promo highlights — shown to signed-out visitors on the landing page.
+const ORA_FEATURES: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+}[] = [
+  {
+    icon: Bot,
+    title: "Free, no sign-in",
+    description: "Start chatting instantly. Ora is a free AI assistant — no account needed.",
+  },
+  {
+    icon: Globe,
+    title: "Live web search",
+    description: "Get up-to-date answers grounded in real sources, with citations you can follow.",
+  },
+  {
+    icon: ImageIcon,
+    title: "Images in & out",
+    description: "Generate original images from a prompt, or upload one and ask Ora to analyze it.",
+  },
+  {
+    icon: FileText,
+    title: "Document export",
+    description: "Turn answers into ready-to-share PDF, DOCX, XLSX, and PPTX files.",
+  },
+  {
+    icon: Mic,
+    title: "Voice conversation",
+    description: "Talk to Ora hands-free and hear replies spoken back in a natural voice.",
+  },
+  {
+    icon: Brain,
+    title: "Memory across chats",
+    description: "Ora remembers what matters so each conversation picks up where you left off.",
+  },
+];
 
 // Capability chips — speak to ideas, not stacks. Each pre-fills the prompt input.
 const CAPABILITY_CHIPS = [
@@ -563,17 +601,51 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Ora — public AI assistant */}
+          {/* Meet Ora — public AI assistant promo */}
           <Show when="signed-out">
-            <div className="mt-10 mb-2">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="flex-1 h-px bg-border/60" />
-                <span className="text-xs text-muted-foreground/60 font-medium px-1">
-                  Have questions? Ask Ora — free, no sign-in required
-                </span>
-                <div className="flex-1 h-px bg-border/60" />
+            <div className="mt-14 mb-2 max-w-5xl mx-auto">
+              <div className="text-center mb-10">
+                <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
+                  <Sparkles className="h-3 w-3" />
+                  Meet Ora
+                </div>
+                <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
+                  Your free <span className="gradient-text">AI assistant</span>
+                </h2>
+                <p className="text-muted-foreground max-w-2xl mx-auto">
+                  Ora answers questions, researches the web, makes images, writes documents, and
+                  remembers your conversations — no account required. Ask anything before you build.
+                </p>
               </div>
-              <OraPanel chat={oraChat} />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {ORA_FEATURES.map((feature) => (
+                  <div
+                    key={feature.title}
+                    className="relative rounded-2xl border border-border bg-card p-6"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4">
+                      <feature.icon className="h-5 w-5 text-primary" />
+                    </div>
+                    <h3 className="font-semibold text-sm text-foreground mb-1.5">
+                      {feature.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {feature.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-8 flex justify-center">
+                <div className="inline-flex items-center gap-2.5 rounded-full border border-primary/30 bg-primary/5 px-5 py-2.5 text-sm font-medium text-foreground">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                  Ask Ora anything — tap the
+                  <span className="text-primary font-semibold">Ask Ora</span>
+                  button in the corner
+                  <ArrowRight className="h-4 w-4 text-primary" />
+                </div>
+              </div>
             </div>
           </Show>
 
