@@ -16,6 +16,7 @@ import { sendEmailWithStatus, type EmailDeliveryStatus } from "../lib/emailClien
 import { supportTicketTemplate } from "../lib/emailTemplates";
 import { getClerkUserById } from "../lib/clerk-users";
 import { broadcastNewTicket } from "../lib/support-alerts";
+import { supportChatLimiter, supportEscalateLimiter } from "../lib/rateLimit";
 
 async function resolveUserEmail(userId: string): Promise<string | null> {
   try {
@@ -244,7 +245,7 @@ function supportLanguageAddendum(language?: string, languageHint?: string): stri
 }
 
 // ── POST /help/support/chat (AUTH) ────────────────────────────────────────────
-router.post("/help/support/chat", async (req, res) => {
+router.post("/help/support/chat", supportChatLimiter, async (req, res) => {
   const authed = await resolveAuthedOraUser(req);
   if (!authed) {
     res.status(401).json({ error: "Sign in to use MustaFlow Support." });
@@ -421,6 +422,70 @@ router.get("/help/support/conversations", async (req, res) => {
   } catch (err) {
     logger.error({ component: "help-support", err }, "Failed to list support conversations");
     res.status(500).json({ error: "Failed to load support conversations" });
+  }
+});
+
+// ── GET /help/support/conversations/:id (AUTH) ────────────────────────────────
+// Returns the full message history of a single support conversation, strictly
+// scoped to the requester AND to the "support" surface — a normal Ora chat id
+// can never be read through this endpoint. Used by the Help Center to hydrate
+// the support chat from the server (localStorage is only a draft/cache).
+router.get("/help/support/conversations/:id", async (req, res) => {
+  const authed = await resolveAuthedOraUser(req);
+  if (!authed) {
+    res.status(401).json({ error: "Sign in to view your support conversation." });
+    return;
+  }
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid conversation id" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .select({
+        id: oraConversationsTable.id,
+        title: oraConversationsTable.title,
+        messages: oraConversationsTable.messages,
+        createdAt: oraConversationsTable.createdAt,
+        updatedAt: oraConversationsTable.updatedAt,
+        lastMessageAt: oraConversationsTable.lastMessageAt,
+      })
+      .from(oraConversationsTable)
+      .where(
+        and(
+          eq(oraConversationsTable.id, id),
+          eq(oraConversationsTable.userId, authed.userId),
+          eq(oraConversationsTable.surface, "support"),
+          isNull(oraConversationsTable.archivedAt),
+        ),
+      );
+    if (!row) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    const rawMessages = Array.isArray(row.messages) ? row.messages : [];
+    const messages = rawMessages
+      .filter(
+        (m): m is { role: "user" | "assistant"; content: string } =>
+          !!m &&
+          typeof m === "object" &&
+          ((m as { role?: unknown }).role === "user" ||
+            (m as { role?: unknown }).role === "assistant") &&
+          typeof (m as { content?: unknown }).content === "string",
+      )
+      .map((m) => ({ role: m.role, content: m.content }));
+    res.json({
+      id: row.id,
+      title: row.title,
+      messages,
+      createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
+      updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+      lastMessageAt: row.lastMessageAt?.toISOString?.() ?? String(row.lastMessageAt),
+    });
+  } catch (err) {
+    logger.error({ component: "help-support", err }, "Failed to load support conversation");
+    res.status(500).json({ error: "Failed to load support conversation" });
   }
 });
 
@@ -613,7 +678,7 @@ const escalateSchema = z.object({
 });
 
 // ── POST /help/support/escalate (AUTH) ────────────────────────────────────────
-router.post("/help/support/escalate", async (req, res) => {
+router.post("/help/support/escalate", supportEscalateLimiter, async (req, res) => {
   const authed = await resolveAuthedOraUser(req);
   if (!authed) {
     res.status(401).json({ error: "Sign in to contact the support team." });

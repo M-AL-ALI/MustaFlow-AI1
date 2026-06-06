@@ -122,6 +122,13 @@ vi.mock("../../lib/clerk-users", () => ({
   getClerkUserById: vi.fn(async () => ({ userId: "user_1", email: "user@example.com" })),
 }));
 
+// Rate limiters are pass-through here so the functional tests can fire many
+// requests; the real limiter behaviour is covered in lib/__tests__/rateLimit.support.test.ts.
+vi.mock("../../lib/rateLimit", () => ({
+  supportChatLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  supportEscalateLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
+
 vi.mock("../../lib/ai-providers", () => ({
   createChatCompletion: vi.fn(async () => ({
     choices: [{ message: { content: "Here is how to do that in MustaFlow." } }],
@@ -397,6 +404,56 @@ describe("GET /help/support/conversations", () => {
   });
 });
 
+describe("GET /help/support/conversations/:id", () => {
+  it("rejects signed-out users with 401", async () => {
+    vi.mocked(resolveAuthedOraUser).mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await request(app).get("/help/support/conversations/5");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 for an invalid id", async () => {
+    authedUser();
+    const app = await buildApp();
+    const res = await request(app).get("/help/support/conversations/abc");
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when the conversation is not owned / not a support surface", async () => {
+    authedUser();
+    dbResults.push([]); // owner+surface scoped lookup → no row
+    const app = await buildApp();
+    const res = await request(app).get("/help/support/conversations/123");
+    expect(res.status).toBe(404);
+  });
+
+  it("returns the full sanitized message history for the owner", async () => {
+    authedUser();
+    dbResults.push([
+      {
+        id: 42,
+        title: "Support conversation",
+        messages: [
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "hello" },
+          { role: "system", content: "should be dropped" },
+        ],
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+        lastMessageAt: new Date("2026-01-02T00:00:00Z"),
+      },
+    ]);
+    const app = await buildApp();
+    const res = await request(app).get("/help/support/conversations/42");
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(42);
+    expect(res.body.messages).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
+  });
+});
+
 // ── POST /help/support/escalate (auth) ────────────────────────────────────────
 
 describe("POST /help/support/escalate", () => {
@@ -487,6 +544,34 @@ describe("POST /help/support/escalate", () => {
     expect(res.status).toBe(201);
     const ticket = insertCaptures[0]?.values as { projectId: number | null };
     expect(ticket.projectId).toBeNull();
+  });
+
+  it("persists frontend ticket metadata: category + browser/device info", async () => {
+    authedUser();
+    dbResults.push([{ id: 77 }]); // insert ticket returning
+    dbResults.push([]); // update emailStatus
+    const app = await buildApp();
+    const deviceInfo = {
+      userAgent: "Mozilla/5.0 (Test Browser)",
+      platform: "TestOS",
+      screen: "1920x1080",
+      timezone: "UTC",
+    };
+    const res = await request(app)
+      .post("/help/support/escalate")
+      .send({
+        subject: "Build keeps failing",
+        category: "bug",
+        transcript: [{ role: "user", content: "broken" }],
+        deviceInfo,
+      });
+    expect(res.status).toBe(201);
+    const ticket = insertCaptures[0]?.values as {
+      category: string;
+      deviceInfo: Record<string, unknown> | null;
+    };
+    expect(ticket.category).toBe("bug");
+    expect(ticket.deviceInfo).toEqual(deviceInfo);
   });
 
   it("rejects a disallowed attachment MIME type", async () => {

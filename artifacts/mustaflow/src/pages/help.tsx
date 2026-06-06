@@ -11,14 +11,19 @@ import {
   X,
   CheckCircle2,
   AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch, Link } from "wouter";
 import {
   useListHelpArticles,
   useSupportChat,
   useEscalateSupport,
+  useListSupportConversations,
+  useGetSupportConversation,
+  getListSupportConversationsQueryKey,
+  getGetSupportConversationQueryKey,
 } from "@workspace/api-client-react";
 import type { HelpArticle, SupportMessage } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
@@ -36,9 +41,20 @@ import { useToast } from "@/hooks/use-toast";
  * conversation state, project context, or the AI Builder.
  */
 
-const SUPPORT_CHAT_STORAGE_KEY = "mustaflow_support_chat_v1";
+// The cache key is scoped per Clerk user id so a previous account's transcript
+// can never surface for the next person on a shared browser. The bare
+// `_v1` key is a legacy global key (pre-scoping) that we proactively purge.
+const SUPPORT_CHAT_STORAGE_PREFIX = "mustaflow_support_chat_v1";
+const SUPPORT_CHAT_LEGACY_KEY = "mustaflow_support_chat_v1";
 
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB per file
+export function supportChatKey(userId: string): string {
+  return `${SUPPORT_CHAT_STORAGE_PREFIX}:${userId}`;
+}
+
+// Must match the backend limit in artifacts/api-server/src/routes/help.ts
+// (MAX_ATTACHMENT_BYTES = 5 MB decoded). Keeping these in sync avoids a request
+// that passes the client check but is rejected server-side.
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB per file
 const ALLOWED_ATTACHMENT_MIME = new Set([
   "image/png",
   "image/jpeg",
@@ -47,9 +63,40 @@ const ALLOWED_ATTACHMENT_MIME = new Set([
   "application/pdf",
 ]);
 
-function loadStoredMessages(): SupportMessage[] {
+const SUPPORT_CATEGORIES = [
+  { value: "general", label: "General question" },
+  { value: "bug", label: "Bug / something broken" },
+  { value: "builder", label: "AI Builder or my project" },
+  { value: "billing", label: "Billing & credits" },
+  { value: "account", label: "Account & sign-in" },
+  { value: "other", label: "Other" },
+];
+
+/** Route to a single support ticket's detail page (see App.tsx /support/tickets/:id). */
+export function ticketDetailPath(ticketId: number): string {
+  return `/support/tickets/${ticketId}`;
+}
+
+/** Best-effort, non-identifying browser/device context attached to a ticket. */
+function collectDeviceInfo(): Record<string, unknown> {
   try {
-    const raw = localStorage.getItem(SUPPORT_CHAT_STORAGE_KEY);
+    return {
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+      platform: navigator.platform,
+      screen: `${window.screen.width}x${window.screen.height}`,
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      url: window.location.href,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function loadStoredMessages(key: string): SupportMessage[] {
+  try {
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -62,9 +109,17 @@ function loadStoredMessages(): SupportMessage[] {
   }
 }
 
-function persistMessages(messages: SupportMessage[]): void {
+export function persistMessages(key: string, messages: SupportMessage[]): void {
   try {
-    localStorage.setItem(SUPPORT_CHAT_STORAGE_KEY, JSON.stringify(messages));
+    localStorage.setItem(key, JSON.stringify(messages));
+  } catch {
+    // best-effort only
+  }
+}
+
+export function clearStoredMessages(key: string): void {
+  try {
+    localStorage.removeItem(key);
   } catch {
     // best-effort only
   }
@@ -159,29 +214,123 @@ interface PendingAttachment {
 
 function SupportChat() {
   const { toast } = useToast();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, userId } = useAuth();
   const [, setLocation] = useLocation();
+  const storageKey = userId ? supportChatKey(userId) : null;
+  const searchString = useSearch();
 
-  const [messages, setMessages] = useState<SupportMessage[]>(() => loadStoredMessages());
+  // ?mode=report (or #support) opens the page focused on contacting the team.
+  const { reportMode, initialProjectId } = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const pid = params.get("projectId");
+    return {
+      reportMode: params.get("mode") === "report" || hash === "#support",
+      initialProjectId: pid && /^\d+$/.test(pid) ? Number(pid) : null,
+    };
+  }, [searchString]);
+
+  const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [input, setInput] = useState("");
   const [canEscalate, setCanEscalate] = useState(false);
 
   // escalation form
   const [showEscalate, setShowEscalate] = useState(false);
   const [subject, setSubject] = useState("");
+  const [category, setCategory] = useState<string>(reportMode ? "bug" : "general");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [escalateResult, setEscalateResult] = useState<{
     ticketId: number;
     emailStatus: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const subjectRef = useRef<HTMLInputElement>(null);
 
   const chat = useSupportChat();
   const escalate = useEscalateSupport();
 
+  // Backend-backed conversation history (Requirement #6). localStorage is only a
+  // draft/cache; the server "support" surface conversation is the source of
+  // truth for signed-in users. We hydrate once on load, then keep the cache in
+  // sync as new turns arrive.
+  const conversationsQuery = useListSupportConversations({
+    query: {
+      enabled: Boolean(isSignedIn),
+      queryKey: getListSupportConversationsQueryKey(),
+    },
+  });
+  const latestConversationId = conversationsQuery.data?.conversations?.[0]?.id ?? 0;
+  const conversationDetail = useGetSupportConversation(latestConversationId, {
+    query: {
+      enabled: Boolean(isSignedIn) && latestConversationId > 0,
+      queryKey: getGetSupportConversationQueryKey(latestConversationId),
+    },
+  });
+  const hydratedRef = useRef(false);
+  const cacheLoadedRef = useRef(false);
+
+  // Purge the legacy pre-scoping global key once so an earlier account's
+  // transcript can never leak to the next user on a shared browser.
+  useEffect(() => {
+    clearStoredMessages(SUPPORT_CHAT_LEGACY_KEY);
+  }, []);
+
+  // Show this user's own cached transcript immediately while the server query
+  // resolves. The cache is scoped by userId, so it is always the same user's
+  // data; the server remains the source of truth below.
+  useEffect(() => {
+    if (!storageKey || cacheLoadedRef.current) return;
+    cacheLoadedRef.current = true;
+    const cached = loadStoredMessages(storageKey);
+    if (cached.length > 0) {
+      setMessages(cached);
+      setCanEscalate(true);
+    }
+  }, [storageKey]);
+
+  // Hydrate from the backend once both queries have settled. The server is
+  // authoritative: if it has no conversation/messages, any stale local cache is
+  // cleared so the chat reflects the account's true server-side history.
+  useEffect(() => {
+    if (hydratedRef.current || !isSignedIn) return;
+    if (conversationsQuery.isLoading) return;
+    if (latestConversationId > 0 && conversationDetail.isLoading) return;
+
+    hydratedRef.current = true;
+    const serverMessages = conversationDetail.data?.messages ?? [];
+    if (serverMessages.length > 0) {
+      setMessages(serverMessages);
+      if (storageKey) persistMessages(storageKey, serverMessages);
+      setCanEscalate(true);
+    } else {
+      setMessages([]);
+      setCanEscalate(false);
+      if (storageKey) clearStoredMessages(storageKey);
+    }
+  }, [
+    isSignedIn,
+    conversationsQuery.isLoading,
+    latestConversationId,
+    conversationDetail.isLoading,
+    conversationDetail.data,
+    storageKey,
+  ]);
+
+  // Auto-open + focus the escalation form when arriving via "Report Issue".
+  useEffect(() => {
+    if (!reportMode || !isSignedIn) return;
+    setShowEscalate(true);
+    const t = window.setTimeout(() => {
+      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      subjectRef.current?.focus();
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [reportMode, isSignedIn]);
+
   const updateMessages = (next: SupportMessage[]) => {
     setMessages(next);
-    persistMessages(next);
+    if (storageKey) persistMessages(storageKey, next);
   };
 
   const handleSend = async () => {
@@ -194,7 +343,12 @@ function SupportChat() {
 
     try {
       const res = await chat.mutateAsync({
-        data: { message: text, messages: history },
+        data: {
+          message: text,
+          messages: history,
+          category,
+          ...(initialProjectId ? { projectId: initialProjectId } : {}),
+        },
       });
       updateMessages([...nextWithUser, { role: "assistant", content: res.reply }]);
       setCanEscalate(Boolean(res.canEscalate));
@@ -224,7 +378,7 @@ function SupportChat() {
       if (file.size > MAX_ATTACHMENT_BYTES) {
         toast({
           title: "File too large",
-          description: `${file.name}: attachments must be 10 MB or smaller.`,
+          description: `${file.name}: attachments must be 5 MB or smaller.`,
           variant: "destructive",
         });
         continue;
@@ -258,6 +412,9 @@ function SupportChat() {
       const res = await escalate.mutateAsync({
         data: {
           subject: subj,
+          category,
+          ...(initialProjectId ? { projectId: initialProjectId } : {}),
+          deviceInfo: collectDeviceInfo(),
           transcript: messages,
           attachments: attachments.map((a) => ({
             fileName: a.fileName,
@@ -303,7 +460,7 @@ function SupportChat() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div ref={containerRef} className="rounded-xl border border-border bg-card">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <LifeBuoy className="h-5 w-5 text-primary" />
         <h2 className="font-semibold">Ask Ora — Support</h2>
@@ -379,12 +536,21 @@ function SupportChat() {
         {escalateResult && (
           <div className="mt-3 flex items-start gap-2 rounded-md border border-border bg-muted/50 p-3 text-sm">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <span>
-              Ticket #{escalateResult.ticketId} created.{" "}
-              {escalateResult.emailStatus === "sent"
-                ? "Our team has been notified by email."
-                : "Our team will review it shortly."}
-            </span>
+            <div className="space-y-1.5">
+              <p>
+                Ticket #{escalateResult.ticketId} created.{" "}
+                {escalateResult.emailStatus === "sent"
+                  ? "Our team has been notified by email."
+                  : "Our team will review it shortly."}
+              </p>
+              <Link
+                href={ticketDetailPath(escalateResult.ticketId)}
+                className="inline-flex items-center gap-1 text-primary hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                View ticket #{escalateResult.ticketId}
+              </Link>
+            </div>
           </div>
         )}
 
@@ -395,11 +561,29 @@ function SupportChat() {
                 Subject
               </label>
               <input
+                ref={subjectRef}
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="Short summary of your issue"
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
               />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Category
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+              >
+                {SUPPORT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -421,7 +605,7 @@ function SupportChat() {
               </button>
               <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
                 <AlertTriangle className="h-3 w-3" />
-                Images (PNG, JPEG, GIF, WebP) and PDF only, up to 10 MB each.
+                Images (PNG, JPEG, GIF, WebP) and PDF only, up to 5 MB each.
               </p>
               {attachments.length > 0 && (
                 <ul className="mt-2 space-y-1">

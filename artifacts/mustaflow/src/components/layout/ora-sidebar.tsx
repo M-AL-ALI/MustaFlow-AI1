@@ -21,6 +21,9 @@ import {
   MoreHorizontal,
   FolderInput,
   Image as ImageIcon,
+  HelpCircle,
+  Bug,
+  LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -40,9 +43,12 @@ import {
 
 // Ora is a standalone assistant — it must NOT link into the AI Builder's
 // /integrations page. Only Ora-scoped destinations belong here.
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { name: "Memory", href: "/ora/memory", icon: Brain },
   { name: "Library", href: "/ora/library", icon: BookOpen },
+  { name: "Help Center", href: "/help", icon: HelpCircle },
+  { name: "Report Issue", href: "/help?mode=report", icon: Bug },
+  { name: "My Support Tickets", href: "/support/tickets", icon: LifeBuoy },
   { name: "Settings", href: "/ora/settings", icon: Settings },
 ];
 

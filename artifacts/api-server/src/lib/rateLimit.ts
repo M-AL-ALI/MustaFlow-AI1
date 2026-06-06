@@ -352,6 +352,25 @@ export const oraHandoffLimiter = createLimiter({
     "Too many Builder handoff requests. Please wait before trying again, or describe your idea directly in the Builder.",
 });
 
+// Help Center support chat — 20 messages per IP per minute. Each call invokes
+// an AI model, so this is stricter than the general limiter but lenient enough
+// for a normal back-and-forth support conversation.
+export const supportChatLimiter = createLimiter({
+  windowMs: 60_000,
+  max: 20,
+  keyPrefix: "support_chat",
+  message: "Too many support messages. Please wait a moment before sending another.",
+});
+
+// Help Center escalation (ticket creation) — 5 per IP per hour. Stricter than
+// chat to prevent ticket spam while still allowing legitimate follow-ups.
+export const supportEscalateLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 5,
+  keyPrefix: "support_escalate",
+  message: "Too many support requests. Please wait before opening another ticket.",
+});
+
 // General API — 300 per minute per IP (broad safety net)
 export const generalLimiter = createLimiter({
   windowMs: 60_000,

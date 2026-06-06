@@ -87,6 +87,15 @@ export interface SupportConversationsOutput {
   conversations: SupportConversationSummary[];
 }
 
+export interface SupportConversationDetail {
+  id: number;
+  title?: string | null;
+  messages: SupportMessage[];
+  createdAt?: string;
+  updatedAt?: string;
+  lastMessageAt?: string;
+}
+
 export interface SupportAttachmentInput {
   fileName: string;
   mimeType: string;

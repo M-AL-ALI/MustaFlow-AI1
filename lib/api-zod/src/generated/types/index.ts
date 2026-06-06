@@ -536,6 +536,7 @@ export * from './suggestionAcceptResult';
 export * from './supportAttachmentInput';
 export * from './supportChatInput';
 export * from './supportChatOutput';
+export * from './supportConversationDetail';
 export * from './supportConversationsOutput';
 export * from './supportConversationSummary';
 export * from './supportMessage';

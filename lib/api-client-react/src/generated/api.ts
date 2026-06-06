@@ -303,6 +303,7 @@ import type {
   SuggestionAcceptResult,
   SupportChatInput,
   SupportChatOutput,
+  SupportConversationDetail,
   SupportConversationsOutput,
   SupportTicketDetail,
   SupportTicketsOutput,
@@ -21002,6 +21003,83 @@ export function useListSupportConversations<TData = Awaited<ReturnType<typeof li
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListSupportConversationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetSupportConversationUrl = (id: number,) => {
+
+
+
+
+  return `/api/help/support/conversations/${id}`
+}
+
+/**
+ * @summary Read a single Support Mode conversation's full message history (owner-scoped).
+ */
+export const getSupportConversation = async (id: number, options?: RequestInit): Promise<SupportConversationDetail> => {
+
+  return customFetch<SupportConversationDetail>(getGetSupportConversationUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSupportConversationQueryKey = (id: number,) => {
+    return [
+    `/api/help/support/conversations/${id}`
+    ] as const;
+    }
+
+
+export const getGetSupportConversationQueryOptions = <TData = Awaited<ReturnType<typeof getSupportConversation>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSupportConversation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSupportConversationQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSupportConversation>>> = ({ signal }) => getSupportConversation(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSupportConversation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSupportConversationQueryResult = NonNullable<Awaited<ReturnType<typeof getSupportConversation>>>
+export type GetSupportConversationQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Read a single Support Mode conversation's full message history (owner-scoped).
+ */
+
+export function useGetSupportConversation<TData = Awaited<ReturnType<typeof getSupportConversation>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSupportConversation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSupportConversationQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

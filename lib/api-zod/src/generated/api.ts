@@ -7494,6 +7494,26 @@ export const ListSupportConversationsResponse = zod.object({
 
 
 /**
+ * @summary Read a single Support Mode conversation's full message history (owner-scoped).
+ */
+export const GetSupportConversationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetSupportConversationResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string().nullish(),
+  "messages": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "lastMessageAt": zod.string().optional()
+})
+
+
+/**
  * @summary List the signed-in user's own support tickets.
  */
 export const ListSupportTicketsResponse = zod.object({

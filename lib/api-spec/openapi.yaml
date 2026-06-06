@@ -6782,6 +6782,39 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /help/support/conversations/{id}:
+    get:
+      operationId: getSupportConversation
+      tags: [help]
+      summary: Read a single Support Mode conversation's full message history (owner-scoped).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Support conversation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportConversationDetail"
+        "400":
+          description: Invalid conversation id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "404":
+          description: Conversation not found or not owned by the requester
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /help/support/tickets:
     get:
       operationId: listSupportTickets
@@ -6966,6 +6999,21 @@ components:
         conversations:
           type: array
           items: { $ref: "#/components/schemas/SupportConversationSummary" }
+
+    SupportConversationDetail:
+      type: object
+      required: [id, messages]
+      properties:
+        id: { type: integer }
+        title:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/SupportMessage" }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        lastMessageAt: { type: string }
 
     SupportAttachmentInput:
       type: object
