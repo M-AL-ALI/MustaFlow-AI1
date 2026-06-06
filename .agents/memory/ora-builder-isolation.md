@@ -14,6 +14,7 @@ Ora (standalone assistant, `/ora`, served by `public-ai/*` routes + `lib/public-
 **Why:** the original isolation only filtered `scope='user'`, but all existing user-scope rows were Builder-generated `style_memory` notes (from `inferStylePreferences`) — there was no Ora write path at all, so the new "Saved Memories" tab leaked Builder engineering notes. Fixed by adding `origin`: every Builder insert is tagged `origin='builder'`, the only Ora write path (`POST /ora/memories`) tags `origin='ora'`, and all existing rows were backfilled to `'builder'` (hidden from Ora, never deleted — Builder still uses them).
 
 **How to apply:**
+
 - Any new Ora read path (`ora-memories.ts` userScope, `chat.ts buildMemoryContext`) MUST filter `eq(origin, "ora")` on top of `scope='user'`.
 - Any new Builder insert into `knowledge_entries` MUST set `origin: "builder"` (or `"system"` for auto-promotion). `origin` is nullable and defaults to null, so an untagged insert is invisible to Ora but also won't be hidden if a read path forgets the filter — both ends must hold.
 - Never reintroduce a `projectId` path into `/public-ai/chat`. `knowledge_entries.scope` defaults to `"project"`, so an unscoped query would pull Builder data.
