@@ -1,0 +1,47 @@
+I reviewed GitHub main. The Help Center/Ora Support work is not fully wired in the pushed code.
+
+Issues found:
+
+1. Ora sidebar still only shows Memory, Library, and Settings.
+   File: artifacts/mustaflow/src/components/layout/ora-sidebar.tsx
+
+   Please add:
+   - Help Center -> /help
+   - Report Issue -> /help?mode=report
+   - My Support Tickets -> /support/tickets
+
+2. Support tickets are currently in the AI Builder/global slide-out nav.
+   File: artifacts/mustaflow/src/components/layout/slide-out-nav.tsx
+
+   Please remove Support tickets from the Builder/global nav unless it is intentionally global. It should not appear as an AI Builder feature.
+
+3. /help and /support/tickets are wrapped in AppLayout.
+   File: artifacts/mustaflow/src/App.tsx
+
+   AppLayout renders the Builder/global nav for signed-in users. This makes Help Center/support look leaked into AI Builder.
+
+   Please move Help Center/support pages to a neutral Help/Ora layout, or create a HelpLayout that does not show AI Builder navigation.
+
+4. The Report Issue behavior is missing from GitHub main.
+   Please implement:
+   - /help?mode=report opens the support/escalation form
+   - focuses the Subject/input field
+   - supports #support as a fallback anchor
+
+5. The support ticket success state should show:
+   - View ticket #N -> /support/tickets/:id
+
+6. Frontend Help page still uses a global localStorage key and 10 MB attachment limit.
+   Please fix:
+   - support chat cache must be keyed per Clerk userId
+   - frontend attachment limit must match backend 5 MB
+
+7. Confirm the missing follow-up work was pushed to GitHub. It looks like Replit reported it complete, but GitHub main does not contain those changes.
+
+Acceptance:
+- Ora sidebar shows Help Center, Report Issue, and My Support Tickets.
+- Report Issue opens /help?mode=report and focuses the escalation form.
+- Support tickets no longer appear as an AI Builder feature.
+- Help/support pages do not render AI Builder navigation.
+- Normal Ora chats remain surface='normal'.
+- Support chats remain surface='support'.

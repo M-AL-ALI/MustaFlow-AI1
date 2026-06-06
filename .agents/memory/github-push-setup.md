@@ -13,9 +13,11 @@ The main agent bash tool blocks ALL git write operations (including `git remote 
 
 **Initial push**: Use `configureWorkflow` + `restartWorkflow` (workflows run as separate OS processes, not subject to the guard). Command: `bash scripts/push-to-github.sh --force`. The script reads `GITHUB_PAT` from the workflow environment at runtime via a credential helper — token never persists in `.git/config`.
 
-**Auto-push**: Add `.husky/post-commit` (with `chmod +x`). Husky fires after every `git commit`, including Replit checkpoints. Run the push in the background (`&`) so it never delays the commit.
+**Auto-push**: Add `.husky/post-commit` (with `chmod +x`). Husky fires after every `git commit`, including Replit checkpoints. Run the push in the background (`&`) so it never delays the commit. **The post-commit hook must route through `scripts/push-to-github.sh`, not inline `git push`** — otherwise it has no retry and silently loses the ref-lock race (see below).
 
 **Why:** The credential helper pattern `!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'` keeps the PAT out of `.git/config` and out of process argv — only the env var is referenced at shell expansion time.
+
+**Ref-lock race / stale GitHub main**: A push can be rejected with `! [remote rejected] cannot lock ref 'refs/heads/main': is at X but expected Y`. This is the husky post-commit auto-push racing the `push-to-github` workflow push (two pushes updating the ref in the same window) — transient, not a real divergence. Symptom: GitHub main silently lags local HEAD. Fix: `scripts/push-to-github.sh` wraps the push in a retry/backoff loop (5 attempts) so a fresh attempt re-reads the current remote tip and wins. Both the workflow and `.husky/post-commit` go through this script so every push path retries.
 
 ## Files set up for M-AL-ALI/MustaFlow-AI1
 

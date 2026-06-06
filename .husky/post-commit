@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
 # Auto-push to GitHub after every Replit checkpoint / commit.
 # Runs in the background so it never slows down the commit itself.
+#
+# Routes through scripts/push-to-github.sh which retries on the transient
+# "cannot lock ref 'refs/heads/main'" race (a concurrent push updating the ref
+# mid-transaction). A plain inline push has no retry, so that race used to leave
+# GitHub main silently stale.
 if [ -n "${GITHUB_PAT:-}" ]; then
-  (
-    git \
-      -c credential.helper='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f' \
-      push https://github.com/M-AL-ALI/MustaFlow-AI1.git main:main \
-      2>/tmp/github-push.log
-  ) &
+  ( bash scripts/push-to-github.sh >/tmp/github-push.log 2>&1 ) &
 fi

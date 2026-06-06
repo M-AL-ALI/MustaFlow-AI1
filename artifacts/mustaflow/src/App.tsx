@@ -64,6 +64,7 @@ import UserProfilePage from "./pages/u";
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
+import { HelpLayout } from "./components/layout/help-layout";
 import { WorkspaceProvider } from "./contexts/workspace-context";
 import { OnboardingTour } from "./components/onboarding-tour";
 import { OfflineIndicator } from "./components/offline-indicator";
@@ -757,27 +758,27 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 </AppLayout>
               </Route>
               <Route path="/help">
-                <AppLayout>
+                <HelpLayout>
                   <HelpPage />
-                </AppLayout>
+                </HelpLayout>
               </Route>
               <Route path="/help/domains-api">
-                <AppLayout>
+                <HelpLayout>
                   <HelpDomainsApiPage />
-                </AppLayout>
+                </HelpLayout>
               </Route>
               <Route path="/support/tickets/:id">
                 <Protected>
-                  <AppLayout>
+                  <HelpLayout>
                     <SupportTicketsPage />
-                  </AppLayout>
+                  </HelpLayout>
                 </Protected>
               </Route>
               <Route path="/support/tickets">
                 <Protected>
-                  <AppLayout>
+                  <HelpLayout>
                     <SupportTicketsPage />
-                  </AppLayout>
+                  </HelpLayout>
                 </Protected>
               </Route>
               <Route path="/status">
