@@ -300,6 +300,70 @@ describe("POST /help/support/chat", () => {
     expect(ticketInsert).toBeTruthy();
     expect((ticketInsert!.values as { projectId: unknown }).projectId).toBeNull();
   });
+
+  it("injects project context for a builder-related issue (after ownership check)", async () => {
+    authedUser();
+    dbResults.push([]); // retrieveHelpArticles
+    dbResults.push([{ id: 7, name: "My App", status: "ready" }]); // buildSupportContext project
+    dbResults.push([]); // persistSupportTurn select existing
+    const app = await buildApp();
+    const res = await request(app)
+      .post("/help/support/chat")
+      .send({ message: "how do I deploy my project", projectId: 7 });
+    expect(res.status).toBe(200);
+    const call = vi.mocked(createChatCompletion).mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const system = call.messages.find((m) => m.role === "system")?.content ?? "";
+    expect(system).toContain("Current project");
+    expect(system).toContain("My App");
+  });
+
+  it("does NOT inject project context for a non-builder issue even with projectId", async () => {
+    authedUser();
+    dbResults.push([]); // retrieveHelpArticles
+    // Queue an OWNED project row in the project-lookup slot. If the gate
+    // regresses and the lookup runs, this row would surface in the prompt —
+    // making the test fail. Correct behavior skips the lookup entirely.
+    dbResults.push([{ id: 7, name: "My App", status: "ready" }]);
+    const app = await buildApp();
+    const res = await request(app)
+      .post("/help/support/chat")
+      .send({ message: "I was charged twice on my billing card", projectId: 7 });
+    expect(res.status).toBe(200);
+    const call = vi.mocked(createChatCompletion).mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const system = call.messages.find((m) => m.role === "system")?.content ?? "";
+    // Safe account context is always present, but the specific project must not be.
+    expect(system).toContain("Signed-in user context");
+    expect(system).not.toContain("Current project");
+    expect(system).not.toContain("My App");
+    // Strongest guarantee: the projects table was never queried at all.
+    const queriedProjects = vi
+      .mocked(dbMock.from)
+      .mock.calls.some((c) => (c[0] as { _name?: string })?._name === "projects");
+    expect(queriedProjects).toBe(false);
+  });
+
+  it("injects project context via the category branch even without builder keywords", async () => {
+    authedUser();
+    dbResults.push([]); // retrieveHelpArticles
+    dbResults.push([{ id: 9, name: "Cat App", status: "ready" }]); // buildSupportContext project
+    dbResults.push([]); // persistSupportTurn select existing
+    const app = await buildApp();
+    // Neutral message (no builder keywords) but an explicit builder category.
+    const res = await request(app)
+      .post("/help/support/chat")
+      .send({ message: "it is not working, can you help", projectId: 9, category: "deployment" });
+    expect(res.status).toBe(200);
+    const call = vi.mocked(createChatCompletion).mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const system = call.messages.find((m) => m.role === "system")?.content ?? "";
+    expect(system).toContain("Current project");
+    expect(system).toContain("Cat App");
+  });
 });
 
 // ── GET /help/support/conversations (auth) ────────────────────────────────────

@@ -8,9 +8,10 @@ project — it survives reload because it comes from the URL, not state. The
 provider takes `activeProjectId` as a prop derived from the route param.
 
 `newConversation(projectId?)` carries a **tri-state** that must NOT be collapsed:
+
 - `undefined` → defer to the active project (global "New conversation").
-- `null`      → explicit standalone chat (`projectId = null`), even inside a project.
-- a number    → that specific project.
+- `null` → explicit standalone chat (`projectId = null`), even inside a project.
+- a number → that specific project.
 
 `resolveScopeProjectId(explicit, activeProjectId)` (lib/ora-project-scope.ts)
 only falls back to the active project when `explicit === undefined`.

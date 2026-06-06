@@ -357,7 +357,8 @@ export function OraConversationsProvider({
   );
 
   const activeProject = useMemo(
-    () => (activeProjectId == null ? null : (projects.find((p) => p.id === activeProjectId) ?? null)),
+    () =>
+      activeProjectId == null ? null : (projects.find((p) => p.id === activeProjectId) ?? null),
     [activeProjectId, projects],
   );
 

@@ -151,9 +151,38 @@ async function retrieveHelpArticles(message: string, limit = 5): Promise<string>
   }
 }
 
+// Categories that indicate the support request is about the AI Builder (the
+// only case in which a specific project's context may be injected).
+const BUILDER_ISSUE_CATEGORIES = new Set([
+  "builder",
+  "ai-builder",
+  "build",
+  "builds",
+  "deployment",
+  "deploy",
+  "publishing",
+  "publish",
+  "preview",
+  "project",
+]);
+// Keyword intent fallback when no explicit builder category is supplied.
+const BUILDER_INTENT_RE =
+  /\b(build|builder|deploy(?:ed|ment)?|publish(?:ed|ing)?|preview|my (?:app|project|site|website)|generate[d]?|refine[d]?|rollback|roll back|version|snapshot|container)\b/i;
+
+/**
+ * Decide whether a support message is AI-Builder related. Project context is
+ * gated on this so non-builder support chats (billing, account, etc.) never
+ * receive project details even when a projectId is supplied (Task #1312).
+ */
+function isBuilderRelatedIssue(category: string | undefined, message: string): boolean {
+  if (category && BUILDER_ISSUE_CATEGORIES.has(category.trim().toLowerCase())) return true;
+  return BUILDER_INTENT_RE.test(message);
+}
+
 /**
  * Build a small, ownership-safe account/project context. Only includes a
- * project block when the project is verified to belong to the requesting user.
+ * project block when (a) the issue is AI-Builder related and (b) the project is
+ * verified to belong to the requesting user.
  * Never includes secrets, file contents, or Builder Knowledge Vault material.
  */
 async function buildSupportContext(
@@ -161,6 +190,7 @@ async function buildSupportContext(
   userEmail: string | null,
   tier: string,
   projectId: number | null | undefined,
+  includeProject: boolean,
 ): Promise<string> {
   const lines = [
     "\n\n## Signed-in user context (safe to reference)",
@@ -169,7 +199,7 @@ async function buildSupportContext(
   ];
   if (userEmail) lines.push(`- Account email: ${userEmail}`);
 
-  if (projectId != null) {
+  if (includeProject && projectId != null) {
     try {
       const [proj] = await db
         .select({
@@ -225,7 +255,7 @@ router.post("/help/support/chat", async (req, res) => {
     res.status(400).json({ error: "Invalid request body" });
     return;
   }
-  const { message, messages = [], projectId, language, languageHint } = parsed.data;
+  const { message, messages = [], projectId, category, language, languageHint } = parsed.data;
 
   // Prompt-injection guard — refuse manipulative input rather than process it.
   if (!scanUserInput(message)) {
@@ -239,9 +269,13 @@ router.post("/help/support/chat", async (req, res) => {
 
   const userEmail = await resolveUserEmail(authed.userId);
 
+  // Project context is injected ONLY when the issue is AI-Builder related —
+  // billing/account/general support never receives project details (Task #1312).
+  const builderRelated = isBuilderRelatedIssue(category, message);
+
   const [articleContext, accountContext] = await Promise.all([
     retrieveHelpArticles(message),
-    buildSupportContext(authed.userId, userEmail, authed.tier, projectId),
+    buildSupportContext(authed.userId, userEmail, authed.tier, projectId, builderRelated),
   ]);
 
   const systemPrompt =

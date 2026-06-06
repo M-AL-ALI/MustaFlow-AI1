@@ -305,11 +305,7 @@ function ConversationRow({
             {projects
               .filter((p) => p.id !== conversation.projectId)
               .map((p) => (
-                <DropdownMenuItem
-                  key={p.id}
-                  onSelect={() => onMove(p.id)}
-                  className="text-xs"
-                >
+                <DropdownMenuItem key={p.id} onSelect={() => onMove(p.id)} className="text-xs">
                   <Folder className="mr-2 h-3.5 w-3.5" />
                   <span className="truncate">{p.name}</span>
                 </DropdownMenuItem>
