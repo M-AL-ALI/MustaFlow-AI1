@@ -648,6 +648,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   }, [clearAttachment, clearUploadError, previewObjectUrl]);
 
   const handleEnterVoiceConvMode = useCallback(() => {
+    void voiceRef.current.prepareVoicePlayback();
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
     setInput("");

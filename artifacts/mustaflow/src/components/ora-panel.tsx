@@ -728,6 +728,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   }, [clearAttachment, clearUploadError, previewObjectUrl]);
 
   const handleEnterVoiceConvMode = useCallback(() => {
+    void voiceRef.current.prepareVoicePlayback();
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
     setInput("");
