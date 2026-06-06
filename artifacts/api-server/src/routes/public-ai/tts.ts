@@ -8,12 +8,26 @@
  */
 import { Router } from "express";
 import { z } from "zod";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import OpenAI from "openai";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraVoiceTtsLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 
 const router = Router();
+
+// Talk to Ora voice replies use OpenAI's POST /audio/speech endpoint, which the
+// Replit AI-integrations proxy does not support ("INVALID_ENDPOINT"). Route TTS
+// through a direct OpenAI client (OPENAI_API_KEY); every other Ora call still
+// goes through the proxy. Constructed lazily so the route degrades gracefully
+// (503) when the key is absent instead of throwing at import time.
+let directTtsClient: OpenAI | null = null;
+function getTtsClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) return null;
+  if (!directTtsClient) {
+    directTtsClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return directTtsClient;
+}
 
 const OPENAI_TTS_VOICES = [
   "alloy",
@@ -57,8 +71,15 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
   const text = parsed.data.text.trim();
   const voice = parsed.data.voice ?? "nova";
 
+  const client = getTtsClient();
+  if (!client) {
+    logger.warn({ component: "ora-tts" }, "OPENAI_API_KEY missing — Ora voice TTS unavailable");
+    res.status(503).json({ error: "Voice replies are not configured." });
+    return;
+  }
+
   try {
-    const response = await openai.audio.speech.create({
+    const response = await client.audio.speech.create({
       model: process.env.ORA_TTS_MODEL ?? "gpt-4o-mini-tts",
       voice,
       input: text,

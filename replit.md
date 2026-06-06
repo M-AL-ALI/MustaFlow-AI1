@@ -24,6 +24,7 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 
 ### Optional env (features gracefully no-op when missing)
 
+- **Talk to Ora voice (TTS)**: `OPENAI_API_KEY` — Ora's `/api/public-ai/tts` speech endpoint uses a **direct** OpenAI client (not the AI-integrations proxy, which rejects `POST /audio/speech` with `INVALID_ENDPOINT`). Without the key, TTS degrades to 503 ("Voice replies are not configured"); Whisper transcribe (`/api/public-ai/transcribe`) still works via the proxy.
 - **GitHub OAuth**: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URL`
 - **Namecheap (domain purchase)**: `NAMECHEAP_API_USER`, `NAMECHEAP_API_KEY`, `NAMECHEAP_USERNAME`, `NAMECHEAP_CLIENT_IP`, `NAMECHEAP_SANDBOX`, `NS1_HOSTNAME`, `NS2_HOSTNAME`, `DOMAIN_MARKUP_PERCENT`
 - **Cloudflare edge CDN**: `CF_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`, `CF_R2_BUCKET`, `CF_KV_NAMESPACE_ID`, `EDGE_SERVING_ENABLED`
