@@ -336,6 +336,37 @@ describe("Ora orchestrator routing", () => {
     expect(decision.fileFormat).toBeTruthy();
   });
 
+  it("routes varied PowerPoint phrasings to file_generation/pptx", async () => {
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    const phrasings = [
+      "create a power point file about dogs",
+      "make me a ppt on marketing",
+      "build a slide deck for my pitch",
+      "generate a power-point deck",
+      "create a pitch deck",
+      "make a slideshow of my trip",
+      "create a powerpoint about dogs",
+    ];
+    for (const message of phrasings) {
+      const decision = await routeOraMessage({ message, mode: "instant" });
+      expect(decision.tool, message).toBe("file_generation");
+      expect(decision.fileFormat, message).toBe("pptx");
+    }
+  });
+
+  it("does NOT route verb-less presentation questions to file_generation", async () => {
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    const questions = ["what is a pitch deck?", "can you review my slideshow narrative for me"];
+    for (const message of questions) {
+      const decision = await routeOraMessage({
+        message,
+        mode: "instant",
+        classifier: { intent: "premium", confidence: "high", topic: "general" },
+      });
+      expect(decision.tool, message).not.toBe("file_generation");
+    }
+  });
+
   it("routes image requests to image_generation", async () => {
     const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
     const decision = await routeOraMessage({

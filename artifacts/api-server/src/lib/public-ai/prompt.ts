@@ -49,6 +49,12 @@ const INJECTION_PATTERNS: RegExp[] = [
 // are handled by the generate-file route and must NOT be flagged as builder requests.
 const FILE_GENERATION_PATTERNS: RegExp[] = [
   /\b(csv|spreadsheet|excel|xlsx|xls|word|docx|pdf|pptx|powerpoint|presentation|slides)\b/i,
+  // Verb-gated presentation phrasings ("create a power point", "make a ppt",
+  // "build a slide deck"). These multi-word / abbreviated cues are intentionally
+  // NOT in the bare-noun gate above so that a plain question ("what is a pitch
+  // deck?") does not get misrouted to file generation — only an explicit
+  // creation/export verb triggers them.
+  /\b(generate|create|make|build|export|produce|design|draft|prepare|put\s+together)\s+(?:me\s+|us\s+)?(?:a\s+|an\s+|the\s+|some\s+|my\s+)*(power[\s-]?point|powerpoint|pptx?|ppt|presentation|slide[\s-]?deck|pitch[\s-]?deck|slide[\s-]?show|slideshow|slides)\b/i,
   /\b(generate|create|make|build|export|produce)\s+(a\s+)?(file|document|report|table|sheet|spreadsheet|doc)\b/i,
   /\b(download|export)\s+(a\s+)?(file|report|spreadsheet|document|csv|excel|pdf|word)\b/i,
 ];
@@ -74,7 +80,11 @@ const FILE_FORMAT_DETECT: Array<{ pattern: RegExp; format: FileFormat }> = [
   { pattern: /\b(excel|xlsx|xls|spreadsheet)\b/i, format: "xlsx" },
   { pattern: /\b(word|docx|doc\b|word\s+doc)/i, format: "docx" },
   { pattern: /\b(pdf)\b/i, format: "pdf" },
-  { pattern: /\b(powerpoint|pptx|ppt\b|presentation|slide\s+deck|slides)\b/i, format: "pptx" },
+  {
+    pattern:
+      /\b(powerpoint|power[\s-]?point|pptx?|presentation|slide[\s-]?deck|pitch[\s-]?deck|slide[\s-]?show|slideshow|slides)\b/i,
+    format: "pptx",
+  },
 ];
 
 export function scanUserInput(text: string): boolean {
