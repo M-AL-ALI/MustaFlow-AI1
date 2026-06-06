@@ -21,6 +21,7 @@ import NotFound from "@/pages/not-found";
 // Pages
 import HomePage from "./pages/home";
 import ProjectsPage from "./pages/projects";
+import NewProjectPage from "./pages/projects/new";
 import ProjectWorkspacePage from "./pages/projects/[id]";
 import ModeSelectPage from "./pages/mode-select";
 import OraPage from "./pages/ora";
@@ -496,6 +497,15 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                   <BuilderGuard>
                     <AppLayout>
                       <ProjectsPage />
+                    </AppLayout>
+                  </BuilderGuard>
+                </Protected>
+              </Route>
+              <Route path="/projects/new">
+                <Protected>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <NewProjectPage />
                     </AppLayout>
                   </BuilderGuard>
                 </Protected>

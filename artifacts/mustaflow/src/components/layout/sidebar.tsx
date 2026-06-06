@@ -23,7 +23,6 @@ import {
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import { useState, useEffect, useCallback } from "react";
-import { CreateProjectModal } from "@/components/create-project-modal";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { BackgroundJobsPanel } from "@/components/background-jobs-panel";
 import { OrgSwitcher } from "@/components/org-switcher";
@@ -252,21 +251,12 @@ function UserSection() {
   );
 }
 
-function SidebarInner({
-  createOpen,
-  setCreateOpen,
-  onClose,
-}: {
-  createOpen: boolean;
-  setCreateOpen: (v: boolean) => void;
-  onClose: () => void;
-}) {
+function SidebarInner({ onClose }: { onClose: () => void }) {
   const { isSignedIn } = useClerkUser();
   const [currentOrgId, setCurrentOrgId] = useState<number | null>(null);
+  const [, setLocation] = useLocation();
   return (
     <div className="w-64 border-r border-border bg-sidebar h-screen flex flex-col overflow-y-auto">
-      <CreateProjectModal open={createOpen} onOpenChange={setCreateOpen} />
-
       {/* Logo + theme toggle + collapse button */}
       <div className="px-4 py-5 flex flex-col items-center gap-2 shrink-0 relative">
         <div className="rounded-3xl border-2 border-sidebar-border bg-sidebar-accent/40 p-3 shadow-lg ring-1 ring-primary/10">
@@ -298,7 +288,7 @@ function SidebarInner({
       {isSignedIn && (
         <div className="px-3 pb-2 shrink-0 space-y-1.5">
           <button
-            onClick={() => setCreateOpen(true)}
+            onClick={() => setLocation("/projects/new")}
             className="w-full flex items-center gap-2 rounded-lg border border-border bg-muted/40 text-foreground hover:bg-muted hover:border-border/80 transition-colors px-3 py-2 text-sm font-medium"
           >
             <Plus className="h-4 w-4 shrink-0" />
@@ -363,7 +353,6 @@ function SidebarInner({
 }
 
 export function Sidebar() {
-  const [createOpen, setCreateOpen] = useState(false);
   const [windowWidth, setWindowWidth] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth : 1200,
   );
@@ -419,11 +408,7 @@ export function Sidebar() {
         >
           {/* Absolute inner so content doesn't squash during animation */}
           <div className="absolute inset-y-0 left-0">
-            <SidebarInner
-              createOpen={createOpen}
-              setCreateOpen={setCreateOpen}
-              onClose={() => setCollapsed(true)}
-            />
+            <SidebarInner onClose={() => setCollapsed(true)} />
           </div>
         </div>
       )}
@@ -436,11 +421,7 @@ export function Sidebar() {
             collapsed ? "-translate-x-full" : "translate-x-0",
           )}
         >
-          <SidebarInner
-            createOpen={createOpen}
-            setCreateOpen={setCreateOpen}
-            onClose={() => setCollapsed(true)}
-          />
+          <SidebarInner onClose={() => setCollapsed(true)} />
         </div>
       )}
     </>

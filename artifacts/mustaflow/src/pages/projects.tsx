@@ -4,13 +4,9 @@ import { BrainstormPanel } from "@/components/brainstorm-panel";
 import {
   useGetProjectsSummary,
   useGetRecentActivity,
-  useCreateProject,
   useGetSecurityBadgeCountsByProject,
   getGetSecurityBadgeCountsByProjectQueryKey,
-  getListProjectsQueryKey,
-  getGetProjectQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -94,8 +90,6 @@ function HomeHero() {
   const [exampleIndex, setExampleIndex] = useState(0);
   const [showDiscuss, setShowDiscuss] = useState(false);
   const [, setLocation] = useLocation();
-  const queryClient = useQueryClient();
-  const createProject = useCreateProject();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const firstName = user?.firstName ?? user?.fullName?.split(" ")[0] ?? null;
@@ -166,25 +160,12 @@ function HomeHero() {
   function handleBuild() {
     const text = prompt.trim();
     if (!text) return;
-    const words = text.split(/\s+/).slice(0, 5).join(" ");
-    const name = words.charAt(0).toUpperCase() + words.slice(1);
-    createProject.mutate(
-      {
-        data: {
-          name,
-          description: text,
-          kind: selectedCategory === "Mobile" ? "mobile-cross" : "web",
-          initialPrompt: text,
-        },
-      },
-      {
-        onSuccess: (project) => {
-          queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
-          void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-          setLocation(`/projects/${project.id}`);
-        },
-      },
-    );
+    // Hand the typed idea off to the formal project-creation page, where the
+    // user confirms the name and choices before starting.
+    const params = new URLSearchParams();
+    params.set("prompt", text);
+    if (selectedCategory === "Mobile") params.set("platform", "mobile");
+    setLocation(`/projects/new?${params.toString()}`);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -311,7 +292,7 @@ function HomeHero() {
               <button
                 type="button"
                 onClick={handleBuild}
-                disabled={createProject.isPending || !prompt.trim()}
+                disabled={!prompt.trim()}
                 className={cn(
                   "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
                   prompt.trim()
