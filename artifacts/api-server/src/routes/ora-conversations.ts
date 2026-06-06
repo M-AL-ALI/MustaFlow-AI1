@@ -314,17 +314,24 @@ router.delete("/ora/conversations/:id", async (req, res) => {
     return;
   }
   try {
-    await db
+    const [row] = await db
       .update(oraConversationsTable)
       .set({ archivedAt: new Date() })
       .where(
         and(
           eq(oraConversationsTable.id, id),
           eq(oraConversationsTable.userId, userId),
-          // Support Mode conversations are isolated (Task #1312).
+          // Support Mode conversations are isolated (Task #1312). A support-surface
+          // id matches nothing here, so the endpoint 404s instead of silently
+          // reporting success (Task #1314).
           eq(oraConversationsTable.surface, "normal"),
         ),
-      );
+      )
+      .returning({ id: oraConversationsTable.id });
+    if (!row) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
     res.json({ ok: true });
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to delete conversation");
