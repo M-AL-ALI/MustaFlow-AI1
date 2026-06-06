@@ -73,10 +73,11 @@ router.post("/public-ai/generate-file", async (req, res) => {
     const quota = await consumeOraQuota(authed.userId, authed.tier, "message");
     if (!quota.allowed) {
       res.status(429).json({
-        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        error: `You've used all ${quota.limit} Ora messages in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
         upgradeCta: true,
         msgCount: quota.used,
         msgLimit: quota.limit,
+        resetsAt: quota.resetsAt,
       });
       return;
     }

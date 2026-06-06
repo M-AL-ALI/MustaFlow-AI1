@@ -23,40 +23,41 @@ import {
   knowledgeEntriesTable,
   oraProfilesTable,
   generatedImagesTable,
-  TIER_DAILY_MESSAGE_LIMIT,
+  TIER_ORA_MESSAGE_LIMIT,
   type SubscriptionTier,
 } from "@workspace/db";
 import {
   consumeOraQuota,
   refundOraQuota,
-  getTodayOraUsage,
+  getOraUsage,
   type OraQuotaKind,
 } from "../../lib/public-ai/ora-usage";
 
-// Authenticated Ora users are metered by message-based DAILY quotas per
-// subscription tier (TIER_DAILY_MESSAGE_LIMIT / TIER_DAILY_IMAGE_LIMIT) — NOT by
-// the AI Builder credit wallet. Anonymous visitors keep the per-session cap.
+// Authenticated Ora users are metered by per-user ROLLING-WINDOW quotas per
+// subscription tier (TIER_ORA_MESSAGE_LIMIT / TIER_ORA_IMAGE_LIMIT) — NOT by the
+// AI Builder credit wallet. Anonymous visitors keep the per-session cap.
 
-function dailyMessageLimit(tier: string): number {
-  return TIER_DAILY_MESSAGE_LIMIT[tier as SubscriptionTier] ?? TIER_DAILY_MESSAGE_LIMIT.free;
+function oraMessageLimit(tier: string): number {
+  return TIER_ORA_MESSAGE_LIMIT[tier as SubscriptionTier] ?? TIER_ORA_MESSAGE_LIMIT.free;
 }
 
 /**
  * Build the usage fields returned to the client. For signed-in users this
- * reflects today's DAILY message/image usage; for anonymous visitors it
- * reflects the per-session message counter.
+ * reflects current rolling-window message/image usage + reset time; for
+ * anonymous visitors it reflects the per-session message counter.
  */
 async function oraUsageResponse(
   authed: AuthedOraUser | null,
   sessionMsgCount: number,
-): Promise<Record<string, number>> {
-  if (!authed) return { msgCount: sessionMsgCount, msgLimit: MSG_LIMIT_VALUE };
-  const u = await getTodayOraUsage(authed.userId, authed.tier);
+): Promise<Record<string, number | string | null>> {
+  if (!authed) return { msgCount: sessionMsgCount, msgLimit: MSG_LIMIT_VALUE, resetsAt: null };
+  const u = await getOraUsage(authed.userId, authed.tier);
   return {
     msgCount: u.messageCount,
     msgLimit: u.messageLimit,
     imageCount: u.imageCount,
     imageLimit: u.imageLimit,
+    resetsAt: u.resetsAt,
   };
 }
 
@@ -245,7 +246,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // Resolve the signed-in user (if any). Authenticated users draw on their
   // monthly credit balance and are exempt from the anonymous visitor cap.
   const authed = await resolveAuthedOraUser(req);
-  const effectiveMsgLimit = authed ? dailyMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
+  const effectiveMsgLimit = authed ? oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
@@ -316,10 +317,11 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
-  // Ora is metered by message-based DAILY quotas per tier — never by the AI
-  // Builder credit wallet. Image generation/edit draws on the daily IMAGE
-  // bucket; everything else (answer, deep, search, file gen, analysis) draws on
-  // the daily MESSAGE bucket. Uploads are unlimited (handled in the upload route).
+  // Ora is metered by per-user ROLLING-WINDOW quotas per tier — never by the AI
+  // Builder credit wallet. Image generation/edit draws on the IMAGE bucket;
+  // everything else (answer, deep, search, file gen, analysis) draws on the
+  // MESSAGE bucket. Messages and images share ONE window timer per user (they
+  // refill together). Uploads are unlimited (handled in the upload route).
   // Atomically reserve the quota slot up-front so concurrent requests cannot
   // overshoot the tier limit. Every branch below that does NOT complete the
   // metered action MUST refund this reservation (see refundOraQuota calls).
@@ -331,8 +333,8 @@ router.post("/public-ai/chat", async (req, res) => {
       res.status(429).json({
         error:
           quotaKind === "image"
-            ? `You've reached today's image limit (${quota.limit}/day) on your plan. Upgrade for more daily images, or come back tomorrow.`
-            : `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+            ? `You've used all ${quota.limit} Ora images in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`
+            : `You've used all ${quota.limit} Ora messages in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
         upgradeCta: true,
         ...usage,
       });

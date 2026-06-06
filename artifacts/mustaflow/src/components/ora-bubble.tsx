@@ -1257,7 +1257,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               <p className="text-xs text-muted-foreground">
                 {isSignedIn ? (
                   <>
-                    Daily message limit reached.{" "}
+                    Message limit reached for this window.{" "}
                     <button
                       type="button"
                       onClick={() => setLocation("/pricing")}

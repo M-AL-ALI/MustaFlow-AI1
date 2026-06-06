@@ -51,21 +51,31 @@ export const TIER_MONTHLY_IMAGE_CAP: Record<SubscriptionTier, number> = {
   wave: 30,
 };
 
-// ── Ora message-based daily quotas ──────────────────────────────────────────
-// The standalone Ora assistant is metered by DAILY message + image limits per
-// subscription tier — NOT by the AI Builder credit wallet. Limits reset at
-// midnight UTC. The Builder keeps its separate credit system untouched.
-export const TIER_DAILY_MESSAGE_LIMIT: Record<SubscriptionTier, number> = {
-  free: 20,
-  core: 30,
-  wave: 55,
+// ── Ora message-based ROLLING-WINDOW quotas ─────────────────────────────────
+// The standalone Ora assistant is metered by per-user ROLLING TIME WINDOWS per
+// subscription tier — NOT by the AI Builder credit wallet, and NOT by a shared
+// midnight-UTC clock. The window starts on the user's FIRST message after a
+// reset and the full allowance refills exactly TIER_ORA_WINDOW_HOURS later.
+// Messages and images share ONE window timer per user (they refill together).
+// The Builder keeps its separate credit system untouched.
+export const TIER_ORA_MESSAGE_LIMIT: Record<SubscriptionTier, number> = {
+  free: 30,
+  core: 100,
+  wave: 280,
 };
 
-// Daily image generation/edit caps per tier (inline Ora images).
-export const TIER_DAILY_IMAGE_LIMIT: Record<SubscriptionTier, number> = {
-  free: 3,
-  core: 10,
-  wave: 20,
+// Image generation/edit caps per tier (inline Ora images), per rolling window.
+export const TIER_ORA_IMAGE_LIMIT: Record<SubscriptionTier, number> = {
+  free: 4,
+  core: 15,
+  wave: 30,
+};
+
+// Length (in hours) of each tier's personal rolling usage window.
+export const TIER_ORA_WINDOW_HOURS: Record<SubscriptionTier, number> = {
+  free: 5,
+  core: 3,
+  wave: 3,
 };
 
 // Per-user subscription row. Created on first subscribe or free-tier initialisation.
@@ -94,23 +104,27 @@ export const userSubscriptionsTable = pgTable(
 export type UserSubscription = typeof userSubscriptionsTable.$inferSelect;
 export type InsertUserSubscription = typeof userSubscriptionsTable.$inferInsert;
 
-// Per-user, per-UTC-day Ora usage counters. Drives Ora's message-based daily
-// quotas (decoupled from the AI Builder credit wallet). One row per user/day;
-// counters are bumped atomically via upsert. Old rows are harmless history.
-export const oraDailyUsageTable = pgTable(
-  "ora_daily_usage",
+// Per-user Ora ROLLING-WINDOW usage counters. Drives Ora's message + image
+// quotas (decoupled from the AI Builder credit wallet). Exactly ONE row per
+// user: `window_start` marks when the current personal window opened (set on the
+// user's first metered action after a reset); `message_count` / `image_count`
+// accumulate within that window. Both counters reset together once
+// now() - window_start >= the tier's window length. Counters are bumped
+// atomically via upsert so concurrent requests can never overshoot the limit.
+export const oraUsageWindowsTable = pgTable(
+  "ora_usage_windows",
   {
     id: serial("id").primaryKey(),
     userId: text("user_id").notNull(),
-    // Calendar day in UTC, formatted YYYY-MM-DD.
-    usageDate: text("usage_date").notNull(),
+    // When the user's current rolling window opened.
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
     messageCount: integer("message_count").notNull().default(0),
     imageCount: integer("image_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("ora_daily_usage_user_date_uniq").on(t.userId, t.usageDate)],
+  (t) => [uniqueIndex("ora_usage_windows_user_uniq").on(t.userId)],
 );
 
-export type OraDailyUsage = typeof oraDailyUsageTable.$inferSelect;
-export type InsertOraDailyUsage = typeof oraDailyUsageTable.$inferInsert;
+export type OraUsageWindow = typeof oraUsageWindowsTable.$inferSelect;
+export type InsertOraUsageWindow = typeof oraUsageWindowsTable.$inferInsert;

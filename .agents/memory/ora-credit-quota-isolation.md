@@ -1,33 +1,44 @@
 ---
-name: Ora credit/quota isolation (daily quotas, not Builder credits)
-description: How the standalone Ora assistant is metered (daily message/image quotas per tier) vs the AI Builder credit wallet, plus the shared-image-edit and overloaded-session caveats.
+name: Ora credit/quota isolation (personal rolling windows, not Builder credits)
+description: How the standalone Ora assistant is metered (per-user rolling time-window message/image quotas per tier) vs the AI Builder credit wallet, plus the shared-image-edit and overloaded-session caveats.
 ---
 
-# Ora is metered by daily quotas, NOT the Builder credit wallet
+# Ora is metered by personal rolling windows, NOT the Builder credit wallet
 
-The standalone Ora assistant is metered by **message-based daily quotas per
-subscription tier** (`ora_daily_usage` table; helpers in
+The standalone Ora assistant is metered by **per-user rolling time-windows per
+subscription tier** (`ora_usage_windows` table, one row/user; helpers in
 `artifacts/api-server/src/lib/public-ai/ora-usage.ts`). The AI Builder keeps its
 separate credit wallet. These two must never be coupled again.
 
 - Buckets: `image_generation`/`image_editing` -> IMAGE bucket; everything else
   (`answer`/deep/`search`/`file_generation`/`*_analysis`) -> MESSAGE bucket.
   Uploads are uncounted.
-- Quotas reset midnight UTC. Authed over-cap -> 429 with `upgradeCta:true`.
-- Anonymous visitors are unchanged: they keep the per-session caps (msg/file/image).
+- Allowances live in `TIER_ORA_MESSAGE_LIMIT`/`TIER_ORA_IMAGE_LIMIT`/
+  `TIER_ORA_WINDOW_HOURS` (subscriptions.ts): Free=30msg/4img/5h,
+  Core=100/15/3h, Wave=280/30/3h.
+- **Window opens on the user's FIRST metered message after a reset; the full
+  allowance refills exactly N hours after that personal `windowStart`.** Messages
+  and images share ONE window timer per user. Every usage helper returns
+  `resetsAt` (windowStart + N hours, or null when no window open / fail-open).
+- Authed over-cap -> 429 with `upgradeCta:true`. Anonymous visitors are
+  unchanged: they keep the per-session caps (msg/file/image).
+- The old per-UTC-day `ora_daily_usage` table is left in place as harmless
+  history; nothing reads it. Don't re-add midnight-UTC reset logic.
 
 **Why:** the prior design deducted Builder credits for Ora usage, which conflated
-two unrelated products. Any future Ora endpoint must meter through the daily-quota
-helpers in `ora-usage.ts`, never `deductCreditsAtomic`.
+two unrelated products. Any future Ora endpoint must meter through the
+rolling-window helpers in `ora-usage.ts`, never `deductCreditsAtomic`.
 
 ## Quota enforcement must be atomic reserve-then-refund, reserved AFTER validation
 
-For the authed daily quota, use the **atomic** reserve helper (increment-if-under-
-limit in one SQL statement) and **refund on every path that does not complete the
-metered action** — model 502s, "not configured" branches, `catch` blocks, and even
-a bare `await import("../../lib/<module>")` that could throw (wrap those in
-try/catch + refund). A check-then-increment pattern races: concurrent requests
-overshoot the tier limit.
+For the authed window quota, use the **atomic** reserve helper (`consumeOraQuota`:
+INSERT...ON CONFLICT(user_id) DO UPDATE that resets the window when expired, else
+increments only when the bucket counter is under the tier limit, in one SQL
+statement) and **refund on every path that does not complete the metered action**
+— model 502s, "not configured" branches, `catch` blocks, and even a bare
+`await import("../../lib/<module>")` that could throw (wrap those in try/catch +
+refund). A check-then-increment pattern races: concurrent requests overshoot the
+tier limit.
 
 Two ordering rules that are easy to get wrong:
 
@@ -48,7 +59,7 @@ the anon cap is signaled before file/image validation.
 ## Caveat 1 — `/images/:id/edit` is SHARED but branches by origin
 
 Ora's inline image **edit** shares the Image Studio edit endpoint, but billing is
-decoupled by `origin`: `origin:"ora"` requests meter through the daily IMAGE quota
+decoupled by `origin`: `origin:"ora"` requests meter through the window IMAGE quota
 and NEVER deduct Builder credits; Image Studio edits (`origin:"image_studio"`)
 still charge credits. The `origin` discriminator is the single source of truth.
 
@@ -60,10 +71,10 @@ credit pricing is intentional. Any new shared image endpoint must branch the sam
 
 `GET|POST /public-ai/session` returns `imageCount`/`imageLimit` that mean different
 things: for anonymous users it's the per-session **upload** count; for authed users
-it's the **daily generated-image** count (from `getTodayOraUsage`).
+it's the **window generated-image** count (from `getOraUsage`).
 
 **Why:** uploads are unlimited for signed-in users, so the frontend upload
 affordance (`atImageLimit`/`atFileLimit`/`atAllLimits` in `ora-panel`/`ora-bubble`)
-must be gated by `!isSignedIn`. Otherwise an authed user who exhausts their daily
+must be gated by `!isSignedIn`. Otherwise an authed user who exhausts their window
 image-generation quota would have the upload button disabled — wrongly. The backend
 `upload.ts` likewise skips the session cap when `authed`.

@@ -58,6 +58,8 @@ export interface OraSession {
   imageLimit?: number;
   imageAnalysisCount?: number;
   imageAnalysisLimit?: number;
+  resetsAt?: string | null;
+  windowHours?: number;
 }
 
 export type UploadState = "idle" | "uploading" | "attached" | "error";

@@ -702,7 +702,27 @@ interface OraPlanUsage {
   msgLimit: number;
   imageCount?: number;
   imageLimit?: number;
+  resetsAt?: string | null;
+  windowHours?: number;
   tier?: string;
+}
+
+/**
+ * Format the time remaining until `resetsAt` as a compact countdown, e.g.
+ * "4h 32m". Returns null when there is no active window (full allowance
+ * available, timer not yet started).
+ */
+function formatWindowCountdown(resetsAt: string | null | undefined): string | null {
+  if (!resetsAt) return null;
+  const target = new Date(resetsAt).getTime();
+  if (Number.isNaN(target)) return null;
+  const ms = target - Date.now();
+  if (ms <= 0) return null;
+  const totalMinutes = Math.ceil(ms / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 interface BillingSubscription {
@@ -927,12 +947,12 @@ function PlanLimitsSection() {
   return (
     <SectionCard
       icon={Gauge}
-      title="Plan & daily limits"
-      description="Ora uses plan-based daily message and image limits."
+      title="Plan & usage limits"
+      description="Ora uses plan-based rolling-window message and image limits that refill together."
     >
       {!isSignedIn ? (
         <p className="text-sm text-muted-foreground">
-          Sign in to see your Ora plan and daily usage.
+          Sign in to see your Ora plan and usage.
         </p>
       ) : loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -958,7 +978,7 @@ function PlanLimitsSection() {
               <p className="mt-2 text-2xl font-bold">
                 {remaining(usage?.msgCount, usage?.msgLimit)}
               </p>
-              <p className="text-xs text-muted-foreground">left today of {usage?.msgLimit ?? 0}</p>
+              <p className="text-xs text-muted-foreground">left of {usage?.msgLimit ?? 0}</p>
             </div>
             <div className="rounded-lg border border-border/60 px-4 py-3">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -969,10 +989,21 @@ function PlanLimitsSection() {
                 {remaining(usage?.imageCount, usage?.imageLimit)}
               </p>
               <p className="text-xs text-muted-foreground">
-                left today of {usage?.imageLimit ?? 0}
+                left of {usage?.imageLimit ?? 0}
               </p>
             </div>
           </div>
+          {(() => {
+            const countdown = formatWindowCountdown(usage?.resetsAt);
+            return (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                {countdown
+                  ? `Messages and images refill together in ${countdown}`
+                  : "Full allowance available — your window starts on your next message"}
+              </p>
+            );
+          })()}
           <div className="flex flex-wrap gap-2 pt-1">
             {canUpgradeToCore && (
               <button

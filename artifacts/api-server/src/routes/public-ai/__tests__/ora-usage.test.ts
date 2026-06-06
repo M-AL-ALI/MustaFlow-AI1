@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // ─── Mock @workspace/db: keep the REAL tier limit constants + table object, but
-// replace `db` with an in-memory stub so the quota logic is exercised without a
-// live Postgres connection. importActual preserves TIER_DAILY_* so we genuinely
-// assert the shipped limits (free 20/3, core 30/10, wave 55/20). ────────────────
+// replace `db` with an in-memory stub so the rolling-window quota logic is
+// exercised without a live Postgres connection. importActual preserves
+// TIER_ORA_* so we genuinely assert the shipped limits (free 30/4, core 100/15,
+// wave 280/30). ────────────────────────────────────────────────────────────────
 // vi.mock factories are hoisted above top-level declarations, so the shared mock
 // state must live inside vi.hoisted to be referenceable from the factory.
 const h = vi.hoisted(() => {
+  const NOW = new Date("2026-06-06T12:00:00Z");
   const selectWhere = vi.fn<(...args: unknown[]) => Promise<unknown[]>>();
-  const returning = vi.fn().mockResolvedValue([{ messageCount: 1, imageCount: 0 }]);
+  const returning = vi
+    .fn()
+    .mockResolvedValue([{ messageCount: 1, imageCount: 0, windowStart: NOW }]);
   const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
   const updateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
   const capturedInsertValues: Array<Record<string, unknown>> = [];
@@ -26,9 +30,9 @@ const h = vi.hoisted(() => {
     }),
     update: () => ({ set: updateSet }),
   };
-  return { selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues, mockDb };
+  return { NOW, selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues, mockDb };
 });
-const { selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues } = h;
+const { NOW, selectWhere, onConflictDoUpdate, returning, updateSet, capturedInsertValues } = h;
 
 vi.mock("@workspace/db", async () => {
   const schema = await import("../../../../../../lib/db/src/schema/index");
@@ -36,149 +40,189 @@ vi.mock("@workspace/db", async () => {
 });
 
 import {
-  oraUsageDate,
-  getTodayOraUsage,
+  oraWindowHours,
+  getOraUsage,
   checkOraQuota,
   consumeOraQuota,
   refundOraQuota,
-  incrementOraMessage,
-  incrementOraImage,
   oraMessageFields,
 } from "../../../lib/public-ai/ora-usage";
 import { MSG_LIMIT_VALUE } from "../../../lib/public-ai/session";
 
+// A window_start far in the future of NOW is "active"; one well in the past is
+// "elapsed". We freeze Date so window math is deterministic.
+const ACTIVE_START = new Date("2026-06-06T11:00:00Z"); // 1h before NOW
+const ELAPSED_START = new Date("2026-06-06T00:00:00Z"); // 12h before NOW
+
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
   selectWhere.mockReset();
   selectWhere.mockResolvedValue([]);
   returning.mockReset();
-  returning.mockResolvedValue([{ messageCount: 1, imageCount: 0 }]);
+  returning.mockResolvedValue([{ messageCount: 1, imageCount: 0, windowStart: NOW }]);
   updateSet.mockClear();
   onConflictDoUpdate.mockClear();
   capturedInsertValues.length = 0;
 });
 
-describe("oraUsageDate — UTC calendar day", () => {
-  it("formats as YYYY-MM-DD in UTC", () => {
-    expect(oraUsageDate(new Date("2026-06-05T13:45:00Z"))).toBe("2026-06-05");
+describe("oraWindowHours — tier window lengths", () => {
+  it("maps each tier to its shipped window length", () => {
+    expect(oraWindowHours("free")).toBe(5);
+    expect(oraWindowHours("core")).toBe(3);
+    expect(oraWindowHours("wave")).toBe(3);
   });
 
-  it("rolls over at midnight UTC, not local time", () => {
-    // 23:30 UTC and 00:30 UTC of the next day are different buckets.
-    expect(oraUsageDate(new Date("2026-06-05T23:30:00Z"))).toBe("2026-06-05");
-    expect(oraUsageDate(new Date("2026-06-06T00:30:00Z"))).toBe("2026-06-06");
+  it("defaults an unknown tier to the free window", () => {
+    expect(oraWindowHours("enterprise-typo")).toBe(5);
   });
 });
 
-describe("getTodayOraUsage — tier limits + counts", () => {
-  it("maps each tier to its shipped daily limits", async () => {
-    const free = await getTodayOraUsage("u1", "free");
-    expect(free.messageLimit).toBe(20);
-    expect(free.imageLimit).toBe(3);
+describe("getOraUsage — tier limits + window counts", () => {
+  it("maps each tier to its shipped allowances", async () => {
+    const free = await getOraUsage("u1", "free");
+    expect(free.messageLimit).toBe(30);
+    expect(free.imageLimit).toBe(4);
+    expect(free.windowHours).toBe(5);
 
-    const core = await getTodayOraUsage("u1", "core");
-    expect(core.messageLimit).toBe(30);
-    expect(core.imageLimit).toBe(10);
+    const core = await getOraUsage("u1", "core");
+    expect(core.messageLimit).toBe(100);
+    expect(core.imageLimit).toBe(15);
+    expect(core.windowHours).toBe(3);
 
-    const wave = await getTodayOraUsage("u1", "wave");
-    expect(wave.messageLimit).toBe(55);
-    expect(wave.imageLimit).toBe(20);
+    const wave = await getOraUsage("u1", "wave");
+    expect(wave.messageLimit).toBe(280);
+    expect(wave.imageLimit).toBe(30);
+    expect(wave.windowHours).toBe(3);
   });
 
-  it("defaults an unknown tier to free limits", async () => {
-    const usage = await getTodayOraUsage("u1", "enterprise-typo");
-    expect(usage.messageLimit).toBe(20);
-    expect(usage.imageLimit).toBe(3);
+  it("defaults an unknown tier to free allowances", async () => {
+    const usage = await getOraUsage("u1", "enterprise-typo");
+    expect(usage.messageLimit).toBe(30);
+    expect(usage.imageLimit).toBe(4);
   });
 
-  it("returns zero counts when no row exists yet", async () => {
+  it("returns zero counts + null window when no row exists yet", async () => {
     selectWhere.mockResolvedValue([]);
-    const usage = await getTodayOraUsage("u1", "core");
+    const usage = await getOraUsage("u1", "core");
     expect(usage.messageCount).toBe(0);
     expect(usage.imageCount).toBe(0);
+    expect(usage.windowStart).toBeNull();
+    expect(usage.resetsAt).toBeNull();
   });
 
-  it("reflects stored counts when a row exists", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 7, imageCount: 2 }]);
-    const usage = await getTodayOraUsage("u1", "core");
+  it("reflects stored counts + resetsAt when an ACTIVE window row exists", async () => {
+    selectWhere.mockResolvedValue([
+      { messageCount: 7, imageCount: 2, windowStart: ACTIVE_START },
+    ]);
+    const usage = await getOraUsage("u1", "core");
     expect(usage.messageCount).toBe(7);
     expect(usage.imageCount).toBe(2);
+    expect(usage.windowStart).toBe(ACTIVE_START.toISOString());
+    // core window is 3h → resets 3h after the 11:00 start = 14:00Z.
+    expect(usage.resetsAt).toBe(new Date("2026-06-06T14:00:00Z").toISOString());
+  });
+
+  it("treats an ELAPSED window as fully reset (zeroed, no active window)", async () => {
+    selectWhere.mockResolvedValue([
+      { messageCount: 99, imageCount: 9, windowStart: ELAPSED_START },
+    ]);
+    const usage = await getOraUsage("u1", "core");
+    expect(usage.messageCount).toBe(0);
+    expect(usage.imageCount).toBe(0);
+    expect(usage.windowStart).toBeNull();
+    expect(usage.resetsAt).toBeNull();
   });
 
   it("fails open to zero counts when the table read throws", async () => {
     selectWhere.mockRejectedValue(new Error("relation does not exist"));
-    const usage = await getTodayOraUsage("u1", "wave");
+    const usage = await getOraUsage("u1", "wave");
     expect(usage.messageCount).toBe(0);
     expect(usage.imageCount).toBe(0);
     // Limits still resolve so enforcement remains correct.
-    expect(usage.messageLimit).toBe(55);
+    expect(usage.messageLimit).toBe(280);
   });
 });
 
 describe("checkOraQuota — bucket routing + cap", () => {
-  it("allows a message when under the message limit", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 19, imageCount: 0 }]);
+  it("allows a message when under the message limit in an active window", async () => {
+    selectWhere.mockResolvedValue([
+      { messageCount: 29, imageCount: 0, windowStart: ACTIVE_START },
+    ]);
     const res = await checkOraQuota("u1", "free", "message");
-    expect(res).toEqual({ allowed: true, used: 19, limit: 20, kind: "message" });
+    expect(res.allowed).toBe(true);
+    expect(res.used).toBe(29);
+    expect(res.limit).toBe(30);
+    expect(res.kind).toBe("message");
+    expect(res.resetsAt).toBe(new Date("2026-06-06T16:00:00Z").toISOString());
   });
 
   it("blocks a message exactly at the message limit", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 20, imageCount: 0 }]);
+    selectWhere.mockResolvedValue([
+      { messageCount: 30, imageCount: 0, windowStart: ACTIVE_START },
+    ]);
     const res = await checkOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(false);
-    expect(res.used).toBe(20);
-    expect(res.limit).toBe(20);
+    expect(res.used).toBe(30);
+    expect(res.limit).toBe(30);
   });
 
   it("routes the image bucket to the image counter/limit, independent of messages", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 99, imageCount: 3 }]);
+    selectWhere.mockResolvedValue([
+      { messageCount: 999, imageCount: 4, windowStart: ACTIVE_START },
+    ]);
     const res = await checkOraQuota("u1", "free", "image");
     expect(res.kind).toBe("image");
-    expect(res.used).toBe(3);
-    expect(res.limit).toBe(3);
+    expect(res.used).toBe(4);
+    expect(res.limit).toBe(4);
     expect(res.allowed).toBe(false); // image cap hit even though messages irrelevant
   });
 });
 
-describe("increment helpers — atomic upsert payloads", () => {
-  it("incrementOraMessage inserts a message=1/image=0 row and upserts", async () => {
-    await incrementOraMessage("u1");
-    expect(capturedInsertValues).toHaveLength(1);
-    expect(capturedInsertValues[0]).toMatchObject({
-      userId: "u1",
-      messageCount: 1,
-      imageCount: 0,
-    });
-    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-  });
-
-  it("incrementOraImage inserts a message=0/image=1 row and upserts", async () => {
-    await incrementOraImage("u1");
-    expect(capturedInsertValues).toHaveLength(1);
-    expect(capturedInsertValues[0]).toMatchObject({
-      userId: "u1",
-      messageCount: 0,
-      imageCount: 1,
-    });
-    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("consumeOraQuota", () => {
-  it("returns the atomic reservation result from the database", async () => {
-    returning.mockResolvedValue([{ messageCount: 20, imageCount: 0 }]);
+describe("consumeOraQuota — atomic reservation", () => {
+  it("inserts an opening row (window_start=now, counter=1) for the message bucket", async () => {
+    returning.mockResolvedValue([{ messageCount: 1, imageCount: 0, windowStart: NOW }]);
     const res = await consumeOraQuota("u1", "free", "message");
-    expect(res).toEqual({ allowed: true, used: 20, limit: 20, kind: "message" });
+    expect(res.allowed).toBe(true);
+    expect(res.used).toBe(1);
+    expect(res.limit).toBe(30);
+    expect(capturedInsertValues).toHaveLength(1);
+    expect(capturedInsertValues[0]).toMatchObject({ userId: "u1", messageCount: 1, imageCount: 0 });
+    // free window 5h → resets 5h after NOW (12:00Z) = 17:00Z.
+    expect(res.resetsAt).toBe(new Date("2026-06-06T17:00:00Z").toISOString());
     expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("inserts an opening row for the image bucket", async () => {
+    returning.mockResolvedValue([{ messageCount: 0, imageCount: 1, windowStart: NOW }]);
+    const res = await consumeOraQuota("u1", "free", "image");
+    expect(res.allowed).toBe(true);
+    expect(res.used).toBe(1);
+    expect(res.limit).toBe(4);
+    expect(capturedInsertValues[0]).toMatchObject({ userId: "u1", messageCount: 0, imageCount: 1 });
+  });
+
+  it("returns the atomic reservation result from the database", async () => {
+    returning.mockResolvedValue([{ messageCount: 30, imageCount: 0, windowStart: ACTIVE_START }]);
+    const res = await consumeOraQuota("u1", "free", "message");
+    expect(res.allowed).toBe(true);
+    expect(res.used).toBe(30);
+    expect(res.limit).toBe(30);
   });
 
   it("blocks when the conditional update did not reserve capacity", async () => {
     returning.mockResolvedValue([]);
-    selectWhere.mockResolvedValue([{ messageCount: 20, imageCount: 0 }]);
+    selectWhere.mockResolvedValue([
+      { messageCount: 30, imageCount: 0, windowStart: ACTIVE_START },
+    ]);
     const res = await consumeOraQuota("u1", "free", "message");
     expect(res.allowed).toBe(false);
-    expect(res.used).toBe(20);
+    expect(res.used).toBe(30);
+    expect(res.resetsAt).toBe(new Date("2026-06-06T16:00:00Z").toISOString());
   });
+});
 
+describe("refundOraQuota", () => {
   it("refunds quota best-effort without throwing", async () => {
     await refundOraQuota("u1", "image");
     expect(updateSet).toHaveBeenCalledTimes(1);
@@ -186,15 +230,21 @@ describe("consumeOraQuota", () => {
 });
 
 describe("oraMessageFields — anon vs authed", () => {
-  it("anonymous visitors get the per-session counter + session limit", async () => {
+  it("anonymous visitors get the per-session counter + session limit + null reset", async () => {
     const fields = await oraMessageFields(null, 4);
-    expect(fields).toEqual({ msgCount: 4, msgLimit: MSG_LIMIT_VALUE });
+    expect(fields).toEqual({ msgCount: 4, msgLimit: MSG_LIMIT_VALUE, resetsAt: null });
   });
 
-  it("signed-in users get today's daily message usage + tier limit", async () => {
-    selectWhere.mockResolvedValue([{ messageCount: 9, imageCount: 1 }]);
+  it("signed-in users get their rolling-window message usage + tier limit + reset", async () => {
+    selectWhere.mockResolvedValue([
+      { messageCount: 9, imageCount: 1, windowStart: ACTIVE_START },
+    ]);
     const fields = await oraMessageFields({ userId: "u1", tier: "core" }, 4);
-    expect(fields).toEqual({ msgCount: 9, msgLimit: 30 });
+    expect(fields).toEqual({
+      msgCount: 9,
+      msgLimit: 100,
+      resetsAt: new Date("2026-06-06T14:00:00Z").toISOString(),
+    });
   });
 });
 

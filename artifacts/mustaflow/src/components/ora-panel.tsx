@@ -1381,13 +1381,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                 <p className="text-xs text-muted-foreground">
                   {isSignedIn ? (
                     <>
-                      You&apos;ve hit today&apos;s message limit.{" "}
+                      You&apos;ve used your message allowance for this window.{" "}
                       <button
                         type="button"
                         onClick={() => setLocation("/pricing")}
                         className="text-[hsl(265_85%_65%)] hover:underline"
                       >
-                        Upgrade for more daily messages
+                        Upgrade for a higher limit
                       </button>
                     </>
                   ) : (

@@ -581,10 +581,11 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       const quota = await consumeOraQuota(userId, oraUser.tier, "image");
       if (!quota.allowed) {
         res.status(429).json({
-          error: `You've reached today's image limit (${quota.limit}/day) on your plan. Upgrade for more daily images, or come back tomorrow.`,
+          error: `You've used all ${quota.limit} Ora images in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
           upgradeCta: true,
           imageCount: quota.used,
           imageLimit: quota.limit,
+          resetsAt: quota.resetsAt,
         });
         return;
       }
