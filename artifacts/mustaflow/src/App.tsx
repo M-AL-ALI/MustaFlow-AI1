@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
 import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
+import { BUILDER_ENABLED } from "@/lib/builder-flag";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import {
@@ -384,8 +385,36 @@ function SmartSignedInRedirect() {
   //   null/unset → first-run mode chooser
   const mode = prefsQuery.data?.preferredMode ?? null;
   if (mode === "ora") return <Redirect to="/ora" />;
-  if (mode === "builder" || mode === "developer") return <Redirect to="/projects" />;
+  // Builder is gated behind BUILDER_ENABLED. While off, returning users whose
+  // saved preference is the builder land on the mode chooser (which shows the
+  // builder as "coming soon") rather than a locked /projects dashboard.
+  if (mode === "builder" || mode === "developer")
+    return <Redirect to={BUILDER_ENABLED ? "/projects" : "/mode-select"} />;
   return <Redirect to="/mode-select" />;
+}
+
+// Redirects builder-only routes to the mode chooser while the builder is gated,
+// with a toast explaining it's coming soon.
+function BuilderComingSoonRedirect() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    toast({
+      title: "AI Build Mode is coming soon",
+      description: "This experience is still under development. Try Ora in the meantime.",
+    });
+    setLocation("/mode-select", { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
+// Builder route guard — renders children only when BUILDER_ENABLED is true.
+// While the builder is off, every builder-only route bounces to mode-select.
+function BuilderGuard({ children }: { children: React.ReactNode }) {
+  if (!BUILDER_ENABLED) return <BuilderComingSoonRedirect />;
+  return <>{children}</>;
 }
 
 // Home: public landing for visitors; authenticated users redirect to their mode dashboard.
@@ -464,37 +493,47 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
               <Route path="/projects">
                 <Protected>
-                  <AppLayout>
-                    <ProjectsPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <ProjectsPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/projects/:id">
                 <Protected>
-                  <AppLayout>
-                    <ProjectWorkspacePage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <ProjectWorkspacePage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/knowledge">
                 <Protected>
-                  <AppLayout>
-                    <KnowledgePage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <KnowledgePage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/vault">
                 <Protected>
-                  <AppLayout>
-                    <VaultPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <VaultPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/memory">
                 <Protected>
-                  <AppLayout>
-                    <MemoryPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <MemoryPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/library">
@@ -504,95 +543,121 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
               <Route path="/settings">
                 <Protected>
-                  <AppLayout>
-                    <SettingsPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <SettingsPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/admin">
                 <Protected>
-                  <AdminGuard>
-                    <AppLayout>
-                      <AdminPage />
-                    </AppLayout>
-                  </AdminGuard>
+                  <BuilderGuard>
+                    <AdminGuard>
+                      <AppLayout>
+                        <AdminPage />
+                      </AppLayout>
+                    </AdminGuard>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/trash">
                 <Protected>
-                  <AppLayout>
-                    <TrashPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <TrashPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/billing">
                 <Protected>
-                  <AppLayout>
-                    <BillingPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <BillingPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/image-studio">
                 <Protected>
-                  <AppLayout>
-                    <ImageStudioPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <ImageStudioPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/published">
                 <Protected>
-                  <AppLayout>
-                    <PublishedPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <PublishedPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/integrations">
                 <Protected>
-                  <AppLayout>
-                    <IntegrationsPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <IntegrationsPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/security">
                 <Protected>
-                  <AppLayout>
-                    <SecurityPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <SecurityPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/learn">
                 <Protected>
-                  <AppLayout>
-                    <LearnPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <LearnPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/workspaces/:id/usage">
                 <Protected>
-                  <AppLayout>
-                    <WorkspaceUsagePage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <WorkspaceUsagePage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/workspaces/:id/domains">
                 <Protected>
-                  <AppLayout>
-                    <WorkspaceDomainsPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <WorkspaceDomainsPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/workspaces/:id/audit">
                 <Protected>
-                  <AppLayout>
-                    <WorkspaceAuditPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <WorkspaceAuditPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/account/domains">
                 <Protected>
-                  <AppLayout>
-                    <MyDomainsPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <MyDomainsPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/orgs/invites/:token">
@@ -602,16 +667,20 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               </Route>
               <Route path="/orgs/new">
                 <Protected>
-                  <AppLayout>
-                    <OrgNewPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <OrgNewPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
               <Route path="/orgs/:orgId">
                 <Protected>
-                  <AppLayout>
-                    <OrgSettingsPage />
-                  </AppLayout>
+                  <BuilderGuard>
+                    <AppLayout>
+                      <OrgSettingsPage />
+                    </AppLayout>
+                  </BuilderGuard>
                 </Protected>
               </Route>
 

@@ -4,7 +4,8 @@ import { useUpdateMyPreferences, getGetMyPreferencesQueryKey } from "@workspace/
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Sparkles, MessageCircle, ArrowRight, Loader2 } from "lucide-react";
+import { BUILDER_ENABLED } from "@/lib/builder-flag";
+import { Sparkles, MessageCircle, ArrowRight, Loader2, Lock } from "lucide-react";
 
 export default function ModeSelectPage() {
   const [, setLocation] = useLocation();
@@ -15,6 +16,7 @@ export default function ModeSelectPage() {
 
   async function handleSelect(mode: "builder" | "ora") {
     if (selecting) return;
+    if (mode === "builder" && !BUILDER_ENABLED) return;
     setSelecting(mode);
     try {
       await updatePreferences.mutateAsync({ data: { preferredMode: mode } });
@@ -73,6 +75,7 @@ export default function ModeSelectPage() {
             glowColor="shadow-primary/10"
             selecting={selecting}
             onSelect={handleSelect}
+            comingSoon={!BUILDER_ENABLED}
           />
 
           {/* Ora */}
@@ -103,6 +106,7 @@ interface ModeCardProps {
   glowColor: string;
   selecting: "builder" | "ora" | null;
   onSelect: (mode: "builder" | "ora") => void;
+  comingSoon?: boolean;
 }
 
 function ModeCard({
@@ -115,8 +119,41 @@ function ModeCard({
   glowColor,
   selecting,
   onSelect,
+  comingSoon = false,
 }: ModeCardProps) {
   const isSelecting = selecting === mode;
+
+  if (comingSoon) {
+    return (
+      <div
+        aria-disabled="true"
+        className="relative flex flex-col items-start gap-5 p-8 rounded-2xl border border-border bg-card text-left cursor-not-allowed select-none overflow-hidden"
+      >
+        <div className="relative z-10 flex flex-col gap-4 w-full opacity-60">
+          {/* Icon + badge */}
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center justify-center h-12 w-12 rounded-xl border border-border bg-muted/60">
+              <Icon className="h-6 w-6 text-foreground" />
+            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
+              <Lock className="h-3 w-3" />
+              Coming soon
+            </span>
+          </div>
+
+          {/* Text */}
+          <div>
+            <h2 className="text-xl font-bold tracking-tight mb-2">{title}</h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
+          </div>
+        </div>
+
+        <p className="relative z-10 text-xs font-medium text-muted-foreground/80">
+          Under development — not available just yet. Choose Ora to get started.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <button
