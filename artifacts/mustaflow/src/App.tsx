@@ -493,6 +493,11 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                   <OraNewProjectPage />
                 </Protected>
               </Route>
+              <Route path="/ora/projects/:projectId">
+                <Protected>
+                  <OraPage />
+                </Protected>
+              </Route>
               <Route path="/ora">
                 <Protected>
                   <OraPage />

@@ -16,14 +16,26 @@ import {
   Check,
   X,
   Folder,
+  FolderOpen,
   MessageSquare,
+  MoreHorizontal,
+  FolderInput,
   Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   useOraConversations,
   type OraConversationSummary,
+  type OraProjectSummary,
 } from "@/hooks/ora-conversations-context";
 
 // Ora is a standalone assistant — it must NOT link into the AI Builder's
@@ -184,19 +196,25 @@ function OraUserSection() {
   );
 }
 
-/** A single conversation row with inline rename + delete. */
+/** A single conversation row with inline rename + delete + move. */
 function ConversationRow({
   conversation,
   active,
   onSelect,
   onRename,
   onDelete,
+  projects,
+  onMove,
 }: {
   conversation: OraConversationSummary;
   active: boolean;
   onSelect: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
+  /** All of the user's projects, for the "Move to project" menu. */
+  projects: OraProjectSummary[];
+  /** Move this conversation to a project (or null for standalone). */
+  onMove: (projectId: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(conversation.title ?? "");
@@ -263,6 +281,47 @@ function ConversationRow({
         <span className="truncate">{label}</span>
       </button>
       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Move conversation"
+              className="p-1 text-muted-foreground hover:text-foreground"
+            >
+              <MoreHorizontal className="h-3 w-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel className="flex items-center gap-1.5 text-xs">
+              <FolderInput className="h-3.5 w-3.5" />
+              Move to
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {conversation.projectId != null ? (
+              <DropdownMenuItem onSelect={() => onMove(null)} className="text-xs">
+                <MessageSquare className="mr-2 h-3.5 w-3.5" />
+                Recent (no project)
+              </DropdownMenuItem>
+            ) : null}
+            {projects
+              .filter((p) => p.id !== conversation.projectId)
+              .map((p) => (
+                <DropdownMenuItem
+                  key={p.id}
+                  onSelect={() => onMove(p.id)}
+                  className="text-xs"
+                >
+                  <Folder className="mr-2 h-3.5 w-3.5" />
+                  <span className="truncate">{p.name}</span>
+                </DropdownMenuItem>
+              ))}
+            {projects.filter((p) => p.id !== conversation.projectId).length === 0 &&
+            conversation.projectId == null ? (
+              <DropdownMenuItem disabled className="text-xs">
+                No projects yet
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <button
           onClick={() => {
             setDraft(conversation.title ?? "");
@@ -291,8 +350,10 @@ function ProjectsSection({ close }: { close: () => void }) {
     projects,
     conversations,
     currentConversationId,
+    activeProjectId,
     selectConversation,
     newConversation,
+    moveConversation,
     renameConversation,
     deleteConversation,
     renameProject,
@@ -300,9 +361,22 @@ function ProjectsSection({ close }: { close: () => void }) {
   } = useOraConversations();
   const [, setLocation] = useLocation();
 
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(() =>
+    activeProjectId == null ? new Set() : new Set([activeProjectId]),
+  );
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+
+  // Always keep the active project expanded so its conversations are visible.
+  useEffect(() => {
+    if (activeProjectId == null) return;
+    setExpanded((prev) => {
+      if (prev.has(activeProjectId)) return prev;
+      const next = new Set(prev);
+      next.add(activeProjectId);
+      return next;
+    });
+  }, [activeProjectId]);
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -365,18 +439,41 @@ function ProjectsSection({ close }: { close: () => void }) {
                   </button>
                 </div>
               ) : (
-                <div className="group flex items-center rounded-md hover:bg-muted transition-colors">
+                <div
+                  className={cn(
+                    "group flex items-center rounded-md transition-colors",
+                    p.id === activeProjectId ? "bg-primary/10" : "hover:bg-muted",
+                  )}
+                >
+                  {/* Chevron toggles expand/collapse without entering. */}
                   <button
                     onClick={() => toggle(p.id)}
-                    title={p.description ?? undefined}
-                    className="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1.5 text-left text-xs font-medium text-foreground"
+                    aria-label={isOpen ? "Collapse project" : "Expand project"}
+                    className="pl-2 py-1.5 text-muted-foreground hover:text-foreground"
                   >
                     {isOpen ? (
-                      <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <ChevronDown className="h-3 w-3 shrink-0" />
                     ) : (
-                      <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <ChevronRight className="h-3 w-3 shrink-0" />
                     )}
-                    <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                  {/* The rest of the row enters the project (navigates). */}
+                  <button
+                    onClick={() => {
+                      setLocation(`/ora/projects/${p.id}`);
+                      close();
+                    }}
+                    title={p.description ?? undefined}
+                    className={cn(
+                      "flex-1 min-w-0 flex items-center gap-1.5 pl-1 pr-2 py-1.5 text-left text-xs font-medium",
+                      p.id === activeProjectId ? "text-primary" : "text-foreground",
+                    )}
+                  >
+                    {p.id === activeProjectId ? (
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    ) : (
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )}
                     <span className="min-w-0 flex flex-col">
                       <span className="truncate">{p.name}</span>
                       {p.description ? (
@@ -389,6 +486,7 @@ function ProjectsSection({ close }: { close: () => void }) {
                   <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
                     <button
                       onClick={() => {
+                        setLocation(`/ora/projects/${p.id}`);
                         newConversation(p.id);
                         close();
                       }}
@@ -411,7 +509,7 @@ function ProjectsSection({ close }: { close: () => void }) {
                       onClick={() => {
                         if (
                           window.confirm(
-                            "Delete this project? Its conversations will be kept as standalone chats.",
+                            "Delete this project? Conversations inside this project will be moved to Recent and will not be deleted.",
                           )
                         )
                           void deleteProject(p.id);
@@ -435,6 +533,8 @@ function ProjectsSection({ close }: { close: () => void }) {
                         key={c.id}
                         conversation={c}
                         active={c.id === currentConversationId}
+                        projects={projects}
+                        onMove={(projectId) => void moveConversation(c.id, projectId)}
                         onSelect={() => {
                           selectConversation(c.id);
                           close();
@@ -465,12 +565,16 @@ function ProjectsSection({ close }: { close: () => void }) {
  */
 function RecentConversationsSection({ close }: { close: () => void }) {
   const {
+    projects,
     conversations,
     currentConversationId,
     selectConversation,
+    newConversation,
+    moveConversation,
     renameConversation,
     deleteConversation,
   } = useOraConversations();
+  const [, setLocation] = useLocation();
 
   const [open, setOpen] = useState(true);
 
@@ -480,20 +584,35 @@ function RecentConversationsSection({ close }: { close: () => void }) {
 
   return (
     <div className="px-3 py-2">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="w-full flex items-center gap-1.5 px-2 pb-1 text-left"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Recent conversations
-        </span>
-      </button>
+      <div className="flex items-center justify-between px-2 pb-1">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex items-center gap-1.5 text-left"
+        >
+          {open ? (
+            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+          )}
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Recent conversations
+          </span>
+        </button>
+        {/* Distinct, explicit standalone new-chat action — always creates a
+            conversation with projectId === null, regardless of active project. */}
+        <button
+          onClick={() => {
+            setLocation("/ora");
+            newConversation(null);
+            close();
+          }}
+          aria-label="New standalone chat"
+          className="p-0.5 text-muted-foreground hover:text-foreground"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
 
       {open && (
         <div className="space-y-0.5">
@@ -505,6 +624,8 @@ function RecentConversationsSection({ close }: { close: () => void }) {
                 key={c.id}
                 conversation={c}
                 active={c.id === currentConversationId}
+                projects={projects}
+                onMove={(projectId) => void moveConversation(c.id, projectId)}
                 onSelect={() => {
                   selectConversation(c.id);
                   close();

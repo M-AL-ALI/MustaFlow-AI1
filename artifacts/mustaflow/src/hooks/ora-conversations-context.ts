@@ -23,10 +23,23 @@ export interface OraConversationsContextValue {
   projects: OraProjectSummary[];
   conversations: OraConversationSummary[];
   currentConversationId: number | null;
+  /**
+   * The project the user is currently inside, derived from the
+   * `/ora/projects/:projectId` route (the single source of truth). `null` on
+   * the standalone `/ora` view.
+   */
+  activeProjectId: number | null;
+  /** The active project's summary, or `null` when none/not yet loaded. */
+  activeProject: OraProjectSummary | null;
   loading: boolean;
   refresh: () => Promise<void>;
   selectConversation: (id: number | null) => void;
-  /** Reset to a blank chat. Optionally target a project for the next message. */
+  /**
+   * Reset to a blank chat for the next message.
+   *   - no argument → scope to the active project (route), if any.
+   *   - `null`      → an explicit standalone chat (`projectId = null`).
+   *   - a number    → that specific project.
+   */
   newConversation: (projectId?: number | null) => void;
   /** Create the current conversation if one doesn't exist yet (first message). */
   ensureConversation: (title: string) => Promise<number | null>;

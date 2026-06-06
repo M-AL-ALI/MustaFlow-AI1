@@ -48,10 +48,11 @@ export default function OraNewProjectPage() {
         return;
       }
       const data = (await res.json()) as { project: OraProjectSummary };
-      // Scope the next chat to the freshly created project so the first
-      // message is saved under it instead of as a standalone conversation.
+      // The project route is the source of truth for the active project. Keep
+      // the sessionStorage handoff as a non-authoritative fallback so first-
+      // message scoping still succeeds even if the route param is slow to apply.
       setPendingOraProjectId(data.project.id);
-      setLocation("/ora");
+      setLocation(`/ora/projects/${data.project.id}`);
     } catch {
       toast({
         title: "Could not create project",

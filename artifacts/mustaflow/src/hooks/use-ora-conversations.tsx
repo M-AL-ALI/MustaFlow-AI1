@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import { authFetch } from "@/lib/api-fetch";
 import { useClerkUser } from "@/lib/clerk-safe";
+import { useToast } from "@/hooks/use-toast";
+import {
+  resolveScopeProjectId,
+  shouldDeselectMovedConversation,
+  isActiveProjectValid,
+} from "@/lib/ora-project-scope";
 import {
   OraConversationsContext,
   type OraConversationSummary,
@@ -55,8 +62,21 @@ function getStoredCurrentId(): number | null {
   }
 }
 
-export function OraConversationsProvider({ children }: { children: React.ReactNode }) {
+export function OraConversationsProvider({
+  children,
+  activeProjectId = null,
+}: {
+  children: React.ReactNode;
+  /**
+   * The project the user is inside, derived from the `/ora/projects/:projectId`
+   * route. This is the single source of truth for the active project and
+   * survives reloads because it comes from the URL, not local/session state.
+   */
+  activeProjectId?: number | null;
+}) {
   const { isSignedIn } = useClerkUser();
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
   const [projects, setProjects] = useState<OraProjectSummary[]>([]);
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(() =>
@@ -66,7 +86,13 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
 
   const currentIdRef = useRef<number | null>(currentConversationId);
   currentIdRef.current = currentConversationId;
-  const pendingProjectIdRef = useRef<number | null>(null);
+  // Scope override for the NEXT new conversation:
+  //   undefined → defer to the active project (route)
+  //   null      → explicit standalone chat
+  //   number    → that specific project
+  const pendingProjectIdRef = useRef<number | null | undefined>(undefined);
+  const activeProjectIdRef = useRef<number | null>(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
   const creatingPromiseRef = useRef<Promise<number | null> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -128,14 +154,50 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
     }
   }, []);
 
+  // Route guard: if the active project (from the URL) is invalid or points at an
+  // archived/deleted project, redirect to /ora and surface a clear message. We
+  // must NOT silently fall through to standalone Ora and save chats as
+  // standalone. Wait until the project list has loaded before judging validity.
+  useEffect(() => {
+    if (loading) return;
+    if (activeProjectId == null) return;
+    if (!isActiveProjectValid(activeProjectId, projects)) {
+      toast({ title: "That project no longer exists" });
+      setLocation("/ora");
+    }
+  }, [loading, activeProjectId, projects, toast, setLocation]);
+
+  // Entering/leaving a project (route change) resets to a blank chat unless the
+  // currently-open conversation already belongs to the new active project — so
+  // the main view shows that project's home, never a chat from another project.
+  // Initialised to the mount value so a hard reload on /ora/projects/:id keeps
+  // any stored conversation selection rather than blanking it.
+  const prevActiveProjectRef = useRef<number | null>(activeProjectId);
+  useEffect(() => {
+    if (prevActiveProjectRef.current === activeProjectId) return;
+    prevActiveProjectRef.current = activeProjectId;
+    const current = conversations.find((c) => c.id === currentIdRef.current);
+    const currentProjectId = current?.projectId ?? null;
+    if (currentProjectId !== activeProjectId) {
+      pendingProjectIdRef.current = undefined;
+      setCurrentConversationId(null);
+      storeCurrentId(null);
+    }
+  }, [activeProjectId, conversations]);
+
   const selectConversation = useCallback((id: number | null) => {
-    pendingProjectIdRef.current = null;
+    // Selecting an existing conversation clears any pending new-chat scope.
+    pendingProjectIdRef.current = undefined;
     setCurrentConversationId(id);
     storeCurrentId(id);
   }, []);
 
   const newConversation = useCallback((projectId?: number | null) => {
-    pendingProjectIdRef.current = projectId ?? null;
+    // `projectId` may be a number (scope to it), null (explicit standalone) or
+    // undefined (defer to the active project route). Preserve the distinction —
+    // do NOT coalesce undefined→null, or a project-scoped "New conversation"
+    // would silently fall back to standalone.
+    pendingProjectIdRef.current = projectId;
     setCurrentConversationId(null);
     storeCurrentId(null);
   }, []);
@@ -152,14 +214,19 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               title: title.trim().slice(0, 120) || null,
-              projectId: pendingProjectIdRef.current ?? null,
+              // Route is the source of truth: when no explicit override was set,
+              // a first message persists under the active project (if any).
+              projectId: resolveScopeProjectId(
+                pendingProjectIdRef.current,
+                activeProjectIdRef.current,
+              ),
             }),
           });
           if (!res.ok) return null;
           const data = (await res.json()) as { conversation: OraConversationSummary };
           const id = data.conversation.id;
           currentIdRef.current = id;
-          pendingProjectIdRef.current = null;
+          pendingProjectIdRef.current = undefined;
           setCurrentConversationId(id);
           storeCurrentId(id);
           void refresh();
@@ -221,6 +288,19 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ projectId }),
         });
+        // If the open conversation just left the active project, deselect it so
+        // the UI never shows a chat inside the wrong project.
+        if (
+          shouldDeselectMovedConversation(
+            id,
+            currentIdRef.current,
+            projectId,
+            activeProjectIdRef.current,
+          )
+        ) {
+          setCurrentConversationId(null);
+          storeCurrentId(null);
+        }
         await refresh();
       } catch {
         /* best-effort */
@@ -276,10 +356,17 @@ export function OraConversationsProvider({ children }: { children: React.ReactNo
     [refresh],
   );
 
+  const activeProject = useMemo(
+    () => (activeProjectId == null ? null : (projects.find((p) => p.id === activeProjectId) ?? null)),
+    [activeProjectId, projects],
+  );
+
   const value: OraConversationsContextValue = {
     projects,
     conversations,
     currentConversationId,
+    activeProjectId,
+    activeProject,
     loading,
     refresh,
     selectConversation,
