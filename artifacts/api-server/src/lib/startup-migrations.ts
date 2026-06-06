@@ -3292,6 +3292,17 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-knowledge-origin (Ora ↔ Builder isolation) ──────────────────────
+  {
+    name: "migrate-knowledge-origin",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS origin TEXT`);
+      await client.query(`UPDATE knowledge_entries SET origin = 'builder' WHERE origin IS NULL`);
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

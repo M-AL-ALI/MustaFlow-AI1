@@ -18,6 +18,20 @@ export async function fetchOraMemories(): Promise<OraMemory[]> {
   return data.memories;
 }
 
+export async function createOraMemory(patch: {
+  title: string;
+  content?: string;
+}): Promise<OraMemory> {
+  const res = await authFetch(`${BASE}/api/ora/memories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Failed to create memory (${res.status})`);
+  const data = (await res.json()) as { memory: OraMemory };
+  return data.memory;
+}
+
 export async function updateOraMemory(
   id: number,
   patch: { title?: string; content?: string; enabled?: boolean },

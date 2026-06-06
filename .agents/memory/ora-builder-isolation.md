@@ -9,11 +9,15 @@ Ora (standalone assistant, `/ora`, served by `public-ai/*` routes + `lib/public-
 
 ## The rule that prevents silent leakage
 
-**Ora's prompt context may inject ONLY user-scoped knowledge (`knowledge_entries.scope = "user"`), never project-scoped (`scope = "project"`).** Project-scoped entries are the Builder's Knowledge Vault, auto-populated by build/refine — injecting them into Ora leaks Builder project knowledge into Ora.
+**Ora may surface/inject ONLY user-approved Ora memories: `knowledge_entries.scope = "user"` AND `origin = "ora"`.** `scope='user'` alone is NOT enough — the Builder also writes user-scope rows (`inferStylePreferences` style_memory, brand profile) that are Builder Knowledge Vault data and must stay out of Ora. The `origin` column (`ora|builder|system|legacy`) is the provenance marker that splits them.
 
-**Why:** `public-ai/chat.ts buildMemoryContext()` previously accepted a `projectId` and OR-ed in `scope='project'` entries for owned projects. The official Ora client never sent `projectId`, so it was dormant, but the endpoint contract allowed the leak. Fixed by removing `projectId` plumbing entirely; `buildMemoryContext(userId)` now filters `scope='user'` only.
+**Why:** the original isolation only filtered `scope='user'`, but all existing user-scope rows were Builder-generated `style_memory` notes (from `inferStylePreferences`) — there was no Ora write path at all, so the new "Saved Memories" tab leaked Builder engineering notes. Fixed by adding `origin`: every Builder insert is tagged `origin='builder'`, the only Ora write path (`POST /ora/memories`) tags `origin='ora'`, and all existing rows were backfilled to `'builder'` (hidden from Ora, never deleted — Builder still uses them).
 
-**How to apply:** Any future change to Ora context assembly must keep the `scope='user'` filter. Never reintroduce a `projectId` path into `/public-ai/chat`. `knowledge_entries.scope` defaults to `"project"`, so an unscoped query would pull Builder data.
+**How to apply:**
+- Any new Ora read path (`ora-memories.ts` userScope, `chat.ts buildMemoryContext`) MUST filter `eq(origin, "ora")` on top of `scope='user'`.
+- Any new Builder insert into `knowledge_entries` MUST set `origin: "builder"` (or `"system"` for auto-promotion). `origin` is nullable and defaults to null, so an untagged insert is invisible to Ora but also won't be hidden if a read path forgets the filter — both ends must hold.
+- Never reintroduce a `projectId` path into `/public-ai/chat`. `knowledge_entries.scope` defaults to `"project"`, so an unscoped query would pull Builder data.
+- The in-chat `ora-memory-manager.tsx` reads `/api/knowledge?scope=user` and filters `type==='note'` client-side; Builder user-scope rows are `type='style_memory'` so they don't leak there, but this is a second Ora surface to keep in mind.
 
 ## Confirmed-isolated surfaces (safe)
 

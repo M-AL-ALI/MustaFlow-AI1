@@ -68,10 +68,11 @@ const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKIN
  * to inject.
  *
  * ISOLATION: Ora is a standalone assistant kept fully separate from the AI
- * Builder. This intentionally injects ONLY user-scoped Ora memories
- * (scope="user"). It must never pull project-scoped Knowledge Vault entries
- * (scope="project", auto-populated by the Builder's build/refine pipeline) into
- * Ora's context — doing so would leak Builder project knowledge into Ora.
+ * Builder. This intentionally injects ONLY user-approved Ora memories
+ * (scope="user" AND origin="ora"). It must never pull AI Builder Knowledge Vault
+ * entries — neither project-scoped build/refine notes nor Builder-generated
+ * user-scope style memories / brand profiles (origin="builder") — into Ora's
+ * context, which would leak Builder engineering knowledge into Ora.
  */
 async function buildMemoryContext(userId: string): Promise<string> {
   try {
@@ -85,6 +86,7 @@ async function buildMemoryContext(userId: string): Promise<string> {
         and(
           eq(knowledgeEntriesTable.userId, userId),
           eq(knowledgeEntriesTable.scope, "user"),
+          eq(knowledgeEntriesTable.origin, "ora"),
           // Respect the Memory Center "pause" toggle: paused memories are kept
           // but excluded from Ora's context.
           eq(knowledgeEntriesTable.enabled, true),

@@ -211,6 +211,8 @@ router.post("/knowledge", async (req, res): Promise<void> => {
       scope: body.scope ?? "project",
       tags: body.tags ? body.tags.join(",") : null,
       approvedForReuse: false,
+      // AI Builder Knowledge Vault provenance — never surfaced by Ora.
+      origin: "builder",
     })
     .returning(publicKnowledgeColumns);
 
@@ -507,6 +509,8 @@ router.post("/knowledge/import", async (req, res): Promise<void> => {
     isPublic: entry.isPublic ?? false,
     userId,
     projectId: null as number | null,
+    // Imported into the AI Builder Knowledge Vault — hidden from Ora Memory.
+    origin: "builder" as const,
   }));
 
   const rows = await db
@@ -680,6 +684,8 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
       projectId: null,
       annotation,
       approvedForReuse: false,
+      // Builder brand profile — hidden from Ora Memory.
+      origin: "builder",
     })
     .returning();
 

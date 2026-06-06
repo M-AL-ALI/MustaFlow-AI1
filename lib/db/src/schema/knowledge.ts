@@ -36,6 +36,16 @@ export type KnowledgeSeverity = (typeof KNOWLEDGE_SEVERITIES)[number];
 export const KNOWLEDGE_SCOPES = ["user", "project", "org", "global"] as const;
 export type KnowledgeScope = (typeof KNOWLEDGE_SCOPES)[number];
 
+/**
+ * Where an entry originated. Used to keep Ora Memory and the AI Builder
+ * Knowledge Vault separate: only `origin = "ora"` entries are ever surfaced or
+ * injected by Ora. Builder-generated knowledge is tagged "builder"; auto-promoted
+ * cross-user knowledge is "system"; rows that predate this column are backfilled
+ * to "builder" and stay hidden from Ora.
+ */
+export const KNOWLEDGE_ORIGINS = ["ora", "builder", "system", "legacy"] as const;
+export type KnowledgeOrigin = (typeof KNOWLEDGE_ORIGINS)[number];
+
 export interface DiffSummary {
   filesAdded: string[];
   filesModified: string[];
@@ -88,6 +98,10 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   enabled: boolean("enabled").notNull().default(true),
   // Ora Memory Center: the Ora conversation a memory was captured from (if any).
   sourceConversationId: integer("source_conversation_id"),
+  // Provenance marker. "ora" = user-approved Ora memory (the only origin Ora
+  // shows/injects); "builder"/"system" = AI Builder Knowledge Vault (hidden from
+  // Ora). Null on legacy rows until the backfill migration runs.
+  origin: text("origin").$type<KnowledgeOrigin>(),
   // Soft-delete: when set, the entry is archived and hidden by default
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   // When set, this entry's contributor has already been rewarded for crossing

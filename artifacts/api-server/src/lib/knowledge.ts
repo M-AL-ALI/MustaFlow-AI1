@@ -184,6 +184,8 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
         tags: tagsCsv,
         approvedForReuse: opts.approvedForReuse ?? false,
         diffSummary: opts.diffSummary ?? null,
+        // AI Builder Knowledge Vault provenance — never surfaced by Ora.
+        origin: "builder",
         // Include the embedding directly if already generated — skip the post-insert async update
         ...(embedding !== null ? { embedding } : {}),
       })
@@ -353,6 +355,8 @@ Extract 3–8 distinct, confident preferences. Only include preferences you can 
         userId,
         projectId: null as number | null,
         approvedForReuse: false,
+        // Builder-inferred style memory — hidden from Ora Memory.
+        origin: "builder" as const,
       })),
     )
     .returning({ id: knowledgeEntriesTable.id });

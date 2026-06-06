@@ -8,10 +8,11 @@ const router = Router();
 
 /* ─── Ora saved memories ──────────────────────────────────────────────────────
  *
- * ISOLATION: Ora memories are stored in `knowledge_entries` with scope="user".
- * Every query here filters BOTH `userId` AND `scope = "user"` so the Memory
- * Center can never read, edit, or delete project-scoped Knowledge Vault entries
- * (scope="project", owned by the AI Builder). Mirrors the isolation rule in
+ * ISOLATION: Ora memories are stored in `knowledge_entries` with scope="user"
+ * AND origin="ora". Every query here filters by all three (userId, scope=user,
+ * origin=ora) so the Memory Center can never read, edit, or delete AI Builder
+ * Knowledge Vault entries — including Builder-generated user-scope style memories
+ * and brand profiles (origin="builder"). Mirrors the isolation rule in
  * buildMemoryContext (routes/public-ai/chat.ts).
  */
 
@@ -19,6 +20,7 @@ const userScope = (userId: string) =>
   and(
     eq(knowledgeEntriesTable.userId, userId),
     eq(knowledgeEntriesTable.scope, "user"),
+    eq(knowledgeEntriesTable.origin, "ora"),
     isNull(knowledgeEntriesTable.archivedAt),
   );
 
@@ -45,6 +47,51 @@ router.get("/ora/memories", async (req, res) => {
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to list memories");
     res.status(500).json({ error: "Failed to load memories" });
+  }
+});
+
+const createMemorySchema = z.object({
+  title: z.string().trim().min(1).max(MAX_TITLE),
+  content: z.string().trim().max(MAX_CONTENT).optional(),
+});
+
+// Create a new Ora memory (user-approved save). Always tagged origin="ora",
+// scope="user", type="note" so it is isolated from the AI Builder Knowledge Vault.
+router.post("/ora/memories", async (req, res) => {
+  const userId = req.userId!;
+  const parsed = createMemorySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .insert(knowledgeEntriesTable)
+      .values({
+        title: parsed.data.title,
+        content: parsed.data.content ?? "",
+        type: "note",
+        category: "note",
+        severity: "info",
+        scope: "user",
+        origin: "ora",
+        userId,
+        projectId: null,
+        enabled: true,
+        approvedForReuse: false,
+      })
+      .returning({
+        id: knowledgeEntriesTable.id,
+        title: knowledgeEntriesTable.title,
+        content: knowledgeEntriesTable.content,
+        enabled: knowledgeEntriesTable.enabled,
+        sourceConversationId: knowledgeEntriesTable.sourceConversationId,
+        createdAt: knowledgeEntriesTable.createdAt,
+      });
+    res.status(201).json({ memory: row });
+  } catch (err) {
+    logger.error({ component: "ora-memories", err }, "Failed to create memory");
+    res.status(500).json({ error: "Failed to create memory" });
   }
 });
 
