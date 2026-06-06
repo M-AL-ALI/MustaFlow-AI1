@@ -120,6 +120,80 @@ export interface EscalateSupportOutput {
   supportEmailUsed?: string | null;
 }
 
+export interface SupportTicketAttachment {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}
+
+export type SupportTicketSummaryStatus = typeof SupportTicketSummaryStatus[keyof typeof SupportTicketSummaryStatus];
+
+
+export const SupportTicketSummaryStatus = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+  closed: 'closed',
+} as const;
+
+export type SupportTicketSummaryEmailStatus = typeof SupportTicketSummaryEmailStatus[keyof typeof SupportTicketSummaryEmailStatus];
+
+
+export const SupportTicketSummaryEmailStatus = {
+  sent: 'sent',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export interface SupportTicketSummary {
+  id: number;
+  subject: string;
+  category: string;
+  status: SupportTicketSummaryStatus;
+  projectId?: number | null;
+  attachmentCount: number;
+  emailStatus: SupportTicketSummaryEmailStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportTicketsOutput {
+  tickets: SupportTicketSummary[];
+}
+
+export type SupportTicketDetailStatus = typeof SupportTicketDetailStatus[keyof typeof SupportTicketDetailStatus];
+
+
+export const SupportTicketDetailStatus = {
+  new: 'new',
+  open: 'open',
+  resolved: 'resolved',
+  closed: 'closed',
+} as const;
+
+export type SupportTicketDetailEmailStatus = typeof SupportTicketDetailEmailStatus[keyof typeof SupportTicketDetailEmailStatus];
+
+
+export const SupportTicketDetailEmailStatus = {
+  sent: 'sent',
+  skipped: 'skipped',
+  failed: 'failed',
+} as const;
+
+export interface SupportTicketDetail {
+  id: number;
+  subject: string;
+  category: string;
+  status: SupportTicketDetailStatus;
+  projectId?: number | null;
+  emailStatus: SupportTicketDetailEmailStatus;
+  createdAt: string;
+  updatedAt: string;
+  transcript: SupportMessage[];
+  attachments: SupportTicketAttachment[];
+}
+
 export type BrainstormMessageRole = typeof BrainstormMessageRole[keyof typeof BrainstormMessageRole];
 
 

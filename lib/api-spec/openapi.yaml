@@ -6741,6 +6741,57 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
 
+  /help/support/tickets:
+    get:
+      operationId: listSupportTickets
+      tags: [help]
+      summary: List the signed-in user's own support tickets.
+      responses:
+        "200":
+          description: Support ticket summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportTicketsOutput"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /help/support/tickets/{id}:
+    get:
+      operationId: getSupportTicket
+      tags: [help]
+      summary: Read a single support ticket (only when it belongs to the requester).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Support ticket detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportTicketDetail"
+        "400":
+          description: Invalid ticket id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "404":
+          description: Ticket not found or not owned by the requester
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   /help/support/escalate:
     post:
       operationId: escalateSupport
@@ -6914,6 +6965,69 @@ components:
         supportEmailUsed:
           type: string
           nullable: true
+
+    SupportTicketAttachment:
+      type: object
+      required: [fileName, mimeType, size, url]
+      properties:
+        fileName: { type: string }
+        mimeType: { type: string }
+        size: { type: integer }
+        url: { type: string }
+
+    SupportTicketSummary:
+      type: object
+      required: [id, subject, category, status, attachmentCount, emailStatus, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        subject: { type: string }
+        category: { type: string }
+        status:
+          type: string
+          enum: [new, open, resolved, closed]
+        projectId:
+          type: integer
+          nullable: true
+        attachmentCount: { type: integer }
+        emailStatus:
+          type: string
+          enum: [sent, skipped, failed]
+        createdAt: { type: string }
+        updatedAt: { type: string }
+
+    SupportTicketsOutput:
+      type: object
+      required: [tickets]
+      properties:
+        tickets:
+          type: array
+          items: { $ref: "#/components/schemas/SupportTicketSummary" }
+
+    SupportTicketDetail:
+      type: object
+      required:
+        [id, subject, category, status, emailStatus, createdAt, updatedAt, transcript, attachments]
+      properties:
+        id: { type: integer }
+        subject: { type: string }
+        category: { type: string }
+        status:
+          type: string
+          enum: [new, open, resolved, closed]
+        projectId:
+          type: integer
+          nullable: true
+        emailStatus:
+          type: string
+          enum: [sent, skipped, failed]
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        transcript:
+          type: array
+          items: { $ref: "#/components/schemas/SupportMessage" }
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/SupportTicketAttachment" }
 
     BrainstormMessage:
       type: object

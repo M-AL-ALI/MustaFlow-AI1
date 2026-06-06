@@ -423,6 +423,120 @@ router.get("/help/support/conversations", async (req, res) => {
   }
 });
 
+/* ─── My support tickets (read-only, owner-scoped) ──────────────────────────── */
+
+function ticketAttachmentCount(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+// ── GET /help/support/tickets (AUTH) ──────────────────────────────────────────
+// Lists the signed-in user's own support tickets. Strictly scoped by the
+// authenticated userId (never the request body) — see the ownership contract in
+// support-ticket-ownership-isolation.test.ts.
+router.get("/help/support/tickets", async (req, res) => {
+  const authed = await resolveAuthedOraUser(req);
+  if (!authed) {
+    res.status(401).json({ error: "Sign in to view your support tickets." });
+    return;
+  }
+  try {
+    const rows = await db
+      .select({
+        id: supportTicketsTable.id,
+        subject: supportTicketsTable.subject,
+        category: supportTicketsTable.category,
+        status: supportTicketsTable.status,
+        projectId: supportTicketsTable.projectId,
+        attachments: supportTicketsTable.attachments,
+        emailStatus: supportTicketsTable.emailStatus,
+        createdAt: supportTicketsTable.createdAt,
+        updatedAt: supportTicketsTable.updatedAt,
+      })
+      .from(supportTicketsTable)
+      .where(eq(supportTicketsTable.userId, authed.userId))
+      .orderBy(desc(supportTicketsTable.createdAt))
+      .limit(200);
+
+    res.json({
+      tickets: rows.map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        category: r.category,
+        status: r.status,
+        projectId: r.projectId,
+        attachmentCount: ticketAttachmentCount(r.attachments),
+        emailStatus: r.emailStatus,
+        createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
+        updatedAt: r.updatedAt?.toISOString?.() ?? String(r.updatedAt),
+      })),
+    });
+  } catch (err) {
+    logger.error({ component: "help-support", err }, "Failed to list support tickets");
+    res.status(500).json({ error: "Failed to load support tickets" });
+  }
+});
+
+// ── GET /help/support/tickets/:id (AUTH) ──────────────────────────────────────
+// Returns a single ticket ONLY when it belongs to the requester; 404 otherwise
+// (no existence leak across accounts).
+router.get("/help/support/tickets/:id", async (req, res) => {
+  const authed = await resolveAuthedOraUser(req);
+  if (!authed) {
+    res.status(401).json({ error: "Sign in to view your support tickets." });
+    return;
+  }
+  const ticketId = Number(req.params.id);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    res.status(400).json({ error: "Invalid ticket id" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .select()
+      .from(supportTicketsTable)
+      .where(
+        and(eq(supportTicketsTable.id, ticketId), eq(supportTicketsTable.userId, authed.userId)),
+      )
+      .limit(1);
+
+    if (!row) {
+      res.status(404).json({ error: "Support ticket not found" });
+      return;
+    }
+
+    const transcript = Array.isArray(row.transcript)
+      ? (row.transcript as { role: string; content: string }[]).filter(
+          (m) =>
+            m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+        )
+      : [];
+    const attachments = Array.isArray(row.attachments)
+      ? (row.attachments as { fileName?: string; mimeType?: string; size?: number; url?: string }[])
+      : [];
+
+    res.json({
+      id: row.id,
+      subject: row.subject,
+      category: row.category,
+      status: row.status,
+      projectId: row.projectId,
+      emailStatus: row.emailStatus,
+      createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
+      updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+      transcript: transcript.map((m) => ({ role: m.role, content: m.content })),
+      attachments: attachments.map((a) => ({
+        fileName: String(a.fileName ?? "attachment"),
+        mimeType: String(a.mimeType ?? "application/octet-stream"),
+        size: typeof a.size === "number" ? a.size : 0,
+        url: typeof a.url === "string" ? a.url : "",
+      })),
+    });
+  } catch (err) {
+    logger.error({ component: "help-support", err }, "Failed to load support ticket");
+    res.status(500).json({ error: "Failed to load support ticket" });
+  }
+});
+
 /* ─── Escalation (persist ticket BEFORE email) ──────────────────────────────── */
 
 const ALLOWED_ATTACHMENT_MIME = new Set([

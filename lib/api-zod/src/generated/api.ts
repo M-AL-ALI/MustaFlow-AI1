@@ -7464,6 +7464,53 @@ export const ListSupportConversationsResponse = zod.object({
 
 
 /**
+ * @summary List the signed-in user's own support tickets.
+ */
+export const ListSupportTicketsResponse = zod.object({
+  "tickets": zod.array(zod.object({
+  "id": zod.number(),
+  "subject": zod.string(),
+  "category": zod.string(),
+  "status": zod.enum(['new', 'open', 'resolved', 'closed']),
+  "projectId": zod.number().nullish(),
+  "attachmentCount": zod.number(),
+  "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Read a single support ticket (only when it belongs to the requester).
+ */
+export const GetSupportTicketParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetSupportTicketResponse = zod.object({
+  "id": zod.number(),
+  "subject": zod.string(),
+  "category": zod.string(),
+  "status": zod.enum(['new', 'open', 'resolved', 'closed']),
+  "projectId": zod.number().nullish(),
+  "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string(),
+  "transcript": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})),
+  "attachments": zod.array(zod.object({
+  "fileName": zod.string(),
+  "mimeType": zod.string(),
+  "size": zod.number(),
+  "url": zod.string()
+}))
+})
+
+
+/**
  * @summary Escalate a support conversation to a human (creates a ticket + email).
  */
 

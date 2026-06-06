@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   ImagePlus,
   MessageCircle,
+  LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { name: "Image Studio", href: "/image-studio", icon: ImagePlus },
   { name: "Knowledge Vault", href: "/vault", icon: BookOpen },
   { name: "Billing", href: "/billing", icon: CreditCard },
+  { name: "Support tickets", href: "/support/tickets", icon: LifeBuoy },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

@@ -38,6 +38,7 @@ import TermsPage from "./pages/terms";
 import PrivacyPage from "./pages/privacy";
 import HelpPage from "./pages/help";
 import HelpDomainsApiPage from "./pages/help-domains-api";
+import SupportTicketsPage from "./pages/support-tickets";
 import StatusPage from "./pages/status";
 import AdminPage from "./pages/admin";
 import SupportInboxPage from "./pages/support-inbox";
@@ -764,6 +765,20 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 <AppLayout>
                   <HelpDomainsApiPage />
                 </AppLayout>
+              </Route>
+              <Route path="/support/tickets/:id">
+                <Protected>
+                  <AppLayout>
+                    <SupportTicketsPage />
+                  </AppLayout>
+                </Protected>
+              </Route>
+              <Route path="/support/tickets">
+                <Protected>
+                  <AppLayout>
+                    <SupportTicketsPage />
+                  </AppLayout>
+                </Protected>
               </Route>
               <Route path="/status">
                 <AppLayout>
