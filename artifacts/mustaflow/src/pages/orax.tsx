@@ -101,6 +101,8 @@ type OraxApproval = {
     paths?: string[];
     branch?: string;
     reason?: string | null;
+    artifactId?: number;
+    scope?: string;
   };
   result?: {
     branch?: string;
@@ -145,6 +147,19 @@ type OraxArtifact = {
     skipped?: Array<{ path: string; reason: string }>;
     model?: string;
     generatedAt?: string;
+    sourceArtifactId?: number;
+    validatedAt?: string;
+    applied?: boolean;
+    changedFiles?: Array<{
+      path: string;
+      beforeBytes: number;
+      afterBytes: number;
+      additions: number;
+      deletions: number;
+    }>;
+    checks?: Array<{ name: string; status: string; message: string }>;
+    errors?: string[];
+    testPreview?: Array<{ name: string; status: string; message: string }>;
   };
   createdAt: string;
   updatedAt: string;
@@ -189,8 +204,12 @@ export default function OraxPage() {
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [requestingApproval, setRequestingApproval] = useState(false);
+  const [requestingSandboxApprovalArtifactId, setRequestingSandboxApprovalArtifactId] = useState<
+    number | null
+  >(null);
   const [decidingApprovalId, setDecidingApprovalId] = useState<number | null>(null);
   const [readingApprovalId, setReadingApprovalId] = useState<number | null>(null);
+  const [runningSandboxApprovalId, setRunningSandboxApprovalId] = useState<number | null>(null);
   const [generatingArtifactApprovalId, setGeneratingArtifactApprovalId] = useState<number | null>(
     null,
   );
@@ -208,7 +227,9 @@ export default function OraxPage() {
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
-  const latestArtifact = artifacts[0] ?? null;
+  const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
+  const latestSandboxResult =
+    artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -539,6 +560,61 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not generate draft patch");
     } finally {
       setGeneratingArtifactApprovalId(null);
+    }
+  }
+
+  async function requestSandboxApproval(artifactId: number) {
+    if (!selectedTask || requestingSandboxApprovalArtifactId) return;
+    setRequestingSandboxApprovalArtifactId(artifactId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/sandbox-approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          reason: "Validate the draft patch in an isolated sandbox before any GitHub action.",
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not request sandbox approval");
+      }
+      const body = (await res.json()) as { approval: OraxApproval };
+      setApprovals((prev) => [body.approval, ...prev]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not request sandbox approval");
+    } finally {
+      setRequestingSandboxApprovalArtifactId(null);
+    }
+  }
+
+  async function runSandboxValidation(approvalId: number) {
+    if (runningSandboxApprovalId) return;
+    setRunningSandboxApprovalId(approvalId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/approvals/${approvalId}/run-sandbox`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not run sandbox validation");
+      }
+      const body = (await res.json()) as { approval: OraxApproval; artifact: OraxArtifact };
+      setApprovals((prev) =>
+        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
+      );
+      setArtifacts((prev) => [
+        body.artifact,
+        ...prev.filter((artifact) => artifact.id !== body.artifact.id),
+      ]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not run sandbox validation");
+    } finally {
+      setRunningSandboxApprovalId(null);
     }
   }
 
@@ -956,8 +1032,15 @@ export default function OraxPage() {
                               {approval.action} - {approval.status}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              {(approval.request.paths ?? []).join(", ")}
+                              {approval.action === "read_files"
+                                ? (approval.request.paths ?? []).join(", ")
+                                : `Draft artifact #${approval.request.artifactId ?? "unknown"}`}
                             </div>
+                            {approval.request.scope ? (
+                              <div className="mt-2 text-xs text-muted-foreground">
+                                {approval.request.scope}
+                              </div>
+                            ) : null}
                             {approval.riskSummary ? (
                               <div className="mt-2 text-xs text-muted-foreground">
                                 {approval.riskSummary}
@@ -985,7 +1068,7 @@ export default function OraxPage() {
                                 </button>
                               </>
                             ) : null}
-                            {approval.status === "approved" ? (
+                            {approval.action === "read_files" && approval.status === "approved" ? (
                               <button
                                 onClick={() => void readApprovedFiles(approval.id)}
                                 disabled={readingApprovalId === approval.id}
@@ -999,7 +1082,8 @@ export default function OraxPage() {
                                 Read files
                               </button>
                             ) : null}
-                            {["approved", "completed"].includes(approval.status) ? (
+                            {approval.action === "read_files" &&
+                            ["approved", "completed"].includes(approval.status) ? (
                               <button
                                 onClick={() => void generateDraftPatch(approval.id)}
                                 disabled={generatingArtifactApprovalId === approval.id}
@@ -1011,6 +1095,20 @@ export default function OraxPage() {
                                   <Code2 className="h-3.5 w-3.5" />
                                 )}
                                 Generate draft patch
+                              </button>
+                            ) : null}
+                            {approval.action === "sandbox_run" && approval.status === "approved" ? (
+                              <button
+                                onClick={() => void runSandboxValidation(approval.id)}
+                                disabled={runningSandboxApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                              >
+                                {runningSandboxApprovalId === approval.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Play className="h-3.5 w-3.5" />
+                                )}
+                                Run sandbox
                               </button>
                             ) : null}
                           </div>
@@ -1068,68 +1166,71 @@ export default function OraxPage() {
                     ) : null}
                   </div>
 
-                  {latestArtifact ? (
+                  {latestDraftPatch ? (
                     <div className="mt-3 space-y-3">
                       <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                        <Metric label="Status" value={latestArtifact.status} />
-                        <Metric label="Branch" value={latestArtifact.payload.branch ?? "unknown"} />
-                        <Metric label="Model" value={latestArtifact.payload.model ?? "unknown"} />
+                        <Metric label="Status" value={latestDraftPatch.status} />
+                        <Metric
+                          label="Branch"
+                          value={latestDraftPatch.payload.branch ?? "unknown"}
+                        />
+                        <Metric label="Model" value={latestDraftPatch.payload.model ?? "unknown"} />
                         <Metric
                           label="Generated"
-                          value={new Date(latestArtifact.createdAt).toLocaleString()}
+                          value={new Date(latestDraftPatch.createdAt).toLocaleString()}
                         />
                       </div>
-                      {latestArtifact.summary ? (
-                        <p className="text-sm text-foreground">{latestArtifact.summary}</p>
+                      {latestDraftPatch.summary ? (
+                        <p className="text-sm text-foreground">{latestDraftPatch.summary}</p>
                       ) : null}
-                      {latestArtifact.payload.explanation ? (
+                      {latestDraftPatch.payload.explanation ? (
                         <p className="text-sm text-muted-foreground">
-                          {latestArtifact.payload.explanation}
+                          {latestDraftPatch.payload.explanation}
                         </p>
                       ) : null}
-                      {latestArtifact.payload.filesRead?.length ? (
+                      {latestDraftPatch.payload.filesRead?.length ? (
                         <div className="text-xs text-muted-foreground">
                           Files used:{" "}
-                          {latestArtifact.payload.filesRead
+                          {latestDraftPatch.payload.filesRead
                             .map((file) => `${file.path} (${formatBytes(file.size)})`)
                             .join(", ")}
                         </div>
                       ) : null}
-                      {latestArtifact.payload.skipped?.length ? (
+                      {latestDraftPatch.payload.skipped?.length ? (
                         <div className="text-xs text-muted-foreground">
                           Skipped:{" "}
-                          {latestArtifact.payload.skipped
+                          {latestDraftPatch.payload.skipped
                             .map((item) => `${item.path} (${item.reason})`)
                             .join(", ")}
                         </div>
                       ) : null}
-                      {latestArtifact.payload.risks?.length ? (
+                      {latestDraftPatch.payload.risks?.length ? (
                         <div>
                           <div className="text-xs font-medium uppercase text-muted-foreground">
                             Risks
                           </div>
                           <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                            {latestArtifact.payload.risks.map((risk) => (
+                            {latestDraftPatch.payload.risks.map((risk) => (
                               <li key={risk}>{risk}</li>
                             ))}
                           </ul>
                         </div>
                       ) : null}
-                      {latestArtifact.payload.tests?.length ? (
+                      {latestDraftPatch.payload.tests?.length ? (
                         <div>
                           <div className="text-xs font-medium uppercase text-muted-foreground">
                             Suggested checks
                           </div>
                           <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                            {latestArtifact.payload.tests.map((test) => (
+                            {latestDraftPatch.payload.tests.map((test) => (
                               <li key={test}>{test}</li>
                             ))}
                           </ul>
                         </div>
                       ) : null}
-                      {latestArtifact.payload.unifiedDiff?.trim() ? (
+                      {latestDraftPatch.payload.unifiedDiff?.trim() ? (
                         <pre className="max-h-96 overflow-auto rounded-md border border-border bg-background px-3 py-3 text-xs text-muted-foreground">
-                          {latestArtifact.payload.unifiedDiff}
+                          {latestDraftPatch.payload.unifiedDiff}
                         </pre>
                       ) : (
                         <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
@@ -1137,10 +1238,110 @@ export default function OraxPage() {
                           draft patch.
                         </p>
                       )}
+                      {latestDraftPatch.payload.unifiedDiff?.trim() ? (
+                        <button
+                          onClick={() => void requestSandboxApproval(latestDraftPatch.id)}
+                          disabled={requestingSandboxApprovalArtifactId === latestDraftPatch.id}
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                        >
+                          {requestingSandboxApprovalArtifactId === latestDraftPatch.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                          )}
+                          Request sandbox approval
+                        </button>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
                       No draft patch yet. Generate one from an approved file-read request.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="text-sm font-semibold">Sandbox validation</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Sandbox validation applies the draft patch to approved file contents only. It
+                    does not modify the repository, run unrestricted terminal commands, push, open
+                    PRs, or deploy.
+                  </p>
+
+                  {latestSandboxResult ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                        <Metric label="Status" value={latestSandboxResult.status} />
+                        <Metric
+                          label="Applied"
+                          value={latestSandboxResult.payload.applied ? "yes" : "no"}
+                        />
+                        <Metric
+                          label="Changed files"
+                          value={String(latestSandboxResult.payload.changedFiles?.length ?? 0)}
+                        />
+                        <Metric
+                          label="Validated"
+                          value={new Date(latestSandboxResult.createdAt).toLocaleString()}
+                        />
+                      </div>
+
+                      {latestSandboxResult.payload.changedFiles?.length ? (
+                        <div>
+                          <div className="text-xs font-medium uppercase text-muted-foreground">
+                            Changed files
+                          </div>
+                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                            {latestSandboxResult.payload.changedFiles.map((file) => (
+                              <li key={file.path}>
+                                {file.path}: +{file.additions} / -{file.deletions},{" "}
+                                {formatBytes(file.beforeBytes)} to {formatBytes(file.afterBytes)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {latestSandboxResult.payload.checks?.length ? (
+                        <div>
+                          <div className="text-xs font-medium uppercase text-muted-foreground">
+                            Sandbox checks
+                          </div>
+                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                            {latestSandboxResult.payload.checks.map((check) => (
+                              <li key={`${check.name}-${check.status}`}>
+                                {check.status}: {check.name} - {check.message}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {latestSandboxResult.payload.testPreview?.length ? (
+                        <div>
+                          <div className="text-xs font-medium uppercase text-muted-foreground">
+                            Suggested tests
+                          </div>
+                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                            {latestSandboxResult.payload.testPreview.map((check) => (
+                              <li key={check.name}>
+                                {check.status}: {check.name} - {check.message}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {latestSandboxResult.payload.errors?.length ? (
+                        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                          {latestSandboxResult.payload.errors.join(" ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      No sandbox validation yet. Request approval from a draft patch, approve it,
+                      then run the sandbox.
                     </p>
                   )}
                 </div>

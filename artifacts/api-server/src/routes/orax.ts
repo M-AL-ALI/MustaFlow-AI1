@@ -8,7 +8,6 @@ import {
   oraxTaskApprovalsTable,
   oraxTaskArtifactsTable,
   oraxTasksTable,
-  ORAX_APPROVAL_ACTIONS,
   ORAX_PROVIDERS,
   ORAX_TASK_KINDS,
   type OraxTaskApproval,
@@ -27,6 +26,7 @@ import {
   scanGithubRepository,
   verifyGithubReadOnlyToken,
 } from "../lib/orax-github";
+import { runOraxSandboxValidation } from "../lib/orax-sandbox";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
 
@@ -54,7 +54,7 @@ const scanRepositorySchema = z.object({
 });
 
 const createApprovalSchema = z.object({
-  action: z.enum(ORAX_APPROVAL_ACTIONS).default("read_files"),
+  action: z.literal("read_files").default("read_files"),
   paths: z.array(z.string().min(1).max(300)).min(1).max(ORAX_FILE_READ_LIMITS.maxFiles),
   branch: z.string().min(1).max(120).optional(),
   reason: z.string().max(1000).optional(),
@@ -69,6 +69,11 @@ const draftPatchSchema = z.object({
   instructions: z.string().max(2000).optional(),
 });
 
+const sandboxApprovalSchema = z.object({
+  artifactId: z.number().int().positive(),
+  reason: z.string().max(1000).optional(),
+});
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -81,6 +86,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Create coding-agent task plans",
       "Request approval to read selected source files",
       "Generate draft patch previews from approved file reads",
+      "Request approval to validate draft patches in an isolated sandbox",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
@@ -610,6 +616,66 @@ router.post("/orax/tasks/:id/draft-patch", async (req, res) => {
   }
 });
 
+router.post("/orax/tasks/:id/sandbox-approvals", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const parsed = sandboxApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid sandbox approval request" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    const artifact = await loadOwnedArtifact(userId, parsed.data.artifactId);
+    if (!task || !artifact || artifact.taskId !== task.id || artifact.type !== "draft_patch") {
+      res.status(404).json({ error: "Task or draft patch artifact not found" });
+      return;
+    }
+
+    const payload = asRecord(artifact.payload);
+    const unifiedDiff = typeof payload.unifiedDiff === "string" ? payload.unifiedDiff : "";
+    if (!unifiedDiff.trim()) {
+      res.status(409).json({ error: "Sandbox validation requires a draft patch diff" });
+      return;
+    }
+
+    const [approval] = await db
+      .insert(oraxTaskApprovalsTable)
+      .values({
+        userId,
+        repositoryId: task.repositoryId,
+        taskId: task.id,
+        action: "sandbox_run",
+        status: "pending",
+        request: {
+          artifactId: artifact.id,
+          reason: parsed.data.reason?.trim() || null,
+          scope:
+            "Validate this draft patch inside an isolated in-memory sandbox. No repository files will be changed.",
+        },
+        riskSummary:
+          "ORAX will validate whether the draft patch applies to approved files. It will not write to the repository, run unrestricted commands, push, open a PR, or deploy.",
+      })
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({ status: "awaiting_approval", updatedAt: new Date() })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.status(201).json({ approval });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to create ORAX sandbox approval");
+    res.status(500).json({ error: "Failed to create ORAX sandbox approval" });
+  }
+});
+
 router.patch("/orax/approvals/:id", async (req, res) => {
   const userId = req.userId!;
   const approvalId = Number(req.params.id);
@@ -760,6 +826,156 @@ router.post("/orax/approvals/:id/read-files", async (req, res) => {
   }
 });
 
+router.post("/orax/approvals/:id/run-sandbox", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = Number(req.params.id);
+  if (!Number.isInteger(approvalId) || approvalId <= 0) {
+    res.status(400).json({ error: "Invalid approval id" });
+    return;
+  }
+
+  try {
+    const approval = await loadOwnedApproval(userId, approvalId);
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (approval.action !== "sandbox_run") {
+      res.status(400).json({ error: "Unsupported approval action" });
+      return;
+    }
+    if (approval.status !== "approved") {
+      res.status(409).json({ error: "Sandbox validation requires an approved request" });
+      return;
+    }
+
+    const task = await loadOwnedTask(userId, approval.taskId);
+    const repository = await loadOwnedRepository(userId, approval.repositoryId);
+    const request = asRecord(approval.request);
+    const artifactId =
+      typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
+    const draftArtifact = Number.isInteger(artifactId)
+      ? await loadOwnedArtifact(userId, artifactId)
+      : undefined;
+    if (!task || !repository || !draftArtifact || draftArtifact.taskId !== task.id) {
+      res.status(404).json({ error: "Task, repository, or draft patch artifact not found" });
+      return;
+    }
+    if (draftArtifact.type !== "draft_patch") {
+      res.status(400).json({ error: "Sandbox validation requires a draft patch artifact" });
+      return;
+    }
+
+    const payload = asRecord(draftArtifact.payload);
+    const unifiedDiff = typeof payload.unifiedDiff === "string" ? payload.unifiedDiff : "";
+    const sourceApprovalId =
+      typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
+    const sourceApproval = sourceApprovalId
+      ? await loadOwnedApproval(userId, sourceApprovalId)
+      : undefined;
+    if (!sourceApproval || sourceApproval.action !== "read_files") {
+      res.status(409).json({ error: "Draft patch is missing its approved file-read source" });
+      return;
+    }
+
+    const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
+    const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+    const branch = sourceRequest.branch || repository.defaultBranch;
+    const token = repository.encryptedToken
+      ? encryptionService.decrypt(repository.encryptedToken)
+      : undefined;
+    const readResult = await readGithubRepositoryFiles({
+      owner: repository.owner,
+      repo: repository.name,
+      branch,
+      paths,
+      token,
+      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+    });
+
+    const tests = Array.isArray(payload.tests)
+      ? payload.tests.filter((item): item is string => typeof item === "string")
+      : [];
+    const sandbox = runOraxSandboxValidation({
+      unifiedDiff,
+      files: readResult.files,
+      suggestedTests: tests,
+    });
+    const sandboxPayload = {
+      sourceArtifactId: draftArtifact.id,
+      sourceApprovalId: sourceApproval.id,
+      branch,
+      validatedAt: new Date().toISOString(),
+      filesRead: readResult.files.map((file) => ({
+        path: file.path,
+        sha: file.sha,
+        size: file.size,
+      })),
+      skipped: readResult.skipped,
+      ...sandbox,
+    };
+
+    const [sandboxArtifact] = await db
+      .insert(oraxTaskArtifactsTable)
+      .values({
+        userId,
+        repositoryId: repository.id,
+        taskId: task.id,
+        approvalId: approval.id,
+        type: "sandbox_result",
+        status: sandbox.applied ? "completed" : "failed",
+        title: `Sandbox validation for ${draftArtifact.title}`,
+        summary: sandbox.applied
+          ? `Sandbox validation passed for ${sandbox.changedFiles.length} file(s).`
+          : "Sandbox validation failed.",
+        payload: sandboxPayload,
+      })
+      .returning();
+
+    const [updatedApproval] = await db
+      .update(oraxTaskApprovalsTable)
+      .set({
+        status: sandbox.applied ? "completed" : "failed",
+        result: {
+          artifactId: sandboxArtifact.id,
+          applied: sandbox.applied,
+          changedFiles: sandbox.changedFiles,
+          errors: sandbox.errors,
+        },
+        completedAt: new Date(),
+      })
+      .where(eq(oraxTaskApprovalsTable.id, approval.id))
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        status: sandbox.applied ? "completed" : "blocked",
+        result: {
+          ...asRecord(task.result),
+          sandbox: {
+            artifactId: sandboxArtifact.id,
+            applied: sandbox.applied,
+            changedFiles: sandbox.changedFiles.length,
+            errors: sandbox.errors,
+          },
+          message: sandbox.applied
+            ? "ORAX validated the draft patch inside an isolated sandbox. No repository files were changed, no commands were run, and nothing was pushed."
+            : "ORAX could not validate the draft patch inside the sandbox.",
+        },
+        updatedAt: new Date(),
+        completedAt: sandbox.applied ? new Date() : null,
+      })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.json({ approval: updatedApproval, artifact: sandboxArtifact });
+  } catch (err) {
+    logger.error({ component: "orax", err, approvalId }, "Failed to run ORAX sandbox validation");
+    res.status(502).json({ error: "Could not run sandbox validation" });
+  }
+});
+
 router.post("/orax/tasks", async (req, res) => {
   const userId = req.userId!;
   const parsed = createTaskSchema.safeParse(req.body ?? {});
@@ -871,6 +1087,20 @@ async function loadOwnedApproval(
       and(eq(oraxTaskApprovalsTable.id, approvalId), eq(oraxTaskApprovalsTable.userId, userId)),
     );
   return approval;
+}
+
+async function loadOwnedArtifact(userId: string, artifactId: number) {
+  const [artifact] = await db
+    .select()
+    .from(oraxTaskArtifactsTable)
+    .where(
+      and(
+        eq(oraxTaskArtifactsTable.id, artifactId),
+        eq(oraxTaskArtifactsTable.userId, userId),
+        isNull(oraxTaskArtifactsTable.archivedAt),
+      ),
+    );
+  return artifact;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

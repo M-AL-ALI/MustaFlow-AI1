@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { buildOraxTaskPlan, normalizeOraxFileReadPaths, parseRepositoryLocator } from "../orax";
 import { buildDraftPatchPrompt, parseDraftPatchJson } from "../orax-draft-patch";
 import { extensionToLanguage, summarizeGithubTree } from "../orax-github";
+import { runOraxSandboxValidation } from "../orax-sandbox";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -201,5 +202,61 @@ describe("ORAX draft patch previews", () => {
     expect(prompt).toContain("Do not include shell commands that mutate files");
     expect(prompt).toContain("Do not suggest pushing, deploying, or opening a PR");
     expect(prompt).toContain("Keep the diff scoped to approved files only");
+  });
+});
+
+describe("ORAX sandbox validation", () => {
+  it("applies a draft patch to approved file content in memory", () => {
+    const result = runOraxSandboxValidation({
+      unifiedDiff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1,2 +1,2 @@
+ export const name = "Ora";
+-export const enabled = false;
++export const enabled = true;`,
+      files: [
+        {
+          path: "src/app.ts",
+          content: 'export const name = "Ora";\nexport const enabled = false;',
+          size: 59,
+          sha: "abc123",
+        },
+      ],
+      suggestedTests: ["pnpm test"],
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.changedFiles).toEqual([
+      expect.objectContaining({ path: "src/app.ts", additions: 1, deletions: 1 }),
+    ]);
+    expect(result.testPreview).toEqual([
+      expect.objectContaining({
+        name: "pnpm test",
+        status: "not_run",
+      }),
+    ]);
+  });
+
+  it("rejects patches outside the approved file set", () => {
+    const result = runOraxSandboxValidation({
+      unifiedDiff: `diff --git a/src/secret.ts b/src/secret.ts
+--- a/src/secret.ts
++++ b/src/secret.ts
+@@ -1 +1 @@
+-export const value = 1;
++export const value = 2;`,
+      files: [
+        {
+          path: "src/app.ts",
+          content: "export const value = 1;",
+          size: 23,
+          sha: "abc123",
+        },
+      ],
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.errors.join(" ")).toContain("outside the approved file set");
   });
 });
