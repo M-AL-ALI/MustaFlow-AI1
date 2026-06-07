@@ -1,2 +1,10 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /projects/
+Disallow: /settings/
+Disallow: /admin/
+Disallow: /sign-in/
+Disallow: /sign-up/
+
+Sitemap: https://mustaflow.app/sitemap.xml

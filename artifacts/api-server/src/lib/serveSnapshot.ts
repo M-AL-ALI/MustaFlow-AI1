@@ -521,7 +521,20 @@ export async function serveSnapshot(
 
   const snapshot = version.filesSnapshot as SnapshotFile[];
   let file = snapshot.find((f) => f.path === filePath);
-  if (!file) file = snapshot.find((f) => f.path === "index.html");
+  if (!file) {
+    // Only fall back to index.html for extensionless paths or .html paths — these
+    // are likely SPA client-side routes. Paths with any other extension are static
+    // asset requests (robots.txt, sitemap.xml, llms.txt, images, scripts, etc.)
+    // and must return a real 404 rather than the HTML shell, to avoid soft-404s
+    // and broken crawl assets on published sites.
+    const lastSegment = filePath.split("/").pop() ?? "";
+    const dotIndex = lastSegment.lastIndexOf(".");
+    const ext = dotIndex !== -1 ? lastSegment.slice(dotIndex + 1).toLowerCase() : "";
+    const isSpaRoute = ext === "" || ext === "html";
+    if (isSpaRoute) {
+      file = snapshot.find((f) => f.path === "index.html");
+    }
+  }
 
   if (!file) {
     // Serve custom 404 page if configured, otherwise fall back to platform default.

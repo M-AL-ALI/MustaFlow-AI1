@@ -1,0 +1,30 @@
+# MustaFlow AI
+
+> An AI-powered app builder for non-technical users. Describe an app idea in plain language and MustaFlow plans, builds, and deploys it — no coding required.
+
+MustaFlow supports multiple output stacks: static HTML/CSS/JS sites, React SPAs, full-stack Node.js apps, and native mobile apps (Expo/React Native). The stack is auto-detected from the user's description.
+
+## Product
+
+- [Home](https://mustaflow.app/): Landing page and product overview
+- [Pricing](https://mustaflow.app/pricing): Plans and credit pricing (Lite, Eco, Power, Pro modes)
+- [Gallery](https://mustaflow.app/gallery): Template gallery — example apps users can start from
+- [Extensions](https://mustaflow.app/extensions): Marketplace of integrations and add-ons
+- [Community](https://mustaflow.app/community): Community hub and public project showcase
+
+## Help & Documentation
+
+- [Help Center](https://mustaflow.app/help): Getting started guides and how-to articles
+- [Domains API](https://mustaflow.app/help/domains-api): Guide to connecting custom domains to published apps
+- [Developer Docs](https://mustaflow.app/developers): API reference and developer integration guides
+- [Developer Changelog](https://mustaflow.app/developers/changelog): API and platform release notes
+
+## Trust & Legal
+
+- [Trust & Security](https://mustaflow.app/trust): Security posture, encryption, GDPR readiness, SOC 2 status, and compliance contacts
+- [Privacy Policy](https://mustaflow.app/privacy): Data collection, retention, and user rights
+- [Terms of Service](https://mustaflow.app/terms): Terms governing use of MustaFlow
+
+## Platform Status
+
+- [Status](https://mustaflow.app/status): Real-time platform health and incident history
