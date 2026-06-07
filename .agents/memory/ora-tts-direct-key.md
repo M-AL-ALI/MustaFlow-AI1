@@ -21,6 +21,15 @@ gracefully instead of throwing at import time.
 class of limitation as web-search grounding (also needs the direct key). `OPENAI_API_KEY`
 is available as a workspace secret and is loaded into the api-server process env.
 
+**Merge hazard:** when this direct-key fix is applied independently on two lines of
+development with *different* helper names (e.g. `getTtsClient` vs `getDirectOpenAI`)
+and a different lazy-singleton var name, a later merge cannot auto-dedupe them — it
+yields a duplicate `const client = ...` in the route handler plus a duplicate
+singleton var, failing the esbuild build with "symbol 'client' has already been
+declared". Avoid by porting the fix with the *same* symbol names everywhere; if a
+collision lands, reconcile `tts.ts` to one helper + one `const client` before
+restarting api-server (typecheck won't catch it — only the esbuild build does).
+
 **How to apply:** if Talk to Ora is silent or `/api/public-ai/tts` returns 502 with
 `INVALID_ENDPOINT`, check that TTS is going through the direct client, not the proxy.
 Note: the lib also has a `textToSpeech` helper that uses `gpt-audio` via
