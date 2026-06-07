@@ -30,7 +30,45 @@ interface RouteMetadata {
   description: string;
   image?: string;
   noIndex?: boolean;
+  jsonLd?: object;
 }
+
+/**
+ * Static FAQ seed — mirrors HELP_ARTICLE_SEED (lib/db/src/help-center-seed.ts)
+ * for the items where isFaq=true. Keep in sync when new FAQ entries are added
+ * to the seed so prerendered HTML stays accurate.
+ */
+const STATIC_FAQS = [
+  {
+    title: "What is MustaFlow?",
+    body: "MustaFlow is an AI-powered app builder for non-technical users. You describe an app idea in natural language and MustaFlow plans, builds, previews, and helps you publish it. It supports static web apps, React apps, full-stack Node.js apps, and native mobile apps.",
+  },
+  {
+    title: "Do I need to know how to code?",
+    body: "No. You describe what you want in plain language and the AI Builder writes the code for you. You can review and refine the result through chat without editing code yourself, though the files are available if you want them.",
+  },
+  {
+    title: "Can I build mobile apps?",
+    body: "Yes. When your prompt describes a mobile app, MustaFlow automatically uses its mobile pipeline to generate a native Expo / React Native app. You do not need to change any setting; the stack is detected from your description.",
+  },
+  {
+    title: "How do I contact support?",
+    body: "Use Ask Ora in the Help Center for instant help. Ora can troubleshoot most issues using these help articles and your account details. If Ora cannot resolve your problem, use Escalate to support to open a ticket that is sent to our support team with your conversation and any screenshots you attach.",
+  },
+];
+
+const HELP_FAQ_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: STATIC_FAQS.map((f) => ({
+    "@type": "Question",
+    name: f.title,
+    acceptedAnswer: {
+      "@type": "Answer",
+      text: f.body,
+    },
+  })),
+};
 
 const PUBLIC_ROUTES: RouteMetadata[] = [
   {
@@ -86,6 +124,7 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     title: `Help Center | ${SITE_NAME}`,
     description:
       "Get answers to common questions about building with MustaFlow AI. Browse help articles or contact support.",
+    jsonLd: HELP_FAQ_JSONLD,
   },
   {
     path: "/help/domains-api",
@@ -143,6 +182,9 @@ function buildHead(meta: RouteMetadata): string {
 // Replaces the entire <head> metadata block (title, description, OG, Twitter,
 // canonical, robots) with route-specific values. Keeps everything else
 // (charset, viewport, icons, fonts, scripts) intact.
+// When meta.jsonLd is set, a <script type="application/ld+json"> block is
+// appended just before </head> so crawlers receive structured data in the
+// initial HTML response — no JavaScript execution required.
 function injectMetadata(html: string, meta: RouteMetadata): string {
   const newHead = buildHead(meta);
 
@@ -199,6 +241,13 @@ function injectMetadata(html: string, meta: RouteMetadata): string {
     /<meta\s+name="twitter:description"\s+content="[^"]*"\s*\/>/,
     `<meta name="twitter:description" content="${meta.description}" />`,
   );
+
+  // Inject JSON-LD structured data before </head> so it is present in the
+  // initial HTML response — visible to crawlers that do not execute JS.
+  if (meta.jsonLd) {
+    const scriptBlock = `    <script type="application/ld+json">${JSON.stringify(meta.jsonLd)}</script>`;
+    html = html.replace("</head>", `${scriptBlock}\n  </head>`);
+  }
 
   return html;
 }
