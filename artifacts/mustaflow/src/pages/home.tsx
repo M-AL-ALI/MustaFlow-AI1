@@ -1,4 +1,4 @@
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AgentIcon } from "@/components/agent-icon";
@@ -349,64 +349,38 @@ export default function HomePage() {
               </span>
             </a>
             <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
-              <button
-                onClick={() => setLocation("/pricing")}
-                className="hover:text-foreground transition-colors"
-              >
+              <Link href="/pricing" className="hover:text-foreground transition-colors">
                 Pricing
-              </button>
-              <button
-                onClick={() => setLocation("/integrations")}
-                className="hover:text-foreground transition-colors"
-              >
+              </Link>
+              <Link href="/integrations" className="hover:text-foreground transition-colors">
                 Integrations
-              </button>
-              <button
-                onClick={() => setLocation("/security")}
-                className="hover:text-foreground transition-colors"
-              >
+              </Link>
+              <Link href="/security" className="hover:text-foreground transition-colors">
                 Security
-              </button>
-              <button
-                onClick={() => setLocation("/developers")}
-                className="hover:text-foreground transition-colors"
-              >
+              </Link>
+              <Link href="/developers" className="hover:text-foreground transition-colors">
                 Developers
-              </button>
-              <button
-                onClick={() => setLocation("/help")}
-                className="hover:text-foreground transition-colors"
-              >
+              </Link>
+              <Link href="/help" className="hover:text-foreground transition-colors">
                 Help
-              </button>
+              </Link>
             </nav>
             <div className="flex items-center gap-2">
               <ThemeToggle />
               <Show when="signed-out">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-sm"
-                  onClick={() => setLocation("/sign-in")}
-                >
-                  Log in
+                <Button variant="ghost" size="sm" className="text-sm" asChild>
+                  <Link href="/sign-in">Log in</Link>
                 </Button>
-                <Button
-                  size="sm"
-                  className="rounded-full px-4 text-sm shadow-md"
-                  onClick={() => setLocation("/sign-up")}
-                >
-                  Create account
+                <Button size="sm" className="rounded-full px-4 text-sm shadow-md" asChild>
+                  <Link href="/sign-up">Create account</Link>
                 </Button>
               </Show>
               <Show when="signed-in">
-                <Button
-                  size="sm"
-                  className="rounded-full px-4 text-sm"
-                  onClick={() => setLocation("/projects")}
-                >
-                  My projects
-                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                <Button size="sm" className="rounded-full px-4 text-sm" asChild>
+                  <Link href="/projects">
+                    My projects
+                    <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  </Link>
                 </Button>
               </Show>
             </div>
@@ -677,11 +651,10 @@ export default function HomePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {DEV_FEATURES.map((feature) => (
-                <button
+                <Link
                   key={feature.title}
-                  type="button"
-                  onClick={() => setLocation(feature.href)}
-                  className="group text-left relative rounded-2xl border border-border bg-card p-6 hover:border-primary/40 hover:bg-muted/40 transition-all duration-200"
+                  href={feature.href}
+                  className="group text-left relative rounded-2xl border border-border bg-card p-6 hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 block"
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4 group-hover:bg-primary/15 transition-colors">
                     <feature.icon className="h-5 w-5 text-primary" />
@@ -690,7 +663,7 @@ export default function HomePage() {
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     {feature.description}
                   </p>
-                </button>
+                </Link>
               ))}
             </div>
           </div>

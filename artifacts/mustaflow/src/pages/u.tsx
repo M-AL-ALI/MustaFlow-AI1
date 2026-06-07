@@ -57,17 +57,10 @@ const PLATFORM_LABELS: Record<string, string> = {
 };
 
 function ProjectCard({ project }: { project: PublicProject }) {
-  const [, navigate] = useLocation();
   const isPublished = project.status === "published" && project.publicSlug;
 
-  return (
-    <div
-      className={cn(
-        "rounded-xl border border-border bg-card p-4 space-y-2",
-        isPublished && "cursor-pointer hover:border-primary/30 transition-colors",
-      )}
-      onClick={() => isPublished && navigate(`/api/p/${project.publicSlug}/`)}
-    >
+  const cardContent = (
+    <>
       <div className="flex items-start justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
@@ -92,8 +85,23 @@ function ProjectCard({ project }: { project: PublicProject }) {
           </span>
         )}
       </div>
-    </div>
+    </>
   );
+
+  if (isPublished && project.publicSlug) {
+    return (
+      <a
+        href={`/api/p/${project.publicSlug}/`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="rounded-xl border border-border bg-card p-4 space-y-2 hover:border-primary/30 transition-colors block"
+      >
+        {cardContent}
+      </a>
+    );
+  }
+
+  return <div className="rounded-xl border border-border bg-card p-4 space-y-2">{cardContent}</div>;
 }
 
 export default function UserProfilePage() {

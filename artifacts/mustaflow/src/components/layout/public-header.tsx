@@ -1,12 +1,10 @@
-import { useLocation } from "wouter";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ArrowRight } from "lucide-react";
 import { Show } from "@clerk/react";
 
 export function PublicHeader() {
-  const [, setLocation] = useLocation();
-
   return (
     <header className="sticky top-0 z-30 backdrop-blur-xl bg-background/80 border-b border-border">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -26,65 +24,39 @@ export function PublicHeader() {
         </a>
 
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
-          <button
-            onClick={() => setLocation("/pricing")}
-            className="hover:text-foreground transition-colors"
-          >
+          <Link href="/pricing" className="hover:text-foreground transition-colors">
             Pricing
-          </button>
-          <button
-            onClick={() => setLocation("/integrations")}
-            className="hover:text-foreground transition-colors"
-          >
+          </Link>
+          <Link href="/integrations" className="hover:text-foreground transition-colors">
             Integrations
-          </button>
-          <button
-            onClick={() => setLocation("/security")}
-            className="hover:text-foreground transition-colors"
-          >
+          </Link>
+          <Link href="/security" className="hover:text-foreground transition-colors">
             Security
-          </button>
-          <button
-            onClick={() => setLocation("/developers")}
-            className="hover:text-foreground transition-colors"
-          >
+          </Link>
+          <Link href="/developers" className="hover:text-foreground transition-colors">
             Developers
-          </button>
-          <button
-            onClick={() => setLocation("/help")}
-            className="hover:text-foreground transition-colors"
-          >
+          </Link>
+          <Link href="/help" className="hover:text-foreground transition-colors">
             Help
-          </button>
+          </Link>
         </nav>
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <Show when="signed-out">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-sm"
-              onClick={() => setLocation("/sign-in")}
-            >
-              Log in
+            <Button variant="ghost" size="sm" className="text-sm" asChild>
+              <Link href="/sign-in">Log in</Link>
             </Button>
-            <Button
-              size="sm"
-              className="rounded-full px-4 text-sm shadow-md"
-              onClick={() => setLocation("/sign-up")}
-            >
-              Create account
+            <Button size="sm" className="rounded-full px-4 text-sm shadow-md" asChild>
+              <Link href="/sign-up">Create account</Link>
             </Button>
           </Show>
           <Show when="signed-in">
-            <Button
-              size="sm"
-              className="rounded-full px-4 text-sm"
-              onClick={() => setLocation("/projects")}
-            >
-              My projects
-              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            <Button size="sm" className="rounded-full px-4 text-sm" asChild>
+              <Link href="/projects">
+                My projects
+                <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+              </Link>
             </Button>
           </Show>
         </div>

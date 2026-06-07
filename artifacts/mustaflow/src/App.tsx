@@ -60,6 +60,7 @@ const OrgSettingsPage = lazy(() => import("./pages/org-settings"));
 const OrgNewPage = lazy(() => import("./pages/org-new"));
 const OrgInviteAcceptPage = lazy(() => import("./pages/org-invite-accept"));
 const GalleryPage = lazy(() => import("./pages/gallery"));
+const GalleryDetailPage = lazy(() => import("./pages/gallery-detail"));
 const ImageStudioPage = lazy(() => import("./pages/image-studio"));
 const ExtensionsPage = lazy(() => import("./pages/extensions"));
 const CommunityPage = lazy(() => import("./pages/community"));
@@ -729,6 +730,11 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                 </Route>
 
                 {/* ── Ecosystem pages ── */}
+                <Route path="/gallery/:slug">
+                  <AppLayout>
+                    <GalleryDetailPage />
+                  </AppLayout>
+                </Route>
                 <Route path="/gallery">
                   <AppLayout>
                     <GalleryPage />

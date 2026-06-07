@@ -1,6 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { PageMeta } from "@/components/page-meta";
 import {
   Search,
@@ -96,13 +96,12 @@ function TemplateCard({
   onUse: (slug: string) => void;
   onFork: (slug: string) => void;
 }) {
-  const [, navigate] = useLocation();
   const categoryInfo = CATEGORIES.find((c) => c.value === template.category);
 
   return (
-    <div
-      className="group rounded-xl border border-border bg-card hover:border-primary/30 transition-all duration-150 flex flex-col overflow-hidden cursor-pointer"
-      onClick={() => navigate(`/gallery/${template.slug}`)}
+    <Link
+      href={`/gallery/${template.slug}`}
+      className="group rounded-xl border border-border bg-card hover:border-primary/30 transition-all duration-150 flex flex-col overflow-hidden"
     >
       {/* Preview thumbnail / placeholder */}
       <div className="relative h-36 bg-muted/30 border-b border-border overflow-hidden flex items-center justify-center">
@@ -192,7 +191,7 @@ function TemplateCard({
           </div>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
