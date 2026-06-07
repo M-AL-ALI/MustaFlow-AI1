@@ -38,6 +38,16 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(rateLimit).toContain('keyPrefix: "ora_voice_tts"');
   });
 
+  it("guards the raw-body transcribe stream against hanging on a pre-consumed/aborted request", () => {
+    const transcribe = readPublicAiRoute("transcribe.ts");
+    // If express.json() already drained the stream (mislabeled application/json),
+    // "end" never fires again; the handler must short-circuit instead of hanging.
+    expect(transcribe).toContain("req.readableEnded");
+    // Client-disconnect mid-upload must also stop the wait, not stall the handler.
+    expect(transcribe).toContain('req.once("aborted"');
+    expect(transcribe).toContain('req.once("close"');
+  });
+
   it("mounts a session-gated server TTS route for natural voice replies", () => {
     const route = readPublicAiRoute("tts.ts");
     expect(route).toContain('router.post("/public-ai/tts"');

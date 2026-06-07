@@ -48,20 +48,66 @@ router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res)
   let total = 0;
   try {
     await new Promise<void>((resolve, reject) => {
-      req.on("data", (chunk: Buffer) => {
+      // If an upstream body parser (express.json) already consumed the stream
+      // — e.g. a caller mislabeled the request as application/json — the "end"
+      // event has already fired and would never fire again, hanging this
+      // handler forever. Resolve immediately so it falls through to the
+      // "Empty audio body" 400 below instead of holding the connection open.
+      if (req.readableEnded) {
+        resolve();
+        return;
+      }
+
+      const cleanup = () => {
+        req.off("data", onData);
+        req.off("end", onEnd);
+        req.off("error", onError);
+        req.off("aborted", onAborted);
+        req.off("close", onClose);
+      };
+      const onData = (chunk: Buffer) => {
         total += chunk.length;
         if (total > MAX_AUDIO_BYTES) {
+          cleanup();
           reject(new Error("too-large"));
           return;
         }
         chunks.push(chunk);
-      });
-      req.on("end", resolve);
-      req.on("error", reject);
+      };
+      const onEnd = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      // Client disconnected mid-upload: stop waiting so the handler never stalls
+      // on a half-sent body. "close" before the stream finished implies an abort.
+      const onAborted = () => {
+        cleanup();
+        reject(new Error("aborted"));
+      };
+      const onClose = () => {
+        if (!req.readableEnded) {
+          cleanup();
+          reject(new Error("aborted"));
+        }
+      };
+
+      req.on("data", onData);
+      req.on("end", onEnd);
+      req.on("error", onError);
+      req.once("aborted", onAborted);
+      req.once("close", onClose);
     });
   } catch (err) {
     if (err instanceof Error && err.message === "too-large") {
       res.status(413).json({ error: "Audio clip too large. 10 MB max." });
+    } else if (err instanceof Error && err.message === "aborted") {
+      // Connection went away — nothing to respond to, but log for visibility.
+      req.log.warn("public-ai/transcribe: client aborted before body completed");
+      if (!res.headersSent) res.status(400).json({ error: "Upload interrupted." });
     } else {
       req.log.error({ err }, "public-ai/transcribe: failed to read body");
       res.status(400).json({ error: "Failed to read audio." });
