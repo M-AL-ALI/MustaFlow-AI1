@@ -31,6 +31,8 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/repositories/${repositoryId}/scans");
     expect(oraxPage).toContain("/api/orax/repositories/${selectedRepository.id}/scan");
     expect(oraxPage).toContain("/api/orax/tasks");
+    expect(oraxPage).toContain("/api/orax/tasks/${taskId}/messages");
+    expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/messages");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/artifacts");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/draft-patch");
@@ -51,9 +53,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-sandbox");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-commands");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
+    expect(oraxPage).toContain("Task conversation");
+    expect(oraxPage).toContain("stored separately from Ora chat and");
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");
     expect(oraxPage).not.toContain("/api/credits");
+    expect(oraxPage).not.toContain("useOraChat");
   });
 
   it("mounts the authenticated /orax API prefix", () => {

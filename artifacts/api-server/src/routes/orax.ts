@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
   db,
   oraxRepositoriesTable,
   oraxRepositoryScansTable,
   oraxTaskApprovalsTable,
   oraxTaskArtifactsTable,
+  oraxTaskMessagesTable,
   oraxTasksTable,
   ORAX_PROVIDERS,
   ORAX_TASK_KINDS,
@@ -53,6 +54,10 @@ const createTaskSchema = z.object({
   kind: z.enum(ORAX_TASK_KINDS).default("analyze"),
   prompt: z.string().min(3).max(8000),
   title: z.string().min(1).max(140).optional(),
+});
+
+const taskMessageSchema = z.object({
+  content: z.string().trim().min(1).max(8000),
 });
 
 const githubConnectSchema = z.object({
@@ -117,6 +122,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Request approval to validate draft patches in an isolated sandbox",
       "Request approval to run controlled syntax, static, and allowlisted workspace checks",
       "Create GitHub branches and pull requests after explicit approval",
+      "Discuss each coding task in a persistent ORAX-only task conversation",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
@@ -390,6 +396,130 @@ router.get("/orax/tasks", async (req, res) => {
   } catch (err) {
     logger.error({ component: "orax", err }, "Failed to list ORAX tasks");
     res.status(500).json({ error: "Failed to load ORAX tasks" });
+  }
+});
+
+router.get("/orax/tasks/:id/messages", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    const messages = await db
+      .select()
+      .from(oraxTaskMessagesTable)
+      .where(
+        and(
+          eq(oraxTaskMessagesTable.userId, userId),
+          eq(oraxTaskMessagesTable.taskId, taskId),
+          isNull(oraxTaskMessagesTable.archivedAt),
+        ),
+      )
+      .orderBy(asc(oraxTaskMessagesTable.createdAt));
+    res.json({ messages });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to list ORAX task messages");
+    res.status(500).json({ error: "Failed to load ORAX task messages" });
+  }
+});
+
+router.post("/orax/tasks/:id/messages", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const parsed = taskMessageSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid message" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const approvals = await db
+      .select()
+      .from(oraxTaskApprovalsTable)
+      .where(
+        and(eq(oraxTaskApprovalsTable.userId, userId), eq(oraxTaskApprovalsTable.taskId, taskId)),
+      )
+      .orderBy(desc(oraxTaskApprovalsTable.createdAt));
+    const artifacts = await db
+      .select()
+      .from(oraxTaskArtifactsTable)
+      .where(
+        and(
+          eq(oraxTaskArtifactsTable.userId, userId),
+          eq(oraxTaskArtifactsTable.taskId, taskId),
+          isNull(oraxTaskArtifactsTable.archivedAt),
+        ),
+      )
+      .orderBy(desc(oraxTaskArtifactsTable.createdAt));
+
+    const now = new Date();
+    const [message] = await db
+      .insert(oraxTaskMessagesTable)
+      .values({
+        userId,
+        repositoryId: task.repositoryId,
+        taskId: task.id,
+        role: "user",
+        content: parsed.data.content,
+        metadata: { source: "orax-task-thread" },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    const assistantContent = buildOraxTaskThreadReply({
+      task,
+      approvals,
+      artifacts,
+    });
+    const [assistantMessage] = await db
+      .insert(oraxTaskMessagesTable)
+      .values({
+        userId,
+        repositoryId: task.repositoryId,
+        taskId: task.id,
+        role: "assistant",
+        content: assistantContent,
+        metadata: {
+          source: "orax-task-thread",
+          mode: "status_discussion",
+          taskStatus: task.status,
+          approvalCount: approvals.length,
+          artifactCount: artifacts.length,
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({ updatedAt: new Date() })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.status(201).json({ messages: [message, assistantMessage] });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to append ORAX task message");
+    res.status(500).json({ error: "Failed to save ORAX task message" });
   }
 });
 
@@ -2031,6 +2161,32 @@ function buildOraxAuditTrail(input: {
     { label: "Workspace checks", id: input.commandArtifactId, kind: "artifact" },
     { label: "GitHub PR approval", id: input.githubApprovalId, kind: "approval" },
   ];
+}
+
+function buildOraxTaskThreadReply(input: {
+  task: OraxTask;
+  approvals: OraxTaskApproval[];
+  artifacts: OraxTaskArtifact[];
+}): string {
+  const pendingApprovals = input.approvals.filter((approval) => approval.status === "pending");
+  const completedArtifacts = input.artifacts.filter((artifact) => artifact.status === "completed");
+  const latestArtifact = input.artifacts[0];
+  const nextStep =
+    pendingApprovals.length > 0
+      ? `There ${pendingApprovals.length === 1 ? "is" : "are"} ${pendingApprovals.length} pending approval${
+          pendingApprovals.length === 1 ? "" : "s"
+        }. Review the approval card before ORAX continues.`
+      : latestArtifact
+        ? `The latest artifact is "${latestArtifact.title}" with status "${latestArtifact.status}". Review the artifact panel for the next available action.`
+        : "No execution artifact exists yet. Start with a read-files approval or draft-patch request when you are ready.";
+
+  return [
+    `I saved this in the ORAX task thread for "${input.task.title}".`,
+    `Current task status: ${input.task.status}.`,
+    `Approvals: ${input.approvals.length}. Artifacts: ${input.artifacts.length}. Completed artifacts: ${completedArtifacts.length}.`,
+    nextStep,
+    "Phase 4A is discussion-only: this chat can track context and explain the workflow, but it cannot run commands, edit files, push branches, or open PRs without the existing approval controls.",
+  ].join("\n");
 }
 
 async function loadOwnedRepository(userId: string, repositoryId: number) {

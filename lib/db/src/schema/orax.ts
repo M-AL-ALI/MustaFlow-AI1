@@ -152,6 +152,9 @@ export const oraxTaskArtifactsTable = pgTable(
   ],
 );
 
+export const ORAX_TASK_MESSAGE_ROLES = ["user", "assistant", "system", "tool"] as const;
+export type OraxTaskMessageRole = (typeof ORAX_TASK_MESSAGE_ROLES)[number];
+
 /**
  * ORAX tasks are isolated from Ora conversations and AI Builder tasks. They
  * record coding-agent intent, plans, results, and future approval/checkpoint
@@ -182,6 +185,34 @@ export const oraxTasksTable = pgTable(
   ],
 );
 
+/**
+ * ORAX task messages are the conversational thread for one coding task. They
+ * stay in the ORAX domain and never appear in normal Ora history or AI Builder.
+ */
+export const oraxTaskMessagesTable = pgTable(
+  "orax_task_messages",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    repositoryId: integer("repository_id").notNull(),
+    taskId: integer("task_id").notNull(),
+    role: text("role").notNull().default("user"),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").notNull().default({}),
+    artifactId: integer("artifact_id"),
+    approvalId: integer("approval_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("orax_task_messages_user_task_idx").on(t.userId, t.taskId, t.createdAt),
+    index("orax_task_messages_task_id_idx").on(t.taskId, t.createdAt),
+    index("orax_task_messages_artifact_id_idx").on(t.artifactId),
+    index("orax_task_messages_approval_id_idx").on(t.approvalId),
+  ],
+);
+
 export type OraxRepository = typeof oraxRepositoriesTable.$inferSelect;
 export type InsertOraxRepository = typeof oraxRepositoriesTable.$inferInsert;
 export type OraxRepositoryScan = typeof oraxRepositoryScansTable.$inferSelect;
@@ -192,3 +223,5 @@ export type OraxTaskArtifact = typeof oraxTaskArtifactsTable.$inferSelect;
 export type InsertOraxTaskArtifact = typeof oraxTaskArtifactsTable.$inferInsert;
 export type OraxTask = typeof oraxTasksTable.$inferSelect;
 export type InsertOraxTask = typeof oraxTasksTable.$inferInsert;
+export type OraxTaskMessage = typeof oraxTaskMessagesTable.$inferSelect;
+export type InsertOraxTaskMessage = typeof oraxTaskMessagesTable.$inferInsert;

@@ -88,6 +88,7 @@ const MIGRATIONS = [
   "migrate-orax-github-readonly",
   "migrate-orax-approvals",
   "migrate-orax-artifacts",
+  "migrate-orax-messages",
 ] as const;
 
 async function main(): Promise<void> {

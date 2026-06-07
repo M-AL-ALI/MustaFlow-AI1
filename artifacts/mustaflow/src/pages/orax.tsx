@@ -15,6 +15,7 @@ import {
   LockKeyhole,
   Play,
   RefreshCw,
+  Send,
   ShieldCheck,
   Terminal,
   X,
@@ -89,6 +90,19 @@ type OraxTask = {
   };
   result?: { message?: string };
   createdAt: string;
+};
+
+type OraxTaskMessage = {
+  id: number;
+  repositoryId: number;
+  taskId: number;
+  role: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  artifactId?: number | null;
+  approvalId?: number | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type OraxApproval = {
@@ -258,6 +272,7 @@ export default function OraxPage() {
   const [tasks, setTasks] = useState<OraxTask[]>([]);
   const [approvals, setApprovals] = useState<OraxApproval[]>([]);
   const [artifacts, setArtifacts] = useState<OraxArtifact[]>([]);
+  const [taskMessages, setTaskMessages] = useState<OraxTaskMessage[]>([]);
   const [capabilities, setCapabilities] = useState<OraxCapabilities | null>(null);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
@@ -270,6 +285,7 @@ export default function OraxPage() {
   const [approvalPaths, setApprovalPaths] = useState("");
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
+  const [taskMessageDraft, setTaskMessageDraft] = useState("");
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>(DEFAULT_ORAX_COMMAND_IDS);
   const [prConfirmationText, setPrConfirmationText] = useState("");
   const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
@@ -280,7 +296,9 @@ export default function OraxPage() {
   const [loadingScans, setLoadingScans] = useState(false);
   const [loadingApprovals, setLoadingApprovals] = useState(false);
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
+  const [loadingTaskMessages, setLoadingTaskMessages] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
+  const [sendingTaskMessage, setSendingTaskMessage] = useState(false);
   const [requestingApproval, setRequestingApproval] = useState(false);
   const [requestingSandboxApprovalArtifactId, setRequestingSandboxApprovalArtifactId] = useState<
     number | null
@@ -419,17 +437,36 @@ export default function OraxPage() {
     }
   }, []);
 
+  const loadTaskMessages = useCallback(async (taskId: number) => {
+    setLoadingTaskMessages(true);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${taskId}/messages`);
+      if (!res.ok) {
+        throw new Error("Could not load task conversation");
+      }
+      const body = (await res.json()) as { messages: OraxTaskMessage[] };
+      setTaskMessages(body.messages);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load task conversation");
+      setTaskMessages([]);
+    } finally {
+      setLoadingTaskMessages(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedTask) {
       setApprovals([]);
       setArtifacts([]);
+      setTaskMessages([]);
       setReadResult(null);
       return;
     }
     setReadResult(null);
     void loadApprovals(selectedTask.id);
     void loadArtifacts(selectedTask.id);
-  }, [loadApprovals, loadArtifacts, selectedTask]);
+    void loadTaskMessages(selectedTask.id);
+  }, [loadApprovals, loadArtifacts, loadTaskMessages, selectedTask]);
 
   async function addRepository() {
     if (!repositoryUrl.trim() || submittingRepo) return;
@@ -541,6 +578,31 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not create ORAX task");
     } finally {
       setSubmittingTask(false);
+    }
+  }
+
+  async function sendTaskMessage() {
+    if (!selectedTask || !taskMessageDraft.trim() || sendingTaskMessage) return;
+    const content = taskMessageDraft.trim();
+    setSendingTaskMessage(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not save task message");
+      }
+      const body = (await res.json()) as { messages: OraxTaskMessage[] };
+      setTaskMessages((prev) => [...prev, ...body.messages]);
+      setTaskMessageDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save task message");
+    } finally {
+      setSendingTaskMessage(false);
     }
   }
 
@@ -1212,6 +1274,84 @@ export default function OraxPage() {
                     </option>
                   ))}
                 </select>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-primary" />
+                        <h3 className="text-sm font-semibold">Task conversation</h3>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Discuss this ORAX task. This thread is stored separately from Ora chat and
+                        AI Builder.
+                      </p>
+                    </div>
+                    {loadingTaskMessages ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 max-h-72 space-y-2 overflow-auto rounded-md border border-border bg-background p-3">
+                    {taskMessages.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No messages yet. Ask ORAX how to approach this task, what is pending, or
+                        what the next approved step should be.
+                      </p>
+                    ) : (
+                      taskMessages.map((message) => {
+                        const isAssistant = message.role === "assistant";
+                        return (
+                          <div
+                            key={message.id}
+                            className={cn(
+                              "rounded-md px-3 py-2 text-sm",
+                              isAssistant
+                                ? "border border-border bg-muted/40"
+                                : "ml-auto max-w-[88%] bg-primary text-primary-foreground",
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "mb-1 text-[11px] font-medium uppercase",
+                                isAssistant
+                                  ? "text-muted-foreground"
+                                  : "text-primary-foreground/80",
+                              )}
+                            >
+                              {isAssistant ? "ORAX" : "You"} -{" "}
+                              {new Date(message.createdAt).toLocaleString()}
+                            </div>
+                            <div className="whitespace-pre-wrap leading-relaxed">
+                              {message.content}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <textarea
+                      value={taskMessageDraft}
+                      onChange={(event) => setTaskMessageDraft(event.target.value)}
+                      placeholder="Discuss this task with ORAX..."
+                      className="min-h-16 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <button
+                      onClick={() => void sendTaskMessage()}
+                      disabled={!taskMessageDraft.trim() || sendingTaskMessage}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {sendingTaskMessage ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      Send
+                    </button>
+                  </div>
+                </div>
 
                 <textarea
                   value={approvalPaths}

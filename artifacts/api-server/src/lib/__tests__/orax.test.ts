@@ -428,3 +428,32 @@ describe("ORAX GitHub PR approval hardening", () => {
     expect(source).toContain("github_branch_exists");
   });
 });
+
+describe("ORAX task conversation isolation", () => {
+  it("stores task chat in ORAX-owned messages and not normal Ora or Builder surfaces", () => {
+    const routeSource = readFileSync(path.join(__dirname, "../../routes/orax.ts"), "utf8");
+    const schemaSource = readFileSync(
+      path.join(__dirname, "../../../../../lib/db/src/schema/orax.ts"),
+      "utf8",
+    );
+    const migrationsSource = readFileSync(path.join(__dirname, "../startup-migrations.ts"), "utf8");
+    const allOutstandingSource = readFileSync(
+      path.join(__dirname, "../../../../../scripts/src/migrate-all-outstanding.ts"),
+      "utf8",
+    );
+
+    expect(schemaSource).toContain("orax_task_messages");
+    expect(schemaSource).toContain("oraxTaskMessagesTable");
+    expect(migrationsSource).toContain("migrate-orax-messages");
+    expect(allOutstandingSource).toContain('"migrate-orax-messages"');
+    expect(routeSource).toContain('router.get("/orax/tasks/:id/messages"');
+    expect(routeSource).toContain('router.post("/orax/tasks/:id/messages"');
+    expect(routeSource).toContain("oraxTaskMessagesTable");
+    expect(routeSource).toContain("buildOraxTaskThreadReply");
+    expect(routeSource).toContain("Phase 4A is discussion-only");
+    expect(routeSource).toContain("persistent ORAX-only task conversation");
+    expect(routeSource).not.toContain("/public-ai/chat");
+    expect(routeSource).not.toContain("/projects/");
+    expect(routeSource).not.toContain("deductCredits");
+  });
+});
