@@ -57,6 +57,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("stored separately from Ora chat and");
     expect(oraxPage).toContain('message.role === "system" || message.role === "tool"');
     expect(oraxPage).toContain("Timeline");
+    expect(oraxPage).toContain("Current checkpoint");
+    expect(oraxPage).toContain("currentCheckpoint");
+    expect(oraxPage).toContain("orax-task-checkpoint");
+    expect(oraxPage).toContain("metadata?.checkpoint");
+    expect(oraxPage).toContain("not Ora");
+    expect(oraxPage).toContain("not AI Builder");
     expect(oraxPage).toContain("actionSuggestions");
     expect(oraxPage).toContain("applyTaskActionSuggestion");
     expect(oraxPage).toContain("pendingSuggestionConfirmation");

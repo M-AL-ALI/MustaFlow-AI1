@@ -74,6 +74,29 @@ type OraxScan = {
   completedAt?: string | null;
 };
 
+type OraxCheckpointSummary = {
+  goal: string;
+  status: string;
+  filesReviewed: string[];
+  approvals: {
+    pending: number;
+    completed: number;
+    failed: number;
+    denied: number;
+    total: number;
+  };
+  artifacts: {
+    draftPatches: number;
+    sandboxResults: number;
+    commandResults: number;
+    githubPrResults: number;
+    total: number;
+  };
+  latestBlocker: string | null;
+  nextStep: string;
+  updatedAt: string;
+};
+
 type OraxTask = {
   id: number;
   repositoryId: number;
@@ -88,7 +111,7 @@ type OraxTask = {
     guardrails?: string[];
     unavailableUntilApproved?: string[];
   };
-  result?: { message?: string };
+  result?: { message?: string; currentCheckpoint?: OraxCheckpointSummary };
   createdAt: string;
 };
 
@@ -100,6 +123,9 @@ type OraxTaskMessage = {
   content: string;
   metadata?: {
     actionSuggestions?: OraxTaskActionSuggestion[];
+    checkpoint?: OraxCheckpointSummary;
+    event?: string;
+    source?: string;
     [key: string]: unknown;
   };
   artifactId?: number | null;
@@ -357,6 +383,14 @@ export default function OraxPage() {
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
+  const currentCheckpoint = useMemo(() => {
+    const checkpointMessage = [...taskMessages]
+      .reverse()
+      .find((message) => message.metadata?.source === "orax-task-checkpoint");
+    return (
+      checkpointMessage?.metadata?.checkpoint ?? selectedTask?.result?.currentCheckpoint ?? null
+    );
+  }, [selectedTask, taskMessages]);
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
   const latestSandboxResult =
     artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
@@ -702,6 +736,8 @@ export default function OraxPage() {
       setApprovals((prev) => [body.approval, ...prev]);
       setApprovalPaths("");
       setApprovalReason("");
+      void load();
+      void loadTaskMessages(selectedTask.id);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request approval");
@@ -729,6 +765,8 @@ export default function OraxPage() {
       setApprovals((prev) =>
         prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
       );
+      void load();
+      void loadTaskMessages(body.approval.taskId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update approval");
     } finally {
@@ -754,6 +792,7 @@ export default function OraxPage() {
         prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
       );
       void load();
+      void loadTaskMessages(body.approval.taskId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read approved files");
     } finally {
@@ -784,6 +823,7 @@ export default function OraxPage() {
         ...prev.filter((artifact) => artifact.id !== body.artifact.id),
       ]);
       void load();
+      void loadTaskMessages(selectedTask.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate draft patch");
     } finally {
@@ -811,6 +851,7 @@ export default function OraxPage() {
       const body = (await res.json()) as { approval: OraxApproval };
       setApprovals((prev) => [body.approval, ...prev]);
       void load();
+      void loadTaskMessages(selectedTask.id);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request sandbox approval");
@@ -846,6 +887,7 @@ export default function OraxPage() {
       const body = (await res.json()) as { approval: OraxApproval };
       setApprovals((prev) => [body.approval, ...prev]);
       void load();
+      void loadTaskMessages(selectedTask.id);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request controlled-check approval");
@@ -885,6 +927,7 @@ export default function OraxPage() {
         ...prev.filter((artifact) => artifact.id !== body.artifact.id),
       ]);
       void load();
+      void loadTaskMessages(body.approval.taskId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not run sandbox validation");
     } finally {
@@ -913,6 +956,7 @@ export default function OraxPage() {
         ...prev.filter((artifact) => artifact.id !== body.artifact.id),
       ]);
       void load();
+      void loadTaskMessages(body.approval.taskId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not run controlled checks");
     } finally {
@@ -950,6 +994,7 @@ export default function OraxPage() {
       setApprovals((prev) => [body.approval, ...prev]);
       setPrConfirmationText("");
       void load();
+      void loadTaskMessages(selectedTask.id);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request GitHub PR approval");
@@ -1001,6 +1046,7 @@ export default function OraxPage() {
         ...prev.filter((artifact) => artifact.id !== body.artifact.id),
       ]);
       void load();
+      void loadTaskMessages(body.approval.taskId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create GitHub pull request");
     } finally {
@@ -1372,6 +1418,94 @@ export default function OraxPage() {
                     </option>
                   ))}
                 </select>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-primary" />
+                        <h3 className="text-sm font-semibold">Current checkpoint</h3>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        ORAX summarizes this task state inside the ORAX thread only. It is not Ora
+                        memory and it is not AI Builder context.
+                      </p>
+                    </div>
+                    {currentCheckpoint ? (
+                      <span className="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
+                        {new Date(currentCheckpoint.updatedAt).toLocaleString()}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {currentCheckpoint ? (
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase text-muted-foreground">
+                          Goal
+                        </div>
+                        <p className="mt-1 text-sm text-foreground">{currentCheckpoint.goal}</p>
+                      </div>
+                      <div className="grid gap-2 text-xs sm:grid-cols-4">
+                        <div className="rounded-md border border-border bg-background px-3 py-2">
+                          <div className="text-muted-foreground">Status</div>
+                          <div className="mt-1 font-medium text-foreground">
+                            {currentCheckpoint.status}
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-border bg-background px-3 py-2">
+                          <div className="text-muted-foreground">Approvals</div>
+                          <div className="mt-1 font-medium text-foreground">
+                            {currentCheckpoint.approvals.completed}/
+                            {currentCheckpoint.approvals.total} complete
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-border bg-background px-3 py-2">
+                          <div className="text-muted-foreground">Pending</div>
+                          <div className="mt-1 font-medium text-foreground">
+                            {currentCheckpoint.approvals.pending}
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-border bg-background px-3 py-2">
+                          <div className="text-muted-foreground">Artifacts</div>
+                          <div className="mt-1 font-medium text-foreground">
+                            {currentCheckpoint.artifacts.total}
+                          </div>
+                        </div>
+                      </div>
+                      {currentCheckpoint.filesReviewed.length ? (
+                        <div>
+                          <div className="text-xs font-semibold uppercase text-muted-foreground">
+                            Files reviewed
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {currentCheckpoint.filesReviewed.map((file) => (
+                              <span
+                                key={file}
+                                className="rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
+                              >
+                                {file}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {currentCheckpoint.latestBlocker ? (
+                        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                          {currentCheckpoint.latestBlocker}
+                        </div>
+                      ) : null}
+                      <div className="rounded-md border border-primary/25 bg-primary/10 px-3 py-2 text-xs text-primary">
+                        Next: {currentCheckpoint.nextStep}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      No checkpoint yet. Create a task milestone, approval, or workflow result to
+                      generate the first checkpoint.
+                    </p>
+                  )}
+                </div>
 
                 <div className="rounded-md border border-border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">

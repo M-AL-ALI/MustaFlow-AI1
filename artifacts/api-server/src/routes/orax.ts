@@ -138,6 +138,29 @@ type OraxTimelineMessageInput = {
   metadata?: Record<string, unknown>;
 };
 
+type OraxCheckpointSummary = {
+  goal: string;
+  status: string;
+  filesReviewed: string[];
+  approvals: {
+    pending: number;
+    completed: number;
+    failed: number;
+    denied: number;
+    total: number;
+  };
+  artifacts: {
+    draftPatches: number;
+    sandboxResults: number;
+    commandResults: number;
+    githubPrResults: number;
+    total: number;
+  };
+  latestBlocker: string | null;
+  nextStep: string;
+  updatedAt: string;
+};
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -2420,6 +2443,7 @@ function buildOraxAuditTrail(input: {
 }
 
 async function persistOraxTimelineMessage(input: OraxTimelineMessageInput): Promise<void> {
+  let timelineSaved = false;
   try {
     await db.insert(oraxTaskMessagesTable).values({
       userId: input.userId,
@@ -2435,12 +2459,217 @@ async function persistOraxTimelineMessage(input: OraxTimelineMessageInput): Prom
         ...(input.metadata ?? {}),
       },
     });
+    timelineSaved = true;
   } catch (err) {
     logger.warn(
       { component: "orax", err, taskId: input.task.id, event: input.event },
       "Failed to persist ORAX timeline message",
     );
   }
+
+  if (timelineSaved) {
+    await persistOraxCheckpoint({
+      userId: input.userId,
+      taskId: input.task.id,
+    });
+  }
+}
+
+async function persistOraxCheckpoint(input: { userId: string; taskId: number }): Promise<void> {
+  try {
+    const task = await loadOwnedTask(input.userId, input.taskId);
+    if (!task) return;
+
+    const [approvals, artifacts] = await Promise.all([
+      db
+        .select()
+        .from(oraxTaskApprovalsTable)
+        .where(
+          and(
+            eq(oraxTaskApprovalsTable.userId, input.userId),
+            eq(oraxTaskApprovalsTable.taskId, input.taskId),
+          ),
+        )
+        .orderBy(desc(oraxTaskApprovalsTable.createdAt)),
+      db
+        .select()
+        .from(oraxTaskArtifactsTable)
+        .where(
+          and(
+            eq(oraxTaskArtifactsTable.userId, input.userId),
+            eq(oraxTaskArtifactsTable.taskId, input.taskId),
+            isNull(oraxTaskArtifactsTable.archivedAt),
+          ),
+        )
+        .orderBy(desc(oraxTaskArtifactsTable.createdAt)),
+    ]);
+
+    const checkpoint = buildOraxCheckpointSummary({ task, approvals, artifacts });
+    const result = asRecord(task.result);
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        result: {
+          ...result,
+          currentCheckpoint: checkpoint,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    await db.insert(oraxTaskMessagesTable).values({
+      userId: input.userId,
+      repositoryId: task.repositoryId,
+      taskId: task.id,
+      role: "system",
+      content: `Checkpoint updated: ${checkpoint.nextStep}`,
+      metadata: {
+        source: "orax-task-checkpoint",
+        event: "checkpoint_updated",
+        checkpoint,
+      },
+    });
+  } catch (err) {
+    logger.warn(
+      { component: "orax", err, taskId: input.taskId },
+      "Failed to persist ORAX checkpoint",
+    );
+  }
+}
+
+function buildOraxCheckpointSummary(input: {
+  task: OraxTask;
+  approvals: OraxTaskApproval[];
+  artifacts: OraxTaskArtifact[];
+}): OraxCheckpointSummary {
+  const approvals = {
+    pending: input.approvals.filter((approval) => approval.status === "pending").length,
+    completed: input.approvals.filter((approval) => approval.status === "completed").length,
+    failed: input.approvals.filter((approval) => approval.status === "failed").length,
+    denied: input.approvals.filter((approval) => approval.status === "denied").length,
+    total: input.approvals.length,
+  };
+  const artifacts = {
+    draftPatches: input.artifacts.filter((artifact) => artifact.type === "draft_patch").length,
+    sandboxResults: input.artifacts.filter((artifact) => artifact.type === "sandbox_result").length,
+    commandResults: input.artifacts.filter((artifact) => artifact.type === "command_result").length,
+    githubPrResults: input.artifacts.filter((artifact) => artifact.type === "github_pr_result")
+      .length,
+    total: input.artifacts.length,
+  };
+  const latestFailedArtifact = input.artifacts.find((artifact) => artifact.status === "failed");
+  const latestDeniedApproval = input.approvals.find((approval) => approval.status === "denied");
+  const taskResult = asRecord(input.task.result);
+  const plan = asRecord(input.task.plan);
+  const latestBlocker =
+    blockerFromArtifact(latestFailedArtifact) ??
+    (latestDeniedApproval
+      ? `Approval #${latestDeniedApproval.id} was denied.`
+      : typeof taskResult.message === "string" &&
+          (input.task.status === "blocked" || input.task.status === "failed")
+        ? taskResult.message
+        : null);
+
+  return {
+    goal:
+      typeof plan.objective === "string" && plan.objective.trim()
+        ? plan.objective.trim()
+        : input.task.prompt,
+    status: input.task.status,
+    filesReviewed: collectOraxCheckpointFiles(input.approvals, input.artifacts),
+    approvals,
+    artifacts,
+    latestBlocker,
+    nextStep: buildOraxCheckpointNextStep({
+      approvals,
+      artifacts,
+      hasBlocker: Boolean(latestBlocker),
+      hasCompletedReadApproval: input.approvals.some(
+        (approval) => approval.action === "read_files" && approval.status === "completed",
+      ),
+      hasCompletedPr: input.artifacts.some(
+        (artifact) => artifact.type === "github_pr_result" && artifact.status === "completed",
+      ),
+    }),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function collectOraxCheckpointFiles(
+  approvals: OraxTaskApproval[],
+  artifacts: OraxTaskArtifact[],
+): string[] {
+  const paths = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.trim() && !value.startsWith("http")) {
+      paths.add(value.trim());
+    }
+  };
+
+  for (const approval of approvals) {
+    const request = asRecord(approval.request);
+    const result = asRecord(approval.result);
+    if (Array.isArray(request.paths)) request.paths.forEach(add);
+    if (Array.isArray(result.files)) {
+      for (const file of result.files) add(asRecord(file).path);
+    }
+  }
+
+  for (const artifact of artifacts) {
+    const payload = asRecord(artifact.payload);
+    if (Array.isArray(payload.filesRead)) {
+      for (const file of payload.filesRead) add(asRecord(file).path);
+    }
+    if (Array.isArray(payload.changedFiles)) {
+      for (const file of payload.changedFiles) add(asRecord(file).path);
+    }
+    if (Array.isArray(payload.filesChanged)) payload.filesChanged.forEach(add);
+  }
+
+  return Array.from(paths).slice(0, 12);
+}
+
+function blockerFromArtifact(artifact: OraxTaskArtifact | undefined): string | null {
+  if (!artifact) return null;
+  const payload = asRecord(artifact.payload);
+  const error = asRecord(payload.error);
+  if (typeof error.message === "string" && error.message.trim()) return error.message.trim();
+  if (typeof artifact.summary === "string" && artifact.summary.trim()) return artifact.summary;
+  return `${artifact.title} failed.`;
+}
+
+function buildOraxCheckpointNextStep(input: {
+  approvals: OraxCheckpointSummary["approvals"];
+  artifacts: OraxCheckpointSummary["artifacts"];
+  hasBlocker: boolean;
+  hasCompletedReadApproval: boolean;
+  hasCompletedPr: boolean;
+}): string {
+  if (input.hasBlocker) {
+    return "Resolve the latest blocker before requesting another approval.";
+  }
+  if (input.approvals.pending > 0) {
+    return `Review ${input.approvals.pending} pending approval${
+      input.approvals.pending === 1 ? "" : "s"
+    }.`;
+  }
+  if (input.hasCompletedPr) {
+    return "Review the created pull request and keep the task thread updated.";
+  }
+  if (input.artifacts.commandResults > 0) {
+    return "If controlled checks passed, request GitHub PR approval with CREATE PR.";
+  }
+  if (input.artifacts.sandboxResults > 0) {
+    return "Request controlled workspace checks for the sandbox-validated patch.";
+  }
+  if (input.artifacts.draftPatches > 0) {
+    return "Request sandbox validation for the draft patch.";
+  }
+  if (input.hasCompletedReadApproval) {
+    return "Generate a draft patch preview from the approved file read.";
+  }
+  return "Request approval to read the relevant repository files.";
 }
 
 function buildOraxTaskThreadReply(input: {
