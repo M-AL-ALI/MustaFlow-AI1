@@ -78,6 +78,8 @@ describe("Talk to Ora voice-session wiring", () => {
         src.indexOf("Conversation cycling: track when Ora finishes speaking"),
       );
       expect(autoSpeakSection).not.toContain("isSpeechSynthesisSupported");
+      expect(autoSpeakSection).not.toContain("isLoading");
+      expect(autoSpeakSection).toContain("playbackKey");
     }
 
     const button = readFe("components/ora/ora-voice-mode-button.tsx");
