@@ -126,6 +126,30 @@ type OraxReadResult = {
   skipped: Array<{ path: string; reason: string }>;
 };
 
+type OraxArtifact = {
+  id: number;
+  repositoryId: number;
+  taskId: number;
+  approvalId?: number | null;
+  type: string;
+  status: string;
+  title: string;
+  summary?: string | null;
+  payload: {
+    branch?: string;
+    unifiedDiff?: string;
+    explanation?: string;
+    risks?: string[];
+    tests?: string[];
+    filesRead?: Array<{ path: string; sha: string; size: number }>;
+    skipped?: Array<{ path: string; reason: string }>;
+    model?: string;
+    generatedAt?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
 type OraxCapabilities = {
   available: string[];
   lockedUntilApprovalLayer: string[];
@@ -142,6 +166,7 @@ export default function OraxPage() {
   const [repositories, setRepositories] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
   const [approvals, setApprovals] = useState<OraxApproval[]>([]);
+  const [artifacts, setArtifacts] = useState<OraxArtifact[]>([]);
   const [capabilities, setCapabilities] = useState<OraxCapabilities | null>(null);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
@@ -153,6 +178,7 @@ export default function OraxPage() {
   const [prompt, setPrompt] = useState("");
   const [approvalPaths, setApprovalPaths] = useState("");
   const [approvalReason, setApprovalReason] = useState("");
+  const [draftInstructions, setDraftInstructions] = useState("");
   const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [submittingRepo, setSubmittingRepo] = useState(false);
@@ -160,10 +186,14 @@ export default function OraxPage() {
   const [scanningRepository, setScanningRepository] = useState(false);
   const [loadingScans, setLoadingScans] = useState(false);
   const [loadingApprovals, setLoadingApprovals] = useState(false);
+  const [loadingArtifacts, setLoadingArtifacts] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [requestingApproval, setRequestingApproval] = useState(false);
   const [decidingApprovalId, setDecidingApprovalId] = useState<number | null>(null);
   const [readingApprovalId, setReadingApprovalId] = useState<number | null>(null);
+  const [generatingArtifactApprovalId, setGeneratingArtifactApprovalId] = useState<number | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const selectedRepository = useMemo(
@@ -178,6 +208,7 @@ export default function OraxPage() {
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
+  const latestArtifact = artifacts[0] ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -252,15 +283,34 @@ export default function OraxPage() {
     }
   }, []);
 
+  const loadArtifacts = useCallback(async (taskId: number) => {
+    setLoadingArtifacts(true);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${taskId}/artifacts`);
+      if (!res.ok) {
+        throw new Error("Could not load draft artifacts");
+      }
+      const body = (await res.json()) as { artifacts: OraxArtifact[] };
+      setArtifacts(body.artifacts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load draft artifacts");
+      setArtifacts([]);
+    } finally {
+      setLoadingArtifacts(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedTask) {
       setApprovals([]);
+      setArtifacts([]);
       setReadResult(null);
       return;
     }
     setReadResult(null);
     void loadApprovals(selectedTask.id);
-  }, [loadApprovals, selectedTask]);
+    void loadArtifacts(selectedTask.id);
+  }, [loadApprovals, loadArtifacts, selectedTask]);
 
   async function addRepository() {
     if (!repositoryUrl.trim() || submittingRepo) return;
@@ -459,6 +509,36 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not read approved files");
     } finally {
       setReadingApprovalId(null);
+    }
+  }
+
+  async function generateDraftPatch(approvalId: number) {
+    if (!selectedTask || generatingArtifactApprovalId) return;
+    setGeneratingArtifactApprovalId(approvalId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/draft-patch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approvalId,
+          instructions: draftInstructions,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not generate draft patch");
+      }
+      const body = (await res.json()) as { artifact: OraxArtifact };
+      setArtifacts((prev) => [
+        body.artifact,
+        ...prev.filter((artifact) => artifact.id !== body.artifact.id),
+      ]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate draft patch");
+    } finally {
+      setGeneratingArtifactApprovalId(null);
     }
   }
 
@@ -852,6 +932,13 @@ export default function OraxPage() {
                   Request approval
                 </button>
 
+                <textarea
+                  value={draftInstructions}
+                  onChange={(event) => setDraftInstructions(event.target.value)}
+                  placeholder="Optional draft patch instructions. Example: keep the fix small and avoid changing public API."
+                  className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+
                 <div className="space-y-2">
                   {approvals.length === 0 ? (
                     <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
@@ -912,6 +999,20 @@ export default function OraxPage() {
                                 Read files
                               </button>
                             ) : null}
+                            {["approved", "completed"].includes(approval.status) ? (
+                              <button
+                                onClick={() => void generateDraftPatch(approval.id)}
+                                disabled={generatingArtifactApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                              >
+                                {generatingArtifactApprovalId === approval.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Code2 className="h-3.5 w-3.5" />
+                                )}
+                                Generate draft patch
+                              </button>
+                            ) : null}
                           </div>
                         </div>
                         {approval.result?.files?.length ? (
@@ -952,6 +1053,97 @@ export default function OraxPage() {
                     </div>
                   </div>
                 ) : null}
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">Draft patch preview</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Generated artifacts are review-only. ORAX still cannot apply files, run
+                        terminal commands, push branches, open PRs, or deploy.
+                      </p>
+                    </div>
+                    {loadingArtifacts ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : null}
+                  </div>
+
+                  {latestArtifact ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                        <Metric label="Status" value={latestArtifact.status} />
+                        <Metric label="Branch" value={latestArtifact.payload.branch ?? "unknown"} />
+                        <Metric label="Model" value={latestArtifact.payload.model ?? "unknown"} />
+                        <Metric
+                          label="Generated"
+                          value={new Date(latestArtifact.createdAt).toLocaleString()}
+                        />
+                      </div>
+                      {latestArtifact.summary ? (
+                        <p className="text-sm text-foreground">{latestArtifact.summary}</p>
+                      ) : null}
+                      {latestArtifact.payload.explanation ? (
+                        <p className="text-sm text-muted-foreground">
+                          {latestArtifact.payload.explanation}
+                        </p>
+                      ) : null}
+                      {latestArtifact.payload.filesRead?.length ? (
+                        <div className="text-xs text-muted-foreground">
+                          Files used:{" "}
+                          {latestArtifact.payload.filesRead
+                            .map((file) => `${file.path} (${formatBytes(file.size)})`)
+                            .join(", ")}
+                        </div>
+                      ) : null}
+                      {latestArtifact.payload.skipped?.length ? (
+                        <div className="text-xs text-muted-foreground">
+                          Skipped:{" "}
+                          {latestArtifact.payload.skipped
+                            .map((item) => `${item.path} (${item.reason})`)
+                            .join(", ")}
+                        </div>
+                      ) : null}
+                      {latestArtifact.payload.risks?.length ? (
+                        <div>
+                          <div className="text-xs font-medium uppercase text-muted-foreground">
+                            Risks
+                          </div>
+                          <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                            {latestArtifact.payload.risks.map((risk) => (
+                              <li key={risk}>{risk}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {latestArtifact.payload.tests?.length ? (
+                        <div>
+                          <div className="text-xs font-medium uppercase text-muted-foreground">
+                            Suggested checks
+                          </div>
+                          <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                            {latestArtifact.payload.tests.map((test) => (
+                              <li key={test}>{test}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {latestArtifact.payload.unifiedDiff?.trim() ? (
+                        <pre className="max-h-96 overflow-auto rounded-md border border-border bg-background px-3 py-3 text-xs text-muted-foreground">
+                          {latestArtifact.payload.unifiedDiff}
+                        </pre>
+                      ) : (
+                        <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                          No diff was generated. Approve more relevant files, then generate a new
+                          draft patch.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      No draft patch yet. Generate one from an approved file-read request.
+                    </p>
+                  )}
+                </div>
               </div>
             ) : (
               <p className="mt-4 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">

@@ -6,6 +6,7 @@ import {
   oraxRepositoriesTable,
   oraxRepositoryScansTable,
   oraxTaskApprovalsTable,
+  oraxTaskArtifactsTable,
   oraxTasksTable,
   ORAX_APPROVAL_ACTIONS,
   ORAX_PROVIDERS,
@@ -14,6 +15,7 @@ import {
   type OraxRepository,
   type OraxTask,
 } from "@workspace/db";
+import { generateOraxDraftPatch } from "../lib/orax-draft-patch";
 import {
   buildOraxTaskPlan,
   normalizeOraxFileReadPaths,
@@ -62,6 +64,11 @@ const decisionSchema = z.object({
   decision: z.enum(["approved", "denied"]),
 });
 
+const draftPatchSchema = z.object({
+  approvalId: z.number().int().positive(),
+  instructions: z.string().max(2000).optional(),
+});
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -73,6 +80,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Scan repository metadata, branches, and file tree summaries",
       "Create coding-agent task plans",
       "Request approval to read selected source files",
+      "Generate draft patch previews from approved file reads",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
@@ -376,6 +384,38 @@ router.get("/orax/tasks/:id/approvals", async (req, res) => {
   }
 });
 
+router.get("/orax/tasks/:id/artifacts", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    const artifacts = await db
+      .select()
+      .from(oraxTaskArtifactsTable)
+      .where(
+        and(
+          eq(oraxTaskArtifactsTable.userId, userId),
+          eq(oraxTaskArtifactsTable.taskId, taskId),
+          isNull(oraxTaskArtifactsTable.archivedAt),
+        ),
+      )
+      .orderBy(desc(oraxTaskArtifactsTable.createdAt));
+    res.json({ artifacts });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to list ORAX artifacts");
+    res.status(500).json({ error: "Failed to load ORAX artifacts" });
+  }
+});
+
 router.post("/orax/tasks/:id/approvals", async (req, res) => {
   const userId = req.userId!;
   const taskId = Number(req.params.id);
@@ -444,6 +484,129 @@ router.post("/orax/tasks/:id/approvals", async (req, res) => {
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to create ORAX approval");
     res.status(500).json({ error: "Failed to create ORAX approval" });
+  }
+});
+
+router.post("/orax/tasks/:id/draft-patch", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const parsed = draftPatchSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid draft patch request" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    const repository = await loadOwnedRepository(userId, task.repositoryId);
+    const approval = await loadOwnedApproval(userId, parsed.data.approvalId);
+    if (!repository || !approval || approval.taskId !== task.id) {
+      res.status(404).json({ error: "Task, repository, or approval not found" });
+      return;
+    }
+    if (approval.action !== "read_files" || !["approved", "completed"].includes(approval.status)) {
+      res.status(409).json({ error: "Draft patch requires an approved file-read request" });
+      return;
+    }
+
+    const request = approval.request as { paths?: string[]; branch?: string };
+    const paths = normalizeOraxFileReadPaths(request.paths ?? []);
+    const branch = request.branch || repository.defaultBranch;
+    const token = repository.encryptedToken
+      ? encryptionService.decrypt(repository.encryptedToken)
+      : undefined;
+    const readResult = await readGithubRepositoryFiles({
+      owner: repository.owner,
+      repo: repository.name,
+      branch,
+      paths,
+      token,
+      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+    });
+
+    if (!readResult.files.length) {
+      res.status(409).json({ error: "No approved files could be read for draft patch generation" });
+      return;
+    }
+
+    const generated = await generateOraxDraftPatch({
+      repositoryLabel: `${repository.owner}/${repository.name}`,
+      taskPrompt: task.prompt,
+      instructions: parsed.data.instructions,
+      branch,
+      files: readResult.files.map((file) => ({
+        path: file.path,
+        content: file.content,
+        size: file.size,
+        sha: file.sha,
+      })),
+    });
+
+    const payload = {
+      branch,
+      approvalId: approval.id,
+      model: process.env.ORAX_DRAFT_PATCH_MODEL || "gpt-5-mini",
+      generatedAt: new Date().toISOString(),
+      filesRead: readResult.files.map((file) => ({
+        path: file.path,
+        sha: file.sha,
+        size: file.size,
+      })),
+      skipped: readResult.skipped,
+      unifiedDiff: generated.unifiedDiff,
+      explanation: generated.explanation,
+      risks: generated.risks,
+      tests: generated.tests,
+    };
+
+    const [artifact] = await db
+      .insert(oraxTaskArtifactsTable)
+      .values({
+        userId,
+        repositoryId: repository.id,
+        taskId: task.id,
+        approvalId: approval.id,
+        type: "draft_patch",
+        status: "draft",
+        title: `Draft patch for ${task.title}`,
+        summary: generated.summary,
+        payload,
+      })
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        status: "awaiting_approval",
+        result: {
+          ...asRecord(task.result),
+          draftPatch: {
+            artifactId: artifact.id,
+            summary: generated.summary,
+            hasDiff: Boolean(generated.unifiedDiff.trim()),
+          },
+          message:
+            "ORAX generated a draft patch preview. It has not applied files, run commands, pushed, opened a PR, or deployed.",
+        },
+        updatedAt: new Date(),
+        completedAt: null,
+      })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.status(201).json({ artifact });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to generate ORAX draft patch");
+    res.status(502).json({ error: "Could not generate draft patch" });
   }
 });
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildOraxTaskPlan, normalizeOraxFileReadPaths, parseRepositoryLocator } from "../orax";
+import { buildDraftPatchPrompt, parseDraftPatchJson } from "../orax-draft-patch";
 import { extensionToLanguage, summarizeGithubTree } from "../orax-github";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,5 +159,47 @@ describe("ORAX safe task plan", () => {
     expect(plan.unavailableUntilApproved).toEqual(
       expect.arrayContaining(["File modifications", "Terminal execution", "Git push"]),
     );
+  });
+});
+
+describe("ORAX draft patch previews", () => {
+  it("parses strict JSON draft patch model output", () => {
+    expect(
+      parseDraftPatchJson(`{
+        "summary": "Fix preview playback",
+        "explanation": "Updates one condition.",
+        "unifiedDiff": "diff --git a/a.ts b/a.ts",
+        "risks": ["Could miss an edge case"],
+        "tests": ["pnpm test"]
+      }`),
+    ).toEqual({
+      summary: "Fix preview playback",
+      explanation: "Updates one condition.",
+      unifiedDiff: "diff --git a/a.ts b/a.ts",
+      risks: ["Could miss an edge case"],
+      tests: ["pnpm test"],
+    });
+  });
+
+  it("keeps generated patch prompts preview-only", () => {
+    const prompt = buildDraftPatchPrompt({
+      repositoryLabel: "M-AL-ALI/MustaFlow-AI1",
+      taskPrompt: "Fix a bug",
+      branch: "main",
+      files: [
+        {
+          path: "src/app.ts",
+          content: "export const value = 1;",
+          size: 23,
+          sha: "abc123",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("Produce a reviewable unified diff preview only");
+    expect(prompt).toContain("Do not claim any file was changed");
+    expect(prompt).toContain("Do not include shell commands that mutate files");
+    expect(prompt).toContain("Do not suggest pushing, deploying, or opening a PR");
+    expect(prompt).toContain("Keep the diff scoped to approved files only");
   });
 });

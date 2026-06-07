@@ -28,6 +28,12 @@ export const ORAX_APPROVAL_STATUSES = [
 ] as const;
 export type OraxApprovalStatus = (typeof ORAX_APPROVAL_STATUSES)[number];
 
+export const ORAX_ARTIFACT_TYPES = ["draft_patch"] as const;
+export type OraxArtifactType = (typeof ORAX_ARTIFACT_TYPES)[number];
+
+export const ORAX_ARTIFACT_STATUSES = ["draft", "rejected", "accepted"] as const;
+export type OraxArtifactStatus = (typeof ORAX_ARTIFACT_STATUSES)[number];
+
 /**
  * ORAX repositories are user-scoped code targets. Provider tokens are stored
  * encrypted and are only used for read-only metadata/tree scans until the
@@ -106,6 +112,30 @@ export const oraxTaskApprovalsTable = pgTable(
   ],
 );
 
+export const oraxTaskArtifactsTable = pgTable(
+  "orax_task_artifacts",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    repositoryId: integer("repository_id").notNull(),
+    taskId: integer("task_id").notNull(),
+    approvalId: integer("approval_id"),
+    type: text("type").notNull().default("draft_patch"),
+    status: text("status").notNull().default("draft"),
+    title: text("title").notNull(),
+    summary: text("summary"),
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("orax_task_artifacts_user_id_idx").on(t.userId, t.createdAt),
+    index("orax_task_artifacts_task_id_idx").on(t.taskId, t.createdAt),
+    index("orax_task_artifacts_status_idx").on(t.status),
+  ],
+);
+
 /**
  * ORAX tasks are isolated from Ora conversations and AI Builder tasks. They
  * record coding-agent intent, plans, results, and future approval/checkpoint
@@ -142,5 +172,7 @@ export type OraxRepositoryScan = typeof oraxRepositoryScansTable.$inferSelect;
 export type InsertOraxRepositoryScan = typeof oraxRepositoryScansTable.$inferInsert;
 export type OraxTaskApproval = typeof oraxTaskApprovalsTable.$inferSelect;
 export type InsertOraxTaskApproval = typeof oraxTaskApprovalsTable.$inferInsert;
+export type OraxTaskArtifact = typeof oraxTaskArtifactsTable.$inferSelect;
+export type InsertOraxTaskArtifact = typeof oraxTaskArtifactsTable.$inferInsert;
 export type OraxTask = typeof oraxTasksTable.$inferSelect;
 export type InsertOraxTask = typeof oraxTasksTable.$inferInsert;

@@ -98,6 +98,36 @@ async function main(): Promise<void> {
     );
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS orax_task_artifacts (
+        id            SERIAL PRIMARY KEY,
+        user_id       TEXT NOT NULL,
+        repository_id INTEGER NOT NULL,
+        task_id       INTEGER NOT NULL,
+        approval_id   INTEGER,
+        type          TEXT NOT NULL DEFAULT 'draft_patch',
+        status        TEXT NOT NULL DEFAULT 'draft',
+        title         TEXT NOT NULL,
+        summary       TEXT,
+        payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        archived_at   TIMESTAMPTZ
+      )
+    `);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS orax_task_artifacts_user_id_idx
+         ON orax_task_artifacts(user_id, created_at)`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS orax_task_artifacts_task_id_idx
+         ON orax_task_artifacts(task_id, created_at)`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS orax_task_artifacts_status_idx
+         ON orax_task_artifacts(status)`,
+    );
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS orax_repository_scans (
         id              SERIAL PRIMARY KEY,
         user_id         TEXT NOT NULL,
