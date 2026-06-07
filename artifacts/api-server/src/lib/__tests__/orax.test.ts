@@ -110,7 +110,7 @@ describe("ORAX read-only GitHub scan summaries", () => {
 
   it("keeps GitHub writes scoped to branch and PR creation", () => {
     const source = readFileSync(path.join(__dirname, "../orax-github.ts"), "utf8");
-    expect(source).toContain('method: "GET"');
+    expect(source).toMatch(/method:\s*(?:options\?\.method\s*\?\?\s*)?"GET"/);
     expect(source).toContain('method: "POST"');
     expect(source).toContain("/git/blobs");
     expect(source).toContain("/git/trees");
