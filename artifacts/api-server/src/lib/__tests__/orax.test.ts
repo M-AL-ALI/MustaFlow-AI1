@@ -335,7 +335,7 @@ describe("ORAX controlled sandbox checks", () => {
         {
           path: "src/broken.js",
           sourceSha: "abc",
-          content: "export const value = ;",
+          content: "const value = ;",
         },
       ],
     });
