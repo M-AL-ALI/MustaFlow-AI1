@@ -530,13 +530,27 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
 
       void (async () => {
         try {
-          const resp = await fetch("/api/public-ai/tts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            signal: abort.signal,
-            body: JSON.stringify({ text: trimmed, language: lang }),
-          });
+          const ttsBody = JSON.stringify({ text: trimmed, language: lang });
+          const requestTts = () =>
+            fetch("/api/public-ai/tts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              signal: abort.signal,
+              body: ttsBody,
+            });
+
+          let resp = await requestTts();
+          if (resp.status === 401 && !abort.signal.aborted) {
+            await fetch("/api/public-ai/session", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              signal: abort.signal,
+              body: "{}",
+            });
+            resp = await requestTts();
+          }
           if (!resp.ok) throw new Error(`TTS failed (${resp.status})`);
           const arr = await resp.arrayBuffer();
           if (serverSpeakSeqRef.current !== seq || abort.signal.aborted) return;

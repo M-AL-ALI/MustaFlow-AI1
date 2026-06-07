@@ -731,11 +731,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   }, [clearAttachment, clearUploadError, previewObjectUrl]);
 
   const handleEnterVoiceConvMode = useCallback(() => {
-    void voiceRef.current.prepareVoicePlayback();
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
+    void voiceRef.current.prepareVoicePlayback();
     setInput("");
     setVoiceReady(false);
+    setVoiceConvTtsMuted(false);
     wasConvSpeakingRef.current = false;
     const lastMsgIndex = messages.length - 1;
     const lastMsg = messages[lastMsgIndex];
@@ -754,6 +755,18 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     voiceRef.current.stopSpeaking();
     whisperConv.cancelRecording();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleToggleVoiceConvTtsMute = useCallback(() => {
+    setVoiceConvTtsMuted((prev) => {
+      const next = !prev;
+      if (next) {
+        voiceRef.current.stopSpeaking();
+      } else {
+        void voiceRef.current.prepareVoicePlayback();
+      }
+      return next;
+    });
   }, []);
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -1444,7 +1457,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     interimTranscript={voice.interimTranscript}
                     isLoading={isLoading}
                     isTtsMuted={voiceConvTtsMuted}
-                    onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
+                    onToggleTtsMute={handleToggleVoiceConvTtsMute}
                     onExit={handleExitVoiceConvMode}
                     onInterrupt={() => voiceRef.current.stopSpeaking()}
                     size="md"

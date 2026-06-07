@@ -467,7 +467,7 @@ export function OraVoiceConvPanel({
           )}
         >
           {isTtsMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
-          {isTtsMuted ? "Muted" : "Voice on"}
+          {isTtsMuted ? "Unmute" : "Mute"}
         </button>
 
         {/* Whisper automatic listening status */}
