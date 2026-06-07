@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { useParams, useLocation, Link } from "wouter";
+import { PageMeta } from "@/components/page-meta";
 import {
   Star,
   GitFork,
@@ -103,7 +104,6 @@ export default function GalleryDetailPage() {
         if (!res.ok) throw new Error("Failed to load");
         const data = (await res.json()) as GalleryTemplate;
         setTemplate(data);
-        document.title = `${data.title} — Template Gallery | MustaFlow AI`;
       })
       .catch(() => {
         toast({ title: "Failed to load template", variant: "destructive" });
@@ -196,6 +196,12 @@ export default function GalleryDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
+      <PageMeta
+        title={`${template.title} — Template Gallery`}
+        description={template.description}
+        path={`/gallery/${template.slug}`}
+      />
+
       {/* Breadcrumb */}
       <Link
         href="/gallery"

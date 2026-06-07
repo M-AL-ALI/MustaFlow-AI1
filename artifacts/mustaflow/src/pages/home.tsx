@@ -482,16 +482,15 @@ export default function HomePage() {
                   { icon: Mic, label: "Voice input" },
                   { icon: SlidersHorizontal, label: "Agent mode" },
                 ].map(({ icon: Icon, label }) => (
-                  <button
+                  <a
                     key={label}
-                    type="button"
-                    onClick={() => setLocation("/sign-up")}
+                    href="/sign-up"
                     title={`${label} — sign in to use`}
                     aria-label={`${label} (sign in to use)`}
                     className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
                   >
                     <Icon className="h-4 w-4" />
-                  </button>
+                  </a>
                 ))}
                 <div className="ml-auto text-xs text-muted-foreground pr-2 hidden sm:block">
                   Press{" "}
@@ -536,14 +535,13 @@ export default function HomePage() {
               <Lightbulb className="h-3.5 w-3.5" />
               Brainstorm first
             </button>
-            <button
-              type="button"
-              onClick={() => setLocation("/developers")}
+            <Link
+              href="/developers"
               className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Explore the API
               <ArrowRight className="h-3.5 w-3.5" />
-            </button>
+            </Link>
           </div>
 
           {/* Template browser panel */}
@@ -701,13 +699,11 @@ export default function HomePage() {
                     Generate variations side-by-side, tweak with the visual editor, and graduate the
                     winner straight into your app. No design tools required.
                   </p>
-                  <Button
-                    size="sm"
-                    className="gap-1.5 rounded-full"
-                    onClick={() => setLocation("/sign-up")}
-                  >
-                    Try it free
-                    <ArrowRight className="h-3.5 w-3.5" />
+                  <Button size="sm" className="gap-1.5 rounded-full" asChild>
+                    <Link href="/sign-up">
+                      Try it free
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
                   </Button>
                 </div>
                 <div className="px-6 pb-6">
@@ -1080,18 +1076,19 @@ export default function HomePage() {
             Join developers, makers, founders, and creators who ship faster with MustaFlow AI.
           </p>
           <div className="flex items-center justify-center gap-4 flex-wrap">
-            <Button size="lg" onClick={() => setLocation("/sign-up")} className="gap-2">
-              Get started for free
-              <ArrowRight className="h-4 w-4" />
+            <Button size="lg" className="gap-2" asChild>
+              <Link href="/sign-up">
+                Get started for free
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             </Button>
-            <button
-              type="button"
-              onClick={() => setLocation("/developers")}
+            <Link
+              href="/developers"
               className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Explore the API
               <ArrowRight className="h-3.5 w-3.5" />
-            </button>
+            </Link>
           </div>
         </div>
       </div>

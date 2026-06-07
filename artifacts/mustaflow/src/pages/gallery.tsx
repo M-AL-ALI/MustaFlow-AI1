@@ -438,13 +438,13 @@ export default function GalleryPage() {
             Submit one of your projects to the gallery and help other builders get started faster.
           </p>
         </div>
-        <button
-          onClick={() => navigate("/projects")}
+        <Link
+          href="/projects"
           className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shrink-0"
         >
           Submit a template
           <ArrowRight className="h-4 w-4" />
-        </button>
+        </Link>
       </div>
 
       {/* Suppress unused var warning */}
