@@ -5,11 +5,14 @@ import {
   Bot,
   CheckCircle2,
   Code2,
+  FileSearch,
   GitBranch,
   GitPullRequest,
+  KeyRound,
   Loader2,
   LockKeyhole,
   Play,
+  RefreshCw,
   ShieldCheck,
   Terminal,
 } from "lucide-react";
@@ -25,7 +28,46 @@ type OraxRepository = {
   repositoryUrl: string;
   defaultBranch: string;
   connectionStatus: string;
+  githubAccountName?: string | null;
+  tokenScopes?: string | null;
+  connectedAt?: string | null;
+  lastScanAt?: string | null;
+  scanStatus?: string;
   updatedAt: string;
+};
+
+type OraxScanSummary = {
+  repo?: {
+    fullName?: string;
+    htmlUrl?: string;
+    defaultBranch?: string;
+    private?: boolean;
+    language?: string | null;
+  };
+  branch?: string;
+  commitSha?: string;
+  fileCount?: number;
+  directoryCount?: number;
+  totalBytes?: number;
+  languages?: Record<string, number>;
+  topLevelEntries?: Array<{ path: string; type: string }>;
+  sampleFiles?: string[];
+  truncated?: boolean;
+};
+
+type OraxScan = {
+  id: number;
+  repositoryId: number;
+  status: string;
+  branch: string;
+  commitSha?: string | null;
+  fileCount: number;
+  directoryCount: number;
+  totalBytes: number;
+  summary: OraxScanSummary;
+  error?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
 };
 
 type OraxTask = {
@@ -65,10 +107,15 @@ export default function OraxPage() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
+  const [githubToken, setGithubToken] = useState("");
+  const [scans, setScans] = useState<OraxScan[]>([]);
   const [taskKind, setTaskKind] = useState<(typeof TASK_KINDS)[number]["value"]>("analyze");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(true);
   const [submittingRepo, setSubmittingRepo] = useState(false);
+  const [connectingGithub, setConnectingGithub] = useState(false);
+  const [scanningRepository, setScanningRepository] = useState(false);
+  const [loadingScans, setLoadingScans] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,6 +123,10 @@ export default function OraxPage() {
     () => repositories.find((repo) => repo.id === selectedRepoId) ?? repositories[0] ?? null,
     [repositories, selectedRepoId],
   );
+  const latestScan = scans[0] ?? null;
+  const latestScanLanguages = Object.entries(latestScan?.summary?.languages ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +158,31 @@ export default function OraxPage() {
     void load();
   }, [load]);
 
+  const loadScans = useCallback(async (repositoryId: number) => {
+    setLoadingScans(true);
+    try {
+      const res = await authFetch(`/api/orax/repositories/${repositoryId}/scans`);
+      if (!res.ok) {
+        throw new Error("Could not load repository scans");
+      }
+      const body = (await res.json()) as { scans: OraxScan[] };
+      setScans(body.scans);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load repository scans");
+      setScans([]);
+    } finally {
+      setLoadingScans(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedRepository) {
+      setScans([]);
+      return;
+    }
+    void loadScans(selectedRepository.id);
+  }, [loadScans, selectedRepository]);
+
   async function addRepository() {
     if (!repositoryUrl.trim() || submittingRepo) return;
     setSubmittingRepo(true);
@@ -130,6 +206,64 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not save repository");
     } finally {
       setSubmittingRepo(false);
+    }
+  }
+
+  async function connectGithub() {
+    if (!selectedRepository || !githubToken.trim() || connectingGithub) return;
+    setConnectingGithub(true);
+    setError(null);
+    try {
+      const res = await authFetch(
+        `/api/orax/repositories/${selectedRepository.id}/github/connect`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: githubToken }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not connect GitHub repository");
+      }
+      const body = (await res.json()) as { repository: OraxRepository };
+      setRepositories((prev) =>
+        prev.map((repo) => (repo.id === body.repository.id ? body.repository : repo)),
+      );
+      setGithubToken("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect GitHub repository");
+    } finally {
+      setConnectingGithub(false);
+    }
+  }
+
+  async function scanRepository() {
+    if (!selectedRepository || scanningRepository) return;
+    setScanningRepository(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/repositories/${selectedRepository.id}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: selectedRepository.defaultBranch }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not scan repository");
+      }
+      const body = (await res.json()) as { repository: OraxRepository; scan: OraxScan };
+      setRepositories((prev) =>
+        prev.map((repo) => (repo.id === body.repository.id ? body.repository : repo)),
+      );
+      setScans((prev) => [body.scan, ...prev.filter((scan) => scan.id !== body.scan.id)]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not scan repository");
+      if (selectedRepository) {
+        void loadScans(selectedRepository.id);
+      }
+    } finally {
+      setScanningRepository(false);
     }
   }
 
@@ -250,6 +384,75 @@ export default function OraxPage() {
 
           <section className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold">Read-only GitHub access</h2>
+            </div>
+            {selectedRepository ? (
+              <div className="mt-4 space-y-3">
+                <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  {selectedRepository.githubAccountName ? (
+                    <>
+                      Connected as{" "}
+                      <span className="font-medium text-foreground">
+                        {selectedRepository.githubAccountName}
+                      </span>
+                      {selectedRepository.tokenScopes ? (
+                        <span> with scopes: {selectedRepository.tokenScopes}</span>
+                      ) : null}
+                    </>
+                  ) : (
+                    "Public repositories can scan without a token. Private repositories need a read-only GitHub token."
+                  )}
+                </div>
+                <input
+                  value={githubToken}
+                  onChange={(event) => setGithubToken(event.target.value)}
+                  type="password"
+                  autoComplete="off"
+                  placeholder="GitHub token for read-only access"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  onClick={() => void connectGithub()}
+                  disabled={connectingGithub || !githubToken.trim()}
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {connectingGithub ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-4 w-4" />
+                  )}
+                  Connect read-only token
+                </button>
+                <button
+                  onClick={() => void scanRepository()}
+                  disabled={scanningRepository}
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {scanningRepository ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Scan repository
+                </button>
+                <div className="text-xs text-muted-foreground">
+                  Last scan:{" "}
+                  {selectedRepository.lastScanAt
+                    ? new Date(selectedRepository.lastScanAt).toLocaleString()
+                    : "Not scanned yet"}
+                  {selectedRepository.scanStatus ? ` - ${selectedRepository.scanStatus}` : null}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                Add a repository before connecting GitHub access.
+              </p>
+            )}
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" />
               <h2 className="text-sm font-semibold">Current capabilities</h2>
             </div>
@@ -281,6 +484,88 @@ export default function OraxPage() {
               {error}
             </div>
           ) : null}
+
+          <section className="rounded-lg border border-border bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <FileSearch className="h-4 w-4 text-primary" />
+                  <h2 className="text-sm font-semibold">Repository scan</h2>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Read-only repository metadata and file-tree summary. Source editing and terminal
+                  execution remain locked.
+                </p>
+              </div>
+              {loadingScans ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              ) : null}
+            </div>
+
+            {latestScan ? (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Metric label="Status" value={latestScan.status} />
+                  <Metric label="Branch" value={latestScan.branch} />
+                  <Metric
+                    label="Commit"
+                    value={latestScan.commitSha ? latestScan.commitSha.slice(0, 10) : "Unknown"}
+                  />
+                  <Metric label="Size" value={formatBytes(latestScan.totalBytes)} />
+                  <Metric label="Files" value={String(latestScan.fileCount)} />
+                  <Metric label="Folders" value={String(latestScan.directoryCount)} />
+                  <Metric
+                    label="Scanned"
+                    value={new Date(latestScan.createdAt).toLocaleString()}
+                    wide
+                  />
+                </div>
+
+                {latestScan.error ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {latestScan.error}
+                  </div>
+                ) : null}
+
+                {latestScanLanguages.length ? (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase text-muted-foreground">
+                      Languages
+                    </h3>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {latestScanLanguages.map(([language, count]) => (
+                        <span
+                          key={language}
+                          className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground"
+                        >
+                          {language}: {count}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {latestScan.summary?.sampleFiles?.length ? (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase text-muted-foreground">
+                      Sample files
+                    </h3>
+                    <div className="mt-2 grid gap-1 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground sm:grid-cols-2">
+                      {latestScan.summary.sampleFiles.slice(0, 20).map((file) => (
+                        <div key={file} className="truncate">
+                          {file}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                No scans yet. Add a GitHub repository, then run a read-only scan.
+              </p>
+            )}
+          </section>
 
           <section className="rounded-lg border border-border bg-card p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -396,4 +681,30 @@ export default function OraxPage() {
       </main>
     </div>
   );
+}
+
+function Metric({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-border bg-muted/30 px-3 py-2",
+        wide ? "sm:col-span-2" : "",
+      )}
+    >
+      <div className="text-[11px] font-medium uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }

@@ -17,9 +17,9 @@ export const ORAX_TASK_STATUSES = [
 export type OraxTaskStatus = (typeof ORAX_TASK_STATUSES)[number];
 
 /**
- * ORAX repositories are user-scoped code targets. Phase 1 stores metadata only:
- * no personal access token, installation secret, or webhook secret is persisted
- * here. Provider auth will be added behind explicit approval gates.
+ * ORAX repositories are user-scoped code targets. Provider tokens are stored
+ * encrypted and are only used for read-only metadata/tree scans until the
+ * approval-gated execution layer is implemented.
  */
 export const oraxRepositoriesTable = pgTable(
   "orax_repositories",
@@ -32,6 +32,12 @@ export const oraxRepositoriesTable = pgTable(
     repositoryUrl: text("repository_url").notNull(),
     defaultBranch: text("default_branch").notNull().default("main"),
     connectionStatus: text("connection_status").notNull().default("metadata_only"),
+    githubAccountName: text("github_account_name"),
+    tokenScopes: text("token_scopes"),
+    encryptedToken: text("encrypted_token"),
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    lastScanAt: timestamp("last_scan_at", { withTimezone: true }),
+    scanStatus: text("scan_status").notNull().default("idle"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -39,6 +45,29 @@ export const oraxRepositoriesTable = pgTable(
   (t) => [
     index("orax_repositories_user_id_idx").on(t.userId),
     index("orax_repositories_provider_idx").on(t.provider, t.owner, t.name),
+  ],
+);
+
+export const oraxRepositoryScansTable = pgTable(
+  "orax_repository_scans",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    repositoryId: integer("repository_id").notNull(),
+    status: text("status").notNull().default("completed"),
+    branch: text("branch").notNull(),
+    commitSha: text("commit_sha"),
+    fileCount: integer("file_count").notNull().default(0),
+    directoryCount: integer("directory_count").notNull().default(0),
+    totalBytes: integer("total_bytes").notNull().default(0),
+    summary: jsonb("summary").notNull().default({}),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("orax_repository_scans_user_id_idx").on(t.userId, t.createdAt),
+    index("orax_repository_scans_repository_id_idx").on(t.repositoryId, t.createdAt),
   ],
 );
 
@@ -74,5 +103,7 @@ export const oraxTasksTable = pgTable(
 
 export type OraxRepository = typeof oraxRepositoriesTable.$inferSelect;
 export type InsertOraxRepository = typeof oraxRepositoriesTable.$inferInsert;
+export type OraxRepositoryScan = typeof oraxRepositoryScansTable.$inferSelect;
+export type InsertOraxRepositoryScan = typeof oraxRepositoryScansTable.$inferInsert;
 export type OraxTask = typeof oraxTasksTable.$inferSelect;
 export type InsertOraxTask = typeof oraxTasksTable.$inferInsert;

@@ -3409,6 +3409,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
           repository_url    TEXT NOT NULL,
           default_branch    TEXT NOT NULL DEFAULT 'main',
           connection_status TEXT NOT NULL DEFAULT 'metadata_only',
+          github_account_name TEXT,
+          token_scopes      TEXT,
+          encrypted_token   TEXT,
+          connected_at      TIMESTAMPTZ,
+          last_scan_at      TIMESTAMPTZ,
+          scan_status       TEXT NOT NULL DEFAULT 'idle',
           created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           archived_at       TIMESTAMPTZ
@@ -3446,6 +3452,82 @@ const MIGRATION_STEPS: MigrationStep[] = [
         `CREATE INDEX IF NOT EXISTS orax_tasks_repository_id_idx ON orax_tasks(repository_id)`,
       );
       await client.query(`CREATE INDEX IF NOT EXISTS orax_tasks_status_idx ON orax_tasks(status)`);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_repository_scans (
+          id              SERIAL PRIMARY KEY,
+          user_id         TEXT NOT NULL,
+          repository_id   INTEGER NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'completed',
+          branch          TEXT NOT NULL,
+          commit_sha      TEXT,
+          file_count      INTEGER NOT NULL DEFAULT 0,
+          directory_count INTEGER NOT NULL DEFAULT 0,
+          total_bytes     INTEGER NOT NULL DEFAULT 0,
+          summary         JSONB NOT NULL DEFAULT '{}'::jsonb,
+          error           TEXT,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at    TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_repository_scans_user_id_idx
+           ON orax_repository_scans(user_id, created_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_repository_scans_repository_id_idx
+           ON orax_repository_scans(repository_id, created_at)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
+  // ── migrate-orax-github-readonly (repo scan upgrade) ──────────────────────
+  {
+    name: "migrate-orax-github-readonly",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(
+        `ALTER TABLE orax_repositories ADD COLUMN IF NOT EXISTS github_account_name TEXT`,
+      );
+      await client.query(
+        `ALTER TABLE orax_repositories ADD COLUMN IF NOT EXISTS token_scopes TEXT`,
+      );
+      await client.query(
+        `ALTER TABLE orax_repositories ADD COLUMN IF NOT EXISTS encrypted_token TEXT`,
+      );
+      await client.query(
+        `ALTER TABLE orax_repositories ADD COLUMN IF NOT EXISTS connected_at TIMESTAMPTZ`,
+      );
+      await client.query(
+        `ALTER TABLE orax_repositories ADD COLUMN IF NOT EXISTS last_scan_at TIMESTAMPTZ`,
+      );
+      await client.query(
+        `ALTER TABLE orax_repositories ADD COLUMN IF NOT EXISTS scan_status TEXT NOT NULL DEFAULT 'idle'`,
+      );
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_repository_scans (
+          id              SERIAL PRIMARY KEY,
+          user_id         TEXT NOT NULL,
+          repository_id   INTEGER NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'completed',
+          branch          TEXT NOT NULL,
+          commit_sha      TEXT,
+          file_count      INTEGER NOT NULL DEFAULT 0,
+          directory_count INTEGER NOT NULL DEFAULT 0,
+          total_bytes     INTEGER NOT NULL DEFAULT 0,
+          summary         JSONB NOT NULL DEFAULT '{}'::jsonb,
+          error           TEXT,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at    TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_repository_scans_user_id_idx
+           ON orax_repository_scans(user_id, created_at)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_repository_scans_repository_id_idx
+           ON orax_repository_scans(repository_id, created_at)`,
+      );
       await client.query("COMMIT");
     },
   },

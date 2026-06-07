@@ -79,7 +79,7 @@ export function buildOraxTaskPlan(input: {
     ],
     guardrails: [
       "ORAX is separate from Ora chat memory and AI Builder project tasks.",
-      "Phase 1 stores repository metadata only; no provider tokens or secrets are stored.",
+      "Provider tokens are encrypted and used only for read-only repository scans.",
       "Write, push, deploy, and delete actions require a later approval-gated execution layer.",
       "Every future code change must produce a diff, test result, and audit entry before push.",
     ],

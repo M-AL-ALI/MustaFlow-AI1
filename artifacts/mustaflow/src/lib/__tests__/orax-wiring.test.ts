@@ -28,9 +28,12 @@ describe("ORAX product-surface wiring", () => {
   it("uses ORAX-owned API routes rather than Ora or AI Builder endpoints", () => {
     expect(oraxPage).toContain("/api/orax/capabilities");
     expect(oraxPage).toContain("/api/orax/repositories");
+    expect(oraxPage).toContain("/api/orax/repositories/${repositoryId}/scans");
+    expect(oraxPage).toContain("/api/orax/repositories/${selectedRepository.id}/scan");
     expect(oraxPage).toContain("/api/orax/tasks");
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");
+    expect(oraxPage).not.toContain("/api/credits");
   });
 
   it("mounts the authenticated /orax API prefix", () => {
