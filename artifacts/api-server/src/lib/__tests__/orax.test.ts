@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildOraxTaskPlan, parseRepositoryLocator } from "../orax";
+import { buildOraxTaskPlan, normalizeOraxFileReadPaths, parseRepositoryLocator } from "../orax";
 import { extensionToLanguage, summarizeGithubTree } from "../orax-github";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -113,6 +113,29 @@ describe("ORAX read-only GitHub scan summaries", () => {
     expect(source).not.toMatch(/method:\s*"PATCH"/);
     expect(source).not.toMatch(/method:\s*"PUT"/);
     expect(source).not.toMatch(/method:\s*"DELETE"/);
+  });
+});
+
+describe("ORAX approval-gated file path validation", () => {
+  it("normalizes repository-relative file paths", () => {
+    expect(normalizeOraxFileReadPaths([" src/index.ts ", "src\\app.ts", "src/index.ts"])).toEqual([
+      "src/index.ts",
+      "src/app.ts",
+    ]);
+  });
+
+  it("rejects absolute paths and traversal", () => {
+    expect(() => normalizeOraxFileReadPaths(["../secrets.env"])).toThrow("traversal");
+    expect(() => normalizeOraxFileReadPaths(["/etc/passwd"])).toThrow("repository-relative");
+    expect(() => normalizeOraxFileReadPaths(["C:/Users/Admin/.ssh/id_rsa"])).toThrow(
+      "repository-relative",
+    );
+  });
+
+  it("limits the number of files in one approval request", () => {
+    expect(() =>
+      normalizeOraxFileReadPaths(Array.from({ length: 13 }, (_, index) => `src/${index}.ts`)),
+    ).toThrow("At most 12 files");
   });
 });
 

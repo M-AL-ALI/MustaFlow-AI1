@@ -17,6 +17,12 @@ export interface OraxPlan {
   unavailableUntilApproved: string[];
 }
 
+export const ORAX_FILE_READ_LIMITS = {
+  maxFiles: 12,
+  maxFileBytes: 100_000,
+  maxTotalBytes: 400_000,
+} as const;
+
 const PROVIDER_HOSTS: Array<{ host: string; provider: OraxProvider }> = [
   { host: "github.com", provider: "github" },
   { host: "gitlab.com", provider: "gitlab" },
@@ -93,6 +99,38 @@ export function buildOraxTaskPlan(input: {
       "Deployment changes",
     ],
   };
+}
+
+export function normalizeOraxFileReadPaths(paths: string[]): string[] {
+  if (!Array.isArray(paths)) {
+    throw new Error("File paths must be an array");
+  }
+  const normalized = paths.map((path) => path.trim().replace(/\\/g, "/")).filter(Boolean);
+  const unique = [...new Set(normalized)];
+
+  if (unique.length === 0) {
+    throw new Error("At least one file path is required");
+  }
+  if (unique.length > ORAX_FILE_READ_LIMITS.maxFiles) {
+    throw new Error(`At most ${ORAX_FILE_READ_LIMITS.maxFiles} files can be read at once`);
+  }
+
+  for (const path of unique) {
+    if (path.length > 300) {
+      throw new Error("File paths must be 300 characters or less");
+    }
+    if (path.startsWith("/") || /^[A-Za-z]:\//.test(path)) {
+      throw new Error("File paths must be repository-relative");
+    }
+    if (path.split("/").some((part) => part === ".." || part === "." || part === "")) {
+      throw new Error("File paths cannot contain traversal segments");
+    }
+    if (/[\0\r\n]/.test(path)) {
+      throw new Error("File paths contain invalid characters");
+    }
+  }
+
+  return unique;
 }
 
 function normalizeRepositoryUrl(raw: string): string {

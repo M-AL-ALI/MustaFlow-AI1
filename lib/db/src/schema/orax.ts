@@ -16,6 +16,18 @@ export const ORAX_TASK_STATUSES = [
 ] as const;
 export type OraxTaskStatus = (typeof ORAX_TASK_STATUSES)[number];
 
+export const ORAX_APPROVAL_ACTIONS = ["read_files"] as const;
+export type OraxApprovalAction = (typeof ORAX_APPROVAL_ACTIONS)[number];
+
+export const ORAX_APPROVAL_STATUSES = [
+  "pending",
+  "approved",
+  "denied",
+  "completed",
+  "failed",
+] as const;
+export type OraxApprovalStatus = (typeof ORAX_APPROVAL_STATUSES)[number];
+
 /**
  * ORAX repositories are user-scoped code targets. Provider tokens are stored
  * encrypted and are only used for read-only metadata/tree scans until the
@@ -71,6 +83,29 @@ export const oraxRepositoryScansTable = pgTable(
   ],
 );
 
+export const oraxTaskApprovalsTable = pgTable(
+  "orax_task_approvals",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    repositoryId: integer("repository_id").notNull(),
+    taskId: integer("task_id").notNull(),
+    action: text("action").notNull().default("read_files"),
+    status: text("status").notNull().default("pending"),
+    request: jsonb("request").notNull().default({}),
+    result: jsonb("result").notNull().default({}),
+    riskSummary: text("risk_summary"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("orax_task_approvals_user_id_idx").on(t.userId, t.createdAt),
+    index("orax_task_approvals_task_id_idx").on(t.taskId, t.createdAt),
+    index("orax_task_approvals_status_idx").on(t.status),
+  ],
+);
+
 /**
  * ORAX tasks are isolated from Ora conversations and AI Builder tasks. They
  * record coding-agent intent, plans, results, and future approval/checkpoint
@@ -105,5 +140,7 @@ export type OraxRepository = typeof oraxRepositoriesTable.$inferSelect;
 export type InsertOraxRepository = typeof oraxRepositoriesTable.$inferInsert;
 export type OraxRepositoryScan = typeof oraxRepositoryScansTable.$inferSelect;
 export type InsertOraxRepositoryScan = typeof oraxRepositoryScansTable.$inferInsert;
+export type OraxTaskApproval = typeof oraxTaskApprovalsTable.$inferSelect;
+export type InsertOraxTaskApproval = typeof oraxTaskApprovalsTable.$inferInsert;
 export type OraxTask = typeof oraxTasksTable.$inferSelect;
 export type InsertOraxTask = typeof oraxTasksTable.$inferInsert;

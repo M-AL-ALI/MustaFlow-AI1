@@ -30,6 +30,16 @@ type GithubTreeEntry = {
   url: string;
 };
 
+type GithubContentResponse = {
+  type: string;
+  path: string;
+  sha: string;
+  size: number;
+  encoding?: string;
+  content?: string;
+  download_url?: string | null;
+};
+
 export type GithubTreeResponse = {
   sha: string;
   truncated?: boolean;
@@ -113,6 +123,88 @@ export async function scanGithubRepository(input: {
     commitSha: branch.body.commit.sha,
     tree: tree.body,
   });
+}
+
+export async function readGithubRepositoryFiles(input: {
+  owner: string;
+  repo: string;
+  branch: string;
+  paths: string[];
+  token?: string;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+}): Promise<{
+  files: Array<{
+    path: string;
+    sha: string;
+    size: number;
+    content: string;
+    truncated: boolean;
+  }>;
+  skipped: Array<{ path: string; reason: string }>;
+  totalBytes: number;
+}> {
+  const files: Array<{
+    path: string;
+    sha: string;
+    size: number;
+    content: string;
+    truncated: boolean;
+  }> = [];
+  const skipped: Array<{ path: string; reason: string }> = [];
+  let totalBytes = 0;
+
+  for (const filePath of input.paths) {
+    if (totalBytes >= input.maxTotalBytes) {
+      skipped.push({ path: filePath, reason: "Total read limit reached" });
+      continue;
+    }
+
+    try {
+      const response = await githubJson<GithubContentResponse>(
+        `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/contents/${encodeGithubPath(filePath)}?ref=${encodeURIComponent(input.branch)}`,
+        input.token,
+      );
+      const body = response.body;
+      if (body.type !== "file") {
+        skipped.push({ path: filePath, reason: "Path is not a file" });
+        continue;
+      }
+      if (body.size > input.maxFileBytes) {
+        skipped.push({ path: filePath, reason: "File exceeds per-file read limit" });
+        continue;
+      }
+      if (totalBytes + body.size > input.maxTotalBytes) {
+        skipped.push({ path: filePath, reason: "File exceeds total read limit" });
+        continue;
+      }
+      if (body.encoding !== "base64" || !body.content) {
+        skipped.push({ path: filePath, reason: "Unsupported GitHub content encoding" });
+        continue;
+      }
+      const decoded = Buffer.from(body.content.replace(/\s/g, ""), "base64");
+      if (!isProbablyText(decoded)) {
+        skipped.push({ path: filePath, reason: "Binary files are not readable by ORAX yet" });
+        continue;
+      }
+      const content = decoded.toString("utf8");
+      totalBytes += body.size;
+      files.push({
+        path: body.path || filePath,
+        sha: body.sha,
+        size: body.size,
+        content,
+        truncated: false,
+      });
+    } catch (err) {
+      skipped.push({
+        path: filePath,
+        reason: err instanceof Error ? err.message : "Could not read file",
+      });
+    }
+  }
+
+  return { files, skipped, totalBytes };
 }
 
 export function summarizeGithubTree(input: {
@@ -233,6 +325,16 @@ function safeJson(text: string): unknown {
   } catch {
     return {};
   }
+}
+
+function encodeGithubPath(filePath: string): string {
+  return filePath.split("/").map(encodeURIComponent).join("/");
+}
+
+function isProbablyText(buffer: Buffer): boolean {
+  if (buffer.length === 0) return true;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
+  return !sample.includes(0);
 }
 
 function normalizeScopes(scopes: string | null): string {

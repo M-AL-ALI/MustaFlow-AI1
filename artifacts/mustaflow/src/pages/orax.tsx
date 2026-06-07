@@ -3,9 +3,11 @@ import { Link } from "wouter";
 import {
   ArrowLeft,
   Bot,
+  Check,
   CheckCircle2,
   Code2,
   FileSearch,
+  FileText,
   GitBranch,
   GitPullRequest,
   KeyRound,
@@ -15,6 +17,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Terminal,
+  X,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { authFetch } from "@/lib/api-fetch";
@@ -88,6 +91,41 @@ type OraxTask = {
   createdAt: string;
 };
 
+type OraxApproval = {
+  id: number;
+  repositoryId: number;
+  taskId: number;
+  action: string;
+  status: string;
+  request: {
+    paths?: string[];
+    branch?: string;
+    reason?: string | null;
+  };
+  result?: {
+    branch?: string;
+    totalBytes?: number;
+    files?: Array<{ path: string; sha: string; size: number; truncated: boolean }>;
+    skipped?: Array<{ path: string; reason: string }>;
+  };
+  riskSummary?: string | null;
+  createdAt: string;
+  decidedAt?: string | null;
+  completedAt?: string | null;
+};
+
+type OraxReadResult = {
+  branch: string;
+  files: Array<{
+    path: string;
+    sha: string;
+    size: number;
+    content: string;
+    truncated: boolean;
+  }>;
+  skipped: Array<{ path: string; reason: string }>;
+};
+
 type OraxCapabilities = {
   available: string[];
   lockedUntilApprovalLayer: string[];
@@ -103,20 +141,29 @@ const TASK_KINDS = [
 export default function OraxPage() {
   const [repositories, setRepositories] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
+  const [approvals, setApprovals] = useState<OraxApproval[]>([]);
   const [capabilities, setCapabilities] = useState<OraxCapabilities | null>(null);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [githubToken, setGithubToken] = useState("");
   const [scans, setScans] = useState<OraxScan[]>([]);
   const [taskKind, setTaskKind] = useState<(typeof TASK_KINDS)[number]["value"]>("analyze");
   const [prompt, setPrompt] = useState("");
+  const [approvalPaths, setApprovalPaths] = useState("");
+  const [approvalReason, setApprovalReason] = useState("");
+  const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [submittingRepo, setSubmittingRepo] = useState(false);
   const [connectingGithub, setConnectingGithub] = useState(false);
   const [scanningRepository, setScanningRepository] = useState(false);
   const [loadingScans, setLoadingScans] = useState(false);
+  const [loadingApprovals, setLoadingApprovals] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
+  const [requestingApproval, setRequestingApproval] = useState(false);
+  const [decidingApprovalId, setDecidingApprovalId] = useState<number | null>(null);
+  const [readingApprovalId, setReadingApprovalId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selectedRepository = useMemo(
@@ -127,6 +174,10 @@ export default function OraxPage() {
   const latestScanLanguages = Object.entries(latestScan?.summary?.languages ?? {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
+  const selectedTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
+    [tasks, selectedTaskId],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,6 +198,7 @@ export default function OraxPage() {
       setRepositories(repoData.repositories);
       setTasks(taskData.tasks);
       setSelectedRepoId((current) => current ?? repoData.repositories[0]?.id ?? null);
+      setSelectedTaskId((current) => current ?? taskData.tasks[0]?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load ORAX");
     } finally {
@@ -182,6 +234,33 @@ export default function OraxPage() {
     }
     void loadScans(selectedRepository.id);
   }, [loadScans, selectedRepository]);
+
+  const loadApprovals = useCallback(async (taskId: number) => {
+    setLoadingApprovals(true);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${taskId}/approvals`);
+      if (!res.ok) {
+        throw new Error("Could not load approvals");
+      }
+      const body = (await res.json()) as { approvals: OraxApproval[] };
+      setApprovals(body.approvals);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load approvals");
+      setApprovals([]);
+    } finally {
+      setLoadingApprovals(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTask) {
+      setApprovals([]);
+      setReadResult(null);
+      return;
+    }
+    setReadResult(null);
+    void loadApprovals(selectedTask.id);
+  }, [loadApprovals, selectedTask]);
 
   async function addRepository() {
     if (!repositoryUrl.trim() || submittingRepo) return;
@@ -287,11 +366,99 @@ export default function OraxPage() {
       }
       const body = (await res.json()) as { task: OraxTask };
       setTasks((prev) => [body.task, ...prev]);
+      setSelectedTaskId(body.task.id);
       setPrompt("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create ORAX task");
     } finally {
       setSubmittingTask(false);
+    }
+  }
+
+  async function requestFileReadApproval() {
+    if (!selectedTask || requestingApproval) return;
+    const paths = approvalPaths
+      .split(/[\n,]/)
+      .map((path) => path.trim())
+      .filter(Boolean);
+    if (!paths.length) {
+      setError("Add at least one repository-relative file path");
+      return;
+    }
+    setRequestingApproval(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "read_files",
+          paths,
+          reason: approvalReason,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not request approval");
+      }
+      const body = (await res.json()) as { approval: OraxApproval };
+      setApprovals((prev) => [body.approval, ...prev]);
+      setApprovalPaths("");
+      setApprovalReason("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not request approval");
+    } finally {
+      setRequestingApproval(false);
+    }
+  }
+
+  async function decideApproval(approvalId: number, decision: "approved" | "denied") {
+    if (decidingApprovalId) return;
+    setDecidingApprovalId(approvalId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/approvals/${approvalId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not update approval");
+      }
+      const body = (await res.json()) as { approval: OraxApproval };
+      setApprovals((prev) =>
+        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update approval");
+    } finally {
+      setDecidingApprovalId(null);
+    }
+  }
+
+  async function readApprovedFiles(approvalId: number) {
+    if (readingApprovalId) return;
+    setReadingApprovalId(approvalId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/approvals/${approvalId}/read-files`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not read approved files");
+      }
+      const body = (await res.json()) as OraxReadResult & { approval: OraxApproval };
+      setReadResult({ branch: body.branch, files: body.files, skipped: body.skipped });
+      setApprovals((prev) =>
+        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
+      );
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read approved files");
+    } finally {
+      setReadingApprovalId(null);
     }
   }
 
@@ -627,6 +794,170 @@ export default function OraxPage() {
                 Create safe plan
               </button>
             </div>
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" />
+                  <h2 className="text-sm font-semibold">Approval-gated file read</h2>
+                </div>
+                <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                  ORAX can read selected source files only after approval. It still cannot edit,
+                  execute terminal commands, push branches, open PRs, or deploy.
+                </p>
+              </div>
+              {loadingApprovals ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              ) : null}
+            </div>
+
+            {selectedTask ? (
+              <div className="mt-4 space-y-4">
+                <select
+                  value={selectedTask.id}
+                  onChange={(event) => setSelectedTaskId(Number(event.target.value))}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {tasks.map((task) => (
+                    <option key={task.id} value={task.id}>
+                      #{task.id} - {task.title}
+                    </option>
+                  ))}
+                </select>
+
+                <textarea
+                  value={approvalPaths}
+                  onChange={(event) => setApprovalPaths(event.target.value)}
+                  placeholder="src/main.ts&#10;package.json&#10;README.md"
+                  className="min-h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                <input
+                  value={approvalReason}
+                  onChange={(event) => setApprovalReason(event.target.value)}
+                  placeholder="Reason for reading these files"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  onClick={() => void requestFileReadApproval()}
+                  disabled={requestingApproval || !approvalPaths.trim()}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {requestingApproval ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4" />
+                  )}
+                  Request approval
+                </button>
+
+                <div className="space-y-2">
+                  {approvals.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      No approval requests for this task yet.
+                    </p>
+                  ) : (
+                    approvals.map((approval) => (
+                      <article
+                        key={approval.id}
+                        className="rounded-md border border-border bg-muted/20 px-3 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium">
+                              {approval.action} - {approval.status}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {(approval.request.paths ?? []).join(", ")}
+                            </div>
+                            {approval.riskSummary ? (
+                              <div className="mt-2 text-xs text-muted-foreground">
+                                {approval.riskSummary}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {approval.status === "pending" ? (
+                              <>
+                                <button
+                                  onClick={() => void decideApproval(approval.id, "approved")}
+                                  disabled={decidingApprovalId === approval.id}
+                                  className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => void decideApproval(approval.id, "denied")}
+                                  disabled={decidingApprovalId === approval.id}
+                                  className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                  Deny
+                                </button>
+                              </>
+                            ) : null}
+                            {approval.status === "approved" ? (
+                              <button
+                                onClick={() => void readApprovedFiles(approval.id)}
+                                disabled={readingApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                              >
+                                {readingApprovalId === approval.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <FileSearch className="h-3.5 w-3.5" />
+                                )}
+                                Read files
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                        {approval.result?.files?.length ? (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Read {approval.result.files.length} file(s),{" "}
+                            {formatBytes(approval.result.totalBytes ?? 0)}
+                          </div>
+                        ) : null}
+                      </article>
+                    ))
+                  )}
+                </div>
+
+                {readResult ? (
+                  <div className="rounded-md border border-border bg-muted/20 p-3">
+                    <div className="text-sm font-semibold">
+                      Approved file read result - {readResult.branch}
+                    </div>
+                    {readResult.skipped.length ? (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Skipped:{" "}
+                        {readResult.skipped
+                          .map((item) => `${item.path} (${item.reason})`)
+                          .join(", ")}
+                      </div>
+                    ) : null}
+                    <div className="mt-3 space-y-3">
+                      {readResult.files.map((file) => (
+                        <div key={file.path} className="rounded-md border border-border bg-card">
+                          <div className="border-b border-border px-3 py-2 text-xs font-medium">
+                            {file.path} - {formatBytes(file.size)}
+                          </div>
+                          <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 py-2 text-xs text-muted-foreground">
+                            {file.content}
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                Create an ORAX task before requesting file-read approval.
+              </p>
+            )}
           </section>
 
           <section className="rounded-lg border border-border bg-card">

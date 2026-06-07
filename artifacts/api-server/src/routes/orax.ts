@@ -5,13 +5,26 @@ import {
   db,
   oraxRepositoriesTable,
   oraxRepositoryScansTable,
+  oraxTaskApprovalsTable,
   oraxTasksTable,
+  ORAX_APPROVAL_ACTIONS,
   ORAX_PROVIDERS,
   ORAX_TASK_KINDS,
+  type OraxTaskApproval,
   type OraxRepository,
+  type OraxTask,
 } from "@workspace/db";
-import { buildOraxTaskPlan, parseRepositoryLocator } from "../lib/orax";
-import { scanGithubRepository, verifyGithubReadOnlyToken } from "../lib/orax-github";
+import {
+  buildOraxTaskPlan,
+  normalizeOraxFileReadPaths,
+  ORAX_FILE_READ_LIMITS,
+  parseRepositoryLocator,
+} from "../lib/orax";
+import {
+  readGithubRepositoryFiles,
+  scanGithubRepository,
+  verifyGithubReadOnlyToken,
+} from "../lib/orax-github";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
 
@@ -38,6 +51,17 @@ const scanRepositorySchema = z.object({
   branch: z.string().min(1).max(120).optional(),
 });
 
+const createApprovalSchema = z.object({
+  action: z.enum(ORAX_APPROVAL_ACTIONS).default("read_files"),
+  paths: z.array(z.string().min(1).max(300)).min(1).max(ORAX_FILE_READ_LIMITS.maxFiles),
+  branch: z.string().min(1).max(120).optional(),
+  reason: z.string().max(1000).optional(),
+});
+
+const decisionSchema = z.object({
+  decision: z.enum(["approved", "denied"]),
+});
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -48,6 +72,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Connect a GitHub token for read-only repository scans",
       "Scan repository metadata, branches, and file tree summaries",
       "Create coding-agent task plans",
+      "Request approval to read selected source files",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
@@ -323,6 +348,255 @@ router.get("/orax/tasks", async (req, res) => {
   }
 });
 
+router.get("/orax/tasks/:id/approvals", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    const approvals = await db
+      .select()
+      .from(oraxTaskApprovalsTable)
+      .where(
+        and(eq(oraxTaskApprovalsTable.userId, userId), eq(oraxTaskApprovalsTable.taskId, taskId)),
+      )
+      .orderBy(desc(oraxTaskApprovalsTable.createdAt));
+    res.json({ approvals });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to list ORAX approvals");
+    res.status(500).json({ error: "Failed to load ORAX approvals" });
+  }
+});
+
+router.post("/orax/tasks/:id/approvals", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const parsed = createApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid approval request" });
+    return;
+  }
+
+  let paths: string[];
+  try {
+    paths = normalizeOraxFileReadPaths(parsed.data.paths);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : "Invalid file paths" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    const repository = await loadOwnedRepository(userId, task.repositoryId);
+    if (!repository) {
+      res.status(404).json({ error: "Repository not found" });
+      return;
+    }
+    if (repository.provider !== "github") {
+      res.status(400).json({ error: "Approved file reads currently support GitHub repositories" });
+      return;
+    }
+
+    const request = {
+      action: parsed.data.action,
+      paths,
+      branch: parsed.data.branch?.trim() || repository.defaultBranch,
+      reason: parsed.data.reason?.trim() || null,
+      limits: ORAX_FILE_READ_LIMITS,
+    };
+    const [approval] = await db
+      .insert(oraxTaskApprovalsTable)
+      .values({
+        userId,
+        repositoryId: repository.id,
+        taskId: task.id,
+        action: parsed.data.action,
+        status: "pending",
+        request,
+        riskSummary:
+          "ORAX will read selected repository files only. It will not edit files, run commands, push branches, open PRs, or deploy.",
+      })
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({ status: "awaiting_approval", updatedAt: new Date() })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.status(201).json({ approval });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to create ORAX approval");
+    res.status(500).json({ error: "Failed to create ORAX approval" });
+  }
+});
+
+router.patch("/orax/approvals/:id", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = Number(req.params.id);
+  if (!Number.isInteger(approvalId) || approvalId <= 0) {
+    res.status(400).json({ error: "Invalid approval id" });
+    return;
+  }
+
+  const parsed = decisionSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid approval decision" });
+    return;
+  }
+
+  try {
+    const approval = await loadOwnedApproval(userId, approvalId);
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (approval.status !== "pending") {
+      res.status(409).json({ error: "Approval has already been decided" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(oraxTaskApprovalsTable)
+      .set({ status: parsed.data.decision, decidedAt: new Date() })
+      .where(eq(oraxTaskApprovalsTable.id, approval.id))
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        status: parsed.data.decision === "approved" ? "awaiting_approval" : "planned",
+        updatedAt: new Date(),
+      })
+      .where(eq(oraxTasksTable.id, approval.taskId));
+
+    res.json({ approval: updated });
+  } catch (err) {
+    logger.error({ component: "orax", err, approvalId }, "Failed to decide ORAX approval");
+    res.status(500).json({ error: "Failed to update ORAX approval" });
+  }
+});
+
+router.post("/orax/approvals/:id/read-files", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = Number(req.params.id);
+  if (!Number.isInteger(approvalId) || approvalId <= 0) {
+    res.status(400).json({ error: "Invalid approval id" });
+    return;
+  }
+
+  try {
+    const approval = await loadOwnedApproval(userId, approvalId);
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (approval.action !== "read_files") {
+      res.status(400).json({ error: "Unsupported approval action" });
+      return;
+    }
+    if (approval.status !== "approved") {
+      res.status(409).json({ error: "File read requires an approved request" });
+      return;
+    }
+
+    const task = await loadOwnedTask(userId, approval.taskId);
+    const repository = await loadOwnedRepository(userId, approval.repositoryId);
+    if (!task || !repository) {
+      res.status(404).json({ error: "Task or repository not found" });
+      return;
+    }
+    if (repository.provider !== "github") {
+      res.status(400).json({ error: "Approved file reads currently support GitHub repositories" });
+      return;
+    }
+
+    const request = approval.request as {
+      paths?: string[];
+      branch?: string;
+    };
+    const paths = normalizeOraxFileReadPaths(request.paths ?? []);
+    const branch = request.branch || repository.defaultBranch;
+    const token = repository.encryptedToken
+      ? encryptionService.decrypt(repository.encryptedToken)
+      : undefined;
+    const readResult = await readGithubRepositoryFiles({
+      owner: repository.owner,
+      repo: repository.name,
+      branch,
+      paths,
+      token,
+      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+    });
+
+    const auditResult = {
+      branch,
+      totalBytes: readResult.totalBytes,
+      files: readResult.files.map((file) => ({
+        path: file.path,
+        sha: file.sha,
+        size: file.size,
+        truncated: file.truncated,
+      })),
+      skipped: readResult.skipped,
+    };
+
+    const [updatedApproval] = await db
+      .update(oraxTaskApprovalsTable)
+      .set({
+        status: readResult.files.length ? "completed" : "failed",
+        result: auditResult,
+        completedAt: new Date(),
+      })
+      .where(eq(oraxTaskApprovalsTable.id, approval.id))
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        status: readResult.files.length ? "completed" : "blocked",
+        result: {
+          ...asRecord(task.result),
+          fileRead: auditResult,
+          message: readResult.files.length
+            ? "ORAX read the approved files. Editing, terminal execution, push, PR, and deploy remain locked."
+            : "ORAX could not read the approved files.",
+        },
+        updatedAt: new Date(),
+        completedAt: readResult.files.length ? new Date() : null,
+      })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.json({
+      approval: updatedApproval,
+      branch,
+      files: readResult.files,
+      skipped: readResult.skipped,
+      limits: ORAX_FILE_READ_LIMITS,
+    });
+  } catch (err) {
+    logger.error({ component: "orax", err, approvalId }, "Failed to read approved ORAX files");
+    res.status(502).json({ error: "Could not read approved files" });
+  }
+});
+
 router.post("/orax/tasks", async (req, res) => {
   const userId = req.userId!;
   const parsed = createTaskSchema.safeParse(req.body ?? {});
@@ -407,6 +681,38 @@ async function loadOwnedRepository(userId: string, repositoryId: number) {
       ),
     );
   return repository;
+}
+
+async function loadOwnedTask(userId: string, taskId: number): Promise<OraxTask | undefined> {
+  const [task] = await db
+    .select()
+    .from(oraxTasksTable)
+    .where(
+      and(
+        eq(oraxTasksTable.id, taskId),
+        eq(oraxTasksTable.userId, userId),
+        isNull(oraxTasksTable.archivedAt),
+      ),
+    );
+  return task;
+}
+
+async function loadOwnedApproval(
+  userId: string,
+  approvalId: number,
+): Promise<OraxTaskApproval | undefined> {
+  const [approval] = await db
+    .select()
+    .from(oraxTaskApprovalsTable)
+    .where(
+      and(eq(oraxTaskApprovalsTable.id, approvalId), eq(oraxTaskApprovalsTable.userId, userId)),
+    );
+  return approval;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }
 
 export default router;

@@ -69,6 +69,35 @@ async function main(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS orax_tasks_status_idx ON orax_tasks(status)`);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS orax_task_approvals (
+        id            SERIAL PRIMARY KEY,
+        user_id       TEXT NOT NULL,
+        repository_id INTEGER NOT NULL,
+        task_id       INTEGER NOT NULL,
+        action        TEXT NOT NULL DEFAULT 'read_files',
+        status        TEXT NOT NULL DEFAULT 'pending',
+        request       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        result        JSONB NOT NULL DEFAULT '{}'::jsonb,
+        risk_summary  TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        decided_at    TIMESTAMPTZ,
+        completed_at  TIMESTAMPTZ
+      )
+    `);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS orax_task_approvals_user_id_idx
+         ON orax_task_approvals(user_id, created_at)`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS orax_task_approvals_task_id_idx
+         ON orax_task_approvals(task_id, created_at)`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS orax_task_approvals_status_idx
+         ON orax_task_approvals(status)`,
+    );
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS orax_repository_scans (
         id              SERIAL PRIMARY KEY,
         user_id         TEXT NOT NULL,
