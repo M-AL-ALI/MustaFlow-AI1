@@ -127,6 +127,17 @@ type OraxTaskActionSuggestion = {
   requiresManualConfirmation?: boolean;
 };
 
+type OraxTimelineMessageInput = {
+  userId: string;
+  task: OraxTask;
+  role?: "system" | "tool";
+  event: string;
+  content: string;
+  approvalId?: number | null;
+  artifactId?: number | null;
+  metadata?: Record<string, unknown>;
+};
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -677,6 +688,20 @@ router.post("/orax/tasks/:id/approvals", async (req, res) => {
       .set({ status: "awaiting_approval", updatedAt: new Date() })
       .where(eq(oraxTasksTable.id, task.id));
 
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "system",
+      event: "approval_requested",
+      content: `File-read approval requested for ${paths.length} path${paths.length === 1 ? "" : "s"}.`,
+      approvalId: approval.id,
+      metadata: {
+        action: approval.action,
+        paths,
+        branch: request.branch,
+      },
+    });
+
     res.status(201).json({ approval });
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to create ORAX approval");
@@ -800,6 +825,22 @@ router.post("/orax/tasks/:id/draft-patch", async (req, res) => {
       })
       .where(eq(oraxTasksTable.id, task.id));
 
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "tool",
+      event: "draft_patch_generated",
+      content: `Draft patch generated: ${generated.summary}`,
+      approvalId: approval.id,
+      artifactId: artifact.id,
+      metadata: {
+        artifactType: artifact.type,
+        status: artifact.status,
+        filesRead: readResult.files.length,
+        skipped: readResult.skipped.length,
+      },
+    });
+
     res.status(201).json({ artifact });
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to generate ORAX draft patch");
@@ -859,6 +900,20 @@ router.post("/orax/tasks/:id/sandbox-approvals", async (req, res) => {
       .update(oraxTasksTable)
       .set({ status: "awaiting_approval", updatedAt: new Date() })
       .where(eq(oraxTasksTable.id, task.id));
+
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "system",
+      event: "approval_requested",
+      content: `Sandbox validation approval requested for draft artifact #${artifact.id}.`,
+      approvalId: approval.id,
+      artifactId: artifact.id,
+      metadata: {
+        action: approval.action,
+        draftArtifactId: artifact.id,
+      },
+    });
 
     res.status(201).json({ approval });
   } catch (err) {
@@ -928,6 +983,20 @@ router.post("/orax/tasks/:id/command-approvals", async (req, res) => {
       .set({ status: "awaiting_approval", updatedAt: new Date() })
       .where(eq(oraxTasksTable.id, task.id));
 
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "system",
+      event: "approval_requested",
+      content: `Controlled-check approval requested for sandbox artifact #${artifact.id}.`,
+      approvalId: approval.id,
+      artifactId: artifact.id,
+      metadata: {
+        action: approval.action,
+        commands,
+      },
+    });
+
     res.status(201).json({ approval });
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to create ORAX command approval");
@@ -990,6 +1059,20 @@ router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
       .set({ status: "awaiting_approval", updatedAt: new Date() })
       .where(eq(oraxTasksTable.id, task.id));
 
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "system",
+      event: "approval_requested",
+      content: `GitHub PR approval requested for controlled-check artifact #${artifact.id}.`,
+      approvalId: approval.id,
+      artifactId: artifact.id,
+      metadata: {
+        action: approval.action,
+        title: parsed.data.title?.trim() || `ORAX: ${task.title}`,
+      },
+    });
+
     res.status(201).json({ approval });
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to create ORAX GitHub PR approval");
@@ -1035,6 +1118,22 @@ router.patch("/orax/approvals/:id", async (req, res) => {
         updatedAt: new Date(),
       })
       .where(eq(oraxTasksTable.id, approval.taskId));
+
+    const task = await loadOwnedTask(userId, approval.taskId);
+    if (task) {
+      await persistOraxTimelineMessage({
+        userId,
+        task,
+        role: "system",
+        event: "approval_decided",
+        content: `Approval #${approval.id} ${parsed.data.decision}.`,
+        approvalId: approval.id,
+        metadata: {
+          action: approval.action,
+          decision: parsed.data.decision,
+        },
+      });
+    }
 
     res.json({ approval: updated });
   } catch (err) {
@@ -1133,6 +1232,23 @@ router.post("/orax/approvals/:id/read-files", async (req, res) => {
         completedAt: readResult.files.length ? new Date() : null,
       })
       .where(eq(oraxTasksTable.id, task.id));
+
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "tool",
+      event: "files_read",
+      content: readResult.files.length
+        ? `Approved file read completed: ${readResult.files.length} file${readResult.files.length === 1 ? "" : "s"} read.`
+        : "Approved file read completed with no readable files.",
+      approvalId: updatedApproval.id,
+      metadata: {
+        branch,
+        files: readResult.files.map((file) => file.path),
+        skipped: readResult.skipped,
+        totalBytes: readResult.totalBytes,
+      },
+    });
 
     res.json({
       approval: updatedApproval,
@@ -1289,6 +1405,23 @@ router.post("/orax/approvals/:id/run-sandbox", async (req, res) => {
         completedAt: sandbox.applied ? new Date() : null,
       })
       .where(eq(oraxTasksTable.id, task.id));
+
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "tool",
+      event: "sandbox_completed",
+      content: sandbox.applied
+        ? `Sandbox validation passed for ${sandbox.changedFiles.length} changed file${sandbox.changedFiles.length === 1 ? "" : "s"}.`
+        : "Sandbox validation failed.",
+      approvalId: updatedApproval.id,
+      artifactId: sandboxArtifact.id,
+      metadata: {
+        applied: sandbox.applied,
+        changedFiles: sandbox.changedFiles,
+        errors: sandbox.errors,
+      },
+    });
 
     res.json({ approval: updatedApproval, artifact: sandboxArtifact });
   } catch (err) {
@@ -1477,6 +1610,26 @@ router.post("/orax/approvals/:id/run-commands", async (req, res) => {
       })
       .where(eq(oraxTasksTable.id, task.id));
 
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "tool",
+      event: "checks_completed",
+      content: commandResult.passed
+        ? `Controlled checks passed: ${commandResult.commands.length} check${commandResult.commands.length === 1 ? "" : "s"} completed.`
+        : `Controlled checks failed: ${commandResult.commands.length} check${commandResult.commands.length === 1 ? "" : "s"} completed.`,
+      approvalId: updatedApproval.id,
+      artifactId: commandArtifact.id,
+      metadata: {
+        passed: commandResult.passed,
+        commands: commandResult.commands.map((command) => ({
+          id: command.id,
+          status: command.status,
+          exitCode: command.exitCode,
+        })),
+      },
+    });
+
     res.json({ approval: updatedApproval, artifact: commandArtifact });
   } catch (err) {
     logger.error({ component: "orax", err, approvalId }, "Failed to run ORAX controlled checks");
@@ -1578,6 +1731,20 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
           completedAt: new Date(),
         })
         .where(eq(oraxTasksTable.id, task.id));
+
+      await persistOraxTimelineMessage({
+        userId,
+        task,
+        role: "tool",
+        event: "pr_reused",
+        content: `Existing GitHub PR reused for artifact #${existingArtifact.id}.`,
+        approvalId: updatedApproval.id,
+        artifactId: existingArtifact.id,
+        metadata: {
+          reused: true,
+          payload: existingPayload,
+        },
+      });
 
       res.json({ approval: updatedApproval, artifact: existingArtifact, reused: true });
       return;
@@ -1714,6 +1881,21 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
           })
           .where(eq(oraxTaskApprovalsTable.id, approval.id))
           .returning();
+
+        await persistOraxTimelineMessage({
+          userId,
+          task,
+          role: "tool",
+          event: "pr_reused",
+          content: `Existing GitHub PR reused for artifact #${afterErrorExisting.id}.`,
+          approvalId: updatedApproval.id,
+          artifactId: afterErrorExisting.id,
+          metadata: {
+            reused: true,
+            payload: existingPayload,
+          },
+        });
+
         res.json({ approval: updatedApproval, artifact: afterErrorExisting, reused: true });
         return;
       }
@@ -1809,6 +1991,22 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       })
       .where(eq(oraxTasksTable.id, task.id));
 
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "tool",
+      event: "pr_created",
+      content: `GitHub PR #${pullRequest.pullRequestNumber} created on branch ${pullRequest.branchName}.`,
+      approvalId: updatedApproval.id,
+      artifactId: prArtifact.id,
+      metadata: {
+        pullRequestNumber: pullRequest.pullRequestNumber,
+        pullRequestUrl: pullRequest.pullRequestUrl,
+        branchName: pullRequest.branchName,
+        filesChanged: pullRequest.changedFiles,
+      },
+    });
+
     res.json({ approval: updatedApproval, artifact: prArtifact });
   } catch (err) {
     logger.error({ component: "orax", err, approvalId }, "Failed to create ORAX GitHub PR");
@@ -1864,6 +2062,19 @@ router.post("/orax/tasks", async (req, res) => {
         approvalRequired: "write_and_push",
       })
       .returning();
+
+    await persistOraxTimelineMessage({
+      userId,
+      task,
+      role: "system",
+      event: "task_created",
+      content: `ORAX task created: ${task.title}`,
+      metadata: {
+        kind: task.kind,
+        repositoryId: repository.id,
+        repository: `${repository.owner}/${repository.name}`,
+      },
+    });
 
     res.status(201).json({ task });
   } catch (err) {
@@ -2035,6 +2246,21 @@ async function persistGithubPrFailure(input: {
     })
     .where(eq(oraxTasksTable.id, input.task.id));
 
+  await persistOraxTimelineMessage({
+    userId: input.userId,
+    task: input.task,
+    role: "tool",
+    event: "pr_failed",
+    content: `GitHub PR creation failed: ${input.failure.message}`,
+    approvalId: approval.id,
+    artifactId: artifact.id,
+    metadata: {
+      branchName: input.branchName,
+      error: input.failure,
+      changedFiles: input.changedFiles,
+    },
+  });
+
   return { approval, artifact };
 }
 
@@ -2191,6 +2417,30 @@ function buildOraxAuditTrail(input: {
     { label: "Workspace checks", id: input.commandArtifactId, kind: "artifact" },
     { label: "GitHub PR approval", id: input.githubApprovalId, kind: "approval" },
   ];
+}
+
+async function persistOraxTimelineMessage(input: OraxTimelineMessageInput): Promise<void> {
+  try {
+    await db.insert(oraxTaskMessagesTable).values({
+      userId: input.userId,
+      repositoryId: input.task.repositoryId,
+      taskId: input.task.id,
+      role: input.role ?? "system",
+      content: input.content,
+      approvalId: input.approvalId ?? null,
+      artifactId: input.artifactId ?? null,
+      metadata: {
+        source: "orax-task-timeline",
+        event: input.event,
+        ...(input.metadata ?? {}),
+      },
+    });
+  } catch (err) {
+    logger.warn(
+      { component: "orax", err, taskId: input.task.id, event: input.event },
+      "Failed to persist ORAX timeline message",
+    );
+  }
 }
 
 function buildOraxTaskThreadReply(input: {

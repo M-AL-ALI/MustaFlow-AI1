@@ -460,6 +460,17 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain('buttonLabel: "Prepare sandbox approval"');
     expect(routeSource).toContain('buttonLabel: "Prepare PR approval"');
     expect(routeSource).toContain("extractOraxCandidatePaths");
+    expect(routeSource).toContain("persistOraxTimelineMessage");
+    expect(routeSource).toContain("orax-task-timeline");
+    expect(routeSource).toContain('event: "task_created"');
+    expect(routeSource).toContain('event: "approval_requested"');
+    expect(routeSource).toContain('event: "approval_decided"');
+    expect(routeSource).toContain('event: "files_read"');
+    expect(routeSource).toContain('event: "draft_patch_generated"');
+    expect(routeSource).toContain('event: "sandbox_completed"');
+    expect(routeSource).toContain('event: "checks_completed"');
+    expect(routeSource).toContain('event: "pr_created"');
+    expect(routeSource).toContain('event: "pr_failed"');
     expect(routeSource).not.toContain("/public-ai/chat");
     expect(routeSource).not.toContain("/projects/");
     expect(routeSource).not.toContain("deductCredits");

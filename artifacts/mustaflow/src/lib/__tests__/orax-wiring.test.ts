@@ -55,6 +55,8 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
     expect(oraxPage).toContain("Task conversation");
     expect(oraxPage).toContain("stored separately from Ora chat and");
+    expect(oraxPage).toContain('message.role === "system" || message.role === "tool"');
+    expect(oraxPage).toContain("Timeline");
     expect(oraxPage).toContain("actionSuggestions");
     expect(oraxPage).toContain("applyTaskActionSuggestion");
     expect(oraxPage).toContain("pendingSuggestionConfirmation");

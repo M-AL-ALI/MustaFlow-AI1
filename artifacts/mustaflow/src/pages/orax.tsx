@@ -1399,6 +1399,7 @@ export default function OraxPage() {
                     ) : (
                       taskMessages.map((message) => {
                         const isAssistant = message.role === "assistant";
+                        const isTimeline = message.role === "system" || message.role === "tool";
                         const suggestions = isAssistant
                           ? (message.metadata?.actionSuggestions ?? [])
                           : [];
@@ -1409,18 +1410,20 @@ export default function OraxPage() {
                               "rounded-md px-3 py-2 text-sm",
                               isAssistant
                                 ? "border border-border bg-muted/40"
-                                : "ml-auto max-w-[88%] bg-primary text-primary-foreground",
+                                : isTimeline
+                                  ? "border border-dashed border-border bg-muted/30 text-muted-foreground"
+                                  : "ml-auto max-w-[88%] bg-primary text-primary-foreground",
                             )}
                           >
                             <div
                               className={cn(
                                 "mb-1 text-[11px] font-medium uppercase",
-                                isAssistant
+                                isAssistant || isTimeline
                                   ? "text-muted-foreground"
                                   : "text-primary-foreground/80",
                               )}
                             >
-                              {isAssistant ? "ORAX" : "You"} -{" "}
+                              {isAssistant ? "ORAX" : isTimeline ? "Timeline" : "You"} -{" "}
                               {new Date(message.createdAt).toLocaleString()}
                             </div>
                             <div className="whitespace-pre-wrap leading-relaxed">
