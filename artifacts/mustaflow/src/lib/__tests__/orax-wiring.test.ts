@@ -63,6 +63,8 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("metadata?.checkpoint");
     expect(oraxPage).toContain("not Ora");
     expect(oraxPage).toContain("not AI Builder");
+    expect(oraxPage).toContain("Resume");
+    expect(oraxPage).toContain("Where are we right now, and what is the next approved step?");
     expect(oraxPage).toContain("actionSuggestions");
     expect(oraxPage).toContain("applyTaskActionSuggestion");
     expect(oraxPage).toContain("pendingSuggestionConfirmation");

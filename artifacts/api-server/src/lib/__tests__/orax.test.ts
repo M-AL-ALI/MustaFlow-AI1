@@ -468,6 +468,12 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("checkpoint_updated");
     expect(routeSource).toContain("currentCheckpoint");
     expect(routeSource).toContain("Request approval to read the relevant repository files.");
+    expect(routeSource).toContain("isOraxResumeQuestion");
+    expect(routeSource).toContain("buildOraxCheckpointResumeReply");
+    expect(routeSource).toContain("resumeMode");
+    expect(routeSource).toContain("Checkpoint next step:");
+    expect(routeSource).toContain("where are we");
+    expect(routeSource).toContain("Next recommended step:");
     expect(routeSource).toContain('event: "task_created"');
     expect(routeSource).toContain('event: "approval_requested"');
     expect(routeSource).toContain('event: "approval_decided"');

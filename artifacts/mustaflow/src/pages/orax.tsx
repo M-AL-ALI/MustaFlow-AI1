@@ -1431,11 +1431,25 @@ export default function OraxPage() {
                         memory and it is not AI Builder context.
                       </p>
                     </div>
-                    {currentCheckpoint ? (
-                      <span className="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
-                        {new Date(currentCheckpoint.updatedAt).toLocaleString()}
-                      </span>
-                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {currentCheckpoint ? (
+                        <span className="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
+                          {new Date(currentCheckpoint.updatedAt).toLocaleString()}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTaskMessageDraft(
+                            "Where are we right now, and what is the next approved step?",
+                          )
+                        }
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Resume
+                      </button>
+                    </div>
                   </div>
 
                   {currentCheckpoint ? (

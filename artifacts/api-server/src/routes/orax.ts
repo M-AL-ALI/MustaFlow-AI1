@@ -548,11 +548,14 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       artifacts,
       userMessage: parsed.data.content,
     });
+    const checkpoint = buildOraxCheckpointSummary({ task, approvals, artifacts });
     const assistantContent = buildOraxTaskThreadReply({
       task,
       approvals,
       artifacts,
       actionSuggestions,
+      checkpoint,
+      userMessage: parsed.data.content,
     });
     const [assistantMessage] = await db
       .insert(oraxTaskMessagesTable)
@@ -568,6 +571,8 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
           taskStatus: task.status,
           approvalCount: approvals.length,
           artifactCount: artifacts.length,
+          checkpoint,
+          resumeMode: isOraxResumeQuestion(parsed.data.content),
           actionSuggestions,
         },
         createdAt: new Date(),
@@ -577,7 +582,13 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
 
     await db
       .update(oraxTasksTable)
-      .set({ updatedAt: new Date() })
+      .set({
+        result: {
+          ...asRecord(task.result),
+          currentCheckpoint: checkpoint,
+        },
+        updatedAt: new Date(),
+      })
       .where(eq(oraxTasksTable.id, task.id));
 
     res.status(201).json({ messages: [message, assistantMessage] });
@@ -2677,7 +2688,13 @@ function buildOraxTaskThreadReply(input: {
   approvals: OraxTaskApproval[];
   artifacts: OraxTaskArtifact[];
   actionSuggestions: OraxTaskActionSuggestion[];
+  checkpoint: OraxCheckpointSummary;
+  userMessage: string;
 }): string {
+  if (isOraxResumeQuestion(input.userMessage)) {
+    return buildOraxCheckpointResumeReply(input.checkpoint);
+  }
+
   const pendingApprovals = input.approvals.filter((approval) => approval.status === "pending");
   const completedArtifacts = input.artifacts.filter((artifact) => artifact.status === "completed");
   const latestArtifact = input.artifacts[0];
@@ -2697,9 +2714,47 @@ function buildOraxTaskThreadReply(input: {
     `I saved this in the ORAX task thread for "${input.task.title}".`,
     `Current task status: ${input.task.status}.`,
     `Approvals: ${input.approvals.length}. Artifacts: ${input.artifacts.length}. Completed artifacts: ${completedArtifacts.length}.`,
+    `Checkpoint next step: ${input.checkpoint.nextStep}`,
     suggestionLine,
     nextStep,
     "Phase 4B is planning-only: this chat can suggest approval-ready next steps, but it cannot run commands, edit files, push branches, or open PRs without the existing approval controls.",
+  ].join("\n");
+}
+
+function isOraxResumeQuestion(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return [
+    "where are we",
+    "where we at",
+    "what is next",
+    "what's next",
+    "next step",
+    "resume",
+    "continue",
+    "catch me up",
+    "status",
+    "checkpoint",
+  ].some((phrase) => normalized.includes(phrase));
+}
+
+function buildOraxCheckpointResumeReply(checkpoint: OraxCheckpointSummary): string {
+  const filesLine = checkpoint.filesReviewed.length
+    ? `Files reviewed: ${checkpoint.filesReviewed.join(", ")}.`
+    : "Files reviewed: none yet.";
+  const blockerLine = checkpoint.latestBlocker
+    ? `Latest blocker: ${checkpoint.latestBlocker}`
+    : "Latest blocker: none recorded.";
+
+  return [
+    "Here is the current ORAX checkpoint for this task.",
+    `Goal: ${checkpoint.goal}`,
+    `Status: ${checkpoint.status}.`,
+    `Approvals: ${checkpoint.approvals.completed}/${checkpoint.approvals.total} completed, ${checkpoint.approvals.pending} pending, ${checkpoint.approvals.denied} denied, ${checkpoint.approvals.failed} failed.`,
+    `Artifacts: ${checkpoint.artifacts.total} total (${checkpoint.artifacts.draftPatches} draft patches, ${checkpoint.artifacts.sandboxResults} sandbox results, ${checkpoint.artifacts.commandResults} command results, ${checkpoint.artifacts.githubPrResults} PR results).`,
+    filesLine,
+    blockerLine,
+    `Next recommended step: ${checkpoint.nextStep}`,
+    "Safety boundary: ORAX will not read files, run checks, create branches, push code, or open a PR unless you explicitly approve the matching action.",
   ].join("\n");
 }
 
