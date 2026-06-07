@@ -73,3 +73,4 @@ export * from "./vault-embeddings";
 export * from "./generated-images";
 export * from "./help-articles";
 export * from "./support-tickets";
+export * from "./orax";

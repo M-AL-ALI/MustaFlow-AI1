@@ -5,11 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BUILDER_ENABLED } from "@/lib/builder-flag";
-import { Sparkles, MessageCircle, ArrowRight, Loader2, Lock } from "lucide-react";
+import { Sparkles, MessageCircle, ArrowRight, Loader2, Lock, Code2 } from "lucide-react";
 
 export default function ModeSelectPage() {
   const [, setLocation] = useLocation();
-  const [selecting, setSelecting] = useState<"builder" | "ora" | null>(null);
+  const [selecting, setSelecting] = useState<"builder" | "ora" | "orax" | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updatePreferences = useUpdateMyPreferences();
@@ -30,6 +30,12 @@ export default function ModeSelectPage() {
       });
       setSelecting(null);
     }
+  }
+
+  function handleOraxSelect() {
+    if (selecting) return;
+    setSelecting("orax");
+    setLocation("/orax");
   }
 
   return (
@@ -63,7 +69,7 @@ export default function ModeSelectPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-3xl">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full max-w-5xl">
           {/* AI Build Mode */}
           <ModeCard
             mode="builder"
@@ -74,7 +80,7 @@ export default function ModeSelectPage() {
             borderHover="hover:border-primary/60"
             glowColor="shadow-primary/10"
             selecting={selecting}
-            onSelect={handleSelect}
+            onSelect={() => void handleSelect("builder")}
             comingSoon={!BUILDER_ENABLED}
           />
 
@@ -88,7 +94,20 @@ export default function ModeSelectPage() {
             borderHover="hover:border-violet-500/60"
             glowColor="shadow-violet-500/10"
             selecting={selecting}
-            onSelect={handleSelect}
+            onSelect={() => void handleSelect("ora")}
+          />
+
+          {/* ORAX */}
+          <ModeCard
+            mode="orax"
+            icon={Code2}
+            title="ORAX"
+            description="A coding-agent workspace for repositories, task plans, reviews, and safe approval-gated code work."
+            accent="from-emerald-500/20 via-emerald-500/5 to-transparent"
+            borderHover="hover:border-emerald-500/60"
+            glowColor="shadow-emerald-500/10"
+            selecting={selecting}
+            onSelect={handleOraxSelect}
           />
         </div>
       </div>
@@ -97,15 +116,15 @@ export default function ModeSelectPage() {
 }
 
 interface ModeCardProps {
-  mode: "builder" | "ora";
+  mode: "builder" | "ora" | "orax";
   icon: React.ElementType;
   title: string;
   description: string;
   accent: string;
   borderHover: string;
   glowColor: string;
-  selecting: "builder" | "ora" | null;
-  onSelect: (mode: "builder" | "ora") => void;
+  selecting: "builder" | "ora" | "orax" | null;
+  onSelect: () => void;
   comingSoon?: boolean;
 }
 
@@ -157,7 +176,7 @@ function ModeCard({
 
   return (
     <button
-      onClick={() => onSelect(mode)}
+      onClick={onSelect}
       disabled={selecting !== null}
       className={`
         group relative flex flex-col items-start gap-5 p-8 rounded-2xl border border-border
