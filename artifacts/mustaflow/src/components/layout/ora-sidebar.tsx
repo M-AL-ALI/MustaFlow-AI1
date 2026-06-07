@@ -25,6 +25,7 @@ import {
   Bug,
   LifeBuoy,
   Clock,
+  Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -45,6 +46,7 @@ import {
 // Ora is a standalone assistant — it must NOT link into the AI Builder's
 // /integrations page. Only Ora-scoped destinations belong here.
 export const NAV_ITEMS = [
+  { name: "ORAX", href: "/orax", icon: Code2 },
   { name: "Memory", href: "/ora/memory", icon: Brain },
   { name: "Library", href: "/ora/library", icon: BookOpen },
   { name: "Help Center", href: "/help", icon: HelpCircle },
