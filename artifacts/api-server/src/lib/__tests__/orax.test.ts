@@ -412,4 +412,19 @@ describe("ORAX GitHub PR approval hardening", () => {
       "Package checks, when present, were limited to approved ORAX command IDs",
     );
   });
+
+  it("makes PR creation retry-safe and persists GitHub failures", () => {
+    const source = readFileSync(path.join(__dirname, "../../routes/orax.ts"), "utf8");
+
+    expect(source).toContain("findCompletedGithubPrArtifactForApproval");
+    expect(source).toContain("findCompletedGithubPrArtifactForCommand");
+    expect(source).toContain("buildOraxBranchName");
+    expect(source).toContain("orax/task-${taskId}-check-${commandArtifactId}");
+    expect(source).toContain("persistGithubPrFailure");
+    expect(source).toContain('type: "github_pr_result"');
+    expect(source).toContain('status: "failed"');
+    expect(source).toContain("normalizeGithubPrFailure");
+    expect(source).toContain("github_permission_error");
+    expect(source).toContain("github_branch_exists");
+  });
 });

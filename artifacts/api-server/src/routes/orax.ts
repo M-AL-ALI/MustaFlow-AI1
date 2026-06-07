@@ -13,6 +13,7 @@ import {
   type OraxTaskApproval,
   type OraxRepository,
   type OraxTask,
+  type OraxTaskArtifact,
 } from "@workspace/db";
 import { generateOraxDraftPatch } from "../lib/orax-draft-patch";
 import {
@@ -1341,6 +1342,15 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       res.status(400).json({ error: "Unsupported approval action" });
       return;
     }
+    if (approval.status === "completed") {
+      const existingArtifact = await findCompletedGithubPrArtifactForApproval(userId, approval.id);
+      if (existingArtifact) {
+        res.json({ approval, artifact: existingArtifact, reused: true });
+        return;
+      }
+      res.status(409).json({ error: "GitHub PR approval is already completed" });
+      return;
+    }
     if (approval.status !== "approved") {
       res.status(409).json({ error: "GitHub PR creation requires an approved request" });
       return;
@@ -1374,6 +1384,42 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
     const commandPayload = asRecord(commandArtifact.payload);
     if (commandPayload.passed !== true) {
       res.status(409).json({ error: "GitHub PR creation requires passed controlled checks" });
+      return;
+    }
+
+    const existingArtifact = await findCompletedGithubPrArtifactForCommand(
+      userId,
+      task.id,
+      commandArtifact.id,
+    );
+    if (existingArtifact) {
+      const existingPayload = asRecord(existingArtifact.payload);
+      const [updatedApproval] = await db
+        .update(oraxTaskApprovalsTable)
+        .set({
+          status: "completed",
+          result: buildGithubPrApprovalResult(existingArtifact.id, existingPayload),
+          completedAt: new Date(),
+        })
+        .where(eq(oraxTaskApprovalsTable.id, approval.id))
+        .returning();
+
+      await db
+        .update(oraxTasksTable)
+        .set({
+          status: "completed",
+          result: {
+            ...asRecord(task.result),
+            githubPr: buildGithubPrTaskResult(existingArtifact.id, existingPayload),
+            message:
+              "ORAX reused the existing GitHub pull request for this checked patch. No duplicate PR was created.",
+          },
+          updatedAt: new Date(),
+          completedAt: new Date(),
+        })
+        .where(eq(oraxTasksTable.id, task.id));
+
+      res.json({ approval: updatedApproval, artifact: existingArtifact, reused: true });
       return;
     }
     const sourceSandboxArtifactId =
@@ -1434,40 +1480,106 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       files: readResult.files,
       suggestedTests: tests,
     });
+    const branchName = buildOraxBranchName(task.id, commandArtifact.id);
     if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
-      res.status(409).json({ error: "Sandbox patch no longer applies to the current branch" });
+      const failure = normalizeGithubPrFailure(
+        new Error("Sandbox patch no longer applies to the current branch"),
+      );
+      const failed = await persistGithubPrFailure({
+        userId,
+        task,
+        approval,
+        sandboxArtifact,
+        commandArtifact,
+        draftArtifact,
+        sourceApproval,
+        branchName,
+        baseBranch: branch,
+        changedFiles: sandbox.validation.changedFiles.map((file) => file.path),
+        validation: sandbox.validation,
+        failure,
+      });
+      res.status(409).json({
+        approval: failed.approval,
+        artifact: failed.artifact,
+        error: failure.message,
+      });
       return;
     }
 
-    const branchName = `orax/task-${task.id}-${Date.now().toString(36)}`;
     const title =
       typeof request.title === "string" && request.title.trim()
         ? request.title.trim()
         : `ORAX: ${task.title}`;
-    const pullRequest = await createGithubPullRequestFromFiles({
-      owner: repository.owner,
-      repo: repository.name,
-      token,
-      baseBranch: branch,
-      branchName,
-      title,
-      commitMessage: title,
-      body: buildPullRequestBody({
+    let pullRequest;
+    try {
+      pullRequest = await createGithubPullRequestFromFiles({
+        owner: repository.owner,
+        repo: repository.name,
+        token,
+        baseBranch: branch,
+        branchName,
+        title,
+        commitMessage: title,
+        body: buildPullRequestBody({
+          task,
+          readApprovalId: sourceApproval.id,
+          githubApprovalId: approval.id,
+          sandboxArtifactId: sandboxArtifact.id,
+          commandArtifactId: commandArtifact.id,
+          draftArtifactId: draftArtifact.id,
+          customBody: typeof request.body === "string" ? request.body : null,
+          validation: sandbox.validation,
+          commandResult: commandPayload,
+        }),
+        files: sandbox.patchedFiles.map((file) => ({
+          path: file.path,
+          content: file.content,
+        })),
+      });
+    } catch (err) {
+      const afterErrorExisting = await findCompletedGithubPrArtifactForCommand(
+        userId,
+        task.id,
+        commandArtifact.id,
+      );
+      if (afterErrorExisting) {
+        const existingPayload = asRecord(afterErrorExisting.payload);
+        const [updatedApproval] = await db
+          .update(oraxTaskApprovalsTable)
+          .set({
+            status: "completed",
+            result: buildGithubPrApprovalResult(afterErrorExisting.id, existingPayload),
+            completedAt: new Date(),
+          })
+          .where(eq(oraxTaskApprovalsTable.id, approval.id))
+          .returning();
+        res.json({ approval: updatedApproval, artifact: afterErrorExisting, reused: true });
+        return;
+      }
+
+      const failure = normalizeGithubPrFailure(err);
+      const failed = await persistGithubPrFailure({
+        userId,
         task,
-        readApprovalId: sourceApproval.id,
-        githubApprovalId: approval.id,
-        sandboxArtifactId: sandboxArtifact.id,
-        commandArtifactId: commandArtifact.id,
-        draftArtifactId: draftArtifact.id,
-        customBody: typeof request.body === "string" ? request.body : null,
+        approval,
+        sandboxArtifact,
+        commandArtifact,
+        draftArtifact,
+        sourceApproval,
+        branchName,
+        baseBranch: branch,
+        changedFiles: sandbox.patchedFiles.map((file) => file.path),
         validation: sandbox.validation,
-        commandResult: commandPayload,
-      }),
-      files: sandbox.patchedFiles.map((file) => ({
-        path: file.path,
-        content: file.content,
-      })),
-    });
+        failure,
+      });
+      res.status(failure.statusCode).json({
+        approval: failed.approval,
+        artifact: failed.artifact,
+        error: failure.message,
+      });
+      return;
+    }
 
     const prPayload = {
       sourceArtifactId: sandboxArtifact.id,
@@ -1515,11 +1627,7 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       .set({
         status: "completed",
         result: {
-          artifactId: prArtifact.id,
-          branchName: pullRequest.branchName,
-          commitSha: pullRequest.commitSha,
-          pullRequestNumber: pullRequest.pullRequestNumber,
-          pullRequestUrl: pullRequest.pullRequestUrl,
+          ...buildGithubPrApprovalResult(prArtifact.id, prPayload),
         },
         completedAt: new Date(),
       })
@@ -1532,13 +1640,7 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
         status: "completed",
         result: {
           ...asRecord(task.result),
-          githubPr: {
-            artifactId: prArtifact.id,
-            branchName: pullRequest.branchName,
-            commitSha: pullRequest.commitSha,
-            pullRequestNumber: pullRequest.pullRequestNumber,
-            pullRequestUrl: pullRequest.pullRequestUrl,
-          },
+          githubPr: buildGithubPrTaskResult(prArtifact.id, prPayload),
           message:
             "ORAX created a GitHub branch and pull request from the controlled-check-passed patch. The default branch was not modified directly.",
         },
@@ -1624,6 +1726,242 @@ function toRepositorySummary(repository: OraxRepository) {
     ...safeRepository
   } = repository;
   return safeRepository;
+}
+
+type OraxGithubPrFailure = {
+  code: string;
+  message: string;
+  hint: string;
+  statusCode: number;
+  rawMessage: string;
+};
+
+type OraxPrValidation = {
+  applied: boolean;
+  changedFiles: Array<{ path: string; additions: number; deletions: number }>;
+  errors: string[];
+};
+
+function buildOraxBranchName(taskId: number, commandArtifactId: number): string {
+  return `orax/task-${taskId}-check-${commandArtifactId}`;
+}
+
+async function findCompletedGithubPrArtifactForApproval(userId: string, approvalId: number) {
+  const [artifact] = await db
+    .select()
+    .from(oraxTaskArtifactsTable)
+    .where(
+      and(
+        eq(oraxTaskArtifactsTable.userId, userId),
+        eq(oraxTaskArtifactsTable.approvalId, approvalId),
+        eq(oraxTaskArtifactsTable.type, "github_pr_result"),
+        eq(oraxTaskArtifactsTable.status, "completed"),
+        isNull(oraxTaskArtifactsTable.archivedAt),
+      ),
+    )
+    .orderBy(desc(oraxTaskArtifactsTable.createdAt))
+    .limit(1);
+  return artifact;
+}
+
+async function findCompletedGithubPrArtifactForCommand(
+  userId: string,
+  taskId: number,
+  commandArtifactId: number,
+) {
+  const artifacts = await db
+    .select()
+    .from(oraxTaskArtifactsTable)
+    .where(
+      and(
+        eq(oraxTaskArtifactsTable.userId, userId),
+        eq(oraxTaskArtifactsTable.taskId, taskId),
+        eq(oraxTaskArtifactsTable.type, "github_pr_result"),
+        eq(oraxTaskArtifactsTable.status, "completed"),
+        isNull(oraxTaskArtifactsTable.archivedAt),
+      ),
+    )
+    .orderBy(desc(oraxTaskArtifactsTable.createdAt))
+    .limit(25);
+
+  return artifacts.find((artifact) => {
+    const payload = asRecord(artifact.payload);
+    const value =
+      typeof payload.commandArtifactId === "number"
+        ? payload.commandArtifactId
+        : Number(payload.commandArtifactId);
+    return value === commandArtifactId;
+  });
+}
+
+async function persistGithubPrFailure(input: {
+  userId: string;
+  task: OraxTask;
+  approval: OraxTaskApproval;
+  sandboxArtifact: OraxTaskArtifact;
+  commandArtifact: OraxTaskArtifact;
+  draftArtifact: OraxTaskArtifact;
+  sourceApproval: OraxTaskApproval;
+  branchName: string;
+  baseBranch: string;
+  changedFiles: string[];
+  validation: OraxPrValidation;
+  failure: OraxGithubPrFailure;
+}) {
+  const failedAt = new Date();
+  const payload = {
+    sourceArtifactId: input.sandboxArtifact.id,
+    commandArtifactId: input.commandArtifact.id,
+    draftArtifactId: input.draftArtifact.id,
+    branchName: input.branchName,
+    baseBranch: input.baseBranch,
+    filesChanged: input.changedFiles,
+    failedAt: failedAt.toISOString(),
+    error: input.failure,
+    validation: input.validation,
+    auditTrail: buildOraxAuditTrail({
+      readApprovalId: input.sourceApproval.id,
+      draftArtifactId: input.draftArtifact.id,
+      sandboxArtifactId: input.sandboxArtifact.id,
+      commandArtifactId: input.commandArtifact.id,
+      githubApprovalId: input.approval.id,
+    }),
+  };
+
+  const [artifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: input.task.repositoryId,
+      taskId: input.task.id,
+      approvalId: input.approval.id,
+      type: "github_pr_result",
+      status: "failed",
+      title: `GitHub PR failed for ${input.task.title}`,
+      summary: input.failure.message,
+      payload,
+    })
+    .returning();
+
+  const [approval] = await db
+    .update(oraxTaskApprovalsTable)
+    .set({
+      status: "failed",
+      result: {
+        artifactId: artifact.id,
+        branchName: input.branchName,
+        error: input.failure,
+      },
+      completedAt: failedAt,
+    })
+    .where(eq(oraxTaskApprovalsTable.id, input.approval.id))
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      status: "blocked",
+      result: {
+        ...asRecord(input.task.result),
+        githubPrFailure: {
+          artifactId: artifact.id,
+          branchName: input.branchName,
+          error: input.failure,
+        },
+        message: input.failure.message,
+      },
+      updatedAt: failedAt,
+      completedAt: null,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return { approval, artifact };
+}
+
+function normalizeGithubPrFailure(err: unknown): OraxGithubPrFailure {
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const lower = rawMessage.toLowerCase();
+
+  if (lower.includes("sandbox patch no longer applies")) {
+    return {
+      code: "patch_no_longer_applies",
+      message: "The checked patch no longer applies to the current branch.",
+      hint: "Regenerate the draft patch from the latest approved file read, then rerun checks.",
+      statusCode: 409,
+      rawMessage,
+    };
+  }
+  if (
+    lower.includes("bad credentials") ||
+    lower.includes("resource not accessible") ||
+    lower.includes("requires authentication") ||
+    lower.includes("not authorized") ||
+    lower.includes("http 401") ||
+    lower.includes("http 403")
+  ) {
+    return {
+      code: "github_permission_error",
+      message: "GitHub rejected PR creation because the token does not have enough permission.",
+      hint: "Reconnect GitHub with a token that can create branches, commits, and pull requests for this repository.",
+      statusCode: 403,
+      rawMessage,
+    };
+  }
+  if (lower.includes("reference already exists") || lower.includes("already_exists")) {
+    return {
+      code: "github_branch_exists",
+      message: "GitHub already has the ORAX branch for this checked patch.",
+      hint: "Refresh ORAX. If a PR already exists, ORAX will reuse it; otherwise delete the stale ORAX branch or create a new checked patch.",
+      statusCode: 409,
+      rawMessage,
+    };
+  }
+  if (lower.includes("validation failed")) {
+    return {
+      code: "github_validation_failed",
+      message: "GitHub rejected the branch or pull request payload.",
+      hint: "Review the failed artifact details, then retry after correcting the repository state or PR title/body.",
+      statusCode: 409,
+      rawMessage,
+    };
+  }
+  if (lower.includes("not found") || lower.includes("http 404")) {
+    return {
+      code: "github_repository_not_found",
+      message: "GitHub could not find the repository, branch, or required object.",
+      hint: "Confirm the repository connection, default branch, and token access, then retry.",
+      statusCode: 404,
+      rawMessage,
+    };
+  }
+
+  return {
+    code: "github_api_error",
+    message: "GitHub PR creation failed.",
+    hint: "Review the raw GitHub error in the failed artifact, then retry after the repository or token issue is fixed.",
+    statusCode: 502,
+    rawMessage,
+  };
+}
+
+function buildGithubPrApprovalResult(
+  artifactId: number,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    artifactId,
+    branchName: payload.branchName,
+    commitSha: payload.commitSha,
+    pullRequestNumber: payload.pullRequestNumber,
+    pullRequestUrl: payload.pullRequestUrl,
+  };
+}
+
+function buildGithubPrTaskResult(
+  artifactId: number,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return buildGithubPrApprovalResult(artifactId, payload);
 }
 
 function buildPullRequestBody(input: {

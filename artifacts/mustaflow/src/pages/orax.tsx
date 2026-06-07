@@ -105,10 +105,14 @@ type OraxApproval = {
     scope?: string;
   };
   result?: {
+    artifactId?: number;
     branch?: string;
     totalBytes?: number;
     files?: Array<{ path: string; sha: string; size: number; truncated: boolean }>;
     skipped?: Array<{ path: string; reason: string }>;
+    branchName?: string;
+    pullRequestUrl?: string;
+    error?: OraxFailureInfo;
   };
   riskSummary?: string | null;
   createdAt: string;
@@ -183,9 +187,18 @@ type OraxArtifact = {
     pullRequestState?: string;
     filesChanged?: string[];
     auditTrail?: Array<{ label: string; id: number; kind: string }>;
+    error?: OraxFailureInfo;
+    failedAt?: string;
   };
   createdAt: string;
   updatedAt: string;
+};
+
+type OraxFailureInfo = {
+  code?: string;
+  message?: string;
+  hint?: string;
+  rawMessage?: string;
 };
 
 type OraxCapabilities = {
@@ -1364,6 +1377,19 @@ export default function OraxPage() {
                             {formatBytes(approval.result.totalBytes ?? 0)}
                           </div>
                         ) : null}
+                        {approval.action === "github_pr" && approval.result?.pullRequestUrl ? (
+                          <a
+                            href={approval.result.pullRequestUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
+                          >
+                            Open created pull request
+                          </a>
+                        ) : null}
+                        {approval.action === "github_pr" && approval.result?.error ? (
+                          <FailureNotice failure={approval.result.error} />
+                        ) : null}
                       </article>
                     ))
                   )}
@@ -1798,6 +1824,10 @@ export default function OraxPage() {
                       {latestGithubPrResult.summary ? (
                         <p className="text-sm text-foreground">{latestGithubPrResult.summary}</p>
                       ) : null}
+                      {latestGithubPrResult.status === "failed" &&
+                      latestGithubPrResult.payload.error ? (
+                        <FailureNotice failure={latestGithubPrResult.payload.error} />
+                      ) : null}
                       {latestGithubPrResult.payload.pullRequestUrl ? (
                         <a
                           href={latestGithubPrResult.payload.pullRequestUrl}
@@ -1900,6 +1930,23 @@ function Metric({ label, value, wide = false }: { label: string; value: string; 
     >
       <div className="text-[11px] font-medium uppercase text-muted-foreground">{label}</div>
       <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function FailureNotice({ failure }: { failure: OraxFailureInfo }) {
+  return (
+    <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+      <div className="font-medium">
+        {failure.code ? `${failure.code}: ` : ""}
+        {failure.message ?? "GitHub PR creation failed."}
+      </div>
+      {failure.hint ? <div className="mt-1 text-destructive/90">{failure.hint}</div> : null}
+      {failure.rawMessage ? (
+        <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-background/80 px-2 py-2 text-[11px] text-destructive">
+          {failure.rawMessage}
+        </pre>
+      ) : null}
     </div>
   );
 }
