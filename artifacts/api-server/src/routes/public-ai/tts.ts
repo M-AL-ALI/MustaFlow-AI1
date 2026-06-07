@@ -8,12 +8,13 @@
  */
 import { Router } from "express";
 import { z } from "zod";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import OpenAI from "openai";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraVoiceTtsLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 
 const router = Router();
+let directOpenAI: OpenAI | null = null;
 
 const OPENAI_TTS_VOICES = [
   "alloy",
@@ -34,6 +35,13 @@ const ttsSchema = z.object({
   voice: z.enum(OPENAI_TTS_VOICES).optional(),
   language: z.string().max(20).optional(),
 });
+
+function getDirectOpenAI(): OpenAI | null {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  directOpenAI ??= new OpenAI({ apiKey });
+  return directOpenAI;
+}
 
 router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -56,9 +64,14 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
 
   const text = parsed.data.text.trim();
   const voice = parsed.data.voice ?? "nova";
+  const client = getDirectOpenAI();
+  if (!client) {
+    res.status(503).json({ error: "Ora voice is not configured." });
+    return;
+  }
 
   try {
-    const response = await openai.audio.speech.create({
+    const response = await client.audio.speech.create({
       model: process.env.ORA_TTS_MODEL ?? "gpt-4o-mini-tts",
       voice,
       input: text,
