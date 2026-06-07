@@ -650,11 +650,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   }, [clearAttachment, clearUploadError, previewObjectUrl]);
 
   const handleEnterVoiceConvMode = useCallback(() => {
-    void voiceRef.current.prepareVoicePlayback();
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
+    void voiceRef.current.prepareVoicePlayback();
     setInput("");
     setVoiceReady(false);
+    setVoiceConvTtsMuted(false);
     wasConvSpeakingRef.current = false;
     const lastMsgIndex = messages.length - 1;
     const lastMsg = messages[lastMsgIndex];
@@ -673,6 +674,18 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     voiceRef.current.stopSpeaking();
     whisperConv.cancelRecording();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleToggleVoiceConvTtsMute = useCallback(() => {
+    setVoiceConvTtsMuted((prev) => {
+      const next = !prev;
+      if (next) {
+        voiceRef.current.stopSpeaking();
+      } else {
+        void voiceRef.current.prepareVoicePlayback();
+      }
+      return next;
+    });
   }, []);
 
   const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -1318,7 +1331,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   interimTranscript={voice.interimTranscript}
                   isLoading={isLoading}
                   isTtsMuted={voiceConvTtsMuted}
-                  onToggleTtsMute={() => setVoiceConvTtsMuted((v) => !v)}
+                  onToggleTtsMute={handleToggleVoiceConvTtsMute}
                   onExit={handleExitVoiceConvMode}
                   onInterrupt={() => voiceRef.current.stopSpeaking()}
                   size="sm"

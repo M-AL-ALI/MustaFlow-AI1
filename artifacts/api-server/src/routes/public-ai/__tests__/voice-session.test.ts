@@ -72,6 +72,9 @@ describe("Talk to Ora voice-session wiring", () => {
       expect(src).toContain("voice.isSupported || whisperConv.isSupported");
       expect(src).toContain("active={voiceConvActive}");
       expect(src).toContain("prepareVoicePlayback()");
+      expect(src).toContain("setVoiceConvTtsMuted(false)");
+      expect(src).toContain("handleToggleVoiceConvTtsMute");
+      expect(src).toContain("voiceRef.current.stopSpeaking()");
       expect(src).toContain("startWhisperRecording({ autoStop: true })");
       const autoSpeakSection = src.slice(
         src.indexOf("Auto-TTS: speak each new Ora reply"),
@@ -84,6 +87,17 @@ describe("Talk to Ora voice-session wiring", () => {
 
     const button = readFe("components/ora/ora-voice-mode-button.tsx");
     expect(button).toContain("Auto listening");
+    expect(button).toContain('"Unmute"');
+    expect(button).toContain('"Mute"');
+    expect(button).not.toContain('"Voice on"');
     expect(button).not.toContain("Hold to speak");
+  });
+
+  it("retries server TTS once after refreshing an expired Ora session", () => {
+    const hook = readFe("hooks/use-ora-voice.ts");
+    expect(hook).toContain('fetch("/api/public-ai/tts"');
+    expect(hook).toContain("resp.status === 401");
+    expect(hook).toContain('fetch("/api/public-ai/session"');
+    expect(hook).toContain("resp = await requestTts()");
   });
 });
