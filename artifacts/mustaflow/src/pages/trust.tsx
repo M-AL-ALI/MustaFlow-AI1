@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Clock,
 } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 
 interface TrustSectionProps {
   icon: React.ElementType;
@@ -53,6 +54,11 @@ function Badge({ label, color }: { label: string; color: "green" | "yellow" | "b
 export default function TrustPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-12">
+      <PageMeta
+        title="Trust & Security"
+        description="MustaFlow AI's security posture, compliance certifications, encryption practices, and data protection commitments."
+        path="/trust"
+      />
       {/* Header */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">

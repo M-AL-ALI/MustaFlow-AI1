@@ -1,8 +1,15 @@
 import { Shield, Eye, Database, Bell } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 
 export default function PrivacyPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-10">
+      <PageMeta
+        title="Privacy Policy"
+        description="Learn how MustaFlow AI collects, uses, and protects your data. We are committed to privacy and transparency."
+        path="/privacy"
+        noIndex={true}
+      />
       <div className="space-y-3">
         <div className="flex items-center gap-3">
           <Shield className="h-6 w-6 text-primary" />

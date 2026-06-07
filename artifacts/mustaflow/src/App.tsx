@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { syncThemeDom, getStoredTheme } from "@/lib/theme";
 import { setVoiceLang } from "@/hooks/use-voice-input";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
@@ -16,52 +16,57 @@ import {
   useGetMyPreferences,
   setAuthTokenGetter,
 } from "@workspace/api-client-react";
+import { HelmetProvider } from "react-helmet-async";
 import NotFound from "@/pages/not-found";
 
-// Pages
-import HomePage from "./pages/home";
-import ProjectsPage from "./pages/projects";
-import NewProjectPage from "./pages/projects/new";
-import ProjectWorkspacePage from "./pages/projects/[id]";
-import ModeSelectPage from "./pages/mode-select";
-import OraPage from "./pages/ora";
-import OraLibraryPage from "./pages/ora-library";
-import OraSettingsPage from "./pages/ora-settings";
-import OraMemoryPage from "./pages/ora-memory";
-import OraNewProjectPage from "./pages/ora-new-project";
-import OraxPage from "./pages/orax";
-import KnowledgePage from "./pages/knowledge";
-import VaultPage from "./pages/vault";
-import MemoryPage from "./pages/memory";
-import LibraryPage from "./pages/library";
-import SettingsPage from "./pages/settings";
-import TermsPage from "./pages/terms";
-import PrivacyPage from "./pages/privacy";
-import HelpPage from "./pages/help";
-import HelpDomainsApiPage from "./pages/help-domains-api";
-import SupportTicketsPage from "./pages/support-tickets";
-import StatusPage from "./pages/status";
-import AdminPage from "./pages/admin";
-import SupportInboxPage from "./pages/support-inbox";
-import TrashPage from "./pages/trash";
-import BillingPage from "./pages/billing";
-import PublishedPage from "./pages/published";
-import IntegrationsPage from "./pages/integrations";
-import SecurityPage from "./pages/security";
-import LearnPage from "./pages/learn";
-import PricingPage from "./pages/pricing";
-import WorkspaceUsagePage from "./pages/workspace-usage";
-import WorkspaceAuditPage from "./pages/workspace-audit";
-import MyDomainsPage from "./pages/account/domains";
-import WorkspaceDomainsPage from "./pages/workspace-domains";
-import OrgSettingsPage from "./pages/org-settings";
-import OrgNewPage from "./pages/org-new";
-import OrgInviteAcceptPage from "./pages/org-invite-accept";
-import GalleryPage from "./pages/gallery";
-import ImageStudioPage from "./pages/image-studio";
-import ExtensionsPage from "./pages/extensions";
-import CommunityPage from "./pages/community";
-import UserProfilePage from "./pages/u";
+// Pages — lazy loaded so each route gets its own async chunk.
+// Public marketing pages load first; heavy builder/admin surfaces are deferred.
+const HomePage = lazy(() => import("./pages/home"));
+const ProjectsPage = lazy(() => import("./pages/projects"));
+const NewProjectPage = lazy(() => import("./pages/projects/new"));
+const ProjectWorkspacePage = lazy(() => import("./pages/projects/[id]"));
+const ModeSelectPage = lazy(() => import("./pages/mode-select"));
+const OraPage = lazy(() => import("./pages/ora"));
+const OraLibraryPage = lazy(() => import("./pages/ora-library"));
+const OraSettingsPage = lazy(() => import("./pages/ora-settings"));
+const OraMemoryPage = lazy(() => import("./pages/ora-memory"));
+const OraNewProjectPage = lazy(() => import("./pages/ora-new-project"));
+const OraxPage = lazy(() => import("./pages/orax"));
+const KnowledgePage = lazy(() => import("./pages/knowledge"));
+const VaultPage = lazy(() => import("./pages/vault"));
+const MemoryPage = lazy(() => import("./pages/memory"));
+const LibraryPage = lazy(() => import("./pages/library"));
+const SettingsPage = lazy(() => import("./pages/settings"));
+const TermsPage = lazy(() => import("./pages/terms"));
+const PrivacyPage = lazy(() => import("./pages/privacy"));
+const HelpPage = lazy(() => import("./pages/help"));
+const HelpDomainsApiPage = lazy(() => import("./pages/help-domains-api"));
+const SupportTicketsPage = lazy(() => import("./pages/support-tickets"));
+const StatusPage = lazy(() => import("./pages/status"));
+const AdminPage = lazy(() => import("./pages/admin"));
+const SupportInboxPage = lazy(() => import("./pages/support-inbox"));
+const TrashPage = lazy(() => import("./pages/trash"));
+const BillingPage = lazy(() => import("./pages/billing"));
+const PublishedPage = lazy(() => import("./pages/published"));
+const IntegrationsPage = lazy(() => import("./pages/integrations"));
+const SecurityPage = lazy(() => import("./pages/security"));
+const LearnPage = lazy(() => import("./pages/learn"));
+const PricingPage = lazy(() => import("./pages/pricing"));
+const WorkspaceUsagePage = lazy(() => import("./pages/workspace-usage"));
+const WorkspaceAuditPage = lazy(() => import("./pages/workspace-audit"));
+const MyDomainsPage = lazy(() => import("./pages/account/domains"));
+const WorkspaceDomainsPage = lazy(() => import("./pages/workspace-domains"));
+const OrgSettingsPage = lazy(() => import("./pages/org-settings"));
+const OrgNewPage = lazy(() => import("./pages/org-new"));
+const OrgInviteAcceptPage = lazy(() => import("./pages/org-invite-accept"));
+const GalleryPage = lazy(() => import("./pages/gallery"));
+const ImageStudioPage = lazy(() => import("./pages/image-studio"));
+const ExtensionsPage = lazy(() => import("./pages/extensions"));
+const CommunityPage = lazy(() => import("./pages/community"));
+const UserProfilePage = lazy(() => import("./pages/u"));
+const TrustPage = lazy(() => import("./pages/trust"));
+const DevelopersPage = lazy(() => import("./pages/developers"));
+const DevelopersChangelogPage = lazy(() => import("./pages/developers-changelog"));
 
 // Components
 import { AppLayout } from "./components/layout/app-layout";
@@ -69,9 +74,6 @@ import { HelpLayout } from "./components/layout/help-layout";
 import { WorkspaceProvider } from "./contexts/workspace-context";
 import { OnboardingTour } from "./components/onboarding-tour";
 import { OfflineIndicator } from "./components/offline-indicator";
-import TrustPage from "./pages/trust";
-import DevelopersPage from "./pages/developers";
-import DevelopersChangelogPage from "./pages/developers-changelog";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -460,354 +462,356 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
       <MaybeClerkContextProviders isE2E={isE2E}>
         <WorkspaceProvider>
           <TooltipProvider>
-            <Switch>
-              {/* ── Public routes ── */}
-              <Route path="/" component={HomeRoute} />
-              {/* REQUIRED — /*? wildcard matches bare URL + OAuth sub-paths */}
-              <Route path="/sign-in/*?" component={SignInPage} />
-              <Route path="/sign-up/*?" component={SignUpPage} />
-              {/* Backward-compat redirect from old /login stub */}
-              <Route path="/login">
-                <Redirect to="/sign-in" />
-              </Route>
+            <Suspense fallback={null}>
+              <Switch>
+                {/* ── Public routes ── */}
+                <Route path="/" component={HomeRoute} />
+                {/* REQUIRED — /*? wildcard matches bare URL + OAuth sub-paths */}
+                <Route path="/sign-in/*?" component={SignInPage} />
+                <Route path="/sign-up/*?" component={SignUpPage} />
+                {/* Backward-compat redirect from old /login stub */}
+                <Route path="/login">
+                  <Redirect to="/sign-in" />
+                </Route>
 
-              {/* ── Protected routes ── */}
-              <Route path="/mode-select">
-                <Protected>
-                  <ModeSelectPage />
-                </Protected>
-              </Route>
-              <Route path="/ora/library">
-                <Protected>
-                  <OraLibraryPage />
-                </Protected>
-              </Route>
-              <Route path="/ora/settings">
-                <Protected>
-                  <OraSettingsPage />
-                </Protected>
-              </Route>
-              <Route path="/ora/memory">
-                <Protected>
-                  <OraMemoryPage />
-                </Protected>
-              </Route>
-              <Route path="/ora/projects/new">
-                <Protected>
-                  <OraNewProjectPage />
-                </Protected>
-              </Route>
-              <Route path="/ora/projects/:projectId">
-                <Protected>
-                  <OraPage />
-                </Protected>
-              </Route>
-              <Route path="/ora">
-                <Protected>
-                  <OraPage />
-                </Protected>
-              </Route>
-              <Route path="/orax">
-                <Protected>
-                  <OraxPage />
-                </Protected>
-              </Route>
-              <Route path="/projects">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <ProjectsPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/projects/new">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <NewProjectPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/projects/:id">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <ProjectWorkspacePage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/knowledge">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <KnowledgePage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/vault">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <VaultPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/memory">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <MemoryPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/library">
-                <AppLayout>
-                  <LibraryPage />
-                </AppLayout>
-              </Route>
-              <Route path="/settings">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <SettingsPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/admin/support">
-                <Protected>
-                  <BuilderGuard>
-                    <AdminGuard>
+                {/* ── Protected routes ── */}
+                <Route path="/mode-select">
+                  <Protected>
+                    <ModeSelectPage />
+                  </Protected>
+                </Route>
+                <Route path="/ora/library">
+                  <Protected>
+                    <OraLibraryPage />
+                  </Protected>
+                </Route>
+                <Route path="/ora/settings">
+                  <Protected>
+                    <OraSettingsPage />
+                  </Protected>
+                </Route>
+                <Route path="/ora/memory">
+                  <Protected>
+                    <OraMemoryPage />
+                  </Protected>
+                </Route>
+                <Route path="/ora/projects/new">
+                  <Protected>
+                    <OraNewProjectPage />
+                  </Protected>
+                </Route>
+                <Route path="/ora/projects/:projectId">
+                  <Protected>
+                    <OraPage />
+                  </Protected>
+                </Route>
+                <Route path="/ora">
+                  <Protected>
+                    <OraPage />
+                  </Protected>
+                </Route>
+                <Route path="/orax">
+                  <Protected>
+                    <OraxPage />
+                  </Protected>
+                </Route>
+                <Route path="/projects">
+                  <Protected>
+                    <BuilderGuard>
                       <AppLayout>
-                        <SupportInboxPage />
+                        <ProjectsPage />
                       </AppLayout>
-                    </AdminGuard>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/admin">
-                <Protected>
-                  <BuilderGuard>
-                    <AdminGuard>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/projects/new">
+                  <Protected>
+                    <BuilderGuard>
                       <AppLayout>
-                        <AdminPage />
+                        <NewProjectPage />
                       </AppLayout>
-                    </AdminGuard>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/trash">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <TrashPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/billing">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <BillingPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/image-studio">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <ImageStudioPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/published">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <PublishedPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/integrations">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <IntegrationsPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/security">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <SecurityPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/learn">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <LearnPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/workspaces/:id/usage">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <WorkspaceUsagePage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/workspaces/:id/domains">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <WorkspaceDomainsPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/workspaces/:id/audit">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <WorkspaceAuditPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/account/domains">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <MyDomainsPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/orgs/invites/:token">
-                <AppLayout>
-                  <OrgInviteAcceptPage />
-                </AppLayout>
-              </Route>
-              <Route path="/orgs/new">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <OrgNewPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
-              <Route path="/orgs/:orgId">
-                <Protected>
-                  <BuilderGuard>
-                    <AppLayout>
-                      <OrgSettingsPage />
-                    </AppLayout>
-                  </BuilderGuard>
-                </Protected>
-              </Route>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/projects/:id">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <ProjectWorkspacePage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/knowledge">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <KnowledgePage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/vault">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <VaultPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/memory">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <MemoryPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/library">
+                  <AppLayout>
+                    <LibraryPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/settings">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <SettingsPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/admin/support">
+                  <Protected>
+                    <BuilderGuard>
+                      <AdminGuard>
+                        <AppLayout>
+                          <SupportInboxPage />
+                        </AppLayout>
+                      </AdminGuard>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/admin">
+                  <Protected>
+                    <BuilderGuard>
+                      <AdminGuard>
+                        <AppLayout>
+                          <AdminPage />
+                        </AppLayout>
+                      </AdminGuard>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/trash">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <TrashPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/billing">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <BillingPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/image-studio">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <ImageStudioPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/published">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <PublishedPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/integrations">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <IntegrationsPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/security">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <SecurityPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/learn">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <LearnPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/workspaces/:id/usage">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <WorkspaceUsagePage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/workspaces/:id/domains">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <WorkspaceDomainsPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/workspaces/:id/audit">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <WorkspaceAuditPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/account/domains">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <MyDomainsPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/orgs/invites/:token">
+                  <AppLayout>
+                    <OrgInviteAcceptPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/orgs/new">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <OrgNewPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
+                <Route path="/orgs/:orgId">
+                  <Protected>
+                    <BuilderGuard>
+                      <AppLayout>
+                        <OrgSettingsPage />
+                      </AppLayout>
+                    </BuilderGuard>
+                  </Protected>
+                </Route>
 
-              {/* ── Ecosystem pages ── */}
-              <Route path="/gallery">
-                <AppLayout>
-                  <GalleryPage />
-                </AppLayout>
-              </Route>
-              <Route path="/extensions">
-                <AppLayout>
-                  <ExtensionsPage />
-                </AppLayout>
-              </Route>
-              <Route path="/community">
-                <AppLayout>
-                  <CommunityPage />
-                </AppLayout>
-              </Route>
-              <Route path="/u/:username">
-                <AppLayout>
-                  <UserProfilePage />
-                </AppLayout>
-              </Route>
+                {/* ── Ecosystem pages ── */}
+                <Route path="/gallery">
+                  <AppLayout>
+                    <GalleryPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/extensions">
+                  <AppLayout>
+                    <ExtensionsPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/community">
+                  <AppLayout>
+                    <CommunityPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/u/:username">
+                  <AppLayout>
+                    <UserProfilePage />
+                  </AppLayout>
+                </Route>
 
-              {/* ── Public info pages ── */}
-              <Route path="/pricing">
-                <AppLayout>
-                  <PricingPage />
-                </AppLayout>
-              </Route>
-              <Route path="/terms">
-                <AppLayout>
-                  <TermsPage />
-                </AppLayout>
-              </Route>
-              <Route path="/privacy">
-                <AppLayout>
-                  <PrivacyPage />
-                </AppLayout>
-              </Route>
-              <Route path="/help">
-                <HelpLayout>
-                  <HelpPage />
-                </HelpLayout>
-              </Route>
-              <Route path="/help/domains-api">
-                <HelpLayout>
-                  <HelpDomainsApiPage />
-                </HelpLayout>
-              </Route>
-              <Route path="/support/tickets/:id">
-                <Protected>
+                {/* ── Public info pages ── */}
+                <Route path="/pricing">
+                  <AppLayout>
+                    <PricingPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/terms">
+                  <AppLayout>
+                    <TermsPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/privacy">
+                  <AppLayout>
+                    <PrivacyPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/help">
                   <HelpLayout>
-                    <SupportTicketsPage />
+                    <HelpPage />
                   </HelpLayout>
-                </Protected>
-              </Route>
-              <Route path="/support/tickets">
-                <Protected>
+                </Route>
+                <Route path="/help/domains-api">
                   <HelpLayout>
-                    <SupportTicketsPage />
+                    <HelpDomainsApiPage />
                   </HelpLayout>
-                </Protected>
-              </Route>
-              <Route path="/status">
-                <AppLayout>
-                  <StatusPage />
-                </AppLayout>
-              </Route>
-              <Route path="/trust">
-                <AppLayout>
-                  <TrustPage />
-                </AppLayout>
-              </Route>
-              <Route path="/developers/changelog">
-                <DevelopersChangelogPage />
-              </Route>
-              <Route path="/developers">
-                <AppLayout>
-                  <DevelopersPage />
-                </AppLayout>
-              </Route>
+                </Route>
+                <Route path="/support/tickets/:id">
+                  <Protected>
+                    <HelpLayout>
+                      <SupportTicketsPage />
+                    </HelpLayout>
+                  </Protected>
+                </Route>
+                <Route path="/support/tickets">
+                  <Protected>
+                    <HelpLayout>
+                      <SupportTicketsPage />
+                    </HelpLayout>
+                  </Protected>
+                </Route>
+                <Route path="/status">
+                  <AppLayout>
+                    <StatusPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/trust">
+                  <AppLayout>
+                    <TrustPage />
+                  </AppLayout>
+                </Route>
+                <Route path="/developers/changelog">
+                  <DevelopersChangelogPage />
+                </Route>
+                <Route path="/developers">
+                  <AppLayout>
+                    <DevelopersPage />
+                  </AppLayout>
+                </Route>
 
-              <Route component={NotFound} />
-            </Switch>
+                <Route component={NotFound} />
+              </Switch>
+            </Suspense>
             {!isE2E && (
               <Show when="signed-in">
                 <OnboardingTour />
@@ -880,9 +884,11 @@ function ClerkProviderWithRoutes() {
 
 function App() {
   return (
-    <WouterRouter base={basePath}>
-      <ClerkProviderWithRoutes />
-    </WouterRouter>
+    <HelmetProvider>
+      <WouterRouter base={basePath}>
+        <ClerkProviderWithRoutes />
+      </WouterRouter>
+    </HelmetProvider>
   );
 }
 

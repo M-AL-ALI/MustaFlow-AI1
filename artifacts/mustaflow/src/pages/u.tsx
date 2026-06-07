@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
+import { PageMeta } from "@/components/page-meta";
 import {
   Globe,
   Twitter,
@@ -222,6 +223,18 @@ export default function UserProfilePage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
+      <PageMeta
+        title={
+          profile.displayName
+            ? `${profile.displayName} (@${profile.username})`
+            : `@${profile.username}`
+        }
+        description={
+          profile.bio ??
+          `See the public apps and projects built by ${profile.displayName ?? profile.username} on MustaFlow AI.`
+        }
+        path={`/u/${profile.username}`}
+      />
       {/* Profile header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 pb-6 border-b border-border">
         <div className="h-16 w-16 rounded-full overflow-hidden bg-muted border border-border shrink-0 flex items-center justify-center">

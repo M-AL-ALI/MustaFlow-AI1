@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { ArrowLeft, Terminal, Globe, Key, Webhook, BookOpen, Copy, Check } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 import { useState } from "react";
 
 function CodeBlock({ code }: { code: string }) {
@@ -82,6 +83,11 @@ function EndpointRow({
 export default function HelpDomainsApiPage() {
   return (
     <div className="min-h-screen bg-background">
+      <PageMeta
+        title="Custom Domains & API Guide"
+        description="Learn how to connect a custom domain, configure DNS, and use the MustaFlow public API to manage and publish your apps."
+        path="/help/domains-api"
+      />
       <div className="max-w-4xl mx-auto px-6 py-12 space-y-16">
         {/* Header */}
         <div className="space-y-4">

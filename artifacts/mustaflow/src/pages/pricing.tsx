@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
+import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -101,6 +102,11 @@ export default function PricingPage() {
 
   return (
     <div className="pb-24">
+      <PageMeta
+        title="Pricing"
+        description="Simple, transparent pricing for every stage of building. Start free and scale up with MustaFlow AI — no credit card required."
+        path="/pricing"
+      />
       {/* Hero */}
       <div className="max-w-4xl mx-auto px-6 pt-16 pb-12 text-center">
         <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-6">

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { Link } from "wouter";
+import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@clerk/react";
 import {
@@ -553,6 +554,11 @@ export default function DevelopersPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-12 space-y-12">
+      <PageMeta
+        title="Developers"
+        description="Build on MustaFlow AI with our public API. Manage projects, trigger builds, publish apps, and integrate with your own tools."
+        path="/developers"
+      />
       {/* Header */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">

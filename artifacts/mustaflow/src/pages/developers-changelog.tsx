@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { ArrowRight, Code2, History, Plus, AlertTriangle, Pencil, ChevronLeft } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 
 interface ChangeEntry {
   type: "added" | "changed" | "deprecated" | "fixed";
@@ -266,6 +267,11 @@ function ChangeTag({ type }: { type: ChangeEntry["type"] }) {
 export default function DevelopersChangelogPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-10">
+      <PageMeta
+        title="API Changelog"
+        description="Track changes to the MustaFlow public API. View new endpoints, deprecations, and breaking changes by release date."
+        path="/developers/changelog"
+      />
       {/* Page header */}
       <div className="space-y-4">
         <Link

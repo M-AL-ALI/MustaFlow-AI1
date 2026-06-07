@@ -1,8 +1,15 @@
 import { FileText, Shield, AlertTriangle, Scale } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 
 export default function TermsPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-10">
+      <PageMeta
+        title="Terms of Service"
+        description="Read the MustaFlow AI Terms of Service. Learn about acceptable use, intellectual property, and your rights as a user."
+        path="/terms"
+        noIndex={true}
+      />
       <div className="space-y-3">
         <div className="flex items-center gap-3">
           <Scale className="h-6 w-6 text-primary" />

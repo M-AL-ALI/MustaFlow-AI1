@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { PageMeta } from "@/components/page-meta";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -129,6 +130,11 @@ export default function StatusPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <PageMeta
+        title="System Status"
+        description="Live status and uptime for MustaFlow AI services — builder, preview, publishing, AI generation, and more."
+        path="/status"
+      />
       <div className="max-w-2xl mx-auto px-4 py-12">
         <div className="flex items-center justify-between mb-8">
           <div>

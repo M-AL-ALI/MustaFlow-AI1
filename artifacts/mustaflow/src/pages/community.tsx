@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { Users, Globe, Star, GitFork, ArrowRight, Layers, Share2 } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 
 export default function CommunityPage() {
   const highlights = [
@@ -36,6 +37,11 @@ export default function CommunityPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-10">
+      <PageMeta
+        title="Community"
+        description="Join the MustaFlow AI builder community. Share apps, explore public templates, and learn from top builders on the platform."
+        path="/community"
+      />
       {/* Header */}
       <div className="space-y-2">
         <h1 className="text-2xl font-bold text-foreground">Community</h1>

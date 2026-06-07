@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   ExternalLink,
 } from "lucide-react";
+import { PageMeta } from "@/components/page-meta";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { useLocation, useSearch, Link } from "wouter";
@@ -720,6 +721,11 @@ export default function HelpPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 p-6">
+      <PageMeta
+        title="Help Center"
+        description="Get answers to common questions about building with MustaFlow AI. Browse help articles or contact support."
+        path="/help"
+      />
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <HelpCircle className="h-6 w-6 text-primary" />

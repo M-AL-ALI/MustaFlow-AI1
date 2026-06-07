@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
+import { PageMeta } from "@/components/page-meta";
 import {
   Search,
   Star,
@@ -288,6 +289,11 @@ export default function GalleryPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
+      <PageMeta
+        title="Template Gallery"
+        description="Browse hundreds of community-built and official app templates across every category. Start your next project in seconds with MustaFlow AI."
+        path="/gallery"
+      />
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">Template Gallery</h1>

@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/react";
+import { PageMeta } from "@/components/page-meta";
 import {
   Search,
   Puzzle,
@@ -412,6 +413,11 @@ export default function ExtensionsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+      <PageMeta
+        title="Extensions Marketplace"
+        description="Discover and install extensions to supercharge your MustaFlow AI projects. Add integrations, tools, and capabilities to your apps."
+        path="/extensions"
+      />
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">Extensions</h1>
