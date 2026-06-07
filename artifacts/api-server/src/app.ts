@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import { clerkMiddleware } from "@clerk/express";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import { profileSsrRouter } from "./routes/profile-ssr";
 import { customDomainMiddleware } from "./middlewares/customDomainMiddleware";
 import { previewSubdomainGateway } from "./middlewares/previewSubdomainGateway";
 import { logger } from "./lib/logger";
@@ -144,6 +145,13 @@ app.use(clerkMiddleware());
 // preview session validation and proxying are fully isolated from platform traffic.
 app.use(previewSubdomainGateway);
 app.use(customDomainMiddleware);
+
+// Public profile pages at /u/:username — served with SSR so crawlers
+// receive profile content in the initial HTML response.
+// Mounted before /api so the /u path (added to the proxy paths list in
+// artifact.toml) reaches this handler instead of falling through to the
+// API 404 guard.
+app.use(profileSsrRouter);
 
 app.use("/api", router);
 
