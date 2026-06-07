@@ -3246,27 +3246,14 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
-  // ── migrate-ora-daily-usage (Ora message-based daily quotas) ────────────────
+  // ── migrate-drop-ora-daily-usage ─────────────────────────────────────────────
+  // Ora usage metering moved from per-UTC-day caps (ora_daily_usage) to per-user
+  // rolling windows (ora_usage_windows). Nothing reads the legacy table anymore;
+  // drop it so the schema stays tidy. Idempotent via DROP TABLE IF EXISTS.
   {
-    name: "migrate-ora-daily-usage",
+    name: "migrate-drop-ora-daily-usage",
     async run(client) {
-      await client.query("BEGIN");
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS ora_daily_usage (
-          id            SERIAL PRIMARY KEY,
-          user_id       TEXT NOT NULL,
-          usage_date    TEXT NOT NULL,
-          message_count INTEGER NOT NULL DEFAULT 0,
-          image_count   INTEGER NOT NULL DEFAULT 0,
-          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      await client.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS ora_daily_usage_user_date_uniq
-           ON ora_daily_usage (user_id, usage_date)`,
-      );
-      await client.query("COMMIT");
+      await client.query(`DROP TABLE IF EXISTS ora_daily_usage`);
     },
   },
 
