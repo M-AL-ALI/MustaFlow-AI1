@@ -84,6 +84,7 @@ const MIGRATIONS = [
   "migrate-ora-memory-center",
   "migrate-knowledge-origin",
   "migrate-help-center",
+  "migrate-orax",
 ] as const;
 
 async function main(): Promise<void> {

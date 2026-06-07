@@ -29,6 +29,7 @@ import OraLibraryPage from "./pages/ora-library";
 import OraSettingsPage from "./pages/ora-settings";
 import OraMemoryPage from "./pages/ora-memory";
 import OraNewProjectPage from "./pages/ora-new-project";
+import OraxPage from "./pages/orax";
 import KnowledgePage from "./pages/knowledge";
 import VaultPage from "./pages/vault";
 import MemoryPage from "./pages/memory";
@@ -504,6 +505,11 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
               <Route path="/ora">
                 <Protected>
                   <OraPage />
+                </Protected>
+              </Route>
+              <Route path="/orax">
+                <Protected>
+                  <OraxPage />
                 </Protected>
               </Route>
               <Route path="/projects">
