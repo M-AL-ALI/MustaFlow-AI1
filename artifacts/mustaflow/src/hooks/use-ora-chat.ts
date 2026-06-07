@@ -58,6 +58,8 @@ export interface OraSession {
   imageLimit?: number;
   imageAnalysisCount?: number;
   imageAnalysisLimit?: number;
+  resetsAt?: string | null;
+  windowHours?: number;
 }
 
 export type UploadState = "idle" | "uploading" | "attached" | "error";
@@ -126,6 +128,41 @@ const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 
 const FILE_LIMIT = 3;
 const IMAGE_LIMIT = 2;
+
+// Usage fields any metered Ora endpoint may return alongside its result. The
+// rolling-window backend echoes message + image counts and the personal
+// window's resetsAt/windowHours so the sidebar countdown and remaining-quota
+// indicators stay in sync after every action.
+interface OraUsagePayload {
+  msgCount: number;
+  msgLimit: number;
+  imageCount?: number;
+  imageLimit?: number;
+  resetsAt?: string | null;
+  windowHours?: number;
+}
+
+// Merge a usage payload into the current session, preserving fields the payload
+// doesn't carry (sessionId, file/image-analysis counts). Used by every
+// setSession update path so resetsAt/windowHours/image counts propagate.
+function mergeUsage(prev: OraSession | null, data: OraUsagePayload): OraSession {
+  const base: OraSession = prev ?? {
+    sessionId: "",
+    msgCount: data.msgCount,
+    msgLimit: data.msgLimit,
+    fileCount: 0,
+    fileLimit: FILE_LIMIT,
+  };
+  return {
+    ...base,
+    msgCount: data.msgCount,
+    msgLimit: data.msgLimit,
+    ...(data.imageCount != null ? { imageCount: data.imageCount } : {}),
+    ...(data.imageLimit != null ? { imageLimit: data.imageLimit } : {}),
+    ...(data.resetsAt !== undefined ? { resetsAt: data.resetsAt } : {}),
+    ...(data.windowHours != null ? { windowHours: data.windowHours } : {}),
+  };
+}
 
 const DOC_ALLOWED_EXTENSIONS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".pptx"];
 const IMAGE_ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
@@ -488,6 +525,8 @@ export function useOraChat(): UseOraChatReturn {
             imageLimit?: number;
             imageAnalysisCount?: number;
             imageAnalysisLimit?: number;
+            resetsAt?: string | null;
+            windowHours?: number;
           }>("/api/public-ai/session");
           setSession({
             sessionId: data.sessionId,
@@ -499,6 +538,8 @@ export function useOraChat(): UseOraChatReturn {
             imageLimit: data.imageLimit ?? IMAGE_LIMIT,
             imageAnalysisCount: data.imageAnalysisCount ?? 0,
             imageAnalysisLimit: data.imageAnalysisLimit ?? 2,
+            resetsAt: data.resetsAt ?? null,
+            windowHours: data.windowHours,
           });
           if (!convRef.current) {
             const stored = getStoredTranscript();
@@ -532,6 +573,10 @@ export function useOraChat(): UseOraChatReturn {
           msgLimit: number;
           fileCount?: number;
           fileLimit?: number;
+          imageCount?: number;
+          imageLimit?: number;
+          resetsAt?: string | null;
+          windowHours?: number;
         }>("/api/public-ai/session", {});
         storeSessionId(data.sessionId);
         setSession({
@@ -540,6 +585,10 @@ export function useOraChat(): UseOraChatReturn {
           msgLimit: data.msgLimit,
           fileCount: data.fileCount ?? 0,
           fileLimit: data.fileLimit ?? FILE_LIMIT,
+          imageCount: data.imageCount ?? 0,
+          imageLimit: data.imageLimit ?? IMAGE_LIMIT,
+          resetsAt: data.resetsAt ?? null,
+          windowHours: data.windowHours,
         });
         if (!convRef.current) {
           const stored = getStoredTranscript();
@@ -884,6 +933,10 @@ export function useOraChat(): UseOraChatReturn {
               result: DatasetAnalysisResult;
               msgCount: number;
               msgLimit: number;
+              imageCount?: number;
+              imageLimit?: number;
+              resetsAt?: string | null;
+              windowHours?: number;
             }>("/api/public-ai/dataset-analysis", body);
 
             setMessages((prev) => {
@@ -900,17 +953,7 @@ export function useOraChat(): UseOraChatReturn {
               if (isSignedIn) saveToServer(next);
               return next;
             });
-            setSession((prev) =>
-              prev
-                ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
-                : {
-                    sessionId: "",
-                    msgCount: data.msgCount,
-                    msgLimit: data.msgLimit,
-                    fileCount: 0,
-                    fileLimit: FILE_LIMIT,
-                  },
-            );
+            setSession((prev) => mergeUsage(prev, data));
           } else {
             body.fileRef = currentAttachment.fileRef;
             const data = await apiPost<{
@@ -918,6 +961,10 @@ export function useOraChat(): UseOraChatReturn {
               handoffCta: boolean;
               msgCount: number;
               msgLimit: number;
+              imageCount?: number;
+              imageLimit?: number;
+              resetsAt?: string | null;
+              windowHours?: number;
             }>("/api/public-ai/file-analysis", body);
 
             setMessages((prev) => {
@@ -934,17 +981,7 @@ export function useOraChat(): UseOraChatReturn {
               if (isSignedIn) saveToServer(next);
               return next;
             });
-            setSession((prev) =>
-              prev
-                ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
-                : {
-                    sessionId: "",
-                    msgCount: data.msgCount,
-                    msgLimit: data.msgLimit,
-                    fileCount: 0,
-                    fileLimit: FILE_LIMIT,
-                  },
-            );
+            setSession((prev) => mergeUsage(prev, data));
           }
         } else {
           const body: Record<string, unknown> = {
@@ -979,6 +1016,10 @@ export function useOraChat(): UseOraChatReturn {
             sources?: OraSource[];
             msgCount: number;
             msgLimit: number;
+            imageCount?: number;
+            imageLimit?: number;
+            resetsAt?: string | null;
+            windowHours?: number;
           }>("/api/public-ai/chat", body);
 
           setMessages((prev) => {
@@ -1020,17 +1061,7 @@ export function useOraChat(): UseOraChatReturn {
             if (isSignedIn) saveToServer(next);
             return next;
           });
-          setSession((prev) =>
-            prev
-              ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
-              : {
-                  sessionId: "",
-                  msgCount: data.msgCount,
-                  msgLimit: data.msgLimit,
-                  fileCount: 0,
-                  fileLimit: FILE_LIMIT,
-                },
-          );
+          setSession((prev) => mergeUsage(prev, data));
         }
       };
 
@@ -1052,6 +1083,10 @@ export function useOraChat(): UseOraChatReturn {
               msgLimit: number;
               fileCount?: number;
               fileLimit?: number;
+              imageCount?: number;
+              imageLimit?: number;
+              resetsAt?: string | null;
+              windowHours?: number;
             }>("/api/public-ai/session", {});
             storeSessionId(data.sessionId);
             setSession({
@@ -1060,6 +1095,10 @@ export function useOraChat(): UseOraChatReturn {
               msgLimit: data.msgLimit,
               fileCount: data.fileCount ?? 0,
               fileLimit: data.fileLimit ?? FILE_LIMIT,
+              imageCount: data.imageCount ?? 0,
+              imageLimit: data.imageLimit ?? IMAGE_LIMIT,
+              resetsAt: data.resetsAt ?? null,
+              windowHours: data.windowHours,
             });
             // Retry with the fresh session — return early so the user message
             // stays in state and no error is shown.
@@ -1133,6 +1172,10 @@ export function useOraChat(): UseOraChatReturn {
           mimeType: string;
           msgCount: number;
           msgLimit: number;
+          imageCount?: number;
+          imageLimit?: number;
+          resetsAt?: string | null;
+          windowHours?: number;
         }>("/api/public-ai/generate-file", body);
 
         setMessages((prev) => {
@@ -1153,17 +1196,7 @@ export function useOraChat(): UseOraChatReturn {
           if (isSignedIn) saveToServer(next);
           return next;
         });
-        setSession((prev) =>
-          prev
-            ? { ...prev, msgCount: data.msgCount, msgLimit: data.msgLimit }
-            : {
-                sessionId: "",
-                msgCount: data.msgCount,
-                msgLimit: data.msgLimit,
-                fileCount: 0,
-                fileLimit: FILE_LIMIT,
-              },
-        );
+        setSession((prev) => mergeUsage(prev, data));
       } catch (err: unknown) {
         const status = (err as { status?: number }).status;
         const msg = (err as Error).message;
@@ -1209,6 +1242,10 @@ export function useOraChat(): UseOraChatReturn {
               mimeType: string;
               msgCount: number;
               msgLimit: number;
+              imageCount?: number;
+              imageLimit?: number;
+              resetsAt?: string | null;
+              windowHours?: number;
             }>("/api/public-ai/generate-file", retryBody);
             setMessages((prev) => {
               const next = [
@@ -1228,17 +1265,7 @@ export function useOraChat(): UseOraChatReturn {
               if (isSignedIn) saveToServer(next);
               return next;
             });
-            setSession((prev) =>
-              prev
-                ? { ...prev, msgCount: retryData.msgCount, msgLimit: retryData.msgLimit }
-                : {
-                    sessionId: refreshed.sessionId,
-                    msgCount: retryData.msgCount,
-                    msgLimit: retryData.msgLimit,
-                    fileCount: 0,
-                    fileLimit: FILE_LIMIT,
-                  },
-            );
+            setSession((prev) => mergeUsage(prev, retryData));
             setIsLoading(false);
             return;
           } catch {
@@ -1428,6 +1455,10 @@ export function useOraChat(): UseOraChatReturn {
         msgLimit: number;
         fileCount?: number;
         fileLimit?: number;
+        imageCount?: number;
+        imageLimit?: number;
+        resetsAt?: string | null;
+        windowHours?: number;
       }>("/api/public-ai/session", {});
       storeSessionId(data.sessionId);
       setSession({
@@ -1436,6 +1467,10 @@ export function useOraChat(): UseOraChatReturn {
         msgLimit: data.msgLimit,
         fileCount: data.fileCount ?? 0,
         fileLimit: data.fileLimit ?? FILE_LIMIT,
+        imageCount: data.imageCount ?? 0,
+        imageLimit: data.imageLimit ?? IMAGE_LIMIT,
+        resetsAt: data.resetsAt ?? null,
+        windowHours: data.windowHours,
       });
     } catch {
       /* best-effort */

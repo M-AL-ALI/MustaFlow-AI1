@@ -80,6 +80,7 @@
     "migrate-canvas-state": "tsx ./src/migrate-canvas-state.ts",
     "migrate-low-credit-email": "tsx ./src/migrate-low-credit-email.ts",
     "migrate-ora-project-description": "tsx ./src/migrate-ora-project-description.ts",
+    "migrate-ora-usage-windows": "tsx ./src/migrate-ora-usage-windows.ts",
     "migrate-provisioning-steps": "tsx ./src/migrate-provisioning-steps.ts",
     "migrate-gdpr-erasure-job": "tsx ./src/migrate-gdpr-erasure-job.ts",
     "migrate-voice-lang": "tsx ./src/migrate-voice-lang.ts",

@@ -7,7 +7,7 @@ import {
   generatedImagesTable,
   creditTransactionsTable,
   userCreditsTable,
-  oraDailyUsageTable,
+  oraUsageWindowsTable,
 } from "@workspace/db";
 import imageGenRouter from "../image-gen";
 import { CREDITS_ENFORCEMENT_ENABLED } from "../credits";
@@ -75,7 +75,7 @@ afterAll(async () => {
     await db.delete(generatedImagesTable).where(eq(generatedImagesTable.userId, u));
     await db.delete(creditTransactionsTable).where(eq(creditTransactionsTable.userId, u));
     await db.delete(userCreditsTable).where(eq(userCreditsTable.userId, u));
-    await db.delete(oraDailyUsageTable).where(eq(oraDailyUsageTable.userId, u));
+    await db.delete(oraUsageWindowsTable).where(eq(oraUsageWindowsTable.userId, u));
   }
 });
 
@@ -148,7 +148,7 @@ describe("POST /images/:id/edit — inline image editing", () => {
     }
   });
 
-  it("Ora-originated edits use Ora daily image quota instead of credits", async () => {
+  it("Ora-originated edits use Ora rolling-window image quota instead of credits", async () => {
     const parentId = await insertParentImage(USER_A);
 
     const res = await request(appAs(USER_A)).post(`/images/${parentId}/edit`).send({
@@ -160,7 +160,7 @@ describe("POST /images/:id/edit — inline image editing", () => {
     expect(res.status).toBe(202);
     expect(res.body.creditCost).toBe(0);
     expect(res.body.imageCount).toBe(1);
-    expect(res.body.imageLimit).toBe(3);
+    expect(res.body.imageLimit).toBe(4);
 
     const childId = res.body.imageId as number;
     const [child] = await db
@@ -175,8 +175,8 @@ describe("POST /images/:id/edit — inline image editing", () => {
     expect(child.creditCost).toBe(0);
   });
 
-  it("refunds the Ora daily image quota when an async edit job fails", async () => {
-    // Fresh user so the daily-usage row is uncontaminated by other tests'
+  it("refunds the Ora rolling-window image quota when an async edit job fails", async () => {
+    // Fresh user so the usage-window row is uncontaminated by other tests'
     // async failures. The parent's bogus fileUrl makes the background edit job
     // fail fast (getImageBuffer can't fetch it), exercising the refund path.
     const parentId = await insertParentImage(USER_C);
@@ -206,11 +206,11 @@ describe("POST /images/:id/edit — inline image editing", () => {
     }
     expect(status).toBe("failed");
 
-    // The reserved slot was refunded — the daily image count is back to 0.
+    // The reserved slot was refunded — the window image count is back to 0.
     const [usage] = await db
       .select()
-      .from(oraDailyUsageTable)
-      .where(eq(oraDailyUsageTable.userId, USER_C));
+      .from(oraUsageWindowsTable)
+      .where(eq(oraUsageWindowsTable.userId, USER_C));
     expect(usage?.imageCount ?? 0).toBe(0);
   }, 30000);
 

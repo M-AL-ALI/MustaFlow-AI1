@@ -575,22 +575,25 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
   let reservedOraImageQuota = false;
   let oraImageCount: number | undefined;
   let oraImageLimit: number | undefined;
+  let oraResetsAt: string | null | undefined;
   try {
     if (isOraEdit) {
       const oraUser = await resolveTierForUser(userId);
       const quota = await consumeOraQuota(userId, oraUser.tier, "image");
       if (!quota.allowed) {
         res.status(429).json({
-          error: `You've reached today's image limit (${quota.limit}/day) on your plan. Upgrade for more daily images, or come back tomorrow.`,
+          error: `You've used all ${quota.limit} Ora images in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
           upgradeCta: true,
           imageCount: quota.used,
           imageLimit: quota.limit,
+          resetsAt: quota.resetsAt,
         });
         return;
       }
       reservedOraImageQuota = true;
       oraImageCount = quota.used;
       oraImageLimit = quota.limit;
+      oraResetsAt = quota.resetsAt;
     }
 
     const { jobId, imageId } = await enqueueImageEditJob({
@@ -610,7 +613,9 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       imageId,
       creditCost: isOraEdit ? 0 : (IMAGE_CREDIT_COSTS[quality] ?? 3),
       status: "pending",
-      ...(isOraEdit ? { imageCount: oraImageCount, imageLimit: oraImageLimit } : {}),
+      ...(isOraEdit
+        ? { imageCount: oraImageCount, imageLimit: oraImageLimit, resetsAt: oraResetsAt }
+        : {}),
     });
   } catch (err) {
     if (reservedOraImageQuota) await refundOraQuota(userId, "image");

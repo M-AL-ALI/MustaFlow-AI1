@@ -11,7 +11,7 @@ import {
 } from "../../lib/public-ai/session";
 import { oraSessionLimiter } from "../../lib/rateLimit";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { getTodayOraUsage } from "../../lib/public-ai/ora-usage";
+import { getOraUsage } from "../../lib/public-ai/ora-usage";
 import { logger } from "../../lib/logger";
 
 const router = Router();
@@ -35,18 +35,20 @@ router.post("/public-ai/session", oraSessionLimiter, async (req, res) => {
   const { token, payload } = createSession();
   setSessionCookie(res, token);
 
-  // Signed-in users are metered by daily quotas per tier; surface today's usage
-  // so the indicator is accurate from the first paint. Anonymous visitors get
-  // the per-session cap.
+  // Signed-in users are metered by per-user rolling windows per tier; surface
+  // current-window usage + reset time so the indicator is accurate from the
+  // first paint. Anonymous visitors get the per-session cap.
   const authed = await resolveAuthedOraUser(req);
   if (authed) {
-    const usage = await getTodayOraUsage(authed.userId, authed.tier);
+    const usage = await getOraUsage(authed.userId, authed.tier);
     res.json({
       sessionId: payload.sessionId,
       msgCount: usage.messageCount,
       msgLimit: usage.messageLimit,
       imageCount: usage.imageCount,
       imageLimit: usage.imageLimit,
+      resetsAt: usage.resetsAt,
+      windowHours: usage.windowHours,
       tier: authed.tier,
       isPaid: authed.isPaid,
     });
@@ -73,28 +75,29 @@ router.get("/public-ai/session", async (req, res) => {
   }
 
   const authed = await resolveAuthedOraUser(req);
-  const daily = authed ? await getTodayOraUsage(authed.userId, authed.tier) : null;
+  const usage = authed ? await getOraUsage(authed.userId, authed.tier) : null;
 
   res.json({
     sessionId: session.sessionId,
-    msgCount: daily ? daily.messageCount : session.msgCount,
-    msgLimit: daily ? daily.messageLimit : MSG_LIMIT_VALUE,
+    msgCount: usage ? usage.messageCount : session.msgCount,
+    msgLimit: usage ? usage.messageLimit : MSG_LIMIT_VALUE,
     fileCount: session.fileCount,
     fileLimit: FILE_LIMIT_VALUE,
-    imageCount: daily ? daily.imageCount : session.imageCount,
-    imageLimit: daily ? daily.imageLimit : IMAGE_LIMIT_VALUE,
+    imageCount: usage ? usage.imageCount : session.imageCount,
+    imageLimit: usage ? usage.imageLimit : IMAGE_LIMIT_VALUE,
     imageAnalysisCount: session.imageAnalysisCount,
     imageAnalysisLimit: IMAGE_ANALYSIS_LIMIT_VALUE,
+    ...(usage ? { resetsAt: usage.resetsAt, windowHours: usage.windowHours } : {}),
     ...(authed ? { tier: authed.tier, isPaid: authed.isPaid } : {}),
   });
 });
 
 /**
- * Today's Ora DAILY usage for the signed-in user. This is the ONLY usage signal
- * the standalone Ora UI surfaces — it must NEVER read the AI Builder credit
- * wallet. Unlike GET /public-ai/session it does not require an ora-session
- * cookie, so the sidebar usage indicator works regardless of chat session
- * state. Returns 401 for anonymous callers (the sidebar simply hides itself).
+ * The signed-in user's current rolling-window Ora usage. This is the ONLY usage
+ * signal the standalone Ora UI surfaces — it must NEVER read the AI Builder
+ * credit wallet. Unlike GET /public-ai/session it does not require an
+ * ora-session cookie, so the sidebar usage indicator works regardless of chat
+ * session state. Returns 401 for anonymous callers (the sidebar hides itself).
  */
 router.get("/public-ai/usage", async (req, res) => {
   const authed = await resolveAuthedOraUser(req);
@@ -102,12 +105,14 @@ router.get("/public-ai/usage", async (req, res) => {
     res.status(401).json({ error: "Not signed in" });
     return;
   }
-  const usage = await getTodayOraUsage(authed.userId, authed.tier);
+  const usage = await getOraUsage(authed.userId, authed.tier);
   res.json({
     messageCount: usage.messageCount,
     messageLimit: usage.messageLimit,
     imageCount: usage.imageCount,
     imageLimit: usage.imageLimit,
+    resetsAt: usage.resetsAt,
+    windowHours: usage.windowHours,
   });
 });
 

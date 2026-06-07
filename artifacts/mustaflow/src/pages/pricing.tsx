@@ -7,8 +7,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@clerk/react";
 
 const FREE_FEATURES = [
-  "15 Ora messages / day",
-  "3 Ora images / day",
+  "30 Ora messages every 5 hours",
+  "4 Ora images every 5 hours",
   "Unlimited file uploads to Ora",
   "Ora Instant replies",
   "150 Builder credits / month",
@@ -19,8 +19,8 @@ const FREE_FEATURES = [
 ];
 
 const CORE_FEATURES = [
-  "30 Ora messages / day",
-  "10 Ora images / day",
+  "100 Ora messages every 3 hours",
+  "15 Ora images every 3 hours",
   "Unlimited file uploads to Ora",
   "Ora Instant + Deep Thinking",
   "1,500 Builder credits / month",
@@ -32,8 +32,8 @@ const CORE_FEATURES = [
 ];
 
 const WAVE_FEATURES = [
-  "55 Ora messages / day",
-  "20 Ora images / day",
+  "280 Ora messages every 3 hours",
+  "30 Ora images every 3 hours",
   "Unlimited file uploads to Ora",
   "Ora Instant + Deep Thinking",
   "4,000 Builder credits / month",
@@ -45,9 +45,9 @@ const WAVE_FEATURES = [
 ];
 
 const ORA_PLAN_LIMITS = [
-  { plan: "Free", messages: "15 / day", images: "3 / day", deep: "—" },
-  { plan: "Core", messages: "30 / day", images: "10 / day", deep: "Included" },
-  { plan: "Wave", messages: "55 / day", images: "20 / day", deep: "Included" },
+  { plan: "Free", messages: "30 / 5 hrs", images: "4 / 5 hrs", deep: "—" },
+  { plan: "Core", messages: "100 / 3 hrs", images: "15 / 3 hrs", deep: "Included" },
+  { plan: "Wave", messages: "280 / 3 hrs", images: "30 / 3 hrs", deep: "Included" },
 ];
 
 export default function PricingPage() {
@@ -250,7 +250,7 @@ export default function PricingPage() {
           </div>
           <div className="border border-border rounded-xl bg-card overflow-hidden mb-6">
             <div className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30">
-              Ora assistant — daily limits by plan
+              Ora assistant — rolling-window limits by plan
             </div>
             <div className="grid grid-cols-4 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border">
               <span>Plan</span>
@@ -269,7 +269,9 @@ export default function PricingPage() {
               ))}
             </div>
             <p className="px-5 py-3 text-xs text-muted-foreground border-t border-border">
-              Daily limits reset at midnight UTC. File uploads are always unlimited.
+              Limits use a personal rolling window: your allowance refills in full a set number of
+              hours after your first message, and messages and images refill together. File uploads
+              are always unlimited.
             </p>
           </div>
           <div className="border border-border rounded-xl bg-card overflow-hidden">

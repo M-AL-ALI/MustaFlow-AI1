@@ -24,6 +24,7 @@ import {
   HelpCircle,
   Bug,
   LifeBuoy,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -52,25 +53,47 @@ export const NAV_ITEMS = [
   { name: "Settings", href: "/ora/settings", icon: Settings },
 ];
 
-interface OraDailyUsage {
+interface OraWindowUsage {
   messageCount: number;
   messageLimit: number;
   imageCount: number;
   imageLimit: number;
+  resetsAt: string | null;
+  windowHours?: number;
 }
 
-// Ora is metered by DAILY message/image quotas per tier — NOT the AI Builder
-// credit wallet. This widget intentionally reads /api/public-ai/usage and must
-// never call /api/credits or link to Builder billing.
+/**
+ * Format the time remaining until `resetsAt` as a compact countdown, e.g.
+ * "4h 32m" or "12m". Returns null when there is no active window (resetsAt is
+ * null — the full allowance is available and the timer hasn't started yet).
+ */
+function formatCountdown(resetsAt: string | null, now: number): string | null {
+  if (!resetsAt) return null;
+  const target = new Date(resetsAt).getTime();
+  if (Number.isNaN(target)) return null;
+  const ms = target - now;
+  if (ms <= 0) return null;
+  const totalMinutes = Math.ceil(ms / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+// Ora is metered by per-user ROLLING-WINDOW message/image quotas per tier — NOT
+// the AI Builder credit wallet. Messages and images share ONE window timer that
+// refills together. This widget reads /api/public-ai/usage and must never call
+// /api/credits or link to Builder billing.
 function OraUsageWidget() {
   const { isSignedIn } = useClerkUser();
-  const [usage, setUsage] = useState<OraDailyUsage | null>(null);
+  const [usage, setUsage] = useState<OraWindowUsage | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const fetchUsage = useCallback(async () => {
     try {
       const res = await authFetch("/api/public-ai/usage");
       if (res.ok) {
-        const data = (await res.json()) as OraDailyUsage;
+        const data = (await res.json()) as OraWindowUsage;
         setUsage(data);
       }
     } catch {
@@ -90,10 +113,19 @@ function OraUsageWidget() {
     };
   }, [isSignedIn, fetchUsage]);
 
+  // Tick the countdown every second so the reset time stays live.
+  useEffect(() => {
+    if (!usage?.resetsAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, [usage?.resetsAt]);
+
   if (!isSignedIn || !usage) return null;
 
   const msgRemaining = Math.max(0, usage.messageLimit - usage.messageCount);
+  const imgRemaining = Math.max(0, usage.imageLimit - usage.imageCount);
   const msgLow = msgRemaining <= Math.max(1, Math.ceil(usage.messageLimit * 0.1));
+  const countdown = formatCountdown(usage.resetsAt, now);
 
   return (
     <div className="px-3 py-2">
@@ -108,23 +140,28 @@ function OraUsageWidget() {
         <div className="flex items-center gap-2">
           <MessageSquare className="h-3.5 w-3.5 shrink-0" />
           <div className="flex-1 min-w-0">
-            <span className="font-semibold text-foreground">{usage.messageCount}</span>
-            <span className="ml-1">/ {usage.messageLimit} messages today</span>
+            <span className="font-semibold text-foreground">{msgRemaining}</span>
+            <span className="ml-1">of {usage.messageLimit} messages left</span>
           </div>
         </div>
         {usage.imageLimit > 0 && (
           <div className="flex items-center gap-2 mt-1.5">
             <ImageIcon className="h-3.5 w-3.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <span className="font-semibold text-foreground">{usage.imageCount}</span>
-              <span className="ml-1">/ {usage.imageLimit} images today</span>
+              <span className="font-semibold text-foreground">{imgRemaining}</span>
+              <span className="ml-1">of {usage.imageLimit} images left</span>
             </div>
           </div>
         )}
-        {msgLow && (
-          <p className="text-[10px] leading-tight mt-1.5 font-normal">
-            Almost at today&apos;s limit — resets tomorrow
-          </p>
+        {countdown ? (
+          <div className="flex items-center gap-2 mt-1.5">
+            <Clock className="h-3.5 w-3.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="ml-0">Resets in {countdown}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[10px] leading-tight mt-1.5 font-normal">Full allowance available</p>
         )}
       </div>
     </div>

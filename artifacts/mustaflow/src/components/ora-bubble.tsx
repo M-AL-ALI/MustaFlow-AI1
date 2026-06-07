@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
+import { OraUsageInline } from "@/components/ora-usage-inline";
 import { cn } from "@/lib/utils";
 import type {
   UseOraChatReturn,
@@ -1257,7 +1258,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               <p className="text-xs text-muted-foreground">
                 {isSignedIn ? (
                   <>
-                    Daily message limit reached.{" "}
+                    Message limit reached for this window.{" "}
                     <button
                       type="button"
                       onClick={() => setLocation("/pricing")}
@@ -1501,6 +1502,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         {session.msgLimit - session.msgCount} left
                       </span>
                     )}
+                    <OraUsageInline
+                      session={session}
+                      isSignedIn={isSignedIn}
+                      className="text-[9px] text-muted-foreground/50 shrink-0 ml-1.5 flex items-center gap-1"
+                    />
                   </div>
                 </>
               )}

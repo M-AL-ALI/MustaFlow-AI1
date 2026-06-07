@@ -91,7 +91,7 @@ router.post(
       if (!passedImageLimiter || res.headersSent) return;
 
       // Uploads are unlimited for signed-in users — Ora meters them only by the
-      // daily message/image quotas, never by upload counts. Anonymous visitors
+      // rolling-window message/image quotas, never by upload counts. Anonymous visitors
       // keep the per-session cap. Check BEFORE validating file bytes; only
       // increment after a successful store so rejected files don't consume it.
       if (!authed && session.imageCount >= IMAGE_LIMIT_VALUE) {

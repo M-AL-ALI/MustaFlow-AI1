@@ -11,7 +11,7 @@ import {
 import { getImage } from "../../lib/public-ai/image-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { consumeOraQuota, refundOraQuota, getTodayOraUsage } from "../../lib/public-ai/ora-usage";
+import { consumeOraQuota, refundOraQuota, getOraUsage } from "../../lib/public-ai/ora-usage";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
 
 const router = Router();
@@ -82,7 +82,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
   }
 
   // Resolve the signed-in Ora user up-front. The anonymous per-session cap is a
-  // side-effect-free read, so it can be signaled early; only the authed daily
+  // side-effect-free read, so it can be signaled early; only the authed rolling-window
   // quota is RESERVED (consumed), and that reservation is deferred until after
   // cheap validation so rejected/stale requests never consume a user's allowance.
   const authed = await resolveAuthedOraUser(req);
@@ -112,17 +112,18 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     return;
   }
 
-  // Image analysis counts against the signed-in user's daily MESSAGE bucket.
+  // Image analysis counts against the signed-in user's rolling-window MESSAGE bucket.
   // consumeOraQuota is atomic; the reservation is held below and only released
   // via refundOraQuota on model failure.
   if (authed) {
     const quota = await consumeOraQuota(authed.userId, authed.tier, "message");
     if (!quota.allowed) {
       res.status(429).json({
-        error: `You've reached today's message limit (${quota.limit}/day) on your plan. Upgrade for more daily messages, or come back tomorrow.`,
+        error: `You've used all ${quota.limit} Ora messages in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
         upgradeCta: true,
         imageAnalysisCount: quota.used,
         imageAnalysisLimit: quota.limit,
+        resetsAt: quota.resetsAt,
       });
       return;
     }
@@ -215,7 +216,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
   // model call succeeded so we keep the reservation — no extra increment.
   const { token, payload } = incrementImageAnalysisCount(session);
   setSessionCookie(res, token);
-  const dailyUsage = authed ? await getTodayOraUsage(authed.userId, authed.tier) : null;
+  const windowUsage = authed ? await getOraUsage(authed.userId, authed.tier) : null;
 
   logger.info(
     {
@@ -234,8 +235,9 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
   res.json({
     reply,
     handoffCta: false,
-    imageAnalysisCount: dailyUsage ? dailyUsage.messageCount : payload.imageAnalysisCount,
-    imageAnalysisLimit: dailyUsage ? dailyUsage.messageLimit : IMAGE_ANALYSIS_LIMIT_VALUE,
+    imageAnalysisCount: windowUsage ? windowUsage.messageCount : payload.imageAnalysisCount,
+    imageAnalysisLimit: windowUsage ? windowUsage.messageLimit : IMAGE_ANALYSIS_LIMIT_VALUE,
+    ...(windowUsage ? { resetsAt: windowUsage.resetsAt } : {}),
   });
 });
 

@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { authFetch } from "@/lib/api-fetch";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
+import { OraUsageInline } from "@/components/ora-usage-inline";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
@@ -1381,13 +1382,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                 <p className="text-xs text-muted-foreground">
                   {isSignedIn ? (
                     <>
-                      You&apos;ve hit today&apos;s message limit.{" "}
+                      You&apos;ve used your message allowance for this window.{" "}
                       <button
                         type="button"
                         onClick={() => setLocation("/pricing")}
                         className="text-[hsl(265_85%_65%)] hover:underline"
                       >
-                        Upgrade for more daily messages
+                        Upgrade for a higher limit
                       </button>
                     </>
                   ) : (
@@ -1689,6 +1690,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                           {session.msgLimit - session.msgCount} messages left
                         </span>
                       )}
+                      <OraUsageInline session={session} isSignedIn={isSignedIn} />
                     </div>
                   </>
                 )}
