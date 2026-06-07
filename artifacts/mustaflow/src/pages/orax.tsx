@@ -309,6 +309,9 @@ export default function OraxPage() {
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
   const [taskMessageDraft, setTaskMessageDraft] = useState("");
+  const [pendingSuggestionConfirmation, setPendingSuggestionConfirmation] =
+    useState<OraxTaskActionSuggestion | null>(null);
+  const [suggestionPrConfirmationText, setSuggestionPrConfirmationText] = useState("");
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>(DEFAULT_ORAX_COMMAND_IDS);
   const [prConfirmationText, setPrConfirmationText] = useState("");
   const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
@@ -486,6 +489,8 @@ export default function OraxPage() {
       return;
     }
     setReadResult(null);
+    setPendingSuggestionConfirmation(null);
+    setSuggestionPrConfirmationText("");
     void loadApprovals(selectedTask.id);
     void loadArtifacts(selectedTask.id);
     void loadTaskMessages(selectedTask.id);
@@ -630,12 +635,18 @@ export default function OraxPage() {
   }
 
   function applyTaskActionSuggestion(suggestion: OraxTaskActionSuggestion) {
+    setPendingSuggestionConfirmation(null);
+    setSuggestionPrConfirmationText("");
+
     if (suggestion.type === "read_files") {
       if (suggestion.paths?.length) {
         setApprovalPaths(suggestion.paths.join("\n"));
       }
       if (suggestion.reason) {
         setApprovalReason(suggestion.reason);
+      }
+      if (suggestion.paths?.length) {
+        setPendingSuggestionConfirmation(suggestion);
       }
       return;
     }
@@ -652,18 +663,24 @@ export default function OraxPage() {
       if (allowed.length) {
         setSelectedCommandIds(allowed);
       }
+      setPendingSuggestionConfirmation(suggestion);
+      return;
+    }
+
+    if (suggestion.type === "sandbox_run" || suggestion.type === "github_pr") {
+      setPendingSuggestionConfirmation(suggestion);
     }
   }
 
-  async function requestFileReadApproval() {
-    if (!selectedTask || requestingApproval) return;
+  async function requestFileReadApproval(): Promise<boolean> {
+    if (!selectedTask || requestingApproval) return false;
     const paths = approvalPaths
       .split(/[\n,]/)
       .map((path) => path.trim())
       .filter(Boolean);
     if (!paths.length) {
       setError("Add at least one repository-relative file path");
-      return;
+      return false;
     }
     setRequestingApproval(true);
     setError(null);
@@ -685,8 +702,10 @@ export default function OraxPage() {
       setApprovals((prev) => [body.approval, ...prev]);
       setApprovalPaths("");
       setApprovalReason("");
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request approval");
+      return false;
     } finally {
       setRequestingApproval(false);
     }
@@ -772,8 +791,8 @@ export default function OraxPage() {
     }
   }
 
-  async function requestSandboxApproval(artifactId: number) {
-    if (!selectedTask || requestingSandboxApprovalArtifactId) return;
+  async function requestSandboxApproval(artifactId: number): Promise<boolean> {
+    if (!selectedTask || requestingSandboxApprovalArtifactId) return false;
     setRequestingSandboxApprovalArtifactId(artifactId);
     setError(null);
     try {
@@ -792,18 +811,20 @@ export default function OraxPage() {
       const body = (await res.json()) as { approval: OraxApproval };
       setApprovals((prev) => [body.approval, ...prev]);
       void load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request sandbox approval");
+      return false;
     } finally {
       setRequestingSandboxApprovalArtifactId(null);
     }
   }
 
-  async function requestCommandApproval(artifactId: number) {
-    if (!selectedTask || requestingCommandApprovalArtifactId) return;
+  async function requestCommandApproval(artifactId: number): Promise<boolean> {
+    if (!selectedTask || requestingCommandApprovalArtifactId) return false;
     if (!selectedCommandIds.length) {
       setError("Select at least one ORAX check to request approval.");
-      return;
+      return false;
     }
     setRequestingCommandApprovalArtifactId(artifactId);
     setError(null);
@@ -825,8 +846,10 @@ export default function OraxPage() {
       const body = (await res.json()) as { approval: OraxApproval };
       setApprovals((prev) => [body.approval, ...prev]);
       void load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request controlled-check approval");
+      return false;
     } finally {
       setRequestingCommandApprovalArtifactId(null);
     }
@@ -897,11 +920,14 @@ export default function OraxPage() {
     }
   }
 
-  async function requestGithubPrApproval(artifactId: number) {
-    if (!selectedTask || requestingPrApprovalArtifactId) return;
-    if (prConfirmationText.trim() !== "CREATE PR") {
+  async function requestGithubPrApproval(
+    artifactId: number,
+    confirmationText = prConfirmationText,
+  ): Promise<boolean> {
+    if (!selectedTask || requestingPrApprovalArtifactId) return false;
+    if (confirmationText.trim() !== "CREATE PR") {
       setError('Type "CREATE PR" before requesting GitHub PR approval.');
-      return;
+      return false;
     }
     setRequestingPrApprovalArtifactId(artifactId);
     setError(null);
@@ -924,10 +950,33 @@ export default function OraxPage() {
       setApprovals((prev) => [body.approval, ...prev]);
       setPrConfirmationText("");
       void load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request GitHub PR approval");
+      return false;
     } finally {
       setRequestingPrApprovalArtifactId(null);
+    }
+  }
+
+  async function confirmTaskActionSuggestion() {
+    const suggestion = pendingSuggestionConfirmation;
+    if (!suggestion) return;
+
+    let created = false;
+    if (suggestion.type === "read_files") {
+      created = await requestFileReadApproval();
+    } else if (suggestion.type === "sandbox_run" && suggestion.artifactId) {
+      created = await requestSandboxApproval(suggestion.artifactId);
+    } else if (suggestion.type === "controlled_checks" && suggestion.artifactId) {
+      created = await requestCommandApproval(suggestion.artifactId);
+    } else if (suggestion.type === "github_pr" && suggestion.artifactId) {
+      created = await requestGithubPrApproval(suggestion.artifactId, suggestionPrConfirmationText);
+    }
+
+    if (created) {
+      setPendingSuggestionConfirmation(null);
+      setSuggestionPrConfirmationText("");
     }
   }
 
@@ -1426,6 +1475,60 @@ export default function OraxPage() {
                       })
                     )}
                   </div>
+
+                  {pendingSuggestionConfirmation ? (
+                    <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100">
+                      <div className="font-semibold">Confirm approval request</div>
+                      <p className="mt-1 text-xs">
+                        ORAX will create an approval request for:{" "}
+                        <span className="font-medium">{pendingSuggestionConfirmation.title}</span>.
+                        It will not execute the approval, run commands, push branches, or open a PR.
+                      </p>
+                      {pendingSuggestionConfirmation.type === "read_files" &&
+                      pendingSuggestionConfirmation.paths?.length ? (
+                        <div className="mt-2 text-xs">
+                          Files: {pendingSuggestionConfirmation.paths.join(", ")}
+                        </div>
+                      ) : null}
+                      {pendingSuggestionConfirmation.type === "controlled_checks" &&
+                      pendingSuggestionConfirmation.commands?.length ? (
+                        <div className="mt-2 text-xs">
+                          Checks: {pendingSuggestionConfirmation.commands.join(", ")}
+                        </div>
+                      ) : null}
+                      {pendingSuggestionConfirmation.type === "github_pr" ? (
+                        <input
+                          value={suggestionPrConfirmationText}
+                          onChange={(event) => setSuggestionPrConfirmationText(event.target.value)}
+                          placeholder="Type CREATE PR to confirm"
+                          className="mt-3 h-9 w-full rounded-md border border-amber-300 bg-background px-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring dark:border-amber-700"
+                        />
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void confirmTaskActionSuggestion()}
+                          disabled={
+                            pendingSuggestionConfirmation.type === "github_pr" &&
+                            suggestionPrConfirmationText.trim() !== "CREATE PR"
+                          }
+                          className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Create approval request
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingSuggestionConfirmation(null);
+                            setSuggestionPrConfirmationText("");
+                          }}
+                          className="inline-flex h-8 items-center rounded-md border border-amber-300 px-3 text-xs font-medium hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/30"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                     <textarea

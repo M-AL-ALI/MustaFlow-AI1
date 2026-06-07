@@ -57,6 +57,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("stored separately from Ora chat and");
     expect(oraxPage).toContain("actionSuggestions");
     expect(oraxPage).toContain("applyTaskActionSuggestion");
+    expect(oraxPage).toContain("pendingSuggestionConfirmation");
+    expect(oraxPage).toContain("confirmTaskActionSuggestion");
+    expect(oraxPage).toContain("Create approval request");
+    expect(oraxPage).toContain('suggestionPrConfirmationText.trim() !== "CREATE PR"');
+    expect(oraxPage).toContain("requestGithubPrApproval(");
+    expect(oraxPage).toContain("suggestionPrConfirmationText");
     expect(oraxPage).toContain("setApprovalPaths(suggestion.paths.join");
     expect(oraxPage).toContain("setDraftInstructions");
     expect(oraxPage).toContain("setSelectedCommandIds");

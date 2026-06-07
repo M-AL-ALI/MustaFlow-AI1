@@ -144,6 +144,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Create GitHub branches and pull requests after explicit approval",
       "Discuss each coding task in a persistent ORAX-only task conversation",
       "Map task chat into approval-ready suggestions without auto-executing them",
+      "Prepare approval requests from task-chat suggestions only after explicit confirmation",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
@@ -2252,6 +2253,7 @@ function buildOraxTaskActionSuggestions(input: {
       title: "Prepare PR approval",
       description:
         "Controlled checks passed. Review the PR section and type CREATE PR manually if you want ORAX to request PR creation approval.",
+      buttonLabel: "Prepare PR approval",
       artifactId: latestCommandResult.id,
       requiresManualConfirmation: true,
     });
@@ -2280,6 +2282,7 @@ function buildOraxTaskActionSuggestions(input: {
       title: "Request sandbox validation",
       description:
         "A draft patch exists. Use the existing sandbox approval button when you are ready to validate it.",
+      buttonLabel: "Prepare sandbox approval",
       artifactId: latestDraftPatch.id,
     });
   }

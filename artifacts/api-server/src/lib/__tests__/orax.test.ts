@@ -454,8 +454,11 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("buildOraxTaskActionSuggestions");
     expect(routeSource).toContain("actionSuggestions");
     expect(routeSource).toContain("Map task chat into approval-ready suggestions");
+    expect(routeSource).toContain("Prepare approval requests from task-chat suggestions");
     expect(routeSource).toContain("persistent ORAX-only task conversation");
     expect(routeSource).toContain("requiresManualConfirmation");
+    expect(routeSource).toContain('buttonLabel: "Prepare sandbox approval"');
+    expect(routeSource).toContain('buttonLabel: "Prepare PR approval"');
     expect(routeSource).toContain("extractOraxCandidatePaths");
     expect(routeSource).not.toContain("/public-ai/chat");
     expect(routeSource).not.toContain("/projects/");
