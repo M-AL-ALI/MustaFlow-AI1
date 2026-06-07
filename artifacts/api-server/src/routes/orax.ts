@@ -97,6 +97,7 @@ const githubPrApprovalSchema = z.object({
   artifactId: z.number().int().positive(),
   title: z.string().min(1).max(180).optional(),
   body: z.string().max(4000).optional(),
+  confirmationText: z.literal("CREATE PR"),
   reason: z.string().max(1000).optional(),
 });
 
@@ -813,6 +814,7 @@ router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
           artifactId: artifact.id,
           title: parsed.data.title?.trim() || `ORAX: ${task.title}`,
           body: parsed.data.body?.trim() || null,
+          confirmationText: parsed.data.confirmationText,
           reason: parsed.data.reason?.trim() || null,
           scope:
             "Create a new GitHub branch and pull request from this checked patch. The default branch will not be modified directly.",
@@ -1452,6 +1454,8 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       commitMessage: title,
       body: buildPullRequestBody({
         task,
+        readApprovalId: sourceApproval.id,
+        githubApprovalId: approval.id,
         sandboxArtifactId: sandboxArtifact.id,
         commandArtifactId: commandArtifact.id,
         draftArtifactId: draftArtifact.id,
@@ -1482,6 +1486,13 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
         changedFiles: sandbox.validation.changedFiles,
         errors: sandbox.validation.errors,
       },
+      auditTrail: buildOraxAuditTrail({
+        readApprovalId: sourceApproval.id,
+        draftArtifactId: draftArtifact.id,
+        sandboxArtifactId: sandboxArtifact.id,
+        commandArtifactId: commandArtifact.id,
+        githubApprovalId: approval.id,
+      }),
     };
 
     const [prArtifact] = await db
@@ -1617,6 +1628,8 @@ function toRepositorySummary(repository: OraxRepository) {
 
 function buildPullRequestBody(input: {
   task: OraxTask;
+  readApprovalId: number;
+  githubApprovalId: number;
   sandboxArtifactId: number;
   commandArtifactId: number;
   draftArtifactId: number;
@@ -1648,9 +1661,11 @@ function buildPullRequestBody(input: {
     input.customBody?.trim() || `ORAX generated this PR from task #${input.task.id}.`,
     "",
     "## ORAX Safety Record",
+    `- Read approval: #${input.readApprovalId}`,
     `- Draft artifact: #${input.draftArtifactId}`,
     `- Sandbox artifact: #${input.sandboxArtifactId}`,
     `- Controlled-check artifact: #${input.commandArtifactId}`,
+    `- GitHub PR approval: #${input.githubApprovalId}`,
     "- Default branch was not modified directly.",
     "- No unrestricted terminal commands were executed by ORAX.",
     "- Package checks, when present, were limited to approved ORAX command IDs in a temporary workspace.",
@@ -1662,6 +1677,22 @@ function buildPullRequestBody(input: {
     "## Checks",
     checks,
   ].join("\n");
+}
+
+function buildOraxAuditTrail(input: {
+  readApprovalId: number;
+  draftArtifactId: number;
+  sandboxArtifactId: number;
+  commandArtifactId: number;
+  githubApprovalId: number;
+}) {
+  return [
+    { label: "Read approval", id: input.readApprovalId, kind: "approval" },
+    { label: "Draft patch", id: input.draftArtifactId, kind: "artifact" },
+    { label: "Sandbox validation", id: input.sandboxArtifactId, kind: "artifact" },
+    { label: "Workspace checks", id: input.commandArtifactId, kind: "artifact" },
+    { label: "GitHub PR approval", id: input.githubApprovalId, kind: "approval" },
+  ];
 }
 
 async function loadOwnedRepository(userId: string, repositoryId: number) {

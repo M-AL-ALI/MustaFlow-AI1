@@ -148,6 +148,7 @@ type OraxArtifact = {
     model?: string;
     generatedAt?: string;
     sourceArtifactId?: number;
+    sourceApprovalId?: number;
     validatedAt?: string;
     applied?: boolean;
     changedFiles?: Array<{
@@ -181,6 +182,7 @@ type OraxArtifact = {
     pullRequestUrl?: string;
     pullRequestState?: string;
     filesChanged?: string[];
+    auditTrail?: Array<{ label: string; id: number; kind: string }>;
   };
   createdAt: string;
   updatedAt: string;
@@ -256,6 +258,7 @@ export default function OraxPage() {
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>(DEFAULT_ORAX_COMMAND_IDS);
+  const [prConfirmationText, setPrConfirmationText] = useState("");
   const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [submittingRepo, setSubmittingRepo] = useState(false);
@@ -304,6 +307,14 @@ export default function OraxPage() {
     artifacts.find((artifact) => artifact.type === "command_result") ?? null;
   const latestGithubPrResult =
     artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
+  const commandFailureCount =
+    latestCommandResult?.payload.commands?.filter((command) => command.status === "failed")
+      .length ?? 0;
+  const commandPassedCount =
+    latestCommandResult?.payload.commands?.filter((command) => command.status === "passed")
+      .length ?? 0;
+  const readyForPrApproval =
+    latestCommandResult?.status === "completed" && latestCommandResult.payload.passed === true;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -764,6 +775,10 @@ export default function OraxPage() {
 
   async function requestGithubPrApproval(artifactId: number) {
     if (!selectedTask || requestingPrApprovalArtifactId) return;
+    if (prConfirmationText.trim() !== "CREATE PR") {
+      setError('Type "CREATE PR" before requesting GitHub PR approval.');
+      return;
+    }
     setRequestingPrApprovalArtifactId(artifactId);
     setError(null);
     try {
@@ -773,6 +788,7 @@ export default function OraxPage() {
         body: JSON.stringify({
           artifactId,
           title: `ORAX: ${selectedTask.title}`,
+          confirmationText: "CREATE PR",
           reason: "Create a GitHub branch and pull request from the sandbox-passed patch.",
         }),
       });
@@ -782,6 +798,7 @@ export default function OraxPage() {
       }
       const body = (await res.json()) as { approval: OraxApproval };
       setApprovals((prev) => [body.approval, ...prev]);
+      setPrConfirmationText("");
       void load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request GitHub PR approval");
@@ -1652,6 +1669,10 @@ export default function OraxPage() {
                         <p className="text-sm text-foreground">{latestCommandResult.summary}</p>
                       ) : null}
 
+                      <div className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+                        Command summary: {commandPassedCount} passed, {commandFailureCount} failed.
+                      </div>
+
                       {latestCommandResult.payload.commands?.length ? (
                         <div className="space-y-2">
                           {latestCommandResult.payload.commands.map((command) => (
@@ -1688,19 +1709,53 @@ export default function OraxPage() {
                         </div>
                       ) : null}
 
-                      {latestCommandResult.payload.passed ? (
-                        <button
-                          onClick={() => void requestGithubPrApproval(latestCommandResult.id)}
-                          disabled={requestingPrApprovalArtifactId === latestCommandResult.id}
-                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                        >
-                          {requestingPrApprovalArtifactId === latestCommandResult.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <GitPullRequest className="h-3.5 w-3.5" />
-                          )}
-                          Request GitHub PR approval
-                        </button>
+                      {latestCommandResult.payload.passed === false ? (
+                        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                          GitHub PR approval is blocked until every selected check passes. Review
+                          the failed command output, update the draft patch, then rerun the
+                          approval-gated checks.
+                        </div>
+                      ) : null}
+
+                      {readyForPrApproval ? (
+                        <div className="space-y-3 rounded-md border border-border bg-background px-3 py-3">
+                          <div>
+                            <div className="text-xs font-medium uppercase text-muted-foreground">
+                              PR approval review
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              This creates a new branch and pull request only. It does not push to
+                              the default branch or deploy.
+                            </p>
+                          </div>
+                          <ArtifactTrace artifact={latestCommandResult} />
+                          <label className="block text-xs">
+                            <span className="font-medium text-foreground">
+                              Type CREATE PR to enable approval
+                            </span>
+                            <input
+                              value={prConfirmationText}
+                              onChange={(event) => setPrConfirmationText(event.target.value)}
+                              className="mt-1 h-9 w-full rounded-md border border-border bg-card px-3 text-sm outline-none focus:border-primary"
+                              placeholder="CREATE PR"
+                            />
+                          </label>
+                          <button
+                            onClick={() => void requestGithubPrApproval(latestCommandResult.id)}
+                            disabled={
+                              requestingPrApprovalArtifactId === latestCommandResult.id ||
+                              prConfirmationText.trim() !== "CREATE PR"
+                            }
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                          >
+                            {requestingPrApprovalArtifactId === latestCommandResult.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <GitPullRequest className="h-3.5 w-3.5" />
+                            )}
+                            Request GitHub PR approval
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   ) : (
@@ -1759,6 +1814,7 @@ export default function OraxPage() {
                           Files in PR: {latestGithubPrResult.payload.filesChanged.join(", ")}
                         </div>
                       ) : null}
+                      <ArtifactTrace artifact={latestGithubPrResult} />
                       {latestGithubPrResult.payload.commitSha ? (
                         <div className="text-xs text-muted-foreground">
                           Commit: {latestGithubPrResult.payload.commitSha}
@@ -1844,6 +1900,43 @@ function Metric({ label, value, wide = false }: { label: string; value: string; 
     >
       <div className="text-[11px] font-medium uppercase text-muted-foreground">{label}</div>
       <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function ArtifactTrace({ artifact }: { artifact: OraxArtifact }) {
+  const payload = artifact.payload;
+  const items = [
+    { label: "Read approval", id: payload.sourceApprovalId, kind: "approval" },
+    { label: "Draft patch", id: payload.draftArtifactId, kind: "artifact" },
+    { label: "Sandbox validation", id: payload.sourceArtifactId, kind: "artifact" },
+    { label: "Workspace checks", id: payload.commandArtifactId ?? artifact.id, kind: "artifact" },
+    ...(payload.auditTrail ?? []),
+  ]
+    .filter((item): item is { label: string; id: number; kind: string } =>
+      Number.isInteger(item.id),
+    )
+    .filter(
+      (item, index, all) =>
+        all.findIndex((candidate) => candidate.kind === item.kind && candidate.id === item.id) ===
+        index,
+    );
+
+  if (!items.length) return null;
+
+  return (
+    <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
+      <div className="text-[11px] font-medium uppercase text-muted-foreground">Audit trail</div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span
+            key={`${item.kind}-${item.id}`}
+            className="rounded-full border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+          >
+            {item.label} #{item.id}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

@@ -41,6 +41,9 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain('"pnpm-test"');
     expect(oraxPage).toContain('"pnpm-build"');
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
+    expect(oraxPage).toContain('confirmationText: "CREATE PR"');
+    expect(oraxPage).toContain("Type CREATE PR to enable approval");
+    expect(oraxPage).toContain("ArtifactTrace");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/read-files");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-sandbox");

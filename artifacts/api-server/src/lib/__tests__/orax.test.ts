@@ -399,3 +399,17 @@ describe("ORAX controlled sandbox checks", () => {
     );
   });
 });
+
+describe("ORAX GitHub PR approval hardening", () => {
+  it("requires explicit PR confirmation and records the approval chain", () => {
+    const source = readFileSync(path.join(__dirname, "../../routes/orax.ts"), "utf8");
+
+    expect(source).toContain('confirmationText: z.literal("CREATE PR")');
+    expect(source).toContain("buildOraxAuditTrail");
+    expect(source).toContain("Read approval");
+    expect(source).toContain("GitHub PR approval");
+    expect(source).toContain(
+      "Package checks, when present, were limited to approved ORAX command IDs",
+    );
+  });
+});
