@@ -62,7 +62,8 @@ An AI-powered app builder for non-technical users. Describe an app idea in natur
 - `pnpm --filter @workspace/scripts run migrate-image-edit-lineage` — adds parentImageId, sourceType, editInstruction columns to `generated_images` (Phase 9A-2 image editing; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-ora-asset-storage` — adds `storage_key` to `ora_assets`, makes `data` nullable, and adds a `data`/`storage_key` XOR CHECK constraint (Phase 6 R2 offload; run before deploy)
 - `pnpm --filter @workspace/scripts run migrate-ora-project-description` — adds nullable `description` to `ora_projects` (Ora dedicated "New project" page at `/ora/projects/new`; run before deploy)
-- `pnpm --filter @workspace/scripts run migrate-ora-usage-windows` — creates `ora_usage_windows` (one row/user, rolling-window Ora quotas) replacing the per-UTC-day `ora_daily_usage` metering (run before deploy; old table left in place as harmless history)
+- `pnpm --filter @workspace/scripts run migrate-ora-usage-windows` — creates `ora_usage_windows` (one row/user, rolling-window Ora quotas) replacing the per-UTC-day `ora_daily_usage` metering (run before deploy)
+- `pnpm --filter @workspace/scripts run migrate-drop-ora-daily-usage` — drops the legacy `ora_daily_usage` table (superseded by `ora_usage_windows`; nothing reads it anymore). Idempotent; also runs as a startup migration step.
 
 ## Stack
 
