@@ -153,6 +153,11 @@ STRIPE_PRICE_STARTER = "price_1Tae1ULqqLu7se88cTw00WRi"
 STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
 STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"
 E2E_TEST_ENABLED = "true"
+SMTP_HOST = "smtp-relay.brevo.com"
+SMTP_PORT = "587"
+SMTP_USER = "addebc001@smtp-brevo.com"
+SMTP_SECURE = "false"
+SUPPORT_EMAIL = "Mustafa_alali74@yahoo.com"
 
 [userenv.development]
 DEV_SLOW_BUILD_DELAY_MS = "30000"
