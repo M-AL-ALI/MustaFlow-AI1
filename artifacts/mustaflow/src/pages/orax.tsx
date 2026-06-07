@@ -198,6 +198,46 @@ const TASK_KINDS = [
   { value: "fix", label: "Fix" },
 ] as const;
 
+const ORAX_COMMAND_OPTIONS = [
+  {
+    id: "patch-static-checks",
+    label: "Static patch checks",
+    description: "Validate patch scope and changed-file metadata.",
+  },
+  {
+    id: "json-syntax",
+    label: "JSON syntax",
+    description: "Parse patched JSON files.",
+  },
+  {
+    id: "node-syntax",
+    label: "Node syntax",
+    description: "Run node --check on patched JavaScript files.",
+  },
+  {
+    id: "pnpm-typecheck",
+    label: "pnpm run typecheck",
+    description: "Run the repository typecheck script in a temporary workspace.",
+  },
+  {
+    id: "pnpm-lint",
+    label: "pnpm run lint",
+    description: "Run the repository lint script in a temporary workspace.",
+  },
+  {
+    id: "pnpm-test",
+    label: "pnpm test",
+    description: "Run the repository test script in a temporary workspace.",
+  },
+  {
+    id: "pnpm-build",
+    label: "pnpm run build",
+    description: "Run the repository build script in a temporary workspace.",
+  },
+] as const;
+
+const DEFAULT_ORAX_COMMAND_IDS = ["patch-static-checks", "json-syntax", "node-syntax"];
+
 export default function OraxPage() {
   const [repositories, setRepositories] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
@@ -215,6 +255,7 @@ export default function OraxPage() {
   const [approvalPaths, setApprovalPaths] = useState("");
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
+  const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>(DEFAULT_ORAX_COMMAND_IDS);
   const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [submittingRepo, setSubmittingRepo] = useState(false);
@@ -625,6 +666,10 @@ export default function OraxPage() {
 
   async function requestCommandApproval(artifactId: number) {
     if (!selectedTask || requestingCommandApprovalArtifactId) return;
+    if (!selectedCommandIds.length) {
+      setError("Select at least one ORAX check to request approval.");
+      return;
+    }
     setRequestingCommandApprovalArtifactId(artifactId);
     setError(null);
     try {
@@ -633,8 +678,9 @@ export default function OraxPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           artifactId,
-          commands: ["patch-static-checks", "json-syntax", "node-syntax"],
-          reason: "Run fixed controlled checks before any GitHub pull request approval.",
+          commands: selectedCommandIds,
+          reason:
+            "Run approval-gated ORAX checks in a temporary workspace before any GitHub pull request approval.",
         }),
       });
       if (!res.ok) {
@@ -649,6 +695,15 @@ export default function OraxPage() {
     } finally {
       setRequestingCommandApprovalArtifactId(null);
     }
+  }
+
+  function toggleCommandId(commandId: string) {
+    setSelectedCommandIds((current) => {
+      if (current.includes(commandId)) {
+        return current.filter((id) => id !== commandId);
+      }
+      return [...current, commandId];
+    });
   }
 
   async function runSandboxValidation(approvalId: number) {
@@ -1512,18 +1567,51 @@ export default function OraxPage() {
                       ) : null}
 
                       {latestSandboxResult.payload.applied ? (
-                        <button
-                          onClick={() => void requestCommandApproval(latestSandboxResult.id)}
-                          disabled={requestingCommandApprovalArtifactId === latestSandboxResult.id}
-                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                        >
-                          {requestingCommandApprovalArtifactId === latestSandboxResult.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Terminal className="h-3.5 w-3.5" />
-                          )}
-                          Request controlled checks
-                        </button>
+                        <div className="space-y-3">
+                          <div>
+                            <div className="text-xs font-medium uppercase text-muted-foreground">
+                              Checks to request
+                            </div>
+                            <div className="mt-2 grid gap-2 md:grid-cols-2">
+                              {ORAX_COMMAND_OPTIONS.map((option) => (
+                                <label
+                                  key={option.id}
+                                  className="flex min-h-16 cursor-pointer items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs hover:bg-muted/50"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedCommandIds.includes(option.id)}
+                                    onChange={() => toggleCommandId(option.id)}
+                                    className="mt-0.5 h-4 w-4 rounded border-border"
+                                  />
+                                  <span>
+                                    <span className="block font-medium text-foreground">
+                                      {option.label}
+                                    </span>
+                                    <span className="mt-0.5 block text-muted-foreground">
+                                      {option.description}
+                                    </span>
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => void requestCommandApproval(latestSandboxResult.id)}
+                            disabled={
+                              requestingCommandApprovalArtifactId === latestSandboxResult.id ||
+                              selectedCommandIds.length === 0
+                            }
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                          >
+                            {requestingCommandApprovalArtifactId === latestSandboxResult.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Terminal className="h-3.5 w-3.5" />
+                            )}
+                            Request selected checks
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   ) : (
@@ -1537,8 +1625,9 @@ export default function OraxPage() {
                 <div className="rounded-md border border-border bg-muted/20 p-3">
                   <div className="text-sm font-semibold">Controlled checks</div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Controlled checks run fixed ORAX validators only. They do not run repo package
-                    scripts, arbitrary shell text, deployment commands, or default-branch writes.
+                    Controlled checks run fixed ORAX validators and selected pnpm scripts in a
+                    temporary workspace. They do not accept arbitrary shell text, deployment
+                    commands, or default-branch writes.
                   </p>
 
                   {latestCommandResult ? (

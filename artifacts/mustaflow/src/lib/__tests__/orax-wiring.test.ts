@@ -36,6 +36,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/draft-patch");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/sandbox-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/command-approvals");
+    expect(oraxPage).toContain('"pnpm-typecheck"');
+    expect(oraxPage).toContain('"pnpm-lint"');
+    expect(oraxPage).toContain('"pnpm-test"');
+    expect(oraxPage).toContain('"pnpm-build"');
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/read-files");

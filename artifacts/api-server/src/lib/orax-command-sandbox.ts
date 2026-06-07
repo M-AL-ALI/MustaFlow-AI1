@@ -11,9 +11,17 @@ export const ORAX_SANDBOX_COMMAND_IDS = [
   "patch-static-checks",
   "json-syntax",
   "node-syntax",
+  "pnpm-typecheck",
+  "pnpm-lint",
+  "pnpm-test",
+  "pnpm-build",
 ] as const;
 
 export type OraxSandboxCommandId = (typeof ORAX_SANDBOX_COMMAND_IDS)[number];
+export type OraxWorkspaceCommandId = Extract<
+  OraxSandboxCommandId,
+  "pnpm-typecheck" | "pnpm-lint" | "pnpm-test" | "pnpm-build"
+>;
 
 export type OraxCommandResult = {
   id: OraxSandboxCommandId;
@@ -27,7 +35,7 @@ export type OraxCommandResult = {
 };
 
 export type OraxControlledSandboxResult = {
-  mode: "controlled_sandbox_execution";
+  mode: "controlled_sandbox_execution" | "isolated_workspace_execution";
   passed: boolean;
   commands: OraxCommandResult[];
   blockedCommands: string[];
@@ -38,12 +46,44 @@ const COMMAND_LABELS: Record<OraxSandboxCommandId, string> = {
   "patch-static-checks": "Patch static checks",
   "json-syntax": "JSON syntax check",
   "node-syntax": "Node JavaScript syntax check",
+  "pnpm-typecheck": "pnpm run typecheck",
+  "pnpm-lint": "pnpm run lint",
+  "pnpm-test": "pnpm test",
+  "pnpm-build": "pnpm run build",
+};
+
+const WORKSPACE_COMMANDS: Record<
+  OraxWorkspaceCommandId,
+  { executable: string; args: string[]; timeoutMs: number }
+> = {
+  "pnpm-typecheck": {
+    executable: "corepack",
+    args: ["pnpm", "run", "typecheck"],
+    timeoutMs: 180_000,
+  },
+  "pnpm-lint": {
+    executable: "corepack",
+    args: ["pnpm", "run", "lint"],
+    timeoutMs: 180_000,
+  },
+  "pnpm-test": {
+    executable: "corepack",
+    args: ["pnpm", "test"],
+    timeoutMs: 180_000,
+  },
+  "pnpm-build": {
+    executable: "corepack",
+    args: ["pnpm", "run", "build"],
+    timeoutMs: 180_000,
+  },
 };
 
 const DEFAULT_COMMANDS: OraxSandboxCommandId[] = ["patch-static-checks", "json-syntax"];
-const MAX_COMMANDS = 3;
+export const ORAX_MAX_SANDBOX_COMMANDS = ORAX_SANDBOX_COMMAND_IDS.length;
 const EXEC_TIMEOUT_MS = 5000;
+const EXTRACT_TIMEOUT_MS = 30_000;
 const OUTPUT_LIMIT = 4000;
+const WORKSPACE_OUTPUT_BUFFER = 512 * 1024;
 
 export function normalizeOraxSandboxCommandIds(commands?: string[]): OraxSandboxCommandId[] {
   const requested = commands?.length ? commands : DEFAULT_COMMANDS;
@@ -67,10 +107,14 @@ export function normalizeOraxSandboxCommandIds(commands?: string[]): OraxSandbox
   if (!normalized.length) {
     throw new Error("At least one ORAX sandbox command is required");
   }
-  if (normalized.length > MAX_COMMANDS) {
-    throw new Error(`At most ${MAX_COMMANDS} ORAX sandbox commands can run at once`);
+  if (normalized.length > ORAX_MAX_SANDBOX_COMMANDS) {
+    throw new Error(`At most ${ORAX_MAX_SANDBOX_COMMANDS} ORAX sandbox commands can run at once`);
   }
   return normalized;
+}
+
+export function hasOraxWorkspaceCommandIds(commands: OraxSandboxCommandId[]): boolean {
+  return commands.some(isOraxWorkspaceCommandId);
 }
 
 export async function runOraxControlledSandboxChecks(input: {
@@ -81,24 +125,101 @@ export async function runOraxControlledSandboxChecks(input: {
   const results: OraxCommandResult[] = [];
 
   for (const command of input.commands) {
-    if (command === "patch-static-checks") {
-      results.push(runPatchStaticChecks(input.staticChecks));
-    } else if (command === "json-syntax") {
-      results.push(runJsonSyntaxCheck(input.patchedFiles));
-    } else if (command === "node-syntax") {
-      results.push(await runNodeSyntaxCheck(input.patchedFiles));
+    if (isOraxWorkspaceCommandId(command)) {
+      results.push(
+        failedResult(
+          command,
+          "Workspace package commands require the isolated workspace runner.",
+          "No repository archive was provided to the controlled sandbox runner.",
+        ),
+      );
+    } else {
+      results.push(await runStaticCommand(command, input.patchedFiles, input.staticChecks));
     }
   }
 
+  return summarizeCommandResults("controlled_sandbox_execution", results);
+}
+
+export async function runOraxIsolatedWorkspaceChecks(input: {
+  commands: OraxSandboxCommandId[];
+  patchedFiles: OraxSandboxPatchedFile[];
+  staticChecks: OraxSandboxCheck[];
+  repositoryArchive?: Buffer | null;
+}): Promise<OraxControlledSandboxResult> {
+  const results: OraxCommandResult[] = [];
+  const needsWorkspace = hasOraxWorkspaceCommandIds(input.commands);
+  let workspace: { root: string; repoRoot: string } | null = null;
+  let workspaceError: string | null = null;
+
+  if (needsWorkspace) {
+    if (!input.repositoryArchive?.length) {
+      workspaceError = "Repository archive is required for workspace package checks.";
+    } else {
+      try {
+        workspace = await prepareIsolatedWorkspace(input.repositoryArchive, input.patchedFiles);
+      } catch (err) {
+        workspaceError =
+          err instanceof Error ? err.message : "Could not prepare isolated ORAX workspace.";
+      }
+    }
+  }
+
+  try {
+    for (const command of input.commands) {
+      if (isOraxWorkspaceCommandId(command)) {
+        if (!workspace || workspaceError) {
+          results.push(
+            failedResult(command, "Could not prepare isolated workspace.", workspaceError ?? ""),
+          );
+        } else {
+          results.push(await runWorkspaceCommand(command, workspace.root, workspace.repoRoot));
+        }
+      } else {
+        results.push(await runStaticCommand(command, input.patchedFiles, input.staticChecks));
+      }
+    }
+  } finally {
+    if (workspace) {
+      await rm(workspace.root, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  return summarizeCommandResults(
+    needsWorkspace ? "isolated_workspace_execution" : "controlled_sandbox_execution",
+    results,
+  );
+}
+
+async function runStaticCommand(
+  command: Exclude<OraxSandboxCommandId, OraxWorkspaceCommandId>,
+  patchedFiles: OraxSandboxPatchedFile[],
+  staticChecks: OraxSandboxCheck[],
+): Promise<OraxCommandResult> {
+  if (command === "patch-static-checks") {
+    return runPatchStaticChecks(staticChecks);
+  }
+  if (command === "json-syntax") {
+    return runJsonSyntaxCheck(patchedFiles);
+  }
+  return runNodeSyntaxCheck(patchedFiles);
+}
+
+function summarizeCommandResults(
+  mode: OraxControlledSandboxResult["mode"],
+  results: OraxCommandResult[],
+): OraxControlledSandboxResult {
   const failed = results.filter((result) => result.status === "failed");
   return {
-    mode: "controlled_sandbox_execution",
+    mode,
     passed: failed.length === 0,
     commands: results,
     blockedCommands: [],
     summary: failed.length
-      ? `${failed.length} controlled check(s) failed.`
-      : "All controlled sandbox checks passed.",
+      ? `${failed.length} ORAX check(s) failed.`
+      : mode === "isolated_workspace_execution"
+        ? "All ORAX checks passed in the isolated workspace."
+        : "All controlled sandbox checks passed.",
   };
 }
 
@@ -202,6 +323,76 @@ async function runNodeSyntaxCheck(files: OraxSandboxPatchedFile[]): Promise<Orax
   };
 }
 
+async function prepareIsolatedWorkspace(
+  repositoryArchive: Buffer,
+  patchedFiles: OraxSandboxPatchedFile[],
+): Promise<{ root: string; repoRoot: string }> {
+  const root = path.join(
+    tmpdir(),
+    `orax-workspace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+  const repoRoot = path.join(root, "repo");
+  const archivePath = path.join(root, "repo.tar.gz");
+  const tempPath = path.join(root, "tmp");
+
+  await mkdir(repoRoot, { recursive: true });
+  await mkdir(tempPath, { recursive: true });
+  await writeFile(archivePath, repositoryArchive);
+  await execFileAsync("tar", ["-xzf", archivePath, "-C", repoRoot, "--strip-components=1"], {
+    cwd: root,
+    timeout: EXTRACT_TIMEOUT_MS,
+    maxBuffer: 64 * 1024,
+    env: sanitizedWorkspaceEnv(root),
+  });
+
+  for (const file of patchedFiles) {
+    const target = resolveSandboxPath(repoRoot, file.path);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, file.content, "utf8");
+  }
+
+  return { root, repoRoot };
+}
+
+async function runWorkspaceCommand(
+  command: OraxWorkspaceCommandId,
+  workspaceRoot: string,
+  repoRoot: string,
+): Promise<OraxCommandResult> {
+  const started = Date.now();
+  const config = WORKSPACE_COMMANDS[command];
+  try {
+    const result = await execFileAsync(config.executable, config.args, {
+      cwd: repoRoot,
+      timeout: config.timeoutMs,
+      maxBuffer: WORKSPACE_OUTPUT_BUFFER,
+      env: sanitizedWorkspaceEnv(workspaceRoot),
+    });
+    return {
+      id: command,
+      label: COMMAND_LABELS[command],
+      status: "passed",
+      exitCode: 0,
+      durationMs: Date.now() - started,
+      stdout: truncate(result.stdout ?? ""),
+      stderr: truncate(result.stderr ?? ""),
+      message: `${COMMAND_LABELS[command]} passed inside the isolated workspace.`,
+    };
+  } catch (err) {
+    const output = extractExecOutput(err);
+    return {
+      id: command,
+      label: COMMAND_LABELS[command],
+      status: "failed",
+      exitCode: output.exitCode,
+      durationMs: Date.now() - started,
+      stdout: truncate(output.stdout),
+      stderr: truncate(output.stderr || output.message),
+      message: `${COMMAND_LABELS[command]} failed inside the isolated workspace.`,
+    };
+  }
+}
+
 function skippedResult(id: OraxSandboxCommandId, message: string): OraxCommandResult {
   return {
     id,
@@ -213,6 +404,29 @@ function skippedResult(id: OraxSandboxCommandId, message: string): OraxCommandRe
     stderr: "",
     message,
   };
+}
+
+function failedResult(
+  id: OraxSandboxCommandId,
+  message: string,
+  stderr: string,
+): OraxCommandResult {
+  return {
+    id,
+    label: COMMAND_LABELS[id],
+    status: "failed",
+    exitCode: 1,
+    durationMs: 0,
+    stdout: "",
+    stderr: truncate(stderr),
+    message,
+  };
+}
+
+function isOraxWorkspaceCommandId(
+  command: OraxSandboxCommandId,
+): command is OraxWorkspaceCommandId {
+  return command in WORKSPACE_COMMANDS;
 }
 
 function resolveSandboxPath(root: string, filePath: string): string {
@@ -233,6 +447,25 @@ function resolveSandboxPath(root: string, filePath: string): string {
   return resolved;
 }
 
+function sanitizedWorkspaceEnv(root: string): NodeJS.ProcessEnv {
+  const tempPath = path.join(root, "tmp");
+  return {
+    PATH: process.env.PATH ?? "",
+    CI: "true",
+    NO_COLOR: "1",
+    HOME: root,
+    TMPDIR: tempPath,
+    TMP: tempPath,
+    TEMP: tempPath,
+    PNPM_HOME: path.join(root, ".pnpm-home"),
+    npm_config_cache: path.join(root, ".npm-cache"),
+    npm_config_store_dir: path.join(root, ".pnpm-store"),
+    npm_config_audit: "false",
+    npm_config_fund: "false",
+    npm_config_update_notifier: "false",
+  };
+}
+
 function formatExecError(err: unknown): string {
   if (err && typeof err === "object") {
     const record = err as { stdout?: unknown; stderr?: unknown; message?: unknown };
@@ -243,6 +476,29 @@ function formatExecError(err: unknown): string {
     );
   }
   return String(err);
+}
+
+function extractExecOutput(err: unknown): {
+  stdout: string;
+  stderr: string;
+  message: string;
+  exitCode: number;
+} {
+  if (err && typeof err === "object") {
+    const record = err as {
+      stdout?: unknown;
+      stderr?: unknown;
+      message?: unknown;
+      code?: unknown;
+    };
+    return {
+      stdout: typeof record.stdout === "string" ? record.stdout : "",
+      stderr: typeof record.stderr === "string" ? record.stderr : "",
+      message: typeof record.message === "string" ? record.message : "",
+      exitCode: typeof record.code === "number" ? record.code : 1,
+    };
+  }
+  return { stdout: "", stderr: "", message: String(err), exitCode: 1 };
 }
 
 function truncate(value: string): string {

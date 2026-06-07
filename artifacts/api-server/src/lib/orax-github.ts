@@ -1,5 +1,6 @@
 const GITHUB_API_BASE = "https://api.github.com";
 const GITHUB_API_VERSION = "2022-11-28";
+const MAX_ORAX_TARBALL_BYTES = 75 * 1024 * 1024;
 
 export type GithubRepoResponse = {
   default_branch: string;
@@ -236,6 +237,28 @@ export async function readGithubRepositoryFiles(input: {
   return { files, skipped, totalBytes };
 }
 
+export async function downloadGithubRepositoryTarball(input: {
+  owner: string;
+  repo: string;
+  branch: string;
+  token?: string;
+}): Promise<Buffer> {
+  const response = await githubFetch(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/tarball/${encodeURIComponent(input.branch)}`,
+    input.token,
+    { accept: "application/vnd.github+json" },
+  );
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_ORAX_TARBALL_BYTES) {
+    throw new Error("Repository archive exceeds the ORAX workspace size limit");
+  }
+  const archive = Buffer.from(await response.arrayBuffer());
+  if (archive.length > MAX_ORAX_TARBALL_BYTES) {
+    throw new Error("Repository archive exceeds the ORAX workspace size limit");
+  }
+  return archive;
+}
+
 export async function createGithubPullRequestFromFiles(input: {
   owner: string;
   repo: string;
@@ -451,15 +474,10 @@ async function githubJson<T>(
     body?: unknown;
   },
 ): Promise<{ body: T; scopes: string | null }> {
-  const response = await fetch(`${GITHUB_API_BASE}${path}`, {
+  const response = await githubFetch(path, token, {
     method: options?.method ?? "GET",
-    headers: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": GITHUB_API_VERSION,
-      ...(options?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(options?.body ? { body: JSON.stringify(options.body) } : {}),
+    body: options?.body,
+    accept: "application/vnd.github+json",
   });
   const text = await response.text();
   const body = text ? safeJson(text) : null;
@@ -476,6 +494,39 @@ async function githubJson<T>(
     body: body as T,
     scopes: response.headers.get("x-oauth-scopes"),
   };
+}
+
+async function githubFetch(
+  path: string,
+  token?: string,
+  options?: {
+    method?: "GET" | "POST";
+    body?: unknown;
+    accept?: string;
+  },
+): Promise<Response> {
+  const response = await fetch(`${GITHUB_API_BASE}${path}`, {
+    method: options?.method ?? "GET",
+    headers: {
+      Accept: options?.accept ?? "application/vnd.github+json",
+      "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(options?.body ? { body: JSON.stringify(options.body) } : {}),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const body = text ? safeJson(text) : null;
+    const message =
+      typeof body === "object" && body && "message" in body
+        ? String((body as { message?: unknown }).message)
+        : `GitHub returned HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return response;
 }
 
 function safeJson(text: string): unknown {

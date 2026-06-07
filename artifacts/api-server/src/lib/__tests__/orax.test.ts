@@ -4,8 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildOraxTaskPlan, normalizeOraxFileReadPaths, parseRepositoryLocator } from "../orax";
 import {
+  hasOraxWorkspaceCommandIds,
   normalizeOraxSandboxCommandIds,
   runOraxControlledSandboxChecks,
+  runOraxIsolatedWorkspaceChecks,
 } from "../orax-command-sandbox";
 import { buildDraftPatchPrompt, parseDraftPatchJson } from "../orax-draft-patch";
 import { extensionToLanguage, summarizeGithubTree } from "../orax-github";
@@ -272,15 +274,20 @@ describe("ORAX sandbox validation", () => {
 });
 
 describe("ORAX controlled sandbox checks", () => {
-  it("does not run repo package-manager scripts or shell commands", () => {
+  it("does not accept arbitrary command strings or shell execution", () => {
     const source = readFileSync(path.join(__dirname, "../orax-command-sandbox.ts"), "utf8");
     expect(source).toContain("execFile");
     expect(source).toContain("process.execPath");
     expect(source).toContain("--check");
+    expect(source).toContain("corepack");
+    expect(source).toContain('"pnpm", "run", "typecheck"');
+    expect(source).toContain('"pnpm", "run", "lint"');
+    expect(source).toContain('"pnpm", "test"');
+    expect(source).toContain('"pnpm", "run", "build"');
     expect(source).not.toContain("exec(");
     expect(source).not.toContain("spawn(");
-    expect(source).not.toContain("pnpm run");
-    expect(source).not.toContain("npm run");
+    expect(source).not.toContain("shell:");
+    expect(source).not.toContain("rm -rf");
     expect(source).not.toContain("yarn");
   });
 
@@ -291,6 +298,25 @@ describe("ORAX controlled sandbox checks", () => {
     expect(() => normalizeOraxSandboxCommandIds(["rm -rf /"])).toThrow(
       "Unsupported ORAX sandbox command",
     );
+  });
+
+  it("accepts only fixed workspace package-check command IDs", () => {
+    const commands = normalizeOraxSandboxCommandIds([
+      "patch-static-checks",
+      "pnpm-typecheck",
+      "pnpm-lint",
+      "pnpm-test",
+      "pnpm-build",
+    ]);
+
+    expect(commands).toEqual([
+      "patch-static-checks",
+      "pnpm-typecheck",
+      "pnpm-lint",
+      "pnpm-test",
+      "pnpm-build",
+    ]);
+    expect(hasOraxWorkspaceCommandIds(commands)).toBe(true);
   });
 
   it("runs fixed controlled checks without repo package scripts", async () => {
@@ -325,6 +351,29 @@ describe("ORAX controlled sandbox checks", () => {
       "node-syntax",
     ]);
     expect(JSON.stringify(result)).not.toContain("rm -rf /");
+  });
+
+  it("requires a repository archive before workspace package checks run", async () => {
+    const result = await runOraxIsolatedWorkspaceChecks({
+      commands: ["pnpm-typecheck"],
+      staticChecks: [],
+      patchedFiles: [
+        {
+          path: "src/app.ts",
+          sourceSha: "abc",
+          content: "export const value = 1;",
+        },
+      ],
+    });
+
+    expect(result.mode).toBe("isolated_workspace_execution");
+    expect(result.passed).toBe(false);
+    expect(result.commands[0]).toEqual(
+      expect.objectContaining({
+        id: "pnpm-typecheck",
+        status: "failed",
+      }),
+    );
   });
 
   it("reports syntax failures as failed command results", async () => {

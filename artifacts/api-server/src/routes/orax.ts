@@ -23,15 +23,18 @@ import {
 } from "../lib/orax";
 import {
   createGithubPullRequestFromFiles,
+  downloadGithubRepositoryTarball,
   readGithubRepositoryFiles,
   scanGithubRepository,
   verifyGithubReadOnlyToken,
 } from "../lib/orax-github";
 import { buildOraxSandboxPatch, runOraxSandboxValidation } from "../lib/orax-sandbox";
 import {
+  hasOraxWorkspaceCommandIds,
   normalizeOraxSandboxCommandIds,
+  ORAX_MAX_SANDBOX_COMMANDS,
   ORAX_SANDBOX_COMMAND_IDS,
-  runOraxControlledSandboxChecks,
+  runOraxIsolatedWorkspaceChecks,
 } from "../lib/orax-command-sandbox";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
@@ -82,7 +85,11 @@ const sandboxApprovalSchema = z.object({
 
 const safeCheckApprovalSchema = z.object({
   artifactId: z.number().int().positive(),
-  commands: z.array(z.enum(ORAX_SANDBOX_COMMAND_IDS)).min(1).max(3).optional(),
+  commands: z
+    .array(z.enum(ORAX_SANDBOX_COMMAND_IDS))
+    .min(1)
+    .max(ORAX_MAX_SANDBOX_COMMANDS)
+    .optional(),
   reason: z.string().max(1000).optional(),
 });
 
@@ -96,7 +103,7 @@ const githubPrApprovalSchema = z.object({
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
-    phase: "controlled_sandbox_execution",
+    phase: "isolated_workspace_execution",
     mode: "approval_gated_repository_change_validation",
     available: [
       "Register repository metadata",
@@ -106,7 +113,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Request approval to read selected source files",
       "Generate draft patch previews from approved file reads",
       "Request approval to validate draft patches in an isolated sandbox",
-      "Request approval to run controlled syntax and static checks",
+      "Request approval to run controlled syntax, static, and allowlisted workspace checks",
       "Create GitHub branches and pull requests after explicit approval",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
@@ -114,7 +121,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Clone private repositories",
       "Edit files",
       "Run unrestricted terminal commands",
-      "Run repo package scripts without a stronger container boundary",
+      "Run non-allowlisted commands or deployment scripts",
       "Push directly to the default branch",
       "Open pull requests without explicit approval",
       "Deploy applications",
@@ -747,10 +754,10 @@ router.post("/orax/tasks/:id/command-approvals", async (req, res) => {
           commands,
           reason: parsed.data.reason?.trim() || null,
           scope:
-            "Run fixed ORAX-controlled syntax and static checks. No arbitrary shell text, package scripts, deployment, or default-branch write is allowed.",
+            "Run fixed ORAX-controlled checks. Package checks are limited to allowlisted pnpm commands in a temporary workspace. No arbitrary shell text, deployment, or default-branch write is allowed.",
         },
         riskSummary:
-          "ORAX will run only fixed safe-check IDs in a temporary sandbox. It will not run repo package scripts, execute arbitrary shell commands, push, open a PR, or deploy.",
+          "ORAX will run only fixed safe-check IDs. Allowlisted pnpm commands run in a temporary isolated workspace with a sanitized environment. It will not execute arbitrary shell commands, push, open a PR, or deploy.",
       })
       .returning();
 
@@ -1226,10 +1233,19 @@ router.post("/orax/approvals/:id/run-commands", async (req, res) => {
       ? request.commands.filter((item): item is string => typeof item === "string")
       : undefined;
     const commands = normalizeOraxSandboxCommandIds(requestCommands);
-    const commandResult = await runOraxControlledSandboxChecks({
+    const repositoryArchive = hasOraxWorkspaceCommandIds(commands)
+      ? await downloadGithubRepositoryTarball({
+          owner: repository.owner,
+          repo: repository.name,
+          branch,
+          token,
+        })
+      : null;
+    const commandResult = await runOraxIsolatedWorkspaceChecks({
       commands,
       patchedFiles: sandbox.patchedFiles,
       staticChecks: sandbox.validation.checks,
+      repositoryArchive,
     });
     const commandPayload = {
       sourceArtifactId: sandboxArtifact.id,
@@ -1290,8 +1306,8 @@ router.post("/orax/approvals/:id/run-commands", async (req, res) => {
             commands: commandResult.commands.length,
           },
           message: commandResult.passed
-            ? "ORAX ran controlled syntax/static checks in an isolated temporary sandbox. No repo package scripts, unrestricted commands, push, or deploy ran."
-            : "ORAX controlled checks failed.",
+            ? "ORAX ran approval-gated checks in an isolated temporary workspace. Only fixed command IDs were allowed; no arbitrary shell text, push, or deploy ran."
+            : "ORAX approval-gated checks failed.",
         },
         updatedAt: new Date(),
         completedAt: commandResult.passed ? new Date() : null,
@@ -1636,7 +1652,8 @@ function buildPullRequestBody(input: {
     `- Sandbox artifact: #${input.sandboxArtifactId}`,
     `- Controlled-check artifact: #${input.commandArtifactId}`,
     "- Default branch was not modified directly.",
-    "- No unrestricted terminal commands or repository package scripts were executed by ORAX.",
+    "- No unrestricted terminal commands were executed by ORAX.",
+    "- Package checks, when present, were limited to approved ORAX command IDs in a temporary workspace.",
     "- No deployment was triggered.",
     "",
     "## Changed Files",
