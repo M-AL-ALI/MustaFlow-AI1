@@ -98,11 +98,34 @@ type OraxTaskMessage = {
   taskId: number;
   role: string;
   content: string;
-  metadata?: Record<string, unknown>;
+  metadata?: {
+    actionSuggestions?: OraxTaskActionSuggestion[];
+    [key: string]: unknown;
+  };
   artifactId?: number | null;
   approvalId?: number | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type OraxTaskActionSuggestion = {
+  type:
+    | "read_files"
+    | "draft_patch"
+    | "sandbox_run"
+    | "controlled_checks"
+    | "github_pr"
+    | "review_pending_approval";
+  title: string;
+  description: string;
+  buttonLabel?: string;
+  paths?: string[];
+  reason?: string;
+  instructions?: string;
+  artifactId?: number;
+  approvalId?: number;
+  commands?: string[];
+  requiresManualConfirmation?: boolean;
 };
 
 type OraxApproval = {
@@ -603,6 +626,32 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not save task message");
     } finally {
       setSendingTaskMessage(false);
+    }
+  }
+
+  function applyTaskActionSuggestion(suggestion: OraxTaskActionSuggestion) {
+    if (suggestion.type === "read_files") {
+      if (suggestion.paths?.length) {
+        setApprovalPaths(suggestion.paths.join("\n"));
+      }
+      if (suggestion.reason) {
+        setApprovalReason(suggestion.reason);
+      }
+      return;
+    }
+
+    if (suggestion.type === "draft_patch") {
+      setDraftInstructions(suggestion.instructions ?? "");
+      return;
+    }
+
+    if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
+      const allowed = suggestion.commands.filter((command) =>
+        ORAX_COMMAND_OPTIONS.some((option) => option.id === command),
+      );
+      if (allowed.length) {
+        setSelectedCommandIds(allowed);
+      }
     }
   }
 
@@ -1301,6 +1350,9 @@ export default function OraxPage() {
                     ) : (
                       taskMessages.map((message) => {
                         const isAssistant = message.role === "assistant";
+                        const suggestions = isAssistant
+                          ? (message.metadata?.actionSuggestions ?? [])
+                          : [];
                         return (
                           <div
                             key={message.id}
@@ -1325,6 +1377,50 @@ export default function OraxPage() {
                             <div className="whitespace-pre-wrap leading-relaxed">
                               {message.content}
                             </div>
+                            {suggestions.length ? (
+                              <div className="mt-3 space-y-2">
+                                {suggestions.map((suggestion, index) => {
+                                  const canApply = Boolean(suggestion.buttonLabel);
+                                  return (
+                                    <div
+                                      key={`${suggestion.type}-${suggestion.artifactId ?? suggestion.approvalId ?? index}`}
+                                      className="rounded-md border border-border bg-background px-3 py-2"
+                                    >
+                                      <div className="text-xs font-semibold text-foreground">
+                                        {suggestion.title}
+                                      </div>
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        {suggestion.description}
+                                      </p>
+                                      {suggestion.paths?.length ? (
+                                        <div className="mt-2 text-xs text-muted-foreground">
+                                          Files: {suggestion.paths.join(", ")}
+                                        </div>
+                                      ) : null}
+                                      {suggestion.commands?.length ? (
+                                        <div className="mt-2 text-xs text-muted-foreground">
+                                          Checks: {suggestion.commands.join(", ")}
+                                        </div>
+                                      ) : null}
+                                      {suggestion.requiresManualConfirmation ? (
+                                        <div className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-300">
+                                          Manual confirmation is required in the PR section.
+                                        </div>
+                                      ) : null}
+                                      {canApply ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => applyTaskActionSuggestion(suggestion)}
+                                          className="mt-2 inline-flex h-8 items-center rounded-md border border-border px-2 text-xs font-medium hover:bg-muted"
+                                        >
+                                          {suggestion.buttonLabel}
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })

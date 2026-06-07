@@ -107,6 +107,26 @@ const githubPrApprovalSchema = z.object({
   reason: z.string().max(1000).optional(),
 });
 
+type OraxTaskActionSuggestion = {
+  type:
+    | "read_files"
+    | "draft_patch"
+    | "sandbox_run"
+    | "controlled_checks"
+    | "github_pr"
+    | "review_pending_approval";
+  title: string;
+  description: string;
+  buttonLabel?: string;
+  paths?: string[];
+  reason?: string;
+  instructions?: string;
+  artifactId?: number;
+  approvalId?: number;
+  commands?: string[];
+  requiresManualConfirmation?: boolean;
+};
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -123,6 +143,7 @@ router.get("/orax/capabilities", (_req, res) => {
       "Request approval to run controlled syntax, static, and allowlisted workspace checks",
       "Create GitHub branches and pull requests after explicit approval",
       "Discuss each coding task in a persistent ORAX-only task conversation",
+      "Map task chat into approval-ready suggestions without auto-executing them",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
@@ -486,10 +507,17 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       })
       .returning();
 
+    const actionSuggestions = buildOraxTaskActionSuggestions({
+      task,
+      approvals,
+      artifacts,
+      userMessage: parsed.data.content,
+    });
     const assistantContent = buildOraxTaskThreadReply({
       task,
       approvals,
       artifacts,
+      actionSuggestions,
     });
     const [assistantMessage] = await db
       .insert(oraxTaskMessagesTable)
@@ -505,6 +533,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
           taskStatus: task.status,
           approvalCount: approvals.length,
           artifactCount: artifacts.length,
+          actionSuggestions,
         },
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -2167,10 +2196,14 @@ function buildOraxTaskThreadReply(input: {
   task: OraxTask;
   approvals: OraxTaskApproval[];
   artifacts: OraxTaskArtifact[];
+  actionSuggestions: OraxTaskActionSuggestion[];
 }): string {
   const pendingApprovals = input.approvals.filter((approval) => approval.status === "pending");
   const completedArtifacts = input.artifacts.filter((artifact) => artifact.status === "completed");
   const latestArtifact = input.artifacts[0];
+  const suggestionLine = input.actionSuggestions.length
+    ? `Suggested next action: ${input.actionSuggestions[0].title}.`
+    : "Suggested next action: clarify the target files or behavior before requesting approval.";
   const nextStep =
     pendingApprovals.length > 0
       ? `There ${pendingApprovals.length === 1 ? "is" : "are"} ${pendingApprovals.length} pending approval${
@@ -2184,9 +2217,114 @@ function buildOraxTaskThreadReply(input: {
     `I saved this in the ORAX task thread for "${input.task.title}".`,
     `Current task status: ${input.task.status}.`,
     `Approvals: ${input.approvals.length}. Artifacts: ${input.artifacts.length}. Completed artifacts: ${completedArtifacts.length}.`,
+    suggestionLine,
     nextStep,
-    "Phase 4A is discussion-only: this chat can track context and explain the workflow, but it cannot run commands, edit files, push branches, or open PRs without the existing approval controls.",
+    "Phase 4B is planning-only: this chat can suggest approval-ready next steps, but it cannot run commands, edit files, push branches, or open PRs without the existing approval controls.",
   ].join("\n");
+}
+
+function buildOraxTaskActionSuggestions(input: {
+  task: OraxTask;
+  approvals: OraxTaskApproval[];
+  artifacts: OraxTaskArtifact[];
+  userMessage: string;
+}): OraxTaskActionSuggestion[] {
+  const suggestions: OraxTaskActionSuggestion[] = [];
+  const pendingApproval = input.approvals.find((approval) => approval.status === "pending");
+  if (pendingApproval) {
+    suggestions.push({
+      type: "review_pending_approval",
+      title: "Review pending approval",
+      description:
+        "This task already has a pending approval. Decide that approval before requesting another workflow step.",
+      approvalId: pendingApproval.id,
+    });
+    return suggestions;
+  }
+
+  const latestCommandResult = input.artifacts.find(
+    (artifact) => artifact.type === "command_result",
+  );
+  const latestCommandPayload = asRecord(latestCommandResult?.payload);
+  if (latestCommandResult?.status === "completed" && latestCommandPayload.passed === true) {
+    suggestions.push({
+      type: "github_pr",
+      title: "Prepare PR approval",
+      description:
+        "Controlled checks passed. Review the PR section and type CREATE PR manually if you want ORAX to request PR creation approval.",
+      artifactId: latestCommandResult.id,
+      requiresManualConfirmation: true,
+    });
+  }
+
+  const latestSandboxResult = input.artifacts.find(
+    (artifact) => artifact.type === "sandbox_result",
+  );
+  const latestSandboxPayload = asRecord(latestSandboxResult?.payload);
+  if (latestSandboxResult && latestSandboxPayload.applied === true) {
+    suggestions.push({
+      type: "controlled_checks",
+      title: "Prepare controlled checks",
+      description:
+        "The draft patch applied in the sandbox. Select the allowlisted checks you want to request next.",
+      buttonLabel: "Use default checks",
+      artifactId: latestSandboxResult.id,
+      commands: [...ORAX_SANDBOX_COMMAND_IDS],
+    });
+  }
+
+  const latestDraftPatch = input.artifacts.find((artifact) => artifact.type === "draft_patch");
+  if (latestDraftPatch && latestDraftPatch.status !== "rejected") {
+    suggestions.push({
+      type: "sandbox_run",
+      title: "Request sandbox validation",
+      description:
+        "A draft patch exists. Use the existing sandbox approval button when you are ready to validate it.",
+      artifactId: latestDraftPatch.id,
+    });
+  }
+
+  const completedReadApproval = input.approvals.find(
+    (approval) => approval.action === "read_files" && approval.status === "completed",
+  );
+  if (completedReadApproval) {
+    suggestions.push({
+      type: "draft_patch",
+      title: "Prepare draft patch instructions",
+      description:
+        "Approved files have been read. Use this message as draft-patch guidance, then generate a preview from the completed read approval.",
+      buttonLabel: "Use as draft instructions",
+      approvalId: completedReadApproval.id,
+      instructions: input.userMessage.slice(0, 2000),
+    });
+  }
+
+  const extractedPaths = extractOraxCandidatePaths(input.userMessage);
+  if (extractedPaths.length > 0 || suggestions.length === 0) {
+    suggestions.push({
+      type: "read_files",
+      title: "Prepare file-read approval",
+      description:
+        extractedPaths.length > 0
+          ? "I found likely file paths in your message. Use them to prepare a read-files approval request."
+          : "Start by identifying the source files ORAX should read before planning a code change.",
+      buttonLabel: extractedPaths.length > 0 ? "Use detected paths" : undefined,
+      paths: extractedPaths,
+      reason: `Task discussion: ${input.task.title}`.slice(0, 1000),
+    });
+  }
+
+  return suggestions.slice(0, 4);
+}
+
+function extractOraxCandidatePaths(message: string): string[] {
+  const matches =
+    message.match(
+      /\b(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+|\b(?:package\.json|pnpm-lock\.yaml|README\.md|tsconfig\.json|vite\.config\.ts)\b/g,
+    ) ?? [];
+  return Array.from(new Set(matches))
+    .filter((pathName) => !pathName.startsWith("http"))
+    .slice(0, ORAX_FILE_READ_LIMITS.maxFiles);
 }
 
 async function loadOwnedRepository(userId: string, repositoryId: number) {

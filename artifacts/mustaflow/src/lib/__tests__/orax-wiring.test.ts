@@ -55,10 +55,16 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
     expect(oraxPage).toContain("Task conversation");
     expect(oraxPage).toContain("stored separately from Ora chat and");
+    expect(oraxPage).toContain("actionSuggestions");
+    expect(oraxPage).toContain("applyTaskActionSuggestion");
+    expect(oraxPage).toContain("setApprovalPaths(suggestion.paths.join");
+    expect(oraxPage).toContain("setDraftInstructions");
+    expect(oraxPage).toContain("setSelectedCommandIds");
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");
     expect(oraxPage).not.toContain("/api/credits");
     expect(oraxPage).not.toContain("useOraChat");
+    expect(oraxPage).not.toContain('setPrConfirmationText("CREATE PR")');
   });
 
   it("mounts the authenticated /orax API prefix", () => {

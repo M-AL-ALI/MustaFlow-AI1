@@ -450,8 +450,13 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain('router.post("/orax/tasks/:id/messages"');
     expect(routeSource).toContain("oraxTaskMessagesTable");
     expect(routeSource).toContain("buildOraxTaskThreadReply");
-    expect(routeSource).toContain("Phase 4A is discussion-only");
+    expect(routeSource).toContain("Phase 4B is planning-only");
+    expect(routeSource).toContain("buildOraxTaskActionSuggestions");
+    expect(routeSource).toContain("actionSuggestions");
+    expect(routeSource).toContain("Map task chat into approval-ready suggestions");
     expect(routeSource).toContain("persistent ORAX-only task conversation");
+    expect(routeSource).toContain("requiresManualConfirmation");
+    expect(routeSource).toContain("extractOraxCandidatePaths");
     expect(routeSource).not.toContain("/public-ai/chat");
     expect(routeSource).not.toContain("/projects/");
     expect(routeSource).not.toContain("deductCredits");
