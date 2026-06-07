@@ -16,7 +16,12 @@ export const ORAX_TASK_STATUSES = [
 ] as const;
 export type OraxTaskStatus = (typeof ORAX_TASK_STATUSES)[number];
 
-export const ORAX_APPROVAL_ACTIONS = ["read_files", "sandbox_run", "github_pr"] as const;
+export const ORAX_APPROVAL_ACTIONS = [
+  "read_files",
+  "sandbox_run",
+  "safe_check",
+  "github_pr",
+] as const;
 export type OraxApprovalAction = (typeof ORAX_APPROVAL_ACTIONS)[number];
 
 export const ORAX_APPROVAL_STATUSES = [
@@ -28,7 +33,12 @@ export const ORAX_APPROVAL_STATUSES = [
 ] as const;
 export type OraxApprovalStatus = (typeof ORAX_APPROVAL_STATUSES)[number];
 
-export const ORAX_ARTIFACT_TYPES = ["draft_patch", "sandbox_result", "github_pr_result"] as const;
+export const ORAX_ARTIFACT_TYPES = [
+  "draft_patch",
+  "sandbox_result",
+  "command_result",
+  "github_pr_result",
+] as const;
 export type OraxArtifactType = (typeof ORAX_ARTIFACT_TYPES)[number];
 
 export const ORAX_ARTIFACT_STATUSES = [

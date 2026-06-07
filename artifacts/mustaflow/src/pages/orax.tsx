@@ -160,7 +160,20 @@ type OraxArtifact = {
     checks?: Array<{ name: string; status: string; message: string }>;
     errors?: string[];
     testPreview?: Array<{ name: string; status: string; message: string }>;
+    passed?: boolean;
+    commands?: Array<{
+      id: string;
+      label: string;
+      status: string;
+      exitCode?: number | null;
+      durationMs?: number;
+      stdout?: string;
+      stderr?: string;
+      message: string;
+    }>;
+    executedAt?: string;
     draftArtifactId?: number;
+    commandArtifactId?: number;
     branchName?: string;
     baseBranch?: string;
     commitSha?: string;
@@ -215,12 +228,16 @@ export default function OraxPage() {
   const [requestingSandboxApprovalArtifactId, setRequestingSandboxApprovalArtifactId] = useState<
     number | null
   >(null);
+  const [requestingCommandApprovalArtifactId, setRequestingCommandApprovalArtifactId] = useState<
+    number | null
+  >(null);
   const [requestingPrApprovalArtifactId, setRequestingPrApprovalArtifactId] = useState<
     number | null
   >(null);
   const [decidingApprovalId, setDecidingApprovalId] = useState<number | null>(null);
   const [readingApprovalId, setReadingApprovalId] = useState<number | null>(null);
   const [runningSandboxApprovalId, setRunningSandboxApprovalId] = useState<number | null>(null);
+  const [runningCommandApprovalId, setRunningCommandApprovalId] = useState<number | null>(null);
   const [creatingPrApprovalId, setCreatingPrApprovalId] = useState<number | null>(null);
   const [generatingArtifactApprovalId, setGeneratingArtifactApprovalId] = useState<number | null>(
     null,
@@ -242,6 +259,8 @@ export default function OraxPage() {
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
   const latestSandboxResult =
     artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
+  const latestCommandResult =
+    artifacts.find((artifact) => artifact.type === "command_result") ?? null;
   const latestGithubPrResult =
     artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
 
@@ -604,6 +623,34 @@ export default function OraxPage() {
     }
   }
 
+  async function requestCommandApproval(artifactId: number) {
+    if (!selectedTask || requestingCommandApprovalArtifactId) return;
+    setRequestingCommandApprovalArtifactId(artifactId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/command-approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          commands: ["patch-static-checks", "json-syntax", "node-syntax"],
+          reason: "Run fixed controlled checks before any GitHub pull request approval.",
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not request controlled-check approval");
+      }
+      const body = (await res.json()) as { approval: OraxApproval };
+      setApprovals((prev) => [body.approval, ...prev]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not request controlled-check approval");
+    } finally {
+      setRequestingCommandApprovalArtifactId(null);
+    }
+  }
+
   async function runSandboxValidation(approvalId: number) {
     if (runningSandboxApprovalId) return;
     setRunningSandboxApprovalId(approvalId);
@@ -629,6 +676,34 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not run sandbox validation");
     } finally {
       setRunningSandboxApprovalId(null);
+    }
+  }
+
+  async function runControlledChecks(approvalId: number) {
+    if (runningCommandApprovalId) return;
+    setRunningCommandApprovalId(approvalId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/approvals/${approvalId}/run-commands`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not run controlled checks");
+      }
+      const body = (await res.json()) as { approval: OraxApproval; artifact: OraxArtifact };
+      setApprovals((prev) =>
+        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
+      );
+      setArtifacts((prev) => [
+        body.artifact,
+        ...prev.filter((artifact) => artifact.id !== body.artifact.id),
+      ]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not run controlled checks");
+    } finally {
+      setRunningCommandApprovalId(null);
     }
   }
 
@@ -968,8 +1043,8 @@ export default function OraxPage() {
                   <h2 className="text-sm font-semibold">Create ORAX task</h2>
                 </div>
                 <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                  Phase 1 creates a safe coding-agent plan. Code edits, terminal execution, PRs, and
-                  pushes stay locked.
+                  ORAX creates a safe coding-agent plan. File reads, patch previews, controlled
+                  checks, and PR creation all stay approval-gated.
                 </p>
               </div>
               <div className="flex rounded-md border border-border p-1">
@@ -1179,6 +1254,20 @@ export default function OraxPage() {
                                   <Play className="h-3.5 w-3.5" />
                                 )}
                                 Run sandbox
+                              </button>
+                            ) : null}
+                            {approval.action === "safe_check" && approval.status === "approved" ? (
+                              <button
+                                onClick={() => void runControlledChecks(approval.id)}
+                                disabled={runningCommandApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                              >
+                                {runningCommandApprovalId === approval.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Terminal className="h-3.5 w-3.5" />
+                                )}
+                                Run checks
                               </button>
                             ) : null}
                             {approval.action === "github_pr" && approval.status === "approved" ? (
@@ -1424,16 +1513,16 @@ export default function OraxPage() {
 
                       {latestSandboxResult.payload.applied ? (
                         <button
-                          onClick={() => void requestGithubPrApproval(latestSandboxResult.id)}
-                          disabled={requestingPrApprovalArtifactId === latestSandboxResult.id}
+                          onClick={() => void requestCommandApproval(latestSandboxResult.id)}
+                          disabled={requestingCommandApprovalArtifactId === latestSandboxResult.id}
                           className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
                         >
-                          {requestingPrApprovalArtifactId === latestSandboxResult.id ? (
+                          {requestingCommandApprovalArtifactId === latestSandboxResult.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
-                            <GitPullRequest className="h-3.5 w-3.5" />
+                            <Terminal className="h-3.5 w-3.5" />
                           )}
-                          Request GitHub PR approval
+                          Request controlled checks
                         </button>
                       ) : null}
                     </div>
@@ -1446,10 +1535,99 @@ export default function OraxPage() {
                 </div>
 
                 <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="text-sm font-semibold">Controlled checks</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Controlled checks run fixed ORAX validators only. They do not run repo package
+                    scripts, arbitrary shell text, deployment commands, or default-branch writes.
+                  </p>
+
+                  {latestCommandResult ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                        <Metric label="Status" value={latestCommandResult.status} />
+                        <Metric
+                          label="Passed"
+                          value={latestCommandResult.payload.passed ? "yes" : "no"}
+                        />
+                        <Metric
+                          label="Commands"
+                          value={String(latestCommandResult.payload.commands?.length ?? 0)}
+                        />
+                        <Metric
+                          label="Executed"
+                          value={new Date(latestCommandResult.createdAt).toLocaleString()}
+                        />
+                      </div>
+
+                      {latestCommandResult.summary ? (
+                        <p className="text-sm text-foreground">{latestCommandResult.summary}</p>
+                      ) : null}
+
+                      {latestCommandResult.payload.commands?.length ? (
+                        <div className="space-y-2">
+                          {latestCommandResult.payload.commands.map((command) => (
+                            <div
+                              key={`${command.id}-${command.status}`}
+                              className="rounded-md border border-border bg-card px-3 py-2"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <span className="font-medium text-foreground">
+                                  {command.label || command.id}
+                                </span>
+                                <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
+                                  {command.status}
+                                  {typeof command.exitCode === "number"
+                                    ? ` / exit ${command.exitCode}`
+                                    : ""}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {command.message}
+                              </p>
+                              {command.stdout ? (
+                                <pre className="mt-2 max-h-32 overflow-auto rounded bg-background px-2 py-2 text-[11px] text-muted-foreground">
+                                  {command.stdout}
+                                </pre>
+                              ) : null}
+                              {command.stderr ? (
+                                <pre className="mt-2 max-h-32 overflow-auto rounded border border-destructive/30 bg-destructive/10 px-2 py-2 text-[11px] text-destructive">
+                                  {command.stderr}
+                                </pre>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {latestCommandResult.payload.passed ? (
+                        <button
+                          onClick={() => void requestGithubPrApproval(latestCommandResult.id)}
+                          disabled={requestingPrApprovalArtifactId === latestCommandResult.id}
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                        >
+                          {requestingPrApprovalArtifactId === latestCommandResult.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <GitPullRequest className="h-3.5 w-3.5" />
+                          )}
+                          Request GitHub PR approval
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      No controlled checks yet. Request approval from a passed sandbox result,
+                      approve it, then run the checks.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
                   <div className="text-sm font-semibold">GitHub pull request</div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    ORAX can create a new branch and pull request only after explicit approval. It
-                    never pushes directly to the default branch.
+                    ORAX can create a new branch and pull request only after controlled checks pass
+                    and you explicitly approve the GitHub action. It never pushes directly to the
+                    default branch.
                   </p>
 
                   {latestGithubPrResult ? (
@@ -1500,7 +1678,7 @@ export default function OraxPage() {
                     </div>
                   ) : (
                     <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No GitHub pull request yet. Request approval from a passed sandbox result,
+                      No GitHub pull request yet. Run controlled checks, request GitHub PR approval,
                       approve it, then create the PR.
                     </p>
                   )}
@@ -1540,7 +1718,7 @@ export default function OraxPage() {
                         </p>
                       </div>
                       <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        read-only foundation
+                        approval-gated
                       </span>
                     </div>
                     {task.result?.message ? (

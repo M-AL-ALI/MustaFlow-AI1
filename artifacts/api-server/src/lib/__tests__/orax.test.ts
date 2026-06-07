@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildOraxTaskPlan, normalizeOraxFileReadPaths, parseRepositoryLocator } from "../orax";
+import {
+  normalizeOraxSandboxCommandIds,
+  runOraxControlledSandboxChecks,
+} from "../orax-command-sandbox";
 import { buildDraftPatchPrompt, parseDraftPatchJson } from "../orax-draft-patch";
 import { extensionToLanguage, summarizeGithubTree } from "../orax-github";
 import { runOraxSandboxValidation } from "../orax-sandbox";
@@ -264,5 +268,85 @@ describe("ORAX sandbox validation", () => {
 
     expect(result.applied).toBe(false);
     expect(result.errors.join(" ")).toContain("outside the approved file set");
+  });
+});
+
+describe("ORAX controlled sandbox checks", () => {
+  it("does not run repo package-manager scripts or shell commands", () => {
+    const source = readFileSync(path.join(__dirname, "../orax-command-sandbox.ts"), "utf8");
+    expect(source).toContain("execFile");
+    expect(source).toContain("process.execPath");
+    expect(source).toContain("--check");
+    expect(source).not.toContain("exec(");
+    expect(source).not.toContain("spawn(");
+    expect(source).not.toContain("pnpm run");
+    expect(source).not.toContain("npm run");
+    expect(source).not.toContain("yarn");
+  });
+
+  it("rejects arbitrary or destructive command names", () => {
+    expect(() => normalizeOraxSandboxCommandIds(["pnpm test"])).toThrow(
+      "Unsupported ORAX sandbox command",
+    );
+    expect(() => normalizeOraxSandboxCommandIds(["rm -rf /"])).toThrow(
+      "Unsupported ORAX sandbox command",
+    );
+  });
+
+  it("runs fixed controlled checks without repo package scripts", async () => {
+    const result = await runOraxControlledSandboxChecks({
+      commands: ["patch-static-checks", "json-syntax", "node-syntax"],
+      staticChecks: [
+        {
+          name: "src/app.js: patch applies",
+          status: "passed",
+          message: "Patch applied.",
+        },
+      ],
+      patchedFiles: [
+        {
+          path: "package.json",
+          sourceSha: "abc",
+          content: '{"name":"demo","scripts":{"test":"rm -rf /"}}',
+        },
+        {
+          path: "src/app.js",
+          sourceSha: "def",
+          content: 'export const value = "safe";',
+        },
+      ],
+    });
+
+    expect(result.mode).toBe("controlled_sandbox_execution");
+    expect(result.passed).toBe(true);
+    expect(result.commands.map((command) => command.id)).toEqual([
+      "patch-static-checks",
+      "json-syntax",
+      "node-syntax",
+    ]);
+    expect(JSON.stringify(result)).not.toContain("rm -rf /");
+  });
+
+  it("reports syntax failures as failed command results", async () => {
+    const result = await runOraxControlledSandboxChecks({
+      commands: ["node-syntax"],
+      staticChecks: [],
+      patchedFiles: [
+        {
+          path: "src/broken.js",
+          sourceSha: "abc",
+          content: "export const value = ;",
+        },
+      ],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.commands[0]).toEqual(
+      expect.objectContaining({
+        id: "node-syntax",
+        status: "failed",
+        exitCode: 1,
+      }),
+    );
   });
 });

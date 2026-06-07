@@ -35,10 +35,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/artifacts");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/draft-patch");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/sandbox-approvals");
+    expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/command-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/read-files");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-sandbox");
+    expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-commands");
     expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");

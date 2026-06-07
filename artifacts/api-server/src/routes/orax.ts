@@ -28,6 +28,11 @@ import {
   verifyGithubReadOnlyToken,
 } from "../lib/orax-github";
 import { buildOraxSandboxPatch, runOraxSandboxValidation } from "../lib/orax-sandbox";
+import {
+  normalizeOraxSandboxCommandIds,
+  ORAX_SANDBOX_COMMAND_IDS,
+  runOraxControlledSandboxChecks,
+} from "../lib/orax-command-sandbox";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
 
@@ -75,6 +80,12 @@ const sandboxApprovalSchema = z.object({
   reason: z.string().max(1000).optional(),
 });
 
+const safeCheckApprovalSchema = z.object({
+  artifactId: z.number().int().positive(),
+  commands: z.array(z.enum(ORAX_SANDBOX_COMMAND_IDS)).min(1).max(3).optional(),
+  reason: z.string().max(1000).optional(),
+});
+
 const githubPrApprovalSchema = z.object({
   artifactId: z.number().int().positive(),
   title: z.string().min(1).max(180).optional(),
@@ -85,8 +96,8 @@ const githubPrApprovalSchema = z.object({
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
-    phase: "read_only_github_scan",
-    mode: "read_only_repository_analysis",
+    phase: "controlled_sandbox_execution",
+    mode: "approval_gated_repository_change_validation",
     available: [
       "Register repository metadata",
       "Connect a GitHub token for read-only repository scans",
@@ -95,13 +106,15 @@ router.get("/orax/capabilities", (_req, res) => {
       "Request approval to read selected source files",
       "Generate draft patch previews from approved file reads",
       "Request approval to validate draft patches in an isolated sandbox",
+      "Request approval to run controlled syntax and static checks",
       "Create GitHub branches and pull requests after explicit approval",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
       "Clone private repositories",
       "Edit files",
-      "Run terminal commands",
+      "Run unrestricted terminal commands",
+      "Run repo package scripts without a stronger container boundary",
       "Push directly to the default branch",
       "Open pull requests without explicit approval",
       "Deploy applications",
@@ -685,6 +698,74 @@ router.post("/orax/tasks/:id/sandbox-approvals", async (req, res) => {
   }
 });
 
+router.post("/orax/tasks/:id/command-approvals", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const parsed = safeCheckApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid controlled-check approval request" });
+    return;
+  }
+
+  let commands;
+  try {
+    commands = normalizeOraxSandboxCommandIds(parsed.data.commands);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : "Invalid command list" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    const artifact = await loadOwnedArtifact(userId, parsed.data.artifactId);
+    if (!task || !artifact || artifact.taskId !== task.id || artifact.type !== "sandbox_result") {
+      res.status(404).json({ error: "Task or sandbox result artifact not found" });
+      return;
+    }
+
+    const payload = asRecord(artifact.payload);
+    if (artifact.status !== "completed" || payload.applied !== true) {
+      res.status(409).json({ error: "Controlled checks require a passed sandbox result" });
+      return;
+    }
+
+    const [approval] = await db
+      .insert(oraxTaskApprovalsTable)
+      .values({
+        userId,
+        repositoryId: task.repositoryId,
+        taskId: task.id,
+        action: "safe_check",
+        status: "pending",
+        request: {
+          artifactId: artifact.id,
+          commands,
+          reason: parsed.data.reason?.trim() || null,
+          scope:
+            "Run fixed ORAX-controlled syntax and static checks. No arbitrary shell text, package scripts, deployment, or default-branch write is allowed.",
+        },
+        riskSummary:
+          "ORAX will run only fixed safe-check IDs in a temporary sandbox. It will not run repo package scripts, execute arbitrary shell commands, push, open a PR, or deploy.",
+      })
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({ status: "awaiting_approval", updatedAt: new Date() })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.status(201).json({ approval });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to create ORAX command approval");
+    res.status(500).json({ error: "Failed to create ORAX command approval" });
+  }
+});
+
 router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
   const userId = req.userId!;
   const taskId = Number(req.params.id);
@@ -702,14 +783,14 @@ router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
   try {
     const task = await loadOwnedTask(userId, taskId);
     const artifact = await loadOwnedArtifact(userId, parsed.data.artifactId);
-    if (!task || !artifact || artifact.taskId !== task.id || artifact.type !== "sandbox_result") {
-      res.status(404).json({ error: "Task or sandbox result artifact not found" });
+    if (!task || !artifact || artifact.taskId !== task.id || artifact.type !== "command_result") {
+      res.status(404).json({ error: "Task or controlled-check artifact not found" });
       return;
     }
 
     const payload = asRecord(artifact.payload);
-    if (payload.applied !== true || artifact.status !== "completed") {
-      res.status(409).json({ error: "GitHub PR creation requires a passed sandbox result" });
+    if (payload.passed !== true || artifact.status !== "completed") {
+      res.status(409).json({ error: "GitHub PR creation requires passed controlled checks" });
       return;
     }
 
@@ -727,10 +808,10 @@ router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
           body: parsed.data.body?.trim() || null,
           reason: parsed.data.reason?.trim() || null,
           scope:
-            "Create a new GitHub branch and pull request from this sandbox-passed patch. The default branch will not be modified directly.",
+            "Create a new GitHub branch and pull request from this checked patch. The default branch will not be modified directly.",
         },
         riskSummary:
-          "ORAX will create a new branch, commit the sandbox-passed patch, and open a pull request. It will not push directly to the default branch, deploy, or run terminal commands.",
+          "ORAX will create a new branch, commit the controlled-check-passed patch, and open a pull request. It will not push directly to the default branch, deploy, or run unrestricted terminal commands.",
       })
       .returning();
 
@@ -1046,6 +1127,184 @@ router.post("/orax/approvals/:id/run-sandbox", async (req, res) => {
   }
 });
 
+router.post("/orax/approvals/:id/run-commands", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = Number(req.params.id);
+  if (!Number.isInteger(approvalId) || approvalId <= 0) {
+    res.status(400).json({ error: "Invalid approval id" });
+    return;
+  }
+
+  try {
+    const approval = await loadOwnedApproval(userId, approvalId);
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (approval.action !== "safe_check") {
+      res.status(400).json({ error: "Unsupported approval action" });
+      return;
+    }
+    if (approval.status !== "approved") {
+      res.status(409).json({ error: "Controlled checks require an approved request" });
+      return;
+    }
+
+    const task = await loadOwnedTask(userId, approval.taskId);
+    const repository = await loadOwnedRepository(userId, approval.repositoryId);
+    const request = asRecord(approval.request);
+    const sandboxArtifactId =
+      typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
+    const sandboxArtifact = Number.isInteger(sandboxArtifactId)
+      ? await loadOwnedArtifact(userId, sandboxArtifactId)
+      : undefined;
+    if (!task || !repository || !sandboxArtifact || sandboxArtifact.taskId !== task.id) {
+      res.status(404).json({ error: "Task, repository, or sandbox artifact not found" });
+      return;
+    }
+    if (sandboxArtifact.type !== "sandbox_result" || sandboxArtifact.status !== "completed") {
+      res.status(409).json({ error: "Controlled checks require a completed sandbox result" });
+      return;
+    }
+
+    const sandboxPayload = asRecord(sandboxArtifact.payload);
+    const draftArtifactId =
+      typeof sandboxPayload.sourceArtifactId === "number"
+        ? sandboxPayload.sourceArtifactId
+        : Number(sandboxPayload.sourceArtifactId);
+    const draftArtifact = Number.isInteger(draftArtifactId)
+      ? await loadOwnedArtifact(userId, draftArtifactId)
+      : undefined;
+    if (!draftArtifact || draftArtifact.type !== "draft_patch") {
+      res.status(409).json({ error: "Sandbox result is missing its draft patch source" });
+      return;
+    }
+
+    const draftPayload = asRecord(draftArtifact.payload);
+    const unifiedDiff =
+      typeof draftPayload.unifiedDiff === "string" ? draftPayload.unifiedDiff : "";
+    const sourceApprovalId =
+      typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
+    const sourceApproval = sourceApprovalId
+      ? await loadOwnedApproval(userId, sourceApprovalId)
+      : undefined;
+    if (!sourceApproval || sourceApproval.action !== "read_files") {
+      res.status(409).json({ error: "Draft patch is missing its approved file-read source" });
+      return;
+    }
+
+    const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
+    const branch = sourceRequest.branch || repository.defaultBranch;
+    const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+    const token = repository.encryptedToken
+      ? encryptionService.decrypt(repository.encryptedToken)
+      : undefined;
+    const readResult = await readGithubRepositoryFiles({
+      owner: repository.owner,
+      repo: repository.name,
+      branch,
+      paths,
+      token,
+      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+    });
+
+    const tests = Array.isArray(draftPayload.tests)
+      ? draftPayload.tests.filter((item): item is string => typeof item === "string")
+      : [];
+    const sandbox = buildOraxSandboxPatch({
+      unifiedDiff,
+      files: readResult.files,
+      suggestedTests: tests,
+    });
+    if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
+      res.status(409).json({ error: "Sandbox patch no longer applies to the current branch" });
+      return;
+    }
+
+    const requestCommands = Array.isArray(request.commands)
+      ? request.commands.filter((item): item is string => typeof item === "string")
+      : undefined;
+    const commands = normalizeOraxSandboxCommandIds(requestCommands);
+    const commandResult = await runOraxControlledSandboxChecks({
+      commands,
+      patchedFiles: sandbox.patchedFiles,
+      staticChecks: sandbox.validation.checks,
+    });
+    const commandPayload = {
+      sourceArtifactId: sandboxArtifact.id,
+      draftArtifactId: draftArtifact.id,
+      sourceApprovalId: sourceApproval.id,
+      branch,
+      executedAt: new Date().toISOString(),
+      ...commandResult,
+      validation: {
+        applied: sandbox.validation.applied,
+        changedFiles: sandbox.validation.changedFiles,
+        errors: sandbox.validation.errors,
+      },
+    };
+
+    const [commandArtifact] = await db
+      .insert(oraxTaskArtifactsTable)
+      .values({
+        userId,
+        repositoryId: repository.id,
+        taskId: task.id,
+        approvalId: approval.id,
+        type: "command_result",
+        status: commandResult.passed ? "completed" : "failed",
+        title: `Controlled checks for ${sandboxArtifact.title}`,
+        summary: commandResult.summary,
+        payload: commandPayload,
+      })
+      .returning();
+
+    const [updatedApproval] = await db
+      .update(oraxTaskApprovalsTable)
+      .set({
+        status: commandResult.passed ? "completed" : "failed",
+        result: {
+          artifactId: commandArtifact.id,
+          passed: commandResult.passed,
+          commands: commandResult.commands.map((command) => ({
+            id: command.id,
+            status: command.status,
+            exitCode: command.exitCode,
+          })),
+        },
+        completedAt: new Date(),
+      })
+      .where(eq(oraxTaskApprovalsTable.id, approval.id))
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        status: commandResult.passed ? "completed" : "blocked",
+        result: {
+          ...asRecord(task.result),
+          controlledChecks: {
+            artifactId: commandArtifact.id,
+            passed: commandResult.passed,
+            commands: commandResult.commands.length,
+          },
+          message: commandResult.passed
+            ? "ORAX ran controlled syntax/static checks in an isolated temporary sandbox. No repo package scripts, unrestricted commands, push, or deploy ran."
+            : "ORAX controlled checks failed.",
+        },
+        updatedAt: new Date(),
+        completedAt: commandResult.passed ? new Date() : null,
+      })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.json({ approval: updatedApproval, artifact: commandArtifact });
+  } catch (err) {
+    logger.error({ component: "orax", err, approvalId }, "Failed to run ORAX controlled checks");
+    res.status(502).json({ error: "Could not run controlled checks" });
+  }
+});
+
 router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
   const userId = req.userId!;
   const approvalId = Number(req.params.id);
@@ -1072,13 +1331,13 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
     const task = await loadOwnedTask(userId, approval.taskId);
     const repository = await loadOwnedRepository(userId, approval.repositoryId);
     const request = asRecord(approval.request);
-    const sandboxArtifactId =
+    const commandArtifactId =
       typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
-    const sandboxArtifact = Number.isInteger(sandboxArtifactId)
-      ? await loadOwnedArtifact(userId, sandboxArtifactId)
+    const commandArtifact = Number.isInteger(commandArtifactId)
+      ? await loadOwnedArtifact(userId, commandArtifactId)
       : undefined;
-    if (!task || !repository || !sandboxArtifact || sandboxArtifact.taskId !== task.id) {
-      res.status(404).json({ error: "Task, repository, or sandbox artifact not found" });
+    if (!task || !repository || !commandArtifact || commandArtifact.taskId !== task.id) {
+      res.status(404).json({ error: "Task, repository, or controlled-check artifact not found" });
       return;
     }
     if (repository.provider !== "github") {
@@ -1089,16 +1348,31 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       res.status(409).json({ error: "Connect a GitHub token before creating a pull request" });
       return;
     }
-    if (sandboxArtifact.type !== "sandbox_result" || sandboxArtifact.status !== "completed") {
-      res.status(409).json({ error: "GitHub PR creation requires a completed sandbox result" });
+    if (commandArtifact.type !== "command_result" || commandArtifact.status !== "completed") {
+      res.status(409).json({ error: "GitHub PR creation requires completed controlled checks" });
       return;
     }
 
-    const sandboxPayload = asRecord(sandboxArtifact.payload);
+    const commandPayload = asRecord(commandArtifact.payload);
+    if (commandPayload.passed !== true) {
+      res.status(409).json({ error: "GitHub PR creation requires passed controlled checks" });
+      return;
+    }
+    const sourceSandboxArtifactId =
+      typeof commandPayload.sourceArtifactId === "number"
+        ? commandPayload.sourceArtifactId
+        : Number(commandPayload.sourceArtifactId);
+    const sandboxArtifact = Number.isInteger(sourceSandboxArtifactId)
+      ? await loadOwnedArtifact(userId, sourceSandboxArtifactId)
+      : undefined;
+    if (!sandboxArtifact || sandboxArtifact.type !== "sandbox_result") {
+      res.status(409).json({ error: "Controlled-check result is missing its sandbox source" });
+      return;
+    }
     const draftArtifactId =
-      typeof sandboxPayload.sourceArtifactId === "number"
-        ? sandboxPayload.sourceArtifactId
-        : Number(sandboxPayload.sourceArtifactId);
+      typeof commandPayload.draftArtifactId === "number"
+        ? commandPayload.draftArtifactId
+        : Number(commandPayload.draftArtifactId);
     const draftArtifact = Number.isInteger(draftArtifactId)
       ? await loadOwnedArtifact(userId, draftArtifactId)
       : undefined;
@@ -1163,9 +1437,11 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
       body: buildPullRequestBody({
         task,
         sandboxArtifactId: sandboxArtifact.id,
+        commandArtifactId: commandArtifact.id,
         draftArtifactId: draftArtifact.id,
         customBody: typeof request.body === "string" ? request.body : null,
         validation: sandbox.validation,
+        commandResult: commandPayload,
       }),
       files: sandbox.patchedFiles.map((file) => ({
         path: file.path,
@@ -1175,6 +1451,7 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
 
     const prPayload = {
       sourceArtifactId: sandboxArtifact.id,
+      commandArtifactId: commandArtifact.id,
       draftArtifactId: draftArtifact.id,
       branchName: pullRequest.branchName,
       baseBranch: pullRequest.baseBranch,
@@ -1236,7 +1513,7 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
             pullRequestUrl: pullRequest.pullRequestUrl,
           },
           message:
-            "ORAX created a GitHub branch and pull request from the sandbox-passed patch. The default branch was not modified directly.",
+            "ORAX created a GitHub branch and pull request from the controlled-check-passed patch. The default branch was not modified directly.",
         },
         updatedAt: new Date(),
         completedAt: new Date(),
@@ -1325,21 +1602,31 @@ function toRepositorySummary(repository: OraxRepository) {
 function buildPullRequestBody(input: {
   task: OraxTask;
   sandboxArtifactId: number;
+  commandArtifactId: number;
   draftArtifactId: number;
   customBody?: string | null;
   validation: {
     changedFiles: Array<{ path: string; additions: number; deletions: number }>;
     testPreview: Array<{ name: string; status: string; message: string }>;
   };
+  commandResult: Record<string, unknown>;
 }): string {
   const changedFiles = input.validation.changedFiles
     .map((file) => `- ${file.path} (+${file.additions} / -${file.deletions})`)
     .join("\n");
-  const checks = input.validation.testPreview.length
-    ? input.validation.testPreview
-        .map((check) => `- ${check.name}: ${check.status} - ${check.message}`)
+  const commandResult = input.commandResult;
+  const commands = Array.isArray(commandResult.commands)
+    ? commandResult.commands
+        .map((command) => {
+          const record = asRecord(command);
+          const id = typeof record.id === "string" ? record.id : "unknown";
+          const status = typeof record.status === "string" ? record.status : "unknown";
+          const message = typeof record.message === "string" ? record.message : "";
+          return `- ${id}: ${status}${message ? ` - ${message}` : ""}`;
+        })
         .join("\n")
-    : "- No external test commands were run in this phase.";
+    : "";
+  const checks = commands || "- No controlled checks were recorded.";
 
   return [
     input.customBody?.trim() || `ORAX generated this PR from task #${input.task.id}.`,
@@ -1347,8 +1634,9 @@ function buildPullRequestBody(input: {
     "## ORAX Safety Record",
     `- Draft artifact: #${input.draftArtifactId}`,
     `- Sandbox artifact: #${input.sandboxArtifactId}`,
+    `- Controlled-check artifact: #${input.commandArtifactId}`,
     "- Default branch was not modified directly.",
-    "- No terminal commands were executed by ORAX.",
+    "- No unrestricted terminal commands or repository package scripts were executed by ORAX.",
     "- No deployment was triggered.",
     "",
     "## Changed Files",
