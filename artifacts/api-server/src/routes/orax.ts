@@ -22,11 +22,12 @@ import {
   parseRepositoryLocator,
 } from "../lib/orax";
 import {
+  createGithubPullRequestFromFiles,
   readGithubRepositoryFiles,
   scanGithubRepository,
   verifyGithubReadOnlyToken,
 } from "../lib/orax-github";
-import { runOraxSandboxValidation } from "../lib/orax-sandbox";
+import { buildOraxSandboxPatch, runOraxSandboxValidation } from "../lib/orax-sandbox";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
 
@@ -74,6 +75,13 @@ const sandboxApprovalSchema = z.object({
   reason: z.string().max(1000).optional(),
 });
 
+const githubPrApprovalSchema = z.object({
+  artifactId: z.number().int().positive(),
+  title: z.string().min(1).max(180).optional(),
+  body: z.string().max(4000).optional(),
+  reason: z.string().max(1000).optional(),
+});
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -87,14 +95,15 @@ router.get("/orax/capabilities", (_req, res) => {
       "Request approval to read selected source files",
       "Generate draft patch previews from approved file reads",
       "Request approval to validate draft patches in an isolated sandbox",
+      "Create GitHub branches and pull requests after explicit approval",
       "Store ORAX task history separately from Ora and AI Builder",
     ],
     lockedUntilApprovalLayer: [
       "Clone private repositories",
       "Edit files",
       "Run terminal commands",
-      "Push branches",
-      "Open pull requests",
+      "Push directly to the default branch",
+      "Open pull requests without explicit approval",
       "Deploy applications",
     ],
   });
@@ -676,6 +685,67 @@ router.post("/orax/tasks/:id/sandbox-approvals", async (req, res) => {
   }
 });
 
+router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const parsed = githubPrApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid GitHub PR approval request" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    const artifact = await loadOwnedArtifact(userId, parsed.data.artifactId);
+    if (!task || !artifact || artifact.taskId !== task.id || artifact.type !== "sandbox_result") {
+      res.status(404).json({ error: "Task or sandbox result artifact not found" });
+      return;
+    }
+
+    const payload = asRecord(artifact.payload);
+    if (payload.applied !== true || artifact.status !== "completed") {
+      res.status(409).json({ error: "GitHub PR creation requires a passed sandbox result" });
+      return;
+    }
+
+    const [approval] = await db
+      .insert(oraxTaskApprovalsTable)
+      .values({
+        userId,
+        repositoryId: task.repositoryId,
+        taskId: task.id,
+        action: "github_pr",
+        status: "pending",
+        request: {
+          artifactId: artifact.id,
+          title: parsed.data.title?.trim() || `ORAX: ${task.title}`,
+          body: parsed.data.body?.trim() || null,
+          reason: parsed.data.reason?.trim() || null,
+          scope:
+            "Create a new GitHub branch and pull request from this sandbox-passed patch. The default branch will not be modified directly.",
+        },
+        riskSummary:
+          "ORAX will create a new branch, commit the sandbox-passed patch, and open a pull request. It will not push directly to the default branch, deploy, or run terminal commands.",
+      })
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({ status: "awaiting_approval", updatedAt: new Date() })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.status(201).json({ approval });
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to create ORAX GitHub PR approval");
+    res.status(500).json({ error: "Failed to create ORAX GitHub PR approval" });
+  }
+});
+
 router.patch("/orax/approvals/:id", async (req, res) => {
   const userId = req.userId!;
   const approvalId = Number(req.params.id);
@@ -976,6 +1046,210 @@ router.post("/orax/approvals/:id/run-sandbox", async (req, res) => {
   }
 });
 
+router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = Number(req.params.id);
+  if (!Number.isInteger(approvalId) || approvalId <= 0) {
+    res.status(400).json({ error: "Invalid approval id" });
+    return;
+  }
+
+  try {
+    const approval = await loadOwnedApproval(userId, approvalId);
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (approval.action !== "github_pr") {
+      res.status(400).json({ error: "Unsupported approval action" });
+      return;
+    }
+    if (approval.status !== "approved") {
+      res.status(409).json({ error: "GitHub PR creation requires an approved request" });
+      return;
+    }
+
+    const task = await loadOwnedTask(userId, approval.taskId);
+    const repository = await loadOwnedRepository(userId, approval.repositoryId);
+    const request = asRecord(approval.request);
+    const sandboxArtifactId =
+      typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
+    const sandboxArtifact = Number.isInteger(sandboxArtifactId)
+      ? await loadOwnedArtifact(userId, sandboxArtifactId)
+      : undefined;
+    if (!task || !repository || !sandboxArtifact || sandboxArtifact.taskId !== task.id) {
+      res.status(404).json({ error: "Task, repository, or sandbox artifact not found" });
+      return;
+    }
+    if (repository.provider !== "github") {
+      res.status(400).json({ error: "GitHub PR creation only supports GitHub repositories" });
+      return;
+    }
+    if (!repository.encryptedToken) {
+      res.status(409).json({ error: "Connect a GitHub token before creating a pull request" });
+      return;
+    }
+    if (sandboxArtifact.type !== "sandbox_result" || sandboxArtifact.status !== "completed") {
+      res.status(409).json({ error: "GitHub PR creation requires a completed sandbox result" });
+      return;
+    }
+
+    const sandboxPayload = asRecord(sandboxArtifact.payload);
+    const draftArtifactId =
+      typeof sandboxPayload.sourceArtifactId === "number"
+        ? sandboxPayload.sourceArtifactId
+        : Number(sandboxPayload.sourceArtifactId);
+    const draftArtifact = Number.isInteger(draftArtifactId)
+      ? await loadOwnedArtifact(userId, draftArtifactId)
+      : undefined;
+    if (!draftArtifact || draftArtifact.type !== "draft_patch") {
+      res.status(409).json({ error: "Sandbox result is missing its draft patch source" });
+      return;
+    }
+
+    const draftPayload = asRecord(draftArtifact.payload);
+    const unifiedDiff =
+      typeof draftPayload.unifiedDiff === "string" ? draftPayload.unifiedDiff : "";
+    const sourceApprovalId =
+      typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
+    const sourceApproval = sourceApprovalId
+      ? await loadOwnedApproval(userId, sourceApprovalId)
+      : undefined;
+    if (!sourceApproval || sourceApproval.action !== "read_files") {
+      res.status(409).json({ error: "Draft patch is missing its approved file-read source" });
+      return;
+    }
+
+    const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
+    const branch = sourceRequest.branch || repository.defaultBranch;
+    const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+    const token = encryptionService.decrypt(repository.encryptedToken);
+    const readResult = await readGithubRepositoryFiles({
+      owner: repository.owner,
+      repo: repository.name,
+      branch,
+      paths,
+      token,
+      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+    });
+
+    const tests = Array.isArray(draftPayload.tests)
+      ? draftPayload.tests.filter((item): item is string => typeof item === "string")
+      : [];
+    const sandbox = buildOraxSandboxPatch({
+      unifiedDiff,
+      files: readResult.files,
+      suggestedTests: tests,
+    });
+    if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
+      res.status(409).json({ error: "Sandbox patch no longer applies to the current branch" });
+      return;
+    }
+
+    const branchName = `orax/task-${task.id}-${Date.now().toString(36)}`;
+    const title =
+      typeof request.title === "string" && request.title.trim()
+        ? request.title.trim()
+        : `ORAX: ${task.title}`;
+    const pullRequest = await createGithubPullRequestFromFiles({
+      owner: repository.owner,
+      repo: repository.name,
+      token,
+      baseBranch: branch,
+      branchName,
+      title,
+      commitMessage: title,
+      body: buildPullRequestBody({
+        task,
+        sandboxArtifactId: sandboxArtifact.id,
+        draftArtifactId: draftArtifact.id,
+        customBody: typeof request.body === "string" ? request.body : null,
+        validation: sandbox.validation,
+      }),
+      files: sandbox.patchedFiles.map((file) => ({
+        path: file.path,
+        content: file.content,
+      })),
+    });
+
+    const prPayload = {
+      sourceArtifactId: sandboxArtifact.id,
+      draftArtifactId: draftArtifact.id,
+      branchName: pullRequest.branchName,
+      baseBranch: pullRequest.baseBranch,
+      commitSha: pullRequest.commitSha,
+      pullRequestNumber: pullRequest.pullRequestNumber,
+      pullRequestUrl: pullRequest.pullRequestUrl,
+      pullRequestState: pullRequest.pullRequestState,
+      filesChanged: pullRequest.changedFiles,
+      createdAt: new Date().toISOString(),
+      validation: {
+        applied: sandbox.validation.applied,
+        changedFiles: sandbox.validation.changedFiles,
+        errors: sandbox.validation.errors,
+      },
+    };
+
+    const [prArtifact] = await db
+      .insert(oraxTaskArtifactsTable)
+      .values({
+        userId,
+        repositoryId: repository.id,
+        taskId: task.id,
+        approvalId: approval.id,
+        type: "github_pr_result",
+        status: "completed",
+        title: `GitHub PR for ${task.title}`,
+        summary: `Opened PR #${pullRequest.pullRequestNumber} on ${pullRequest.branchName}.`,
+        payload: prPayload,
+      })
+      .returning();
+
+    const [updatedApproval] = await db
+      .update(oraxTaskApprovalsTable)
+      .set({
+        status: "completed",
+        result: {
+          artifactId: prArtifact.id,
+          branchName: pullRequest.branchName,
+          commitSha: pullRequest.commitSha,
+          pullRequestNumber: pullRequest.pullRequestNumber,
+          pullRequestUrl: pullRequest.pullRequestUrl,
+        },
+        completedAt: new Date(),
+      })
+      .where(eq(oraxTaskApprovalsTable.id, approval.id))
+      .returning();
+
+    await db
+      .update(oraxTasksTable)
+      .set({
+        status: "completed",
+        result: {
+          ...asRecord(task.result),
+          githubPr: {
+            artifactId: prArtifact.id,
+            branchName: pullRequest.branchName,
+            commitSha: pullRequest.commitSha,
+            pullRequestNumber: pullRequest.pullRequestNumber,
+            pullRequestUrl: pullRequest.pullRequestUrl,
+          },
+          message:
+            "ORAX created a GitHub branch and pull request from the sandbox-passed patch. The default branch was not modified directly.",
+        },
+        updatedAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(oraxTasksTable.id, task.id));
+
+    res.json({ approval: updatedApproval, artifact: prArtifact });
+  } catch (err) {
+    logger.error({ component: "orax", err, approvalId }, "Failed to create ORAX GitHub PR");
+    res.status(502).json({ error: "Could not create GitHub pull request" });
+  }
+});
+
 router.post("/orax/tasks", async (req, res) => {
   const userId = req.userId!;
   const parsed = createTaskSchema.safeParse(req.body ?? {});
@@ -1046,6 +1320,43 @@ function toRepositorySummary(repository: OraxRepository) {
     ...safeRepository
   } = repository;
   return safeRepository;
+}
+
+function buildPullRequestBody(input: {
+  task: OraxTask;
+  sandboxArtifactId: number;
+  draftArtifactId: number;
+  customBody?: string | null;
+  validation: {
+    changedFiles: Array<{ path: string; additions: number; deletions: number }>;
+    testPreview: Array<{ name: string; status: string; message: string }>;
+  };
+}): string {
+  const changedFiles = input.validation.changedFiles
+    .map((file) => `- ${file.path} (+${file.additions} / -${file.deletions})`)
+    .join("\n");
+  const checks = input.validation.testPreview.length
+    ? input.validation.testPreview
+        .map((check) => `- ${check.name}: ${check.status} - ${check.message}`)
+        .join("\n")
+    : "- No external test commands were run in this phase.";
+
+  return [
+    input.customBody?.trim() || `ORAX generated this PR from task #${input.task.id}.`,
+    "",
+    "## ORAX Safety Record",
+    `- Draft artifact: #${input.draftArtifactId}`,
+    `- Sandbox artifact: #${input.sandboxArtifactId}`,
+    "- Default branch was not modified directly.",
+    "- No terminal commands were executed by ORAX.",
+    "- No deployment was triggered.",
+    "",
+    "## Changed Files",
+    changedFiles || "- None recorded.",
+    "",
+    "## Checks",
+    checks,
+  ].join("\n");
 }
 
 async function loadOwnedRepository(userId: string, repositoryId: number) {

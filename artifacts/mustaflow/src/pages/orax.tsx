@@ -160,6 +160,14 @@ type OraxArtifact = {
     checks?: Array<{ name: string; status: string; message: string }>;
     errors?: string[];
     testPreview?: Array<{ name: string; status: string; message: string }>;
+    draftArtifactId?: number;
+    branchName?: string;
+    baseBranch?: string;
+    commitSha?: string;
+    pullRequestNumber?: number;
+    pullRequestUrl?: string;
+    pullRequestState?: string;
+    filesChanged?: string[];
   };
   createdAt: string;
   updatedAt: string;
@@ -207,9 +215,13 @@ export default function OraxPage() {
   const [requestingSandboxApprovalArtifactId, setRequestingSandboxApprovalArtifactId] = useState<
     number | null
   >(null);
+  const [requestingPrApprovalArtifactId, setRequestingPrApprovalArtifactId] = useState<
+    number | null
+  >(null);
   const [decidingApprovalId, setDecidingApprovalId] = useState<number | null>(null);
   const [readingApprovalId, setReadingApprovalId] = useState<number | null>(null);
   const [runningSandboxApprovalId, setRunningSandboxApprovalId] = useState<number | null>(null);
+  const [creatingPrApprovalId, setCreatingPrApprovalId] = useState<number | null>(null);
   const [generatingArtifactApprovalId, setGeneratingArtifactApprovalId] = useState<number | null>(
     null,
   );
@@ -230,6 +242,8 @@ export default function OraxPage() {
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
   const latestSandboxResult =
     artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
+  const latestGithubPrResult =
+    artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -615,6 +629,62 @@ export default function OraxPage() {
       setError(err instanceof Error ? err.message : "Could not run sandbox validation");
     } finally {
       setRunningSandboxApprovalId(null);
+    }
+  }
+
+  async function requestGithubPrApproval(artifactId: number) {
+    if (!selectedTask || requestingPrApprovalArtifactId) return;
+    setRequestingPrApprovalArtifactId(artifactId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/github-pr-approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          title: `ORAX: ${selectedTask.title}`,
+          reason: "Create a GitHub branch and pull request from the sandbox-passed patch.",
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not request GitHub PR approval");
+      }
+      const body = (await res.json()) as { approval: OraxApproval };
+      setApprovals((prev) => [body.approval, ...prev]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not request GitHub PR approval");
+    } finally {
+      setRequestingPrApprovalArtifactId(null);
+    }
+  }
+
+  async function createGithubPr(approvalId: number) {
+    if (creatingPrApprovalId) return;
+    setCreatingPrApprovalId(approvalId);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/approvals/${approvalId}/create-github-pr`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not create GitHub pull request");
+      }
+      const body = (await res.json()) as { approval: OraxApproval; artifact: OraxArtifact };
+      setApprovals((prev) =>
+        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
+      );
+      setArtifacts((prev) => [
+        body.artifact,
+        ...prev.filter((artifact) => artifact.id !== body.artifact.id),
+      ]);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create GitHub pull request");
+    } finally {
+      setCreatingPrApprovalId(null);
     }
   }
 
@@ -1111,6 +1181,20 @@ export default function OraxPage() {
                                 Run sandbox
                               </button>
                             ) : null}
+                            {approval.action === "github_pr" && approval.status === "approved" ? (
+                              <button
+                                onClick={() => void createGithubPr(approval.id)}
+                                disabled={creatingPrApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                              >
+                                {creatingPrApprovalId === approval.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <GitPullRequest className="h-3.5 w-3.5" />
+                                )}
+                                Create PR
+                              </button>
+                            ) : null}
                           </div>
                         </div>
                         {approval.result?.files?.length ? (
@@ -1337,11 +1421,87 @@ export default function OraxPage() {
                           {latestSandboxResult.payload.errors.join(" ")}
                         </div>
                       ) : null}
+
+                      {latestSandboxResult.payload.applied ? (
+                        <button
+                          onClick={() => void requestGithubPrApproval(latestSandboxResult.id)}
+                          disabled={requestingPrApprovalArtifactId === latestSandboxResult.id}
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                        >
+                          {requestingPrApprovalArtifactId === latestSandboxResult.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <GitPullRequest className="h-3.5 w-3.5" />
+                          )}
+                          Request GitHub PR approval
+                        </button>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
                       No sandbox validation yet. Request approval from a draft patch, approve it,
                       then run the sandbox.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="text-sm font-semibold">GitHub pull request</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    ORAX can create a new branch and pull request only after explicit approval. It
+                    never pushes directly to the default branch.
+                  </p>
+
+                  {latestGithubPrResult ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                        <Metric label="Status" value={latestGithubPrResult.status} />
+                        <Metric
+                          label="Branch"
+                          value={latestGithubPrResult.payload.branchName ?? "unknown"}
+                        />
+                        <Metric
+                          label="Base"
+                          value={latestGithubPrResult.payload.baseBranch ?? "unknown"}
+                        />
+                        <Metric
+                          label="PR"
+                          value={
+                            latestGithubPrResult.payload.pullRequestNumber
+                              ? `#${latestGithubPrResult.payload.pullRequestNumber}`
+                              : "unknown"
+                          }
+                        />
+                      </div>
+                      {latestGithubPrResult.summary ? (
+                        <p className="text-sm text-foreground">{latestGithubPrResult.summary}</p>
+                      ) : null}
+                      {latestGithubPrResult.payload.pullRequestUrl ? (
+                        <a
+                          href={latestGithubPrResult.payload.pullRequestUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-muted"
+                        >
+                          <GitPullRequest className="h-3.5 w-3.5" />
+                          Open pull request
+                        </a>
+                      ) : null}
+                      {latestGithubPrResult.payload.filesChanged?.length ? (
+                        <div className="text-xs text-muted-foreground">
+                          Files in PR: {latestGithubPrResult.payload.filesChanged.join(", ")}
+                        </div>
+                      ) : null}
+                      {latestGithubPrResult.payload.commitSha ? (
+                        <div className="text-xs text-muted-foreground">
+                          Commit: {latestGithubPrResult.payload.commitSha}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      No GitHub pull request yet. Request approval from a passed sandbox result,
+                      approve it, then create the PR.
                     </p>
                   )}
                 </div>

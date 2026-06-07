@@ -13,6 +13,12 @@ export type OraxSandboxChangedFile = {
   deletions: number;
 };
 
+export type OraxSandboxPatchedFile = {
+  path: string;
+  content: string;
+  sourceSha: string;
+};
+
 export type OraxSandboxCheck = {
   name: string;
   status: "passed" | "failed" | "not_run";
@@ -43,11 +49,20 @@ export function runOraxSandboxValidation(input: {
   files: OraxSandboxFile[];
   suggestedTests?: string[];
 }): OraxSandboxValidation {
+  return buildOraxSandboxPatch(input).validation;
+}
+
+export function buildOraxSandboxPatch(input: {
+  unifiedDiff: string;
+  files: OraxSandboxFile[];
+  suggestedTests?: string[];
+}): { validation: OraxSandboxValidation; patchedFiles: OraxSandboxPatchedFile[] } {
   const filesByPath = new Map(input.files.map((file) => [file.path, file]));
   const parsed = parseUnifiedDiff(input.unifiedDiff);
   const errors: string[] = [];
   const changedFiles: OraxSandboxChangedFile[] = [];
   const checks: OraxSandboxCheck[] = [];
+  const patchedFiles: OraxSandboxPatchedFile[] = [];
 
   if (!parsed.length) {
     errors.push("No unified diff could be parsed.");
@@ -73,6 +88,11 @@ export function runOraxSandboxValidation(input: {
       additions: result.additions,
       deletions: result.deletions,
     });
+    patchedFiles.push({
+      path: patch.path,
+      content: result.content,
+      sourceSha: source.sha,
+    });
 
     checks.push(...runStaticChecks(patch.path, result.content));
   }
@@ -83,17 +103,20 @@ export function runOraxSandboxValidation(input: {
 
   const applied = errors.length === 0 && changedFiles.length > 0;
   return {
-    mode: "in_memory_patch_sandbox",
-    applied,
-    changedFiles,
-    checks,
-    errors,
-    testPreview: (input.suggestedTests ?? []).slice(0, 8).map((test) => ({
-      name: test,
-      status: "not_run",
-      message:
-        "External command execution remains locked in this phase. This check is listed for review.",
-    })),
+    validation: {
+      mode: "in_memory_patch_sandbox",
+      applied,
+      changedFiles,
+      checks,
+      errors,
+      testPreview: (input.suggestedTests ?? []).slice(0, 8).map((test) => ({
+        name: test,
+        status: "not_run",
+        message:
+          "External command execution remains locked in this phase. This check is listed for review.",
+      })),
+    },
+    patchedFiles: applied ? patchedFiles : [],
   };
 }
 

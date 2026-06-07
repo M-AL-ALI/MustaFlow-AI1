@@ -21,6 +21,35 @@ type GithubBranchResponse = {
   };
 };
 
+type GithubRefResponse = {
+  object: {
+    sha: string;
+    type: string;
+  };
+};
+
+type GithubCommitResponse = {
+  sha: string;
+  tree: {
+    sha: string;
+  };
+};
+
+type GithubBlobResponse = {
+  sha: string;
+};
+
+type GithubCreateTreeResponse = {
+  sha: string;
+};
+
+type GithubPullResponse = {
+  number: number;
+  html_url: string;
+  state: string;
+  title: string;
+};
+
 type GithubTreeEntry = {
   path: string;
   mode: string;
@@ -207,6 +236,130 @@ export async function readGithubRepositoryFiles(input: {
   return { files, skipped, totalBytes };
 }
 
+export async function createGithubPullRequestFromFiles(input: {
+  owner: string;
+  repo: string;
+  token: string;
+  baseBranch: string;
+  branchName: string;
+  title: string;
+  body: string;
+  commitMessage: string;
+  files: Array<{ path: string; content: string }>;
+}): Promise<{
+  branchName: string;
+  baseBranch: string;
+  commitSha: string;
+  pullRequestNumber: number;
+  pullRequestUrl: string;
+  pullRequestState: string;
+  changedFiles: string[];
+}> {
+  if (!input.token.trim()) {
+    throw new Error("GitHub token is required for PR creation");
+  }
+  const branchName = normalizeBranchName(input.branchName);
+  if (!branchName || branchName === input.baseBranch || branchName.includes("..")) {
+    throw new Error("Invalid ORAX branch name");
+  }
+  if (!input.files.length) {
+    throw new Error("No files provided for PR creation");
+  }
+
+  const baseRef = await githubJson<GithubRefResponse>(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/ref/heads/${encodeRefPath(input.baseBranch)}`,
+    input.token,
+  );
+  const baseCommitSha = baseRef.body.object.sha;
+  const baseCommit = await githubJson<GithubCommitResponse>(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/commits/${encodeURIComponent(baseCommitSha)}`,
+    input.token,
+  );
+
+  const treeEntries = [];
+  for (const file of input.files) {
+    const blob = await githubJson<GithubBlobResponse>(
+      `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/blobs`,
+      input.token,
+      {
+        method: "POST",
+        body: {
+          content: file.content,
+          encoding: "utf-8",
+        },
+      },
+    );
+    treeEntries.push({
+      path: file.path,
+      mode: "100644",
+      type: "blob",
+      sha: blob.body.sha,
+    });
+  }
+
+  const tree = await githubJson<GithubCreateTreeResponse>(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/trees`,
+    input.token,
+    {
+      method: "POST",
+      body: {
+        base_tree: baseCommit.body.tree.sha,
+        tree: treeEntries,
+      },
+    },
+  );
+
+  const commit = await githubJson<GithubCommitResponse>(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/commits`,
+    input.token,
+    {
+      method: "POST",
+      body: {
+        message: input.commitMessage,
+        tree: tree.body.sha,
+        parents: [baseCommitSha],
+      },
+    },
+  );
+
+  await githubJson<{ ref: string }>(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/refs`,
+    input.token,
+    {
+      method: "POST",
+      body: {
+        ref: `refs/heads/${branchName}`,
+        sha: commit.body.sha,
+      },
+    },
+  );
+
+  const pull = await githubJson<GithubPullResponse>(
+    `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls`,
+    input.token,
+    {
+      method: "POST",
+      body: {
+        title: input.title,
+        head: branchName,
+        base: input.baseBranch,
+        body: input.body,
+        maintainer_can_modify: true,
+      },
+    },
+  );
+
+  return {
+    branchName,
+    baseBranch: input.baseBranch,
+    commitSha: commit.body.sha,
+    pullRequestNumber: pull.body.number,
+    pullRequestUrl: pull.body.html_url,
+    pullRequestState: pull.body.state,
+    changedFiles: input.files.map((file) => file.path),
+  };
+}
+
 export function summarizeGithubTree(input: {
   owner: string;
   name: string;
@@ -293,14 +446,20 @@ export function extensionToLanguage(filePath: string): string | null {
 async function githubJson<T>(
   path: string,
   token?: string,
+  options?: {
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
 ): Promise<{ body: T; scopes: string | null }> {
   const response = await fetch(`${GITHUB_API_BASE}${path}`, {
-    method: "GET",
+    method: options?.method ?? "GET",
     headers: {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    ...(options?.body ? { body: JSON.stringify(options.body) } : {}),
   });
   const text = await response.text();
   const body = text ? safeJson(text) : null;
@@ -329,6 +488,19 @@ function safeJson(text: string): unknown {
 
 function encodeGithubPath(filePath: string): string {
   return filePath.split("/").map(encodeURIComponent).join("/");
+}
+
+function encodeRefPath(ref: string): string {
+  return ref.split("/").map(encodeURIComponent).join("/");
+}
+
+function normalizeBranchName(branchName: string): string {
+  return branchName
+    .trim()
+    .replace(/[^A-Za-z0-9._/-]+/g, "-")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\/{2,}/g, "/")
+    .slice(0, 120);
 }
 
 function isProbablyText(buffer: Buffer): boolean {

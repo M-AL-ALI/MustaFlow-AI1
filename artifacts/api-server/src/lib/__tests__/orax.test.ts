@@ -108,13 +108,19 @@ describe("ORAX read-only GitHub scan summaries", () => {
     expect(extensionToLanguage("LICENSE")).toBeNull();
   });
 
-  it("keeps the GitHub helper read-only", () => {
+  it("keeps GitHub writes scoped to branch and PR creation", () => {
     const source = readFileSync(path.join(__dirname, "../orax-github.ts"), "utf8");
     expect(source).toContain('method: "GET"');
-    expect(source).not.toMatch(/method:\s*"POST"/);
+    expect(source).toContain('method: "POST"');
+    expect(source).toContain("/git/blobs");
+    expect(source).toContain("/git/trees");
+    expect(source).toContain("/git/commits");
+    expect(source).toContain("/git/refs");
+    expect(source).toContain("/pulls");
     expect(source).not.toMatch(/method:\s*"PATCH"/);
     expect(source).not.toMatch(/method:\s*"PUT"/);
     expect(source).not.toMatch(/method:\s*"DELETE"/);
+    expect(source).not.toContain("child_process");
   });
 });
 
