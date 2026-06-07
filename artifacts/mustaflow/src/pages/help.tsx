@@ -678,6 +678,33 @@ export default function HelpPage() {
   const { data, isLoading } = useListHelpArticles(search.trim() ? { q: search.trim() } : undefined);
 
   const faqs = useMemo(() => data?.faqs ?? [], [data]);
+
+  useEffect(() => {
+    if (faqs.length === 0) return;
+    const scriptId = "faqpage-jsonld";
+    let el = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (!el) {
+      el = document.createElement("script");
+      el.id = scriptId;
+      el.type = "application/ld+json";
+      document.head.appendChild(el);
+    }
+    el.textContent = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: faqs.map((f) => ({
+        "@type": "Question",
+        name: f.title,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: f.body,
+        },
+      })),
+    });
+    return () => {
+      document.getElementById(scriptId)?.remove();
+    };
+  }, [faqs]);
   const articles = useMemo(() => data?.articles ?? [], [data]);
 
   const categories = useMemo(() => {
