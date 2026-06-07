@@ -43,8 +43,10 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(route).toContain('router.post("/public-ai/tts"');
     expect(route).toContain("validateSession");
     expect(route).toContain("oraVoiceTtsLimiter");
+    expect(route).toContain("OPENAI_API_KEY");
     expect(route).toContain("gpt-4o-mini-tts");
     expect(route).toContain('"Content-Type", "audio/mpeg"');
+    expect(route).not.toContain("@workspace/integrations-openai-ai-server");
 
     const index = readPublicAiRoute("index.ts");
     expect(index).toContain('import ttsRouter from "./tts"');
@@ -76,6 +78,8 @@ describe("Talk to Ora voice-session wiring", () => {
         src.indexOf("Conversation cycling: track when Ora finishes speaking"),
       );
       expect(autoSpeakSection).not.toContain("isSpeechSynthesisSupported");
+      expect(autoSpeakSection).not.toContain("isLoading");
+      expect(autoSpeakSection).toContain("playbackKey");
     }
 
     const button = readFe("components/ora/ora-voice-mode-button.tsx");

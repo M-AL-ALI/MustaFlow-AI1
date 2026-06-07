@@ -14,6 +14,7 @@ import { oraVoiceTtsLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 
 const router = Router();
+let directOpenAI: OpenAI | null = null;
 
 // Talk to Ora voice replies use OpenAI's POST /audio/speech endpoint, which the
 // Replit AI-integrations proxy does not support ("INVALID_ENDPOINT"). Route TTS
@@ -49,6 +50,13 @@ const ttsSchema = z.object({
   language: z.string().max(20).optional(),
 });
 
+function getDirectOpenAI(): OpenAI | null {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  directOpenAI ??= new OpenAI({ apiKey });
+  return directOpenAI;
+}
+
 router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
@@ -70,6 +78,11 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
 
   const text = parsed.data.text.trim();
   const voice = parsed.data.voice ?? "nova";
+  const client = getDirectOpenAI();
+  if (!client) {
+    res.status(503).json({ error: "Ora voice is not configured." });
+    return;
+  }
 
   const client = getTtsClient();
   if (!client) {

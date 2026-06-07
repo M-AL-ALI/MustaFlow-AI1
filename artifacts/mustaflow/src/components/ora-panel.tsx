@@ -435,13 +435,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   // Uses speakTextForce so it works regardless of the user's TTS toggle preference —
   // Voice Conversation Mode has its own mute control (voiceConvTtsMuted).
   useEffect(() => {
-    if (!voiceConvActive || voiceConvTtsMuted || isLoading) return;
-    const lastMsg = messages[messages.length - 1];
+    if (!voiceConvActive || voiceConvTtsMuted) return;
+    const lastMsgIndex = messages.length - 1;
+    const lastMsg = messages[lastMsgIndex];
     if (!lastMsg || lastMsg.role !== "assistant") return;
-    if (lastMsg.content === lastConvAssistantMsgRef.current) return;
-    lastConvAssistantMsgRef.current = lastMsg.content;
+    const playbackKey = `${lastMsgIndex}:${lastMsg.content}`;
+    if (playbackKey === lastConvAssistantMsgRef.current) return;
+    lastConvAssistantMsgRef.current = playbackKey;
     voiceRef.current.speakTextForce(lastMsg.content, languageRef.current);
-  }, [messages, isLoading, voiceConvActive, voiceConvTtsMuted]);
+  }, [messages, voiceConvActive, voiceConvTtsMuted]);
 
   // Conversation cycling: track when Ora finishes speaking so the automatic
   // listener can resume.
@@ -735,11 +737,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     setInput("");
     setVoiceReady(false);
     wasConvSpeakingRef.current = false;
-    lastConvAssistantMsgRef.current = null;
+    const lastMsgIndex = messages.length - 1;
+    const lastMsg = messages[lastMsgIndex];
+    lastConvAssistantMsgRef.current =
+      lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
     setVoiceConvActive(true);
     voiceConvActiveRef.current = true;
-    // Whisper push-to-talk: don't auto-start listening — user holds the button.
-  }, []);
+    // The automatic listener effect starts Whisper once the mode is active.
+  }, [messages]);
 
   const handleExitVoiceConvMode = useCallback(() => {
     setVoiceConvActive(false);
