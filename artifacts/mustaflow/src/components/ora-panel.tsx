@@ -8,6 +8,7 @@ import {
   Paperclip,
   FileText,
   Table2,
+  Image as ImageIcon,
   AlertCircle,
   Loader2,
   X,
@@ -1093,6 +1094,18 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         isFull ? "text-[15px]" : "text-sm",
                       )}
                     >
+                      {msg.attachment && (
+                        <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] px-2.5 py-1.5 text-xs">
+                          {msg.attachment.isImage ? (
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                          ) : msg.attachment.isDataset ? (
+                            <Table2 className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                          ) : (
+                            <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                          )}
+                          <span className="truncate">{msg.attachment.filename}</span>
+                        </div>
+                      )}
                       {msg.content}
                     </div>
                   ) : msg.datasetResult ? (

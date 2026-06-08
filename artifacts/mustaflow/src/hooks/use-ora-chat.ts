@@ -33,6 +33,17 @@ export interface OraMessage {
   suggestions?: string[];
   messageKind?: "image-analysis" | "document-analysis";
   hadAttachment?: boolean;
+  /**
+   * Lightweight metadata about the file the user attached to this message, so
+   * the upload stays visible in the thread (and after reload). We persist only
+   * the display fields — never the file bytes.
+   */
+  attachment?: {
+    filename: string;
+    fileType: string;
+    isImage?: boolean;
+    isDataset?: boolean;
+  };
   editedFrom?: boolean;
   generatedFile?: GeneratedFile;
   imageUrl?: string;
@@ -352,6 +363,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   messageKind?: string;
   suggestions?: string[];
   hadAttachment?: boolean;
+  attachment?: { filename: string; fileType: string; isImage?: boolean; isDataset?: boolean };
   editedFrom?: boolean;
   generatedFile?: GeneratedFile;
   datasetResult?: DatasetAnalysisResult;
@@ -371,6 +383,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.messageKind !== undefined ? { messageKind: m.messageKind } : {}),
     ...(m.suggestions && m.suggestions.length > 0 ? { suggestions: m.suggestions } : {}),
     ...(m.hadAttachment ? { hadAttachment: true } : {}),
+    // Persist the attachment metadata so the upload stays visible after reload.
+    ...(m.attachment ? { attachment: m.attachment } : {}),
     ...(m.editedFrom ? { editedFrom: true } : {}),
     // Include generatedFile so the download card persists across re-renders
     ...(m.generatedFile ? { generatedFile: m.generatedFile } : {}),
@@ -881,7 +895,17 @@ export function useOraChat(): UseOraChatReturn {
       const userMsg: OraMessage = {
         role: "user",
         content,
-        ...(currentAttachment ? { hadAttachment: true } : {}),
+        ...(currentAttachment
+          ? {
+              hadAttachment: true,
+              attachment: {
+                filename: currentAttachment.filename,
+                fileType: currentAttachment.fileType,
+                ...(currentAttachment.isImage ? { isImage: true } : {}),
+                ...(currentAttachment.isDataset ? { isDataset: true } : {}),
+              },
+            }
+          : {}),
         ...(opts?.editedFrom ? { editedFrom: true } : {}),
       };
       setMessages(() => {

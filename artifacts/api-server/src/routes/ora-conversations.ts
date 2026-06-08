@@ -46,6 +46,16 @@ const messageSchema = z.object({
   suggestions: z.array(z.string()).optional(),
   generatedFile: generatedFileSchema.optional(),
   hadAttachment: z.boolean().optional(),
+  // Display metadata for a user's uploaded file — persisted so the attachment
+  // chip stays visible in the thread after reload (never the file bytes).
+  attachment: z
+    .object({
+      filename: z.string().max(300),
+      fileType: z.string().max(120),
+      isImage: z.boolean().optional(),
+      isDataset: z.boolean().optional(),
+    })
+    .optional(),
   editedFrom: z.boolean().optional(),
   // Web-search citation cards — persisted so they survive reload.
   sources: z.array(sourceSchema).max(20).optional(),

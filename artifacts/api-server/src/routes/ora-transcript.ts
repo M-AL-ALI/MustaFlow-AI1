@@ -44,6 +44,16 @@ const messageSchema = z.object({
   suggestions: z.array(z.string()).optional(),
   generatedFile: generatedFileSchema.optional(),
   hadAttachment: z.boolean().optional(),
+  // Mirror ora-conversations.ts: persist the upload's display metadata so the
+  // attachment chip survives reload (never the file bytes).
+  attachment: z
+    .object({
+      filename: z.string().max(300),
+      fileType: z.string().max(120),
+      isImage: z.boolean().optional(),
+      isDataset: z.boolean().optional(),
+    })
+    .optional(),
   editedFrom: z.boolean().optional(),
   // Mirror the conversation schema so the anonymous/legacy transcript store
   // restores citations, inline images, and memory chips faithfully too.
