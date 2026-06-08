@@ -240,9 +240,28 @@ function backfillMemoryEmbeddings(rows: OraMemoryRow[]): void {
 }
 
 /**
+ * A saved Ora memory that was injected into a given reply's context. Surfaced
+ * to the client (Ora-scoped only) so the UI can show which memories shaped the
+ * answer and deep-link them to the Memory Center. Carries only the memory id +
+ * its short title — never AI Builder / project data.
+ */
+export interface OraMemoryUsed {
+  id: number;
+  title: string;
+}
+
+/** Result of building the saved-memory context block for a reply. */
+export interface MemoryContextResult {
+  /** The formatted context block appended to the system prompt (or ""). */
+  text: string;
+  /** The memories actually injected, for client-side transparency. */
+  used: OraMemoryUsed[];
+}
+
+/**
  * Fetch the user's saved Ora memories and format them as a compact context
- * block for the system prompt. Returns an empty string when there is nothing
- * to inject.
+ * block for the system prompt. Returns an empty block + empty `used` list when
+ * there is nothing to inject.
  *
  * When the current message is provided, memories are RELEVANCE-RANKED (semantic
  * similarity primary, TF-IDF fallback, recency tiebreaker) so older-but-relevant
@@ -256,7 +275,10 @@ function backfillMemoryEmbeddings(rows: OraMemoryRow[]): void {
  * user-scope style memories / brand profiles (origin="builder") — into Ora's
  * context, which would leak Builder engineering knowledge into Ora.
  */
-async function buildMemoryContext(userId: string, currentMessage?: string): Promise<string> {
+async function buildMemoryContext(
+  userId: string,
+  currentMessage?: string,
+): Promise<MemoryContextResult> {
   try {
     const rows = await db
       .select({
@@ -281,7 +303,7 @@ async function buildMemoryContext(userId: string, currentMessage?: string): Prom
       .orderBy(desc(knowledgeEntriesTable.createdAt))
       .limit(ORA_MEMORY_CANDIDATE_LIMIT);
 
-    if (rows.length === 0) return "";
+    if (rows.length === 0) return { text: "", used: [] };
 
     const selected =
       currentMessage && currentMessage.trim().length > 0
@@ -292,15 +314,18 @@ async function buildMemoryContext(userId: string, currentMessage?: string): Prom
     // use semantic similarity. Fire-and-forget; never blocks this reply.
     backfillMemoryEmbeddings(rows);
 
-    if (selected.length === 0) return "";
+    if (selected.length === 0) return { text: "", used: [] };
 
     const lines = selected
       .map((r) => `- ${r.title}${r.content ? `: ${r.content}` : ""}`)
       .join("\n");
-    return `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation:\n${lines}`;
+    return {
+      text: `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation:\n${lines}`,
+      used: selected.map((r) => ({ id: r.id, title: r.title })),
+    };
   } catch {
     // Memory injection is best-effort — never block a reply on it.
-    return "";
+    return { text: "", used: [] };
   }
 }
 
@@ -820,9 +845,11 @@ router.post("/public-ai/chat", async (req, res) => {
     // Mirrors the conversational branch: profile is always applied for signed-in
     // users; saved memories respect the referenceSavedMemories opt-out toggle.
     const searchProfileContext = authed ? await buildProfileContext(authed.userId) : "";
-    const searchMemoryContext =
-      authed && referenceSavedMemories ? await buildMemoryContext(authed.userId, message) : "";
-    const searchPersonalContext = searchProfileContext + searchMemoryContext;
+    const searchMemory =
+      authed && referenceSavedMemories
+        ? await buildMemoryContext(authed.userId, message)
+        : { text: "", used: [] };
+    const searchPersonalContext = searchProfileContext + searchMemory.text;
     try {
       const result = await runOraWebSearch({
         query: message,
@@ -839,6 +866,7 @@ router.post("/public-ai/chat", async (req, res) => {
         sources: result.sources,
         images: result.images,
         videos: result.videos,
+        ...(searchMemory.used.length > 0 ? { memoriesUsed: searchMemory.used } : {}),
         ...usage,
       });
     } catch (err) {
@@ -878,8 +906,10 @@ router.post("/public-ai/chat", async (req, res) => {
       : [];
 
   // Saved memories are opt-out and only available to signed-in users.
-  const memoryContext =
-    authed && referenceSavedMemories ? await buildMemoryContext(authed.userId, message) : "";
+  const memory =
+    authed && referenceSavedMemories
+      ? await buildMemoryContext(authed.userId, message)
+      : { text: "", used: [] };
 
   // The Ora profile ("About you") is custom instructions — always applied for
   // signed-in users when present, independent of the saved-memories toggle.
@@ -906,7 +936,7 @@ router.post("/public-ai/chat", async (req, res) => {
     buildSystemPrompt(language, languageHint) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
     profileContext +
-    memoryContext +
+    memory.text +
     summaryContext;
 
   const callMessages = [
@@ -1097,6 +1127,10 @@ router.post("/public-ai/chat", async (req, res) => {
     // and re-send it on the next turn. Always present when chat history is on so
     // the client can advance its "already summarized" pointer.
     ...(referenceChatHistory ? { conversationSummary } : {}),
+    // Surface which saved Ora memories shaped this reply (Ora-scoped only) so
+    // the client can show an unobtrusive "based on your saved memories"
+    // indicator that deep-links to the Memory Center.
+    ...(memory.used.length > 0 ? { memoriesUsed: memory.used } : {}),
     mode: deepAllowed ? "deep" : "instant",
     ...usage,
   });

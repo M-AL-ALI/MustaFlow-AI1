@@ -83,6 +83,12 @@ const messageSchema = z.object({
   memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
   memorySaveCandidateSensitive: z.boolean().optional(),
   memorySaved: z.boolean().optional(),
+  // Saved Ora memories that shaped this reply (Ora-scoped only) — persisted so
+  // the "based on your saved memories" indicator survives reload.
+  memoriesUsed: z
+    .array(z.object({ id: z.number().int(), title: z.string().max(200) }))
+    .max(30)
+    .optional(),
 });
 
 const MAX_STORED = 100;

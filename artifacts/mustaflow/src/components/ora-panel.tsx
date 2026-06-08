@@ -35,6 +35,7 @@ import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
+import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
 import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
@@ -1269,6 +1270,17 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         saved={Boolean(msg.memorySaved)}
                         sensitive={Boolean(msg.memorySaveCandidateSensitive)}
                         onSave={() => handleSaveMemory(msg.memorySaveCandidate ?? "", msg.content)}
+                        onOpenMemoryCenter={() => setMemoryManagerOpen(true)}
+                      />
+                    )}
+
+                  {msg.role === "assistant" &&
+                    isSignedIn &&
+                    Array.isArray(msg.memoriesUsed) &&
+                    msg.memoriesUsed.length > 0 && (
+                      <OraMemoriesUsedChip
+                        memories={msg.memoriesUsed}
+                        onOpenMemoryCenter={() => setMemoryManagerOpen(true)}
                       />
                     )}
 

@@ -40,6 +40,16 @@ export interface OraVideo {
   thumbnailUrl?: string;
 }
 
+/**
+ * A saved Ora memory that shaped a given reply. Surfaced (Ora-scoped only) so
+ * the chat can show an unobtrusive "based on your saved memories" indicator
+ * that deep-links to the Memory Center.
+ */
+export interface OraMemoryUsed {
+  id: number;
+  title: string;
+}
+
 export interface OraMessage {
   role: "user" | "assistant";
   content: string;
@@ -76,6 +86,10 @@ export interface OraMessage {
   images?: OraImage[];
   /** Relevant videos found on the web, rendered as clickable link cards. */
   videos?: OraVideo[];
+  /** Saved Ora memories that shaped this reply (Ora-scoped only). */
+  memoriesUsed?: OraMemoryUsed[];
+  /** rolling conversation summary for this conversation. */
+  conversationSummary?: string;
 }
 
 export interface OraSession {
@@ -406,6 +420,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   sources?: OraSource[];
   images?: OraImage[];
   videos?: OraVideo[];
+  memoriesUsed?: OraMemoryUsed[];
+  conversationSummary?: string;
 }> {
   return messages.map((m) => ({
     role: m.role,
@@ -435,6 +451,10 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     // Persist web-found media so the gallery + video cards survive reload
     ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
     ...(m.videos && m.videos.length > 0 ? { videos: m.videos } : {}),
+    // Persist which saved memories shaped the reply so the indicator survives reload
+    ...(m.memoriesUsed && m.memoriesUsed.length > 0 ? { memoriesUsed: m.memoriesUsed } : {}),
+    // Persist the rolling summary so it can be re-sent after a reload
+    ...(m.conversationSummary ? { conversationSummary: m.conversationSummary } : {}),
   }));
 }
 
@@ -1146,6 +1166,8 @@ export function useOraChat(): UseOraChatReturn {
             videos?: OraVideo[];
             // Updated rolling conversation summary (present when chat history on)
             conversationSummary?: string;
+            // Present when saved Ora memories shaped this reply (Ora-scoped only)
+            memoriesUsed?: OraMemoryUsed[];
             msgCount: number;
             msgLimit: number;
             imageCount?: number;
@@ -1176,6 +1198,8 @@ export function useOraChat(): UseOraChatReturn {
                 ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
                 ...(data.images && data.images.length > 0 ? { images: data.images } : {}),
                 ...(data.videos && data.videos.length > 0 ? { videos: data.videos } : {}),
+                ...(data.memoriesUsed && data.memoriesUsed.length > 0 ? { memoriesUsed: data.memoriesUsed } : {}),
+                ...(data.conversationSummary ? { conversationSummary: data.conversationSummary } : {}),
                 ...(data.memorySaveCandidate
                   ? {
                       memorySaveCandidate: data.memorySaveCandidate,

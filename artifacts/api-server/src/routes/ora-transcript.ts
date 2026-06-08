@@ -81,6 +81,12 @@ const messageSchema = z.object({
   memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
   memorySaveCandidateSensitive: z.boolean().optional(),
   memorySaved: z.boolean().optional(),
+  // Mirror ora-conversations.ts: persist which saved memories shaped a reply so
+  // the "based on your saved memories" indicator survives reload.
+  memoriesUsed: z
+    .array(z.object({ id: z.number().int(), title: z.string().max(200) }))
+    .max(30)
+    .optional(),
 });
 
 const saveBodySchema = z.object({

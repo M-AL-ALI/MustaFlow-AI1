@@ -1,25 +1,29 @@
 import { useState } from "react";
-import { Brain, Check, Loader2, ShieldAlert } from "lucide-react";
+import { ArrowUpRight, Brain, Check, Loader2, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
  * Inline "Save to memory" affordance shown beneath an assistant message that
  * carries a memory candidate (a durable fact Ora detected). Once saved it
- * collapses to a small confirmation. The actual persistence + transcript update
- * is owned by the parent via `onSave`; this component only manages its own
- * in-flight / error UI.
+ * collapses to a small confirmation that links straight to the Memory Center so
+ * the user can see exactly where the memory now lives. The actual persistence +
+ * transcript update is owned by the parent via `onSave`; this component only
+ * manages its own in-flight / error UI.
  */
 export function OraMemorySaveChip({
   fact,
   saved,
   sensitive = false,
   onSave,
+  onOpenMemoryCenter,
 }: {
   fact: string;
   saved: boolean;
   /** When true, the fact looks like PII/credentials — warn and never auto-save. */
   sensitive?: boolean;
   onSave: () => Promise<void>;
+  /** Opens the Memory Center so the user can see the saved entry. */
+  onOpenMemoryCenter?: () => void;
 }) {
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
 
@@ -27,7 +31,17 @@ export function OraMemorySaveChip({
     return (
       <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <Check className="h-3.5 w-3.5 text-emerald-500" />
-        Saved to memory
+        <span>Saved to memory</span>
+        {onOpenMemoryCenter && (
+          <button
+            type="button"
+            onClick={onOpenMemoryCenter}
+            className="inline-flex items-center gap-0.5 font-medium text-[hsl(265_85%_65%)] hover:underline"
+          >
+            View in Memory Center
+            <ArrowUpRight className="h-3 w-3" />
+          </button>
+        )}
       </div>
     );
   }
