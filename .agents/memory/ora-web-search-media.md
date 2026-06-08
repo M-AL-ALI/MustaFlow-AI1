@@ -15,6 +15,19 @@ machine-checkable list of tool-returned media URLs — the model self-reports me
 http(s)-only + public-host-only + dedupe/cap + frontend `<img onError>` hide-on-failure.
 Do not claim full provenance enforcement.
 
+**Videos: existence-verified via oEmbed (not just shape-checked).** The model routinely
+hallucinates plausible-but-dead YouTube IDs → the card renders a broken player ("An error
+occurred / Playback ID …") behind a dead "Watch on YouTube" link. `sanitizeVideos` only
+validates URL *shape*. `verifyVideos` (in `web-search.ts`, awaited in `runOraWebSearch` after
+`parseOraMediaBlock`) confirms each video against its provider's **public oEmbed endpoint**
+(`youtube.com` / `vimeo.com` — fixed trusted hosts, so the outbound call is NOT SSRF even
+though the input URL came from the model) and DROPS anything non-2xx/timeout/error. Runs in
+parallel with a per-request timeout, preserves order. **Tradeoff:** videos on providers we
+can't oEmbed-verify (anything but YouTube/Vimeo) are dropped entirely — "show nothing" beats
+"show a fake card." Images are NOT verified (broken `<img>` just hides; no fake-link UX).
+**How to apply:** any new video provider must get an oEmbed entry in `videoOembedEndpoint` or
+its cards never surface.
+
 **SSRF guard (load-bearing): `isPrivateOrLocalHost` gates every media + citation URL.**
 **Why:** media URLs are auto-fetched by the viewer's browser via `<img src>` (no click),
 so a hallucinated/poisoned internal URL turns a chat reply into an SSRF-style probe of the

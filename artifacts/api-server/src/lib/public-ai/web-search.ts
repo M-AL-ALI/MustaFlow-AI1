@@ -298,6 +298,91 @@ export function sanitizeVideos(raw: unknown, limit = 3): OraVideo[] {
 }
 
 /**
+ * Public oEmbed endpoint for the video providers Ora can positively verify.
+ * These are fixed, trusted hosts (youtube.com / vimeo.com), so calling them
+ * carries no SSRF risk even though the *input* URL was reported by the model.
+ * Returns null for any provider we cannot authoritatively verify.
+ */
+function videoOembedEndpoint(url: string): string | null {
+  const id = youtubeId(url);
+  if (id) {
+    return `https://www.youtube.com/oembed?url=${encodeURIComponent(
+      `https://www.youtube.com/watch?v=${id}`,
+    )}&format=json`;
+  }
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (host === "vimeo.com" || host === "player.vimeo.com") {
+      return `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Confirm a single model-reported video actually exists and is embeddable by
+ * querying its provider's oEmbed endpoint. On success any gaps in the card's
+ * title/thumbnail are filled from the oEmbed payload; on a missing, private, or
+ * unembeddable video (non-2xx, timeout, or network error) it returns null so
+ * the card is dropped.
+ */
+async function verifyOneVideo(video: OraVideo, timeoutMs: number): Promise<OraVideo | null> {
+  const endpoint = videoOembedEndpoint(video.url);
+  // Only surface videos we can positively confirm — never a guessed URL.
+  if (!endpoint) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(endpoint, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as {
+      title?: unknown;
+      thumbnail_url?: unknown;
+    } | null;
+    const oembedTitle = asString(data?.title);
+    const oembedThumb = asString(data?.thumbnail_url);
+    const thumbnailUrl =
+      video.thumbnailUrl ??
+      youtubeThumbnail(video.url) ??
+      (oembedThumb && isSafeHttpUrl(oembedThumb) ? oembedThumb : undefined);
+    const title = video.title ?? oembedTitle ?? undefined;
+    return {
+      url: video.url,
+      ...(title ? { title } : {}),
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Verify model-reported videos actually exist and are embeddable.
+ *
+ * The web_search tool grounds the prose + `sources`, but the `videos` array is
+ * the model's own recollection — so it routinely contains plausible-looking yet
+ * non-existent YouTube IDs that render as a broken player ("An error occurred /
+ * Playback ID ...") behind a dead "Watch on YouTube" link. We confirm each
+ * entry against the provider's public oEmbed endpoint (fixed, trusted hosts —
+ * no SSRF) and drop anything we cannot positively confirm, so a rendered video
+ * card always points at a real, playable video. Checks run in parallel with a
+ * per-request timeout and preserve the original ordering.
+ */
+export async function verifyVideos(videos: OraVideo[], timeoutMs = 4500): Promise<OraVideo[]> {
+  if (videos.length === 0) return [];
+  const checked = await Promise.all(videos.map((v) => verifyOneVideo(v, timeoutMs)));
+  return checked.filter((v): v is OraVideo => v !== null);
+}
+
+/**
  * Pull the trailing ```ora-media JSON block (or a JSON block carrying
  * `images`/`videos` keys) out of the model reply, returning the cleaned answer
  * text plus the sanitized media. Never throws on malformed JSON.
@@ -404,7 +489,12 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
 
   const rawReply = (resp.output_text ?? "").trim();
   const sources = dedupeSources(extractSources(resp.output));
-  const { text: reply, images, videos } = parseOraMediaBlock(rawReply);
+  const { text: reply, images, videos: parsedVideos } = parseOraMediaBlock(rawReply);
+  // The videos array is the model's own recollection, not grounded by the
+  // search tool, so confirm each one is a real, embeddable video before
+  // surfacing it. Anything unverifiable (hallucinated/dead YouTube IDs) is
+  // dropped here so the UI never renders a broken player or a dead link.
+  const videos = await verifyVideos(parsedVideos);
 
   logger.info(
     {
@@ -414,6 +504,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
       sourceCount: sources.length,
       imageCount: images.length,
       videoCount: videos.length,
+      droppedVideoCount: parsedVideos.length - videos.length,
       hasReply: reply.length > 0,
     },
     "Ora web search completed",

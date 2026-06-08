@@ -37,6 +37,25 @@ vi.mock("openai", () => ({
   },
 }));
 
+// verifyVideos() confirms each model-reported video via the provider's public
+// oEmbed endpoint before it is surfaced. Stub fetch so the deterministic test
+// never touches the network: a YouTube oEmbed lookup resolves 200 with
+// metadata, except the sentinel id "doesnotexist" which 404s (a hallucinated
+// video). Anything else 404s too.
+const fetchMock = vi.fn(async (input: unknown) => {
+  const url = String(input);
+  if (url.startsWith("https://www.youtube.com/oembed")) {
+    if (url.includes("doesnotexist")) {
+      return new Response("not found", { status: 404 });
+    }
+    return new Response(
+      JSON.stringify({ title: "Verified", thumbnail_url: "https://img.youtube.com/x.jpg" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  return new Response("not found", { status: 404 });
+});
+
 // Search requires a signed-in user (checkToolAccess denies anonymous with
 // search_signin_required). Mock the resolver to return a free authed user.
 vi.mock("../../../lib/public-ai/authed-user", () => ({
@@ -123,6 +142,7 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
   beforeEach(async () => {
     vi.clearAllMocks();
     createMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
     app = await buildApp();
   });
 
@@ -205,5 +225,41 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.videos)).toBe(true);
     expect(res.body.videos.length).toBe(0);
+  });
+
+  it("drops a well-formed YouTube URL whose video does not exist (oEmbed 404)", async () => {
+    createMock.mockResolvedValueOnce({
+      output_text:
+        "Here you go.\n\n```ora-media\n" +
+        JSON.stringify({
+          images: [],
+          videos: [
+            // URL-shape valid but the video is gone — oEmbed 404s, so the card
+            // would otherwise render as a broken player + dead link.
+            { url: "https://www.youtube.com/watch?v=doesnotexist", title: "fake" },
+            // A real, verifiable video alongside it survives.
+            { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", title: "real" },
+          ],
+        }) +
+        "\n```",
+      output: [],
+    });
+
+    const { token } = makeSession();
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${token}`)
+      .send({
+        message: "find me a youtube video about composting",
+        messages: [],
+        referenceSavedMemories: false,
+      });
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.videos)).toBe(true);
+    // Only the verifiable video survives; the hallucinated one is dropped.
+    expect(res.body.videos.length).toBe(1);
+    expect(res.body.videos[0].url).toContain("dQw4w9WgXcQ");
+    expect(res.body.videos.some((v: { url: string }) => v.url.includes("doesnotexist"))).toBe(false);
   });
 });
