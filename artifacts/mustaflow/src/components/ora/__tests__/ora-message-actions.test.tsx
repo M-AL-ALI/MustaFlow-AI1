@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { OraMessageActions } from "../ora-message-actions";
 import type { OraMessage } from "@/hooks/use-ora-chat";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
@@ -106,6 +107,38 @@ function getAllButtonLabels(container: HTMLElement): string[] {
   return getAllButtons(container).map((btn) => btn.getAttribute("aria-label") ?? "");
 }
 
+// The labeled download/export actions live in the mobile Popover (text-labeled
+// items, no aria-label) and the desktop OraExportMenu. The desktop assistant
+// toolbar delegates rich exports to <OraExportMenu> (a button titled
+// "Export / Generate"); the per-format actions are reachable by opening the
+// mobile actions menu. These helpers drive that menu.
+async function openMobileActions(): Promise<void> {
+  // The desktop toolbar is a <div role="toolbar"> with the same accessible
+  // name; the mobile trigger is the only <button> named "Message actions".
+  const trigger = screen.getByRole("button", { name: "Message actions" });
+  await userEvent.click(trigger);
+}
+
+function normalize(text: string | null): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+// Radix portals the Popover content onto document.body, so query the document
+// rather than the render container.
+function getMenuItemByText(text: string): HTMLButtonElement | null {
+  return (
+    (Array.from(document.body.querySelectorAll<HTMLButtonElement>("button")).find(
+      (btn) => normalize(btn.textContent) === text,
+    ) as HTMLButtonElement | undefined) ?? null
+  );
+}
+
+function getMenuItemTexts(): string[] {
+  return Array.from(document.body.querySelectorAll<HTMLButtonElement>("button")).map((btn) =>
+    normalize(btn.textContent),
+  );
+}
+
 describe("OraMessageActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -127,10 +160,12 @@ describe("OraMessageActions", () => {
       expect(getButtonByLabel(container, "Edit")).not.toBeNull();
     });
 
-    it("does not render Download button for user messages", () => {
+    it("does not render Download/export controls for user messages", () => {
       const { container } = renderActions({ message: userMessage });
       const labels = getAllButtonLabels(container);
       expect(labels.some((l) => /download/i.test(l))).toBe(false);
+      // The export menu is assistant-only.
+      expect(container.querySelector('button[title="Export / Generate"]')).toBeNull();
     });
 
     it("calls clipboard API on Copy click", async () => {
@@ -176,10 +211,9 @@ describe("OraMessageActions", () => {
       expect(getButtonByLabel(container, "Copy")).not.toBeNull();
     });
 
-    it("renders Download button for assistant message", () => {
+    it("renders the export menu trigger for assistant message", () => {
       const { container } = renderActions({ message: assistantMessage });
-      const labels = getAllButtonLabels(container);
-      expect(labels.some((l) => /download/i.test(l))).toBe(true);
+      expect(container.querySelector('button[title="Export / Generate"]')).not.toBeNull();
     });
 
     it("does not render Edit button for assistant messages", () => {
@@ -235,9 +269,10 @@ describe("OraMessageActions", () => {
       expect(onReadAloud).toHaveBeenCalledWith(assistantMessage.content);
     });
 
-    it("calls downloadMessageAsMarkdown on Download click for plain assistant message", () => {
-      const { container } = renderActions({ message: assistantMessage });
-      const btn = getButtonByLabel(container, "Download as Markdown");
+    it("calls downloadMessageAsMarkdown from the mobile menu for a plain assistant message", async () => {
+      renderActions({ message: assistantMessage });
+      await openMobileActions();
+      const btn = getMenuItemByText("Download as Markdown");
       expect(btn).not.toBeNull();
       fireEvent.click(btn!);
       expect(mockDownloadMessageAsMarkdown).toHaveBeenCalledWith(assistantMessage, "ora-response");
@@ -245,47 +280,54 @@ describe("OraMessageActions", () => {
   });
 
   describe("Dataset analysis messages", () => {
-    it("renders Download report button for dataset message", () => {
-      const { container } = renderActions({ message: datasetMessage });
-      expect(getButtonByLabel(container, "Download report")).not.toBeNull();
+    it("renders Download report in the mobile menu for dataset message", async () => {
+      renderActions({ message: datasetMessage });
+      await openMobileActions();
+      expect(getMenuItemByText("Download report")).not.toBeNull();
     });
 
-    it("renders Download JSON button for dataset message", () => {
-      const { container } = renderActions({ message: datasetMessage });
-      expect(getButtonByLabel(container, "Download JSON")).not.toBeNull();
+    it("renders Download JSON in the mobile menu for dataset message", async () => {
+      renderActions({ message: datasetMessage });
+      await openMobileActions();
+      expect(getMenuItemByText("Download JSON")).not.toBeNull();
     });
 
-    it("renders Download action plan CSV when actionPlan exists", () => {
-      const { container } = renderActions({ message: datasetMessage });
-      expect(getButtonByLabel(container, "Download action plan CSV")).not.toBeNull();
+    it("renders Download action plan CSV when actionPlan exists", async () => {
+      renderActions({ message: datasetMessage });
+      await openMobileActions();
+      expect(getMenuItemByText("Download action plan CSV")).not.toBeNull();
     });
 
-    it("does not render Download action plan CSV when no actionPlan", () => {
+    it("does not render Download action plan CSV when no actionPlan", async () => {
       const noActionPlan: OraMessage = {
         ...datasetMessage,
         datasetResult: { ...datasetResult, actionPlan: undefined },
       };
-      const { container } = renderActions({ message: noActionPlan });
-      expect(getButtonByLabel(container, "Download action plan CSV")).toBeNull();
+      renderActions({ message: noActionPlan });
+      await openMobileActions();
+      expect(getMenuItemByText("Download action plan CSV")).toBeNull();
     });
 
-    it("calls downloadDatasetReport on Download report click", () => {
-      const { container } = renderActions({ message: datasetMessage });
-      const btn = getButtonByLabel(container, "Download report");
+    it("calls downloadDatasetReport on Download report click", async () => {
+      renderActions({ message: datasetMessage });
+      await openMobileActions();
+      const btn = getMenuItemByText("Download report");
       fireEvent.click(btn!);
       expect(mockDownloadDatasetReport).toHaveBeenCalledWith(datasetResult, "ora-dataset-report");
     });
 
-    it("calls downloadDatasetJson on Download JSON click", () => {
-      const { container } = renderActions({ message: datasetMessage });
-      const btn = getButtonByLabel(container, "Download JSON");
+    it("calls downloadDatasetJson on Download JSON click", async () => {
+      renderActions({ message: datasetMessage });
+      await openMobileActions();
+      const btn = getMenuItemByText("Download JSON");
       fireEvent.click(btn!);
       expect(mockDownloadDatasetJson).toHaveBeenCalledWith(datasetResult, "ora-dataset-result");
     });
 
-    it("calls downloadActionPlanCsv on Download action plan CSV click", () => {
-      const { container } = renderActions({ message: datasetMessage });
-      const btn = getButtonByLabel(container, "Download action plan CSV");
+    it("calls downloadActionPlanCsv on Download action plan CSV click", async () => {
+      renderActions({ message: datasetMessage });
+      await openMobileActions();
+      const btn = getMenuItemByText("Download action plan CSV");
       fireEvent.click(btn!);
       expect(mockDownloadActionPlanCsv).toHaveBeenCalledWith(
         datasetResult.actionPlan,
@@ -295,31 +337,34 @@ describe("OraMessageActions", () => {
   });
 
   describe("Image and document analysis messages", () => {
-    it("renders Download button for image-analysis messages", () => {
-      const { container } = renderActions({ message: imageAnalysisMessage });
-      const labels = getAllButtonLabels(container);
-      expect(labels.some((l) => /download/i.test(l))).toBe(true);
+    it("renders a download action for image-analysis messages", async () => {
+      renderActions({ message: imageAnalysisMessage });
+      await openMobileActions();
+      expect(getMenuItemTexts().some((l) => /download/i.test(l))).toBe(true);
     });
 
-    it("renders Download button for document-analysis messages", () => {
-      const { container } = renderActions({ message: documentAnalysisMessage });
-      const labels = getAllButtonLabels(container);
-      expect(labels.some((l) => /download/i.test(l))).toBe(true);
+    it("renders a download action for document-analysis messages", async () => {
+      renderActions({ message: documentAnalysisMessage });
+      await openMobileActions();
+      expect(getMenuItemTexts().some((l) => /download/i.test(l))).toBe(true);
     });
 
-    it("renders image analysis download label for image-analysis kind", () => {
-      const { container } = renderActions({ message: imageAnalysisMessage });
-      expect(getButtonByLabel(container, "Download image analysis")).not.toBeNull();
+    it("renders image analysis download label for image-analysis kind", async () => {
+      renderActions({ message: imageAnalysisMessage });
+      await openMobileActions();
+      expect(getMenuItemByText("Download image analysis")).not.toBeNull();
     });
 
-    it("renders document analysis download label for document-analysis kind", () => {
-      const { container } = renderActions({ message: documentAnalysisMessage });
-      expect(getButtonByLabel(container, "Download document analysis")).not.toBeNull();
+    it("renders document analysis download label for document-analysis kind", async () => {
+      renderActions({ message: documentAnalysisMessage });
+      await openMobileActions();
+      expect(getMenuItemByText("Download document analysis")).not.toBeNull();
     });
 
-    it("calls downloadMessageAsMarkdown with image filename on click", () => {
-      const { container } = renderActions({ message: imageAnalysisMessage });
-      const btn = getButtonByLabel(container, "Download image analysis");
+    it("calls downloadMessageAsMarkdown with image filename on click", async () => {
+      renderActions({ message: imageAnalysisMessage });
+      await openMobileActions();
+      const btn = getMenuItemByText("Download image analysis");
       fireEvent.click(btn!);
       expect(mockDownloadMessageAsMarkdown).toHaveBeenCalledWith(
         imageAnalysisMessage,
@@ -327,9 +372,10 @@ describe("OraMessageActions", () => {
       );
     });
 
-    it("calls downloadMessageAsMarkdown with document filename on click", () => {
-      const { container } = renderActions({ message: documentAnalysisMessage });
-      const btn = getButtonByLabel(container, "Download document analysis");
+    it("calls downloadMessageAsMarkdown with document filename on click", async () => {
+      renderActions({ message: documentAnalysisMessage });
+      await openMobileActions();
+      const btn = getMenuItemByText("Download document analysis");
       fireEvent.click(btn!);
       expect(mockDownloadMessageAsMarkdown).toHaveBeenCalledWith(
         documentAnalysisMessage,
