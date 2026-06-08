@@ -1,33 +1,27 @@
 ---
-name: Ora voice phase4 tests are stale
-description: Why phase4.test.ts fails on main and why those failures are not product bugs.
+name: Ora phase2/3/4/6 api-server tests now pass
+description: History — these were once stale/flaky; as of the Ora-memory merges they pass cleanly. Treat new failures as real.
 ---
 
-# Ora voice — phase4.test.ts encodes an obsolete design contract
+# Ora phase2/3/4/6 tests — formerly stale, now green
 
-`artifacts/api-server/src/routes/public-ai/__tests__/phase4.test.ts` (8 tests)
-asserts the original "Voice-A" design: browser Web Speech API only, an
-`OraVoiceMicButton` component, a specific mic-button placement, an interim
-"Listening…" transcript hint, and **no** `/transcribe` backend route.
+Historically `artifacts/api-server/src/routes/public-ai/__tests__/phase4.test.ts`
+encoded an obsolete "Voice-A" contract (browser Web Speech only, `OraVoiceMicButton`,
+no `/transcribe` route) that was superseded by Whisper-based voice mode
+(`routes/public-ai/transcribe.ts` → `POST /api/public-ai/transcribe`;
+`OraVoiceModeButton` + `hooks/use-ora-voice.ts`). phase2/phase6 also failed only
+under full-suite parallel load via cold dynamic-import timeouts.
 
-That design was deliberately superseded by Whisper-based voice conversation mode
-(adds `routes/public-ai/transcribe.ts` → `POST /api/public-ai/transcribe` via
-gpt-4o-mini-transcribe; UI now uses `OraVoiceModeButton` + `hooks/use-ora-voice.ts`
-in `components/ora-panel.tsx` and `ora-bubble.tsx`).
+**Current status (verified during a full Ora E2E sweep):** phase2, phase3, phase4,
+and phase6 all PASS — phase4=part of 111 (phase2/4/6), phase3=51 in isolation. The
+obsolete phase4 assertions were updated/removed in the Ora-memory merges, and the
+cold-import timeouts did not recur when files are run in small chunks (2-3 files)
+rather than the whole api-server suite at once.
 
-**So:** these 8 failures are STALE TESTS, not regressions. The voice/upload/image
-controls are all still present and working. Either update phase4.test.ts to the
-Whisper contract or delete the obsolete assertions.
+**So:** do NOT pre-dismiss a phase2/3/4/6 failure as "known stale" anymore. If one
+fails now, investigate it as a real regression. The only remaining load-sensitive
+gotcha is running the *entire* api-server suite at once (cold-import timeouts) — run
+in chunks. See [vitest-cold-import-timeout](vitest-cold-import-timeout.md).
 
-# Other full-suite api-server failures that are NOT bugs
-
-- `phase6.test.ts` ("…route file still exports a router") and `phase2.test.ts`
-  ("upload returns 401 with no session cookie") fail ONLY under full-suite
-  parallel load — cold dynamic-import timeouts (>13s). They pass in isolation.
-  See [vitest-cold-import-timeout](vitest-cold-import-timeout.md).
-- `preview-architecture.test.ts` ("task-agent staged output is isolated until
-  Apply") is a static source-contains assertion for a Builder task-agent feature,
-  unrelated to Ora; pre-existing stale assertion.
-
-**Net:** the full api-server suite shows ~11–12 failures that are entirely stale
-tests + cold-import timeouts. Zero real product bugs in Ora / Phase 3/4/6 scope.
+`preview-architecture.test.ts` (Builder task-agent static source assertion, unrelated
+to Ora) remains a separate pre-existing brittle assertion.
