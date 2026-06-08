@@ -18,6 +18,7 @@ import {
 } from "../../lib/public-ai/orchestrator";
 import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
+import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import {
   db,
@@ -64,10 +65,189 @@ async function oraUsageResponse(
 
 const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
 
+// ── Saved-memory retrieval (relevance-ranked) ────────────────────────────────
+
+/**
+ * Budget for the saved-memories block, in characters (~4 chars/token). Reuses
+ * the shared knowledge token budget so Ora memory and the Builder vault stay
+ * tuned together. Replaces the old hard 15-entry recency cap.
+ */
+const ORA_MEMORY_CHAR_BUDGET = parseInt(process.env.KNOWLEDGE_TOKEN_BUDGET ?? "2400", 10);
+/** Hard ceiling on injected memories regardless of how small each one is. */
+const ORA_MEMORY_MAX_ENTRIES = 30;
+/** Candidate pool cap so a huge memory store doesn't blow up scoring cost. */
+const ORA_MEMORY_CANDIDATE_LIMIT = 200;
+/** Max embeddings backfilled per retrieval (fire-and-forget). */
+const ORA_MEMORY_BACKFILL_PER_CALL = 8;
+/** Weight applied to cosine similarity, mirroring the Builder vault. */
+const ORA_MEMORY_SEMANTIC_WEIGHT = 6.0;
+/** Max time we'll wait for the query embedding before falling back to TF-IDF. */
+const ORA_MEMORY_EMBED_TIMEOUT_MS = 2500;
+
+export interface OraMemoryRow {
+  id: number;
+  title: string;
+  content: string;
+  embedding: number[] | null;
+  createdAt: Date;
+}
+
+/** Lowercase tokens (≥3 chars) for TF-IDF keyword overlap. */
+export function tokeniseMemory(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s,.:;_\-/()[\]{}'"!?]+/)
+    .filter((w) => w.length >= 3);
+}
+
+/**
+ * Take memories from an already-ordered list until the character budget or the
+ * max-entry ceiling is hit. Always keeps at least the first entry so recall
+ * never silently returns nothing when a single memory exceeds the budget.
+ */
+export function selectMemoriesWithinBudget(ordered: OraMemoryRow[]): OraMemoryRow[] {
+  const selected: OraMemoryRow[] = [];
+  let chars = 0;
+  for (const r of ordered) {
+    if (selected.length >= ORA_MEMORY_MAX_ENTRIES) break;
+    const cost = r.title.length + (r.content?.length ?? 0) + 4;
+    if (selected.length > 0 && chars + cost > ORA_MEMORY_CHAR_BUDGET) break;
+    selected.push(r);
+    chars += cost;
+  }
+  return selected;
+}
+
+/**
+ * Rank memories by relevance to the current message, following the Builder
+ * vault's approach: semantic cosine similarity when an entry has an embedding,
+ * per-entry TF-IDF keyword overlap as a fallback, plus a light recency
+ * tiebreaker. When NO entry produces any relevance signal (e.g. embeddings are
+ * unavailable and there is zero keyword overlap), it degrades to a pure recency
+ * ordering so recall behaves at least as well as the old path.
+ */
+export async function rankMemoriesByRelevance(
+  rows: OraMemoryRow[],
+  message: string,
+): Promise<OraMemoryRow[]> {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return selectMemoriesWithinBudget(rows);
+
+  // Best-effort prompt embedding, raced against a short timeout. On any failure
+  // OR if the provider is slow, we fall back to TF-IDF for every entry — never
+  // block or noticeably slow the reply on the embedding provider.
+  let promptEmbedding: number[] | null = null;
+  try {
+    promptEmbedding = await Promise.race([
+      generateEmbedding(trimmed),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ORA_MEMORY_EMBED_TIMEOUT_MS)),
+    ]);
+  } catch {
+    promptEmbedding = null;
+  }
+
+  const promptTokens = tokeniseMemory(trimmed);
+  const rowTokens = rows.map((e) => tokeniseMemory(`${e.title} ${e.content}`));
+  const N = rows.length;
+
+  // Document frequency for each unique query token (for TF-IDF idf).
+  const df = new Map<string, number>();
+  for (const t of new Set(promptTokens)) {
+    let count = 0;
+    for (const toks of rowTokens) if (toks.includes(t)) count++;
+    df.set(t, count);
+  }
+
+  const now = Date.now();
+  const ONE_DAY_MS = 86_400_000;
+  const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+
+  let anySignal = false;
+  const scored = rows.map((e, i) => {
+    let score = 0;
+    let signal = false;
+
+    const entryEmbedding = e.embedding;
+    if (
+      promptEmbedding &&
+      Array.isArray(entryEmbedding) &&
+      entryEmbedding.length === promptEmbedding.length
+    ) {
+      // Primary: semantic similarity.
+      const sim = cosineSimilarity(promptEmbedding, entryEmbedding);
+      score += sim * ORA_MEMORY_SEMANTIC_WEIGHT;
+      if (sim > 0.05) signal = true;
+    } else {
+      // Fallback: TF-IDF keyword overlap (per-entry, graceful).
+      const toks = rowTokens[i];
+      const counts = new Map<string, number>();
+      for (const w of toks) counts.set(w, (counts.get(w) ?? 0) + 1);
+      let tfidf = 0;
+      for (const t of promptTokens) {
+        const tc = counts.get(t);
+        if (tc) {
+          const tf = tc / Math.max(toks.length, 1);
+          const idf = Math.log((N + 1) / ((df.get(t) ?? 0) + 1)) + 1;
+          tfidf += tf * idf;
+        }
+      }
+      score += tfidf;
+      if (tfidf > 0) signal = true;
+    }
+
+    // Light recency tiebreaker — relevance dominates, recency breaks ties.
+    const ageMs = now - new Date(e.createdAt).getTime();
+    if (ageMs < ONE_DAY_MS) score += 0.3;
+    else if (ageMs < SEVEN_DAYS_MS) score += 0.15;
+
+    if (signal) anySignal = true;
+    return { entry: e, score };
+  });
+
+  // No relevance signal anywhere → preserve the recency-based floor.
+  if (!anySignal) return selectMemoriesWithinBudget(rows);
+
+  scored.sort((a, b) => b.score - a.score);
+  return selectMemoriesWithinBudget(scored.map((s) => s.entry));
+}
+
+/**
+ * Lazily backfill embeddings for Ora memories that lack them so future
+ * retrievals can use semantic similarity. Fire-and-forget and strictly bounded
+ * — never awaited, never blocks the reply, and silently no-ops when the
+ * embedding provider is unavailable. Does NOT change how memories are saved.
+ */
+function backfillMemoryEmbeddings(rows: OraMemoryRow[]): void {
+  const missing = rows
+    .filter((r) => !Array.isArray(r.embedding) || r.embedding.length === 0)
+    .slice(0, ORA_MEMORY_BACKFILL_PER_CALL);
+  if (missing.length === 0) return;
+  void (async () => {
+    for (const m of missing) {
+      try {
+        const input = buildEmbeddingInput(m.title, m.content).trim();
+        if (input.length === 0) continue;
+        const vec = await generateEmbedding(input);
+        await db
+          .update(knowledgeEntriesTable)
+          .set({ embedding: vec })
+          .where(eq(knowledgeEntriesTable.id, m.id));
+      } catch {
+        // Best-effort — a later retrieval will retry the backfill.
+      }
+    }
+  })();
+}
+
 /**
  * Fetch the user's saved Ora memories and format them as a compact context
  * block for the system prompt. Returns an empty string when there is nothing
  * to inject.
+ *
+ * When the current message is provided, memories are RELEVANCE-RANKED (semantic
+ * similarity primary, TF-IDF fallback, recency tiebreaker) so older-but-relevant
+ * facts are recalled even past the old 15-entry recency window. Without a
+ * message, it falls back to a budget-aware recency ordering.
  *
  * ISOLATION: Ora is a standalone assistant kept fully separate from the AI
  * Builder. This intentionally injects ONLY user-approved Ora memories
@@ -76,12 +256,15 @@ const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKIN
  * user-scope style memories / brand profiles (origin="builder") — into Ora's
  * context, which would leak Builder engineering knowledge into Ora.
  */
-async function buildMemoryContext(userId: string): Promise<string> {
+async function buildMemoryContext(userId: string, currentMessage?: string): Promise<string> {
   try {
     const rows = await db
       .select({
+        id: knowledgeEntriesTable.id,
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
+        embedding: knowledgeEntriesTable.embedding,
+        createdAt: knowledgeEntriesTable.createdAt,
       })
       .from(knowledgeEntriesTable)
       .where(
@@ -96,11 +279,24 @@ async function buildMemoryContext(userId: string): Promise<string> {
         ),
       )
       .orderBy(desc(knowledgeEntriesTable.createdAt))
-      .limit(15);
+      .limit(ORA_MEMORY_CANDIDATE_LIMIT);
 
     if (rows.length === 0) return "";
 
-    const lines = rows.map((r) => `- ${r.title}${r.content ? `: ${r.content}` : ""}`).join("\n");
+    const selected =
+      currentMessage && currentMessage.trim().length > 0
+        ? await rankMemoriesByRelevance(rows, currentMessage)
+        : selectMemoriesWithinBudget(rows);
+
+    // Lazily index any memories missing an embedding so later retrievals can
+    // use semantic similarity. Fire-and-forget; never blocks this reply.
+    backfillMemoryEmbeddings(rows);
+
+    if (selected.length === 0) return "";
+
+    const lines = selected
+      .map((r) => `- ${r.title}${r.content ? `: ${r.content}` : ""}`)
+      .join("\n");
     return `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation:\n${lines}`;
   } catch {
     // Memory injection is best-effort — never block a reply on it.
@@ -610,7 +806,7 @@ router.post("/public-ai/chat", async (req, res) => {
     // users; saved memories respect the referenceSavedMemories opt-out toggle.
     const searchProfileContext = authed ? await buildProfileContext(authed.userId) : "";
     const searchMemoryContext =
-      authed && referenceSavedMemories ? await buildMemoryContext(authed.userId) : "";
+      authed && referenceSavedMemories ? await buildMemoryContext(authed.userId, message) : "";
     const searchPersonalContext = searchProfileContext + searchMemoryContext;
     try {
       const result = await runOraWebSearch({
@@ -668,7 +864,7 @@ router.post("/public-ai/chat", async (req, res) => {
 
   // Saved memories are opt-out and only available to signed-in users.
   const memoryContext =
-    authed && referenceSavedMemories ? await buildMemoryContext(authed.userId) : "";
+    authed && referenceSavedMemories ? await buildMemoryContext(authed.userId, message) : "";
 
   // The Ora profile ("About you") is custom instructions — always applied for
   // signed-in users when present, independent of the saved-memories toggle.
