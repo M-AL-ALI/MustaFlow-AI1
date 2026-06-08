@@ -366,6 +366,19 @@ const bodySchema = z.object({
    * silently skipped.
    */
   documentRefs: z.array(z.string().uuid()).max(5).default([]),
+  /**
+   * Rolling conversation summary maintained client-side. As a conversation
+   * grows past the recent-message window, older turns are condensed into this
+   * running summary and re-sent so long conversations stay coherent. Echoed
+   * back (possibly updated) in the response so the client can persist it.
+   */
+  conversationSummary: z.string().max(8000).optional(),
+  /**
+   * Earlier overflow turns that have just scrolled out of the recent window and
+   * are not yet reflected in `conversationSummary`. They are folded into the
+   * summary on this request. Bounded by the client; capped again server-side.
+   */
+  summarizeMessages: z.array(messageItemSchema).max(40).default([]),
 });
 
 /**
@@ -435,6 +448,8 @@ router.post("/public-ai/chat", async (req, res) => {
     referenceSavedMemories,
     referenceChatHistory,
     documentRefs,
+    conversationSummary: priorSummary,
+    summarizeMessages,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -870,11 +885,29 @@ router.post("/public-ai/chat", async (req, res) => {
   // signed-in users when present, independent of the saved-memories toggle.
   const profileContext = authed ? await buildProfileContext(authed.userId) : "";
 
+  // Rolling conversation summary: when the chat has grown past the recent
+  // window, fold the newly overflowed turns into a compact running summary so
+  // facts/decisions from early in the chat stay in context. Bounded + fail-safe
+  // (returns the prior summary on any error). Skipped entirely when the user
+  // has chat history turned off, or for short chats with no overflow.
+  let conversationSummary = referenceChatHistory ? (priorSummary ?? "").trim() : "";
+  if (referenceChatHistory && summarizeMessages.length > 0) {
+    const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
+    conversationSummary = await updateConversationSummary({
+      priorSummary: conversationSummary,
+      newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
+    });
+  }
+  const summaryContext = conversationSummary
+    ? `\n\n## Earlier in this conversation\nThe following is a running summary of earlier parts of THIS conversation that have scrolled out of the recent message window. Treat these as established context and stay consistent with them, but defer to anything more recent:\n${conversationSummary}`
+    : "";
+
   const systemPrompt =
     buildSystemPrompt(language, languageHint) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
     profileContext +
-    memoryContext;
+    memoryContext +
+    summaryContext;
 
   const callMessages = [
     { role: "system" as const, content: systemPrompt },
@@ -1060,6 +1093,10 @@ router.post("/public-ai/chat", async (req, res) => {
           memorySaveCandidateSensitive: memoryCandidate.sensitive,
         }
       : {}),
+    // Echo the (possibly updated) rolling summary so the client can persist it
+    // and re-send it on the next turn. Always present when chat history is on so
+    // the client can advance its "already summarized" pointer.
+    ...(referenceChatHistory ? { conversationSummary } : {}),
     mode: deepAllowed ? "deep" : "instant",
     ...usage,
   });

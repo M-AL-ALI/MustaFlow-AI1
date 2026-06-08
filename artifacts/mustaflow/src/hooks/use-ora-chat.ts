@@ -159,6 +159,16 @@ const TRANSCRIPT_STORAGE_KEY = "ora_transcript";
 const FILE_LIMIT = 3;
 const IMAGE_LIMIT = 2;
 
+// Number of most-recent messages sent verbatim as the chat context window.
+// Turns older than this are condensed into a rolling summary so long
+// conversations stay coherent without unbounded token growth. Mirrors the
+// backend's ORA_RECENT_WINDOW.
+const RECENT_WINDOW = 20;
+// Cap on how many overflow turns we ship to be folded into the summary in a
+// single request (mirrors the backend ORA_SUMMARIZE_BATCH_MAX). Normally only a
+// couple overflow per turn; this bounds the one-time backlog after a reload.
+const SUMMARIZE_BATCH_MAX = 40;
+
 // Usage fields any metered Ora endpoint may return alongside its result. The
 // rolling-window backend echoes message + image counts and the personal
 // window's resetsAt/windowHours so the sidebar countdown and remaining-quota
@@ -478,6 +488,16 @@ export function useOraChat(): UseOraChatReturn {
   // conversation. In-memory only — not persisted (the store expires in 30 min).
   const documentRefsRef = useRef<string[]>([]);
 
+  // Rolling conversation summary for THIS conversation. As the chat grows past
+  // the recent-message window, older turns are condensed into this running
+  // summary (maintained server-side, returned each reply) and re-sent so long
+  // conversations stay coherent. `summarizedUpToRef` tracks how many leading
+  // messages have already been folded in, so each turn only ships the NEW
+  // overflow (bounded cost). Reset on new/changed/cleared conversation. Kept
+  // in-memory only — recomputed once after a reload from the persisted turns.
+  const conversationSummaryRef = useRef<string>("");
+  const summarizedUpToRef = useRef<number>(0);
+
   const setLanguage = useCallback((lang: string) => {
     setLanguageState(lang);
     try {
@@ -698,14 +718,18 @@ export function useOraChat(): UseOraChatReturn {
     if (id == null) {
       loadedConvRef.current = null;
       documentRefsRef.current = [];
+      conversationSummaryRef.current = "";
+      summarizedUpToRef.current = 0;
       setMessages([]);
       return;
     }
     if (id === loadedConvRef.current) return;
     loadedConvRef.current = id;
-    // Switching conversations: the prior conversation's upload refs no longer
-    // apply (and would belong to a different transcript).
+    // Switching conversations: the prior conversation's upload refs and rolling
+    // summary no longer apply (they belong to a different transcript).
     documentRefsRef.current = [];
+    conversationSummaryRef.current = "";
+    summarizedUpToRef.current = 0;
     // Snapshot the edit generation before fetching. If the user types/sends a
     // message while this GET is in flight, editGenRef advances and we discard the
     // (now stale) server payload rather than overwriting the unsaved local edit.
@@ -941,7 +965,31 @@ export function useOraChat(): UseOraChatReturn {
       setIsLoading(true);
       setError(null);
 
-      const history = baseMessages.slice(-20).map((m) => ({ role: m.role, content: m.content }));
+      const history = baseMessages
+        .slice(-RECENT_WINDOW)
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      // Rolling summary bookkeeping (plain-chat path only). `windowStart` is the
+      // index in baseMessages where the recent window begins; everything before
+      // it has scrolled out of context. The unsummarized overflow is the range
+      // [overflowStart, windowStart); we fold it in OLDEST-FIRST, at most
+      // SUMMARIZE_BATCH_MAX turns per request, and advance the pointer only by
+      // what we actually processed. This drains a large backlog (e.g. after a
+      // reload resets the pointer) over successive turns instead of permanently
+      // skipping the earliest turns.
+      // Editing/resending an earlier message rewinds the transcript, so reset
+      // the summary if the truncation point predates what we've summarized.
+      if (opts?.truncateTo !== undefined && opts.truncateTo < summarizedUpToRef.current) {
+        conversationSummaryRef.current = "";
+        summarizedUpToRef.current = 0;
+      }
+      const windowStart = Math.max(0, baseMessages.length - RECENT_WINDOW);
+      const overflowStart = Math.min(summarizedUpToRef.current, windowStart);
+      const overflowEnd = Math.min(overflowStart + SUMMARIZE_BATCH_MAX, windowStart);
+      const overflow = baseMessages
+        .slice(overflowStart, overflowEnd)
+        .filter((m) => m.content.trim().length > 0)
+        .map((m) => ({ role: m.role, content: m.content }));
 
       const executeApiCall = async (): Promise<void> => {
         if (currentAttachment) {
@@ -1049,13 +1097,24 @@ export function useOraChat(): UseOraChatReturn {
             setSession((prev) => mergeUsage(prev, data));
           }
         } else {
+          const useChatHistory = getReferenceChatHistory();
           const body: Record<string, unknown> = {
             message: content,
             messages: history,
             mode,
             referenceSavedMemories: getReferenceSavedMemories(),
-            referenceChatHistory: getReferenceChatHistory(),
+            referenceChatHistory: useChatHistory,
           };
+          // Rolling summary: only relevant when chat history is on. Re-send the
+          // current summary plus any newly overflowed turns to be folded into it.
+          if (useChatHistory) {
+            if (conversationSummaryRef.current) {
+              body.conversationSummary = conversationSummaryRef.current;
+            }
+            if (overflow.length > 0) {
+              body.summarizeMessages = overflow;
+            }
+          }
           if (documentRefsRef.current.length > 0) {
             body.documentRefs = documentRefsRef.current;
           }
@@ -1085,6 +1144,8 @@ export function useOraChat(): UseOraChatReturn {
             // Real images + relevant videos found during a live web search
             images?: OraImage[];
             videos?: OraVideo[];
+            // Updated rolling conversation summary (present when chat history on)
+            conversationSummary?: string;
             msgCount: number;
             msgLimit: number;
             imageCount?: number;
@@ -1092,6 +1153,15 @@ export function useOraChat(): UseOraChatReturn {
             resetsAt?: string | null;
             windowHours?: number;
           }>("/api/public-ai/chat", body);
+
+          // Persist the rolling summary and advance the "already summarized"
+          // pointer by exactly what we processed this turn (overflowEnd), so a
+          // large backlog drains over successive turns without skipping the
+          // earliest turns.
+          if (data.conversationSummary !== undefined) {
+            conversationSummaryRef.current = data.conversationSummary;
+            summarizedUpToRef.current = overflowEnd;
+          }
 
           setMessages((prev) => {
             const next = [
@@ -1504,6 +1574,8 @@ export function useOraChat(): UseOraChatReturn {
     if (convRef.current) {
       loadedConvRef.current = null;
       documentRefsRef.current = [];
+      conversationSummaryRef.current = "";
+      summarizedUpToRef.current = 0;
       setMessages([]);
       setError(null);
       setSessionExpired(false);
@@ -1517,6 +1589,8 @@ export function useOraChat(): UseOraChatReturn {
     clearStoredTranscript();
     clearStoredSessionId();
     documentRefsRef.current = [];
+    conversationSummaryRef.current = "";
+    summarizedUpToRef.current = 0;
     setMessages([]);
     setError(null);
     setSessionExpired(false);
