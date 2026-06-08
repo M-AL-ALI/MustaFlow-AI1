@@ -639,6 +639,8 @@ router.post("/public-ai/chat", async (req, res) => {
       res.json({
         reply: result.reply,
         sources: result.sources,
+        images: result.images,
+        videos: result.videos,
         ...usage,
       });
     } catch (err) {

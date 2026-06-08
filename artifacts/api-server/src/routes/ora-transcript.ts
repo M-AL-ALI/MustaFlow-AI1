@@ -35,6 +35,18 @@ const sourceSchema = z.object({
   url: z.string().max(2000),
 });
 
+const imageSchema = z.object({
+  url: z.string().max(2000),
+  title: z.string().max(500).optional(),
+  source: z.string().max(2000).optional(),
+});
+
+const videoSchema = z.object({
+  url: z.string().max(2000),
+  title: z.string().max(500).optional(),
+  thumbnailUrl: z.string().max(2000).optional(),
+});
+
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32000),
@@ -58,6 +70,10 @@ const messageSchema = z.object({
   // Mirror the conversation schema so the anonymous/legacy transcript store
   // restores citations, inline images, and memory chips faithfully too.
   sources: z.array(sourceSchema).max(20).optional(),
+  // Web-found media (real images shown inline, video link cards) — persisted so
+  // they survive reload, mirroring ora-conversations.ts.
+  images: z.array(imageSchema).max(8).optional(),
+  videos: z.array(videoSchema).max(6).optional(),
   imageUrl: z.string().max(4000).optional(),
   imageId: z.number().int().optional(),
   editInstruction: z.string().max(2000).optional(),

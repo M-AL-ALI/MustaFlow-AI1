@@ -58,6 +58,7 @@ import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraSourceCards } from "@/components/ora/ora-source-cards";
+import { OraImageGallery, OraVideoCards } from "@/components/ora/ora-media-cards";
 
 function downloadOraFile(file: GeneratedFile) {
   if (!file.fileData) return;
@@ -1250,6 +1251,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   {msg.role === "assistant" &&
                     Array.isArray(msg.sources) &&
                     msg.sources.length > 0 && <OraSourceCards sources={msg.sources} />}
+
+                  {msg.role === "assistant" &&
+                    Array.isArray(msg.images) &&
+                    msg.images.length > 0 && <OraImageGallery images={msg.images} />}
+
+                  {msg.role === "assistant" &&
+                    Array.isArray(msg.videos) &&
+                    msg.videos.length > 0 && <OraVideoCards videos={msg.videos} />}
 
                   {msg.role === "assistant" &&
                     isSignedIn &&

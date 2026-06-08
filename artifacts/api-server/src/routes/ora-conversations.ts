@@ -37,6 +37,18 @@ const sourceSchema = z.object({
   url: z.string().max(2000),
 });
 
+const imageSchema = z.object({
+  url: z.string().max(2000),
+  title: z.string().max(500).optional(),
+  source: z.string().max(2000).optional(),
+});
+
+const videoSchema = z.object({
+  url: z.string().max(2000),
+  title: z.string().max(500).optional(),
+  thumbnailUrl: z.string().max(2000).optional(),
+});
+
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32000),
@@ -59,6 +71,9 @@ const messageSchema = z.object({
   editedFrom: z.boolean().optional(),
   // Web-search citation cards — persisted so they survive reload.
   sources: z.array(sourceSchema).max(20).optional(),
+  // Web-found media: real images shown inline + video link cards.
+  images: z.array(imageSchema).max(8).optional(),
+  videos: z.array(videoSchema).max(6).optional(),
   // Inline image fields — imageUrl is a hosted/remote URL (never base64), so it
   // is safe to persist; imageId/editInstruction restore the editable lineage.
   imageUrl: z.string().max(4000).optional(),

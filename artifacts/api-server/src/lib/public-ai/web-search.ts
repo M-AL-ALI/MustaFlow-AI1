@@ -21,6 +21,22 @@ export interface OraSource {
   url: string;
 }
 
+/** A real image found on the web during search, shown inline in the chat. */
+export interface OraImage {
+  url: string;
+  title?: string;
+  /** The page the image was found on, so the user can verify the context. */
+  source?: string;
+}
+
+/** A relevant video found on the web during search, shown as a link card. */
+export interface OraVideo {
+  url: string;
+  title?: string;
+  /** Optional thumbnail (derived for YouTube) so the card has a preview. */
+  thumbnailUrl?: string;
+}
+
 export interface OraWebSearchInput {
   query: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -30,6 +46,8 @@ export interface OraWebSearchInput {
 export interface OraWebSearchResult {
   reply: string;
   sources: OraSource[];
+  images: OraImage[];
+  videos: OraVideo[];
 }
 
 /** Whether a live web search backend is available in this environment. */
@@ -46,14 +64,55 @@ function getClient(): OpenAI {
 }
 
 /**
- * Returns true only for http(s) URLs. Anything else (javascript:, data:,
- * file:, mailto:, etc.) is rejected so a poisoned/malformed citation can never
- * become a clickable link in the UI.
+ * Reject hostnames that point at the local machine or a private/internal
+ * network (loopback, RFC1918, link-local, unique-local IPv6, and cloud
+ * metadata IPs). The media URLs Ora surfaces are auto-fetched by the browser
+ * (`<img src>`), so a hallucinated or poisoned internal URL must never be
+ * rendered or persisted — it would turn a chat reply into an SSRF-style probe
+ * of the viewer's own network.
+ */
+export function isPrivateOrLocalHost(hostname: string): boolean {
+  // Normalize: lowercase, strip IPv6 brackets, and drop the FQDN trailing
+  // dot(s) (`localhost.` resolves to localhost) so suffix/equality checks hold.
+  let host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  // Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) to its embedded v4 literal.
+  const mapped = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mapped) host = mapped[1];
+  if (
+    host === "localhost" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
+    return true;
+  }
+  // IPv6 loopback / unique-local (fc00::/7) / link-local (fe80::/10).
+  if (host === "::1" || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) {
+    return true;
+  }
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 127 || a === 10 || a === 0) return true; // loopback / private / unspecified
+    if (a === 169 && b === 254) return true; // link-local incl. 169.254.169.254 metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true; // private
+  }
+  return false;
+}
+
+/**
+ * Returns true only for http(s) URLs that point at a public host. Non-http(s)
+ * schemes (javascript:, data:, file:, mailto:, etc.) and private/local network
+ * targets are rejected so a poisoned/malformed citation or media URL can never
+ * become a clickable link or an auto-fetched internal request in the UI.
  */
 export function isSafeHttpUrl(raw: string): boolean {
   try {
-    const proto = new URL(raw).protocol;
-    return proto === "http:" || proto === "https:";
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return !isPrivateOrLocalHost(u.hostname);
   } catch {
     return false;
   }
@@ -135,13 +194,143 @@ export function dedupeSources(sources: OraSource[], limit = 6): OraSource[] {
   return out;
 }
 
+/** Extract a YouTube video id from any common YouTube URL shape. */
+export function youtubeId(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") {
+      const id = u.pathname.slice(1).split("/")[0];
+      return id || null;
+    }
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (u.pathname === "/watch") return u.searchParams.get("v");
+      const m = u.pathname.match(/^\/(?:shorts|embed|v)\/([^/?#]+)/);
+      if (m) return m[1];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Derive a stable thumbnail URL for a YouTube video, else null. */
+export function youtubeThumbnail(raw: string): string | null {
+  const id = youtubeId(raw);
+  return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null;
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/**
+ * Validate + dedupe model-reported image results. Only http(s) URLs survive;
+ * the page each image was found on (`source`) is kept only when it is itself a
+ * safe http(s) URL. Capped so the chat never floods with images.
+ */
+export function sanitizeImages(raw: unknown, limit = 4): OraImage[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: OraImage[] = [];
+  for (const item of raw as Array<Record<string, unknown>>) {
+    const url = asString(item?.url);
+    if (!url) continue;
+    const cleaned = cleanSourceUrl(url);
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    const title = asString(item?.title);
+    const sourceRaw = asString(item?.source) ?? asString(item?.sourcePage) ?? asString(item?.page);
+    const source = sourceRaw ? cleanSourceUrl(sourceRaw) : null;
+    out.push({
+      url: cleaned,
+      ...(title ? { title } : {}),
+      ...(source ? { source } : {}),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Validate + dedupe model-reported video results. Only http(s) URLs survive; a
+ * thumbnail is derived for YouTube links so the card shows a preview.
+ */
+export function sanitizeVideos(raw: unknown, limit = 3): OraVideo[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: OraVideo[] = [];
+  for (const item of raw as Array<Record<string, unknown>>) {
+    const url = asString(item?.url);
+    if (!url) continue;
+    const cleaned = cleanSourceUrl(url);
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    const title = asString(item?.title);
+    const thumbFromModel = asString(item?.thumbnailUrl ?? item?.thumbnail);
+    const thumb =
+      youtubeThumbnail(cleaned) ?? (thumbFromModel ? cleanSourceUrl(thumbFromModel) : null);
+    out.push({
+      url: cleaned,
+      ...(title ? { title } : {}),
+      ...(thumb ? { thumbnailUrl: thumb } : {}),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Pull the trailing ```ora-media JSON block (or a JSON block carrying
+ * `images`/`videos` keys) out of the model reply, returning the cleaned answer
+ * text plus the sanitized media. Never throws on malformed JSON.
+ */
+export function parseOraMediaBlock(reply: string): {
+  text: string;
+  images: OraImage[];
+  videos: OraVideo[];
+} {
+  const empty = { text: reply.trim(), images: [] as OraImage[], videos: [] as OraVideo[] };
+  if (!reply) return empty;
+
+  // Prefer an explicit ora-media fence; fall back to a generic json fence.
+  let match = reply.match(/```ora-media\s*([\s\S]*?)```/i);
+  if (!match) {
+    const generic = reply.match(/```json\s*([\s\S]*?)```/i);
+    if (generic && /"(?:images|videos)"\s*:/.test(generic[1])) match = generic;
+  }
+  if (!match) return empty;
+
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const candidate = JSON.parse(match[1].trim());
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      parsed = candidate as Record<string, unknown>;
+    }
+  } catch {
+    parsed = null;
+  }
+
+  const text = reply.replace(match[0], "").trim();
+  if (!parsed) return { ...empty, text };
+  return {
+    text,
+    images: sanitizeImages(parsed.images),
+    videos: sanitizeVideos(parsed.videos),
+  };
+}
+
 function buildInstructions(language: string | undefined): string {
   const base = [
     "You are Ora, a helpful assistant with live web access.",
-    "Use the web_search tool to find current, accurate information, then answer the user's question concisely and directly.",
-    "Base your answer only on what the search returns. Quote specific facts, numbers, and dates where relevant.",
-    "If the search returns nothing useful, say so honestly instead of guessing. Never fabricate sources or facts.",
+    "Use the web_search tool thoroughly to find current, accurate information from reputable sources, then answer the user's question (or help troubleshoot) concisely and directly.",
+    "Base your answer only on what the search returns. Quote specific facts, numbers, and dates where relevant, and prefer authoritative or official sources so the user can trust the result.",
+    "If the search returns nothing useful, say so honestly instead of guessing. Never fabricate sources, facts, or URLs.",
     "Keep the answer focused — a few short paragraphs at most. Do not append a raw list of URLs; the sources are shown separately.",
+    // Media: real images + videos found during search, returned as a structured
+    // trailing block the server parses and strips before display.
+    "When (and only when) the user would benefit from seeing them, include relevant media you ACTUALLY found via web search. Use direct image file URLs (jpg/png/webp/gif) for images and watch-page URLs for videos. Never invent or guess a URL — omit anything you are not confident is real and reachable.",
+    'At the very END of your reply, append exactly one fenced code block tagged ora-media containing JSON of the form {"images":[{"url":"https://...","title":"...","source":"https://page-it-was-on"}],"videos":[{"url":"https://...","title":"..."}]}. Use up to 4 images and up to 3 videos. If you found none, use {"images":[],"videos":[]}. Put nothing after this block.',
   ];
   if (language && language !== "auto") {
     base.push(`Respond entirely in "${language}".`);
@@ -173,8 +362,9 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     input: messages as never,
   })) as { output_text?: string; output?: unknown };
 
-  const reply = (resp.output_text ?? "").trim();
+  const rawReply = (resp.output_text ?? "").trim();
   const sources = dedupeSources(extractSources(resp.output));
+  const { text: reply, images, videos } = parseOraMediaBlock(rawReply);
 
   logger.info(
     {
@@ -182,6 +372,8 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
       model,
       latencyMs: Date.now() - start,
       sourceCount: sources.length,
+      imageCount: images.length,
+      videoCount: videos.length,
       hasReply: reply.length > 0,
     },
     "Ora web search completed",
@@ -190,5 +382,5 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   if (!reply) {
     throw new Error("Web search returned an empty answer");
   }
-  return { reply, sources };
+  return { reply, sources, images, videos };
 }

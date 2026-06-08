@@ -25,6 +25,21 @@ export interface OraSource {
   url: string;
 }
 
+/** A real image found on the web during search, shown inline in the chat. */
+export interface OraImage {
+  url: string;
+  title?: string;
+  /** The page the image was found on, so the user can verify the context. */
+  source?: string;
+}
+
+/** A relevant video found on the web during search, shown as a link card. */
+export interface OraVideo {
+  url: string;
+  title?: string;
+  thumbnailUrl?: string;
+}
+
 export interface OraMessage {
   role: "user" | "assistant";
   content: string;
@@ -57,6 +72,10 @@ export interface OraMessage {
   memorySaveCandidateSensitive?: boolean;
   memorySaved?: boolean;
   sources?: OraSource[];
+  /** Real images found on the web, rendered inline as a gallery. */
+  images?: OraImage[];
+  /** Relevant videos found on the web, rendered as clickable link cards. */
+  videos?: OraVideo[];
 }
 
 export interface OraSession {
@@ -375,6 +394,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   memorySaveCandidateSensitive?: boolean;
   memorySaved?: boolean;
   sources?: OraSource[];
+  images?: OraImage[];
+  videos?: OraVideo[];
 }> {
   return messages.map((m) => ({
     role: m.role,
@@ -401,6 +422,9 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     ...(m.memorySaved ? { memorySaved: true } : {}),
     // Persist cited web-search sources so the source cards survive reload
     ...(m.sources && m.sources.length > 0 ? { sources: m.sources } : {}),
+    // Persist web-found media so the gallery + video cards survive reload
+    ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
+    ...(m.videos && m.videos.length > 0 ? { videos: m.videos } : {}),
   }));
 }
 
@@ -1058,6 +1082,9 @@ export function useOraChat(): UseOraChatReturn {
             memorySaveCandidateSensitive?: boolean;
             // Present when the chat route ran a live web search
             sources?: OraSource[];
+            // Real images + relevant videos found during a live web search
+            images?: OraImage[];
+            videos?: OraVideo[];
             msgCount: number;
             msgLimit: number;
             imageCount?: number;
@@ -1077,6 +1104,8 @@ export function useOraChat(): UseOraChatReturn {
                 ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
                 ...(data.imageId != null ? { imageId: data.imageId } : {}),
                 ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
+                ...(data.images && data.images.length > 0 ? { images: data.images } : {}),
+                ...(data.videos && data.videos.length > 0 ? { videos: data.videos } : {}),
                 ...(data.memorySaveCandidate
                   ? {
                       memorySaveCandidate: data.memorySaveCandidate,

@@ -384,7 +384,7 @@ describe("regression — prior phase routes unaffected", () => {
     const mod = await import("../chat");
     expect(mod.default).toBeDefined();
     expect(typeof mod.default.use).toBe("function"); // Express Router
-  });
+  }, 30000); // cold dynamic import of the chat router tree can exceed the 5s default
 
   // Phase 2 — document upload route
   it("Phase 2: upload route file still exports a router", async () => {
