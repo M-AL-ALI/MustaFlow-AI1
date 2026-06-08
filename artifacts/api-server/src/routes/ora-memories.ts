@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, desc, isNull } from "drizzle-orm";
+import { and, eq, desc, isNull, inArray, ne } from "drizzle-orm";
 import { db, knowledgeEntriesTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { findMemoriesToSupersede } from "../lib/public-ai/memory-consolidation";
 
 const router = Router();
 
@@ -37,6 +38,7 @@ router.get("/ora/memories", async (req, res) => {
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
         enabled: knowledgeEntriesTable.enabled,
+        supersededBy: knowledgeEntriesTable.supersededBy,
         sourceConversationId: knowledgeEntriesTable.sourceConversationId,
         createdAt: knowledgeEntriesTable.createdAt,
       })
@@ -64,12 +66,14 @@ router.post("/ora/memories", async (req, res) => {
     res.status(400).json({ error: "Invalid request body" });
     return;
   }
+  const title = parsed.data.title;
+  const content = parsed.data.content ?? "";
   try {
     const [row] = await db
       .insert(knowledgeEntriesTable)
       .values({
-        title: parsed.data.title,
-        content: parsed.data.content ?? "",
+        title,
+        content,
         type: "note",
         category: "note",
         severity: "info",
@@ -85,15 +89,74 @@ router.post("/ora/memories", async (req, res) => {
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
         enabled: knowledgeEntriesTable.enabled,
+        supersededBy: knowledgeEntriesTable.supersededBy,
         sourceConversationId: knowledgeEntriesTable.sourceConversationId,
         createdAt: knowledgeEntriesTable.createdAt,
       });
-    res.status(201).json({ memory: row });
+
+    // Consolidation: when the new fact overlaps earlier active memories (a
+    // contradicting update like "dark mode" → "light mode"), supersede those
+    // earlier entries so only the current fact is injected into Ora's context.
+    // Non-destructive: superseded rows are kept (still listed in the Memory
+    // Center) and just disabled + tagged with this new row's id. Best-effort —
+    // a failure here never fails the save.
+    const supersededIds = await consolidateOverlappingMemories(userId, row.id, title, content);
+
+    res.status(201).json({ memory: row, supersededIds });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to create memory");
     res.status(500).json({ error: "Failed to create memory" });
   }
 });
+
+/**
+ * Find the user's existing ACTIVE Ora memories that the just-saved memory
+ * (`newId`) supersedes, and disable + tag them. Returns the superseded ids.
+ * Conservative: only high-overlap matches are touched (see memory-consolidation
+ * for the rule). Never throws — consolidation is best-effort.
+ */
+async function consolidateOverlappingMemories(
+  userId: string,
+  newId: number,
+  title: string,
+  content: string,
+): Promise<number[]> {
+  try {
+    // Only compare against active rows: enabled, not archived, not already
+    // superseded, and excluding the new row itself.
+    const candidates = await db
+      .select({
+        id: knowledgeEntriesTable.id,
+        title: knowledgeEntriesTable.title,
+        content: knowledgeEntriesTable.content,
+      })
+      .from(knowledgeEntriesTable)
+      .where(
+        and(
+          userScope(userId),
+          eq(knowledgeEntriesTable.enabled, true),
+          isNull(knowledgeEntriesTable.supersededBy),
+          ne(knowledgeEntriesTable.id, newId),
+        ),
+      );
+
+    const toSupersede = findMemoriesToSupersede({ title, content }, candidates);
+    if (toSupersede.length === 0) return [];
+
+    await db
+      .update(knowledgeEntriesTable)
+      .set({ supersededBy: newId, enabled: false })
+      .where(and(inArray(knowledgeEntriesTable.id, toSupersede), userScope(userId)));
+
+    return toSupersede;
+  } catch (err) {
+    logger.warn(
+      { component: "ora-memories", err, newId },
+      "Memory consolidation failed (non-fatal)",
+    );
+    return [];
+  }
+}
 
 const patchMemorySchema = z
   .object({
@@ -134,6 +197,7 @@ router.patch("/ora/memories/:id", async (req, res) => {
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
         enabled: knowledgeEntriesTable.enabled,
+        supersededBy: knowledgeEntriesTable.supersededBy,
         sourceConversationId: knowledgeEntriesTable.sourceConversationId,
         createdAt: knowledgeEntriesTable.createdAt,
       });
@@ -145,6 +209,42 @@ router.patch("/ora/memories/:id", async (req, res) => {
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to update memory");
     res.status(500).json({ error: "Failed to update memory" });
+  }
+});
+
+// Restore a superseded memory: clear its superseded marker and re-enable it so
+// Ora references it again. The user's explicit undo of a consolidation — both
+// the restored fact and whatever superseded it stay active afterwards (their
+// choice). No-op for memories that were not superseded.
+router.post("/ora/memories/:id/restore", async (req, res) => {
+  const userId = req.userId!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid memory id" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .update(knowledgeEntriesTable)
+      .set({ supersededBy: null, enabled: true })
+      .where(and(eq(knowledgeEntriesTable.id, id), userScope(userId)))
+      .returning({
+        id: knowledgeEntriesTable.id,
+        title: knowledgeEntriesTable.title,
+        content: knowledgeEntriesTable.content,
+        enabled: knowledgeEntriesTable.enabled,
+        supersededBy: knowledgeEntriesTable.supersededBy,
+        sourceConversationId: knowledgeEntriesTable.sourceConversationId,
+        createdAt: knowledgeEntriesTable.createdAt,
+      });
+    if (!row) {
+      res.status(404).json({ error: "Memory not found" });
+      return;
+    }
+    res.json({ memory: row });
+  } catch (err) {
+    logger.error({ component: "ora-memories", err }, "Failed to restore memory");
+    res.status(500).json({ error: "Failed to restore memory" });
   }
 });
 

@@ -3733,6 +3733,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  {
+    name: "migrate-ora-memory-supersede",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(
+        `ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS superseded_by INTEGER`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

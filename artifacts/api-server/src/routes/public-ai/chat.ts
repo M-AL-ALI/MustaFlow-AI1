@@ -297,6 +297,9 @@ async function buildMemoryContext(
           // Respect the Memory Center "pause" toggle: paused memories are kept
           // but excluded from Ora's context.
           eq(knowledgeEntriesTable.enabled, true),
+          // Consolidation: never inject a memory that a newer fact superseded —
+          // only the current version of a fact reaches Ora's context.
+          isNull(knowledgeEntriesTable.supersededBy),
           isNull(knowledgeEntriesTable.archivedAt),
         ),
       )

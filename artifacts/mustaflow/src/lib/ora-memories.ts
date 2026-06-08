@@ -7,6 +7,12 @@ export interface OraMemory {
   title: string;
   content: string;
   enabled: boolean;
+  /**
+   * When set, the id of a newer memory that superseded this one (a contradicting
+   * update like "dark mode" → "light mode"). Superseded memories are kept and
+   * still listed, but excluded from Ora's context until restored. Null = active.
+   */
+  supersededBy: number | null;
   sourceConversationId: number | null;
   createdAt: string;
 }
@@ -42,6 +48,15 @@ export async function updateOraMemory(
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`Failed to update memory (${res.status})`);
+  const data = (await res.json()) as { memory: OraMemory };
+  return data.memory;
+}
+
+export async function restoreOraMemory(id: number): Promise<OraMemory> {
+  const res = await authFetch(`${BASE}/api/ora/memories/${id}/restore`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to restore memory (${res.status})`);
   const data = (await res.json()) as { memory: OraMemory };
   return data.memory;
 }

@@ -98,6 +98,13 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   enabled: boolean("enabled").notNull().default(true),
   // Ora Memory Center: the Ora conversation a memory was captured from (if any).
   sourceConversationId: integer("source_conversation_id"),
+  // Ora Memory consolidation: when a NEWER Ora memory supersedes this one
+  // (the user saved an updated fact that overlaps an earlier memory), this
+  // points to the newer entry's id. Superseded entries are disabled (excluded
+  // from Ora's context) but kept visible in the Memory Center with a
+  // "Superseded" badge, so the change is non-destructive and reversible.
+  // Null = active / never superseded. Ora (origin="ora") rows only.
+  supersededBy: integer("superseded_by"),
   // Provenance marker. "ora" = user-approved Ora memory (the only origin Ora
   // shows/injects); "builder"/"system" = AI Builder Knowledge Vault (hidden from
   // Ora). Null on legacy rows until the backfill migration runs.

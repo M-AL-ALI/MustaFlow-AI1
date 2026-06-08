@@ -18,6 +18,8 @@ import {
   X,
   MessageSquare,
   AlertTriangle,
+  RotateCcw,
+  Layers,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -32,6 +34,7 @@ import {
   createOraMemory,
   updateOraMemory,
   deleteOraMemory,
+  restoreOraMemory,
   clearOraMemories,
   clearOraConversations,
   type OraMemory,
@@ -265,20 +268,71 @@ function MemoryRow({
   onToggle,
   onSave,
   onDelete,
+  onRestore,
 }: {
   memory: OraMemory;
   onToggle: (enabled: boolean) => void;
   onSave: (patch: { title: string; content: string }) => void;
   onDelete: () => void;
+  onRestore: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(memory.title);
   const [content, setContent] = useState(memory.content);
+  const superseded = memory.supersededBy !== null;
 
   const commit = () => {
     if (title.trim()) onSave({ title: title.trim(), content: content.trim() });
     setEditing(false);
   };
+
+  // Superseded memories are read-only until restored: a newer memory covers the
+  // same fact, so we present this one as historical with a single Restore action
+  // (plus delete) rather than the full edit/toggle controls.
+  if (superseded) {
+    return (
+      <div className="rounded-lg border border-border/50 bg-muted/30 px-4 py-3 opacity-80">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Layers className="h-2.5 w-2.5" />
+                Superseded
+              </span>
+            </div>
+            <p className="mt-1.5 text-sm font-medium text-foreground line-through decoration-muted-foreground/40">
+              {memory.title}
+            </p>
+            {memory.content && (
+              <p className="mt-0.5 text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                {memory.content}
+              </p>
+            )}
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              {new Date(memory.createdAt).toLocaleDateString()} · Replaced by a newer memory
+            </p>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={onRestore}
+              aria-label="Restore memory"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Restore
+            </button>
+            <button
+              onClick={onDelete}
+              aria-label="Delete memory"
+              className="p-1.5 text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -431,6 +485,20 @@ function MemoriesTab() {
     }
   }
 
+  async function handleRestore(m: OraMemory) {
+    const prev = memories;
+    setMemories((cur) =>
+      cur.map((x) => (x.id === m.id ? { ...x, supersededBy: null, enabled: true } : x)),
+    );
+    try {
+      const restored = await restoreOraMemory(m.id);
+      setMemories((cur) => cur.map((x) => (x.id === m.id ? restored : x)));
+    } catch {
+      setMemories(prev);
+      toast({ title: "Could not restore memory", variant: "destructive" });
+    }
+  }
+
   function resetAddForm() {
     setAdding(false);
     setNewTitle("");
@@ -445,6 +513,14 @@ function MemoriesTab() {
       const created = await createOraMemory({ title, content: newContent.trim() });
       setMemories((prev) => [created, ...prev]);
       resetAddForm();
+      // Saving may have superseded existing overlapping memories server-side; refetch
+      // so those rows immediately reflect their superseded state (badge + Restore).
+      try {
+        const rows = await fetchOraMemories();
+        setMemories(rows);
+      } catch {
+        /* non-fatal: the optimistic insert above still shows the new memory */
+      }
     } catch {
       toast({ title: "Could not save memory", variant: "destructive" });
     } finally {
@@ -549,6 +625,7 @@ function MemoriesTab() {
               onToggle={(enabled) => void handleToggle(m, enabled)}
               onSave={(patch) => void handleSave(m, patch)}
               onDelete={() => void handleDelete(m)}
+              onRestore={() => void handleRestore(m)}
             />
           ))}
         </div>
