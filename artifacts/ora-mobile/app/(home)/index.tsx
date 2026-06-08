@@ -9,7 +9,9 @@ import {
   createAudioPlayer,
   setAudioModeAsync,
   useAudioRecorder,
+  useAudioRecorderState,
   type AudioPlayer,
+  type AudioRecorder,
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import {
@@ -112,7 +114,10 @@ export default function OraChatScreen() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
+    isMeteringEnabled: true,
+  });
   const playerRef = useRef<AudioPlayer | null>(null);
 
   useEffect(() => {
@@ -516,24 +521,26 @@ export default function OraChatScreen() {
           )}
 
           <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
-            <Pressable
-              onPress={handleAttach}
-              disabled={uploading}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: c.radius,
-                backgroundColor: c.secondary,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {uploading ? (
-                <ActivityIndicator size="small" color={c.mutedForeground} />
-              ) : (
-                <Paperclip size={20} color={c.mutedForeground} />
-              )}
-            </Pressable>
+            {!recording && (
+              <Pressable
+                onPress={handleAttach}
+                disabled={uploading}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: c.radius,
+                  backgroundColor: c.secondary,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {uploading ? (
+                  <ActivityIndicator size="small" color={c.mutedForeground} />
+                ) : (
+                  <Paperclip size={20} color={c.mutedForeground} />
+                )}
+              </Pressable>
+            )}
             <Pressable
               onPress={recording ? stopRecording : startRecording}
               disabled={transcribing}
@@ -554,50 +561,56 @@ export default function OraChatScreen() {
                 <Mic size={20} color={c.mutedForeground} />
               )}
             </Pressable>
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="Message Ora…"
-              placeholderTextColor={c.mutedForeground}
-              multiline
-              style={{
-                flex: 1,
-                maxHeight: 120,
-                minHeight: 44,
-                backgroundColor: c.card,
-                borderWidth: 1,
-                borderColor: c.border,
-                borderRadius: c.radius,
-                paddingHorizontal: 14,
-                paddingTop: 12,
-                paddingBottom: 12,
-                color: c.foreground,
-                fontFamily: "Inter_400Regular",
-                fontSize: 15,
-              }}
-            />
-            <Pressable
-              onPress={handleSend}
-              disabled={sending || (!input.trim() && !attachment)}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: c.radius,
-                backgroundColor:
-                  sending || (!input.trim() && !attachment) ? c.secondary : c.primary,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color={c.primaryForeground} />
-              ) : (
-                <ArrowUp
-                  size={20}
-                  color={!input.trim() && !attachment ? c.mutedForeground : c.primaryForeground}
+            {recording ? (
+              <RecordingIndicator recorder={recorder} />
+            ) : (
+              <>
+                <TextInput
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Message Ora…"
+                  placeholderTextColor={c.mutedForeground}
+                  multiline
+                  style={{
+                    flex: 1,
+                    maxHeight: 120,
+                    minHeight: 44,
+                    backgroundColor: c.card,
+                    borderWidth: 1,
+                    borderColor: c.border,
+                    borderRadius: c.radius,
+                    paddingHorizontal: 14,
+                    paddingTop: 12,
+                    paddingBottom: 12,
+                    color: c.foreground,
+                    fontFamily: "Inter_400Regular",
+                    fontSize: 15,
+                  }}
                 />
-              )}
-            </Pressable>
+                <Pressable
+                  onPress={handleSend}
+                  disabled={sending || (!input.trim() && !attachment)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: c.radius,
+                    backgroundColor:
+                      sending || (!input.trim() && !attachment) ? c.secondary : c.primary,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {sending ? (
+                    <ActivityIndicator size="small" color={c.primaryForeground} />
+                  ) : (
+                    <ArrowUp
+                      size={20}
+                      color={!input.trim() && !attachment ? c.mutedForeground : c.primaryForeground}
+                    />
+                  )}
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -611,6 +624,84 @@ export default function OraChatScreen() {
         onSelect={loadConversation}
         onDelete={removeConversation}
       />
+    </View>
+  );
+}
+
+const WAVEFORM_BAR_COUNT = 28;
+const METERING_FLOOR_DB = -50;
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const mm = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const ss = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function RecordingIndicator({ recorder }: { recorder: AudioRecorder }) {
+  const c = useColors();
+  const state = useAudioRecorderState(recorder, 90);
+  const [levels, setLevels] = useState<number[]>(() => Array(WAVEFORM_BAR_COUNT).fill(0));
+
+  const metering = state.metering;
+  useEffect(() => {
+    const db = typeof metering === "number" ? metering : METERING_FLOOR_DB;
+    const norm = Math.max(0, Math.min(1, (db - METERING_FLOOR_DB) / -METERING_FLOOR_DB));
+    const eased = Math.pow(norm, 0.6);
+    setLevels((prev) => [...prev.slice(1), eased]);
+  }, [metering]);
+
+  return (
+    <View
+      style={{
+        flex: 1,
+        minHeight: 44,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        backgroundColor: c.card,
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+      }}
+    >
+      <View
+        style={{
+          flex: 1,
+          height: 28,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        {levels.map((level, i) => (
+          <View
+            key={i}
+            style={{
+              flex: 1,
+              height: Math.max(3, level * 26),
+              borderRadius: 2,
+              backgroundColor: c.destructive,
+              opacity: 0.55 + level * 0.45,
+            }}
+          />
+        ))}
+      </View>
+      <Text
+        style={{
+          color: c.mutedForeground,
+          fontFamily: "Inter_500Medium",
+          fontSize: 13,
+          fontVariant: ["tabular-nums"],
+          minWidth: 44,
+          textAlign: "right",
+        }}
+      >
+        {formatElapsed(state.durationMillis)}
+      </Text>
     </View>
   );
 }
@@ -841,10 +932,7 @@ function MessageBubble({
               hitSlop={8}
               style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
             >
-              <Volume2
-                size={13}
-                color={speaking ? c.accentForeground : c.mutedForeground}
-              />
+              <Volume2 size={13} color={speaking ? c.accentForeground : c.mutedForeground} />
               <Text
                 style={{
                   color: speaking ? c.accentForeground : c.mutedForeground,
