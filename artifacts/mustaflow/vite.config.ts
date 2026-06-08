@@ -63,79 +63,13 @@ export default defineConfig({
         // Lightweight public entry — no Clerk, smaller initial JS for crawlers.
         public: path.resolve(import.meta.dirname, "public.html"),
       },
-      output: {
-        manualChunks(id) {
-          // Core React runtime — loaded on every route
-          if (id.includes("node_modules/react/") || id.includes("node_modules/react-dom/")) {
-            return "react-runtime";
-          }
-          // Clerk auth — needed for most routes but not the raw bundle
-          if (id.includes("node_modules/@clerk/")) {
-            return "clerk";
-          }
-          // Monaco editor — only used in the project workspace
-          if (
-            id.includes("node_modules/@monaco-editor/") ||
-            id.includes("node_modules/monaco-editor/")
-          ) {
-            return "monaco";
-          }
-          // XYFlow / canvas — only used in the builder canvas tab
-          if (id.includes("node_modules/@xyflow/") || id.includes("node_modules/@dagrejs/")) {
-            return "canvas-libs";
-          }
-          // Heavy document generation libs — only used in export flows
-          if (
-            id.includes("node_modules/docx/") ||
-            id.includes("node_modules/exceljs/") ||
-            id.includes("node_modules/pptxgenjs/") ||
-            id.includes("node_modules/html2canvas/")
-          ) {
-            return "doc-export";
-          }
-          // Stripe — only used in billing page
-          if (id.includes("node_modules/@stripe/")) {
-            return "stripe";
-          }
-          // Recharts + chart deps — only used in reporting/usage pages
-          if (id.includes("node_modules/recharts/") || id.includes("node_modules/d3-")) {
-            return "charts";
-          }
-          // WebContainers — only used in agentic builder
-          if (id.includes("node_modules/@webcontainer/")) {
-            return "webcontainer";
-          }
-          // Sentry — error reporting, deferred
-          if (id.includes("node_modules/@sentry/")) {
-            return "sentry";
-          }
-          // Framer Motion — animations, only loaded where used
-          if (id.includes("node_modules/framer-motion/")) {
-            return "framer-motion";
-          }
-          // React Markdown + remark/rehype pipeline
-          if (
-            id.includes("node_modules/react-markdown/") ||
-            id.includes("node_modules/remark") ||
-            id.includes("node_modules/rehype") ||
-            id.includes("node_modules/unified/") ||
-            id.includes("node_modules/mdast") ||
-            id.includes("node_modules/hast") ||
-            id.includes("node_modules/micromark") ||
-            id.includes("node_modules/vfile")
-          ) {
-            return "markdown";
-          }
-          // highlight.js — syntax highlighting in the editor / markdown
-          if (id.includes("node_modules/highlight.js/")) {
-            return "highlight";
-          }
-          // All other node_modules — shared vendor chunk
-          if (id.includes("node_modules/")) {
-            return "vendor";
-          }
-        },
-      },
+      // NOTE: No custom `manualChunks` here on purpose. Hand-splitting
+      // interdependent vendor libraries (recharts/d3, remark/rehype, xyflow, etc.)
+      // across separate chunks creates circular imports between chunks, which
+      // surface at runtime as "Cannot access 'X' before initialization" (TDZ)
+      // errors that crash the whole app before React mounts. Rollup's default
+      // chunking co-locates circularly-dependent modules and guarantees correct
+      // init order. Route-level code splitting via lazy() imports is unaffected.
     },
   },
   server: {

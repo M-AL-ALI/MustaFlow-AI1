@@ -53,9 +53,13 @@ function checkViaHtml() {
   while ((m = re.exec(html)) !== null) {
     const href = m[1];
     if (!href.endsWith(".js") && !href.endsWith(".mjs")) continue;
-    // Vite hrefs are root-relative (e.g. /assets/foo.js or /base/assets/foo.js)
-    // Strip leading slash + optional base path, keep assets/… relative to DIST_DIR
-    const rel = href.replace(/^\/[^/]*\//, "").replace(/^\//, "");
+    // Vite hrefs are root-relative (e.g. /assets/foo.js or /base/assets/foo.js).
+    // Anchor on the /assets/ segment so both root and base-prefixed hrefs resolve
+    // to a path relative to DIST_DIR. (The old `/^\/[^/]*\//` regex wrongly
+    // stripped the `assets/` dir itself for root paths, producing 0-byte sizes
+    // and a false-green budget check.)
+    const assetsIdx = href.indexOf("/assets/");
+    const rel = assetsIdx >= 0 ? href.slice(assetsIdx + 1) : href.replace(/^\//, "");
     files.push({ href, rel });
   }
 
@@ -73,6 +77,18 @@ function checkViaHtml() {
     const size = fileSize(absPath);
     totalBytes += size;
     details.push({ file: rel || href, size });
+  }
+
+  // Guard against a silent false-green: if we matched preload links but every
+  // one resolved to 0 bytes, the href→file mapping is broken (not a genuinely
+  // empty bundle). Surface it instead of reporting a bogus pass.
+  if (files.length > 0 && totalBytes === 0) {
+    console.error(
+      `[bundle-size] ✖ FAIL: matched ${files.length} preload link(s) in public.html but ` +
+        `all resolved to 0 bytes — href→file path mapping is broken. ` +
+        `Check the /assets/ normalization in check-bundle-size.mjs.`,
+    );
+    process.exit(1);
   }
 
   return { totalBytes, details, method: "html-modulepreload" };
