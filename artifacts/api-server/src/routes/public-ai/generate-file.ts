@@ -8,7 +8,8 @@ import {
   MSG_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { scanUserInput } from "../../lib/public-ai/prompt";
-import { generateFileFromPrompt } from "../../lib/public-ai/file-builder";
+import { generateFileFromPrompt, FileGenerationError } from "../../lib/public-ai/file-builder";
+import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
 import { consumeOraQuota, refundOraQuota, oraMessageFields } from "../../lib/public-ai/ora-usage";
 import { persistOraAsset } from "../../lib/ora-assets";
@@ -25,6 +26,10 @@ const bodySchema = z.object({
   messages: z.array(messageItemSchema).max(20).default([]),
   format: z.enum(["csv", "xlsx", "docx", "pdf", "pptx"]),
   language: z.string().max(20).optional(),
+  // IDs of files the user uploaded earlier this conversation. When present we
+  // re-hydrate their real content so creation extracts/transforms actual data
+  // instead of fabricating it.
+  documentRefs: z.array(z.string().uuid()).max(5).default([]),
 });
 
 router.post("/public-ai/generate-file", async (req, res) => {
@@ -34,7 +39,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
     return;
   }
 
-  const { message, messages, format, language } = parsed.data;
+  const { message, messages, format, language, documentRefs } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
@@ -85,8 +90,21 @@ router.post("/public-ai/generate-file", async (req, res) => {
 
   const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
 
+  // Re-hydrate any uploaded documents/datasets so the file is built from the
+  // user's real data. Empty when nothing resolves (expired/foreign refs); in
+  // that case generation falls back to its non-source-data behavior.
+  const carriedDocs = buildCarriedDocumentContext(documentRefs, session.sessionId, message);
+  const filePrompt = carriedDocs ? `${message}\n\n${carriedDocs}` : message;
+  const hasSourceData = carriedDocs.length > 0;
+
   try {
-    const result = await generateFileFromPrompt(message, format, history, language);
+    const result = await generateFileFromPrompt(
+      filePrompt,
+      format,
+      history,
+      language,
+      hasSourceData,
+    );
 
     // Persist to the durable asset library for signed-in users so the file
     // survives chat resets, reloads, and other devices. Best-effort.
@@ -126,7 +144,13 @@ router.post("/public-ai/generate-file", async (req, res) => {
   } catch (err) {
     if (authed) await refundOraQuota(authed.userId, "message");
     logger.error({ component: "ora-generate-file", format, err }, "File generation failed");
-    res.status(500).json({ error: "Failed to generate file. Please try again." });
+    // FileGenerationError carries a user-safe message (e.g. the model lost the
+    // attached data) — surface it instead of the generic 500 fallback.
+    if (err instanceof FileGenerationError) {
+      res.status(422).json({ error: err.message });
+    } else {
+      res.status(500).json({ error: "Failed to generate file. Please try again." });
+    }
   }
 });
 

@@ -157,10 +157,16 @@ export function buildDatasetContextBlock(
     `Rows: ${summary.rowCount.toLocaleString()}${summary.truncated ? " (capped at 10,000-row limit; original file larger)" : ""}`,
   );
   lines.push(`Columns: ${summary.colCount}`);
-  if (summary.sheetName) lines.push(`Sheet: ${summary.sheetName}`);
+  if (summary.sheetName) lines.push(`Sheet analyzed: ${summary.sheetName} (largest visible sheet)`);
+  if (summary.otherVisibleSheets && summary.otherVisibleSheets.length > 0) {
+    lines.push(
+      `Other visible sheets NOT analyzed: ${summary.otherVisibleSheets.join(", ")}. ` +
+        `Only the sheet above was extracted. If the user asks about data on another sheet, tell them to re-upload that sheet (or save it as its own file).`,
+    );
+  }
   if (summary.hiddenSheetsSkipped > 0) {
     lines.push(
-      `Hidden sheets skipped: ${summary.hiddenSheetsSkipped} (only the first visible sheet was analyzed)`,
+      `Hidden sheets skipped: ${summary.hiddenSheetsSkipped} (hidden/very-hidden sheets are never analyzed)`,
     );
   }
   if (summary.sanitizedCellCount > 0) {

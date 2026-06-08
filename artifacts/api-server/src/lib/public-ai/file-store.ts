@@ -5,8 +5,11 @@
  * — raw file bytes are discarded immediately after extraction. Nothing is written
  * to the database or to disk.
  *
- * Entries expire after 30 minutes (matching the session JWT TTL) and are evicted
- * by a cleanup interval and on every access attempt.
+ * Entries expire after 2 hours and are evicted by a cleanup interval and on
+ * every access attempt. The window is intentionally longer than the 30-minute
+ * session JWT TTL (the sessionId itself is stable across token refresh) so an
+ * active, longer conversation does not lose its uploaded files mid-session and
+ * force the user to re-upload.
  */
 
 import type { DatasetSummary } from "./dataset-extract.js";
@@ -15,7 +18,7 @@ export const MAX_TEXT_CHARS_PER_FILE = 25_000;
 export const MAX_TOTAL_CHARS_PER_SESSION = 75_000;
 export const FILE_LIMIT_PER_SESSION = 3;
 
-const TTL_MS = 30 * 60 * 1000;
+const TTL_MS = 2 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_STORE_ENTRIES = 2_000;
 

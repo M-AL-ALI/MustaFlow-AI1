@@ -36,6 +36,10 @@ export interface DatasetSummary {
   hiddenSheetsSkipped: number;
   truncated: boolean;
   sheetName?: string;
+  // Names of other visible sheets we did NOT extract (the workbook had more
+  // than one sheet with data). Surfaced to the user so a multi-sheet upload is
+  // never silently reduced to a single sheet without them knowing.
+  otherVisibleSheets?: string[];
 }
 
 export class DatasetExtractionError extends Error {
@@ -193,16 +197,29 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
   // ExcelJS 4.x worksheets[0] resolves to `never` in strict TS 5.9+ generics; use `any` locally
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let targetSheet: any = null;
+  let targetRowCount = -1;
   let hiddenSheetsSkipped = 0;
+  const visibleSheetNames: string[] = [];
 
+  // Pick the LARGEST visible sheet (most rows) rather than the first one. A
+  // common layout puts a cover/instructions tab first and the real data on a
+  // later sheet; selecting the first sheet silently dropped that data.
   workbook.eachSheet((sheet) => {
-    if (targetSheet) return;
     const state = (sheet as { state?: string }).state;
     if (state === "hidden" || state === "veryHidden") {
       hiddenSheetsSkipped++;
       return;
     }
-    targetSheet = sheet;
+    const name = (sheet as { name?: string }).name ?? "Sheet";
+    visibleSheetNames.push(name);
+    const rowCount =
+      (sheet as { actualRowCount?: number; rowCount?: number }).actualRowCount ??
+      (sheet as { rowCount?: number }).rowCount ??
+      0;
+    if (rowCount > targetRowCount) {
+      targetRowCount = rowCount;
+      targetSheet = sheet;
+    }
   });
 
   if (!targetSheet) {
@@ -214,6 +231,7 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
 
   const sheet = targetSheet;
   const sheetName = (sheet as { name?: string }).name ?? "Sheet1";
+  const otherVisibleSheets = visibleSheetNames.filter((n) => n !== sheetName);
 
   const headerRow = sheet.getRow(1);
   const headers: string[] = [];
@@ -302,6 +320,7 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
     hiddenSheetsSkipped,
     truncated,
     sheetName,
+    otherVisibleSheets: otherVisibleSheets.length > 0 ? otherVisibleSheets : undefined,
   };
 }
 

@@ -1237,6 +1237,10 @@ export function useOraChat(): UseOraChatReturn {
         } else {
           body.languageHint = navigator.language;
         }
+        // Carry any earlier-uploaded files so the file is built from real data.
+        if (documentRefsRef.current.length > 0) {
+          body.documentRefs = documentRefsRef.current;
+        }
 
         const data = await apiPost<{
           reply: string;
@@ -1307,6 +1311,10 @@ export function useOraChat(): UseOraChatReturn {
               retryBody.language = language;
             } else {
               retryBody.languageHint = navigator.language;
+            }
+            // Carry any earlier-uploaded files so the file is built from real data.
+            if (documentRefsRef.current.length > 0) {
+              retryBody.documentRefs = documentRefsRef.current;
             }
             const retryData = await apiPost<{
               reply: string;

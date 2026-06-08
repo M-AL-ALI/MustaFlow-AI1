@@ -1,0 +1,144 @@
+import { describe, it, expect } from "vitest";
+import { safeParseFileJson, FileGenerationError } from "./file-builder.js";
+import { buildDatasetContextBlock } from "./dataset-prompt.js";
+import { buildCarriedDocumentContext } from "./carried-docs.js";
+import { storeFile } from "./file-store.js";
+import type { DatasetSummary } from "./dataset-extract.js";
+
+function makeSummary(over: Partial<DatasetSummary> = {}): DatasetSummary {
+  return {
+    rowCount: 3,
+    colCount: 2,
+    headers: ["Name", "Amount"],
+    sampleRows: [
+      ["Alice", "100"],
+      ["Bob", "200"],
+      ["Carol", "300"],
+    ],
+    columnProfiles: [],
+    paretoSets: [],
+    sanitizedCellCount: 0,
+    hiddenSheetsSkipped: 0,
+    truncated: false,
+    sheetName: "Data",
+    ...over,
+  };
+}
+
+describe("safeParseFileJson", () => {
+  it("parses clean JSON", () => {
+    expect(safeParseFileJson('{"a":1,"b":"x"}')).toEqual({ a: 1, b: "x" });
+  });
+
+  it("strips ```json code fences", () => {
+    expect(safeParseFileJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
+  });
+
+  it("strips bare ``` code fences", () => {
+    expect(safeParseFileJson('```\n{"a":1}\n```')).toEqual({ a: 1 });
+  });
+
+  it("repairs a response truncated mid-array, keeping complete rows", () => {
+    // Simulate the model hitting the token cap mid-row.
+    const truncated = '{"title":"T","headers":["A","B"],"rows":[["x","1"],["y","2"],["z","';
+    const out = safeParseFileJson(truncated) as {
+      title?: string;
+      rows?: unknown[];
+    };
+    expect(out.title).toBe("T");
+    expect(Array.isArray(out.rows)).toBe(true);
+    // The complete rows survive; the partial trailing one is dropped.
+    expect(out.rows!.length).toBe(2);
+    expect(out.rows![0]).toEqual(["x", "1"]);
+  });
+
+  it("returns {} for unsalvageable garbage", () => {
+    expect(safeParseFileJson("not json at all")).toEqual({});
+  });
+
+  it("returns {} for empty input", () => {
+    expect(safeParseFileJson("")).toEqual({});
+  });
+});
+
+describe("buildDatasetContextBlock — sheet awareness", () => {
+  it("labels the analyzed sheet as the largest visible sheet", () => {
+    const block = buildDatasetContextBlock("book.xlsx", makeSummary(), "summarize");
+    expect(block).toContain("Sheet analyzed: Data (largest visible sheet)");
+  });
+
+  it("surfaces other visible sheets that were not analyzed", () => {
+    const block = buildDatasetContextBlock(
+      "book.xlsx",
+      makeSummary({ otherVisibleSheets: ["Cover", "Notes"] }),
+      "summarize",
+    );
+    expect(block).toContain("Other visible sheets NOT analyzed: Cover, Notes");
+  });
+
+  it("omits the other-sheets note when there is only one visible sheet", () => {
+    const block = buildDatasetContextBlock("book.xlsx", makeSummary(), "summarize");
+    expect(block).not.toContain("Other visible sheets NOT analyzed");
+  });
+});
+
+describe("buildCarriedDocumentContext — datasets are carried", () => {
+  it("renders a dataset upload (empty extractedText) via its summary", () => {
+    const sessionId = "sess-dataset-1";
+    const ref = storeFile({
+      sessionId,
+      filename: "sales.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extractedText: "",
+      charCount: 0,
+      datasetSummary: makeSummary(),
+    });
+
+    const ctx = buildCarriedDocumentContext([ref], sessionId, "make a CSV from this");
+    expect(ctx).toContain("[ATTACHED FILES");
+    expect(ctx).toContain("sales.xlsx");
+    // Real header values from the dataset summary must be present.
+    expect(ctx).toContain("Name");
+    expect(ctx).toContain("Amount");
+  });
+
+  it("carries a plain-text document via extractedText", () => {
+    const sessionId = "sess-doc-1";
+    const ref = storeFile({
+      sessionId,
+      filename: "notes.txt",
+      mimeType: "text/plain",
+      extractedText: "The quarterly revenue was 1.2M.",
+      charCount: 30,
+    });
+
+    const ctx = buildCarriedDocumentContext([ref], sessionId);
+    expect(ctx).toContain("notes.txt");
+    expect(ctx).toContain("quarterly revenue was 1.2M");
+  });
+
+  it("returns empty string when refs belong to another session", () => {
+    const ref = storeFile({
+      sessionId: "owner-session",
+      filename: "secret.txt",
+      mimeType: "text/plain",
+      extractedText: "private",
+      charCount: 7,
+    });
+    expect(buildCarriedDocumentContext([ref], "different-session")).toBe("");
+  });
+
+  it("returns empty string for no refs", () => {
+    expect(buildCarriedDocumentContext([], "any")).toBe("");
+  });
+});
+
+describe("FileGenerationError", () => {
+  it("is an Error subclass carrying a user-safe message", () => {
+    const err = new FileGenerationError("Could not extract the data from your file.");
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(FileGenerationError);
+    expect(err.name).toBe("FileGenerationError");
+    expect(err.message).toBe("Could not extract the data from your file.");
+  });
+});

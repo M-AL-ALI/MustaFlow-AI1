@@ -21,6 +21,18 @@ import PptxGenJS from "pptxgenjs";
 
 export type { FileFormat };
 
+/**
+ * Thrown when file generation cannot honor the user's request — most importantly
+ * when source data was attached but the model returned nothing usable. Routes
+ * map this to a client-facing error instead of silently returning an empty file.
+ */
+export class FileGenerationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FileGenerationError";
+  }
+}
+
 export type ColumnType = "text" | "number" | "currency" | "date" | "percent";
 
 export interface TabularData {
@@ -68,11 +80,30 @@ export interface GeneratedFileResult {
 // AI system prompts
 // ---------------------------------------------------------------------------
 
-function buildTabularSystemPrompt(format: "csv" | "xlsx", language?: string): string {
+// When the user attached a file, the builder receives its real content. The
+// model must transcribe/transform that data faithfully instead of inventing
+// plausible-looking rows — fabrication was the #1 reported file-creation bug.
+const SOURCE_DATA_DIRECTIVE =
+  `\n\nSOURCE DATA PROVIDED:\n` +
+  `The user's message includes the actual content of file(s) they uploaded (look for an "[ATTACHED FILES ...]" or "[DATASET ...]" block). You MUST build this file from that real data:\n` +
+  `- Extract, organize, and transform the ACTUAL values from the attached content.\n` +
+  `- Do NOT invent, fabricate, guess, or pad with placeholder/sample data.\n` +
+  `- Preserve every real row/record/value the user asked for; do not drop, summarize away, or truncate data unless explicitly told to.\n` +
+  `- If the user asks for a subset (e.g. specific columns, a filter, a total), derive it from the real data only.\n` +
+  `- If the attached data is empty or does not contain what the user asked for, return your best structure from what IS present rather than making up values.`;
+
+function buildTabularSystemPrompt(
+  format: "csv" | "xlsx",
+  language?: string,
+  hasSourceData = false,
+): string {
   const langNote =
     language && language !== "auto"
       ? `\nRespond in ${language}. All generated text (headers, data values) must be in ${language}.`
       : "";
+  const rowRule = hasSourceData
+    ? `4. Use the real rows from the attached data — include all of them (or exactly the subset requested). Do NOT add invented rows.\n`
+    : `4. Generate at least 10 realistic, varied, logically sorted rows.\n`;
   return (
     `You are a data generation expert. The user wants a professionally organized ${format.toUpperCase()} file.\n` +
     `Return ONLY valid JSON — no prose, no markdown, no code fences.\n\n` +
@@ -95,13 +126,14 @@ function buildTabularSystemPrompt(format: "csv" | "xlsx", language?: string): st
     `1. EVERY row must have EXACTLY the same number of values as "headers". No exceptions.\n` +
     `2. Values are in the SAME ORDER as headers (index 0 = first column, etc.).\n` +
     `3. Header names: short, clean, title-case (1–3 words). No duplicates.\n` +
-    `4. Generate at least 10 realistic, varied, logically sorted rows.\n` +
+    rowRule +
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
-    `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}`
+    `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}` +
+    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
 }
 
-function buildPresentationSystemPrompt(language?: string): string {
+function buildPresentationSystemPrompt(language?: string, hasSourceData = false): string {
   const langNote =
     language && language !== "auto"
       ? `\nRespond in ${language}. All generated content must be in ${language}.`
@@ -121,17 +153,24 @@ function buildPresentationSystemPrompt(language?: string): string {
     `  ]\n` +
     `}\n\n` +
     `RULES:\n` +
-    `1. Include at least 5 slides with meaningful, distinct headings.\n` +
+    (hasSourceData
+      ? `1. Build the slides from the actual content of the attached file(s); do not invent facts or figures.\n`
+      : `1. Include at least 5 slides with meaningful, distinct headings.\n`) +
     `2. Each slide must have 3-6 concise bullet points -- short, professional, no leading dashes.\n` +
     `3. Bullet text must be plain -- no markdown, no asterisks, no hyphens at the start.\n` +
     `4. Headings must be short (3-7 words max) and clearly titled.\n` +
     `5. The subtitle is optional -- use it for a tagline, date, or author.\n` +
     `6. Match the presentation topic and purpose to exactly what the user asked for.\n` +
-    `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}`
+    `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}` +
+    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
 }
 
-function buildDocumentSystemPrompt(format: "docx" | "pdf", language?: string): string {
+function buildDocumentSystemPrompt(
+  format: "docx" | "pdf",
+  language?: string,
+  hasSourceData = false,
+): string {
   const langNote =
     language && language !== "auto"
       ? `\nRespond in ${language}. All generated content must be in ${language}.`
@@ -152,13 +191,18 @@ function buildDocumentSystemPrompt(format: "docx" | "pdf", language?: string): s
     `  ]\n` +
     `}\n\n` +
     `RULES:\n` +
-    `1. Write substantive, professional content — not placeholder text.\n` +
-    `2. Include at least 4 sections with meaningful headings.\n` +
+    (hasSourceData
+      ? `1. Build the document from the actual content of the attached file(s); summarize/organize the real text, do not invent facts.\n`
+      : `1. Write substantive, professional content — not placeholder text.\n`) +
+    (hasSourceData
+      ? `2. Use as many sections as the source content needs.\n`
+      : `2. Include at least 4 sections with meaningful headings.\n`) +
     `3. Each section needs either "content", "bullets", or both.\n` +
     `4. "bullets" is an array of concise bullet points (no leading dashes — just the text).\n` +
     `5. Match the document type and purpose to what the user asked for exactly.\n` +
     `6. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
-    `7. Only these keys are allowed: title, subtitle, sections (with heading, content, bullets).${langNote}`
+    `7. Only these keys are allowed: title, subtitle, sections (with heading, content, bullets).${langNote}` +
+    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
 }
 
@@ -769,22 +813,102 @@ function mimeForFormat(format: FileFormat): string {
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Parse the model's JSON reply defensively. Despite response_format json_object,
+ * a reply can still arrive wrapped in a code fence or — when a large dataset
+ * extraction hits the token cap — truncated mid-array. A plain JSON.parse throws
+ * and 500s the request, so we strip fences and, as a last resort, trim the
+ * string back to the last complete top-level structure before re-parsing.
+ * Returns {} when nothing salvageable remains (callers degrade to defaults).
+ */
+export function safeParseFileJson(raw: string): Record<string, unknown> {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  if (!cleaned) return {};
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    // Best-effort repair for a response truncated mid-array/object: close any
+    // unterminated string, drop a trailing partial element, then balance the
+    // open brackets/braces in reverse order.
+    const repaired = repairTruncatedJson(cleaned);
+    if (repaired) {
+      try {
+        const parsed = JSON.parse(repaired);
+        return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+}
+
+function repairTruncatedJson(s: string): string | null {
+  // Walk the string tracking structure depth, ignoring brackets inside strings.
+  // Each time we close a bracket we record that index together with a snapshot
+  // of the still-open stack at that point — that's the last position where the
+  // JSON was structurally complete and can be cleanly closed.
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let lastIndex = -1;
+  let lastOpenStack: string[] = [];
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{" || ch === "[") {
+      stack.push(ch);
+    } else if (ch === "}" || ch === "]") {
+      stack.pop();
+      lastIndex = i;
+      lastOpenStack = [...stack];
+    }
+  }
+
+  if (stack.length === 0) return null; // already balanced — repair won't help
+  if (lastIndex < 0) return null; // never saw a complete structure to fall back to
+
+  // Truncate to the last complete structure, drop any trailing comma the cut
+  // left behind, then close the brackets that were still open at that point.
+  let body = s.slice(0, lastIndex + 1).replace(/,\s*$/, "");
+  let closers = "";
+  for (let i = lastOpenStack.length - 1; i >= 0; i--) {
+    closers += lastOpenStack[i] === "{" ? "}" : "]";
+  }
+  return body + closers;
+}
+
 export async function generateFileFromPrompt(
   message: string,
   format: FileFormat,
   history: Array<{ role: "user" | "assistant"; content: string }>,
   language?: string,
+  hasSourceData = false,
 ): Promise<GeneratedFileResult> {
   const isTabular = format === "csv" || format === "xlsx";
   const isPptx = format === "pptx";
 
   let systemPrompt: string;
   if (isTabular) {
-    systemPrompt = buildTabularSystemPrompt(format as "csv" | "xlsx", language);
+    systemPrompt = buildTabularSystemPrompt(format as "csv" | "xlsx", language, hasSourceData);
   } else if (isPptx) {
-    systemPrompt = buildPresentationSystemPrompt(language);
+    systemPrompt = buildPresentationSystemPrompt(language, hasSourceData);
   } else {
-    systemPrompt = buildDocumentSystemPrompt(format as "docx" | "pdf", language);
+    systemPrompt = buildDocumentSystemPrompt(format as "docx" | "pdf", language, hasSourceData);
   }
 
   const callMessages = [
@@ -798,11 +922,13 @@ export async function generateFileFromPrompt(
     model: process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4",
     messages: callMessages,
     response_format: { type: "json_object" },
-    max_completion_tokens: 4000,
+    // Higher cap so extracting a real dataset into a file isn't truncated
+    // mid-JSON (which previously threw on parse and 500'd the request).
+    max_completion_tokens: 8000,
   });
 
   const raw = result.choices[0]?.message?.content?.trim() ?? "{}";
-  const aiData = JSON.parse(raw) as Record<string, unknown>;
+  const aiData = safeParseFileJson(raw);
 
   let fileBuffer: Buffer;
   // eslint-disable-next-line no-useless-assignment
@@ -843,6 +969,14 @@ export async function generateFileFromPrompt(
     };
     title = data.title;
     rowCount = data.rows.length;
+    // When the user attached real data, an empty extraction means the model
+    // (or a truncated/invalid reply) lost it. Fail loudly rather than handing
+    // back an empty/fabricated file — that was the original "wrong data" bug.
+    if (hasSourceData && rowCount === 0) {
+      throw new FileGenerationError(
+        "Could not extract the data from your file. Please try again, or re-upload it.",
+      );
+    }
     fileBuffer = format === "csv" ? await buildCsv(data) : await buildXlsx(data);
   } else if (isPptx) {
     const rawSlides = Array.isArray(aiData.slides) ? aiData.slides : [];
@@ -858,6 +992,11 @@ export async function generateFileFromPrompt(
     };
     title = data.title;
     slideCount = data.slides.length;
+    if (hasSourceData && slideCount === 0) {
+      throw new FileGenerationError(
+        "Could not build slides from your file. Please try again, or re-upload it.",
+      );
+    }
     fileBuffer = await buildPptx(data);
   } else {
     const rawSections = Array.isArray(aiData.sections) ? aiData.sections : [];
@@ -874,6 +1013,11 @@ export async function generateFileFromPrompt(
     };
     title = data.title;
     sectionCount = data.sections.length;
+    if (hasSourceData && sectionCount === 0) {
+      throw new FileGenerationError(
+        "Could not build a document from your file. Please try again, or re-upload it.",
+      );
+    }
     fileBuffer = format === "docx" ? await buildDocx(data) : await buildPdf(data);
   }
 
