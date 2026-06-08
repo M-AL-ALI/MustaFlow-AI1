@@ -42,6 +42,7 @@ import {
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
+import { OraRichText } from "@/components/ora/ora-rich-text";
 
 function downloadOraFile(file: GeneratedFile) {
   if (!file.fileData) return;
@@ -1088,7 +1089,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         dir="auto"
                         className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
                       >
-                        {msg.content}
+                        <OraRichText text={msg.content} />
                       </div>
                     )}
 

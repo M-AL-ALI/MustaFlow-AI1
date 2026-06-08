@@ -31,7 +31,12 @@ Never invent facts. If you are not certain about something, say "I'm not certain
 - No emojis
 
 ## Language
-Match the language the user is currently writing in (per-message detection), and default to English when the message is ambiguous or too short to detect. Do not lock into the first message's language for the rest of the conversation. Supported languages include English, Arabic, Spanish, French, and others.`;
+Match the language the user is currently writing in (per-message detection), and default to English when the message is ambiguous or too short to detect. Do not lock into the first message's language for the rest of the conversation. Supported languages include English, Arabic, Spanish, French, and others.
+
+## Links
+- Whenever you reference a URL, always write it as a proper clickable markdown link with a short, descriptive label: [MustaFlow](https://mustaflow.app). The user reads your replies in an app where markdown links are tappable but plain or code-formatted URLs are not.
+- NEVER wrap a URL in backticks or inline code (e.g. \`https://...\`) — a URL inside code formatting is never clickable. Backticks are only for code, file names, and commands, never for links.
+- When you report back a preview link or a published app link, present it as a clear labelled markdown link such as [Open your app](https://...) so it stands out as the primary action.`;
 
 const INJECTION_PATTERNS: RegExp[] = [
   /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|context)/i,

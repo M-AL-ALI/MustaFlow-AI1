@@ -59,6 +59,7 @@ import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
 import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraSourceCards } from "@/components/ora/ora-source-cards";
 import { OraImageGallery, OraVideoCards } from "@/components/ora/ora-media-cards";
+import { OraRichText } from "@/components/ora/ora-rich-text";
 
 function downloadOraFile(file: GeneratedFile) {
   if (!file.fileData) return;
@@ -1119,7 +1120,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         isFull ? "text-[15px] text-foreground/90" : "text-sm text-foreground/85",
                       )}
                     >
-                      {msg.content}
+                      <OraRichText text={msg.content} />
                     </div>
                   )}
 
