@@ -22,6 +22,7 @@ import {
   templateRatingsTable,
   projectsTable,
   projectFilesTable,
+  communityProfilesTable,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { requireAdmin } from "../lib/adminAuth";
@@ -84,6 +85,7 @@ publicGalleryRouter.get("/gallery-templates", async (req, res): Promise<void> =>
         tags: galleryTemplatesTable.tags,
         authorId: galleryTemplatesTable.authorId,
         authorName: galleryTemplatesTable.authorName,
+        authorUsername: communityProfilesTable.username,
         previewUrl: galleryTemplatesTable.previewUrl,
         thumbnailUrl: galleryTemplatesTable.thumbnailUrl,
         platform: galleryTemplatesTable.platform,
@@ -99,6 +101,10 @@ publicGalleryRouter.get("/gallery-templates", async (req, res): Promise<void> =>
         publishedAt: galleryTemplatesTable.publishedAt,
       })
       .from(galleryTemplatesTable)
+      .leftJoin(
+        communityProfilesTable,
+        eq(galleryTemplatesTable.authorId, communityProfilesTable.userId),
+      )
       .where(and(...conditions))
       .orderBy(desc(galleryTemplatesTable.editorsPick), desc(galleryTemplatesTable.rating))
       .limit(limit)

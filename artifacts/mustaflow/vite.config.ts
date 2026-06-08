@@ -50,6 +50,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Warn when any individual chunk exceeds 800 kB (uncompressed).
+    // The overall public entry must stay below Google's 2 MB rendering limit.
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -96,6 +99,27 @@ export default defineConfig({
           // Sentry — error reporting, deferred
           if (id.includes("node_modules/@sentry/")) {
             return "sentry";
+          }
+          // Framer Motion — animations, only loaded where used
+          if (id.includes("node_modules/framer-motion/")) {
+            return "framer-motion";
+          }
+          // React Markdown + remark/rehype pipeline
+          if (
+            id.includes("node_modules/react-markdown/") ||
+            id.includes("node_modules/remark") ||
+            id.includes("node_modules/rehype") ||
+            id.includes("node_modules/unified/") ||
+            id.includes("node_modules/mdast") ||
+            id.includes("node_modules/hast") ||
+            id.includes("node_modules/micromark") ||
+            id.includes("node_modules/vfile")
+          ) {
+            return "markdown";
+          }
+          // highlight.js — syntax highlighting in the editor / markdown
+          if (id.includes("node_modules/highlight.js/")) {
+            return "highlight";
           }
           // All other node_modules — shared vendor chunk
           if (id.includes("node_modules/")) {
