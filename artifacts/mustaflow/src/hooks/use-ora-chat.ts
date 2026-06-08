@@ -433,6 +433,12 @@ export function useOraChat(): UseOraChatReturn {
   // captures this value and discards its server result if a local edit happened
   // while the fetch was outstanding — prevents a stale GET clobbering new input.
   const editGenRef = useRef(0);
+  // Refs of documents (PDF/DOCX/TXT/etc.) uploaded earlier in THIS conversation.
+  // Their extracted text lives only in the server's ephemeral session-scoped
+  // store, so we re-send the recent refs on each plain chat turn to let Ora
+  // answer follow-up questions about an earlier upload. Reset on new/changed
+  // conversation. In-memory only — not persisted (the store expires in 30 min).
+  const documentRefsRef = useRef<string[]>([]);
 
   const setLanguage = useCallback((lang: string) => {
     setLanguageState(lang);
@@ -653,11 +659,15 @@ export function useOraChat(): UseOraChatReturn {
     const id = conv.currentConversationId;
     if (id == null) {
       loadedConvRef.current = null;
+      documentRefsRef.current = [];
       setMessages([]);
       return;
     }
     if (id === loadedConvRef.current) return;
     loadedConvRef.current = id;
+    // Switching conversations: the prior conversation's upload refs no longer
+    // apply (and would belong to a different transcript).
+    documentRefsRef.current = [];
     // Snapshot the edit generation before fetching. If the user types/sends a
     // message while this GET is in flight, editGenRef advances and we discard the
     // (now stale) server payload rather than overwriting the unsaved local edit.
@@ -828,6 +838,13 @@ export function useOraChat(): UseOraChatReturn {
             hiddenSheetsSkipped: data.hiddenSheetsSkipped,
           });
           setUploadState("attached");
+          // Remember non-image upload refs (documents AND datasets) so later
+          // plain chat turns can re-hydrate them for follow-up questions. Keep
+          // only the most recent few (server caps re-hydration at 5).
+          if (data.fileRef) {
+            const next = [...documentRefsRef.current, data.fileRef];
+            documentRefsRef.current = next.slice(-5);
+          }
           setSession((prev) =>
             prev
               ? {
@@ -991,6 +1008,9 @@ export function useOraChat(): UseOraChatReturn {
             referenceSavedMemories: getReferenceSavedMemories(),
             referenceChatHistory: getReferenceChatHistory(),
           };
+          if (documentRefsRef.current.length > 0) {
+            body.documentRefs = documentRefsRef.current;
+          }
           if (language && language !== "auto") {
             body.language = language;
           } else {
@@ -1422,6 +1442,7 @@ export function useOraChat(): UseOraChatReturn {
     // is deleted server-side and the rate-limit session is preserved.
     if (convRef.current) {
       loadedConvRef.current = null;
+      documentRefsRef.current = [];
       setMessages([]);
       setError(null);
       setSessionExpired(false);
@@ -1434,6 +1455,7 @@ export function useOraChat(): UseOraChatReturn {
 
     clearStoredTranscript();
     clearStoredSessionId();
+    documentRefsRef.current = [];
     setMessages([]);
     setError(null);
     setSessionExpired(false);

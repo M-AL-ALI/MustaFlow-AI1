@@ -198,6 +198,60 @@ export interface OraRouteInput {
   mode: "instant" | "deep";
   /** Optional pre-computed classifier result (lets callers reuse one call). */
   classifier?: { intent: OraIntent; confidence: OraConfidence; topic: OraTopic };
+  /**
+   * Recent conversation turns (oldest→newest, excluding the current message).
+   * Used to resolve short continuation replies ("yes", "go ahead", "still
+   * waiting") back to a file the assistant just offered, so the file is actually
+   * generated instead of the model merely claiming it delivered one.
+   */
+  recentMessages?: Array<{ role: "user" | "assistant"; content: string }>;
+}
+
+// Short affirmations / nudges that, on their own, carry no file request but are
+// almost always a "yes, do the thing you just offered" reply. Kept deliberately
+// tight (whole-message match, length-capped) to avoid hijacking real questions.
+const FILE_CONTINUATION_PATTERNS: RegExp[] = [
+  /^(yes|yeah|yep|yup|sure|ok|okay|please|please\s+do|do\s+it|go\s+ahead|go\s+for\s+it|proceed|continue|sounds\s+good|that\s+works|perfect|great)\b/i,
+  /\b(make|create|generate|build|produce|send|give)\s+(it|me\s+one|that|one)\b/i,
+  /\b(still\s+waiting|i'?m\s+waiting|where\s+is\s+it|i\s+don'?t\s+see\s+it|nothing\s+(showed|appeared)|didn'?t\s+(get|see)\s+it)\b/i,
+];
+
+// An explicit OFFER to generate a file in the assistant's last turn. We require
+// this (not a bare format mention) so "here's how PDFs work" + a user "yes"
+// can't spuriously trigger file generation. Matches "I can/I'll/would you like
+// me to/want me to/shall I/let me … create/generate/make/build/put together/
+// prepare/draft/whip up …" — the file noun/format is verified separately via
+// detectFileRequest on the same message.
+const ASSISTANT_FILE_OFFER_PATTERN =
+  /\b(i\s+can|i'?ll|i\s+will|i\s+could|let\s+me|shall\s+i|would\s+you\s+like\s+me\s+to|want\s+me\s+to|do\s+you\s+want\s+me\s+to|happy\s+to)\b[^.?!]*\b(create|generate|make|build|put\s+together|prepare|draft|whip\s+up|export|produce|write\s+up)\b/i;
+
+/**
+ * Resolve a short continuation reply to the file format the assistant just
+ * offered. Returns null unless ALL of the following hold:
+ *  - the current message is a brief affirmation/nudge ("yes", "go ahead"), and
+ *  - the most recent assistant turn explicitly OFFERED to generate a file, and
+ *  - that same assistant turn names a concrete file format.
+ *
+ * This is intentionally narrow: it only inspects the single latest assistant
+ * message (the one that prompted the reply), and a generic mention of a format
+ * ("you could open it as a PDF") without an offer verb will NOT trigger it.
+ */
+function detectFileContinuation(
+  message: string,
+  recentMessages: Array<{ role: "user" | "assistant"; content: string }>,
+): FileFormat | null {
+  const trimmed = message.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) return null;
+  if (!FILE_CONTINUATION_PATTERNS.some((p) => p.test(trimmed))) return null;
+
+  // Only the single latest assistant turn (the one being replied to) counts.
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    const m = recentMessages[i];
+    if (m.role !== "assistant") continue;
+    if (!ASSISTANT_FILE_OFFER_PATTERN.test(m.content)) return null;
+    return detectFileRequest(m.content);
+  }
+  return null;
 }
 
 export interface OraRouteDecision {
@@ -234,6 +288,25 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
       confidence: "high",
       topic: "general",
     };
+  }
+
+  // 1b. File generation continuation. A short "yes / go ahead / still waiting"
+  //     reply to a turn where the assistant offered a specific file must
+  //     actually generate it — otherwise it falls through to a conversational
+  //     answer and the model only *claims* it delivered a file that never
+  //     attached (the reported hallucinated-delivery bug).
+  if (input.recentMessages?.length) {
+    const continuationFormat = detectFileContinuation(message, input.recentMessages);
+    if (continuationFormat) {
+      return {
+        tool: "file_generation",
+        reason: `Continuation of an offered ${continuationFormat.toUpperCase()} file.`,
+        fileFormat: continuationFormat,
+        intent: "premium",
+        confidence: "high",
+        topic: "general",
+      };
+    }
   }
 
   // 2. Image generation fast-path.
