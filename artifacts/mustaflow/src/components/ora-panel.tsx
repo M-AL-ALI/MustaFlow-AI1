@@ -28,7 +28,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListKnowledgeQueryKey } from "@workspace/api-client-react";
+import { ORA_MEMORIES_QUERY_KEY } from "@/lib/ora-memories";
 import { useToast } from "@/hooks/use-toast";
 import { authFetch } from "@/lib/api-fetch";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
@@ -314,9 +314,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     async (fact: string, content: string) => {
       const supersededTitles = await saveOraMemory(fact, saveOraProjectId);
       markMemorySaved(fact, content, supersededTitles);
-      void queryClient.invalidateQueries({
-        queryKey: getListKnowledgeQueryKey({ scope: "user", archived: false, limit: 100 }),
-      });
+      void queryClient.invalidateQueries({ queryKey: ORA_MEMORIES_QUERY_KEY });
     },
     [markMemorySaved, queryClient, saveOraProjectId],
   );
@@ -1309,11 +1307,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                           onSaved={() => {
                             markDocumentMemorySaved(dm.fileRef);
                             void queryClient.invalidateQueries({
-                              queryKey: getListKnowledgeQueryKey({
-                                scope: "user",
-                                archived: false,
-                                limit: 100,
-                              }),
+                              queryKey: ORA_MEMORIES_QUERY_KEY,
                             });
                             toast({ title: "Document saved to memory" });
                           }}

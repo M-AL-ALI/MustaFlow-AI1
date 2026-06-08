@@ -25,6 +25,11 @@ export function normalizeOraMemoryCategory(v: string | null | undefined): OraMem
     : "other";
 }
 
+// Shared React Query key for the signed-in user's saved Ora memories. Used by
+// the Memory Center list query and by every save/edit/delete path that needs to
+// invalidate it so the dialog reflects the latest state immediately.
+export const ORA_MEMORIES_QUERY_KEY = ["ora-memories"] as const;
+
 export interface OraMemory {
   id: number;
   title: string;

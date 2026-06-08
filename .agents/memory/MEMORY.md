@@ -65,3 +65,4 @@
 - [Prerender SEO fallback FOUC](prerender-fouc.md) — public landing flashes unstyled HTML on refresh because prerender injects classless semantic HTML into #root; hide with inline [data-prerender-fallback]{display:none} (kept in raw HTML for bots).
 - [Ora saved-memory embeddings & recall](ora-memory-embeddings.md) — Ora memory save path inserts without embeddings (not writeKnowledge); recall ranks cosine→TF-IDF fallback→recency + lazy backfill-on-read.
 - [Ora memory surfaces & consolidation](ora-memory-surfaces.md) — /api/ora/memories (origin=ora) vs /api/knowledge (excludes ora); supersede-based conflict consolidation is conservative (≥2 shared tokens + 0.6 overlap) and reversible via superseded_by.
+- [Ora Memory Center read path](ora-memory-center-read-path.md) — Memory Center must list/edit/delete via /api/ora/memories; /api/knowledge excludes origin="ora" so it silently shows "No saved memories yet".
