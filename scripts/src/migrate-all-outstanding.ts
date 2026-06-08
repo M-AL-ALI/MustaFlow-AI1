@@ -83,6 +83,7 @@ const MIGRATIONS = [
   "migrate-vault-embeddings",
   "migrate-ora-memory-center",
   "migrate-knowledge-origin",
+  "migrate-ora-memory-category",
   "migrate-help-center",
   "migrate-orax",
   "migrate-orax-github-readonly",

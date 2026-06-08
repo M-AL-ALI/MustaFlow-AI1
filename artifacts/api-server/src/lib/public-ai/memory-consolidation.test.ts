@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  tokenizeMemory,
-  shouldSupersede,
-  findMemoriesToSupersede,
-} from "./memory-consolidation";
+import { tokenizeMemory, shouldSupersede, findMemoriesToSupersede } from "./memory-consolidation";
 
 describe("tokenizeMemory", () => {
   it("drops stopwords, short tokens, and lowercases", () => {
@@ -77,12 +73,9 @@ describe("shouldSupersede — keeps distinct facts (conservative)", () => {
   });
 
   it("too few significant tokens to judge", () => {
-    expect(
-      shouldSupersede(
-        { title: "dogs", content: "" },
-        { title: "cats", content: "" },
-      ),
-    ).toBe(false);
+    expect(shouldSupersede({ title: "dogs", content: "" }, { title: "cats", content: "" })).toBe(
+      false,
+    );
   });
 });
 
@@ -93,10 +86,7 @@ describe("findMemoriesToSupersede", () => {
       { id: 2, title: "I like coffee", content: "" },
       { id: 3, title: "my company is Acme", content: "" },
     ];
-    const ids = findMemoriesToSupersede(
-      { title: "I prefer light mode", content: "" },
-      existing,
-    );
+    const ids = findMemoriesToSupersede({ title: "I prefer light mode", content: "" }, existing);
     expect(ids).toEqual([1]);
   });
 
@@ -105,8 +95,8 @@ describe("findMemoriesToSupersede", () => {
       { id: 1, title: "I like coffee", content: "" },
       { id: 2, title: "I live in Berlin", content: "" },
     ];
-    expect(
-      findMemoriesToSupersede({ title: "I prefer dark mode", content: "" }, existing),
-    ).toEqual([]);
+    expect(findMemoriesToSupersede({ title: "I prefer dark mode", content: "" }, existing)).toEqual(
+      [],
+    );
   });
 });

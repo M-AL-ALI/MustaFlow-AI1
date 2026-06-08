@@ -88,9 +88,22 @@ export interface OraMemoryRow {
   id: number;
   title: string;
   content: string;
+  category: string | null;
   embedding: number[] | null;
   createdAt: Date;
 }
+
+/**
+ * Soft, additive boost applied per memory category during ranking. Sized to the
+ * same magnitude as the recency tiebreakers (0.15–0.3) so it nudges ordering —
+ * e.g. surfaces preferences and personal facts that should usually be in scope —
+ * without ever overriding a strong semantic/keyword relevance signal (semantic
+ * weight is 6.0). Categories not listed get no boost.
+ */
+const ORA_MEMORY_CATEGORY_BOOST: Record<string, number> = {
+  preference: 0.25,
+  personal: 0.15,
+};
 
 /** Lowercase tokens (≥3 chars) for TF-IDF keyword overlap. */
 export function tokeniseMemory(text: string): string[] {
@@ -200,6 +213,11 @@ export async function rankMemoriesByRelevance(
     if (ageMs < ONE_DAY_MS) score += 0.3;
     else if (ageMs < SEVEN_DAYS_MS) score += 0.15;
 
+    // Soft category signal: gently favour categories that should usually be in
+    // scope (preferences, personal facts). Additive and small — never sets the
+    // relevance `signal`, so it can't manufacture a match where none exists.
+    if (e.category) score += ORA_MEMORY_CATEGORY_BOOST[e.category] ?? 0;
+
     if (signal) anySignal = true;
     return { entry: e, score };
   });
@@ -285,6 +303,7 @@ async function buildMemoryContext(
         id: knowledgeEntriesTable.id,
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
+        category: knowledgeEntriesTable.category,
         embedding: knowledgeEntriesTable.embedding,
         createdAt: knowledgeEntriesTable.createdAt,
       })

@@ -46,6 +46,32 @@ export type KnowledgeScope = (typeof KNOWLEDGE_SCOPES)[number];
 export const KNOWLEDGE_ORIGINS = ["ora", "builder", "system", "legacy"] as const;
 export type KnowledgeOrigin = (typeof KNOWLEDGE_ORIGINS)[number];
 
+/**
+ * Lightweight category for Ora memories (origin = "ora"). Stored in the shared
+ * `category` column, which is isolated from the AI Builder Knowledge Vault by
+ * the `origin` filter — Builder rows use their own category values and are never
+ * read by Ora. Assigned automatically on save (heuristic classifier) and
+ * user-overridable from the Memory Center.
+ *
+ *  - preference : how the user likes things (style, tone, defaults, do/don't)
+ *  - personal   : durable personal facts (name, role, location, contact)
+ *  - project    : project / product / work context
+ *  - other      : the default when nothing else fits
+ */
+export const ORA_MEMORY_CATEGORIES = [
+  "preference",
+  "personal",
+  "project",
+  "document",
+  "other",
+] as const;
+export type OraMemoryCategory = (typeof ORA_MEMORY_CATEGORIES)[number];
+export const DEFAULT_ORA_MEMORY_CATEGORY: OraMemoryCategory = "other";
+
+export function isOraMemoryCategory(v: unknown): v is OraMemoryCategory {
+  return typeof v === "string" && (ORA_MEMORY_CATEGORIES as readonly string[]).includes(v);
+}
+
 export interface DiffSummary {
   filesAdded: string[];
   filesModified: string[];

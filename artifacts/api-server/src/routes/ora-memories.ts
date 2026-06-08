@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { and, eq, desc, isNull, inArray, ne } from "drizzle-orm";
-import { db, knowledgeEntriesTable } from "@workspace/db";
+import {
+  db,
+  knowledgeEntriesTable,
+  ORA_MEMORY_CATEGORIES,
+  DEFAULT_ORA_MEMORY_CATEGORY,
+} from "@workspace/db";
+import { classifyOraMemoryCategory } from "../lib/ora-memory-category";
 import { logger } from "../lib/logger";
 import { findMemoriesToSupersede } from "../lib/public-ai/memory-consolidation";
 
@@ -28,6 +34,20 @@ const userScope = (userId: string) =>
 const MAX_TITLE = 200;
 const MAX_CONTENT = 4000;
 
+const categoryEnum = z.enum(ORA_MEMORY_CATEGORIES);
+
+/**
+ * Coerce a stored `category` into a known Ora category. Legacy rows (and any
+ * Builder default of "note") collapse to the default so the UI never shows an
+ * unknown chip before the backfill runs.
+ */
+function normalizeCategory<T extends { category: string | null }>(
+  row: T,
+): Omit<T, "category"> & { category: (typeof ORA_MEMORY_CATEGORIES)[number] } {
+  const parsed = categoryEnum.safeParse(row.category);
+  return { ...row, category: parsed.success ? parsed.data : DEFAULT_ORA_MEMORY_CATEGORY };
+}
+
 // List the user's saved Ora memories.
 router.get("/ora/memories", async (req, res) => {
   const userId = req.userId!;
@@ -37,6 +57,7 @@ router.get("/ora/memories", async (req, res) => {
         id: knowledgeEntriesTable.id,
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
+        category: knowledgeEntriesTable.category,
         enabled: knowledgeEntriesTable.enabled,
         supersededBy: knowledgeEntriesTable.supersededBy,
         sourceConversationId: knowledgeEntriesTable.sourceConversationId,
@@ -45,7 +66,7 @@ router.get("/ora/memories", async (req, res) => {
       .from(knowledgeEntriesTable)
       .where(userScope(userId))
       .orderBy(desc(knowledgeEntriesTable.createdAt));
-    res.json({ memories: rows });
+    res.json({ memories: rows.map(normalizeCategory) });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to list memories");
     res.status(500).json({ error: "Failed to load memories" });
@@ -55,6 +76,7 @@ router.get("/ora/memories", async (req, res) => {
 const createMemorySchema = z.object({
   title: z.string().trim().min(1).max(MAX_TITLE),
   content: z.string().trim().max(MAX_CONTENT).optional(),
+  category: categoryEnum.optional(),
 });
 
 // Create a new Ora memory (user-approved save). Always tagged origin="ora",
@@ -69,13 +91,17 @@ router.post("/ora/memories", async (req, res) => {
   const title = parsed.data.title;
   const content = parsed.data.content ?? "";
   try {
+    // Auto-categorize on save unless the caller picked one explicitly.
+    const category =
+      parsed.data.category ??
+      classifyOraMemoryCategory(parsed.data.title, parsed.data.content ?? "");
     const [row] = await db
       .insert(knowledgeEntriesTable)
       .values({
         title,
         content,
         type: "note",
-        category: "note",
+        category,
         severity: "info",
         scope: "user",
         origin: "ora",
@@ -88,12 +114,12 @@ router.post("/ora/memories", async (req, res) => {
         id: knowledgeEntriesTable.id,
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
+        category: knowledgeEntriesTable.category,
         enabled: knowledgeEntriesTable.enabled,
         supersededBy: knowledgeEntriesTable.supersededBy,
         sourceConversationId: knowledgeEntriesTable.sourceConversationId,
         createdAt: knowledgeEntriesTable.createdAt,
       });
-
     // Consolidation: when the new fact overlaps earlier active memories (a
     // contradicting update like "dark mode" → "light mode"), supersede those
     // earlier entries so only the current fact is injected into Ora's context.
@@ -102,7 +128,7 @@ router.post("/ora/memories", async (req, res) => {
     // a failure here never fails the save.
     const supersededIds = await consolidateOverlappingMemories(userId, row.id, title, content);
 
-    res.status(201).json({ memory: row, supersededIds });
+    res.status(201).json({ memory: normalizeCategory(row), supersededIds });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to create memory");
     res.status(500).json({ error: "Failed to create memory" });
@@ -163,10 +189,18 @@ const patchMemorySchema = z
     title: z.string().trim().min(1).max(MAX_TITLE).optional(),
     content: z.string().max(MAX_CONTENT).optional(),
     enabled: z.boolean().optional(),
+    category: categoryEnum.optional(),
   })
-  .refine((d) => d.title !== undefined || d.content !== undefined || d.enabled !== undefined, {
-    message: "No fields to update",
-  });
+  .refine(
+    (d) =>
+      d.title !== undefined ||
+      d.content !== undefined ||
+      d.enabled !== undefined ||
+      d.category !== undefined,
+    {
+      message: "No fields to update",
+    },
+  );
 
 // Edit a memory's text or toggle whether Ora may reference it.
 router.patch("/ora/memories/:id", async (req, res) => {
@@ -186,6 +220,7 @@ router.patch("/ora/memories/:id", async (req, res) => {
   if (parsed.data.title !== undefined) updates.title = parsed.data.title;
   if (parsed.data.content !== undefined) updates.content = parsed.data.content;
   if (parsed.data.enabled !== undefined) updates.enabled = parsed.data.enabled;
+  if (parsed.data.category !== undefined) updates.category = parsed.data.category;
 
   try {
     const [row] = await db
@@ -196,6 +231,7 @@ router.patch("/ora/memories/:id", async (req, res) => {
         id: knowledgeEntriesTable.id,
         title: knowledgeEntriesTable.title,
         content: knowledgeEntriesTable.content,
+        category: knowledgeEntriesTable.category,
         enabled: knowledgeEntriesTable.enabled,
         supersededBy: knowledgeEntriesTable.supersededBy,
         sourceConversationId: knowledgeEntriesTable.sourceConversationId,
@@ -205,7 +241,7 @@ router.patch("/ora/memories/:id", async (req, res) => {
       res.status(404).json({ error: "Memory not found" });
       return;
     }
-    res.json({ memory: row });
+    res.json({ memory: normalizeCategory(row) });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to update memory");
     res.status(500).json({ error: "Failed to update memory" });

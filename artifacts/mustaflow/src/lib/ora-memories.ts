@@ -2,10 +2,34 @@ import { authFetch } from "@/lib/api-fetch";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+export const ORA_MEMORY_CATEGORIES = [
+  "preference",
+  "personal",
+  "project",
+  "document",
+  "other",
+] as const;
+export type OraMemoryCategory = (typeof ORA_MEMORY_CATEGORIES)[number];
+
+export const ORA_MEMORY_CATEGORY_LABELS: Record<OraMemoryCategory, string> = {
+  preference: "Preference",
+  personal: "Personal",
+  project: "Project",
+  document: "Document",
+  other: "Other",
+};
+
+export function normalizeOraMemoryCategory(v: string | null | undefined): OraMemoryCategory {
+  return (ORA_MEMORY_CATEGORIES as readonly string[]).includes(v ?? "")
+    ? (v as OraMemoryCategory)
+    : "other";
+}
+
 export interface OraMemory {
   id: number;
   title: string;
   content: string;
+  category: OraMemoryCategory;
   enabled: boolean;
   /**
    * When set, the id of a newer memory that superseded this one (a contradicting
@@ -27,6 +51,7 @@ export async function fetchOraMemories(): Promise<OraMemory[]> {
 export async function createOraMemory(patch: {
   title: string;
   content?: string;
+  category?: OraMemoryCategory;
 }): Promise<OraMemory> {
   const res = await authFetch(`${BASE}/api/ora/memories`, {
     method: "POST",
@@ -40,7 +65,7 @@ export async function createOraMemory(patch: {
 
 export async function updateOraMemory(
   id: number,
-  patch: { title?: string; content?: string; enabled?: boolean },
+  patch: { title?: string; content?: string; enabled?: boolean; category?: OraMemoryCategory },
 ): Promise<OraMemory> {
   const res = await authFetch(`${BASE}/api/ora/memories/${id}`, {
     method: "PATCH",

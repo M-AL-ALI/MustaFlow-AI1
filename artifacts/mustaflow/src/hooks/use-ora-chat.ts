@@ -1225,8 +1225,12 @@ export function useOraChat(): UseOraChatReturn {
                 ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
                 ...(data.images && data.images.length > 0 ? { images: data.images } : {}),
                 ...(data.videos && data.videos.length > 0 ? { videos: data.videos } : {}),
-                ...(data.memoriesUsed && data.memoriesUsed.length > 0 ? { memoriesUsed: data.memoriesUsed } : {}),
-                ...(data.conversationSummary ? { conversationSummary: data.conversationSummary } : {}),
+                ...(data.memoriesUsed && data.memoriesUsed.length > 0
+                  ? { memoriesUsed: data.memoriesUsed }
+                  : {}),
+                ...(data.conversationSummary
+                  ? { conversationSummary: data.conversationSummary }
+                  : {}),
                 ...(data.memorySaveCandidate
                   ? {
                       memorySaveCandidate: data.memorySaveCandidate,

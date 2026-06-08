@@ -3426,6 +3426,36 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-ora-memory-category (backfill typed Ora memory categories) ──────
+  {
+    name: "migrate-ora-memory-category",
+    async run(client) {
+      await client.query("BEGIN");
+      // Coarse keyword heuristic mirroring lib/ora-memory-category.ts. Only
+      // touches Ora user-scoped rows still at the legacy default, so it's safe
+      // to re-run and never overrides a user's explicit re-categorization.
+      await client.query(`
+        UPDATE knowledge_entries
+        SET category = CASE
+          WHEN lower(coalesce(title,'') || ' ' || coalesce(content,'')) ~
+            '(prefer|favorite|favourite|i like|i love|always use|never use|avoid|don''t|do not|tone|style|concise|verbose|formal|casual|dark mode|light mode|default to|colour|color|theme|font|format)'
+            THEN 'preference'
+          WHEN lower(coalesce(title,'') || ' ' || coalesce(content,'')) ~
+            '(my name|name is|i am |i''m |i live|i work|based in|located in|email is|phone|birthday|i was born|pronoun|my job|my role|my title|my company|i have a|family|married|speak |native)'
+            THEN 'personal'
+          WHEN lower(coalesce(title,'') || ' ' || coalesce(content,'')) ~
+            '(project|app called|building|website for|feature|deadline|tech stack|stack|database|deploy|client|customer|product|launch|repo|codebase|endpoint|integration)'
+            THEN 'project'
+          ELSE 'other'
+        END
+        WHERE origin = 'ora'
+          AND scope = 'user'
+          AND (category IS NULL OR category = 'note' OR category = 'other')
+      `);
+      await client.query("COMMIT");
+    },
+  },
+
   // ── migrate-orax (isolated coding-agent foundation) ───────────────────────
   {
     name: "migrate-orax",

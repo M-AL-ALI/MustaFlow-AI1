@@ -28,6 +28,7 @@ function mem(id: number, title: string, content: string, ageDays: number): OraMe
     id,
     title,
     content,
+    category: null,
     embedding: null,
     createdAt: new Date(Date.now() - ageDays * 86_400_000),
   };

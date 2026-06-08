@@ -37,7 +37,10 @@ import {
   restoreOraMemory,
   clearOraMemories,
   clearOraConversations,
+  ORA_MEMORY_CATEGORIES,
+  ORA_MEMORY_CATEGORY_LABELS,
   type OraMemory,
+  type OraMemoryCategory,
 } from "@/lib/ora-memories";
 import {
   getReferenceSavedMemories,
@@ -263,16 +266,39 @@ function ProfileTab() {
 
 /* ─── Saved Memories tab ───────────────────────────────────────────────────── */
 
+const CATEGORY_BADGE_CLASS: Record<OraMemoryCategory, string> = {
+  preference: "bg-[hsl(265_85%_65%/0.15)] text-[hsl(265_85%_70%)]",
+  personal: "bg-sky-500/15 text-sky-500 dark:text-sky-400",
+  project: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  document: "bg-[hsl(265_85%_65%/0.12)] text-[hsl(265_85%_65%)]",
+  other: "bg-muted text-muted-foreground",
+};
+
+function CategoryBadge({ category }: { category: OraMemoryCategory }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+        CATEGORY_BADGE_CLASS[category],
+      )}
+    >
+      {ORA_MEMORY_CATEGORY_LABELS[category]}
+    </span>
+  );
+}
+
 function MemoryRow({
   memory,
   onToggle,
   onSave,
+  onCategoryChange,
   onDelete,
   onRestore,
 }: {
   memory: OraMemory;
   onToggle: (enabled: boolean) => void;
   onSave: (patch: { title: string; content: string }) => void;
+  onCategoryChange: (category: OraMemoryCategory) => void;
   onDelete: () => void;
   onRestore: () => void;
 }) {
@@ -355,6 +381,20 @@ function MemoryRow({
             rows={2}
             className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Category
+            <select
+              value={memory.category}
+              onChange={(e) => onCategoryChange(e.target.value as OraMemoryCategory)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {ORA_MEMORY_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {ORA_MEMORY_CATEGORY_LABELS[c]}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="flex items-center gap-2">
             <button
               onClick={commit}
@@ -385,10 +425,13 @@ function MemoryRow({
                 {memory.content}
               </p>
             )}
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              {new Date(memory.createdAt).toLocaleDateString()}
-              {!memory.enabled && " · Paused"}
-            </p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <CategoryBadge category={memory.category} />
+              <span className="text-[11px] text-muted-foreground">
+                {new Date(memory.createdAt).toLocaleDateString()}
+                {!memory.enabled && " · Paused"}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <Switch
@@ -422,9 +465,11 @@ function MemoriesTab() {
   const [memories, setMemories] = useState<OraMemory[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<OraMemoryCategory | "all">("all");
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
+  const [newCategory, setNewCategory] = useState<OraMemoryCategory>("other");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -446,11 +491,12 @@ function MemoriesTab() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return memories;
-    return memories.filter(
-      (m) => m.title.toLowerCase().includes(q) || (m.content ?? "").toLowerCase().includes(q),
-    );
-  }, [memories, query]);
+    return memories.filter((m) => {
+      if (categoryFilter !== "all" && m.category !== categoryFilter) return false;
+      if (!q) return true;
+      return m.title.toLowerCase().includes(q) || (m.content ?? "").toLowerCase().includes(q);
+    });
+  }, [memories, query, categoryFilter]);
 
   async function handleToggle(m: OraMemory, enabled: boolean) {
     setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled } : x)));
@@ -499,10 +545,23 @@ function MemoriesTab() {
     }
   }
 
+  async function handleCategoryChange(m: OraMemory, category: OraMemoryCategory) {
+    if (m.category === category) return;
+    const prev = memories;
+    setMemories((cur) => cur.map((x) => (x.id === m.id ? { ...x, category } : x)));
+    try {
+      await updateOraMemory(m.id, { category });
+    } catch {
+      setMemories(prev);
+      toast({ title: "Could not update category", variant: "destructive" });
+    }
+  }
+
   function resetAddForm() {
     setAdding(false);
     setNewTitle("");
     setNewContent("");
+    setNewCategory("other");
   }
 
   async function handleCreate() {
@@ -510,7 +569,11 @@ function MemoriesTab() {
     if (!title || saving) return;
     setSaving(true);
     try {
-      const created = await createOraMemory({ title, content: newContent.trim() });
+      const created = await createOraMemory({
+        title,
+        content: newContent.trim(),
+        category: newCategory,
+      });
       setMemories((prev) => [created, ...prev]);
       resetAddForm();
       // Saving may have superseded existing overlapping memories server-side; refetch
@@ -570,6 +633,20 @@ function MemoriesTab() {
             placeholder="Add detail (optional)"
             className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Category
+            <select
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value as OraMemoryCategory)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {ORA_MEMORY_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {ORA_MEMORY_CATEGORY_LABELS[c]}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="flex items-center gap-2">
             <button
               onClick={() => void handleCreate()}
@@ -594,14 +671,32 @@ function MemoriesTab() {
         </div>
       )}
       {memories.length > 0 && (
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search memories"
-            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+        <div className="space-y-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search memories"
+              className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(["all", ...ORA_MEMORY_CATEGORIES] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategoryFilter(c)}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                  categoryFilter === c
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {c === "all" ? "All" : ORA_MEMORY_CATEGORY_LABELS[c]}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {memories.length === 0 ? (
@@ -624,6 +719,7 @@ function MemoriesTab() {
               memory={m}
               onToggle={(enabled) => void handleToggle(m, enabled)}
               onSave={(patch) => void handleSave(m, patch)}
+              onCategoryChange={(category) => void handleCategoryChange(m, category)}
               onDelete={() => void handleDelete(m)}
               onRestore={() => void handleRestore(m)}
             />
