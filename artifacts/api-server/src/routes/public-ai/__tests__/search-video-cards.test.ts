@@ -260,6 +260,8 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
     // Only the verifiable video survives; the hallucinated one is dropped.
     expect(res.body.videos.length).toBe(1);
     expect(res.body.videos[0].url).toContain("dQw4w9WgXcQ");
-    expect(res.body.videos.some((v: { url: string }) => v.url.includes("doesnotexist"))).toBe(false);
+    expect(res.body.videos.some((v: { url: string }) => v.url.includes("doesnotexist"))).toBe(
+      false,
+    );
   });
 });
