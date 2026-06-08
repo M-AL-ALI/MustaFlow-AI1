@@ -24,8 +24,7 @@ export function OraImageGallery({ images }: { images: OraImage[] }) {
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
         {safe.map((img, i) => {
           if (broken[img.url]) return null;
-          const linkTarget =
-            img.source && isSafeHttpUrl(img.source) ? img.source : img.url;
+          const linkTarget = img.source && isSafeHttpUrl(img.source) ? img.source : img.url;
           return (
             <a
               key={i}
@@ -89,9 +88,7 @@ export function OraVideoCards({ videos }: { videos: OraVideo[] }) {
                     alt=""
                     loading="lazy"
                     referrerPolicy="no-referrer"
-                    onError={() =>
-                      setBroken((b) => ({ ...b, [v.thumbnailUrl as string]: true }))
-                    }
+                    onError={() => setBroken((b) => ({ ...b, [v.thumbnailUrl as string]: true }))}
                     className="h-10 w-16 object-cover"
                   />
                   <span className="absolute inset-0 flex items-center justify-center bg-black/25">

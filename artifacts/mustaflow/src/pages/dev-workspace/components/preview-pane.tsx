@@ -240,7 +240,10 @@ export function PreviewPane({
         {/* Loading overlay — covers the brief blank flash while the preview
             iframe (re)loads, e.g. after a full page refresh. */}
         {iframeLoading &&
-          !(hasContainer && (containerStatus === "stopped" || containerStatus === "hibernated")) && (
+          !(
+            hasContainer &&
+            (containerStatus === "stopped" || containerStatus === "hibernated")
+          ) && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-800 text-muted-foreground pointer-events-none">
               <Loader2 className="h-5 w-5 animate-spin" />
               <span className="text-xs">Loading preview…</span>

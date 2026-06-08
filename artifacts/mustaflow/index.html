@@ -22,8 +22,7 @@
           // storage) falls through to dark.
           var isDark =
             mode !== "light" &&
-            (mode !== "system" ||
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
+            (mode !== "system" || window.matchMedia("(prefers-color-scheme: dark)").matches);
           el.classList.toggle("dark", isDark);
           el.style.backgroundColor = isDark ? DARK_BG : LIGHT_BG;
         } catch (e) {

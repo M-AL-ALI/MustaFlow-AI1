@@ -81,7 +81,10 @@ function getClient(): OpenAI {
 export function isPrivateOrLocalHost(hostname: string): boolean {
   // Normalize: lowercase, strip IPv6 brackets, and drop the FQDN trailing
   // dot(s) (`localhost.` resolves to localhost) so suffix/equality checks hold.
-  let host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  let host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.+$/, "");
   // Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) to its embedded v4 literal.
   const mapped = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
   if (mapped) host = mapped[1];

@@ -884,7 +884,7 @@ function repairTruncatedJson(s: string): string | null {
 
   // Truncate to the last complete structure, drop any trailing comma the cut
   // left behind, then close the brackets that were still open at that point.
-  let body = s.slice(0, lastIndex + 1).replace(/,\s*$/, "");
+  const body = s.slice(0, lastIndex + 1).replace(/,\s*$/, "");
   let closers = "";
   for (let i = lastOpenStack.length - 1; i >= 0; i--) {
     closers += lastOpenStack[i] === "{" ? "}" : "]";

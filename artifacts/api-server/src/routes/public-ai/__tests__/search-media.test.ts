@@ -113,10 +113,7 @@ describe("sanitizeImages", () => {
   });
 
   it("dedupes repeated URLs", () => {
-    const out = sanitizeImages([
-      { url: "https://a.com/1.jpg" },
-      { url: "https://a.com/1.jpg" },
-    ]);
+    const out = sanitizeImages([{ url: "https://a.com/1.jpg" }, { url: "https://a.com/1.jpg" }]);
     expect(out.length).toBe(1);
   });
 
@@ -188,7 +185,7 @@ describe("parseOraMediaBlock", () => {
   });
 
   it("does not treat an unrelated json fence as media", () => {
-    const reply = "Answer.\n```json\n{\"foo\":1}\n```";
+    const reply = 'Answer.\n```json\n{"foo":1}\n```';
     const out = parseOraMediaBlock(reply);
     expect(out.text).toContain("```json");
     expect(out.images).toEqual([]);

@@ -17,7 +17,10 @@ export function sourceHostname(url: string): string {
  * SSRF-style probe of the viewer's own network.
  */
 function isPrivateOrLocalHost(hostname: string): boolean {
-  let host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  let host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.+$/, "");
   const mapped = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
   if (mapped) host = mapped[1];
   if (
