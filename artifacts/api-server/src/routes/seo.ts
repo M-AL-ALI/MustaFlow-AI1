@@ -109,6 +109,6 @@ seoRouter.get("/sitemap.xml", async (req, res): Promise<void> => {
     res.send(parts.join("\n"));
   } catch (err) {
     logger.error({ err }, "Failed to generate sitemap");
-    res.status(500).send("<?xml version=\"1.0\"?><error>Sitemap unavailable</error>");
+    res.status(500).send('<?xml version="1.0"?><error>Sitemap unavailable</error>');
   }
 });

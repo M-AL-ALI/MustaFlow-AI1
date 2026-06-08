@@ -121,8 +121,32 @@ publicGalleryRouter.get("/gallery-templates", async (req, res): Promise<void> =>
 publicGalleryRouter.get("/gallery-templates/:slug", async (req, res): Promise<void> => {
   try {
     const [row] = await db
-      .select()
+      .select({
+        id: galleryTemplatesTable.id,
+        slug: galleryTemplatesTable.slug,
+        title: galleryTemplatesTable.title,
+        description: galleryTemplatesTable.description,
+        category: galleryTemplatesTable.category,
+        tags: galleryTemplatesTable.tags,
+        previewUrl: galleryTemplatesTable.previewUrl,
+        thumbnailUrl: galleryTemplatesTable.thumbnailUrl,
+        status: galleryTemplatesTable.status,
+        rating: galleryTemplatesTable.rating,
+        ratingCount: galleryTemplatesTable.ratingCount,
+        forkCount: galleryTemplatesTable.forkCount,
+        useCount: galleryTemplatesTable.useCount,
+        authorId: galleryTemplatesTable.authorId,
+        authorName: galleryTemplatesTable.authorName,
+        authorUsername: communityProfilesTable.username,
+        editorsPick: galleryTemplatesTable.editorsPick,
+        createdAt: galleryTemplatesTable.createdAt,
+        updatedAt: galleryTemplatesTable.updatedAt,
+      })
       .from(galleryTemplatesTable)
+      .leftJoin(
+        communityProfilesTable,
+        eq(galleryTemplatesTable.authorId, communityProfilesTable.userId),
+      )
       .where(
         and(
           eq(galleryTemplatesTable.slug, req.params.slug),
@@ -135,8 +159,7 @@ publicGalleryRouter.get("/gallery-templates/:slug", async (req, res): Promise<vo
       return;
     }
 
-    const { filesSnapshot: _files, ...safe } = row;
-    res.json(safe);
+    res.json(row);
   } catch (err) {
     logger.error({ err }, "Failed to get gallery template");
     res.status(500).json({ error: "Failed to load template" });
