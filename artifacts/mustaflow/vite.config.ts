@@ -54,6 +54,12 @@ export default defineConfig({
     // The overall public entry must stay below Google's 2 MB rendering limit.
     chunkSizeWarningLimit: 800,
     rollupOptions: {
+      input: {
+        // Full authenticated app — loads Clerk, workspace context, builder, etc.
+        index: path.resolve(import.meta.dirname, "index.html"),
+        // Lightweight public entry — no Clerk, smaller initial JS for crawlers.
+        public: path.resolve(import.meta.dirname, "public.html"),
+      },
       output: {
         manualChunks(id) {
           // Core React runtime — loaded on every route

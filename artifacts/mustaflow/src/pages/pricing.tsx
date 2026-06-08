@@ -5,7 +5,7 @@ import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@clerk/react";
+import { useAuthState } from "@/lib/auth-state-context";
 
 const FREE_FEATURES = [
   "30 Ora messages every 5 hours",
@@ -52,7 +52,7 @@ const ORA_PLAN_LIMITS = [
 ];
 
 export default function PricingPage() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn } = useAuthState();
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);

@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { Link } from "wouter";
 import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@clerk/react";
+import { useAuthState } from "@/lib/auth-state-context";
 import {
   Code2,
   Key,
@@ -443,7 +443,7 @@ function DevCard({ icon: Icon, title, description, href }: DevCardProps) {
 }
 
 export default function DevelopersPage() {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useAuthState();
 
   const [openEndpoint, setOpenEndpoint] = useState<string | null>(null);
   const [token, setToken] = useState<string>(() => {

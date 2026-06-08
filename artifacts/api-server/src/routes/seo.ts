@@ -2,7 +2,6 @@
  * SEO routes — served before the auth wall so crawlers can access them.
  *
  *   GET /sitemap.xml          — dynamic XML sitemap including gallery templates + public profiles
- *   GET /sitemap-index.xml    — sitemap index pointing at static + dynamic sitemaps
  */
 import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";

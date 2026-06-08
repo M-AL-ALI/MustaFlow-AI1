@@ -59,7 +59,7 @@ import { cn } from "@/lib/utils";
 import { DemoAnimation } from "@/components/demo-animation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TechnologyEcosystemBanner } from "@/components/technology-ecosystem-banner";
-import { Show } from "@clerk/react";
+import { useAuthState } from "@/lib/auth-state-context";
 import { OraBubble } from "@/components/ora-bubble";
 import { useOraChat } from "@/hooks/use-ora-chat";
 
@@ -236,6 +236,7 @@ const HOW_IT_WORKS = [
 ];
 
 export default function HomePage() {
+  const { isSignedIn } = useAuthState();
   const [, setLocation] = useLocation();
   const [prompt, setPrompt] = useState("");
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
@@ -367,22 +368,24 @@ export default function HomePage() {
             </nav>
             <div className="flex items-center gap-2">
               <ThemeToggle />
-              <Show when="signed-out">
-                <Button variant="ghost" size="sm" className="text-sm" asChild>
-                  <Link href="/sign-in">Log in</Link>
-                </Button>
-                <Button size="sm" className="rounded-full px-4 text-sm shadow-md" asChild>
-                  <Link href="/sign-up">Create account</Link>
-                </Button>
-              </Show>
-              <Show when="signed-in">
+              {!isSignedIn && (
+                <>
+                  <Button variant="ghost" size="sm" className="text-sm" asChild>
+                    <Link href="/sign-in">Log in</Link>
+                  </Button>
+                  <Button size="sm" className="rounded-full px-4 text-sm shadow-md" asChild>
+                    <Link href="/sign-up">Create account</Link>
+                  </Button>
+                </>
+              )}
+              {isSignedIn && (
                 <Button size="sm" className="rounded-full px-4 text-sm" asChild>
                   <Link href="/projects">
                     My projects
                     <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                   </Link>
                 </Button>
-              </Show>
+              )}
             </div>
           </div>
         </header>
@@ -563,7 +566,7 @@ export default function HomePage() {
           )}
 
           {/* Meet Ora — public AI assistant promo */}
-          <Show when="signed-out">
+          {!isSignedIn && (
             <div className="mt-14 mb-2 max-w-5xl mx-auto">
               <div className="text-center mb-10">
                 <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
@@ -608,7 +611,7 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-          </Show>
+          )}
 
           {/* Social proof */}
           <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-muted-foreground/70 mt-10 mb-20">
@@ -1105,9 +1108,7 @@ export default function HomePage() {
       )}
 
       {/* Ora floating bubble — signed-out visitors only */}
-      <Show when="signed-out">
-        <OraBubble chat={oraChat} />
-      </Show>
+      {!isSignedIn && <OraBubble chat={oraChat} />}
     </>
   );
 }

@@ -682,12 +682,27 @@ function injectMetadata(html: string, meta: RouteMetadata): string {
 }
 
 function prerender(): void {
+  // Use the lightweight public entry as the template for all public routes.
+  // public.html (built from src/public-main.tsx) excludes @clerk/react,
+  // @sentry/react, and the full authenticated app shell — keeping the initial
+  // JS payload well under Google's 2 MB rendering limit.
+  // Fall back to index.html if public.html is absent (e.g. dev-only builds).
+  let publicHtmlPath = join(distDir, "public.html");
+  let fallbackHtmlPath = join(distDir, "index.html");
   let indexHtml: string;
   try {
-    indexHtml = readFileSync(join(distDir, "index.html"), "utf-8");
+    indexHtml = readFileSync(publicHtmlPath, "utf-8");
+    console.log("[prerender] Using public.html as template (lightweight public entry).");
   } catch {
-    console.error(`[prerender] dist/public/index.html not found — run vite build first`);
-    process.exit(1);
+    try {
+      indexHtml = readFileSync(fallbackHtmlPath, "utf-8");
+      console.warn("[prerender] public.html not found — falling back to index.html.");
+    } catch {
+      console.error(
+        `[prerender] dist/public/public.html and index.html not found — run vite build first`,
+      );
+      process.exit(1);
+    }
   }
 
   let rendered = 0;
