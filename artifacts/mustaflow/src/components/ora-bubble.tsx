@@ -1375,7 +1375,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   )}
 
                   {/* Unified input bar */}
-                  <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
+                  <div className="flex flex-wrap sm:flex-nowrap items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1396,7 +1396,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       }
                       aria-label={atAllLimits ? "Upload limit reached" : "Upload image or file"}
                       className={cn(
-                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
+                        "order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:order-1 sm:h-6 sm:w-6",
                         uploadState === "attached"
                           ? "text-[hsl(265_85%_65%)]"
                           : "text-muted-foreground hover:text-foreground",
@@ -1408,7 +1408,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     </button>
 
                     {/* Generate file button */}
-                    <div className="relative shrink-0" ref={formatMenuRef}>
+                    <div className="relative order-3 shrink-0 sm:order-2" ref={formatMenuRef}>
                       <button
                         type="button"
                         onClick={() => setShowFormatMenu((v) => !v)}
@@ -1416,7 +1416,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         title="Generate a file (CSV, Excel, Word, PDF)"
                         aria-label="Generate file"
                         className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-colors",
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-6 sm:w-6",
                           selectedFormat
                             ? "text-[hsl(265_85%_65%)] bg-[hsl(265_85%_65%/0.12)]"
                             : "text-muted-foreground hover:text-foreground",
@@ -1456,14 +1456,16 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                     </div>
 
                     {/* Dictation button — speech-to-text only; transcript lands in textarea */}
-                    <OraDictationButton
-                      voiceState={voice.voiceState}
-                      isSupported={voice.isSupported}
-                      onStart={() => voice.startListening(language)}
-                      onStop={() => voice.stopListening()}
-                      disabled={isLoading || atLimit}
-                      size="sm"
-                    />
+                    <div className="order-4 shrink-0 sm:order-3">
+                      <OraDictationButton
+                        voiceState={voice.voiceState}
+                        isSupported={voice.isSupported}
+                        onStart={() => voice.startListening(language)}
+                        onStop={() => voice.stopListening()}
+                        disabled={isLoading || atLimit}
+                        size="sm"
+                      />
+                    </div>
 
                     <textarea
                       ref={textareaRef}
@@ -1484,7 +1486,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       }
                       rows={1}
                       dir="auto"
-                      className="flex-1 resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
+                      className="order-1 w-full resize-none bg-transparent py-1 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug sm:order-4 sm:w-auto sm:flex-1"
                       style={{ maxHeight: "80px" }}
                       disabled={isLoading}
                       onPaste={handlePaste}
@@ -1493,7 +1495,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       type="button"
                       onClick={handleSend}
                       disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
+                      className="order-5 ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors sm:order-5 sm:ml-0 sm:h-6 sm:w-6"
                     >
                       <Send className="h-3 w-3" />
                     </button>
@@ -1508,10 +1510,17 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       </p>
                     ) : (
                       <p className="text-[9px] text-muted-foreground/50">
-                        Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
-                        {voice.isSupported || whisperConv.isSupported
-                          ? "Voice or type in any language"
-                          : "Voice unavailable on this browser — typing still works"}
+                        <span className="sm:hidden">
+                          {voice.isSupported || whisperConv.isSupported
+                            ? "Upload files · voice or type"
+                            : "Upload files · typing only"}
+                        </span>
+                        <span className="hidden sm:inline">
+                          Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
+                          {voice.isSupported || whisperConv.isSupported
+                            ? "Voice or type in any language"
+                            : "Voice unavailable on this browser — typing still works"}
+                        </span>
                       </p>
                     )}
                     {session && !isSignedIn && (

@@ -345,6 +345,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<FileFormat | null>(null);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showModeMenu, setShowModeMenu] = useState(false);
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [editingFromIdx, setEditingFromIdx] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -357,6 +358,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasMessages = messages.length > 0;
 
@@ -567,6 +569,17 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showPlusMenu]);
+
+  useEffect(() => {
+    if (!showModeMenu) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target as Node)) {
+        setShowModeMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showModeMenu]);
 
   useEffect(() => {
     if (!showHeaderMenu) return;
@@ -1499,8 +1512,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       </div>
                     )}
 
-                    {/* Unified input bar */}
-                    <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
+                    {/* Unified input bar — single row on desktop; on mobile it wraps
+                        into a two-tier composer (full-width field on top, action row
+                        below) so the placeholder never gets squeezed. */}
+                    <div className="flex flex-wrap sm:flex-nowrap items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -1509,8 +1524,82 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         aria-hidden
                         onChange={handleFileChange}
                       />
-                      {/* Instant vs Deep Thinking toggle */}
-                      <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5">
+                      {/* Compact mode selector — mobile only. Collapses the two
+                          Instant/Deep pills into one chip + popover to reclaim width. */}
+                      <div className="relative order-2 shrink-0 sm:hidden" ref={modeMenuRef}>
+                        <button
+                          type="button"
+                          onClick={() => setShowModeMenu((v) => !v)}
+                          aria-haspopup="menu"
+                          aria-expanded={showModeMenu}
+                          title="Switch response mode"
+                          className="flex h-8 items-center gap-1 rounded-lg bg-muted/40 px-2.5 text-[11px] font-medium text-foreground transition-colors"
+                        >
+                          {mode === "deep" && deepAllowed ? (
+                            <Brain className="h-3.5 w-3.5" />
+                          ) : (
+                            <Zap className="h-3.5 w-3.5" />
+                          )}
+                          {mode === "deep" && deepAllowed ? "Deep" : "Instant"}
+                          <ChevronDown className="h-3 w-3 opacity-60" />
+                        </button>
+                        {showModeMenu && (
+                          <div
+                            role="menu"
+                            className="absolute bottom-full mb-1.5 left-0 z-50 bg-popover border border-border rounded-xl shadow-xl py-1 min-w-[190px]"
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setMode("instant");
+                                setShowModeMenu(false);
+                              }}
+                              className={cn(
+                                "w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2",
+                                mode === "instant" && "text-[hsl(265_85%_65%)] font-medium",
+                              )}
+                            >
+                              <Zap className="h-3.5 w-3.5 shrink-0" />
+                              <span className="flex-1">Instant</span>
+                              <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                                Fast replies
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setShowModeMenu(false);
+                                if (deepAllowed) {
+                                  setMode("deep");
+                                } else {
+                                  setLocation("/ora/settings");
+                                }
+                              }}
+                              className={cn(
+                                "w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2",
+                                mode === "deep" &&
+                                  deepAllowed &&
+                                  "text-[hsl(265_85%_65%)] font-medium",
+                              )}
+                            >
+                              {deepAllowed ? (
+                                <Brain className="h-3.5 w-3.5 shrink-0" />
+                              ) : (
+                                <Lock className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                              <span className="flex-1">Deep</span>
+                              <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                                {deepAllowed ? "Step-by-step" : "Upgrade"}
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Instant vs Deep Thinking toggle — desktop only */}
+                      <div className="hidden sm:order-1 sm:flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5">
                         <button
                           type="button"
                           onClick={() => setMode("instant")}
@@ -1560,7 +1649,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
 
                       {/* Overflow "+" menu — collapses upload + generate-file into one
                           control to keep the composer clean (ChatGPT/Codex style). */}
-                      <div className="relative shrink-0" ref={plusMenuRef}>
+                      <div className="relative order-3 shrink-0 sm:order-2" ref={plusMenuRef}>
                         <button
                           type="button"
                           onClick={() => setShowPlusMenu((v) => !v)}
@@ -1637,14 +1726,16 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       </div>
 
                       {/* Dictation button — speech-to-text only; transcript lands in textarea */}
-                      <OraDictationButton
-                        voiceState={voice.voiceState}
-                        isSupported={voice.isSupported}
-                        onStart={() => voice.startListening(language)}
-                        onStop={() => voice.stopListening()}
-                        disabled={isLoading || atLimit}
-                        size="md"
-                      />
+                      <div className="order-4 shrink-0 sm:order-3">
+                        <OraDictationButton
+                          voiceState={voice.voiceState}
+                          isSupported={voice.isSupported}
+                          onStart={() => voice.startListening(language)}
+                          onStop={() => voice.stopListening()}
+                          disabled={isLoading || atLimit}
+                          size="md"
+                        />
+                      </div>
 
                       <textarea
                         ref={textareaRef}
@@ -1665,7 +1756,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         }
                         rows={1}
                         dir="auto"
-                        className="flex-1 resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug"
+                        className="order-1 w-full resize-none bg-transparent py-1.5 text-sm placeholder:text-muted-foreground/60 focus:outline-none leading-snug sm:order-4 sm:w-auto sm:flex-1"
                         style={{ maxHeight: "96px" }}
                         disabled={isLoading}
                         onPaste={handlePaste}
@@ -1674,7 +1765,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         type="button"
                         onClick={handleSend}
                         disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors"
+                        className="order-5 ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors sm:order-5 sm:ml-0 sm:h-7 sm:w-7"
                       >
                         <Send className="h-3.5 w-3.5" />
                       </button>
@@ -1697,10 +1788,17 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         </p>
                       ) : (
                         <p className="text-[10px] text-muted-foreground/50">
-                          Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
-                          {voice.isSupported || whisperConv.isSupported
-                            ? "Voice or type in any language"
-                            : "Voice unavailable on this browser — typing still works"}
+                          <span className="sm:hidden">
+                            {voice.isSupported || whisperConv.isSupported
+                              ? "Upload files · voice or type"
+                              : "Upload files · typing only"}
+                          </span>
+                          <span className="hidden sm:inline">
+                            Upload or drag images, PDF, DOCX, CSV, XLSX ·{" "}
+                            {voice.isSupported || whisperConv.isSupported
+                              ? "Voice or type in any language"
+                              : "Voice unavailable on this browser — typing still works"}
+                          </span>
                         </p>
                       )}
                       {session && !isSignedIn && (

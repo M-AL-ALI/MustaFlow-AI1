@@ -15,7 +15,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.mustaflow.app"
+      "bundleIdentifier": "com.mustaflow.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.mustaflow.app"
@@ -33,7 +37,12 @@
       "expo-font",
       "expo-web-browser",
       "expo-secure-store",
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow MustaFlow to use your microphone so you can talk to Ora by voice."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
