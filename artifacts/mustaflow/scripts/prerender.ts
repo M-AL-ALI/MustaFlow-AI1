@@ -682,27 +682,24 @@ function injectMetadata(html: string, meta: RouteMetadata): string {
 }
 
 function prerender(): void {
-  // Use the lightweight public entry as the template for all public routes.
-  // public.html (built from src/public-main.tsx) excludes @clerk/react,
-  // @sentry/react, and the full authenticated app shell — keeping the initial
-  // JS payload well under Google's 2 MB rendering limit.
-  // Fall back to index.html if public.html is absent (e.g. dev-only builds).
-  let publicHtmlPath = join(distDir, "public.html");
-  let fallbackHtmlPath = join(distDir, "index.html");
+  // Use the full authenticated app entry (index.html) as the template for all
+  // prerendered routes. This preserves Clerk, the full React SPA, and all
+  // authenticated routes while still injecting SEO-friendly static body HTML
+  // for crawlers. The lightweight public.html entry is only used by
+  // prerender-dynamic-routes.ts for standalone public subpaths (/gallery/:slug,
+  // /u/:username) that never need Clerk.
+  // DO NOT use public.html here — it overwrites index.html with a bundle that
+  // excludes Clerk, breaking all authenticated routes (Ora, billing, etc.).
+  let indexHtmlPath = join(distDir, "index.html");
   let indexHtml: string;
   try {
-    indexHtml = readFileSync(publicHtmlPath, "utf-8");
-    console.log("[prerender] Using public.html as template (lightweight public entry).");
+    indexHtml = readFileSync(indexHtmlPath, "utf-8");
+    console.log("[prerender] Using index.html as template (full authenticated app entry).");
   } catch {
-    try {
-      indexHtml = readFileSync(fallbackHtmlPath, "utf-8");
-      console.warn("[prerender] public.html not found — falling back to index.html.");
-    } catch {
-      console.error(
-        `[prerender] dist/public/public.html and index.html not found — run vite build first`,
-      );
-      process.exit(1);
-    }
+    console.error(
+      `[prerender] dist/public/index.html not found — run vite build first`,
+    );
+    process.exit(1);
   }
 
   let rendered = 0;
