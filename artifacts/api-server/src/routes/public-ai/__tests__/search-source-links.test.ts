@@ -123,9 +123,7 @@ async function buildApp() {
 }
 
 /** Build a Responses-API `output` payload carrying URL citation annotations. */
-function outputWithAnnotations(
-  annotations: Array<{ url: string; title?: string }>,
-): unknown[] {
+function outputWithAnnotations(annotations: Array<{ url: string; title?: string }>): unknown[] {
   return [
     {
       type: "message",
@@ -199,9 +197,7 @@ describe("POST /public-ai/chat — cited source links via live web search (mocke
     expect(res.body.sources.length).toBe(2);
 
     // Every surviving source is a safe, clickable http(s) link.
-    expect(
-      res.body.sources.every((s: { url: string }) => isSafeHttpUrl(s.url)),
-    ).toBe(true);
+    expect(res.body.sources.every((s: { url: string }) => isSafeHttpUrl(s.url))).toBe(true);
 
     // Tracking params are stripped from every cited URL.
     for (const s of res.body.sources as Array<{ url: string }>) {
@@ -212,12 +208,10 @@ describe("POST /public-ai/chat — cited source links via live web search (mocke
     }
 
     // Unsafe targets never reach the response.
-    expect(
-      res.body.sources.some((s: { url: string }) => s.url.includes("127.0.0.1")),
-    ).toBe(false);
-    expect(
-      res.body.sources.some((s: { url: string }) => s.url.startsWith("javascript:")),
-    ).toBe(false);
+    expect(res.body.sources.some((s: { url: string }) => s.url.includes("127.0.0.1"))).toBe(false);
+    expect(res.body.sources.some((s: { url: string }) => s.url.startsWith("javascript:"))).toBe(
+      false,
+    );
 
     // The Wikipedia citation is present exactly once (deduped) and carries a title.
     const wiki = (res.body.sources as Array<{ url: string; title: string }>).filter((s) =>
@@ -228,9 +222,9 @@ describe("POST /public-ai/chat — cited source links via live web search (mocke
     expect(wiki[0].title.length).toBeGreaterThan(0);
 
     // The distinct official source survives.
-    expect(
-      res.body.sources.some((s: { url: string }) => s.url.includes("toureiffel.paris")),
-    ).toBe(true);
+    expect(res.body.sources.some((s: { url: string }) => s.url.includes("toureiffel.paris"))).toBe(
+      true,
+    );
 
     // The visible reply is returned untouched.
     expect(typeof res.body.reply).toBe("string");
