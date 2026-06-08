@@ -38,11 +38,21 @@ export interface OraMemory {
    */
   supersededBy: number | null;
   sourceConversationId: number | null;
+  oraProjectId: number | null;
   createdAt: string;
 }
 
-export async function fetchOraMemories(): Promise<OraMemory[]> {
-  const res = await authFetch(`${BASE}/api/ora/memories`);
+/**
+ * List Ora memories. With no argument, returns user-level memories (those not
+ * anchored to any project). Pass an `oraProjectId` to list that project's
+ * persistent memories instead.
+ */
+export async function fetchOraMemories(oraProjectId?: number | null): Promise<OraMemory[]> {
+  const url =
+    typeof oraProjectId === "number"
+      ? `${BASE}/api/ora/memories?oraProjectId=${oraProjectId}`
+      : `${BASE}/api/ora/memories`;
+  const res = await authFetch(url);
   if (!res.ok) throw new Error(`Failed to load memories (${res.status})`);
   const data = (await res.json()) as { memories: OraMemory[] };
   return data.memories;
@@ -52,6 +62,7 @@ export async function createOraMemory(patch: {
   title: string;
   content?: string;
   category?: OraMemoryCategory;
+  oraProjectId?: number | null;
 }): Promise<OraMemory> {
   const res = await authFetch(`${BASE}/api/ora/memories`, {
     method: "POST",

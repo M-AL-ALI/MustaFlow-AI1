@@ -18,7 +18,20 @@ Ora (standalone assistant, `/ora`, served by `public-ai/*` routes + `lib/public-
 - Any new Ora read path (`ora-memories.ts` userScope, `chat.ts buildMemoryContext`) MUST filter `eq(origin, "ora")` on top of `scope='user'`.
 - Any new Builder insert into `knowledge_entries` MUST set `origin: "builder"` (or `"system"` for auto-promotion). `origin` is nullable and defaults to null, so an untagged insert is invisible to Ora but also won't be hidden if a read path forgets the filter — both ends must hold.
 - Never reintroduce a `projectId` path into `/public-ai/chat`. `knowledge_entries.scope` defaults to `"project"`, so an unscoped query would pull Builder data.
-- The in-chat `ora-memory-manager.tsx` reads `/api/knowledge?scope=user` and filters `type==='note'` client-side; Builder user-scope rows are `type='style_memory'` so they don't leak there, but this is a second Ora surface to keep in mind.
+- The in-chat `ora-memory-manager.tsx` now reads/writes the isolated `/api/ora/memories` endpoints (raw `authFetch` via `lib/ora-memories.ts`), NOT `/api/knowledge`. Saving via `/api/knowledge` is wrong — it stamps `origin='builder'` and leaks into the Builder vault. `lib/ora-memory-save.ts` must POST `/api/ora/memories`.
+
+## Third memory tier: Ora project memory
+
+Ora memory has THREE tiers, all `scope='user'` + `origin='ora'` (NOT a new scope value, NOT Builder's `projectId`):
+
+- **user-level**: `knowledge_entries.ora_project_id IS NULL` — injected into every Ora chat.
+- **ora-project**: `ora_project_id = <ora_projects.id>` — persists across every conversation in that Ora project. Uses the dedicated `oraProjectId` column added for this; deliberately separate from Builder's `projectId` (which stays NULL on Ora rows).
+
+**How to apply:**
+- Per-message injection (`chat.ts buildMemoryContext`) always pulls user-level memories + (when the body's `oraProjectId` is owned) that project's memories, then relevance-ranks (keyword overlap) within a char budget.
+- Standalone Ora chats (no project) get ONLY user-level memory.
+- Deleting/cancelling an Ora project (`DELETE /ora/projects/:id`) must also archive that project's memories (`origin='ora'` AND `ora_project_id = id`).
+- **Builder read/surface paths must add `sql\`origin IS DISTINCT FROM 'ora'\`\`** (IS DISTINCT FROM keeps legacy NULL-origin rows): Builder vault list + export + AI-injection (`jobs.ts loadKnowledgeContext`) + the publish-to-community endpoint. Other Builder reads filter by `projectId` (non-null) or `type` (style_memory/build/refine/conversation_summary) which Ora rows (projectId null, type note) can never match.
 
 ## The reverse rule (Builder must never read Ora memories)
 

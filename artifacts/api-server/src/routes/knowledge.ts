@@ -475,7 +475,15 @@ router.get("/knowledge/export", async (req, res): Promise<void> => {
       createdAt: knowledgeEntriesTable.createdAt,
     })
     .from(knowledgeEntriesTable)
-    .where(and(projectCondition, isNull(knowledgeEntriesTable.archivedAt)))
+    .where(
+      and(
+        projectCondition,
+        // ISOLATION: never export Ora memories (origin="ora") via the Builder
+        // Knowledge Vault export.
+        sql`${knowledgeEntriesTable.origin} IS DISTINCT FROM 'ora'`,
+        isNull(knowledgeEntriesTable.archivedAt),
+      ),
+    )
     .orderBy(desc(knowledgeEntriesTable.createdAt))
     .limit(1000);
 
@@ -797,7 +805,14 @@ router.post("/projects/:projectId/knowledge/:entryId/promote", async (req, res):
   const [existing] = await db
     .select(publicKnowledgeColumns)
     .from(knowledgeEntriesTable)
-    .where(eq(knowledgeEntriesTable.id, entryId));
+    // ISOLATION: Ora memories (origin="ora") must never be publishable to the
+    // community library — treat them as not found here.
+    .where(
+      and(
+        eq(knowledgeEntriesTable.id, entryId),
+        sql`${knowledgeEntriesTable.origin} IS DISTINCT FROM 'ora'`,
+      ),
+    );
 
   if (!existing) {
     res.status(404).json({ error: "Knowledge entry not found" });

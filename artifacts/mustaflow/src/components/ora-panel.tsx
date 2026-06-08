@@ -39,6 +39,7 @@ import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
 import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
+import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
 import { cn } from "@/lib/utils";
 import type {
@@ -301,15 +302,23 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   // collapses and the transcript records the saved state. Shared by the manual
   // save chip and the opt-in auto-save effect below.
   const autoSaveInFlight = useRef<Set<string>>(new Set());
+  // Anchor saved memories to the current Ora project when the chat is inside one,
+  // so they persist across that project's conversations; otherwise save at the
+  // user level. Prefer the conversation's own project over the active route.
+  const oraConv = useOraConversationsOptional();
+  const saveOraProjectId =
+    oraConv?.conversations.find((c) => c.id === oraConv.currentConversationId)?.projectId ??
+    oraConv?.activeProjectId ??
+    null;
   const handleSaveMemory = useCallback(
     async (fact: string, content: string) => {
-      await saveOraMemory(fact);
+      await saveOraMemory(fact, saveOraProjectId);
       markMemorySaved(fact, content);
       void queryClient.invalidateQueries({
         queryKey: getListKnowledgeQueryKey({ scope: "user", archived: false, limit: 100 }),
       });
     },
-    [markMemorySaved, queryClient],
+    [markMemorySaved, queryClient, saveOraProjectId],
   );
 
   // Opt-in auto-save: when the user explicitly asked Ora to remember something
@@ -1878,7 +1887,11 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
         </div>
       </div>
 
-      <OraMemoryManager open={memoryManagerOpen} onOpenChange={setMemoryManagerOpen} />
+      <OraMemoryManager
+        open={memoryManagerOpen}
+        onOpenChange={setMemoryManagerOpen}
+        oraProjectId={saveOraProjectId}
+      />
     </div>
   );
 }

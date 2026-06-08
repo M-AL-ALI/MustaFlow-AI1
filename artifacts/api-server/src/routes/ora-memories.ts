@@ -4,6 +4,7 @@ import { and, eq, desc, isNull, inArray, ne } from "drizzle-orm";
 import {
   db,
   knowledgeEntriesTable,
+  oraProjectsTable,
   ORA_MEMORY_CATEGORIES,
   DEFAULT_ORA_MEMORY_CATEGORY,
 } from "@workspace/db";
@@ -21,15 +22,34 @@ const router = Router();
  * Knowledge Vault entries — including Builder-generated user-scope style memories
  * and brand profiles (origin="builder"). Mirrors the isolation rule in
  * buildMemoryContext (routes/public-ai/chat.ts).
+ *
+ * THREE MEMORY TIERS (all origin="ora", all isolated from Builder):
+ *   - user-level   : ora_project_id IS NULL — applies to every Ora chat.
+ *   - ora-project  : ora_project_id = <ora_projects.id> — persists across every
+ *                    conversation in that project. Uses the dedicated
+ *                    `oraProjectId` column, NOT Builder's `projectId`.
  */
 
-const userScope = (userId: string) =>
+// Matches every Ora memory the user owns (both user-level and project-scoped).
+const baseScope = (userId: string) =>
   and(
     eq(knowledgeEntriesTable.userId, userId),
     eq(knowledgeEntriesTable.scope, "user"),
     eq(knowledgeEntriesTable.origin, "ora"),
     isNull(knowledgeEntriesTable.archivedAt),
   );
+
+const memoryColumns = {
+  id: knowledgeEntriesTable.id,
+  title: knowledgeEntriesTable.title,
+  content: knowledgeEntriesTable.content,
+  enabled: knowledgeEntriesTable.enabled,
+  category: knowledgeEntriesTable.category,
+  oraProjectId: knowledgeEntriesTable.oraProjectId,
+  supersededBy: knowledgeEntriesTable.supersededBy,
+  sourceConversationId: knowledgeEntriesTable.sourceConversationId,
+  createdAt: knowledgeEntriesTable.createdAt,
+};
 
 const MAX_TITLE = 200;
 const MAX_CONTENT = 4000;
@@ -48,23 +68,45 @@ function normalizeCategory<T extends { category: string | null }>(
   return { ...row, category: parsed.success ? parsed.data : DEFAULT_ORA_MEMORY_CATEGORY };
 }
 
+// Verify the caller owns the (non-archived) Ora project. Returns true when the
+// project id is valid and owned, false otherwise.
+async function ownsOraProject(userId: string, oraProjectId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: oraProjectsTable.id })
+    .from(oraProjectsTable)
+    .where(
+      and(
+        eq(oraProjectsTable.id, oraProjectId),
+        eq(oraProjectsTable.userId, userId),
+        isNull(oraProjectsTable.archivedAt),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
 // List the user's saved Ora memories.
+//   ?oraProjectId=<id> — list that project's memories.
+//   (omitted)          — list user-level memories (ora_project_id IS NULL).
 router.get("/ora/memories", async (req, res) => {
   const userId = req.userId!;
+  const projectIdParam = req.query.oraProjectId;
+  const oraProjectId =
+    typeof projectIdParam === "string" && /^\d+$/.test(projectIdParam)
+      ? parseInt(projectIdParam, 10)
+      : null;
   try {
     const rows = await db
-      .select({
-        id: knowledgeEntriesTable.id,
-        title: knowledgeEntriesTable.title,
-        content: knowledgeEntriesTable.content,
-        category: knowledgeEntriesTable.category,
-        enabled: knowledgeEntriesTable.enabled,
-        supersededBy: knowledgeEntriesTable.supersededBy,
-        sourceConversationId: knowledgeEntriesTable.sourceConversationId,
-        createdAt: knowledgeEntriesTable.createdAt,
-      })
+      .select(memoryColumns)
       .from(knowledgeEntriesTable)
-      .where(userScope(userId))
+      .where(
+        and(
+          baseScope(userId),
+          oraProjectId !== null
+            ? eq(knowledgeEntriesTable.oraProjectId, oraProjectId)
+            : isNull(knowledgeEntriesTable.oraProjectId),
+        ),
+      )
       .orderBy(desc(knowledgeEntriesTable.createdAt));
     res.json({ memories: rows.map(normalizeCategory) });
   } catch (err) {
@@ -77,6 +119,9 @@ const createMemorySchema = z.object({
   title: z.string().trim().min(1).max(MAX_TITLE),
   content: z.string().trim().max(MAX_CONTENT).optional(),
   category: categoryEnum.optional(),
+  // When set, the memory is anchored to an Ora project and persists across every
+  // conversation in that project. Validated against ownership before insert.
+  oraProjectId: z.number().int().positive().nullable().optional(),
 });
 
 // Create a new Ora memory (user-approved save). Always tagged origin="ora",
@@ -90,6 +135,11 @@ router.post("/ora/memories", async (req, res) => {
   }
   const title = parsed.data.title;
   const content = parsed.data.content ?? "";
+  const oraProjectId = parsed.data.oraProjectId ?? null;
+  if (oraProjectId !== null && !(await ownsOraProject(userId, oraProjectId))) {
+    res.status(404).json({ error: "Ora project not found" });
+    return;
+  }
   try {
     // Auto-categorize on save unless the caller picked one explicitly.
     const category =
@@ -107,26 +157,27 @@ router.post("/ora/memories", async (req, res) => {
         origin: "ora",
         userId,
         projectId: null,
+        oraProjectId,
         enabled: true,
         approvedForReuse: false,
       })
-      .returning({
-        id: knowledgeEntriesTable.id,
-        title: knowledgeEntriesTable.title,
-        content: knowledgeEntriesTable.content,
-        category: knowledgeEntriesTable.category,
-        enabled: knowledgeEntriesTable.enabled,
-        supersededBy: knowledgeEntriesTable.supersededBy,
-        sourceConversationId: knowledgeEntriesTable.sourceConversationId,
-        createdAt: knowledgeEntriesTable.createdAt,
-      });
+      .returning(memoryColumns);
+
     // Consolidation: when the new fact overlaps earlier active memories (a
     // contradicting update like "dark mode" → "light mode"), supersede those
     // earlier entries so only the current fact is injected into Ora's context.
     // Non-destructive: superseded rows are kept (still listed in the Memory
     // Center) and just disabled + tagged with this new row's id. Best-effort —
-    // a failure here never fails the save.
-    const supersededIds = await consolidateOverlappingMemories(userId, row.id, title, content);
+    // a failure here never fails the save. Scoped to the same memory tier
+    // (project vs user-level) so a project memory never supersedes a user-level
+    // fact (or one in a different project), and vice versa.
+    const supersededIds = await consolidateOverlappingMemories(
+      userId,
+      row.id,
+      title,
+      content,
+      oraProjectId,
+    );
 
     res.status(201).json({ memory: normalizeCategory(row), supersededIds });
   } catch (err) {
@@ -146,10 +197,17 @@ async function consolidateOverlappingMemories(
   newId: number,
   title: string,
   content: string,
+  oraProjectId: number | null,
 ): Promise<number[]> {
   try {
-    // Only compare against active rows: enabled, not archived, not already
-    // superseded, and excluding the new row itself.
+    // Only compare against active rows in the SAME tier: enabled, not archived,
+    // not already superseded, matching project vs user-level scope, and
+    // excluding the new row itself. Tier-scoping keeps a project memory from
+    // superseding a user-level fact (or one in a different project).
+    const sameTier =
+      oraProjectId !== null
+        ? eq(knowledgeEntriesTable.oraProjectId, oraProjectId)
+        : isNull(knowledgeEntriesTable.oraProjectId);
     const candidates = await db
       .select({
         id: knowledgeEntriesTable.id,
@@ -159,7 +217,8 @@ async function consolidateOverlappingMemories(
       .from(knowledgeEntriesTable)
       .where(
         and(
-          userScope(userId),
+          baseScope(userId),
+          sameTier,
           eq(knowledgeEntriesTable.enabled, true),
           isNull(knowledgeEntriesTable.supersededBy),
           ne(knowledgeEntriesTable.id, newId),
@@ -172,7 +231,7 @@ async function consolidateOverlappingMemories(
     await db
       .update(knowledgeEntriesTable)
       .set({ supersededBy: newId, enabled: false })
-      .where(and(inArray(knowledgeEntriesTable.id, toSupersede), userScope(userId)));
+      .where(and(inArray(knowledgeEntriesTable.id, toSupersede), baseScope(userId)));
 
     return toSupersede;
   } catch (err) {
@@ -202,7 +261,8 @@ const patchMemorySchema = z
     },
   );
 
-// Edit a memory's text or toggle whether Ora may reference it.
+// Edit a memory's text or toggle whether Ora may reference it. Works for both
+// user-level and project-scoped memories (scoped by id + owner + origin="ora").
 router.patch("/ora/memories/:id", async (req, res) => {
   const userId = req.userId!;
   const id = Number(req.params.id);
@@ -226,17 +286,8 @@ router.patch("/ora/memories/:id", async (req, res) => {
     const [row] = await db
       .update(knowledgeEntriesTable)
       .set(updates)
-      .where(and(eq(knowledgeEntriesTable.id, id), userScope(userId)))
-      .returning({
-        id: knowledgeEntriesTable.id,
-        title: knowledgeEntriesTable.title,
-        content: knowledgeEntriesTable.content,
-        category: knowledgeEntriesTable.category,
-        enabled: knowledgeEntriesTable.enabled,
-        supersededBy: knowledgeEntriesTable.supersededBy,
-        sourceConversationId: knowledgeEntriesTable.sourceConversationId,
-        createdAt: knowledgeEntriesTable.createdAt,
-      });
+      .where(and(eq(knowledgeEntriesTable.id, id), baseScope(userId)))
+      .returning(memoryColumns);
     if (!row) {
       res.status(404).json({ error: "Memory not found" });
       return;
@@ -263,16 +314,8 @@ router.post("/ora/memories/:id/restore", async (req, res) => {
     const [row] = await db
       .update(knowledgeEntriesTable)
       .set({ supersededBy: null, enabled: true })
-      .where(and(eq(knowledgeEntriesTable.id, id), userScope(userId)))
-      .returning({
-        id: knowledgeEntriesTable.id,
-        title: knowledgeEntriesTable.title,
-        content: knowledgeEntriesTable.content,
-        enabled: knowledgeEntriesTable.enabled,
-        supersededBy: knowledgeEntriesTable.supersededBy,
-        sourceConversationId: knowledgeEntriesTable.sourceConversationId,
-        createdAt: knowledgeEntriesTable.createdAt,
-      });
+      .where(and(eq(knowledgeEntriesTable.id, id), baseScope(userId)))
+      .returning(memoryColumns);
     if (!row) {
       res.status(404).json({ error: "Memory not found" });
       return;
@@ -297,7 +340,7 @@ router.delete("/ora/memories/:id", async (req, res) => {
     await db
       .update(knowledgeEntriesTable)
       .set({ archivedAt: new Date() })
-      .where(and(eq(knowledgeEntriesTable.id, id), userScope(userId)));
+      .where(and(eq(knowledgeEntriesTable.id, id), baseScope(userId)));
     res.json({ ok: true });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to delete memory");
@@ -305,12 +348,13 @@ router.delete("/ora/memories/:id", async (req, res) => {
   }
 });
 
-// Clear ALL of the user's saved Ora memories (Data Controls). Archives only
-// user-scope rows — Builder project knowledge is never touched.
+// Clear ALL of the user's saved Ora memories (Data Controls). Archives every
+// origin="ora" user row (both user-level and project-scoped) — Builder project
+// knowledge is never touched.
 router.delete("/ora/memories", async (req, res) => {
   const userId = req.userId!;
   try {
-    await db.update(knowledgeEntriesTable).set({ archivedAt: new Date() }).where(userScope(userId));
+    await db.update(knowledgeEntriesTable).set({ archivedAt: new Date() }).where(baseScope(userId));
     res.json({ ok: true });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to clear memories");

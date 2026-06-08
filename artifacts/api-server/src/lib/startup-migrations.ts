@@ -3723,6 +3723,21 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  // ── migrate-ora-project-memory (persistent Ora project memory) ─────────────
+  {
+    name: "migrate-ora-project-memory",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(
+        `ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS ora_project_id integer`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS knowledge_entries_ora_project_id_idx ON knowledge_entries(ora_project_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
+
   // ── migrate-orax-messages (task conversation threads) ─────────────────────
   {
     name: "migrate-orax-messages",

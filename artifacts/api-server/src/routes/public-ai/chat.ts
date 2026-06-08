@@ -24,6 +24,7 @@ import {
   db,
   knowledgeEntriesTable,
   oraProfilesTable,
+  oraProjectsTable,
   generatedImagesTable,
   TIER_ORA_MESSAGE_LIMIT,
   type SubscriptionTier,
@@ -295,10 +296,12 @@ export interface MemoryContextResult {
  */
 async function buildMemoryContext(
   userId: string,
+  oraProjectId?: number | null,
   currentMessage?: string,
 ): Promise<MemoryContextResult> {
   try {
-    const rows = await db
+    // User-level memories apply to EVERY Ora chat (standalone or in a project).
+    const userRows = await db
       .select({
         id: knowledgeEntriesTable.id,
         title: knowledgeEntriesTable.title,
@@ -320,21 +323,70 @@ async function buildMemoryContext(
           // only the current version of a fact reaches Ora's context.
           isNull(knowledgeEntriesTable.supersededBy),
           isNull(knowledgeEntriesTable.archivedAt),
+          // User-level only — project memories are pulled separately below.
+          isNull(knowledgeEntriesTable.oraProjectId),
         ),
       )
       .orderBy(desc(knowledgeEntriesTable.createdAt))
       .limit(ORA_MEMORY_CANDIDATE_LIMIT);
 
-    if (rows.length === 0) return { text: "", used: [] };
+    // Project memories persist across every conversation in an Ora project, but
+    // only when the caller actually owns the (non-archived) project. They must
+    // also exclude superseded entries so only the current version of a fact is
+    // injected, matching the user-level query above.
+    let projectRows: OraMemoryRow[] = [];
+    if (typeof oraProjectId === "number") {
+      const [owned] = await db
+        .select({ id: oraProjectsTable.id })
+        .from(oraProjectsTable)
+        .where(
+          and(
+            eq(oraProjectsTable.id, oraProjectId),
+            eq(oraProjectsTable.userId, userId),
+            isNull(oraProjectsTable.archivedAt),
+          ),
+        )
+        .limit(1);
+      if (owned) {
+        projectRows = await db
+          .select({
+            id: knowledgeEntriesTable.id,
+            title: knowledgeEntriesTable.title,
+            content: knowledgeEntriesTable.content,
+            embedding: knowledgeEntriesTable.embedding,
+            createdAt: knowledgeEntriesTable.createdAt,
+          })
+          .from(knowledgeEntriesTable)
+          .where(
+            and(
+              eq(knowledgeEntriesTable.userId, userId),
+              eq(knowledgeEntriesTable.scope, "user"),
+              eq(knowledgeEntriesTable.origin, "ora"),
+              eq(knowledgeEntriesTable.enabled, true),
+              isNull(knowledgeEntriesTable.supersededBy),
+              isNull(knowledgeEntriesTable.archivedAt),
+              eq(knowledgeEntriesTable.oraProjectId, oraProjectId),
+            ),
+          )
+          .orderBy(desc(knowledgeEntriesTable.createdAt))
+          .limit(ORA_MEMORY_CANDIDATE_LIMIT);
+      }
+    }
+
+    // Combine project + user-level memories into one candidate pool, then apply
+    // the Builder-style semantic/TF-IDF ranker so only pertinent memories surface
+    // within the budget. Project memories are listed first as a light tiebreak.
+    const pool = [...projectRows, ...userRows];
+    if (pool.length === 0) return { text: "", used: [] };
 
     const selected =
       currentMessage && currentMessage.trim().length > 0
-        ? await rankMemoriesByRelevance(rows, currentMessage)
-        : selectMemoriesWithinBudget(rows);
+        ? await rankMemoriesByRelevance(pool, currentMessage)
+        : selectMemoriesWithinBudget(pool);
 
     // Lazily index any memories missing an embedding so later retrievals can
     // use semantic similarity. Fire-and-forget; never blocks this reply.
-    backfillMemoryEmbeddings(rows);
+    backfillMemoryEmbeddings(pool);
 
     if (selected.length === 0) return { text: "", used: [] };
 
@@ -426,6 +478,12 @@ const bodySchema = z.object({
    * summary on this request. Bounded by the client; capped again server-side.
    */
   summarizeMessages: z.array(messageItemSchema).max(40).default([]),
+  /**
+   * The Ora project this chat belongs to, if any. When set (and owned by the
+   * caller), Ora also injects that project's persistent memories alongside the
+   * user-level ones. Standalone chats omit it and only get user-level memory.
+   */
+  oraProjectId: z.number().int().positive().nullable().optional(),
 });
 
 /**
@@ -497,6 +555,7 @@ router.post("/public-ai/chat", async (req, res) => {
     documentRefs,
     conversationSummary: priorSummary,
     summarizeMessages,
+    oraProjectId,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -869,7 +928,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const searchProfileContext = authed ? await buildProfileContext(authed.userId) : "";
     const searchMemory =
       authed && referenceSavedMemories
-        ? await buildMemoryContext(authed.userId, message)
+        ? await buildMemoryContext(authed.userId, oraProjectId, message)
         : { text: "", used: [] };
     const searchPersonalContext = searchProfileContext + searchMemory.text;
     try {
@@ -930,7 +989,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // Saved memories are opt-out and only available to signed-in users.
   const memory =
     authed && referenceSavedMemories
-      ? await buildMemoryContext(authed.userId, message)
+      ? await buildMemoryContext(authed.userId, oraProjectId, message)
       : { text: "", used: [] };
 
   // The Ora profile ("About you") is custom instructions — always applied for

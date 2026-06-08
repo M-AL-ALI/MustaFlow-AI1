@@ -84,6 +84,7 @@ const MIGRATIONS = [
   "migrate-ora-memory-center",
   "migrate-knowledge-origin",
   "migrate-ora-memory-category",
+  "migrate-ora-project-memory",
   "migrate-help-center",
   "migrate-orax",
   "migrate-orax-github-readonly",

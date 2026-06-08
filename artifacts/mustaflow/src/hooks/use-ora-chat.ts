@@ -1162,6 +1162,16 @@ export function useOraChat(): UseOraChatReturn {
               body.summarizeMessages = overflow;
             }
           }
+          // Anchor the chat to its Ora project (if any) so the backend can inject
+          // that project's persistent memories. Prefer the conversation's own
+          // project, falling back to the active route project.
+          const chatOraProjectId =
+            conv?.conversations.find((c) => c.id === conv.currentConversationId)?.projectId ??
+            conv?.activeProjectId ??
+            null;
+          if (typeof chatOraProjectId === "number") {
+            body.oraProjectId = chatOraProjectId;
+          }
           if (documentRefsRef.current.length > 0) {
             body.documentRefs = documentRefsRef.current;
           }

@@ -85,8 +85,14 @@ export const knowledgeEntriesTable = pgTable("knowledge_entries", {
   title: text("title").notNull(),
   category: text("category").notNull().default("note"),
   content: text("content").notNull(),
-  // Project-scoped context (null = global / cross-project lesson)
+  // Project-scoped context (null = global / cross-project lesson).
+  // BUILDER ONLY — never set for Ora memories.
   projectId: integer("project_id"),
+  // Ora project anchor (origin="ora" only). When set, this memory belongs to a
+  // specific Ora project (ora_projects.id) and persists across every
+  // conversation in that project. Deliberately SEPARATE from Builder's
+  // `projectId` so the Builder Knowledge Vault read paths never touch it.
+  oraProjectId: integer("ora_project_id"),
   // Actor who triggered the event
   userId: text("user_id"),
   // Machine-readable type for filtering and display

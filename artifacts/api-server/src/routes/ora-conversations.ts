@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import { and, eq, desc, isNull, sql } from "drizzle-orm";
-import { db, oraConversationsTable, oraProjectsTable } from "@workspace/db";
+import {
+  db,
+  oraConversationsTable,
+  oraProjectsTable,
+  knowledgeEntriesTable,
+} from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -495,6 +500,19 @@ router.delete("/ora/projects/:id", async (req, res) => {
       .set({ projectId: null })
       .where(
         and(eq(oraConversationsTable.projectId, id), eq(oraConversationsTable.userId, userId)),
+      );
+    // Remove this project's persistent memories — they are scoped to the project
+    // and must not survive (or leak into user-level retrieval) once it's gone.
+    await db
+      .update(knowledgeEntriesTable)
+      .set({ archivedAt: new Date() })
+      .where(
+        and(
+          eq(knowledgeEntriesTable.userId, userId),
+          eq(knowledgeEntriesTable.origin, "ora"),
+          eq(knowledgeEntriesTable.oraProjectId, id),
+          isNull(knowledgeEntriesTable.archivedAt),
+        ),
       );
     res.json({ ok: true });
   } catch (err) {

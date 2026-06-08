@@ -100,6 +100,7 @@
     "migrate-ora-memory-center": "tsx ./src/migrate-ora-memory-center.ts",
     "migrate-knowledge-origin": "tsx ./src/migrate-knowledge-origin.ts",
     "migrate-recover-ora-memories": "tsx ./src/migrate-recover-ora-memories.ts",
+    "migrate-ora-project-memory": "tsx ./src/migrate-ora-project-memory.ts",
     "migrate-knowledge-usage-events": "tsx ./src/migrate-knowledge-usage-events.ts",
     "migrate-image-studio": "tsx ./src/migrate-image-studio.ts",
     "migrate-image-studio-v2": "tsx ./src/migrate-image-studio-v2.ts",
