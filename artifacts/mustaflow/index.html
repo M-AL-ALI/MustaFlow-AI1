@@ -5,6 +5,34 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
+    <!--
+      Apply the saved theme BEFORE first paint to prevent a flash of the light
+      (default :root) theme on refresh. Mirrors src/lib/theme.ts: key
+      "mf_appearance", default "dark". Must stay in sync with that file.
+    -->
+    <script>
+      (function () {
+        var DARK_BG = "hsl(235 45% 6%)";
+        var LIGHT_BG = "hsl(235 30% 98%)";
+        var el = document.documentElement;
+        try {
+          var mode = localStorage.getItem("mf_appearance") || "dark";
+          // Mirror syncThemeDom() in src/lib/theme.ts exactly: only "light" is
+          // light; "system" follows the OS; ANY other value (incl. corrupted
+          // storage) falls through to dark.
+          var isDark =
+            mode !== "light" &&
+            (mode !== "system" ||
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          el.classList.toggle("dark", isDark);
+          el.style.backgroundColor = isDark ? DARK_BG : LIGHT_BG;
+        } catch (e) {
+          /* localStorage blocked: fall back to the dark default */
+          el.classList.add("dark");
+          el.style.backgroundColor = DARK_BG;
+        }
+      })();
+    </script>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover"
@@ -45,6 +73,7 @@
     <link rel="icon" type="image/png" sizes="any" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="MustaFlow" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#09090b" />
