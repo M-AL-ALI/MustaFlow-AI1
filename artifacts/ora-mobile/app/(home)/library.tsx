@@ -1,13 +1,14 @@
 import { Image } from "expo-image";
-import { FileText, FolderOpen, HardDrive } from "lucide-react-native";
+import { Download, FileText, FolderOpen, HardDrive, Share2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Card, EmptyState, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import { getAssets } from "@/lib/api";
+import { saveAsset } from "@/lib/files";
 import type { OraAsset } from "@/lib/types";
 
 function formatBytes(bytes: number): string {
@@ -86,63 +87,109 @@ export default function LibraryScreen() {
               subtitle="Generated documents and images from your Ora chats will appear here."
             />
           ) : (
-            assets.map((a) => (
-              <Card key={a.id} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                {a.kind === "image" ? (
-                  <View
-                    style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 10,
-                      backgroundColor: c.muted,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Image
-                      source={{
-                        uri: `${process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : ""}/api/ora/assets/${a.id}/download`,
-                      }}
-                      style={{ width: 48, height: 48 }}
-                      contentFit="cover"
-                      transition={150}
-                    />
-                  </View>
-                ) : (
-                  <View
-                    style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 10,
-                      backgroundColor: c.muted,
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <FileText size={22} color={c.accentForeground} />
-                  </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      color: c.foreground,
-                      fontFamily: "Inter_500Medium",
-                      fontSize: 14,
-                    }}
-                  >
-                    {a.fileName}
-                  </Text>
-                  <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                    {a.format?.toUpperCase()} · {formatBytes(a.sizeBytes)}
-                  </Text>
-                </View>
-              </Card>
-            ))
+            assets.map((a) => <AssetCard key={a.id} asset={a} />)
           )}
         </ScrollView>
       )}
     </View>
+  );
+}
+
+function AssetCard({ asset }: { asset: OraAsset }) {
+  const c = useColors();
+  const [saving, setSaving] = useState(false);
+  const isImage = asset.kind === "image";
+
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const outcome = await saveAsset(asset);
+      if (outcome === "image-saved") {
+        Alert.alert("Saved", "Image saved to your photo library.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Couldn't save file",
+        err instanceof Error ? err.message : "Something went wrong.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [asset, saving]);
+
+  return (
+    <Pressable onPress={handleSave} disabled={saving}>
+      <Card style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        {isImage ? (
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 10,
+              backgroundColor: c.muted,
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+            }}
+          >
+            <Image
+              source={{
+                uri: `${process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : ""}/api/ora/assets/${asset.id}/download`,
+              }}
+              style={{ width: 48, height: 48 }}
+              contentFit="cover"
+              transition={150}
+            />
+          </View>
+        ) : (
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 10,
+              backgroundColor: c.muted,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <FileText size={22} color={c.accentForeground} />
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: c.foreground,
+              fontFamily: "Inter_500Medium",
+              fontSize: 14,
+            }}
+          >
+            {asset.fileName}
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+            {asset.format?.toUpperCase()} · {formatBytes(asset.sizeBytes)}
+          </Text>
+        </View>
+        <View
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: c.muted,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color={c.mutedForeground} />
+          ) : isImage ? (
+            <Download size={16} color={c.accentForeground} />
+          ) : (
+            <Share2 size={16} color={c.accentForeground} />
+          )}
+        </View>
+      </Card>
+    </Pressable>
   );
 }

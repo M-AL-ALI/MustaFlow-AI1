@@ -42,6 +42,14 @@
         {
           "microphonePermission": "Allow MustaFlow to use your microphone so you can talk to Ora by voice."
         }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow MustaFlow to save generated images to your photo library.",
+          "savePhotosPermission": "Allow MustaFlow to save generated images to your photo library.",
+          "isAccessMediaLocationEnabled": false
+        }
       ]
     ],
     "experiments": {

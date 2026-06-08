@@ -5,12 +5,14 @@ import * as WebBrowser from "expo-web-browser";
 import {
   ArrowUp,
   Copy,
+  Download,
   FileText,
   Gauge,
   History,
   Image as ImageIcon,
   Paperclip,
   Plus,
+  Share2,
   Sparkles,
   X,
   Zap,
@@ -18,6 +20,7 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -34,6 +37,7 @@ import { Markdown } from "@/components/Markdown";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { EmptyState, Pill } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
+import { saveGeneratedFile, saveImageFromUrl } from "@/lib/files";
 import {
   analyzeDataset,
   analyzeDocument,
@@ -65,6 +69,10 @@ function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] 
   if (isImage) return "image";
   if (DATASET_TYPES.includes(fileType.toLowerCase())) return "dataset";
   return "document";
+}
+
+function isImageFile(mimeType?: string): boolean {
+  return !!mimeType && mimeType.toLowerCase().startsWith("image/");
 }
 
 export default function OraChatScreen() {
@@ -469,8 +477,46 @@ export default function OraChatScreen() {
 function MessageBubble({ message }: { message: OraMessage }) {
   const c = useColors();
   const isUser = message.role === "user";
+  const [savingFile, setSavingFile] = useState(false);
+  const [savingImage, setSavingImage] = useState(false);
 
   const copy = () => Clipboard.setStringAsync(message.content);
+
+  const handleSaveFile = useCallback(async () => {
+    if (!message.file || savingFile) return;
+    setSavingFile(true);
+    try {
+      const outcome = await saveGeneratedFile(message.file);
+      if (outcome === "image-saved") {
+        Alert.alert("Saved", "Image saved to your photo library.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Couldn't save file",
+        err instanceof Error ? err.message : "Something went wrong.",
+      );
+    } finally {
+      setSavingFile(false);
+    }
+  }, [message.file, savingFile]);
+
+  const handleSaveImage = useCallback(async () => {
+    if (!message.imageUrl || savingImage) return;
+    setSavingImage(true);
+    try {
+      await saveImageFromUrl(message.imageUrl);
+      if (Platform.OS !== "web") {
+        Alert.alert("Saved", "Image saved to your photo library.");
+      }
+    } catch (err) {
+      Alert.alert(
+        "Couldn't save image",
+        err instanceof Error ? err.message : "Something went wrong.",
+      );
+    } finally {
+      setSavingImage(false);
+    }
+  }, [message.imageUrl, savingImage]);
 
   if (isUser) {
     return (
@@ -523,21 +569,48 @@ function MessageBubble({ message }: { message: OraMessage }) {
             <Markdown>{message.content}</Markdown>
 
             {message.imageUrl && (
-              <Image
-                source={{ uri: message.imageUrl }}
-                style={{
-                  width: "100%",
-                  aspectRatio: 1,
-                  borderRadius: 12,
-                  marginTop: 10,
-                }}
-                contentFit="cover"
-                transition={200}
-              />
+              <View style={{ marginTop: 10 }}>
+                <Image
+                  source={{ uri: message.imageUrl }}
+                  style={{
+                    width: "100%",
+                    aspectRatio: 1,
+                    borderRadius: 12,
+                  }}
+                  contentFit="cover"
+                  transition={200}
+                />
+                <Pressable
+                  onPress={handleSaveImage}
+                  disabled={savingImage}
+                  hitSlop={8}
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 999,
+                    backgroundColor: "rgba(0,0,0,0.55)",
+                  }}
+                >
+                  {savingImage ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Download size={14} color="#fff" />
+                  )}
+                  <Text style={{ color: "#fff", fontSize: 12 }}>Save</Text>
+                </Pressable>
+              </View>
             )}
 
             {message.file && (
-              <View
+              <Pressable
+                onPress={handleSaveFile}
+                disabled={savingFile}
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -552,7 +625,14 @@ function MessageBubble({ message }: { message: OraMessage }) {
                 <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
                   {message.file.fileName}
                 </Text>
-              </View>
+                {savingFile ? (
+                  <ActivityIndicator size="small" color={c.mutedForeground} />
+                ) : isImageFile(message.file.mimeType) ? (
+                  <Download size={16} color={c.accentForeground} />
+                ) : (
+                  <Share2 size={16} color={c.accentForeground} />
+                )}
+              </Pressable>
             )}
 
             {message.sources && message.sources.length > 0 && (
