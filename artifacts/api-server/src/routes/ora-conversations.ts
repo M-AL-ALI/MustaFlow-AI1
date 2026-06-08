@@ -1,12 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { and, eq, desc, isNull, sql } from "drizzle-orm";
-import {
-  db,
-  oraConversationsTable,
-  oraProjectsTable,
-  knowledgeEntriesTable,
-} from "@workspace/db";
+import { db, oraConversationsTable, oraProjectsTable, knowledgeEntriesTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router = Router();

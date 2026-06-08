@@ -22,10 +22,7 @@ function deriveTitle(fact: string): string {
  * contradicting update like "dark mode" → "light mode") so the chat can tell
  * the user exactly what changed.
  */
-export async function saveOraMemory(
-  fact: string,
-  oraProjectId?: number | null,
-): Promise<string[]> {
+export async function saveOraMemory(fact: string, oraProjectId?: number | null): Promise<string[]> {
   const content = fact.trim();
   if (!content) throw new Error("Cannot save an empty memory");
 

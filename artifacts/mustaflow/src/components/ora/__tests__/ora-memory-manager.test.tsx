@@ -73,10 +73,9 @@ describe("OraMemoryManager — delete flow", () => {
     fireEvent.click(getForgetButton());
 
     await waitFor(() => {
-      expect(mockAuthFetch).toHaveBeenCalledWith(
-        expect.stringContaining("/api/ora/memories/42"),
-        { method: "DELETE" },
-      );
+      expect(mockAuthFetch).toHaveBeenCalledWith(expect.stringContaining("/api/ora/memories/42"), {
+        method: "DELETE",
+      });
       expect(mockToast).toHaveBeenCalledWith(
         expect.objectContaining({ title: "Memory forgotten" }),
       );
