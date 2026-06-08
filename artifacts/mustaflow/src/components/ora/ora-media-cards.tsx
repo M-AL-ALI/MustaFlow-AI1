@@ -54,13 +54,51 @@ export function OraImageGallery({ images }: { images: OraImage[] }) {
 }
 
 /**
- * Renders relevant videos found during a live search as clickable link cards.
- * Each opens the video in a new tab; a derived thumbnail (e.g. YouTube) shows a
- * preview when available. Non-http(s) URLs are defensively dropped.
+ * Derive an embeddable player URL from a video watch URL when the host supports
+ * iframe embedding (YouTube / Vimeo). Returns null for anything we can't safely
+ * embed — the caller then falls back to opening the original watch URL in a new
+ * tab. The derived URL is always a public http(s) host, but callers should still
+ * re-check it with isSafeHttpUrl before rendering an iframe.
+ */
+export function videoEmbedUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    let id: string | null = null;
+    if (host === "youtu.be") {
+      id = u.pathname.slice(1).split("/")[0] || null;
+    } else if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      id = u.searchParams.get("v");
+      if (!id) {
+        const m = u.pathname.match(/^\/(?:shorts|embed|v)\/([^/?#]+)/);
+        if (m) id = m[1];
+      }
+    }
+    if (id && /^[A-Za-z0-9_-]{6,}$/.test(id)) {
+      return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}`;
+    }
+    if (host === "vimeo.com") {
+      const m = u.pathname.match(/^\/(\d+)/);
+      if (m) return `https://player.vimeo.com/video/${m[1]}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Renders relevant videos found during a live search as clickable cards.
+ * Clicking an embeddable card (YouTube / Vimeo) expands an inline iframe player
+ * so the user stays in the conversation; a "Watch on <host>" link is always
+ * present as a fallback for when embedding is blocked (X-Frame-Options, etc.).
+ * Cards we can't embed simply open the watch URL in a new tab. A derived
+ * thumbnail shows a preview when available. Non-http(s) URLs are dropped.
  */
 export function OraVideoCards({ videos }: { videos: OraVideo[] }) {
   const safe = videos.filter((v) => isSafeHttpUrl(v.url));
   const [broken, setBroken] = useState<Record<string, boolean>>({});
+  const [playing, setPlaying] = useState<Record<number, boolean>>({});
   if (safe.length === 0) return null;
 
   return (
@@ -73,14 +111,57 @@ export function OraVideoCards({ videos }: { videos: OraVideo[] }) {
         {safe.map((v, i) => {
           const showThumb =
             v.thumbnailUrl && isSafeHttpUrl(v.thumbnailUrl) && !broken[v.thumbnailUrl];
-          return (
-            <a
-              key={i}
-              href={v.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/60 hover:border-border px-2.5 py-2 transition-all"
-            >
+          const embedUrl = videoEmbedUrl(v.url);
+          const canEmbed = !!embedUrl && isSafeHttpUrl(embedUrl);
+          const isPlaying = canEmbed && playing[i];
+
+          if (isPlaying) {
+            return (
+              <div
+                key={i}
+                className="overflow-hidden rounded-lg border border-border/60 bg-black"
+                data-testid="ora-video-player"
+              >
+                <div className="relative w-full" style={{ aspectRatio: "16 / 9" }}>
+                  <iframe
+                    src={`${embedUrl}?autoplay=1`}
+                    title={v.title ?? "Video player"}
+                    className="absolute inset-0 h-full w-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
+                    {v.title ?? "Now playing"}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={v.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground/70 hover:text-foreground/80 transition-colors"
+                    >
+                      Watch on {sourceHostname(v.url)}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setPlaying((p) => ({ ...p, [i]: false }))}
+                      className="text-[10px] text-muted-foreground/70 hover:text-foreground/80 transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          const cardInner = (
+            <>
               {showThumb ? (
                 <span className="relative shrink-0 overflow-hidden rounded-md">
                   <img
@@ -100,15 +181,37 @@ export function OraVideoCards({ videos }: { videos: OraVideo[] }) {
                   <Play className="h-4 w-4 fill-[hsl(265_85%_65%)] text-[hsl(265_85%_65%)]" />
                 </span>
               )}
-              <span className="flex-1 min-w-0">
+              <span className="flex-1 min-w-0 text-left">
                 <span className="block text-xs font-medium truncate text-foreground/90">
                   {v.title ?? "Watch video"}
                 </span>
                 <span className="block text-[10px] text-muted-foreground/70 truncate">
-                  {sourceHostname(v.url)}
+                  {canEmbed ? "Click to play" : sourceHostname(v.url)}
                 </span>
               </span>
-              <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 group-hover:text-foreground/70 transition-colors" />
+              {canEmbed ? (
+                <Play className="h-3.5 w-3.5 fill-current text-muted-foreground/50 shrink-0 group-hover:text-foreground/70 transition-colors" />
+              ) : (
+                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 group-hover:text-foreground/70 transition-colors" />
+              )}
+            </>
+          );
+
+          const cardClass =
+            "group flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/60 hover:border-border px-2.5 py-2 transition-all";
+
+          return canEmbed ? (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setPlaying((p) => ({ ...p, [i]: true }))}
+              className={`${cardClass} w-full`}
+            >
+              {cardInner}
+            </button>
+          ) : (
+            <a key={i} href={v.url} target="_blank" rel="noopener noreferrer" className={cardClass}>
+              {cardInner}
             </a>
           );
         })}
