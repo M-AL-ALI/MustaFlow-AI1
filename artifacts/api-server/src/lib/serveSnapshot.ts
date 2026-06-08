@@ -522,17 +522,26 @@ export async function serveSnapshot(
   const snapshot = version.filesSnapshot as SnapshotFile[];
   let file = snapshot.find((f) => f.path === filePath);
   if (!file) {
-    // Only fall back to index.html for extensionless paths or .html paths — these
-    // are likely SPA client-side routes. Paths with any other extension are static
-    // asset requests (robots.txt, sitemap.xml, llms.txt, images, scripts, etc.)
-    // and must return a real 404 rather than the HTML shell, to avoid soft-404s
-    // and broken crawl assets on published sites.
-    const lastSegment = filePath.split("/").pop() ?? "";
-    const dotIndex = lastSegment.lastIndexOf(".");
-    const ext = dotIndex !== -1 ? lastSegment.slice(dotIndex + 1).toLowerCase() : "";
-    const isSpaRoute = ext === "" || ext === "html";
-    if (isSpaRoute) {
-      file = snapshot.find((f) => f.path === "index.html");
+    // Only fall back to index.html for extensionless/HTML paths when the snapshot
+    // contains an explicit `_spa` marker file, which the builder injects at build
+    // time for React + Vite projects that use client-side routing. This marker
+    // persists through all future refine passes (the AI never emits or removes it).
+    //
+    // Without the marker, missing paths return a real 404 (using the site's
+    // configured custom 404 page when available). Unconditionally serving the
+    // HTML shell for any unknown extensionless path creates soft-404s, wastes
+    // crawl budget, and causes search engines to index duplicate shell pages
+    // instead of real content — degrading SEO for every published site on the
+    // platform.
+    const hasSpaMarker = snapshot.some((f) => f.path === "_spa");
+    if (hasSpaMarker) {
+      const lastSegment = filePath.split("/").pop() ?? "";
+      const dotIndex = lastSegment.lastIndexOf(".");
+      const ext = dotIndex !== -1 ? lastSegment.slice(dotIndex + 1).toLowerCase() : "";
+      const isSpaRoute = ext === "" || ext === "html";
+      if (isSpaRoute) {
+        file = snapshot.find((f) => f.path === "index.html");
+      }
     }
   }
 
