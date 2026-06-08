@@ -50,6 +50,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Emit the Vite asset manifest so check-bundle-size.mjs can analyse the
+    // transitive import graph for each entry.
+    manifest: true,
     // Warn when any individual chunk exceeds 800 kB (uncompressed).
     // The overall public entry must stay below Google's 2 MB rendering limit.
     chunkSizeWarningLimit: 800,

@@ -123,14 +123,32 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 async function run(): Promise<void> {
-  if (!existsSync(join(DIST_DIR, "index.html"))) {
+  // Graceful no-op when DATABASE_URL is absent — the script is wired into
+  // the postbuild pipeline where DATABASE_URL may not be set (e.g. CI builds
+  // without a live DB, local `pnpm build`). Static routes are still prerendered
+  // by scripts/prerender.ts; this step only adds dynamic gallery/profile stubs.
+  if (!process.env.DATABASE_URL) {
+    console.log(
+      "[prerender-dynamic] DATABASE_URL not set — skipping dynamic prerender (no DB available).",
+    );
+    process.exit(0);
+  }
+
+  // Prefer the lightweight public entry as template — fewer preloaded chunks.
+  // Fall back to index.html if public.html was not emitted (legacy builds).
+  const publicHtmlPath = join(DIST_DIR, "public.html");
+  const indexHtmlPath = join(DIST_DIR, "index.html");
+  const templatePath = existsSync(publicHtmlPath) ? publicHtmlPath : indexHtmlPath;
+
+  if (!existsSync(templatePath)) {
     console.error(
-      "[prerender-dynamic] dist/public/index.html not found — run `pnpm --filter @workspace/mustaflow run build` first",
+      "[prerender-dynamic] dist/public/public.html and index.html not found — " +
+        "run `pnpm --filter @workspace/mustaflow run build` first",
     );
     process.exit(1);
   }
 
-  const indexHtml = readFileSync(join(DIST_DIR, "index.html"), "utf-8");
+  const indexHtml = readFileSync(templatePath, "utf-8");
   const client = await pool.connect();
 
   try {

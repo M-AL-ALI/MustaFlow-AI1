@@ -1,133 +1,183 @@
 /**
- * Bundle size guard — fails the build when the initial JS payload for any
- * entry exceeds Google's 2 MB rendering limit.
+ * Bundle size guard — fails the build when the public entry's initial JS
+ * payload exceeds Google's 2 MB rendering limit.
  *
- * How it works:
- *  1. Reads the Vite-generated .vite/manifest.json from dist/public/.
- *  2. For each entry chunk (isEntry: true), walks the full transitive
- *     synchronous import graph (entry → imports → their imports, etc.)
- *     using a breadth-first traversal.
- *  3. Sums uncompressed byte sizes of all .js/.mjs files in that graph.
- *  4. Fails with exit code 1 if any entry's total exceeds BUDGET_BYTES.
+ * Strategy: parse the built `dist/public/public.html` (the lightweight public
+ * entry) and collect every `<link rel="modulepreload">` href. Those are
+ * exactly the JS files a browser loads synchronously before executing the
+ * entry point — the same set crawlers must execute to see content.
+ * Sum uncompressed bytes; fail if > BUDGET_BYTES.
+ *
+ * Fallback (manifest): if `public.html` is absent (dev-only builds) the tool
+ * falls back to walking `dist/public/.vite/manifest.json` for the public
+ * entry's transitive import graph.
  *
  * Run automatically after every `pnpm build` via the `postbuild` script.
  */
 
-import { readFileSync, statSync } from "fs";
+import { readFileSync, statSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = join(__dirname, "..", "dist", "public");
-const MANIFEST_PATH = join(DIST_DIR, ".vite", "manifest.json");
 
 const BUDGET_BYTES = 2 * 1024 * 1024; // 2 MB — Google's JS rendering limit
-const WARN_BYTES = 1.5 * 1024 * 1024; // 1.5 MB — warn early
+const WARN_BYTES = 1.5 * 1024 * 1024; // 1.5 MB — early warning threshold
 
 function bytesToKB(n) {
   return (n / 1024).toFixed(1);
 }
 
-let manifest;
-try {
-  manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8"));
-} catch {
-  console.warn("[bundle-size] No manifest found — skipping check (run `pnpm build` first).");
-  process.exit(0);
+function fileSize(absPath) {
+  try {
+    return statSync(absPath).size;
+  } catch {
+    return 0;
+  }
 }
 
-// Build a lookup: file path → manifest chunk entry
-const byFile = new Map();
-for (const chunk of Object.values(manifest)) {
-  if (chunk.file) byFile.set(chunk.file, chunk);
-}
+// ---------------------------------------------------------------------------
+// Strategy A: parse <link rel="modulepreload"> from the built public.html
+// ---------------------------------------------------------------------------
+function checkViaHtml() {
+  const htmlPath = join(DIST_DIR, "public.html");
+  if (!existsSync(htmlPath)) return null; // signal: try fallback
 
-/**
- * Walk the full transitive synchronous import graph for a given chunk.
- * Returns a Set of all .js/.mjs file paths reachable from the entry.
- */
-function collectInitialFiles(entryChunk) {
-  const visited = new Set();
-  const queue = [entryChunk];
+  const html = readFileSync(htmlPath, "utf-8");
 
-  while (queue.length > 0) {
-    const chunk = queue.shift();
-    if (!chunk || !chunk.file) continue;
-    if (visited.has(chunk.file)) continue;
-    visited.add(chunk.file);
-
-    for (const imp of chunk.imports ?? []) {
-      // imports can be either a file path or a manifest key
-      const imported = byFile.get(imp) ?? manifest[imp];
-      if (imported && !visited.has(imported.file)) {
-        queue.push(imported);
-      }
-    }
+  // Match all <link rel="modulepreload" href="..."> (Vite emits these)
+  const re = /<link[^>]+rel=["']modulepreload["'][^>]+href=["']([^"']+)["'][^>]*>/gi;
+  const files = [];
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const href = m[1];
+    if (!href.endsWith(".js") && !href.endsWith(".mjs")) continue;
+    // Vite hrefs are root-relative (e.g. /assets/foo.js or /base/assets/foo.js)
+    // Strip leading slash + optional base path, keep assets/… relative to DIST_DIR
+    const rel = href.replace(/^\/[^/]*\//, "").replace(/^\//, "");
+    files.push({ href, rel });
   }
 
-  return visited;
-}
-
-const chunks = Object.values(manifest);
-const entryChunks = chunks.filter((c) => c.isEntry);
-
-if (entryChunks.length === 0) {
-  console.warn("[bundle-size] No entry chunks found in manifest — skipping check.");
-  process.exit(0);
-}
-
-let failed = false;
-
-for (const entry of entryChunks) {
-  const initialFiles = collectInitialFiles(entry);
+  if (files.length === 0) {
+    console.warn(
+      "[bundle-size] No <link rel=modulepreload> found in public.html — skipping size check.",
+    );
+    return { skipped: true };
+  }
 
   let totalBytes = 0;
   const details = [];
+  for (const { href, rel } of files) {
+    const absPath = join(DIST_DIR, rel);
+    const size = fileSize(absPath);
+    totalBytes += size;
+    details.push({ file: rel || href, size });
+  }
 
-  for (const file of initialFiles) {
-    if (!file.endsWith(".js") && !file.endsWith(".mjs")) continue;
-    const absPath = join(DIST_DIR, file);
-    let size = 0;
-    try {
-      size = statSync(absPath).size;
-    } catch {
-      continue;
+  return { totalBytes, details, method: "html-modulepreload" };
+}
+
+// ---------------------------------------------------------------------------
+// Strategy B: walk the Vite manifest for the public entry (fallback)
+// ---------------------------------------------------------------------------
+function checkViaManifest() {
+  const manifestPath = join(DIST_DIR, ".vite", "manifest.json");
+  if (!existsSync(manifestPath)) return null;
+
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+  } catch {
+    return null;
+  }
+
+  // Find the public entry chunk
+  const entryChunk = Object.values(manifest).find(
+    (c) => c.isEntry && (c.src?.includes("public-main") || c.src?.includes("public.html")),
+  );
+  if (!entryChunk) {
+    // Second try: any entry whose file is referenced by public.html
+    return null;
+  }
+
+  // BFS over the synchronous import graph
+  const byFile = new Map();
+  for (const chunk of Object.values(manifest)) {
+    if (chunk.file) byFile.set(chunk.file, chunk);
+  }
+
+  const visited = new Set();
+  const queue = [entryChunk];
+  while (queue.length > 0) {
+    const chunk = queue.shift();
+    if (!chunk?.file || visited.has(chunk.file)) continue;
+    visited.add(chunk.file);
+    for (const imp of chunk.imports ?? []) {
+      const dep = byFile.get(imp) ?? manifest[imp];
+      if (dep && !visited.has(dep.file)) queue.push(dep);
     }
+  }
+
+  let totalBytes = 0;
+  const details = [];
+  for (const file of visited) {
+    if (!file.endsWith(".js") && !file.endsWith(".mjs")) continue;
+    const size = fileSize(join(DIST_DIR, file));
     totalBytes += size;
     details.push({ file, size });
   }
 
-  const label = entry.file ?? entry.src ?? "unknown";
-  details.sort((a, b) => b.size - a.size);
-
-  const icon = totalBytes > BUDGET_BYTES ? "✖" : totalBytes > WARN_BYTES ? "⚠" : "✔";
-  console.log(
-    `[bundle-size] ${icon} Entry: ${label}  initial JS = ${bytesToKB(totalBytes)} kB / budget ${bytesToKB(BUDGET_BYTES)} kB`,
-  );
-  for (const { file, size } of details.slice(0, 10)) {
-    console.log(`             ${bytesToKB(size).padStart(8)} kB  ${file}`);
-  }
-  if (details.length > 10) {
-    console.log(`             … and ${details.length - 10} more chunks`);
-  }
-
-  if (totalBytes > BUDGET_BYTES) {
-    console.error(
-      `[bundle-size] ✖ FAIL: entry "${label}" initial JS (${bytesToKB(totalBytes)} kB) ` +
-        `exceeds the ${bytesToKB(BUDGET_BYTES)} kB budget.\n` +
-        `       Split auth-gated and public routes so crawlers see a lighter entry.`,
-    );
-    failed = true;
-  } else if (totalBytes > WARN_BYTES) {
-    console.warn(
-      `[bundle-size] ⚠ WARN: entry "${label}" initial JS (${bytesToKB(totalBytes)} kB) ` +
-        `is approaching the ${bytesToKB(BUDGET_BYTES)} kB budget.`,
-    );
-  }
+  return { totalBytes, details, method: "manifest" };
 }
 
-if (failed) {
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+const result = checkViaHtml() ?? checkViaManifest();
+
+if (!result) {
+  console.warn(
+    "[bundle-size] Neither dist/public/public.html nor .vite/manifest.json found — " +
+      "skipping check (run `pnpm build` first).",
+  );
+  process.exit(0);
+}
+
+if (result.skipped) {
+  process.exit(0);
+}
+
+const { totalBytes, details, method } = result;
+
+details.sort((a, b) => b.size - a.size);
+
+const icon = totalBytes > BUDGET_BYTES ? "✖" : totalBytes > WARN_BYTES ? "⚠" : "✔";
+console.log(
+  `[bundle-size] ${icon} public entry initial JS = ${bytesToKB(totalBytes)} kB / budget ${bytesToKB(BUDGET_BYTES)} kB  (via ${method})`,
+);
+for (const { file, size } of details.slice(0, 12)) {
+  console.log(`             ${bytesToKB(size).padStart(8)} kB  ${file}`);
+}
+if (details.length > 12) {
+  console.log(`             … and ${details.length - 12} more preloaded files`);
+}
+
+if (totalBytes > BUDGET_BYTES) {
+  console.error(
+    `\n[bundle-size] ✖ FAIL: public entry initial JS (${bytesToKB(totalBytes)} kB) exceeds ` +
+      `the ${bytesToKB(BUDGET_BYTES)} kB budget.\n` +
+      `       Split auth-gated code so crawlers receive a lighter entry.\n` +
+      `       Top chunks above ↑`,
+  );
   process.exit(1);
 }
 
-console.log("[bundle-size] All entries within budget.");
+if (totalBytes > WARN_BYTES) {
+  console.warn(
+    `[bundle-size] ⚠ WARN: public entry (${bytesToKB(totalBytes)} kB) is approaching ` +
+      `the ${bytesToKB(BUDGET_BYTES)} kB limit.`,
+  );
+}
+
+console.log("[bundle-size] Public entry within budget.");
