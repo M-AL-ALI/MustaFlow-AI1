@@ -1160,7 +1160,11 @@ const KNOWLEDGE_CHAR_BUDGET = parseInt(process.env.KNOWLEDGE_TOKEN_BUDGET ?? "24
  * Returns both the formatted context string and the applied entry metadata
  * (id + title + category) so they can be surfaced in the TaskReport.
  */
-async function loadKnowledgeContext(
+// Exported for the Ora↔Builder isolation regression test
+// (src/lib/__tests__/ora-builder-isolation.test.ts). The reverse-leak guard
+// inside this query — `or(isNull(origin), ne(origin, "ora"))` — is the
+// load-bearing filter that keeps personal Ora memories out of build prompts.
+export async function loadKnowledgeContext(
   projectId: number,
   userPrompt?: string,
 ): Promise<KnowledgeContextResult> {
