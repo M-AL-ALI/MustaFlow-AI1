@@ -3785,6 +3785,16 @@ export async function runReactViteBuildPipeline(args: {
   const { files: sanitisedFiles } = scanForSecrets(files);
   files = sanitisedFiles;
 
+  // Inject the SPA fallback marker so the snapshot-serving layer knows this
+  // project uses client-side routing and should fall back to index.html for
+  // extensionless paths that are not found in the snapshot (e.g. deep links
+  // refreshed in the browser). This explicit signal replaces any heuristic
+  // detection (e.g. presence of src/main.tsx) and must be preserved through
+  // all future refine passes — the AI will never emit or remove this file.
+  if (!files.some((f) => f.path === "_spa")) {
+    files.push({ path: "_spa", content: "", mimeType: "text/plain" });
+  }
+
   const report: TaskReport = {
     userRequest: userPrompt,
     blueprint: blueprint as unknown as Record<string, unknown>,

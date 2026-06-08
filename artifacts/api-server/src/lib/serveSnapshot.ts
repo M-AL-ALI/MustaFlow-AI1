@@ -523,26 +523,18 @@ export async function serveSnapshot(
   let file = snapshot.find((f) => f.path === filePath);
   if (!file) {
     // Only fall back to index.html for extensionless/HTML paths when the snapshot
-    // is positively identified as a React SPA with client-side routing.
+    // contains an explicit `_spa` marker file, which the builder injects at build
+    // time for React + Vite projects that use client-side routing. This marker
+    // persists through all future refine passes (the AI never emits or removes it).
     //
-    // Detection heuristic: Vite/React SPA snapshots always contain src/main.tsx
-    // (or src/main.ts / src/App.tsx) because the builder's React+Vite prompt
-    // requires them. Static multi-page HTML apps never contain these files.
-    // A `_spa` marker file can also be included as an explicit override signal.
-    //
-    // Without a positive SPA signal, extensionless paths that do not exist in
-    // the snapshot return a real 404 (using the site's custom 404 page if set).
-    // Serving the HTML shell for missing paths creates soft-404s, wastes crawl
-    // budget, and causes search engines to index duplicate shell pages instead
-    // of real content — degrading SEO for every published site on the platform.
-    const hasSpaEntryPoint = snapshot.some(
-      (f) =>
-        f.path === "src/main.tsx" ||
-        f.path === "src/main.ts" ||
-        f.path === "src/App.tsx" ||
-        f.path === "_spa",
-    );
-    if (hasSpaEntryPoint) {
+    // Without the marker, missing paths return a real 404 (using the site's
+    // configured custom 404 page when available). Unconditionally serving the
+    // HTML shell for any unknown extensionless path creates soft-404s, wastes
+    // crawl budget, and causes search engines to index duplicate shell pages
+    // instead of real content — degrading SEO for every published site on the
+    // platform.
+    const hasSpaMarker = snapshot.some((f) => f.path === "_spa");
+    if (hasSpaMarker) {
       const lastSegment = filePath.split("/").pop() ?? "";
       const dotIndex = lastSegment.lastIndexOf(".");
       const ext = dotIndex !== -1 ? lastSegment.slice(dotIndex + 1).toLowerCase() : "";
