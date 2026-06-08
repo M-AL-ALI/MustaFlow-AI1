@@ -35,6 +35,7 @@ interface GalleryTemplate {
   category: string;
   tags: string[];
   authorName: string | null;
+  authorUsername: string | null;
   platform: string;
   stack: string;
   rating: number;
@@ -160,6 +161,22 @@ function TemplateCard({
             </span>
           )}
         </div>
+
+        {template.authorName && (
+          <div className="text-xs text-muted-foreground">
+            {template.authorUsername ? (
+              <a
+                href={`/u/${template.authorUsername}`}
+                onClick={(e) => e.stopPropagation()}
+                className="hover:text-foreground hover:underline transition-colors"
+              >
+                {template.authorName}
+              </a>
+            ) : (
+              <span>{template.authorName}</span>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center justify-between pt-1 border-t border-border">
           <div className="flex items-center gap-3">

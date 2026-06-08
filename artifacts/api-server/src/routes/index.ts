@@ -77,6 +77,7 @@ import abuseRouter from "./abuse";
 import galleryTemplatesRouter, { publicGalleryRouter } from "./templates";
 import ecosystemExtensionsRouter, { publicExtensionsRouter } from "./ecosystem-extensions";
 import profilesRouter, { publicProfilesRouter } from "./profiles";
+import { seoRouter } from "./seo";
 import metricsRouter from "./metrics";
 import statusRouter from "./status";
 import healthProjectRouter from "./health-project";
@@ -130,6 +131,7 @@ router.use(clerkWebhookRouter); // POST /webhooks/clerk     (Clerk → us)
 router.use(publicGalleryRouter); // GET /gallery-templates[/:slug] — public browsing
 router.use(publicExtensionsRouter); // GET /extensions[/:slug] — public browsing
 router.use(publicProfilesRouter); // GET /profiles/:username[/projects] — public profiles
+router.use(seoRouter); // GET /sitemap.xml — dynamic sitemap for crawlers
 router.use("/v1", v1Router); // POST/GET /v1/* — PAT-authed public REST API (own auth middleware)
 router.use(abuseRouter); // POST /abuse-reports (public intake, no auth)
 router.use(publicCanvasRouter); // GET /canvas/share/:token, /canvas/ab/:testId — public variant previews
@@ -205,6 +207,7 @@ const KNOWN_PREFIXES = [
   "/gallery-templates",
   "/extensions",
   "/profiles",
+  "/sitemap.xml",
   "/brainstorm",
   "/docs",
   "/public-ai",

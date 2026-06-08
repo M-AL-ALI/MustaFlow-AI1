@@ -7,4 +7,4 @@ Disallow: /admin/
 Disallow: /sign-in/
 Disallow: /sign-up/
 
-Sitemap: https://mustaflow.app/sitemap.xml
+Sitemap: https://mustaflow.app/api/sitemap.xml

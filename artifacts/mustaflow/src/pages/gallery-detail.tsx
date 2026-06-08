@@ -34,6 +34,7 @@ interface GalleryTemplate {
   category: string;
   tags: string[];
   authorName: string | null;
+  authorUsername: string | null;
   platform: string;
   stack: string;
   rating: number;
@@ -350,7 +351,16 @@ export default function GalleryDetailPage() {
             {template.authorName && (
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Author</span>
-                <span className="font-medium text-foreground">{template.authorName}</span>
+                {template.authorUsername ? (
+                  <Link
+                    href={`/u/${template.authorUsername}`}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {template.authorName}
+                  </Link>
+                ) : (
+                  <span className="font-medium text-foreground">{template.authorName}</span>
+                )}
               </div>
             )}
           </div>

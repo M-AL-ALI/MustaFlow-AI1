@@ -113,6 +113,7 @@
     "migrate-orax-approvals": "tsx ./src/migrate-orax-approvals.ts",
     "migrate-orax-artifacts": "tsx ./src/migrate-orax-artifacts.ts",
     "migrate-orax-messages": "tsx ./src/migrate-orax-messages.ts",
+    "prerender-dynamic-routes": "tsx ./src/prerender-dynamic-routes.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "validate-developer-mode": "tsx ./src/validate-developer-mode.ts",
     "verify-developer-mode-runtime": "tsx ./src/verify-developer-mode-runtime.ts",

@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useAuth } from "@clerk/react";
+import { AuthStateProvider } from "@/lib/auth-state-context";
 import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
 import { BUILDER_ENABLED } from "@/lib/builder-flag";
 import { publishableKeyFromHost } from "@clerk/react/internal";
@@ -460,376 +461,393 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
       {!isE2E && <VoiceLangSyncer />}
       {!isE2E && <ClerkQueryClientCacheInvalidator />}
       {!isE2E && <ClerkTokenProvider />}
-      <MaybeClerkContextProviders isE2E={isE2E}>
-        <WorkspaceProvider>
-          <TooltipProvider>
-            <Suspense fallback={null}>
-              <Switch>
-                {/* ── Public routes ── */}
-                <Route path="/" component={HomeRoute} />
-                {/* REQUIRED — /*? wildcard matches bare URL + OAuth sub-paths */}
-                <Route path="/sign-in/*?" component={SignInPage} />
-                <Route path="/sign-up/*?" component={SignUpPage} />
-                {/* Backward-compat redirect from old /login stub */}
-                <Route path="/login">
-                  <Redirect to="/sign-in" />
-                </Route>
+      <MaybeAuthStateBridge isE2E={isE2E}>
+        <MaybeClerkContextProviders isE2E={isE2E}>
+          <WorkspaceProvider>
+            <TooltipProvider>
+              <Suspense fallback={null}>
+                <Switch>
+                  {/* ── Public routes ── */}
+                  <Route path="/" component={HomeRoute} />
+                  {/* REQUIRED — /*? wildcard matches bare URL + OAuth sub-paths */}
+                  <Route path="/sign-in/*?" component={SignInPage} />
+                  <Route path="/sign-up/*?" component={SignUpPage} />
+                  {/* Backward-compat redirect from old /login stub */}
+                  <Route path="/login">
+                    <Redirect to="/sign-in" />
+                  </Route>
 
-                {/* ── Protected routes ── */}
-                <Route path="/mode-select">
-                  <Protected>
-                    <ModeSelectPage />
-                  </Protected>
-                </Route>
-                <Route path="/ora/library">
-                  <Protected>
-                    <OraLibraryPage />
-                  </Protected>
-                </Route>
-                <Route path="/ora/settings">
-                  <Protected>
-                    <OraSettingsPage />
-                  </Protected>
-                </Route>
-                <Route path="/ora/memory">
-                  <Protected>
-                    <OraMemoryPage />
-                  </Protected>
-                </Route>
-                <Route path="/ora/projects/new">
-                  <Protected>
-                    <OraNewProjectPage />
-                  </Protected>
-                </Route>
-                <Route path="/ora/projects/:projectId">
-                  <Protected>
-                    <OraPage />
-                  </Protected>
-                </Route>
-                <Route path="/ora">
-                  <Protected>
-                    <OraPage />
-                  </Protected>
-                </Route>
-                <Route path="/orax">
-                  <Protected>
-                    <OraxPage />
-                  </Protected>
-                </Route>
-                <Route path="/projects">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <ProjectsPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/projects/new">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <NewProjectPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/projects/:id">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <ProjectWorkspacePage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/knowledge">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <KnowledgePage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/vault">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <VaultPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/memory">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <MemoryPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/library">
-                  <AppLayout>
-                    <LibraryPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/settings">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <SettingsPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/admin/support">
-                  <Protected>
-                    <BuilderGuard>
-                      <AdminGuard>
+                  {/* ── Protected routes ── */}
+                  <Route path="/mode-select">
+                    <Protected>
+                      <ModeSelectPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/ora/library">
+                    <Protected>
+                      <OraLibraryPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/ora/settings">
+                    <Protected>
+                      <OraSettingsPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/ora/memory">
+                    <Protected>
+                      <OraMemoryPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/ora/projects/new">
+                    <Protected>
+                      <OraNewProjectPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/ora/projects/:projectId">
+                    <Protected>
+                      <OraPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/ora">
+                    <Protected>
+                      <OraPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/orax">
+                    <Protected>
+                      <OraxPage />
+                    </Protected>
+                  </Route>
+                  <Route path="/projects">
+                    <Protected>
+                      <BuilderGuard>
                         <AppLayout>
-                          <SupportInboxPage />
+                          <ProjectsPage />
                         </AppLayout>
-                      </AdminGuard>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/admin">
-                  <Protected>
-                    <BuilderGuard>
-                      <AdminGuard>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/projects/new">
+                    <Protected>
+                      <BuilderGuard>
                         <AppLayout>
-                          <AdminPage />
+                          <NewProjectPage />
                         </AppLayout>
-                      </AdminGuard>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/trash">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <TrashPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/billing">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <BillingPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/image-studio">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <ImageStudioPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/published">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <PublishedPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/integrations">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <IntegrationsPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/security">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <SecurityPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/learn">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <LearnPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/workspaces/:id/usage">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <WorkspaceUsagePage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/workspaces/:id/domains">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <WorkspaceDomainsPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/workspaces/:id/audit">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <WorkspaceAuditPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/account/domains">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <MyDomainsPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/orgs/invites/:token">
-                  <AppLayout>
-                    <OrgInviteAcceptPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/orgs/new">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <OrgNewPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
-                <Route path="/orgs/:orgId">
-                  <Protected>
-                    <BuilderGuard>
-                      <AppLayout>
-                        <OrgSettingsPage />
-                      </AppLayout>
-                    </BuilderGuard>
-                  </Protected>
-                </Route>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/projects/:id">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <ProjectWorkspacePage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/knowledge">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <KnowledgePage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/vault">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <VaultPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/memory">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <MemoryPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/library">
+                    <AppLayout>
+                      <LibraryPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/settings">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <SettingsPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/admin/support">
+                    <Protected>
+                      <BuilderGuard>
+                        <AdminGuard>
+                          <AppLayout>
+                            <SupportInboxPage />
+                          </AppLayout>
+                        </AdminGuard>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/admin">
+                    <Protected>
+                      <BuilderGuard>
+                        <AdminGuard>
+                          <AppLayout>
+                            <AdminPage />
+                          </AppLayout>
+                        </AdminGuard>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/trash">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <TrashPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/billing">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <BillingPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/image-studio">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <ImageStudioPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/published">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <PublishedPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/integrations">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <IntegrationsPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/security">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <SecurityPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/learn">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <LearnPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/workspaces/:id/usage">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <WorkspaceUsagePage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/workspaces/:id/domains">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <WorkspaceDomainsPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/workspaces/:id/audit">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <WorkspaceAuditPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/account/domains">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <MyDomainsPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/orgs/invites/:token">
+                    <AppLayout>
+                      <OrgInviteAcceptPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/orgs/new">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <OrgNewPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/orgs/:orgId">
+                    <Protected>
+                      <BuilderGuard>
+                        <AppLayout>
+                          <OrgSettingsPage />
+                        </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
 
-                {/* ── Ecosystem pages ── */}
-                <Route path="/gallery/:slug">
-                  <AppLayout>
-                    <GalleryDetailPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/gallery">
-                  <AppLayout>
-                    <GalleryPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/extensions">
-                  <AppLayout>
-                    <ExtensionsPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/community">
-                  <AppLayout>
-                    <CommunityPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/u/:username">
-                  <AppLayout>
-                    <UserProfilePage />
-                  </AppLayout>
-                </Route>
+                  {/* ── Ecosystem pages ── */}
+                  <Route path="/gallery/:slug">
+                    <AppLayout>
+                      <GalleryDetailPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/gallery">
+                    <AppLayout>
+                      <GalleryPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/extensions">
+                    <AppLayout>
+                      <ExtensionsPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/community">
+                    <AppLayout>
+                      <CommunityPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/u/:username">
+                    <AppLayout>
+                      <UserProfilePage />
+                    </AppLayout>
+                  </Route>
 
-                {/* ── Public info pages ── */}
-                <Route path="/pricing">
-                  <AppLayout>
-                    <PricingPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/terms">
-                  <AppLayout>
-                    <TermsPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/privacy">
-                  <AppLayout>
-                    <PrivacyPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/help">
-                  <HelpLayout>
-                    <HelpPage />
-                  </HelpLayout>
-                </Route>
-                <Route path="/help/domains-api">
-                  <HelpLayout>
-                    <HelpDomainsApiPage />
-                  </HelpLayout>
-                </Route>
-                <Route path="/support/tickets/:id">
-                  <Protected>
+                  {/* ── Public info pages ── */}
+                  <Route path="/pricing">
+                    <AppLayout>
+                      <PricingPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/terms">
+                    <AppLayout>
+                      <TermsPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/privacy">
+                    <AppLayout>
+                      <PrivacyPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/help">
                     <HelpLayout>
-                      <SupportTicketsPage />
+                      <HelpPage />
                     </HelpLayout>
-                  </Protected>
-                </Route>
-                <Route path="/support/tickets">
-                  <Protected>
+                  </Route>
+                  <Route path="/help/domains-api">
                     <HelpLayout>
-                      <SupportTicketsPage />
+                      <HelpDomainsApiPage />
                     </HelpLayout>
-                  </Protected>
-                </Route>
-                <Route path="/status">
-                  <AppLayout>
-                    <StatusPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/trust">
-                  <AppLayout>
-                    <TrustPage />
-                  </AppLayout>
-                </Route>
-                <Route path="/developers/changelog">
-                  <DevelopersChangelogPage />
-                </Route>
-                <Route path="/developers">
-                  <AppLayout>
-                    <DevelopersPage />
-                  </AppLayout>
-                </Route>
+                  </Route>
+                  <Route path="/support/tickets/:id">
+                    <Protected>
+                      <HelpLayout>
+                        <SupportTicketsPage />
+                      </HelpLayout>
+                    </Protected>
+                  </Route>
+                  <Route path="/support/tickets">
+                    <Protected>
+                      <HelpLayout>
+                        <SupportTicketsPage />
+                      </HelpLayout>
+                    </Protected>
+                  </Route>
+                  <Route path="/status">
+                    <AppLayout>
+                      <StatusPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/trust">
+                    <AppLayout>
+                      <TrustPage />
+                    </AppLayout>
+                  </Route>
+                  <Route path="/developers/changelog">
+                    <DevelopersChangelogPage />
+                  </Route>
+                  <Route path="/developers">
+                    <AppLayout>
+                      <DevelopersPage />
+                    </AppLayout>
+                  </Route>
 
-                <Route component={NotFound} />
-              </Switch>
-            </Suspense>
-            {!isE2E && (
-              <Show when="signed-in">
-                <OnboardingTour />
-              </Show>
-            )}
-            <OfflineIndicator />
-            <Toaster />
-          </TooltipProvider>
-        </WorkspaceProvider>
-      </MaybeClerkContextProviders>
+                  <Route component={NotFound} />
+                </Switch>
+              </Suspense>
+              {!isE2E && (
+                <Show when="signed-in">
+                  <OnboardingTour />
+                </Show>
+              )}
+              <OfflineIndicator />
+              <Toaster />
+            </TooltipProvider>
+          </WorkspaceProvider>
+        </MaybeClerkContextProviders>
+      </MaybeAuthStateBridge>
     </QueryClientProvider>
   );
+}
+
+// Reads isSignedIn from Clerk and injects it into AuthStateContext so that
+// public pages (home, pricing, extensions, developers) can access auth state
+// without importing @clerk/react directly — keeping them usable in the
+// lightweight public entry (PublicApp) that has no ClerkProvider.
+function ClerkAuthStateBridge({ children }: { children: React.ReactNode }) {
+  const { isSignedIn } = useAuth();
+  return <AuthStateProvider isSignedIn={!!isSignedIn}>{children}</AuthStateProvider>;
+}
+
+// Same pattern as MaybeClerkContextProviders: skips Clerk hooks in E2E mode.
+function MaybeAuthStateBridge({ isE2E, children }: { isE2E: boolean; children: React.ReactNode }) {
+  if (isE2E) return <AuthStateProvider isSignedIn={false}>{children}</AuthStateProvider>;
+  return <ClerkAuthStateBridge>{children}</ClerkAuthStateBridge>;
 }
 
 // Conditionally wraps children with ClerkUserProvider + ClerkActionsProvider.

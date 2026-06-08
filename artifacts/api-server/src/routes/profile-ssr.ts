@@ -171,11 +171,7 @@ function readBuiltIndexHtml(): string | null {
 }
 
 /** Inject head tags and body content into the built index.html. */
-function injectIntoIndexHtml(
-  indexHtml: string,
-  headSnippet: string,
-  bodyContent: string,
-): string {
+function injectIntoIndexHtml(indexHtml: string, headSnippet: string, bodyContent: string): string {
   let html = indexHtml;
 
   // Replace the entire <title> block
@@ -194,10 +190,7 @@ function injectIntoIndexHtml(
   html = html.replace("</head>", `  ${headSnippet}\n</head>`);
 
   // Inject body content into <div id="root"></div>
-  html = html.replace(
-    /<div id="root"><\/div>/,
-    `<div id="root">${bodyContent.trim()}</div>`,
-  );
+  html = html.replace(/<div id="root"><\/div>/, `<div id="root">${bodyContent.trim()}</div>`);
 
   return html;
 }
@@ -271,12 +264,7 @@ profileSsrRouter.get("/u/:username", async (req, res): Promise<void> => {
                 publicSlug: projectsTable.publicSlug,
               })
               .from(projectsTable)
-              .where(
-                and(
-                  inArray(projectsTable.id, allIds),
-                  isNull(projectsTable.deletedAt),
-                ),
-              );
+              .where(and(inArray(projectsTable.id, allIds), isNull(projectsTable.deletedAt)));
 
       const { head, body } = buildProfileHtml(username, profile, projects);
       headSnippet = head;

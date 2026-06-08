@@ -1,6 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useRef } from "react";
-import { useAuth } from "@clerk/react";
+import { useAuthState } from "@/lib/auth-state-context";
 import { PageMeta } from "@/components/page-meta";
 import {
   Search,
@@ -281,7 +281,7 @@ interface ProjectListItem {
 
 export default function ExtensionsPage() {
   const { toast } = useToast();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useAuthState();
   const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [extensions, setExtensions] = useState<Extension[]>([]);
