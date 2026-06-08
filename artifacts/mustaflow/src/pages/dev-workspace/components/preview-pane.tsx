@@ -8,6 +8,7 @@ import {
   Globe,
   ArrowLeft,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -50,6 +51,7 @@ export function PreviewPane({
   const [currentPath, setCurrentPath] = useState("/");
   const [pathHistory, setPathHistory] = useState<string[]>(["/"]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const [iframeLoading, setIframeLoading] = useState(true);
   const prevRefreshTrigger = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -106,6 +108,17 @@ export function PreviewPane({
     }
     return `/api/projects/${projectId}/preview${currentPath}`;
   })();
+
+  // Show a loading indicator whenever the iframe (re)loads — on first mount, on
+  // manual refresh (iframeKey bump), and when the resolved src changes after the
+  // project data arrives. Avoids a blank "missing preview" flash on full refresh.
+  // A timeout fallback guarantees the overlay clears even if `onLoad` never fires
+  // (e.g. a stalled connection), so it can never get stuck visible.
+  useEffect(() => {
+    setIframeLoading(true);
+    const timeout = setTimeout(() => setIframeLoading(false), 12000);
+    return () => clearTimeout(timeout);
+  }, [iframeKey, iframeSrc]);
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-zinc-900">
@@ -190,7 +203,7 @@ export function PreviewPane({
       </div>
 
       {/* Preview area */}
-      <div className="flex-1 min-h-0 overflow-auto bg-zinc-800 flex items-start justify-center pt-0">
+      <div className="relative flex-1 min-h-0 overflow-auto bg-zinc-800 flex items-start justify-center pt-0">
         {hasContainer && (containerStatus === "stopped" || containerStatus === "hibernated") ? (
           <div className="flex flex-col items-center justify-center h-full w-full gap-3 text-center p-6">
             <div className="w-12 h-12 rounded-xl bg-muted border border-border flex items-center justify-center">
@@ -219,9 +232,20 @@ export function PreviewPane({
               className="w-full h-full border-0"
               sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
               title="Live Preview"
+              onLoad={() => setIframeLoading(false)}
             />
           </div>
         )}
+
+        {/* Loading overlay — covers the brief blank flash while the preview
+            iframe (re)loads, e.g. after a full page refresh. */}
+        {iframeLoading &&
+          !(hasContainer && (containerStatus === "stopped" || containerStatus === "hibernated")) && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-800 text-muted-foreground pointer-events-none">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-xs">Loading preview…</span>
+            </div>
+          )}
       </div>
     </div>
   );
