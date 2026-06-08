@@ -50,9 +50,7 @@ function serveManifest(platform, res) {
 
   if (!fs.existsSync(manifestPath)) {
     res.writeHead(404, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify({ error: `Manifest not found for platform: ${platform}` }),
-    );
+    res.end(JSON.stringify({ error: `Manifest not found for platform: ${platform}` }));
     return;
   }
 

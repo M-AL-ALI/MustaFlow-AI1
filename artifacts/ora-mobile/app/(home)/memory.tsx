@@ -27,17 +27,16 @@ import type { OraMemory, OraProfile } from "@/lib/types";
 
 type Tab = "profile" | "memories";
 
-const PROFILE_FIELDS: { key: keyof OraProfile; label: string; multiline?: boolean }[] =
-  [
-    { key: "preferredName", label: "Preferred name" },
-    { key: "occupation", label: "Occupation" },
-    { key: "industry", label: "Industry" },
-    { key: "goals", label: "Goals", multiline: true },
-    { key: "skillLevel", label: "Skill level" },
-    { key: "preferredLanguage", label: "Preferred language" },
-    { key: "responseStyle", label: "Response style", multiline: true },
-    { key: "avoid", label: "Things to avoid", multiline: true },
-  ];
+const PROFILE_FIELDS: { key: keyof OraProfile; label: string; multiline?: boolean }[] = [
+  { key: "preferredName", label: "Preferred name" },
+  { key: "occupation", label: "Occupation" },
+  { key: "industry", label: "Industry" },
+  { key: "goals", label: "Goals", multiline: true },
+  { key: "skillLevel", label: "Skill level" },
+  { key: "preferredLanguage", label: "Preferred language" },
+  { key: "responseStyle", label: "Response style", multiline: true },
+  { key: "avoid", label: "Things to avoid", multiline: true },
+];
 
 export default function MemoryScreen() {
   const c = useColors();
@@ -117,8 +116,7 @@ function ProfileTab() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
-          Share details so Ora can tailor every reply to you. This is private to
-          your account.
+          Share details so Ora can tailor every reply to you. This is private to your account.
         </Text>
         {PROFILE_FIELDS.map((f) => (
           <TextField
@@ -130,12 +128,7 @@ function ProfileTab() {
             style={f.multiline ? { minHeight: 80, textAlignVertical: "top" } : undefined}
           />
         ))}
-        <Button
-          label={saved ? "Saved" : "Save profile"}
-          onPress={save}
-          loading={saving}
-          full
-        />
+        <Button label={saved ? "Saved" : "Save profile"} onPress={save} loading={saving} full />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -182,15 +175,11 @@ function MemoriesTab() {
   }, [title, content, reload]);
 
   const toggle = useCallback(async (m: OraMemory) => {
-    setMemories((prev) =>
-      prev.map((x) => (x.id === m.id ? { ...x, enabled: !x.enabled } : x)),
-    );
+    setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: !x.enabled } : x)));
     try {
       await updateMemory(m.id, { enabled: !m.enabled });
     } catch {
-      setMemories((prev) =>
-        prev.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)),
-      );
+      setMemories((prev) => prev.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)));
     }
   }, []);
 
@@ -235,12 +224,7 @@ function MemoriesTab() {
                 onPress={() => setAdding(false)}
                 style={{ flex: 1 }}
               />
-              <Button
-                label="Save"
-                onPress={add}
-                loading={saving}
-                style={{ flex: 1 }}
-              />
+              <Button label="Save" onPress={add} loading={saving} style={{ flex: 1 }} />
             </View>
           </Card>
         ) : (

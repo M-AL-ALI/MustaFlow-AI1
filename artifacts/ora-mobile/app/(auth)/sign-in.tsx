@@ -3,14 +3,7 @@ import * as AuthSession from "expo-auth-session";
 import { Link, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Logo } from "@/components/Logo";
@@ -74,9 +67,7 @@ export default function SignInScreen() {
   }, [startSSOFlow, router]);
 
   const fieldErr =
-    errors?.fields?.identifier?.message ||
-    errors?.fields?.password?.message ||
-    formError;
+    errors?.fields?.identifier?.message || errors?.fields?.password?.message || formError;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>

@@ -92,11 +92,7 @@ export function Button({
   );
 }
 
-export function TextField({
-  label,
-  style,
-  ...props
-}: TextInputProps & { label?: string }) {
+export function TextField({ label, style, ...props }: TextInputProps & { label?: string }) {
   const c = useColors();
   return (
     <View style={{ gap: 6 }}>
@@ -133,13 +129,7 @@ export function TextField({
   );
 }
 
-export function Card({
-  children,
-  style,
-}: {
-  children: React.ReactNode;
-  style?: ViewStyle;
-}) {
+export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
   const c = useColors();
   return (
     <View
@@ -186,9 +176,7 @@ export function Pill({
         borderColor: active ? c.primary : c.border,
       }}
     >
-      {Icon && (
-        <Icon size={14} color={active ? c.primaryForeground : c.mutedForeground} />
-      )}
+      {Icon && <Icon size={14} color={active ? c.primaryForeground : c.mutedForeground} />}
       <Text
         style={{
           color: active ? c.primaryForeground : c.foreground,

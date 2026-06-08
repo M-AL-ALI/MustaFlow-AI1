@@ -1,31 +1,10 @@
-import {
-  CheckCircle2,
-  GitBranch,
-  Lock,
-  Plus,
-  Sparkles,
-  TerminalSquare,
-} from "lucide-react-native";
+import { CheckCircle2, GitBranch, Lock, Plus, Sparkles, TerminalSquare } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
-import {
-  Button,
-  Card,
-  EmptyState,
-  Loading,
-  Pill,
-  TextField,
-} from "@/components/ui";
+import { Button, Card, EmptyState, Loading, Pill, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
   addRepository,
@@ -34,11 +13,7 @@ import {
   listRepositories,
   listTasks,
 } from "@/lib/api";
-import type {
-  OraxCapabilities,
-  OraxRepository,
-  OraxTask,
-} from "@/lib/types";
+import type { OraxCapabilities, OraxRepository, OraxTask } from "@/lib/types";
 
 type Tab = "repos" | "tasks" | "capabilities";
 
@@ -112,10 +87,7 @@ export default function OraxScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader
-        title="Orax"
-        subtitle="Connect repositories & run agentic tasks"
-      />
+      <ScreenHeader title="Orax" subtitle="Connect repositories & run agentic tasks" />
       <View
         style={{
           flexDirection: "row",
@@ -309,10 +281,7 @@ export default function OraxScreen() {
                         </View>
                       </View>
                       {t.prompt ? (
-                        <Text
-                          numberOfLines={3}
-                          style={{ color: c.mutedForeground, fontSize: 13 }}
-                        >
+                        <Text numberOfLines={3} style={{ color: c.mutedForeground, fontSize: 13 }}>
                           {t.prompt}
                         </Text>
                       ) : null}

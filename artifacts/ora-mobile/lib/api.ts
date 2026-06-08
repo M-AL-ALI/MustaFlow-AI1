@@ -78,13 +78,8 @@ async function parseError(res: Response): Promise<never> {
   throw new ApiRequestError(res.status, message, body);
 }
 
-async function jsonRequest<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const headers = await authHeaders(
-    init.body ? { "Content-Type": "application/json" } : undefined,
-  );
+async function jsonRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = await authHeaders(init.body ? { "Content-Type": "application/json" } : undefined);
   const res = await fetch(url(path), {
     ...init,
     headers: mergeHeaders(headers, init.headers),
@@ -184,19 +179,17 @@ export function analyzeDocument(
 }
 
 /** Transcribe raw audio bytes (Whisper). Returns recognized text. */
-export async function transcribeAudio(
-  uri: string,
-  format: string,
-  lang?: string,
-): Promise<string> {
+export async function transcribeAudio(uri: string, format: string, lang?: string): Promise<string> {
   const bytes = await (await fetch(uri)).arrayBuffer();
   const params = new URLSearchParams({ format });
   if (lang) params.set("lang", lang);
   const headers = await authHeaders({ "Content-Type": "application/octet-stream" });
-  const res = await fetch(
-    url(`/api/public-ai/transcribe?${params.toString()}`),
-    { method: "POST", body: bytes, headers, credentials: "include" },
-  );
+  const res = await fetch(url(`/api/public-ai/transcribe?${params.toString()}`), {
+    method: "POST",
+    body: bytes,
+    headers,
+    credentials: "include",
+  });
   if (!res.ok) await parseError(res);
   const data = (await res.json()) as { text: string };
   return data.text;
@@ -237,9 +230,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 // ---------------------------------------------------------------------------
 
 export async function getProfile(): Promise<OraProfile> {
-  const data = await jsonRequest<{ profile: OraProfile } | OraProfile>(
-    "/api/ora/profile",
-  );
+  const data = await jsonRequest<{ profile: OraProfile } | OraProfile>("/api/ora/profile");
   return (data as { profile?: OraProfile }).profile ?? (data as OraProfile);
 }
 
@@ -293,19 +284,14 @@ export function createConversation(
   });
 }
 
-export async function getConversation(
-  id: number,
-): Promise<OraConversationDetail> {
+export async function getConversation(id: number): Promise<OraConversationDetail> {
   const data = await jsonRequest<{ conversation: OraConversationDetail }>(
     `/api/ora/conversations/${id}`,
   );
   return data.conversation;
 }
 
-export function saveConversationMessages(
-  id: number,
-  messages: OraMessage[],
-): Promise<unknown> {
+export function saveConversationMessages(id: number, messages: OraMessage[]): Promise<unknown> {
   return jsonRequest(`/api/ora/conversations/${id}/messages`, {
     method: "PUT",
     body: JSON.stringify({ messages }),
@@ -329,9 +315,7 @@ export function getOraxCapabilities(): Promise<OraxCapabilities> {
 }
 
 export async function listRepositories(): Promise<OraxRepository[]> {
-  const data = await jsonRequest<{ repositories: OraxRepository[] }>(
-    "/api/orax/repositories",
-  );
+  const data = await jsonRequest<{ repositories: OraxRepository[] }>("/api/orax/repositories");
   return data.repositories ?? [];
 }
 
@@ -370,9 +354,7 @@ export function getPreferences(): Promise<UserPreferences> {
   return jsonRequest<UserPreferences>("/api/me/preferences");
 }
 
-export function updatePreferences(
-  patch: Partial<UserPreferences>,
-): Promise<UserPreferences> {
+export function updatePreferences(patch: Partial<UserPreferences>): Promise<UserPreferences> {
   return jsonRequest<UserPreferences>("/api/me/preferences", {
     method: "PATCH",
     body: JSON.stringify(patch),

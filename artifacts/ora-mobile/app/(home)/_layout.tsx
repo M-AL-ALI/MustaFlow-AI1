@@ -1,9 +1,6 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { setAuthTokenGetter } from "@workspace/api-client-react";
-import {
-  DrawerContentScrollView,
-  DrawerContentComponentProps,
-} from "@react-navigation/drawer";
+import { DrawerContentScrollView, DrawerContentComponentProps } from "@react-navigation/drawer";
 import { Redirect, useRouter } from "expo-router";
 import { Drawer } from "expo-router/drawer";
 import {
@@ -43,10 +40,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.sidebar }}>
-      <DrawerContentScrollView
-        {...props}
-        contentContainerStyle={{ paddingTop: insets.top + 8 }}
-      >
+      <DrawerContentScrollView {...props} contentContainerStyle={{ paddingTop: insets.top + 8 }}>
         <View style={{ paddingHorizontal: 16, paddingBottom: 18 }}>
           <Logo size={30} />
         </View>
@@ -69,10 +63,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
                   backgroundColor: active ? c.accent : "transparent",
                 }}
               >
-                <Icon
-                  size={20}
-                  color={active ? c.accentForeground : c.mutedForeground}
-                />
+                <Icon size={20} color={active ? c.accentForeground : c.mutedForeground} />
                 <Text
                   style={{
                     color: active ? c.foreground : c.mutedForeground,
@@ -108,10 +99,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
           >
             {user?.fullName || user?.username || "Signed in"}
           </Text>
-          <Text
-            numberOfLines={1}
-            style={{ color: c.mutedForeground, fontSize: 12 }}
-          >
+          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
             {user?.primaryEmailAddress?.emailAddress ?? ""}
           </Text>
         </View>

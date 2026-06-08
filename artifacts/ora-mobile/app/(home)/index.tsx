@@ -91,9 +91,7 @@ export default function OraChatScreen() {
   }, []);
 
   const scrollToEnd = useCallback(() => {
-    requestAnimationFrame(() =>
-      listRef.current?.scrollToEnd({ animated: true }),
-    );
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, []);
 
   const persist = useCallback(
@@ -101,9 +99,7 @@ export default function OraChatScreen() {
       try {
         let convId = conversationId;
         if (!convId) {
-          const title =
-            msgs.find((m) => m.role === "user")?.content.slice(0, 60) ||
-            "New chat";
+          const title = msgs.find((m) => m.role === "user")?.content.slice(0, 60) || "New chat";
           const created = await createConversation(title, null);
           convId = created.conversation.id;
           setConversationId(convId);
@@ -147,14 +143,11 @@ export default function OraChatScreen() {
         const prompt = text || "Please analyze this attachment.";
         let reply: string;
         if (currentAttachment.kind === "image") {
-          reply = (await analyzeImage(currentAttachment.ref, prompt, history))
-            .reply;
+          reply = (await analyzeImage(currentAttachment.ref, prompt, history)).reply;
         } else if (currentAttachment.kind === "dataset") {
-          reply = (await analyzeDataset(currentAttachment.ref, prompt, history))
-            .reply;
+          reply = (await analyzeDataset(currentAttachment.ref, prompt, history)).reply;
         } else {
-          reply = (await analyzeDocument(currentAttachment.ref, prompt, history))
-            .reply;
+          reply = (await analyzeDocument(currentAttachment.ref, prompt, history)).reply;
         }
         assistant = { id: pending.id, role: "assistant", content: reply };
       } else {
@@ -182,9 +175,7 @@ export default function OraChatScreen() {
               : undefined,
         };
         if (res.msgCount != null && res.msgLimit != null) {
-          setSession((s) =>
-            s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
-          );
+          setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
         }
       }
       const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));
@@ -192,13 +183,10 @@ export default function OraChatScreen() {
       scrollToEnd();
       void persist(finalMsgs);
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Something went wrong. Try again.";
+      const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === pending.id
-            ? { ...m, pending: false, error: true, content: msg }
-            : m,
+          m.id === pending.id ? { ...m, pending: false, error: true, content: msg } : m,
         ),
       );
     } finally {
@@ -297,9 +285,7 @@ export default function OraChatScreen() {
   );
 
   const usageText = session
-    ? `${session.msgCount}/${session.msgLimit} messages${
-        session.tier ? ` · ${session.tier}` : ""
-      }`
+    ? `${session.msgCount}/${session.msgLimit} messages${session.tier ? ` · ${session.tier}` : ""}`
     : "Loading…";
 
   return (
@@ -391,10 +377,7 @@ export default function OraChatScreen() {
               ) : (
                 <FileText size={14} color={c.accentForeground} />
               )}
-              <Text
-                numberOfLines={1}
-                style={{ color: c.foreground, fontSize: 13, maxWidth: 200 }}
-              >
+              <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, maxWidth: 200 }}>
                 {attachment.filename}
               </Text>
               <Pressable onPress={() => setAttachment(null)} hitSlop={8}>
@@ -452,9 +435,7 @@ export default function OraChatScreen() {
                 height: 44,
                 borderRadius: c.radius,
                 backgroundColor:
-                  sending || (!input.trim() && !attachment)
-                    ? c.secondary
-                    : c.primary,
+                  sending || (!input.trim() && !attachment) ? c.secondary : c.primary,
                 alignItems: "center",
                 justifyContent: "center",
               }}
@@ -464,11 +445,7 @@ export default function OraChatScreen() {
               ) : (
                 <ArrowUp
                   size={20}
-                  color={
-                    !input.trim() && !attachment
-                      ? c.mutedForeground
-                      : c.primaryForeground
-                  }
+                  color={!input.trim() && !attachment ? c.mutedForeground : c.primaryForeground}
                 />
               )}
             </Pressable>
@@ -540,9 +517,7 @@ function MessageBubble({ message }: { message: OraMessage }) {
         {message.pending ? (
           <ActivityIndicator size="small" color={c.mutedForeground} />
         ) : message.error ? (
-          <Text style={{ color: c.destructive, fontSize: 14 }}>
-            {message.content}
-          </Text>
+          <Text style={{ color: c.destructive, fontSize: 14 }}>{message.content}</Text>
         ) : (
           <>
             <Markdown>{message.content}</Markdown>
@@ -574,10 +549,7 @@ function MessageBubble({ message }: { message: OraMessage }) {
                 }}
               >
                 <FileText size={18} color={c.accentForeground} />
-                <Text
-                  numberOfLines={1}
-                  style={{ color: c.foreground, fontSize: 13, flex: 1 }}
-                >
+                <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
                   {message.file.fileName}
                 </Text>
               </View>
@@ -657,12 +629,7 @@ function ConversationsModal({
   const insets = useSafeAreaInsets();
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
         <Pressable style={{ flex: 1 }} onPress={onClose} />
         <View
@@ -724,14 +691,10 @@ function ConversationsModal({
                     paddingVertical: 12,
                     paddingHorizontal: 12,
                     borderRadius: c.radius,
-                    backgroundColor:
-                      conv.id === activeId ? c.accent : "transparent",
+                    backgroundColor: conv.id === activeId ? c.accent : "transparent",
                   }}
                 >
-                  <Pressable
-                    style={{ flex: 1 }}
-                    onPress={() => onSelect(conv.id)}
-                  >
+                  <Pressable style={{ flex: 1 }} onPress={() => onSelect(conv.id)}>
                     <Text
                       numberOfLines={1}
                       style={{

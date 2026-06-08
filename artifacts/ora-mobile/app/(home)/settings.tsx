@@ -1,12 +1,6 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useRouter } from "expo-router";
-import {
-  CreditCard,
-  LogOut,
-  Mic,
-  Moon,
-  User as UserIcon,
-} from "lucide-react-native";
+import { CreditCard, LogOut, Mic, Moon, User as UserIcon } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -121,9 +115,7 @@ export default function SettingsScreen() {
             }}
           >
             <Moon size={16} color={c.accentForeground} />
-            <Text style={{ color: c.foreground, fontSize: 14 }}>
-              Dark mode (always on)
-            </Text>
+            <Text style={{ color: c.foreground, fontSize: 14 }}>Dark mode (always on)</Text>
           </View>
         </SectionCard>
 
@@ -144,11 +136,7 @@ export default function SettingsScreen() {
           </View>
         </SectionCard>
 
-        <SectionCard
-          icon={CreditCard}
-          title="Plan"
-          description="Your current Ora subscription."
-        >
+        <SectionCard icon={CreditCard} title="Plan" description="Your current Ora subscription.">
           <View
             style={{
               flexDirection: "row",
@@ -171,9 +159,7 @@ export default function SettingsScreen() {
               {subscription?.tier ?? "Free"}
             </Text>
             {subscription?.status && (
-              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                {subscription.status}
-              </Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{subscription.status}</Text>
             )}
           </View>
         </SectionCard>

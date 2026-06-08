@@ -3,14 +3,7 @@ import * as AuthSession from "expo-auth-session";
 import { Link, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Logo } from "@/components/Logo";
@@ -82,8 +75,7 @@ export default function SignUpScreen() {
   if (signUp.status === "complete" || isSignedIn) return null;
 
   const awaitingCode =
-    signUp.status === "missing_requirements" &&
-    signUp.unverifiedFields?.includes("email_address");
+    signUp.status === "missing_requirements" && signUp.unverifiedFields?.includes("email_address");
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -136,11 +128,7 @@ export default function SignUpScreen() {
                 onChangeText={setCode}
                 placeholder="123456"
               />
-              {formError && (
-                <Text style={{ color: c.destructive, fontSize: 13 }}>
-                  {formError}
-                </Text>
-              )}
+              {formError && <Text style={{ color: c.destructive, fontSize: 13 }}>{formError}</Text>}
               <Button
                 label="Verify & continue"
                 onPress={handleVerify}
@@ -187,9 +175,7 @@ export default function SignUpScreen() {
                 full
               />
 
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
-              >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                 <View style={{ flex: 1, height: 1, backgroundColor: c.border }} />
                 <Text style={{ color: c.mutedForeground, fontSize: 13 }}>or</Text>
                 <View style={{ flex: 1, height: 1, backgroundColor: c.border }} />

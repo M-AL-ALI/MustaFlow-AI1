@@ -146,8 +146,8 @@ export default function HelpScreen() {
               maxWidth: 300,
             }}
           >
-            Ora is your AI companion for thinking, creating, and getting things
-            done. Here's what you can do.
+            Ora is your AI companion for thinking, creating, and getting things done. Here's what
+            you can do.
           </Text>
         </Card>
 

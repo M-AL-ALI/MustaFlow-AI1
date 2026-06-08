@@ -21,9 +21,7 @@ export default function LibraryScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const [assets, setAssets] = useState<OraAsset[]>([]);
-  const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(
-    null,
-  );
+  const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
@@ -75,8 +73,7 @@ export default function LibraryScreen() {
                   Storage
                 </Text>
                 <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  {formatBytes(storage.usedBytes)} of {formatBytes(storage.capBytes)}{" "}
-                  used
+                  {formatBytes(storage.usedBytes)} of {formatBytes(storage.capBytes)} used
                 </Text>
               </View>
             </Card>
@@ -90,10 +87,7 @@ export default function LibraryScreen() {
             />
           ) : (
             assets.map((a) => (
-              <Card
-                key={a.id}
-                style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
-              >
+              <Card key={a.id} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                 {a.kind === "image" ? (
                   <View
                     style={{

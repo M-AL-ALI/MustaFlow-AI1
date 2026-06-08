@@ -56,10 +56,7 @@ export function ScreenHeader({
           {title}
         </Text>
         {subtitle && (
-          <Text
-            numberOfLines={1}
-            style={{ color: c.mutedForeground, fontSize: 12 }}
-          >
+          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
             {subtitle}
           </Text>
         )}
