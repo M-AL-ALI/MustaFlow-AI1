@@ -81,6 +81,14 @@ export interface OraMessage {
   /** True when the candidate looks like PII/credentials — never auto-saved. */
   memorySaveCandidateSensitive?: boolean;
   memorySaved?: boolean;
+  /**
+   * Present on a document-analysis reply for signed-in users: lets the user
+   * opt in to persisting a concise summary of the analyzed file into Ora's
+   * memory. Carries only the ephemeral file ref + display name — never bytes.
+   */
+  documentMemory?: { fileRef: string; filename: string };
+  /** True once the document summary has been saved to memory. */
+  documentMemorySaved?: boolean;
   sources?: OraSource[];
   /** Real images found on the web, rendered inline as a gallery. */
   images?: OraImage[];
@@ -164,6 +172,7 @@ export interface UseOraChatReturn {
   sessionExpired: boolean;
   dismissSessionExpired: () => void;
   markMemorySaved: (candidate: string, content: string) => void;
+  markDocumentMemorySaved: (fileRef: string) => void;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -417,6 +426,8 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;
   memorySaved?: boolean;
+  documentMemory?: { fileRef: string; filename: string };
+  documentMemorySaved?: boolean;
   sources?: OraSource[];
   images?: OraImage[];
   videos?: OraVideo[];
@@ -446,6 +457,10 @@ function serializeForStorage(messages: OraMessage[]): Array<{
       : {}),
     ...(m.memorySaveCandidateSensitive ? { memorySaveCandidateSensitive: true } : {}),
     ...(m.memorySaved ? { memorySaved: true } : {}),
+    // Persist the document-memory affordance + saved state so the "Remember
+    // this document" chip survives reload. Only the file ref + name — no bytes.
+    ...(m.documentMemory ? { documentMemory: m.documentMemory } : {}),
+    ...(m.documentMemorySaved ? { documentMemorySaved: true } : {}),
     // Persist cited web-search sources so the source cards survive reload
     ...(m.sources && m.sources.length > 0 ? { sources: m.sources } : {}),
     // Persist web-found media so the gallery + video cards survive reload
@@ -1108,6 +1123,18 @@ export function useOraChat(): UseOraChatReturn {
                   content: data.reply,
                   handoffCta: data.handoffCta,
                   messageKind: "document-analysis" as const,
+                  // Offer to persist a concise summary of this document to Ora's
+                  // memory (opt-in). Only for signed-in users — anonymous
+                  // visitors have no memory to save to. Carries only the
+                  // ephemeral file ref + display name, never the bytes.
+                  ...(isSignedIn && currentAttachment.fileRef
+                    ? {
+                        documentMemory: {
+                          fileRef: currentAttachment.fileRef,
+                          filename: currentAttachment.filename,
+                        },
+                      }
+                    : {}),
                 },
               ];
               storeTranscript(next);
@@ -1689,6 +1716,28 @@ export function useOraChat(): UseOraChatReturn {
     [isSignedIn, saveToServer],
   );
 
+  // Mark a document-analysis message's memory as saved: flips documentMemorySaved
+  // on and persists the transcript so the "saved" state survives reload. Matched
+  // by fileRef identity so a transcript edit/rebase can't target the wrong row.
+  const markDocumentMemorySaved = useCallback(
+    (fileRef: string) => {
+      setMessages((prev) => {
+        const matchIdx = prev.findIndex(
+          (m) =>
+            m.role === "assistant" &&
+            !m.documentMemorySaved &&
+            m.documentMemory?.fileRef === fileRef,
+        );
+        if (matchIdx === -1) return prev;
+        const next = prev.map((m, i) => (i === matchIdx ? { ...m, documentMemorySaved: true } : m));
+        storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
+        return next;
+      });
+    },
+    [isSignedIn, saveToServer],
+  );
+
   const oraStatus = deriveOraStatus(
     isLoading,
     uploadState,
@@ -1722,5 +1771,6 @@ export function useOraChat(): UseOraChatReturn {
     sessionExpired,
     dismissSessionExpired: () => setSessionExpired(false),
     markMemorySaved,
+    markDocumentMemorySaved,
   };
 }

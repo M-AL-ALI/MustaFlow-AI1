@@ -36,6 +36,7 @@ import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { OraMemorySaveChip } from "@/components/ora/ora-memory-save-chip";
 import { OraMemoriesUsedChip } from "@/components/ora/ora-memories-used-chip";
+import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip";
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
 import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
@@ -245,6 +246,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     sessionExpired,
     dismissSessionExpired,
     markMemorySaved,
+    markDocumentMemorySaved,
   } = chat;
 
   const { isSignedIn } = useUser();
@@ -1283,6 +1285,31 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         onOpenMemoryCenter={() => setMemoryManagerOpen(true)}
                       />
                     )}
+
+                  {msg.role === "assistant" &&
+                    isSignedIn &&
+                    msg.documentMemory &&
+                    (() => {
+                      const dm = msg.documentMemory;
+                      return (
+                        <OraDocumentMemoryChip
+                          fileRef={dm.fileRef}
+                          filename={dm.filename}
+                          saved={Boolean(msg.documentMemorySaved)}
+                          onSaved={() => {
+                            markDocumentMemorySaved(dm.fileRef);
+                            void queryClient.invalidateQueries({
+                              queryKey: getListKnowledgeQueryKey({
+                                scope: "user",
+                                archived: false,
+                                limit: 100,
+                              }),
+                            });
+                            toast({ title: "Document saved to memory" });
+                          }}
+                        />
+                      );
+                    })()}
 
                   {msg.editedFrom && (
                     <p className="text-[10px] text-muted-foreground/50 mt-0.5 text-right pr-1">

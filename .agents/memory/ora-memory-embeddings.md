@@ -27,3 +27,11 @@ in-scope way to make semantic recall actually fire over time.
 **How to apply:** if you ever need semantic search over Ora memories to work
 immediately (not eventually), either embed at save time in `ora-memories.ts` or
 trigger a batch backfill — don't assume the `embedding` column is populated.
+
+**Category is display-only for recall.** `buildMemoryContext` filters on
+`origin="ora"` + `scope="user"` + enabled + not-archived, but NOT on
+`category`. So any new memory category (e.g. document summaries saved with
+`category="document"`) automatically flows through recall with zero recall-path
+changes — `category` is purely a discriminator for the Memory Center UI. To make
+a new memory kind recallable, just insert it with the right origin/scope; to
+show it distinctly, branch on `category` in the Memory Center only.

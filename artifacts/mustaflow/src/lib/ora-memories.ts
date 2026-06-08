@@ -75,3 +75,35 @@ export async function clearOraConversations(): Promise<void> {
   const res = await authFetch(`${BASE}/api/ora/conversations`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to clear conversations (${res.status})`);
 }
+
+export interface RememberDocumentResult {
+  saved: boolean;
+  /** When true the summary looked sensitive — re-call with confirmSensitive. */
+  requiresConfirmation?: boolean;
+  sensitive?: boolean;
+  /** The concise summary that was (or would be) saved. */
+  summary?: string;
+}
+
+/**
+ * Persist a concise summary of an analyzed document into Ora's memory (opt-in,
+ * Task #1372). The backend summarizes the still-cached file by its ref — the
+ * raw bytes are never stored. A summary flagged sensitive is NOT saved until the
+ * caller re-invokes with confirmSensitive=true.
+ */
+export async function rememberDocument(
+  fileRef: string,
+  confirmSensitive = false,
+): Promise<RememberDocumentResult> {
+  const res = await fetch(`${BASE}/api/public-ai/remember-document`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileRef, ...(confirmSensitive ? { confirmSensitive: true } : {}) }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? `Failed to save document to memory (${res.status})`);
+  }
+  return (await res.json()) as RememberDocumentResult;
+}

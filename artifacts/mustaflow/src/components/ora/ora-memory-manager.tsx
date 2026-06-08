@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Brain, Check, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { Brain, Check, FileText, Loader2, Pencil, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListKnowledge,
@@ -225,7 +225,17 @@ export function OraMemoryManager({
                     className="flex items-start justify-between gap-2 rounded-lg border border-border/60 px-3 py-2"
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{m.title}</p>
+                      <p className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                        {m.category === "document" && (
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                        )}
+                        <span className="truncate">{m.title}</span>
+                      </p>
+                      {m.category === "document" && (
+                        <span className="mt-0.5 inline-block rounded bg-[hsl(265_85%_65%/0.12)] px-1.5 py-0.5 text-[10px] font-medium text-[hsl(265_85%_65%)]">
+                          From document
+                        </span>
+                      )}
                       <p className="text-xs text-muted-foreground break-words mt-0.5">
                         {m.content}
                       </p>
