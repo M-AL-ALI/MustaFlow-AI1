@@ -6,6 +6,7 @@ export const userPreferencesTable = pgTable("user_preferences", {
   dismissedOnboarding: boolean("dismissed_onboarding").notNull().default(false),
   preferredMode: text("preferred_mode").$type<"builder" | "developer" | "ora">(),
   voiceLang: text("voice_lang"),
+  autoReadReplies: boolean("auto_read_replies").notNull().default(false),
   // GDPR erasure lifecycle — set when DELETE /api/me is called.
   // erasureJobId: pg-boss job ID for the scheduled hard-erasure. Allows cancellation within 30 days.
   // erasureRequestedAt: when the erasure was initiated (for display in the UI).

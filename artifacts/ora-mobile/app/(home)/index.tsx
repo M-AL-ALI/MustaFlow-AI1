@@ -14,6 +14,7 @@ import {
   type AudioRecorder,
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
+import { useFocusEffect } from "expo-router";
 import {
   ArrowUp,
   Copy,
@@ -111,6 +112,7 @@ export default function OraChatScreen() {
   const [loadingConversations, setLoadingConversations] = useState(false);
 
   const [voiceLang, setVoiceLang] = useState("en");
+  const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -120,14 +122,30 @@ export default function OraChatScreen() {
   });
   const playerRef = useRef<AudioPlayer | null>(null);
 
+  const loadPreferences = useCallback(() => {
+    getPreferences()
+      .then((p) => {
+        if (p.voiceLang) setVoiceLang(p.voiceLang);
+        setAutoReadReplies(!!p.autoReadReplies);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     getOraSession()
       .then(setSession)
       .catch(() => setSession(null));
-    getPreferences()
-      .then((p) => p.voiceLang && setVoiceLang(p.voiceLang))
-      .catch(() => {});
-  }, []);
+    loadPreferences();
+  }, [loadPreferences]);
+
+  // Re-read preferences whenever the chat screen regains focus so changes made
+  // in Settings (e.g. "Read replies aloud", voice language) apply immediately
+  // without an app restart — drawer screens stay mounted between navigations.
+  useFocusEffect(
+    useCallback(() => {
+      loadPreferences();
+    }, [loadPreferences]),
+  );
 
   useEffect(() => {
     return () => {
@@ -231,6 +249,9 @@ export default function OraChatScreen() {
       setMessages(finalMsgs);
       scrollToEnd();
       void persist(finalMsgs);
+      if (autoReadRef.current && assistant.content.trim()) {
+        void speakRef.current(assistant);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
       setMessages((prev) =>
@@ -321,6 +342,11 @@ export default function OraChatScreen() {
     },
     [speakingId, voiceLang],
   );
+
+  const speakRef = useRef(speak);
+  speakRef.current = speak;
+  const autoReadRef = useRef(autoReadReplies);
+  autoReadRef.current = autoReadReplies;
 
   const handleAttach = useCallback(async () => {
     try {

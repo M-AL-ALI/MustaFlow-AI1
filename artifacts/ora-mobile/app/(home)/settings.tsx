@@ -1,8 +1,8 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useRouter } from "expo-router";
-import { CreditCard, LogOut, Mic, Moon, User as UserIcon } from "lucide-react-native";
+import { CreditCard, LogOut, Mic, Moon, User as UserIcon, Volume2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -68,11 +68,15 @@ export default function SettingsScreen() {
   const { user } = useUser();
 
   const [voiceLang, setVoiceLangState] = useState("en");
+  const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
 
   useEffect(() => {
     getPreferences()
-      .then((p) => p.voiceLang && setVoiceLangState(p.voiceLang))
+      .then((p) => {
+        if (p.voiceLang) setVoiceLangState(p.voiceLang);
+        setAutoReadReplies(!!p.autoReadReplies);
+      })
       .catch(() => {});
     getSubscription()
       .then(setSubscription)
@@ -85,6 +89,15 @@ export default function SettingsScreen() {
       await updatePreferences({ voiceLang: code });
     } catch {
       /* ignore */
+    }
+  }, []);
+
+  const toggleAutoRead = useCallback(async (value: boolean) => {
+    setAutoReadReplies(value);
+    try {
+      await updatePreferences({ autoReadReplies: value });
+    } catch {
+      setAutoReadReplies(!value);
     }
   }, []);
 
@@ -133,6 +146,35 @@ export default function SettingsScreen() {
                 onPress={() => changeVoiceLang(l.code)}
               />
             ))}
+          </View>
+        </SectionCard>
+
+        <SectionCard
+          icon={Volume2}
+          title="Read replies aloud"
+          description="Ora speaks each new reply automatically in your voice-input language."
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: c.foreground, fontSize: 14, flex: 1 }}>
+              Auto-play spoken replies
+            </Text>
+            <Switch
+              value={autoReadReplies}
+              onValueChange={toggleAutoRead}
+              trackColor={{ false: c.border, true: c.primary }}
+              thumbColor={c.primaryForeground}
+            />
           </View>
         </SectionCard>
 

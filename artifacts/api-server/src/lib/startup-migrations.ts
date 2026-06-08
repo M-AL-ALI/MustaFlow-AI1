@@ -2259,6 +2259,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
     },
   },
 
+  // ── migrate-auto-read-replies ────────────────────────────────────────────────
+  {
+    name: "migrate-auto-read-replies",
+    async run(client) {
+      await client.query(
+        `ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS auto_read_replies BOOLEAN NOT NULL DEFAULT false`,
+      );
+    },
+  },
+
   // ── migrate-reinforced-count (Task #980) ─────────────────────────────────────
   {
     name: "migrate-reinforced-count",

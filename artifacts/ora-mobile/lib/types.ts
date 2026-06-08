@@ -199,6 +199,7 @@ export interface UserPreferences {
   dismissedOnboarding?: boolean;
   preferredMode?: "builder" | "developer" | "ora";
   voiceLang?: string;
+  autoReadReplies?: boolean;
 }
 
 export interface BillingSubscription {

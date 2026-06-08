@@ -84,6 +84,7 @@
     "migrate-provisioning-steps": "tsx ./src/migrate-provisioning-steps.ts",
     "migrate-gdpr-erasure-job": "tsx ./src/migrate-gdpr-erasure-job.ts",
     "migrate-voice-lang": "tsx ./src/migrate-voice-lang.ts",
+    "migrate-auto-read-replies": "tsx ./src/migrate-auto-read-replies.ts",
     "migrate-drop-conversations": "tsx ./src/migrate-drop-conversations.ts",
     "migrate-drop-ora-daily-usage": "tsx ./src/migrate-drop-ora-daily-usage.ts",
     "migrate-command-approval": "tsx ./src/migrate-command-approval.ts",
