@@ -294,7 +294,7 @@ export interface MemoryContextResult {
  * user-scope style memories / brand profiles (origin="builder") — into Ora's
  * context, which would leak Builder engineering knowledge into Ora.
  */
-async function buildMemoryContext(
+export async function buildMemoryContext(
   userId: string,
   oraProjectId?: number | null,
   currentMessage?: string,
