@@ -569,7 +569,7 @@ function MemoriesTab() {
     if (!title || saving) return;
     setSaving(true);
     try {
-      const created = await createOraMemory({
+      const { memory: created } = await createOraMemory({
         title,
         content: newContent.trim(),
         category: newCategory,

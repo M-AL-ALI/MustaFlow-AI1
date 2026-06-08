@@ -17,20 +17,24 @@ function deriveTitle(fact: string): string {
  * Persist a durable fact to the signed-in user's Ora memory. Pass `oraProjectId`
  * to anchor it to a specific Ora project (persists across that project's
  * conversations); omit it for a user-level memory. Throws on any non-2xx
- * response so callers can surface an error and avoid marking the candidate saved.
+ * response so callers can surface an error and avoid marking the candidate
+ * saved. Returns the titles of any earlier memories this save replaced (a
+ * contradicting update like "dark mode" → "light mode") so the chat can tell
+ * the user exactly what changed.
  */
 export async function saveOraMemory(
   fact: string,
   oraProjectId?: number | null,
-): Promise<void> {
+): Promise<string[]> {
   const content = fact.trim();
   if (!content) throw new Error("Cannot save an empty memory");
 
   // The Ora endpoint stores title + content; derive a short title from the fact
   // and keep the full fact as the content so nothing is lost.
-  await createOraMemory({
+  const { superseded } = await createOraMemory({
     title: deriveTitle(content),
     content,
     ...(typeof oraProjectId === "number" ? { oraProjectId } : {}),
   });
+  return superseded.map((s) => s.title);
 }

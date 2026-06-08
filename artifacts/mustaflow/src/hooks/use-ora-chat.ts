@@ -89,6 +89,11 @@ export interface OraMessage {
   documentMemory?: { fileRef: string; filename: string };
   /** True once the document summary has been saved to memory. */
   documentMemorySaved?: boolean;
+  /**
+   * Titles of earlier memories this save replaced (a contradicting update like
+   * "dark mode" → "light mode"). Drives the inline "Updated your memory" note.
+   */
+  memorySupersededTitles?: string[];
   sources?: OraSource[];
   /** Real images found on the web, rendered inline as a gallery. */
   images?: OraImage[];
@@ -171,7 +176,7 @@ export interface UseOraChatReturn {
   clearConversation: () => Promise<void>;
   sessionExpired: boolean;
   dismissSessionExpired: () => void;
-  markMemorySaved: (candidate: string, content: string) => void;
+  markMemorySaved: (candidate: string, content: string, supersededTitles?: string[]) => void;
   markDocumentMemorySaved: (fileRef: string) => void;
 }
 
@@ -428,6 +433,7 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   memorySaved?: boolean;
   documentMemory?: { fileRef: string; filename: string };
   documentMemorySaved?: boolean;
+  memorySupersededTitles?: string[];
   sources?: OraSource[];
   images?: OraImage[];
   videos?: OraVideo[];
@@ -461,6 +467,9 @@ function serializeForStorage(messages: OraMessage[]): Array<{
     // this document" chip survives reload. Only the file ref + name — no bytes.
     ...(m.documentMemory ? { documentMemory: m.documentMemory } : {}),
     ...(m.documentMemorySaved ? { documentMemorySaved: true } : {}),
+    ...(m.memorySupersededTitles && m.memorySupersededTitles.length > 0
+      ? { memorySupersededTitles: m.memorySupersededTitles }
+      : {}),
     // Persist cited web-search sources so the source cards survive reload
     ...(m.sources && m.sources.length > 0 ? { sources: m.sources } : {}),
     // Persist web-found media so the gallery + video cards survive reload
@@ -1705,7 +1714,7 @@ export function useOraChat(): UseOraChatReturn {
   // candidate so the inline save chip collapses to a confirmation, and persists
   // the transcript so the saved state survives reload.
   const markMemorySaved = useCallback(
-    (candidate: string, content: string) => {
+    (candidate: string, content: string, supersededTitles: string[] = []) => {
       setMessages((prev) => {
         // Match by content identity, not array index: the transcript can be
         // truncated/rebased (edit flow) between scheduling a save and it
@@ -1720,7 +1729,16 @@ export function useOraChat(): UseOraChatReturn {
         );
         if (matchIdx === -1) return prev;
         const next = prev.map((m, i) =>
-          i === matchIdx ? { ...m, memorySaved: true, memorySaveCandidate: undefined } : m,
+          i === matchIdx
+            ? {
+                ...m,
+                memorySaved: true,
+                memorySaveCandidate: undefined,
+                ...(supersededTitles.length > 0
+                  ? { memorySupersededTitles: supersededTitles }
+                  : {}),
+              }
+            : m,
         );
         storeTranscript(next);
         if (isSignedIn) saveToServer(next);

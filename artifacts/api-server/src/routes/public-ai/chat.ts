@@ -353,6 +353,7 @@ export async function buildMemoryContext(
             id: knowledgeEntriesTable.id,
             title: knowledgeEntriesTable.title,
             content: knowledgeEntriesTable.content,
+            category: knowledgeEntriesTable.category,
             embedding: knowledgeEntriesTable.embedding,
             createdAt: knowledgeEntriesTable.createdAt,
           })

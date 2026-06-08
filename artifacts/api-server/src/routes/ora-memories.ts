@@ -171,7 +171,7 @@ router.post("/ora/memories", async (req, res) => {
     // a failure here never fails the save. Scoped to the same memory tier
     // (project vs user-level) so a project memory never supersedes a user-level
     // fact (or one in a different project), and vice versa.
-    const supersededIds = await consolidateOverlappingMemories(
+    const superseded = await consolidateOverlappingMemories(
       userId,
       row.id,
       title,
@@ -179,7 +179,13 @@ router.post("/ora/memories", async (req, res) => {
       oraProjectId,
     );
 
-    res.status(201).json({ memory: normalizeCategory(row), supersededIds });
+    // `supersededIds` kept for backward compatibility; `superseded` carries the
+    // titles so the Ora chat can name exactly what was replaced inline.
+    res.status(201).json({
+      memory: normalizeCategory(row),
+      supersededIds: superseded.map((s) => s.id),
+      superseded,
+    });
   } catch (err) {
     logger.error({ component: "ora-memories", err }, "Failed to create memory");
     res.status(500).json({ error: "Failed to create memory" });
@@ -188,7 +194,8 @@ router.post("/ora/memories", async (req, res) => {
 
 /**
  * Find the user's existing ACTIVE Ora memories that the just-saved memory
- * (`newId`) supersedes, and disable + tag them. Returns the superseded ids.
+ * (`newId`) supersedes, and disable + tag them. Returns the superseded entries
+ * (id + title) so the caller can tell the user exactly what was replaced.
  * Conservative: only high-overlap matches are touched (see memory-consolidation
  * for the rule). Never throws — consolidation is best-effort.
  */
@@ -198,7 +205,7 @@ async function consolidateOverlappingMemories(
   title: string,
   content: string,
   oraProjectId: number | null,
-): Promise<number[]> {
+): Promise<Array<{ id: number; title: string }>> {
   try {
     // Only compare against active rows in the SAME tier: enabled, not archived,
     // not already superseded, matching project vs user-level scope, and
@@ -233,7 +240,10 @@ async function consolidateOverlappingMemories(
       .set({ supersededBy: newId, enabled: false })
       .where(and(inArray(knowledgeEntriesTable.id, toSupersede), baseScope(userId)));
 
-    return toSupersede;
+    const toSupersedeSet = new Set(toSupersede);
+    return candidates
+      .filter((c) => toSupersedeSet.has(c.id))
+      .map((c) => ({ id: c.id, title: c.title }));
   } catch (err) {
     logger.warn(
       { component: "ora-memories", err, newId },

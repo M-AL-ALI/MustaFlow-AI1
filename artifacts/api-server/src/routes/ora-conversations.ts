@@ -88,6 +88,9 @@ const messageSchema = z.object({
   memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
   memorySaveCandidateSensitive: z.boolean().optional(),
   memorySaved: z.boolean().optional(),
+  // Titles of earlier memories this save replaced — persisted so the inline
+  // "Updated your memory" note survives reload.
+  memorySupersededTitles: z.array(z.string().max(200)).max(20).optional(),
   // Saved Ora memories that shaped this reply (Ora-scoped only) — persisted so
   // the "based on your saved memories" indicator survives reload.
   memoriesUsed: z

@@ -312,8 +312,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     null;
   const handleSaveMemory = useCallback(
     async (fact: string, content: string) => {
-      await saveOraMemory(fact, saveOraProjectId);
-      markMemorySaved(fact, content);
+      const supersededTitles = await saveOraMemory(fact, saveOraProjectId);
+      markMemorySaved(fact, content, supersededTitles);
       void queryClient.invalidateQueries({
         queryKey: getListKnowledgeQueryKey({ scope: "user", archived: false, limit: 100 }),
       });
@@ -1280,6 +1280,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         fact={msg.memorySaveCandidate ?? ""}
                         saved={Boolean(msg.memorySaved)}
                         sensitive={Boolean(msg.memorySaveCandidateSensitive)}
+                        supersededTitles={msg.memorySupersededTitles}
                         onSave={() => handleSaveMemory(msg.memorySaveCandidate ?? "", msg.content)}
                         onOpenMemoryCenter={() => setMemoryManagerOpen(true)}
                       />

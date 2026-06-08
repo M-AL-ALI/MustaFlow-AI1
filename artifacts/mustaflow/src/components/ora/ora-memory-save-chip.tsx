@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowUpRight, Brain, Check, Loader2, ShieldAlert } from "lucide-react";
+import { ArrowUpRight, Brain, Check, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,6 +14,7 @@ export function OraMemorySaveChip({
   fact,
   saved,
   sensitive = false,
+  supersededTitles,
   onSave,
   onOpenMemoryCenter,
 }: {
@@ -21,6 +22,12 @@ export function OraMemorySaveChip({
   saved: boolean;
   /** When true, the fact looks like PII/credentials — warn and never auto-save. */
   sensitive?: boolean;
+  /**
+   * Titles of earlier memories this save replaced (a contradicting update like
+   * "dark mode" → "light mode"). When present, the saved confirmation names what
+   * changed so the behavior is transparent.
+   */
+  supersededTitles?: string[];
   onSave: () => Promise<void>;
   /** Opens the Memory Center so the user can see the saved entry. */
   onOpenMemoryCenter?: () => void;
@@ -28,6 +35,33 @@ export function OraMemorySaveChip({
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
 
   if (saved) {
+    const replaced = supersededTitles?.filter((t) => t.trim().length > 0) ?? [];
+    if (replaced.length > 0) {
+      const replacedLabel =
+        replaced.length === 1
+          ? `“${replaced[0]}”`
+          : `${replaced.length} earlier memories`;
+      return (
+        <div className="mt-2 flex items-start gap-1.5 rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.05)] px-3 py-2 text-[11px] text-muted-foreground">
+          <RefreshCw className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <span className="text-foreground/85">
+              Updated your memory — I&apos;ll remember this instead of {replacedLabel}.
+            </span>{" "}
+            {onOpenMemoryCenter && (
+              <button
+                type="button"
+                onClick={onOpenMemoryCenter}
+                className="inline-flex items-center gap-0.5 font-medium text-[hsl(265_85%_65%)] hover:underline align-baseline"
+              >
+                Review or undo
+                <ArrowUpRight className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <Check className="h-3.5 w-3.5 text-emerald-500" />

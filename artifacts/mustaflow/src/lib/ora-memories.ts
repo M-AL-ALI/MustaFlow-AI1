@@ -58,20 +58,32 @@ export async function fetchOraMemories(oraProjectId?: number | null): Promise<Or
   return data.memories;
 }
 
+/** A pre-existing memory that a newly-saved one replaced (contradicting update). */
+export interface SupersededMemory {
+  id: number;
+  title: string;
+}
+
+export interface CreateOraMemoryResult {
+  memory: OraMemory;
+  /** Earlier memories this save superseded (empty when nothing was replaced). */
+  superseded: SupersededMemory[];
+}
+
 export async function createOraMemory(patch: {
   title: string;
   content?: string;
   category?: OraMemoryCategory;
   oraProjectId?: number | null;
-}): Promise<OraMemory> {
+}): Promise<CreateOraMemoryResult> {
   const res = await authFetch(`${BASE}/api/ora/memories`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`Failed to create memory (${res.status})`);
-  const data = (await res.json()) as { memory: OraMemory };
-  return data.memory;
+  const data = (await res.json()) as { memory: OraMemory; superseded?: SupersededMemory[] };
+  return { memory: data.memory, superseded: data.superseded ?? [] };
 }
 
 export async function updateOraMemory(
