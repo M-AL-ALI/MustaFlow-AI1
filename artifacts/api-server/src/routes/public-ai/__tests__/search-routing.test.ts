@@ -42,11 +42,28 @@ describe("isWebSearchRequest", () => {
     expect(isWebSearchRequest("what's the weather in Paris tomorrow")).toBe(true);
   });
 
+  it("matches website / homepage / URL lookups for a brand or company", () => {
+    expect(isWebSearchRequest("find perdue's website and logo")).toBe(true);
+    expect(isWebSearchRequest("find perdue website")).toBe(true);
+    expect(isWebSearchRequest("search on the market and find the perdue website")).toBe(true);
+    expect(isWebSearchRequest("look up the official site for Tesla")).toBe(true);
+    expect(isWebSearchRequest("what's the homepage of OpenAI")).toBe(true);
+    expect(isWebSearchRequest("get me the url for the New York Times")).toBe(true);
+  });
+
   it("does NOT hijack ordinary product / how-to questions", () => {
     expect(isWebSearchRequest("how do I build a todo app with MustaFlow?")).toBe(false);
     expect(isWebSearchRequest("explain how closures work in JavaScript")).toBe(false);
     expect(isWebSearchRequest("write me a poem about the ocean")).toBe(false);
     expect(isWebSearchRequest("what can I build here")).toBe(false);
+    // Website-related but NOT a lookup — must stay conversational.
+    expect(isWebSearchRequest("what is a good website builder")).toBe(false);
+    expect(isWebSearchRequest("how do I add a search bar to my app")).toBe(false);
+    expect(isWebSearchRequest("build me a website for my bakery")).toBe(false);
+    // Internal "look up / search" over the user's own data — NOT a web search.
+    expect(isWebSearchRequest("look up this value in my uploaded file")).toBe(false);
+    expect(isWebSearchRequest("search for duplicates in this CSV")).toBe(false);
+    expect(isWebSearchRequest("look up this function in the docs I pasted")).toBe(false);
   });
 });
 

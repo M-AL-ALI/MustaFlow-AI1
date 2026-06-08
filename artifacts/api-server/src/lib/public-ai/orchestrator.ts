@@ -169,9 +169,10 @@ export function isImageGenerationRequest(message: string): boolean {
  * hijacked into search.
  */
 export const ORA_SEARCH_PATTERNS: RegExp[] = [
-  // Explicit "search/look up/google the web/online/internet"
+  // Explicit "search/look up/google the web/online/internet". Web context is
+  // required so internal-data ops ("search for duplicates in this CSV") are not
+  // hijacked into a live web search.
   /\b(search|look\s+up|google|browse|check)\s+(?:(?:on|the)\s+)?(?:web|online|internet|google)\b/i,
-  /\bsearch\s+(?:for|the\s+web)\b/i,
   // "latest/current/recent/newest <thing>" where it implies fresh data
   /\b(latest|current|recent|newest|up[-\s]?to[-\s]?date|most\s+recent)\b.*\b(news|version|release|releases?|price|prices?|update|updates?|score|scores?|results?|stats?|standings?|data|figures?|rates?|headlines?)\b/i,
   /\bwhat(?:'?s| is| are)\s+(?:the\s+)?(?:latest|current|newest|most\s+recent)\b/i,
@@ -185,6 +186,23 @@ export const ORA_SEARCH_PATTERNS: RegExp[] = [
   // Sports / events outcomes
   /\bwho\s+won\b/i,
   /\bas\s+of\s+(?:today|now|this\s+(?:week|month|year))\b/i,
+  // ── External website / homepage / URL lookups ──
+  // Ora can find a brand/company/product/person's site via live search, so a
+  // request to fetch or look up a website should run a search (not be refused).
+  // Retrieval verbs are required so "what is a good website builder" is NOT
+  // hijacked into a search.
+  /\b(find|get|show|fetch|locate|look\s*up|search\s+for|search\s+up)\b[^.?!]{0,40}\b(?:official\s+)?(?:web\s?site|home\s?page|web\s+page|url|web\s+address|official\s+site|landing\s+page)\b/i,
+  // "what/which/where is the website/homepage/url of|for X" — question-word
+  // guarded so build requests like "build me a website for my bakery" do NOT
+  // match (no question word) and "what is a good website builder" does NOT match
+  // (the noun is not followed by of|for|is|to).
+  /\b(?:what|which|where)\b[^.?!]{0,30}\b(?:official\s+)?(?:web\s?site|home\s?page|web\s+page|url|web\s+address|official\s+site)\s+(?:of|for|is|to)\b/i,
+  /\b[\w][\w .'&-]*'s\s+(?:official\s+)?(?:web\s?site|home\s?page|url|official\s+site)\b/i,
+  // "search the web/internet/online/google/market" (incl. "search on market").
+  // Web context is required so "search for duplicates in this CSV" or "look up
+  // this value in my file" do NOT get hijacked into a live web search.
+  /\bsearch\s+(?:the\s+|on\s+)?(?:web|internet|online|google|market)\b/i,
+  /\b(find|search|look\s*up|locate|browse)\b[^.?!]{0,40}\b(online|on\s+the\s+(?:web|internet)|on\s+google)\b/i,
 ];
 
 export function isWebSearchRequest(message: string): boolean {
