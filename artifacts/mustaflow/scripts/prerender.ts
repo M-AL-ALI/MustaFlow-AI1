@@ -696,9 +696,7 @@ function prerender(): void {
     indexHtml = readFileSync(indexHtmlPath, "utf-8");
     console.log("[prerender] Using index.html as template (full authenticated app entry).");
   } catch {
-    console.error(
-      `[prerender] dist/public/index.html not found — run vite build first`,
-    );
+    console.error(`[prerender] dist/public/index.html not found — run vite build first`);
     process.exit(1);
   }
 
