@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import {
   db,
   knowledgeEntriesTable,
@@ -160,6 +160,11 @@ router.get("/knowledge", async (req, res): Promise<void> => {
   }
 
   const conditions: SQL[] = [projectCondition];
+  // ISOLATION: the Builder Knowledge Vault UI must never surface Ora memories.
+  // Exclude origin="ora" (NULL origin is legacy/pre-backfill, treated as Builder).
+  conditions.push(
+    or(isNull(knowledgeEntriesTable.origin), ne(knowledgeEntriesTable.origin, "ora")) as SQL,
+  );
   if (!includeArchived) conditions.push(isNull(knowledgeEntriesTable.archivedAt) as SQL);
   if (typeFilter) conditions.push(eq(knowledgeEntriesTable.type, typeFilter) as SQL);
   if (severityFilter) conditions.push(eq(knowledgeEntriesTable.severity, severityFilter) as SQL);

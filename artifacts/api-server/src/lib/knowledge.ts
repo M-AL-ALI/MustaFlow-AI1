@@ -106,6 +106,10 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
                   eq(knowledgeEntriesTable.type, opts.type),
                   eq(knowledgeEntriesTable.approvedForReuse, false),
                   ne(knowledgeEntriesTable.scope, "global"),
+                  // ISOLATION: writeKnowledge only ever produces Builder entries,
+                  // so a near-duplicate may only merge into another Builder row —
+                  // never into an Ora memory. (NULL origin is legacy Builder data.)
+                  or(isNull(knowledgeEntriesTable.origin), ne(knowledgeEntriesTable.origin, "ora")),
                   isNull(knowledgeEntriesTable.archivedAt),
                   isNotNull(knowledgeEntriesTable.embedding),
                 ),
@@ -123,6 +127,12 @@ export async function writeKnowledge(opts: KnowledgeWriteOpts): Promise<void> {
                     eq(knowledgeEntriesTable.type, opts.type),
                     eq(knowledgeEntriesTable.approvedForReuse, false),
                     ne(knowledgeEntriesTable.scope, "global"),
+                    // ISOLATION: a Builder write may only merge into a Builder
+                    // row, never into an Ora memory. (NULL origin = legacy Builder.)
+                    or(
+                      isNull(knowledgeEntriesTable.origin),
+                      ne(knowledgeEntriesTable.origin, "ora"),
+                    ),
                     isNull(knowledgeEntriesTable.archivedAt),
                     isNotNull(knowledgeEntriesTable.embedding),
                   ),

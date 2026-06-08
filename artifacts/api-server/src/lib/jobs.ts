@@ -1,4 +1,4 @@
-import { eq, sql, and, inArray, desc, or, asc, isNull, count } from "drizzle-orm";
+import { eq, sql, and, inArray, desc, or, asc, isNull, count, ne } from "drizzle-orm";
 import {
   db,
   pool,
@@ -1195,6 +1195,14 @@ async function loadKnowledgeContext(
                       )
                     : sql`false`,
                 ),
+                // ISOLATION (reverse leak): the AI Builder must NEVER pull
+                // origin="ora" entries into a build's knowledge context. This
+                // guard applies to the entire eligibility query — the
+                // approved-for-reuse, project-scoped, and user-scope branches
+                // above — so personal Ora memories can never become "lessons
+                // from prior builds". (NULL origin is legacy/pre-backfill and
+                // is treated as Builder-owned.)
+                or(isNull(knowledgeEntriesTable.origin), ne(knowledgeEntriesTable.origin, "ora")),
                 isNull(knowledgeEntriesTable.archivedAt),
               ),
             )
@@ -2091,6 +2099,8 @@ export async function runJob(input: JobInput): Promise<void> {
               and(
                 eq(knowledgeEntriesTable.projectId, projectId),
                 eq(knowledgeEntriesTable.type, "conversation_summary"),
+                // ISOLATION: never read an Ora-origin row into a Builder prompt.
+                or(isNull(knowledgeEntriesTable.origin), ne(knowledgeEntriesTable.origin, "ora")),
               ),
             )
             .orderBy(desc(knowledgeEntriesTable.createdAt))

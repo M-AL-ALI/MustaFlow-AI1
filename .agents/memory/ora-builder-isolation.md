@@ -20,6 +20,17 @@ Ora (standalone assistant, `/ora`, served by `public-ai/*` routes + `lib/public-
 - Never reintroduce a `projectId` path into `/public-ai/chat`. `knowledge_entries.scope` defaults to `"project"`, so an unscoped query would pull Builder data.
 - The in-chat `ora-memory-manager.tsx` reads `/api/knowledge?scope=user` and filters `type==='note'` client-side; Builder user-scope rows are `type='style_memory'` so they don't leak there, but this is a second Ora surface to keep in mind.
 
+## The reverse rule (Builder must never read Ora memories)
+
+Isolation is bidirectional. Every **Builder-facing** reader of `knowledge_entries` that can feed a build prompt, the Vault UI, or dedup MUST exclude `origin="ora"` via `or(isNull(origin), ne(origin, "ora"))` (NULL origin is legacy/pre-backfill = Builder-owned). Points that need the guard:
+
+- `loadKnowledgeContext` (jobs.ts) — the user-scope branch of the eligibility query had NO origin filter, so personal Ora memories could leak in as "lessons from prior builds". Guard the WHOLE OR (approved-for-reuse + project + user-scope), not just one branch.
+- `GET /api/knowledge` (routes/knowledge.ts) — the Builder Vault list UI.
+- conversation-summary reader (jobs.ts) and any other prompt-context reader.
+- `writeKnowledge` dedup candidate queries (lib/knowledge.ts) — both project and user branches: a Builder write (always `origin="builder"`) must only merge into a Builder row, never an Ora memory, or dedup silently re-tags/overwrites it.
+
+**Why the client save path mattered:** the Ora "Save to memory" chip / auto-save / the duplicate "Ora Memories" section on the Style Memory page all POSTed to `/api/knowledge` (hardcodes `origin="builder"`), misfiling genuine Ora saves into the Vault. Fix repoints the client to `POST /api/ora/memories` and a recovery migration re-tags the misfiled rows: `scope='user' AND origin='builder' AND type='note' AND project_id IS NULL` → `origin='ora'` (EXCLUDE `type='style_memory'` = legit brand profiles + inferred style memories). `promoteHighQualityLessons` is already safe (filters `scope='project'`).
+
 ## Confirmed-isolated surfaces (safe)
 
 - System prompts: `ORA_SYSTEM_PROMPT` (lib/public-ai/prompt.ts) vs Builder `BUILD/REFINE/PLAN_SYSTEM_PROMPT` (lib/builder.ts) — distinct, no shared template.

@@ -1,5 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect } from "react";
+import { Link } from "wouter";
 import { useListKnowledge, getListKnowledgeQueryKey } from "@workspace/api-client-react";
 import type { KnowledgeEntry } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -21,12 +22,9 @@ import {
   LayoutTemplate,
   Type,
   Layers,
-  Plus,
-  Pencil,
-  Trash2,
-  Check,
   MessageSquare,
   History,
+  ArrowRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -482,284 +480,33 @@ function OraChatSettingsSection() {
   );
 }
 
-function OraMemoriesSection({
-  entries,
-  onChanged,
-}: {
-  entries: KnowledgeEntry[];
-  onChanged: () => void;
-}) {
-  const { toast } = useToast();
-  const [adding, setAdding] = useState(false);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftContent, setDraftContent] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [clearing, setClearing] = useState(false);
-
-  const memories = entries.filter((e) => e.type === "note");
-
-  const resetAdd = () => {
-    setDraftTitle("");
-    setDraftContent("");
-    setAdding(false);
-  };
-
-  const handleAdd = async () => {
-    if (!draftTitle.trim() || !draftContent.trim()) return;
-    setSaving(true);
-    try {
-      await authFetch("/api/knowledge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: draftTitle.trim(),
-          content: draftContent.trim(),
-          type: "note",
-          category: "note",
-          scope: "user",
-        }),
-      });
-      resetAdd();
-      onChanged();
-      toast({ title: "Memory saved" });
-    } catch {
-      toast({ title: "Failed to save memory", variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const startEdit = (entry: KnowledgeEntry) => {
-    setEditingId(entry.id);
-    setEditTitle(entry.title);
-    setEditContent(entry.content);
-  };
-
-  const handleEditSave = async (id: number) => {
-    if (!editTitle.trim() || !editContent.trim()) return;
-    setBusyId(id);
-    try {
-      await authFetch(`/api/knowledge/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: editTitle.trim(), content: editContent.trim() }),
-      });
-      setEditingId(null);
-      onChanged();
-      toast({ title: "Memory updated" });
-    } catch {
-      toast({ title: "Failed to update memory", variant: "destructive" });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleForget = async (id: number) => {
-    setBusyId(id);
-    try {
-      await authFetch(`/api/knowledge/${id}`, { method: "DELETE" });
-      onChanged();
-      toast({ title: "Memory forgotten" });
-    } catch {
-      toast({ title: "Failed to forget memory", variant: "destructive" });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleClearAll = async () => {
-    if (memories.length === 0) return;
-    setClearing(true);
-    try {
-      const results = await Promise.allSettled(
-        memories.map((m) => authFetch(`/api/knowledge/${m.id}`, { method: "DELETE" })),
-      );
-      // Always refetch so the list reflects whatever did succeed, even on partial failure.
-      onChanged();
-      const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed > 0) {
-        toast({
-          title:
-            failed === memories.length
-              ? "Failed to clear memories"
-              : `Cleared ${memories.length - failed} of ${memories.length} memories`,
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({ title: "All memories cleared" });
-    } catch {
-      toast({ title: "Failed to clear memories", variant: "destructive" });
-    } finally {
-      setClearing(false);
-    }
-  };
-
+function OraMemoriesSection() {
+  // Ora saved memories are managed exclusively in the canonical Ora Memory
+  // Center (/ora/memory), where every read/write is origin="ora" and stays
+  // fully isolated from the AI Builder Knowledge Vault. This page intentionally
+  // links out instead of duplicating the CRUD surface (which previously misfiled
+  // saves into the Builder vault via /api/knowledge).
   return (
     <section className="mb-8">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <BrainCircuit className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-foreground">Ora Memories</h2>
-          <span className="text-[10px] text-muted-foreground/60 ml-1">({memories.length})</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {memories.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void handleClearAll()}
-              disabled={clearing}
-              className="gap-1.5"
-            >
-              {clearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Clear all
-            </Button>
-          )}
-          {!adding && (
-            <Button size="sm" onClick={() => setAdding(true)} className="gap-1.5">
-              <Plus className="h-3.5 w-3.5" />
-              Add memory
-            </Button>
-          )}
-        </div>
+      <div className="flex items-center gap-2 mb-4">
+        <BrainCircuit className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold text-foreground">Ora Memories</h2>
       </div>
-
-      <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-        Facts and preferences you want Ora to remember across conversations — your name, your
-        company, how you like things done. These are injected into Ora's replies when "Reference
-        saved memories" is on.
-      </p>
-
-      {adding && (
-        <div className="border border-border rounded-xl p-4 mb-3 space-y-3 bg-muted/20">
-          <input
-            type="text"
-            placeholder="Title (e.g. Preferred tone)"
-            value={draftTitle}
-            onChange={(e) => setDraftTitle(e.target.value)}
-            className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm"
-          />
-          <textarea
-            placeholder="What should Ora remember?"
-            value={draftContent}
-            onChange={(e) => setDraftContent(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm resize-y"
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => void handleAdd()}
-              disabled={saving || !draftTitle.trim() || !draftContent.trim()}
-              className="gap-1.5"
-            >
-              {saving ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Check className="h-3.5 w-3.5" />
-              )}
-              Save
-            </Button>
-            <Button size="sm" variant="ghost" onClick={resetAdd} disabled={saving}>
-              Cancel
-            </Button>
+      <Link href="/ora/memory">
+        <div className="group flex items-center justify-between gap-4 border border-border rounded-xl p-4 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              Manage your Ora memories in the Memory Center
+            </p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              Facts and preferences you want Ora to remember across conversations — your name, your
+              company, how you like things done. They are kept separate from the AI Builder and
+              never influence your builds.
+            </p>
           </div>
+          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-hover:translate-x-0.5" />
         </div>
-      )}
-
-      {memories.length === 0 && !adding ? (
-        <div className="border border-dashed border-border rounded-xl p-8 text-center">
-          <BrainCircuit className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground mb-1">No saved memories yet</p>
-          <p className="text-xs text-muted-foreground/60 max-w-sm mx-auto leading-relaxed">
-            Add a memory and Ora will reference it in future conversations.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {memories.map((entry) =>
-            editingId === entry.id ? (
-              <div
-                key={entry.id}
-                className="border border-border rounded-xl p-4 space-y-3 bg-muted/20"
-              >
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm"
-                />
-                <textarea
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm resize-y"
-                />
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => void handleEditSave(entry.id)}
-                    disabled={busyId === entry.id || !editTitle.trim() || !editContent.trim()}
-                    className="gap-1.5"
-                  >
-                    {busyId === entry.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Check className="h-3.5 w-3.5" />
-                    )}
-                    Save
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div
-                key={entry.id}
-                className="border border-border rounded-xl p-4 flex items-start justify-between gap-4 group"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">{entry.title}</p>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed whitespace-pre-wrap">
-                    {entry.content}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => startEdit(entry)}
-                    aria-label="Edit memory"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => void handleForget(entry.id)}
-                    disabled={busyId === entry.id}
-                    aria-label="Forget memory"
-                  >
-                    {busyId === entry.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ),
-          )}
-        </div>
-      )}
+      </Link>
     </section>
   );
 }
@@ -847,8 +594,8 @@ export default function MemoryPage() {
               {/* Ora chat memory toggles */}
               <OraChatSettingsSection />
 
-              {/* Manually saved Ora memories */}
-              <OraMemoriesSection entries={entries} onChanged={() => void refetch()} />
+              {/* Manually saved Ora memories — managed in the Ora Memory Center */}
+              <OraMemoriesSection />
 
               {/* User-declared brand profile */}
               <BrandProfileSection />

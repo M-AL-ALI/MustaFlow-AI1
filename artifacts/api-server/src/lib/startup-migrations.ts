@@ -3308,6 +3308,28 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+  // ── migrate-recover-ora-memories (re-tag misfiled Ora saves) ────────────────
+  // Recovers Ora memories that the buggy save paths POSTed to /api/knowledge
+  // (origin="builder"). Genuine Builder user-scope data (brand profiles +
+  // inferred style memories, both type="style_memory") is excluded. Idempotent:
+  // recovered rows carry origin="ora" and no longer match. Must run AFTER the
+  // knowledge-origin backfill above so origin is populated.
+  {
+    name: "migrate-recover-ora-memories",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE knowledge_entries
+            SET origin = 'ora'
+          WHERE scope = 'user'
+            AND origin = 'builder'
+            AND type = 'note'
+            AND type <> 'style_memory'
+            AND project_id IS NULL`,
+      );
+      await client.query("COMMIT");
+    },
+  },
   // ── migrate-help-center (Task #1312) ────────────────────────────────────────
   {
     name: "migrate-help-center",
