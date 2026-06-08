@@ -92,7 +92,10 @@ function injectRoute(indexHtml: string, route: DynamicRoute): string {
     html = html.replace("</head>", `${scriptBlock}\n  </head>`);
   }
 
-  html = html.replace(/<div id="root"><\/div>/, `<div id="root">${route.body.trim()}</div>`);
+  html = html.replace(
+    /<div id="root"><\/div>/,
+    `<div id="root"><div data-prerender-fallback>${route.body.trim()}</div></div>`,
+  );
 
   return html;
 }

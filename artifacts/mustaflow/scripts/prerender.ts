@@ -675,7 +675,10 @@ function injectMetadata(html: string, meta: RouteMetadata): string {
   // do not execute JavaScript see meaningful headings, copy, and links.
   // The React SPA replaces this via createRoot().render() in browsers.
   if (meta.body) {
-    html = html.replace(/<div id="root"><\/div>/, `<div id="root">${meta.body.trim()}</div>`);
+    html = html.replace(
+      /<div id="root"><\/div>/,
+      `<div id="root"><div data-prerender-fallback>${meta.body.trim()}</div></div>`,
+    );
   }
 
   return html;

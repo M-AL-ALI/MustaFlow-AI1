@@ -30,6 +30,18 @@
         }
       })();
     </script>
+    <style>
+      /*
+        Hide the prerendered SEO fallback markup (injected into #root by
+        scripts/prerender.ts and prerender-dynamic-routes.ts for non-JS
+        crawlers) from real browsers. The semantic HTML stays in the raw
+        response so non-JS bots still read it, but humans never see the
+        unstyled flash before the React app mounts and replaces #root.
+      */
+      [data-prerender-fallback] {
+        display: none !important;
+      }
+    </style>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover"
@@ -66,7 +78,7 @@
       content="Build websites, apps, and workflows with AI. MustaFlow helps you brainstorm ideas, start from templates, generate code, and publish faster."
     />
     <meta name="twitter:image" content="https://mustaflow.app/opengraph.jpg" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="any" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
