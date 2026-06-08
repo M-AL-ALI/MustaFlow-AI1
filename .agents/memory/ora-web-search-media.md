@@ -36,3 +36,18 @@ built here.
 `serializeForStorage` spreads) and BOTH backend validators (`ora-transcript.ts` +
 `ora-conversations.ts` messageSchema). Mirrors the existing "Ora message persistence schema
 mirroring" rule — miss either schema and rich fields are silently stripped on save.
+
+**Personalization parity — the search branch is a separate code path.** `chat.ts` has two
+branches: the SEARCH branch (`decision.tool === "search"` → `runOraWebSearch` → early
+`return`) and the conversational branch below it. `buildMemoryContext`/`buildProfileContext`
+are only injected in the conversational branch's `systemPrompt`. **Any per-user context
+(memory, profile, "About you") must be wired into BOTH branches independently, or it silently
+fails for whichever branch was missed** — e.g. "Ora remembers everything about you" broke
+during web searches because the search branch returned before any memory injection.
+**Why:** the search branch builds its own instructions in `web-search.ts buildInstructions`,
+not `buildSystemPrompt`. **How to apply:** the search branch passes
+`personalContext = profileContext + (referenceSavedMemories ? memoryContext : "")` into
+`runOraWebSearch({...personalContext})`; keep the toggle semantics identical to the
+conversational branch (profile always for authed users, memories gated on
+`referenceSavedMemories`). Both context builders are best-effort (try/catch → "") so awaiting
+them inside the search try block can't break search.

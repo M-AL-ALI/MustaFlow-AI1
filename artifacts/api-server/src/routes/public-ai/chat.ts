@@ -631,8 +631,21 @@ router.post("/public-ai/chat", async (req, res) => {
             .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
         : []
     ).filter((m) => m.content.trim().length > 0);
+    // Personalize web search with what Ora already knows about the user, so a
+    // search answer stays tailored (e.g. resolving "near me" to a saved city).
+    // Mirrors the conversational branch: profile is always applied for signed-in
+    // users; saved memories respect the referenceSavedMemories opt-out toggle.
+    const searchProfileContext = authed ? await buildProfileContext(authed.userId) : "";
+    const searchMemoryContext =
+      authed && referenceSavedMemories ? await buildMemoryContext(authed.userId) : "";
+    const searchPersonalContext = searchProfileContext + searchMemoryContext;
     try {
-      const result = await runOraWebSearch({ query: message, history, language });
+      const result = await runOraWebSearch({
+        query: message,
+        history,
+        language,
+        personalContext: searchPersonalContext || undefined,
+      });
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);

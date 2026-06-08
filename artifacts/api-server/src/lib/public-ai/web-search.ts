@@ -41,6 +41,13 @@ export interface OraWebSearchInput {
   query: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   language?: string;
+  /**
+   * Optional pre-formatted personalization block (the signed-in user's Ora
+   * profile and/or saved memories). Injected into the search instructions so a
+   * web-search answer stays personalized — e.g. tailoring "places near me" to a
+   * remembered city — without the model fabricating personal facts.
+   */
+  personalContext?: string;
 }
 
 export interface OraWebSearchResult {
@@ -320,7 +327,7 @@ export function parseOraMediaBlock(reply: string): {
   };
 }
 
-function buildInstructions(language: string | undefined): string {
+export function buildInstructions(language: string | undefined, personalContext?: string): string {
   const base = [
     "You are Ora, a helpful assistant with live web access.",
     "Use the web_search tool thoroughly to find current, accurate information from reputable sources, then answer the user's question (or help troubleshoot) concisely and directly.",
@@ -335,7 +342,18 @@ function buildInstructions(language: string | undefined): string {
   if (language && language !== "auto") {
     base.push(`Respond entirely in "${language}".`);
   }
-  return base.join(" ");
+  let instructions = base.join(" ");
+  // Personalization: the user's saved Ora profile/memories are appended as
+  // trusted context so the search answer stays tailored to them (e.g. resolving
+  // "near me" to a remembered city). These are facts the user told Ora — use
+  // them to interpret the query, but never treat them as search results and
+  // never fabricate new personal details.
+  if (personalContext && personalContext.trim().length > 0) {
+    instructions +=
+      "\n\nThe following is what you already know about this user. Use it silently to interpret and personalize the request when directly relevant. Do not repeat, list, or otherwise disclose these personal details back to the user unless they are clearly germane to the answer, and never present them as if they came from the web search:" +
+      personalContext;
+  }
+  return instructions;
 }
 
 /**
@@ -343,7 +361,7 @@ function buildInstructions(language: string | undefined): string {
  * Throws on provider failure so the route can surface a retryable error.
  */
 export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebSearchResult> {
-  const { query, history = [], language } = input;
+  const { query, history = [], language, personalContext } = input;
   const model = process.env.ORA_SEARCH_MODEL ?? "gpt-4o";
 
   // Build a compact input: recent turns for follow-up context, then the query.
@@ -356,7 +374,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   const client = getClient();
   const resp = (await client.responses.create({
     model,
-    instructions: buildInstructions(language),
+    instructions: buildInstructions(language, personalContext),
     // The web_search tool is enabled per request; the model decides when to call it.
     tools: [{ type: "web_search" }] as never,
     input: messages as never,

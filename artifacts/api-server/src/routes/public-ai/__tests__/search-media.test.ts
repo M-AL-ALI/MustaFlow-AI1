@@ -18,6 +18,7 @@ import {
   parseOraMediaBlock,
   isSafeHttpUrl,
   isPrivateOrLocalHost,
+  buildInstructions,
 } from "../../../lib/public-ai/web-search";
 
 describe("isPrivateOrLocalHost", () => {
@@ -207,5 +208,40 @@ describe("parseOraMediaBlock", () => {
     expect(out.text).toBe("Just a plain answer.");
     expect(out.images).toEqual([]);
     expect(out.videos).toEqual([]);
+  });
+});
+
+describe("buildInstructions personalization", () => {
+  it("omits any personalization block when no context is supplied", () => {
+    const out = buildInstructions("auto");
+    expect(out).not.toContain("what you already know about this user");
+  });
+
+  it("omits the block for empty / whitespace-only context", () => {
+    expect(buildInstructions("auto", "")).not.toContain("what you already know about this user");
+    expect(buildInstructions("auto", "   \n  ")).not.toContain(
+      "what you already know about this user",
+    );
+  });
+
+  it("appends the user's profile/memory context when provided", () => {
+    const ctx = "\n\n## About the user\n- Preferred name: Sam\n- Industry: Coffee";
+    const out = buildInstructions("auto", ctx);
+    expect(out).toContain("what you already know about this user");
+    expect(out).toContain("Preferred name: Sam");
+    expect(out).toContain("Industry: Coffee");
+  });
+
+  it("instructs the model to use context silently and not to disclose it", () => {
+    const out = buildInstructions("auto", "\n\n## About the user\n- City: Austin");
+    expect(out).toContain("silently");
+    expect(out).toContain("never present them as if they came from the web search");
+  });
+
+  it("still requires the trailing ora-media block alongside personalization", () => {
+    const out = buildInstructions("auto", "\n\n## About the user\n- City: Austin");
+    expect(out).toContain("ora-media");
+    // Personalization is appended AFTER the media-block instruction.
+    expect(out.indexOf("ora-media")).toBeLessThan(out.indexOf("what you already know"));
   });
 });
