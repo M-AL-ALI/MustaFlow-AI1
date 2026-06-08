@@ -11,6 +11,7 @@
  * pipeline module. It may only depend on the public-ai prompt helpers and the
  * Ora intent classifier.
  */
+import { logger } from "../logger";
 import { classifyIntent, type OraConfidence, type OraIntent, type OraTopic } from "./classifier";
 import { detectFileRequest, type FileFormat } from "./prompt";
 
@@ -569,4 +570,129 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
     confidence: sensitive ? "low" : isExplicit ? "high" : "low",
     sensitive,
   };
+}
+
+// ── Model-based memory-save candidate extraction ────────────────────────────
+
+const MEMORY_EXTRACT_SYSTEM_PROMPT = `You extract durable, user-specific facts worth remembering long-term from a single user message to a chat assistant named Ora.
+
+A DURABLE fact is a stable preference, attribute, constraint, or piece of context about the user, their business, or their projects that would still be useful to know in a future, unrelated conversation. Examples: their name, company, role, industry, the product they're building, a standing preference ("I prefer dark mode", "always answer concisely"), their tech stack, budget, timezone, target audience, or recurring constraints.
+
+NOT durable (return save=false): greetings, small talk, one-off questions, requests/commands for the current task, transient state ("I'm tired today", "what's the weather"), opinions about the current answer, or anything only relevant to this single exchange.
+
+Set "explicit" to true ONLY when the user directly asks you to remember/note/save something (e.g. "remember that…", "don't forget…", "keep a note that…", "for future reference…"). Otherwise false.
+
+Write "fact" as one concise, self-contained declarative sentence in third person about the user (e.g. "Prefers dark mode", "Is building an e-commerce app for handmade jewelry", "Works as a product manager at Acme"). Strip any imperative preamble. Keep it under 200 characters.
+
+Respond ONLY with strict JSON of the form: {"save": boolean, "fact": string, "explicit": boolean}. When save is false, set fact to "" and explicit to false.`;
+
+/**
+ * Model-based extraction of a durable, user-specific fact worth saving to Ora
+ * memory. This is the smarter successor to {@link detectMemorySaveCandidate}:
+ * it catches durable facts phrased outside the fixed regex patterns and avoids
+ * offering to save transient chatter.
+ *
+ * Design constraints:
+ * - **Cheap + fast**: uses a small model (gpt-5-nano by default) with a short
+ *   prompt and a tiny token cap so it never meaningfully slows a reply.
+ * - **Fail-safe**: any error, empty output, or invalid JSON falls back to the
+ *   regex detector ({@link detectMemorySaveCandidate}). It NEVER throws.
+ * - **Sensitivity preserved**: the existing PII/credential guard
+ *   ({@link detectSensitiveFact}) is applied to BOTH the extracted fact and the
+ *   raw message. A sensitive candidate is always forced to "low" confidence so
+ *   it can never be auto-saved — only manually confirmed.
+ * - **Confidence mapping unchanged**: explicit "remember this" phrasing →
+ *   "high" (eligible for opt-in auto-save); facts stated in passing → "low".
+ */
+export async function extractMemorySaveCandidate(
+  message: string,
+): Promise<MemorySaveCandidate | null> {
+  const trimmed = message.trim();
+  // Below the regex detector's minimum there is never a durable fact, so skip
+  // the model call entirely. The upper bound is intentionally broader than the
+  // regex detector's 400-char cap (the model can summarise a longer message into
+  // a concise fact) but still bounded so we never feed an unbounded prompt; past
+  // it we degrade to the cheaper regex detector rather than paying for a long
+  // model call.
+  if (trimmed.length < 6) return null;
+  if (trimmed.length > 2000) return detectMemorySaveCandidate(message);
+
+  const model = process.env.ORA_MEMORY_MODEL ?? "gpt-5-nano";
+  // Hard latency ceiling: this runs inline before the chat response is sent, so
+  // a slow provider must not stall the reply. On timeout we fall back to the
+  // regex detector (via the catch below) instead of blocking. Tunable via env.
+  const timeoutMs = Number(process.env.ORA_MEMORY_TIMEOUT_MS) || 1500;
+  const start = Date.now();
+
+  try {
+    const { createChatCompletion } = await import("../ai-providers");
+    const result = await Promise.race([
+      createChatCompletion({
+        provider: "openai",
+        model,
+        messages: [
+          { role: "system", content: MEMORY_EXTRACT_SYSTEM_PROMPT },
+          { role: "user", content: trimmed.slice(0, 1000) },
+        ],
+        response_format: { type: "json_object" },
+        max_completion_tokens: 120,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("memory-extract-timeout")), timeoutMs),
+      ),
+    ]);
+
+    const raw = result.choices[0]?.message?.content?.trim() ?? "";
+    if (!raw) return detectMemorySaveCandidate(message);
+
+    let parsed: { save?: unknown; fact?: unknown; explicit?: unknown };
+    try {
+      parsed = JSON.parse(raw) as { save?: unknown; fact?: unknown; explicit?: unknown };
+    } catch {
+      return detectMemorySaveCandidate(message);
+    }
+
+    const save = parsed.save === true;
+    const fact = typeof parsed.fact === "string" ? parsed.fact.trim() : "";
+    if (!save || fact.length === 0) {
+      logger.info(
+        { component: "ora-memory-extract", model, latencyMs: Date.now() - start, save: false },
+        "Memory extraction: no durable fact",
+      );
+      return null;
+    }
+
+    const isExplicit = parsed.explicit === true;
+    // The sensitive guard is non-negotiable: scan the model's extracted fact AND
+    // the raw user message (the PII may live in phrasing the model paraphrased
+    // away). A sensitive candidate is always forced to low confidence so it can
+    // never be auto-saved without an explicit click.
+    const sensitive = detectSensitiveFact(fact) || detectSensitiveFact(trimmed);
+
+    logger.info(
+      {
+        component: "ora-memory-extract",
+        model,
+        latencyMs: Date.now() - start,
+        save: true,
+        explicit: isExplicit,
+        sensitive,
+      },
+      "Memory extraction: durable fact found",
+    );
+
+    return {
+      fact: fact.slice(0, 300),
+      confidence: sensitive ? "low" : isExplicit ? "high" : "low",
+      sensitive,
+    };
+  } catch (err) {
+    // Fail safe to the regex detector rather than erroring the chat. This keeps
+    // explicit "remember…" phrasing working even if the model call fails.
+    logger.info(
+      { component: "ora-memory-extract", model, latencyMs: Date.now() - start, err },
+      "Memory extraction threw — falling back to regex detector",
+    );
+    return detectMemorySaveCandidate(message);
+  }
 }

@@ -14,7 +14,7 @@ import { type OraTopic } from "../../lib/public-ai/classifier";
 import {
   routeOraMessage,
   checkToolAccess,
-  detectMemorySaveCandidate,
+  extractMemorySaveCandidate,
 } from "../../lib/public-ai/orchestrator";
 import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
@@ -847,8 +847,11 @@ router.post("/public-ai/chat", async (req, res) => {
 
   // Surface a memory-save candidate when the user stated a durable fact. This is
   // a non-binding suggestion for signed-in users; the client decides whether to
-  // offer the save. It never persists anything on its own.
-  const memoryCandidate = authed ? detectMemorySaveCandidate(message) : null;
+  // offer the save. It never persists anything on its own. Model-based
+  // extraction catches durable facts phrased outside the fixed regex patterns
+  // and avoids offering to save transient chatter; it fails safe to the regex
+  // detector and never throws.
+  const memoryCandidate = authed ? await extractMemorySaveCandidate(message) : null;
   const usage = await oraUsageResponse(authed, payload.msgCount);
 
   res.json({
