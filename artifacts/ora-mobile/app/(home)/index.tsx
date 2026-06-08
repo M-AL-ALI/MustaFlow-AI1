@@ -1,7 +1,17 @@
 import { Image } from "expo-image";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
+import * as Haptics from "expo-haptics";
 import * as WebBrowser from "expo-web-browser";
+import {
+  AudioModule,
+  RecordingPresets,
+  createAudioPlayer,
+  setAudioModeAsync,
+  useAudioRecorder,
+  type AudioPlayer,
+} from "expo-audio";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   ArrowUp,
   Copy,
@@ -10,10 +20,13 @@ import {
   Gauge,
   History,
   Image as ImageIcon,
+  Mic,
   Paperclip,
   Plus,
   Share2,
   Sparkles,
+  Square,
+  Volume2,
   X,
   Zap,
 } from "lucide-react-native";
@@ -46,9 +59,12 @@ import {
   deleteConversation,
   getConversation,
   getOraSession,
+  getPreferences,
   listConversations,
   saveConversationMessages,
   sendChat,
+  synthesizeSpeech,
+  transcribeAudio,
   uploadFile,
 } from "@/lib/api";
 import type {
@@ -92,10 +108,30 @@ export default function OraChatScreen() {
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
 
+  const [voiceLang, setVoiceLang] = useState("en");
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const playerRef = useRef<AudioPlayer | null>(null);
+
   useEffect(() => {
     getOraSession()
       .then(setSession)
       .catch(() => setSession(null));
+    getPreferences()
+      .then((p) => p.voiceLang && setVoiceLang(p.voiceLang))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      try {
+        playerRef.current?.remove();
+      } catch {
+        /* ignore */
+      }
+    };
   }, []);
 
   const scrollToEnd = useCallback(() => {
@@ -201,6 +237,85 @@ export default function OraChatScreen() {
       setSending(false);
     }
   }, [input, attachment, sending, messages, mode, scrollToEnd, persist]);
+
+  const startRecording = useCallback(async () => {
+    if (recording || transcribing) return;
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) return;
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setRecording(true);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {
+      setRecording(false);
+    }
+  }, [recording, transcribing, recorder]);
+
+  const stopRecording = useCallback(async () => {
+    if (!recording) return;
+    setRecording(false);
+    setTranscribing(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await recorder.stop();
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+      const uri = recorder.uri;
+      if (!uri) return;
+      const text = await transcribeAudio(uri, "m4a", voiceLang);
+      const clean = text.trim();
+      if (clean) {
+        setInput((prev) => (prev.trim() ? `${prev.trim()} ${clean}` : clean));
+      }
+    } catch {
+      /* surfaced by absence of inserted text */
+    } finally {
+      setTranscribing(false);
+    }
+  }, [recording, recorder, voiceLang]);
+
+  const speak = useCallback(
+    async (message: OraMessage) => {
+      try {
+        playerRef.current?.remove();
+      } catch {
+        /* ignore */
+      }
+      playerRef.current = null;
+      if (speakingId === message.id) {
+        setSpeakingId(null);
+        return;
+      }
+      setSpeakingId(message.id);
+      try {
+        const dataUri = await synthesizeSpeech(message.content, "nova", voiceLang);
+        const base64 = dataUri.split(",")[1] ?? "";
+        const fileUri = `${FileSystem.cacheDirectory}ora-tts-${Date.now()}.mp3`;
+        await FileSystem.writeAsStringAsync(fileUri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+        const player = createAudioPlayer({ uri: fileUri });
+        playerRef.current = player;
+        player.addListener("playbackStatusUpdate", (status) => {
+          if (status.didJustFinish) {
+            setSpeakingId((cur) => (cur === message.id ? null : cur));
+            try {
+              player.remove();
+            } catch {
+              /* ignore */
+            }
+            if (playerRef.current === player) playerRef.current = null;
+          }
+        });
+        player.play();
+      } catch {
+        setSpeakingId((cur) => (cur === message.id ? null : cur));
+      }
+    },
+    [speakingId, voiceLang],
+  );
 
   const handleAttach = useCallback(async () => {
     try {
@@ -337,7 +452,13 @@ export default function OraChatScreen() {
               />
             </View>
           }
-          renderItem={({ item }) => <MessageBubble message={item} />}
+          renderItem={({ item }) => (
+            <MessageBubble
+              message={item}
+              speaking={speakingId === item.id}
+              onSpeak={() => speak(item)}
+            />
+          )}
         />
 
         {/* Composer */}
@@ -413,6 +534,26 @@ export default function OraChatScreen() {
                 <Paperclip size={20} color={c.mutedForeground} />
               )}
             </Pressable>
+            <Pressable
+              onPress={recording ? stopRecording : startRecording}
+              disabled={transcribing}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: c.radius,
+                backgroundColor: recording ? c.destructive : c.secondary,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {transcribing ? (
+                <ActivityIndicator size="small" color={c.mutedForeground} />
+              ) : recording ? (
+                <Square size={18} color={c.primaryForeground} fill={c.primaryForeground} />
+              ) : (
+                <Mic size={20} color={c.mutedForeground} />
+              )}
+            </Pressable>
             <TextInput
               value={input}
               onChangeText={setInput}
@@ -474,7 +615,15 @@ export default function OraChatScreen() {
   );
 }
 
-function MessageBubble({ message }: { message: OraMessage }) {
+function MessageBubble({
+  message,
+  speaking,
+  onSpeak,
+}: {
+  message: OraMessage;
+  speaking: boolean;
+  onSpeak: () => void;
+}) {
   const c = useColors();
   const isUser = message.role === "user";
   const [savingFile, setSavingFile] = useState(false);
@@ -669,20 +818,44 @@ function MessageBubble({ message }: { message: OraMessage }) {
         )}
       </View>
       {!message.pending && !message.error && (
-        <Pressable
-          onPress={copy}
-          hitSlop={8}
+        <View
           style={{
             flexDirection: "row",
             alignItems: "center",
-            gap: 4,
+            gap: 16,
             marginTop: 6,
             marginLeft: 4,
           }}
         >
-          <Copy size={13} color={c.mutedForeground} />
-          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Copy</Text>
-        </Pressable>
+          <Pressable
+            onPress={copy}
+            hitSlop={8}
+            style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+          >
+            <Copy size={13} color={c.mutedForeground} />
+            <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Copy</Text>
+          </Pressable>
+          {!!message.content && (
+            <Pressable
+              onPress={onSpeak}
+              hitSlop={8}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+            >
+              <Volume2
+                size={13}
+                color={speaking ? c.accentForeground : c.mutedForeground}
+              />
+              <Text
+                style={{
+                  color: speaking ? c.accentForeground : c.mutedForeground,
+                  fontSize: 12,
+                }}
+              >
+                {speaking ? "Stop" : "Listen"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
       )}
     </View>
   );
