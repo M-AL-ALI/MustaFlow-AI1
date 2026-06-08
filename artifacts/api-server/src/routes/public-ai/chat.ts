@@ -618,6 +618,7 @@ router.post("/public-ai/chat", async (req, res) => {
         history,
         language,
         personalContext: searchPersonalContext || undefined,
+        wantsVideos: decision.wantsVideos,
       });
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);

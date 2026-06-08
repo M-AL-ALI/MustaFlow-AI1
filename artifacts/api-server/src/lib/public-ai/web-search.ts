@@ -48,6 +48,13 @@ export interface OraWebSearchInput {
    * remembered city — without the model fabricating personal facts.
    */
   personalContext?: string;
+  /**
+   * True when the user specifically asked Ora to FIND a video. The model is then
+   * explicitly instructed to populate the `videos` array in the trailing
+   * ora-media block (rendered as clickable video cards) instead of dropping a
+   * raw watch URL into the prose.
+   */
+  wantsVideos?: boolean;
 }
 
 export interface OraWebSearchResult {
@@ -330,7 +337,11 @@ export function parseOraMediaBlock(reply: string): {
   };
 }
 
-export function buildInstructions(language: string | undefined, personalContext?: string): string {
+export function buildInstructions(
+  language: string | undefined,
+  personalContext?: string,
+  wantsVideos?: boolean,
+): string {
   const base = [
     "You are Ora, a helpful assistant with live web access.",
     "Use the web_search tool thoroughly to find current, accurate information from reputable sources, then answer the user's question (or help troubleshoot) concisely and directly.",
@@ -342,6 +353,14 @@ export function buildInstructions(language: string | undefined, personalContext?
     "When (and only when) the user would benefit from seeing them, include relevant media you ACTUALLY found via web search. Use direct image file URLs (jpg/png/webp/gif) for images and watch-page URLs for videos. Never invent or guess a URL — omit anything you are not confident is real and reachable.",
     'At the very END of your reply, append exactly one fenced code block tagged ora-media containing JSON of the form {"images":[{"url":"https://...","title":"...","source":"https://page-it-was-on"}],"videos":[{"url":"https://...","title":"..."}]}. Use up to 4 images and up to 3 videos. If you found none, use {"images":[],"videos":[]}. Put nothing after this block.',
   ];
+  if (wantsVideos) {
+    // The user explicitly asked for a video. Make the videos array the primary
+    // deliverable: the UI renders each entry as a clickable video card, so the
+    // watch URLs MUST go in the media block, not the prose.
+    base.push(
+      'The user is specifically asking for a video. Use web_search to find one or more real, relevant videos on the topic (prefer YouTube watch-page URLs, e.g. https://www.youtube.com/watch?v=...). You MUST list every video you found in the "videos" array of the trailing ora-media block — never paste a video URL into your prose, because the videos array is rendered as clickable cards. Keep your text reply to a short sentence or two introducing them. Only include real, reachable URLs you actually found; if you genuinely found none, say so and leave the videos array empty.',
+    );
+  }
   if (language && language !== "auto") {
     base.push(`Respond entirely in "${language}".`);
   }
@@ -364,7 +383,7 @@ export function buildInstructions(language: string | undefined, personalContext?
  * Throws on provider failure so the route can surface a retryable error.
  */
 export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebSearchResult> {
-  const { query, history = [], language, personalContext } = input;
+  const { query, history = [], language, personalContext, wantsVideos } = input;
   const model = process.env.ORA_SEARCH_MODEL ?? "gpt-4o";
 
   // Build a compact input: recent turns for follow-up context, then the query.
@@ -377,7 +396,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   const client = getClient();
   const resp = (await client.responses.create({
     model,
-    instructions: buildInstructions(language, personalContext),
+    instructions: buildInstructions(language, personalContext, wantsVideos),
     // The web_search tool is enabled per request; the model decides when to call it.
     tools: [{ type: "web_search" }] as never,
     input: messages as never,

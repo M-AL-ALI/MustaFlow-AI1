@@ -209,6 +209,43 @@ export function isWebSearchRequest(message: string): boolean {
   return ORA_SEARCH_PATTERNS.some((p) => p.test(message));
 }
 
+// ── Video-request intent detection ──────────────────────────────────────────
+
+/**
+ * Conservative signals that the user is explicitly asking Ora to FIND a video
+ * (a YouTube clip, a tutorial video, "any related videos?"). These requests are
+ * routed to the live web-search/media pipeline so the answer surfaces real,
+ * clickable video cards instead of a bare URL the user must copy-paste.
+ *
+ * Kept deliberately narrow — a retrieval verb (find/show/get/recommend/…) must
+ * accompany a video noun, OR the message must be a short "any videos?" style
+ * ask. We intentionally do NOT include creation verbs (generate/make/create) so
+ * a "make me a video app" / "build a video player" request is never pulled into
+ * search, and Ora does not falsely imply it can generate a video.
+ */
+export const ORA_VIDEO_PATTERNS: RegExp[] = [
+  // Strong retrieval verbs + video noun: "find a video about composting",
+  // "show me a youtube video on X", "recommend a clip explaining recursion".
+  /\b(find|show|search\s+for|search\s+up|look\s+up|recommend|suggest)\b(?:\s+(?:me|us|my)\b)?[^.?!]{0,40}\b(?:youtube\s+)?(?:videos?|clips?|tutorial\s+videos?|video\s+tutorials?)\b/i,
+  // Weaker fetch verbs (get/send/share) require an explicit "me/us" so a
+  // "get the video player working" build request never matches.
+  /\b(get|send|share)\s+(?:me|us)\b[^.?!]{0,40}\b(?:youtube\s+)?(?:videos?|clips?)\b/i,
+  // "more/related/other/another video(s)" — asking for additional clips on the
+  // topic. These adjectives are themselves the request signal.
+  /\b(more|related|other|another)\s+(?:good\s+|relevant\s+|helpful\s+)?(?:youtube\s+)?(?:videos?|clips?)\b/i,
+  // Question-framed asks: "are there any videos", "do you have any videos",
+  // "got any clips", "have you got a video". Anchored to question/request
+  // scaffolding so statements like "we have some videos in our app" or "I have
+  // a video bug" never match.
+  /(?:\bis\s+there|\bare\s+there|\bdo\s+you\s+have|\byou\s+got|^\s*got|^\s*have\s+you)\s+(?:a|an|any|some)?\s*(?:good\s+|relevant\s+)?(?:youtube\s+)?(?:videos?|clips?)\b/i,
+  // Explicit "watch / find a youtube video" intent.
+  /\b(watch|find|recommend|suggest)\b[^.?!]{0,30}\byoutube\b/i,
+];
+
+export function isVideoRequest(message: string): boolean {
+  return ORA_VIDEO_PATTERNS.some((p) => p.test(message));
+}
+
 // ── Routing ─────────────────────────────────────────────────────────────────
 
 export interface OraRouteInput {
@@ -277,6 +314,12 @@ export interface OraRouteDecision {
   reason: string;
   /** Set when tool === "file_generation". */
   fileFormat?: FileFormat;
+  /**
+   * Set when tool === "search" AND the message specifically asked for a video.
+   * The route passes this to the web-search pipeline so the model is explicitly
+   * told to populate the `videos` array (rendered as clickable video cards).
+   */
+  wantsVideos?: boolean;
   intent: OraIntent;
   confidence: OraConfidence;
   topic: OraTopic;
@@ -341,10 +384,14 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
   // 3. Web-search fast-path — current-info questions need live results. Runs
   //    before the instant/deep classifier so a grounded answer always wins over
   //    a (possibly stale) model-only reply, regardless of the selected mode.
-  if (isWebSearchRequest(message)) {
+  const videoRequest = isVideoRequest(message);
+  if (isWebSearchRequest(message) || videoRequest) {
     return {
       tool: "search",
-      reason: "Detected a request for current/live information.",
+      reason: videoRequest
+        ? "Detected a request to find a relevant video."
+        : "Detected a request for current/live information.",
+      ...(videoRequest ? { wantsVideos: true } : {}),
       intent: "premium",
       confidence: "high",
       topic: "general",

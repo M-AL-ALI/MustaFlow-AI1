@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isWebSearchRequest,
+  isVideoRequest,
   routeOraMessage,
   checkToolAccess,
   isImageGenerationRequest,
@@ -67,7 +68,83 @@ describe("isWebSearchRequest", () => {
   });
 });
 
+// ─── isVideoRequest ───────────────────────────────────────────────────────────
+
+describe("isVideoRequest", () => {
+  it("matches explicit requests to FIND a video", () => {
+    expect(isVideoRequest("show me a video about composting")).toBe(true);
+    expect(isVideoRequest("find a youtube video on sourdough starters")).toBe(true);
+    expect(isVideoRequest("got any related videos?")).toBe(true);
+    expect(isVideoRequest("can you find me some videos on knot tying")).toBe(true);
+    expect(isVideoRequest("recommend a clip explaining recursion")).toBe(true);
+    expect(isVideoRequest("are there any videos that walk through this")).toBe(true);
+    expect(isVideoRequest("do you have any videos on this topic")).toBe(true);
+    expect(isVideoRequest("got any clips on this")).toBe(true);
+    expect(isVideoRequest("show me more videos like that")).toBe(true);
+  });
+
+  it("does NOT hijack build / app / conversational requests that mention video", () => {
+    // Creation/build verbs must never be treated as a video-find request.
+    expect(isVideoRequest("build me a video streaming app")).toBe(false);
+    expect(isVideoRequest("create a video player component")).toBe(false);
+    expect(isVideoRequest("generate a video of a sunset")).toBe(false);
+    expect(isVideoRequest("how do video codecs work?")).toBe(false);
+    expect(isVideoRequest("what is the best video editing software")).toBe(false);
+    expect(isVideoRequest("explain how youtube's algorithm works")).toBe(false);
+  });
+
+  it("does NOT match statements that merely mention having a video (no request)", () => {
+    // These are the over-broad false positives the patterns must avoid: a user
+    // describing their own app/data, not asking Ora to find a video.
+    expect(isVideoRequest("I have a video editing bug")).toBe(false);
+    expect(isVideoRequest("I have a video player issue")).toBe(false);
+    expect(isVideoRequest("we have some videos in our app")).toBe(false);
+    expect(isVideoRequest("get the video player working")).toBe(false);
+    expect(isVideoRequest("do you support any video formats")).toBe(false);
+  });
+});
+
 // ─── routeOraMessage → search ─────────────────────────────────────────────────
+
+describe("routeOraMessage routes video requests to the search/media path", () => {
+  it("routes a video-find request to `search` with wantsVideos set", async () => {
+    const decision = await routeOraMessage({
+      message: "show me a video about composting",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("search");
+    expect(decision.wantsVideos).toBe(true);
+  });
+
+  it("routes video requests to search in deep mode too", async () => {
+    const decision = await routeOraMessage({
+      message: "find me a youtube video on sourdough",
+      mode: "deep",
+    });
+    expect(decision.tool).toBe("search");
+    expect(decision.wantsVideos).toBe(true);
+  });
+
+  it("does NOT set wantsVideos for an ordinary live-info search", async () => {
+    const decision = await routeOraMessage({
+      message: "what is the current bitcoin price",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("search");
+    expect(decision.wantsVideos).toBeUndefined();
+  });
+
+  it("does NOT route a 'build a video app' request to search", async () => {
+    const decision = await routeOraMessage({
+      message: "build me a video streaming app",
+      mode: "instant",
+      // Provide a classifier so the conversational fallback doesn't make a live
+      // AI call (this message intentionally falls through all fast-paths).
+      classifier: { intent: "builder_request", confidence: "high", topic: "general" },
+    });
+    expect(decision.tool).not.toBe("search");
+  });
+});
 
 describe("routeOraMessage picks the search tool for live-info questions", () => {
   it("routes a current-info question to `search` regardless of mode", async () => {

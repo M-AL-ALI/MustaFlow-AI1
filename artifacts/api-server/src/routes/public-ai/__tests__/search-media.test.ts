@@ -242,3 +242,23 @@ describe("buildInstructions personalization", () => {
     expect(out.indexOf("ora-media")).toBeLessThan(out.indexOf("what you already know"));
   });
 });
+
+describe("buildInstructions video intent", () => {
+  it("omits the video directive by default", () => {
+    const out = buildInstructions("auto");
+    expect(out).not.toContain("specifically asking for a video");
+  });
+
+  it("adds a strong video directive when wantsVideos is true", () => {
+    const out = buildInstructions("auto", undefined, true);
+    expect(out).toContain("specifically asking for a video");
+    // It must instruct the model to put videos in the array, not the prose.
+    expect(out).toContain('"videos" array');
+    expect(out).toContain("youtube.com/watch");
+  });
+
+  it("still requires the trailing ora-media block when asking for videos", () => {
+    const out = buildInstructions("auto", undefined, true);
+    expect(out).toContain("ora-media");
+  });
+});
