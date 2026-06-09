@@ -20,6 +20,7 @@ import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/au
 import type { Provider } from "../../lib/ai-providers";
 import {
   selectOraModelRoute,
+  runCandidateChain,
   type OraRouteTier,
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
@@ -1103,26 +1104,17 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const [mainResult, suggestionResult] = await Promise.allSettled([
     (async () => {
-      let lastErr: unknown = null;
-      for (let i = 0; i < candidates.length; i++) {
-        const candidate = candidates[i];
-        try {
-          const result = await createChatCompletion({
+      const chain = await runCandidateChain(
+        candidates,
+        (candidate) =>
+          createChatCompletion({
             provider: candidate.provider,
             model: candidate.model,
             messages: callMessages,
             response_format: { type: "text" },
             max_completion_tokens: maxTokens,
-          });
-          return {
-            reply: result.choices[0]?.message?.content?.trim() ?? null,
-            // "usedFallback" means we did not land on the first-choice provider.
-            usedFallback: i > 0,
-            modelUsed: candidate.model,
-            provider: candidate.provider,
-          };
-        } catch (candidateErr) {
-          lastErr = candidateErr;
+          }),
+        (candidate, i, candidateErr) =>
           logger.warn(
             {
               component: "ora-chat",
@@ -1133,10 +1125,15 @@ router.post("/public-ai/chat", async (req, res) => {
               err: candidateErr,
             },
             "Ora model candidate failed — trying next provider in fallback chain",
-          );
-        }
-      }
-      throw lastErr ?? new Error("All Ora model candidates failed");
+          ),
+      );
+      return {
+        reply: chain.result.choices[0]?.message?.content?.trim() ?? null,
+        // "usedFallback" means we did not land on the first-choice provider.
+        usedFallback: chain.usedFallback,
+        modelUsed: chain.candidate.model,
+        provider: chain.candidate.provider,
+      };
     })(),
     createChatCompletion({
       provider: "openai",

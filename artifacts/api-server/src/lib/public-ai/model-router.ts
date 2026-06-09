@@ -137,3 +137,44 @@ export function selectOraModelRoute(input: OraModelRouteInput): ModelCandidate[]
 
   return providers.map((provider) => ({ provider, model: modelFor(provider, input) }));
 }
+
+/** Outcome of a successful run through the candidate fallback chain. */
+export interface CandidateChainResult<T> {
+  /** The value returned by the attempt that succeeded. */
+  result: T;
+  /** The candidate (provider+model) that produced the successful result. */
+  candidate: ModelCandidate;
+  /** Zero-based index of the winning candidate in the chain. */
+  index: number;
+  /** True when the winner was not the first-choice provider (index > 0). */
+  usedFallback: boolean;
+}
+
+/**
+ * Iterate the ordered candidate chain, attempting each provider+model in turn
+ * until one succeeds. This is the runtime half of the smart router: the caller
+ * supplies an `attempt` callback (which wraps `createChatCompletion` for a given
+ * candidate) and an optional `onError` hook for logging each failed attempt.
+ *
+ * Returns the first successful result along with which candidate produced it and
+ * whether a fallback was used. If every candidate throws, the last error is
+ * re-thrown so the caller can surface a single failure to the user.
+ */
+export async function runCandidateChain<T>(
+  candidates: ModelCandidate[],
+  attempt: (candidate: ModelCandidate, index: number) => Promise<T>,
+  onError?: (candidate: ModelCandidate, index: number, err: unknown) => void,
+): Promise<CandidateChainResult<T>> {
+  let lastErr: unknown = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    try {
+      const result = await attempt(candidate, i);
+      return { result, candidate, index: i, usedFallback: i > 0 };
+    } catch (candidateErr) {
+      lastErr = candidateErr;
+      onError?.(candidate, i, candidateErr);
+    }
+  }
+  throw lastErr ?? new Error("All Ora model candidates failed");
+}
