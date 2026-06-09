@@ -98,6 +98,16 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).not.toContain('setPrConfirmationText("CREATE PR")');
   });
 
+  it("clears task-scoped state immediately on ORAX task switches", () => {
+    expect(oraxPage).toContain("const activeTaskIdRef = useRef<number | null>(null)");
+    expect(oraxPage).toContain("const switchedTasks = activeTaskIdRef.current !== selectedTask.id");
+    expect(oraxPage).toContain("activeTaskIdRef.current = selectedTask.id");
+    expect(collapse(oraxPage)).toContain(
+      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setReadResult(null); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setTaskMessageDraft(""); }',
+    );
+    expect(oraxPage).toContain("if (activeTaskIdRef.current !== taskId) return");
+  });
+
   it("mounts the authenticated /orax API prefix", () => {
     expect(routesIndex).toContain('"/orax"');
     expect(routesIndex).toContain("router.use(oraxRouter)");

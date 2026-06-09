@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import {
   ArrowLeft,
@@ -327,6 +327,7 @@ export default function OraxPage() {
   const [defaultBranch, setDefaultBranch] = useState("main");
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const activeTaskIdRef = useRef<number | null>(null);
   const [githubToken, setGithubToken] = useState("");
   const [scans, setScans] = useState<OraxScan[]>([]);
   const [taskKind, setTaskKind] = useState<(typeof TASK_KINDS)[number]["value"]>("analyze");
@@ -476,12 +477,16 @@ export default function OraxPage() {
         throw new Error("Could not load approvals");
       }
       const body = (await res.json()) as { approvals: OraxApproval[] };
+      if (activeTaskIdRef.current !== taskId) return;
       setApprovals(body.approvals);
     } catch (err) {
+      if (activeTaskIdRef.current !== taskId) return;
       setError(err instanceof Error ? err.message : "Could not load approvals");
       setApprovals([]);
     } finally {
-      setLoadingApprovals(false);
+      if (activeTaskIdRef.current === taskId) {
+        setLoadingApprovals(false);
+      }
     }
   }, []);
 
@@ -493,12 +498,16 @@ export default function OraxPage() {
         throw new Error("Could not load draft artifacts");
       }
       const body = (await res.json()) as { artifacts: OraxArtifact[] };
+      if (activeTaskIdRef.current !== taskId) return;
       setArtifacts(body.artifacts);
     } catch (err) {
+      if (activeTaskIdRef.current !== taskId) return;
       setError(err instanceof Error ? err.message : "Could not load draft artifacts");
       setArtifacts([]);
     } finally {
-      setLoadingArtifacts(false);
+      if (activeTaskIdRef.current === taskId) {
+        setLoadingArtifacts(false);
+      }
     }
   }, []);
 
@@ -510,26 +519,47 @@ export default function OraxPage() {
         throw new Error("Could not load task conversation");
       }
       const body = (await res.json()) as { messages: OraxTaskMessage[] };
+      if (activeTaskIdRef.current !== taskId) return;
       setTaskMessages(body.messages);
     } catch (err) {
+      if (activeTaskIdRef.current !== taskId) return;
       setError(err instanceof Error ? err.message : "Could not load task conversation");
       setTaskMessages([]);
     } finally {
-      setLoadingTaskMessages(false);
+      if (activeTaskIdRef.current === taskId) {
+        setLoadingTaskMessages(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     if (!selectedTask) {
+      activeTaskIdRef.current = null;
       setApprovals([]);
       setArtifacts([]);
       setTaskMessages([]);
       setReadResult(null);
+      setPendingSuggestionConfirmation(null);
+      setSuggestionPrConfirmationText("");
+      setTaskMessageDraft("");
+      setLoadingApprovals(false);
+      setLoadingArtifacts(false);
+      setLoadingTaskMessages(false);
       return;
     }
-    setReadResult(null);
-    setPendingSuggestionConfirmation(null);
-    setSuggestionPrConfirmationText("");
+    const switchedTasks = activeTaskIdRef.current !== selectedTask.id;
+    activeTaskIdRef.current = selectedTask.id;
+
+    if (switchedTasks) {
+      setApprovals([]);
+      setArtifacts([]);
+      setTaskMessages([]);
+      setReadResult(null);
+      setPendingSuggestionConfirmation(null);
+      setSuggestionPrConfirmationText("");
+      setTaskMessageDraft("");
+    }
+
     void loadApprovals(selectedTask.id);
     void loadArtifacts(selectedTask.id);
     void loadTaskMessages(selectedTask.id);
