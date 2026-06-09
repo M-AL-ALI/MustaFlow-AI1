@@ -123,14 +123,22 @@ export function openAiModelForOraRoute(routeTier: OraRouteTier, planTier: OraPla
 export function openAiModelForOraVision(planTier: OraPlanTier): string {
   if (planTier === "wave") {
     return (
-      envModel("ORA_WAVE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ??
-      "gpt-5.4"
+      envModel(
+        "ORA_WAVE_VISION_MODEL",
+        "ORA_VISION_MODEL",
+        "ORA_WAVE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-5.4"
     );
   }
   if (planTier === "core") {
     return (
-      envModel("ORA_CORE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ??
-      "gpt-5.4"
+      envModel(
+        "ORA_CORE_VISION_MODEL",
+        "ORA_VISION_MODEL",
+        "ORA_CORE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-5.4"
     );
   }
   return envModel("ORA_FREE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
