@@ -22,6 +22,7 @@ import {
   selectOraModelRoute,
   runCandidateChain,
   type OraRouteTier,
+  type OraPlanTier,
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
@@ -49,6 +50,52 @@ import {
 
 function oraMessageLimit(tier: string): number {
   return TIER_ORA_MESSAGE_LIMIT[tier as SubscriptionTier] ?? TIER_ORA_MESSAGE_LIMIT.free;
+}
+
+function oraPlanTier(authed: AuthedOraUser | null): OraPlanTier {
+  if (!authed) return "anonymous";
+  return authed.tier === "core" || authed.tier === "wave" ? authed.tier : "free";
+}
+
+function envModel(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+function openAiModelForOraRoute(routeTier: OraRouteTier, planTier: OraPlanTier): string {
+  if (routeTier === "fast") {
+    return envModel("ORA_FAST_MODEL") ?? "gpt-5-mini";
+  }
+
+  if (routeTier === "deep") {
+    if (planTier === "wave") {
+      return (
+        envModel("ORA_WAVE_DEEP_MODEL", "ORA_DEEP_MODEL", "ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ??
+        "gpt-5.4"
+      );
+    }
+    return (
+      envModel("ORA_CORE_DEEP_MODEL", "ORA_DEEP_MODEL", "ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ??
+      "gpt-5.4"
+    );
+  }
+
+  if (planTier === "wave") {
+    return envModel("ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+  }
+  if (planTier === "core") {
+    return envModel("ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+  }
+  return envModel("ORA_FREE_MODEL", "ORA_FAST_MODEL") ?? "gpt-5-mini";
+}
+
+function isNonEnglishLanguage(value: string | undefined): boolean {
+  if (!value || value === "auto") return false;
+  const primary = value.split(",")[0].trim().split("-")[0].toLowerCase();
+  return !!primary && primary !== "en";
 }
 
 /**
@@ -973,9 +1020,6 @@ router.post("/public-ai/chat", async (req, res) => {
     topic: decision.topic,
   };
 
-  const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
-  const deepModel = process.env.ORA_DEEP_MODEL ?? premiumModel;
-
   // Deep Thinking always uses the strongest model with a larger token budget so
   // the step-by-step reasoning has room to land. Otherwise fall back to the
   // mini model only when the classifier is highly confident this is a simple FAQ.
@@ -983,13 +1027,15 @@ router.post("/public-ai/chat", async (req, res) => {
     !deepAllowed &&
     classifierResult.intent === "simple_faq" &&
     classifierResult.confidence === "high";
-  const primaryModel = deepAllowed ? deepModel : usesMini ? "gpt-5-mini" : premiumModel;
-  const maxTokens = deepAllowed ? 2400 : usesMini ? 400 : 1200;
-
   // The routing tier mirrors the model/token dial above. `openaiModel` is the
   // env-aware OpenAI model the router uses verbatim for its OpenAI candidate.
   const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
-  const isMultilingual = !!language && language !== "auto" && !/^en/i.test(language);
+  const planTier = oraPlanTier(authed);
+  const primaryModel = openAiModelForOraRoute(routeTier, planTier);
+  const maxTokens = deepAllowed ? 2400 : usesMini ? 400 : 1200;
+  const isMultilingual =
+    isNonEnglishLanguage(language) ||
+    ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
 
   // Chat history is opt-out: when the user turns off "reference chat history"
   // in their memory settings, each message is treated as a fresh conversation.
@@ -1088,10 +1134,12 @@ router.post("/public-ai/chat", async (req, res) => {
   };
   const candidates: ModelCandidate[] = selectOraModelRoute({
     tier: routeTier,
+    subscriptionTier: planTier,
     topic: classifierResult.topic,
     intent: classifierResult.intent,
     confidence: classifierResult.confidence,
     multilingual: isMultilingual,
+    hasDocumentContext: carriedDocs.trim().length > 0,
     available,
     openCircuits,
     openaiModel: primaryModel,
@@ -1177,6 +1225,9 @@ router.post("/public-ai/chat", async (req, res) => {
       intent: classifierResult.intent,
       confidence: classifierResult.confidence,
       topic: classifierResult.topic,
+      routeTier,
+      planTier,
+      candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       latencyMs,
       usedFallback,
       maxTokens,
