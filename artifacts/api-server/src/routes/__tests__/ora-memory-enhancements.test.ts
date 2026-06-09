@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import express, { type Express } from "express";
 import request from "supertest";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, knowledgeEntriesTable, oraProjectsTable } from "@workspace/db";
 
 /**
