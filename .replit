@@ -163,6 +163,9 @@ SMTP_PORT = "587"
 SMTP_USER = "addebc001@smtp-brevo.com"
 SMTP_SECURE = "false"
 SUPPORT_EMAIL = "Mustafa_alali74@yahoo.com"
+STRIPE_PRICE_STARTER = "price_1Tae1ULqqLu7se88cTw00WRi"
+STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
+STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"
 
 [userenv.development]
 DEV_SLOW_BUILD_DELAY_MS = "30000"
@@ -172,9 +175,6 @@ AI_PROVIDER_PLAN = "anthropic:claude-sonnet-4-6"
 AI_PROVIDER_ARCHITECT = "anthropic:claude-opus-4-7"
 STRIPE_CORE_PRICE_ID = "price_1Tg8OsDCzx2AknNDNf4yt6va"
 STRIPE_WAVE_PRICE_ID = "price_1Tg8OsDCzx2AknNDwjgq8FXU"
-STRIPE_PRICE_STARTER = "price_1Tae1ULqqLu7se88cTw00WRi"
-STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
-STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"
 
 [userenv.production]
 AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
