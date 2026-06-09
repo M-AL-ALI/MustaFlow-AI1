@@ -264,6 +264,28 @@ type OraxFailureInfo = {
   rawMessage?: string;
 };
 
+type OraxThreadLifecycleItem =
+  | {
+      id: string;
+      source: "approval";
+      label: string;
+      title: string;
+      status: string;
+      description: string;
+      createdAt: string;
+      approval: OraxApproval;
+    }
+  | {
+      id: string;
+      source: "artifact";
+      label: string;
+      title: string;
+      status: string;
+      description: string;
+      createdAt: string;
+      artifact: OraxArtifact;
+    };
+
 type OraxCapabilities = {
   available: string[];
   lockedUntilApprovalLayer: string[];
@@ -422,6 +444,32 @@ export default function OraxPage() {
       : primaryThreadSuggestion
         ? primaryThreadSuggestion.title
         : (currentCheckpoint?.nextStep ?? "Ask ORAX what to inspect or approve next.");
+  const threadLifecycleItems = useMemo<OraxThreadLifecycleItem[]>(() => {
+    const approvalItems: OraxThreadLifecycleItem[] = approvals.map((approval) => ({
+      id: `approval-${approval.id}`,
+      source: "approval",
+      label: approval.status === "pending" ? "Approval requested" : "Approval decision",
+      title: formatOraxApprovalAction(approval.action),
+      status: approval.status,
+      description: describeOraxApprovalLifecycle(approval),
+      createdAt: approval.decidedAt ?? approval.completedAt ?? approval.createdAt,
+      approval,
+    }));
+    const artifactItems: OraxThreadLifecycleItem[] = artifacts.map((artifact) => ({
+      id: `artifact-${artifact.id}`,
+      source: "artifact",
+      label: formatOraxArtifactLifecycleLabel(artifact.type),
+      title: artifact.title,
+      status: artifact.status,
+      description: describeOraxArtifactLifecycle(artifact),
+      createdAt: artifact.updatedAt ?? artifact.createdAt,
+      artifact,
+    }));
+
+    return [...approvalItems, ...artifactItems]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 10);
+  }, [approvals, artifacts]);
   const commandFailureCount =
     latestCommandResult?.payload.commands?.filter((command) => command.status === "failed")
       .length ?? 0;
@@ -1763,6 +1811,207 @@ export default function OraxPage() {
                     </div>
                   ) : null}
 
+                  {threadLifecycleItems.length ? (
+                    <div className="mt-3 rounded-md border border-border bg-background p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase text-muted-foreground">
+                            Execution lifecycle
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Follow suggestions, approvals, file reads, patches, sandbox runs,
+                            checks, and PR results in the task thread. Every lifecycle action still
+                            uses the existing explicit approval buttons.
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                          {threadLifecycleItems.length} recent
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {threadLifecycleItems.map((item) => (
+                          <article
+                            key={item.id}
+                            className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase text-muted-foreground">
+                                  {item.label}
+                                </div>
+                                <div className="mt-1 font-medium text-foreground">{item.title}</div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {item.description}
+                                </p>
+                              </div>
+                              <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                                {item.status}
+                              </span>
+                            </div>
+                            {item.source === "approval" ? (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {item.approval.status === "pending" ? (
+                                  <>
+                                    <button
+                                      onClick={() =>
+                                        void decideApproval(item.approval.id, "approved")
+                                      }
+                                      disabled={decidingApprovalId === item.approval.id}
+                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                    >
+                                      <Check className="h-3.5 w-3.5" />
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        void decideApproval(item.approval.id, "denied")
+                                      }
+                                      disabled={decidingApprovalId === item.approval.id}
+                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                      Deny
+                                    </button>
+                                  </>
+                                ) : null}
+                                {item.approval.action === "read_files" &&
+                                item.approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void readApprovedFiles(item.approval.id)}
+                                    disabled={readingApprovalId === item.approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {readingApprovalId === item.approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <FileSearch className="h-3.5 w-3.5" />
+                                    )}
+                                    Read files
+                                  </button>
+                                ) : null}
+                                {item.approval.action === "read_files" &&
+                                ["approved", "completed"].includes(item.approval.status) ? (
+                                  <button
+                                    onClick={() => void generateDraftPatch(item.approval.id)}
+                                    disabled={generatingArtifactApprovalId === item.approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                  >
+                                    {generatingArtifactApprovalId === item.approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Code2 className="h-3.5 w-3.5" />
+                                    )}
+                                    Generate draft patch
+                                  </button>
+                                ) : null}
+                                {item.approval.action === "sandbox_run" &&
+                                item.approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void runSandboxValidation(item.approval.id)}
+                                    disabled={runningSandboxApprovalId === item.approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {runningSandboxApprovalId === item.approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Play className="h-3.5 w-3.5" />
+                                    )}
+                                    Run sandbox
+                                  </button>
+                                ) : null}
+                                {item.approval.action === "safe_check" &&
+                                item.approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void runControlledChecks(item.approval.id)}
+                                    disabled={runningCommandApprovalId === item.approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {runningCommandApprovalId === item.approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Terminal className="h-3.5 w-3.5" />
+                                    )}
+                                    Run checks
+                                  </button>
+                                ) : null}
+                                {item.approval.action === "github_pr" &&
+                                item.approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void createGithubPr(item.approval.id)}
+                                    disabled={creatingPrApprovalId === item.approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {creatingPrApprovalId === item.approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <GitPullRequest className="h-3.5 w-3.5" />
+                                    )}
+                                    Create PR
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {item.artifact.type === "draft_patch" &&
+                                item.artifact.payload.unifiedDiff?.trim() ? (
+                                  <button
+                                    onClick={() => void requestSandboxApproval(item.artifact.id)}
+                                    disabled={
+                                      requestingSandboxApprovalArtifactId === item.artifact.id
+                                    }
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                  >
+                                    {requestingSandboxApprovalArtifactId === item.artifact.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <ShieldCheck className="h-3.5 w-3.5" />
+                                    )}
+                                    Request sandbox approval
+                                  </button>
+                                ) : null}
+                                {item.artifact.type === "sandbox_result" &&
+                                item.artifact.payload.applied ? (
+                                  <button
+                                    onClick={() => void requestCommandApproval(item.artifact.id)}
+                                    disabled={
+                                      requestingCommandApprovalArtifactId === item.artifact.id ||
+                                      selectedCommandIds.length === 0
+                                    }
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                  >
+                                    {requestingCommandApprovalArtifactId === item.artifact.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Terminal className="h-3.5 w-3.5" />
+                                    )}
+                                    Request checks
+                                  </button>
+                                ) : null}
+                                {item.artifact.type === "command_result" &&
+                                item.artifact.payload.passed === true ? (
+                                  <span className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                    Type CREATE PR in Workflow controls to request PR approval.
+                                  </span>
+                                ) : null}
+                                {item.artifact.payload.pullRequestUrl ? (
+                                  <a
+                                    href={item.artifact.payload.pullRequestUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted"
+                                  >
+                                    <GitPullRequest className="h-3.5 w-3.5" />
+                                    Open PR
+                                  </a>
+                                ) : null}
+                              </div>
+                            )}
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mt-3 max-h-72 space-y-2 overflow-auto rounded-md border border-border bg-background p-3">
                     {taskMessages.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
@@ -2691,6 +2940,89 @@ export default function OraxPage() {
       </main>
     </div>
   );
+}
+
+function formatOraxApprovalAction(action: string): string {
+  switch (action) {
+    case "read_files":
+      return "File-read approval";
+    case "sandbox_run":
+      return "Sandbox approval";
+    case "safe_check":
+      return "Controlled-check approval";
+    case "github_pr":
+      return "GitHub PR approval";
+    default:
+      return action.replace(/_/g, " ");
+  }
+}
+
+function formatOraxArtifactLifecycleLabel(type: string): string {
+  switch (type) {
+    case "draft_patch":
+      return "Draft patch generated";
+    case "sandbox_result":
+      return "Sandbox result";
+    case "command_result":
+      return "Controlled checks result";
+    case "github_pr_result":
+      return "Pull request result";
+    default:
+      return "Workflow result";
+  }
+}
+
+function describeOraxApprovalLifecycle(approval: OraxApproval): string {
+  if (approval.action === "read_files") {
+    const files = approval.request.paths?.length
+      ? approval.request.paths.join(", ")
+      : "selected files";
+    if (approval.status === "completed" && approval.result?.files?.length) {
+      return `Files read: ${approval.result.files.length}; total ${formatBytes(
+        approval.result.totalBytes ?? 0,
+      )}.`;
+    }
+    return `Requested source access for ${files}.`;
+  }
+  if (approval.action === "sandbox_run") {
+    return `Sandbox validation request for artifact #${approval.request.artifactId ?? "unknown"}.`;
+  }
+  if (approval.action === "safe_check") {
+    return approval.request.scope ?? "Controlled workspace checks require explicit approval.";
+  }
+  if (approval.action === "github_pr") {
+    if (approval.result?.pullRequestUrl) {
+      return `Pull request created: ${approval.result.pullRequestUrl}`;
+    }
+    return "GitHub PR creation requires completed checks and explicit CREATE PR confirmation.";
+  }
+  return approval.riskSummary ?? "Approval-gated ORAX workflow step.";
+}
+
+function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
+  if (artifact.type === "draft_patch") {
+    return artifact.summary ?? "Review-only patch preview generated from approved source files.";
+  }
+  if (artifact.type === "sandbox_result") {
+    const changedFiles = artifact.payload.changedFiles?.length ?? 0;
+    return artifact.payload.applied
+      ? `Sandbox applied the patch preview to ${changedFiles} file${changedFiles === 1 ? "" : "s"}.`
+      : "Sandbox could not apply the patch preview. Review the blocker before continuing.";
+  }
+  if (artifact.type === "command_result") {
+    const passed =
+      artifact.payload.commands?.filter((command) => command.status === "passed").length ?? 0;
+    const failed =
+      artifact.payload.commands?.filter((command) => command.status === "failed").length ?? 0;
+    return `Controlled checks completed: ${passed} passed, ${failed} failed.`;
+  }
+  if (artifact.type === "github_pr_result") {
+    if (artifact.payload.pullRequestUrl) {
+      return `Pull request created on ${artifact.payload.branchName ?? "the ORAX branch"}.`;
+    }
+    return artifact.payload.error?.message ?? "GitHub PR result recorded.";
+  }
+  return artifact.summary ?? "ORAX workflow artifact recorded.";
 }
 
 function Metric({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {

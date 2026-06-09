@@ -74,6 +74,16 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Explain approval");
     expect(oraxPage).toContain("Summarize result");
     expect(oraxPage).toContain("Latest execution result");
+    expect(oraxPage).toContain("threadLifecycleItems");
+    expect(oraxPage).toContain("Execution lifecycle");
+    expect(oraxPage).toContain("Approval requested");
+    expect(oraxPage).toContain("Draft patch generated");
+    expect(oraxPage).toContain("Sandbox result");
+    expect(oraxPage).toContain("Controlled checks result");
+    expect(oraxPage).toContain("Pull request result");
+    expect(oraxPage).toContain("Every lifecycle action still");
+    expect(oraxPage).toContain("uses the existing explicit approval buttons");
+    expect(oraxPage).toContain("Type CREATE PR in Workflow controls to request PR approval");
     expect(oraxPage).toContain("stored separately from Ora chat and");
     expect(oraxPage).toContain('message.role === "system" || message.role === "tool"');
     expect(oraxPage).toContain("Timeline");
