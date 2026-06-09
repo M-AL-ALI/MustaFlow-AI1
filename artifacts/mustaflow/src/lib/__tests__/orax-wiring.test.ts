@@ -32,7 +32,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/repositories/${selectedRepository.id}/scan");
     expect(oraxPage).toContain("/api/orax/tasks");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/messages");
-    expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/messages");
+    expect(oraxPage).toContain("appendTaskMessage(selectedTask.id, content)");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/artifacts");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/draft-patch");
@@ -43,6 +43,11 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain('"pnpm-test"');
     expect(oraxPage).toContain('"pnpm-build"');
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
+    expect(oraxPage).toContain("Start ORAX chat");
+    expect(oraxPage).toContain("appendTaskMessage");
+    expect(oraxPage).toContain("createTask({ startThread: true })");
+    expect(oraxPage).toContain("The first message becomes the task prompt");
+    expect(oraxPage).toContain("normal Ora history or AI Builder");
     expect(oraxPage).toContain('confirmationText: "CREATE PR"');
     expect(oraxPage).toContain("Type CREATE PR to enable approval");
     expect(oraxPage).toContain("ArtifactTrace");
