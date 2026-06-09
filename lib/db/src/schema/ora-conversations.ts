@@ -43,6 +43,15 @@ export const oraConversationsTable = pgTable(
     title: text("title"),
     surface: text("surface").notNull().default("normal"),
     messages: jsonb("messages").notNull().default([]),
+    // Rolling, model-generated gist of this conversation. Persisted (best-effort,
+    // throttled) on message save and read back by Ora's cross-conversation recall
+    // so a fact mentioned in one conversation can surface in another. Null until
+    // the conversation has enough turns to summarise.
+    summary: text("summary"),
+    // Number of (non-empty) turns reflected in `summary` — used to throttle
+    // re-summarisation (only regenerate once enough new turns accumulate).
+    summaryMsgCount: integer("summary_msg_count").notNull().default(0),
+    summaryUpdatedAt: timestamp("summary_updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),

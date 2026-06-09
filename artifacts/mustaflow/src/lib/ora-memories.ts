@@ -75,6 +75,17 @@ export interface CreateOraMemoryResult {
   superseded: SupersededMemory[];
 }
 
+/** Thrown when a save is rejected because the user is at their memory cap. */
+export class MemoryFullError extends Error {
+  readonly code = "memory_full";
+  readonly limit?: number;
+  constructor(message: string, limit?: number) {
+    super(message);
+    this.name = "MemoryFullError";
+    this.limit = limit;
+  }
+}
+
 export async function createOraMemory(patch: {
   title: string;
   content?: string;
@@ -86,9 +97,35 @@ export async function createOraMemory(patch: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`Failed to create memory (${res.status})`);
+  if (!res.ok) {
+    // Surface the capacity limit as a typed error so callers can show a clear
+    // "memory full" message instead of a generic failure.
+    if (res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string; limit?: number };
+      throw new MemoryFullError(
+        data.error ?? "You've reached your saved-memory limit.",
+        data.limit,
+      );
+    }
+    throw new Error(`Failed to create memory (${res.status})`);
+  }
   const data = (await res.json()) as { memory: OraMemory; superseded?: SupersededMemory[] };
   return { memory: data.memory, superseded: data.superseded ?? [] };
+}
+
+export interface OraMemoryUsage {
+  count: number;
+  limit: number;
+}
+
+/** Shared React Query key for the memory capacity meter. */
+export const ORA_MEMORY_USAGE_QUERY_KEY = ["ora-memory-usage"] as const;
+
+/** Fetch how many memories the user has saved against their cap. */
+export async function fetchOraMemoryUsage(): Promise<OraMemoryUsage> {
+  const res = await authFetch(`${BASE}/api/ora/memories/usage`);
+  if (!res.ok) throw new Error(`Failed to load memory usage (${res.status})`);
+  return (await res.json()) as OraMemoryUsage;
 }
 
 export async function updateOraMemory(

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, desc, isNull, inArray, ne } from "drizzle-orm";
+import { and, eq, desc, isNull, inArray, ne, sql } from "drizzle-orm";
 import {
   db,
   knowledgeEntriesTable,
@@ -53,6 +53,25 @@ const memoryColumns = {
 
 const MAX_TITLE = 200;
 const MAX_CONTENT = 4000;
+
+/**
+ * Maximum number of saved Ora memories per user (across all tiers — user-level
+ * plus every project). Configurable via ORA_MEMORY_MAX; defaults to 200. Once a
+ * user is at the cap, new saves are rejected with 409 until they delete some.
+ */
+const ORA_MEMORY_LIMIT = (() => {
+  const parsed = parseInt(process.env.ORA_MEMORY_MAX ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
+})();
+
+/** Count the user's active (non-archived) Ora memories across all tiers. */
+async function countOraMemories(userId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(knowledgeEntriesTable)
+    .where(baseScope(userId));
+  return row?.count ?? 0;
+}
 
 const categoryEnum = z.enum(ORA_MEMORY_CATEGORIES);
 
@@ -115,6 +134,19 @@ router.get("/ora/memories", async (req, res) => {
   }
 });
 
+// Report how many memories the user has saved against their cap, so the Memory
+// Center can render a capacity meter and warn as the user approaches the limit.
+router.get("/ora/memories/usage", async (req, res) => {
+  const userId = req.userId!;
+  try {
+    const count = await countOraMemories(userId);
+    res.json({ count, limit: ORA_MEMORY_LIMIT });
+  } catch (err) {
+    logger.error({ component: "ora-memories", err }, "Failed to load memory usage");
+    res.status(500).json({ error: "Failed to load memory usage" });
+  }
+});
+
 const createMemorySchema = z.object({
   title: z.string().trim().min(1).max(MAX_TITLE),
   content: z.string().trim().max(MAX_CONTENT).optional(),
@@ -145,23 +177,46 @@ router.post("/ora/memories", async (req, res) => {
     const category =
       parsed.data.category ??
       classifyOraMemoryCategory(parsed.data.title, parsed.data.content ?? "");
-    const [row] = await db
-      .insert(knowledgeEntriesTable)
-      .values({
-        title,
-        content,
-        type: "note",
-        category,
-        severity: "info",
-        scope: "user",
-        origin: "ora",
-        userId,
-        projectId: null,
-        oraProjectId,
-        enabled: true,
-        approvedForReuse: false,
-      })
-      .returning(memoryColumns);
+
+    // Capacity guard + insert run atomically under a per-user advisory lock so
+    // concurrent saves can't both pass the count check and overshoot the cap.
+    // A null result means the user is at their memory limit; the client surfaces
+    // it as a clear "memory full" message pointing at the Memory Center.
+    const row = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId})::bigint)`);
+      const [c] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(knowledgeEntriesTable)
+        .where(baseScope(userId));
+      if ((c?.count ?? 0) >= ORA_MEMORY_LIMIT) return null;
+      const [inserted] = await tx
+        .insert(knowledgeEntriesTable)
+        .values({
+          title,
+          content,
+          type: "note",
+          category,
+          severity: "info",
+          scope: "user",
+          origin: "ora",
+          userId,
+          projectId: null,
+          oraProjectId,
+          enabled: true,
+          approvedForReuse: false,
+        })
+        .returning(memoryColumns);
+      return inserted;
+    });
+
+    if (!row) {
+      res.status(409).json({
+        error: `You've reached your saved-memory limit (${ORA_MEMORY_LIMIT}). Delete some memories to save new ones.`,
+        code: "memory_full",
+        limit: ORA_MEMORY_LIMIT,
+      });
+      return;
+    }
 
     // Consolidation: when the new fact overlaps earlier active memories (a
     // contradicting update like "dark mode" → "light mode"), supersede those

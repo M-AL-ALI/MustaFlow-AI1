@@ -30,12 +30,13 @@ import {
 } from "../../lib/public-ai/model-router";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
-import { eq, and, isNull, desc, sql } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import {
   db,
   knowledgeEntriesTable,
   oraProfilesTable,
   oraProjectsTable,
+  oraConversationsTable,
   generatedImagesTable,
   TIER_ORA_MESSAGE_LIMIT,
   type SubscriptionTier,
@@ -321,42 +322,52 @@ export async function buildMemoryContext(
   currentMessage?: string,
 ): Promise<MemoryContextResult> {
   try {
-    // User-level memories apply to EVERY Ora chat (standalone or in a project).
-    const userRows = await db
-      .select({
-        id: knowledgeEntriesTable.id,
-        title: knowledgeEntriesTable.title,
-        content: knowledgeEntriesTable.content,
-        category: knowledgeEntriesTable.category,
-        embedding: knowledgeEntriesTable.embedding,
-        createdAt: knowledgeEntriesTable.createdAt,
-      })
-      .from(knowledgeEntriesTable)
-      .where(
-        and(
-          eq(knowledgeEntriesTable.userId, userId),
-          eq(knowledgeEntriesTable.scope, "user"),
-          eq(knowledgeEntriesTable.origin, "ora"),
-          // Respect the Memory Center "pause" toggle: paused memories are kept
-          // but excluded from Ora's context.
-          eq(knowledgeEntriesTable.enabled, true),
-          // Consolidation: never inject a memory that a newer fact superseded —
-          // only the current version of a fact reaches Ora's context.
-          isNull(knowledgeEntriesTable.supersededBy),
-          isNull(knowledgeEntriesTable.archivedAt),
-          // User-level only — project memories are pulled separately below.
-          isNull(knowledgeEntriesTable.oraProjectId),
-        ),
-      )
-      .orderBy(desc(knowledgeEntriesTable.createdAt))
-      .limit(ORA_MEMORY_CANDIDATE_LIMIT);
+    // ISOLATION (project vs general): a project chat sees ONLY that project's
+    // memories; a standalone chat sees ONLY user-level memories. The two tiers
+    // are never mixed — a project's context must not leak general facts, and a
+    // general chat must not surface project-specific facts.
+    const isProjectChat = typeof oraProjectId === "number";
+
+    // User-level memories apply to standalone (non-project) chats only. We skip
+    // this query entirely inside a project chat so isolation is enforced.
+    let userRows: OraMemoryRow[] = [];
+    if (!isProjectChat) {
+      userRows = await db
+        .select({
+          id: knowledgeEntriesTable.id,
+          title: knowledgeEntriesTable.title,
+          content: knowledgeEntriesTable.content,
+          category: knowledgeEntriesTable.category,
+          embedding: knowledgeEntriesTable.embedding,
+          createdAt: knowledgeEntriesTable.createdAt,
+        })
+        .from(knowledgeEntriesTable)
+        .where(
+          and(
+            eq(knowledgeEntriesTable.userId, userId),
+            eq(knowledgeEntriesTable.scope, "user"),
+            eq(knowledgeEntriesTable.origin, "ora"),
+            // Respect the Memory Center "pause" toggle: paused memories are kept
+            // but excluded from Ora's context.
+            eq(knowledgeEntriesTable.enabled, true),
+            // Consolidation: never inject a memory that a newer fact superseded —
+            // only the current version of a fact reaches Ora's context.
+            isNull(knowledgeEntriesTable.supersededBy),
+            isNull(knowledgeEntriesTable.archivedAt),
+            // User-level only — project memories are pulled separately below.
+            isNull(knowledgeEntriesTable.oraProjectId),
+          ),
+        )
+        .orderBy(desc(knowledgeEntriesTable.createdAt))
+        .limit(ORA_MEMORY_CANDIDATE_LIMIT);
+    }
 
     // Project memories persist across every conversation in an Ora project, but
     // only when the caller actually owns the (non-archived) project. They must
     // also exclude superseded entries so only the current version of a fact is
     // injected, matching the user-level query above.
     let projectRows: OraMemoryRow[] = [];
-    if (typeof oraProjectId === "number") {
+    if (isProjectChat) {
       const [owned] = await db
         .select({ id: oraProjectsTable.id })
         .from(oraProjectsTable)
@@ -395,10 +406,10 @@ export async function buildMemoryContext(
       }
     }
 
-    // Combine project + user-level memories into one candidate pool, then apply
-    // the Builder-style semantic/TF-IDF ranker so only pertinent memories surface
-    // within the budget. Project memories are listed first as a light tiebreak.
-    const pool = [...projectRows, ...userRows];
+    // Single-tier candidate pool (project chat → project memories only; general
+    // chat → user-level only), then apply the Builder-style semantic/TF-IDF
+    // ranker so only pertinent memories surface within the budget.
+    const pool = isProjectChat ? projectRows : userRows;
     if (pool.length === 0) return { text: "", used: [] };
 
     const selected =
@@ -422,6 +433,117 @@ export async function buildMemoryContext(
   } catch {
     // Memory injection is best-effort — never block a reply on it.
     return { text: "", used: [] };
+  }
+}
+
+/** Max OTHER conversations whose summaries we consider for recall. */
+const CROSS_CONV_CANDIDATE_LIMIT = 25;
+/** How many past-conversation summaries actually get injected. */
+const CROSS_CONV_MAX = 3;
+/** Total character budget for the injected cross-conversation block. */
+const CROSS_CONV_CHAR_BUDGET = 1400;
+/** Per-summary excerpt cap so one long summary can't dominate the budget. */
+const CROSS_CONV_EXCERPT_CHARS = 500;
+
+/**
+ * Cross-conversation recall: pull the rolling summaries of the user's OTHER Ora
+ * conversations in the SAME tier as the current chat and surface the few most
+ * relevant ones, so a fact mentioned in conversation A can be recalled in a new
+ * conversation B.
+ *
+ * ISOLATION (mirrors buildMemoryContext): a project chat recalls only summaries
+ * of OTHER conversations in that SAME project; a general (standalone) chat
+ * recalls only other general conversations. The two tiers never cross.
+ *
+ * Best-effort: returns an empty string on any error and never blocks the reply.
+ * Callers gate this on `referenceChatHistory` being on and the chat NOT being
+ * temporary.
+ */
+async function buildCrossConversationContext(
+  userId: string,
+  oraProjectId: number | null | undefined,
+  currentMessage: string,
+  currentConversationId: number | null | undefined,
+): Promise<string> {
+  try {
+    const isProjectChat = typeof oraProjectId === "number";
+
+    const rows = await db
+      .select({
+        id: oraConversationsTable.id,
+        title: oraConversationsTable.title,
+        summary: oraConversationsTable.summary,
+        lastMessageAt: oraConversationsTable.lastMessageAt,
+      })
+      .from(oraConversationsTable)
+      .where(
+        and(
+          eq(oraConversationsTable.userId, userId),
+          eq(oraConversationsTable.surface, "normal"),
+          isNull(oraConversationsTable.archivedAt),
+          isNotNull(oraConversationsTable.summary),
+          // Tier isolation: same project, or general-only when not in a project.
+          isProjectChat
+            ? eq(oraConversationsTable.projectId, oraProjectId)
+            : isNull(oraConversationsTable.projectId),
+          // Exclude the conversation we're currently in (its own context is
+          // already provided by the in-session messages + rolling summary).
+          typeof currentConversationId === "number"
+            ? ne(oraConversationsTable.id, currentConversationId)
+            : undefined,
+        ),
+      )
+      .orderBy(desc(oraConversationsTable.lastMessageAt))
+      .limit(CROSS_CONV_CANDIDATE_LIMIT);
+
+    const candidates = rows.filter((r) => (r.summary ?? "").trim().length > 0);
+    if (candidates.length === 0) return "";
+
+    // Rank by keyword overlap with the current message, with a light recency
+    // tiebreak so a recent-but-equally-relevant chat wins. No embeddings here —
+    // summaries are long-form and TF-IDF overlap is sufficient + cheap.
+    const promptTokens = new Set(tokeniseMemory(currentMessage));
+    const now = Date.now();
+    const SEVEN_DAYS_MS = 7 * 86_400_000;
+    const scored = candidates
+      .map((r) => {
+        const toks = tokeniseMemory(`${r.title ?? ""} ${r.summary ?? ""}`);
+        let overlap = 0;
+        const seen = new Set<string>();
+        for (const t of toks) {
+          if (promptTokens.has(t) && !seen.has(t)) {
+            overlap++;
+            seen.add(t);
+          }
+        }
+        const ageMs = now - new Date(r.lastMessageAt).getTime();
+        const recency = Math.max(0, 1 - ageMs / SEVEN_DAYS_MS); // 0..1 over a week
+        return { row: r, score: overlap + recency * 0.5 };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    // Require at least some keyword signal: if nothing overlaps the current
+    // message, don't inject stale unrelated chatter.
+    const relevant = scored.filter((s) => s.score > 0.5);
+    if (relevant.length === 0) return "";
+
+    const picked: string[] = [];
+    let chars = 0;
+    for (const { row } of relevant) {
+      if (picked.length >= CROSS_CONV_MAX) break;
+      const excerpt = (row.summary ?? "").trim().slice(0, CROSS_CONV_EXCERPT_CHARS);
+      const label = (row.title ?? "").trim() || "Earlier conversation";
+      const line = `- ${label}: ${excerpt}`;
+      if (picked.length > 0 && chars + line.length > CROSS_CONV_CHAR_BUDGET) break;
+      picked.push(line);
+      chars += line.length;
+    }
+    if (picked.length === 0) return "";
+
+    return `\n\n## From your past conversations\nRelevant context from the user's OTHER recent conversations with you. Use it when it helps, but defer to anything in the current conversation:\n${picked.join("\n")}`;
+  } catch {
+    // Best-effort — never block a reply on cross-conversation recall.
+    return "";
   }
 }
 
@@ -506,6 +628,20 @@ const bodySchema = z.object({
    * user-level ones. Standalone chats omit it and only get user-level memory.
    */
   oraProjectId: z.number().int().positive().nullable().optional(),
+  /**
+   * Temporary ("incognito") chat. When true, Ora neither READS long-term memory
+   * (saved memories + cross-conversation recall) nor WRITES it: no memory inject,
+   * no cross-conversation recall, and no memory-save candidate is surfaced. The
+   * current in-session messages still provide context. The client also skips
+   * persisting a temporary conversation entirely.
+   */
+  temporary: z.boolean().default(false),
+  /**
+   * The id of the conversation this turn belongs to (when it has been persisted).
+   * Used by cross-conversation recall to EXCLUDE the current conversation from the
+   * "past conversations" it pulls in. Null/omitted for a brand-new chat.
+   */
+  conversationId: z.number().int().positive().nullable().optional(),
 });
 
 /**
@@ -595,6 +731,8 @@ router.post("/public-ai/chat", async (req, res) => {
     conversationSummary: priorSummary,
     summarizeMessages,
     oraProjectId,
+    temporary,
+    conversationId,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -969,8 +1107,9 @@ router.post("/public-ai/chat", async (req, res) => {
     // Mirrors the conversational branch: profile is always applied for signed-in
     // users; saved memories respect the referenceSavedMemories opt-out toggle.
     const searchProfileContext = authed ? await buildProfileContext(authed.userId) : "";
+    // Temporary ("incognito") chats never read long-term saved memories.
     const searchMemory =
-      authed && referenceSavedMemories
+      authed && referenceSavedMemories && !temporary
         ? await buildMemoryContext(authed.userId, oraProjectId, message)
         : { text: "", used: [] };
     const searchPersonalContext = searchProfileContext + searchMemory.text;
@@ -1033,11 +1172,21 @@ router.post("/public-ai/chat", async (req, res) => {
       ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
       : [];
 
-  // Saved memories are opt-out and only available to signed-in users.
+  // Saved memories are opt-out and only available to signed-in users. Temporary
+  // ("incognito") chats never read long-term memory.
   const memory =
-    authed && referenceSavedMemories
+    authed && referenceSavedMemories && !temporary
       ? await buildMemoryContext(authed.userId, oraProjectId, message)
       : { text: "", used: [] };
+
+  // Cross-conversation recall: pull relevant gist from the user's OTHER recent
+  // conversations (same tier per isolation). Gated on chat-history being on and
+  // the chat NOT being temporary — and only for signed-in users (anonymous
+  // sessions have no persisted conversations to recall from).
+  const crossConvContext =
+    authed && referenceChatHistory && !temporary
+      ? await buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
+      : "";
 
   // The Ora profile ("About you") is custom instructions — always applied for
   // signed-in users when present, independent of the saved-memories toggle.
@@ -1065,6 +1214,7 @@ router.post("/public-ai/chat", async (req, res) => {
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
     profileContext +
     memory.text +
+    crossConvContext +
     summaryContext;
 
   const callMessages = [
@@ -1255,7 +1405,10 @@ router.post("/public-ai/chat", async (req, res) => {
   // extraction catches durable facts phrased outside the fixed regex patterns
   // and avoids offering to save transient chatter; it fails safe to the regex
   // detector and never throws.
-  const memoryCandidate = authed ? await extractMemorySaveCandidate(message) : null;
+  // Temporary ("incognito") chats never surface a memory-save candidate, so the
+  // client has nothing to persist.
+  const memoryCandidate =
+    authed && !temporary ? await extractMemorySaveCandidate(message) : null;
   const usage = await oraUsageResponse(authed, payload.msgCount);
 
   res.json({

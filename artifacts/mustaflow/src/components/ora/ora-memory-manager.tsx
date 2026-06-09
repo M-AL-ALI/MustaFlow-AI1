@@ -11,9 +11,11 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   fetchOraMemories,
+  fetchOraMemoryUsage,
   updateOraMemory,
   deleteOraMemory,
   type OraMemory,
+  type OraMemoryUsage,
 } from "@/lib/ora-memories";
 import {
   getReferenceSavedMemories,
@@ -22,6 +24,7 @@ import {
   setAutoSaveMemories,
 } from "@/lib/ora-memory-settings";
 import { ORA_MEMORY_CATEGORY_LABELS, normalizeOraMemoryCategory } from "@/lib/ora-memories";
+import { cn } from "@/lib/utils";
 
 /**
  * In-chat memory manager. Lets the user review and delete their saved Ora
@@ -34,6 +37,43 @@ import { ORA_MEMORY_CATEGORY_LABELS, normalizeOraMemoryCategory } from "@/lib/or
  * `oraProjectId` is supplied, this also surfaces that project's persistent
  * memories in a dedicated section alongside the user-level ones.
  */
+/**
+ * Capacity meter for saved memories. Turns amber when nearing the cap (>=80%)
+ * and red when full, so the user understands why new saves may be blocked.
+ */
+function MemoryUsageMeter({ count, limit }: { count: number; limit: number }) {
+  const pct = Math.min(100, Math.round((count / limit) * 100));
+  const full = count >= limit;
+  const near = !full && pct >= 80;
+  const barColor = full
+    ? "bg-destructive"
+    : near
+      ? "bg-amber-500"
+      : "bg-[hsl(265_85%_65%)]";
+  return (
+    <div className="rounded-lg border border-border/60 px-3 py-2.5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-foreground">Memory capacity</p>
+        <p className="text-xs font-medium text-muted-foreground tabular-nums">
+          {count} / {limit}
+        </p>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${pct}%` }} />
+      </div>
+      {full ? (
+        <p className="mt-1.5 text-xs text-destructive">
+          You've reached your memory limit. Forget a memory to save new ones.
+        </p>
+      ) : near ? (
+        <p className="mt-1.5 text-xs text-amber-500">
+          You're nearing your memory limit. Consider forgetting old memories.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function OraMemoryManager({
   open,
   onOpenChange,
@@ -52,6 +92,7 @@ export function OraMemoryManager({
 
   const [userMemories, setUserMemories] = useState<OraMemory[]>([]);
   const [projectMemories, setProjectMemories] = useState<OraMemory[]>([]);
+  const [usage, setUsage] = useState<OraMemoryUsage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // Mirror the persisted toggles in local state so the switches react instantly.
@@ -61,14 +102,16 @@ export function OraMemoryManager({
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [u, p] = await Promise.all([
+      const [u, p, usageRes] = await Promise.all([
         fetchOraMemories(),
         typeof oraProjectId === "number"
           ? fetchOraMemories(oraProjectId)
           : Promise.resolve([] as OraMemory[]),
+        fetchOraMemoryUsage().catch(() => null),
       ]);
       setUserMemories(u);
       setProjectMemories(p);
+      setUsage(usageRes);
     } catch {
       toast({ title: "Failed to load memories", variant: "destructive" });
     } finally {
@@ -256,9 +299,9 @@ export function OraMemoryManager({
 
           <div className="flex items-start justify-between gap-3 rounded-lg border border-border/60 px-3 py-2.5">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground">Auto-save clear memories</p>
+              <p className="text-sm font-medium text-foreground">Auto-save memories</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Automatically save facts when you explicitly ask Ora to remember them.
+                Automatically save durable facts Ora detects. Sensitive details still ask first.
               </p>
             </div>
             <Switch
@@ -267,6 +310,10 @@ export function OraMemoryManager({
               onCheckedChange={handleAutoSaveToggle}
             />
           </div>
+
+          {usage && usage.limit > 0 && (
+            <MemoryUsageMeter count={usage.count} limit={usage.limit} />
+          )}
         </div>
 
         {isLoading ? (

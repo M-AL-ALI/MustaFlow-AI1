@@ -33,13 +33,15 @@ export function setReferenceChatHistory(value: boolean): void {
   window.localStorage.setItem(CHAT_HISTORY_KEY, String(value));
 }
 
-// When enabled, high-confidence memory candidates (the user explicitly said
-// "remember that…") are saved automatically without an extra click. Defaults to
-// off so saving stays an opt-in, deliberate action. Auto-save additionally
-// requires reference-saved-memories to be on, since saving is pointless if Ora
-// will never read the memory back.
+// When enabled (the default), durable, non-sensitive memory candidates Ora
+// detects are saved automatically without an extra click — so useful facts are
+// captured by default instead of relying on the user to press "save". Sensitive
+// candidates are still gated by the ask-before-sensitive safeguard, and the
+// whole behavior can be turned off. Auto-save additionally requires
+// reference-saved-memories to be on, since saving is pointless if Ora will never
+// read the memory back.
 export function getAutoSaveMemories(): boolean {
-  return readBool(AUTO_SAVE_MEMORIES_KEY, false);
+  return readBool(AUTO_SAVE_MEMORIES_KEY, true);
 }
 
 export function setAutoSaveMemories(value: boolean): void {

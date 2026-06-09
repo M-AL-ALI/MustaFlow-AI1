@@ -178,6 +178,10 @@ export interface UseOraChatReturn {
   dismissSessionExpired: () => void;
   markMemorySaved: (candidate: string, content: string, supersededTitles?: string[]) => void;
   markDocumentMemorySaved: (fileRef: string) => void;
+  /** Whether the current session is a temporary ("incognito") chat. */
+  temporary: boolean;
+  /** Toggle temporary mode; always resets to a clean conversation. */
+  setTemporary: (value: boolean) => void;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -496,6 +500,13 @@ export function useOraChat(): UseOraChatReturn {
   const [pendingImageAnalysis, setPendingImageAnalysis] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [mode, setModeState] = useState<OraMode>(getStoredMode);
+  // Temporary ("incognito") chat: when on, this session reads/writes zero
+  // long-term memory and is never persisted to the conversation store. Kept in a
+  // ref too so the debounced saver and the request body can read the latest
+  // value without being in their dependency arrays.
+  const [temporary, setTemporaryState] = useState(false);
+  const temporaryRef = useRef(false);
+  temporaryRef.current = temporary;
 
   // Conversation context is present only on the standalone /ora page (signed-in,
   // per-conversation persistence). On the public landing trial the provider is
@@ -594,6 +605,12 @@ export function useOraChat(): UseOraChatReturn {
 
   const saveToServer = useCallback(
     (msgs: OraMessage[]) => {
+      // Temporary ("incognito") chats are never persisted — drop the save and
+      // cancel any pending one entirely.
+      if (temporaryRef.current) {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        return;
+      }
       editGenRef.current += 1;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const c = convRef.current;
@@ -759,6 +776,18 @@ export function useOraChat(): UseOraChatReturn {
   // first-message exchange isn't clobbered by a server re-fetch.
   useEffect(() => {
     if (!conv) return;
+    // Temporary ("incognito") mode never reads persisted conversation history —
+    // even if the user selects a prior conversation, we keep a blank slate so
+    // long-term content can't leak into an incognito turn (it would otherwise be
+    // re-sent as `body.messages`).
+    if (temporaryRef.current) {
+      loadedConvRef.current = null;
+      documentRefsRef.current = [];
+      conversationSummaryRef.current = "";
+      summarizedUpToRef.current = 0;
+      setMessages([]);
+      return;
+    }
     const id = conv.currentConversationId;
     if (id == null) {
       loadedConvRef.current = null;
@@ -1161,6 +1190,12 @@ export function useOraChat(): UseOraChatReturn {
             referenceSavedMemories: getReferenceSavedMemories(),
             referenceChatHistory: useChatHistory,
           };
+          // Temporary ("incognito") turn: the backend skips all memory/chat
+          // history injection, cross-conversation recall, and memory-candidate
+          // detection when this is set.
+          if (temporaryRef.current) {
+            body.temporary = true;
+          }
           // Rolling summary: only relevant when chat history is on. Re-send the
           // current summary plus any newly overflowed turns to be folded into it.
           if (useChatHistory) {
@@ -1182,6 +1217,13 @@ export function useOraChat(): UseOraChatReturn {
             null;
           if (typeof chatOraProjectId === "number") {
             body.oraProjectId = chatOraProjectId;
+          }
+          // Tell the backend which conversation this turn belongs to so
+          // cross-conversation recall excludes the current conversation's own
+          // summary (no self-recall).
+          const currentConvId = activeConv?.currentConversationId;
+          if (typeof currentConvId === "number") {
+            body.conversationId = currentConvId;
           }
           if (documentRefsRef.current.length > 0) {
             body.documentRefs = documentRefsRef.current;
@@ -1777,6 +1819,34 @@ export function useOraChat(): UseOraChatReturn {
     [isSignedIn, saveToServer],
   );
 
+  // Toggling temporary mode always resets to a clean slate so an incognito
+  // session never mixes with a persisted conversation (and vice-versa). Any
+  // pending debounced save is cancelled first.
+  const setTemporary = useCallback((value: boolean) => {
+    setTemporaryState(value);
+    temporaryRef.current = value;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    editGenRef.current += 1;
+    loadedConvRef.current = null;
+    documentRefsRef.current = [];
+    conversationSummaryRef.current = "";
+    summarizedUpToRef.current = 0;
+    for (const u of objectUrlsRef.current) URL.revokeObjectURL(u);
+    objectUrlsRef.current = [];
+    setMessages([]);
+    setError(null);
+    setSessionExpired(false);
+    setAttachedFile(null);
+    setUploadState("idle");
+    setUploadError(null);
+    if (convRef.current) {
+      convRef.current.newConversation();
+    }
+  }, []);
+
   const oraStatus = deriveOraStatus(
     isLoading,
     uploadState,
@@ -1811,5 +1881,7 @@ export function useOraChat(): UseOraChatReturn {
     dismissSessionExpired: () => setSessionExpired(false),
     markMemorySaved,
     markDocumentMemorySaved,
+    temporary,
+    setTemporary,
   };
 }

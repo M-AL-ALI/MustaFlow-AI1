@@ -3788,6 +3788,22 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-conversation-summary ────────────────────────────────────────
+  {
+    name: "migrate-ora-conversation-summary",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS summary text`);
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS summary_msg_count integer NOT NULL DEFAULT 0`,
+      );
+      await client.query(
+        `ALTER TABLE ora_conversations ADD COLUMN IF NOT EXISTS summary_updated_at timestamptz`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

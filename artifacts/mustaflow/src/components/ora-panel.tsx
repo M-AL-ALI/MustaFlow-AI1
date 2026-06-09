@@ -26,9 +26,10 @@ import {
   GitBranch,
   Plus,
   MoreHorizontal,
+  Ghost,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ORA_MEMORIES_QUERY_KEY } from "@/lib/ora-memories";
+import { ORA_MEMORIES_QUERY_KEY, MemoryFullError } from "@/lib/ora-memories";
 import { useToast } from "@/hooks/use-toast";
 import { authFetch } from "@/lib/api-fetch";
 import { OraMessageActions } from "@/components/ora/ora-message-actions";
@@ -40,7 +41,11 @@ import { OraDocumentMemoryChip } from "@/components/ora/ora-document-memory-chip
 import { OraMemoryManager } from "@/components/ora/ora-memory-manager";
 import { saveOraMemory } from "@/lib/ora-memory-save";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
-import { getAutoSaveMemories, getReferenceSavedMemories } from "@/lib/ora-memory-settings";
+import {
+  getAutoSaveMemories,
+  getReferenceSavedMemories,
+  getAskBeforeSensitive,
+} from "@/lib/ora-memory-settings";
 import { cn } from "@/lib/utils";
 import type {
   UseOraChatReturn,
@@ -248,6 +253,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     dismissSessionExpired,
     markMemorySaved,
     markDocumentMemorySaved,
+    temporary,
+    setTemporary,
   } = chat;
 
   const { isSignedIn } = useUser();
@@ -312,26 +319,43 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     null;
   const handleSaveMemory = useCallback(
     async (fact: string, content: string) => {
-      const supersededTitles = await saveOraMemory(fact, saveOraProjectId);
-      markMemorySaved(fact, content, supersededTitles);
-      void queryClient.invalidateQueries({ queryKey: ORA_MEMORIES_QUERY_KEY });
+      try {
+        const supersededTitles = await saveOraMemory(fact, saveOraProjectId);
+        markMemorySaved(fact, content, supersededTitles);
+        void queryClient.invalidateQueries({ queryKey: ORA_MEMORIES_QUERY_KEY });
+      } catch (err) {
+        // Surface the capacity limit with a clear, actionable message; the
+        // candidate stays in place so the user can manage memories and retry.
+        if (err instanceof MemoryFullError) {
+          toast({
+            title: "Memory full",
+            description: err.message,
+            variant: "destructive",
+          });
+        }
+        throw err;
+      }
     },
-    [markMemorySaved, queryClient, saveOraProjectId],
+    [markMemorySaved, queryClient, saveOraProjectId, toast],
   );
 
-  // Opt-in auto-save: when the user explicitly asked Ora to remember something
-  // (high-confidence candidate) AND both the auto-save and reference-memories
-  // preferences are on, save it without an extra click. Low-confidence
-  // candidates always require a manual click.
+  // Save-by-default auto-save: when the auto-save and reference-memories
+  // preferences are on, save ANY durable memory candidate Ora detects (any
+  // confidence) without an extra click. Sensitive candidates are still gated by
+  // the ask-before-sensitive safeguard — those keep the inline chip so the user
+  // saves them deliberately. Temporary ("incognito") chats never auto-save.
   useEffect(() => {
     if (!isSignedIn) return;
+    if (temporary) return;
     if (!getAutoSaveMemories() || !getReferenceSavedMemories()) return;
+    const askBeforeSensitive = getAskBeforeSensitive();
     messages.forEach((msg) => {
       const candidate = msg.memorySaveCandidate;
+      const sensitiveGated = msg.memorySaveCandidateSensitive === true && askBeforeSensitive;
       if (
         msg.role === "assistant" &&
         candidate &&
-        msg.memorySaveCandidateConfidence === "high" &&
+        !sensitiveGated &&
         !msg.memorySaved
       ) {
         // Key the in-flight guard by content identity, not array index, so a
@@ -351,7 +375,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           });
       }
     });
-  }, [messages, isSignedIn, handleSaveMemory, toast]);
+  }, [messages, isSignedIn, handleSaveMemory, toast, temporary]);
 
   const [input, setInput] = useState("");
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
@@ -841,6 +865,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                 Free · No sign-in required
               </span>
             )}
+            {temporary && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] text-[hsl(265_85%_65%)] font-medium border border-[hsl(265_85%_65%/0.4)] bg-[hsl(265_85%_65%/0.08)] rounded-full px-1.5 py-0.5"
+                title="Temporary chat — nothing is saved to memory or history"
+              >
+                <Ghost className="h-3 w-3" />
+                Temporary
+              </span>
+            )}
           </div>
           {oraStatus !== "idle" && (
             <span className="text-[11px] text-muted-foreground animate-pulse">
@@ -975,6 +1008,30 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   >
                     <Brain className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
                     <span className="flex-1">Ora memory</span>
+                  </button>
+                )}
+
+                {/* Temporary (incognito) chat */}
+                {isSignedIn && (
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={temporary}
+                    onClick={() => {
+                      setTemporary(!temporary);
+                      setShowHeaderMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
+                  >
+                    <Ghost
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        temporary ? "text-[hsl(265_85%_65%)]" : "text-muted-foreground/60",
+                      )}
+                    />
+                    <span className={cn("flex-1", temporary && "text-[hsl(265_85%_65%)] font-medium")}>
+                      {temporary ? "Temporary chat on" : "Temporary chat"}
+                    </span>
                   </button>
                 )}
 

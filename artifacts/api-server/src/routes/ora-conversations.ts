@@ -327,17 +327,83 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
           isNull(oraConversationsTable.archivedAt),
         ),
       )
-      .returning({ id: oraConversationsTable.id });
+      .returning({
+        id: oraConversationsTable.id,
+        summary: oraConversationsTable.summary,
+        summaryMsgCount: oraConversationsTable.summaryMsgCount,
+      });
     if (!row) {
       res.status(404).json({ error: "Conversation not found" });
       return;
     }
     res.json({ ok: true });
+
+    // Cross-conversation recall (single writer): keep a rolling, model-generated
+    // summary of this conversation so another conversation can recall its gist.
+    // This PUT is the ONLY place that writes ora_conversations.summary, so there
+    // is no double-write race. Best-effort and fully detached from the response:
+    // it never blocks the save and never throws into the request.
+    void maybeUpdateConversationSummary(row.id, messages, row.summary, row.summaryMsgCount);
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to save messages");
     res.status(500).json({ error: "Failed to save conversation" });
   }
 });
+
+/**
+ * Throttled, best-effort rolling-summary updater for a single conversation.
+ *
+ * Only the persisted user/assistant turns with real content count. We
+ * (re)generate the summary when there are at least 2 turns AND either no summary
+ * exists yet, or at least 3 new turns have accumulated since the last summary —
+ * so we don't call the model on every keystroke-debounced save.
+ *
+ * Never throws: any failure is logged and swallowed so transcript saving and
+ * the chat reply are unaffected.
+ */
+async function maybeUpdateConversationSummary(
+  conversationId: number,
+  rawMessages: { role: "user" | "assistant"; content: string }[],
+  priorSummary: string | null,
+  priorCount: number,
+): Promise<void> {
+  try {
+    const turns = rawMessages.filter(
+      (m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0,
+    );
+    if (turns.length < 2) return;
+
+    const hasSummary = (priorSummary ?? "").trim().length > 0;
+    const newTurnCount = turns.length - priorCount;
+    if (hasSummary && newTurnCount < 3) return;
+
+    const { updateConversationSummary } = await import("../lib/public-ai/conversation-summary");
+    // When we already have a summary, only fold in the turns added since it was
+    // generated; otherwise summarise the whole (bounded) conversation.
+    const source = hasSummary ? turns.slice(priorCount) : turns;
+    if (source.length === 0) return;
+
+    const summary = await updateConversationSummary({
+      priorSummary: priorSummary ?? "",
+      newMessages: source.slice(-40).map((m) => ({ role: m.role, content: m.content })),
+    });
+    if (!summary || summary.trim().length === 0) return;
+
+    await db
+      .update(oraConversationsTable)
+      .set({
+        summary,
+        summaryMsgCount: turns.length,
+        summaryUpdatedAt: new Date(),
+      })
+      .where(eq(oraConversationsTable.id, conversationId));
+  } catch (err) {
+    logger.warn(
+      { component: "ora-conversations", err, conversationId },
+      "Rolling conversation summary update failed (non-fatal)",
+    );
+  }
+}
 
 // Soft-delete a conversation.
 router.delete("/ora/conversations/:id", async (req, res) => {
