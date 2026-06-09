@@ -1848,6 +1848,7 @@ export default function OraxPage() {
                                 {item.status}
                               </span>
                             </div>
+                            <OraxThreadLifecycleDetails item={item} />
                             {item.source === "approval" ? (
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {item.approval.status === "pending" ? (
@@ -3023,6 +3024,173 @@ function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
     return artifact.payload.error?.message ?? "GitHub PR result recorded.";
   }
   return artifact.summary ?? "ORAX workflow artifact recorded.";
+}
+
+function OraxThreadLifecycleDetails({ item }: { item: OraxThreadLifecycleItem }) {
+  if (item.source === "approval") {
+    const { approval } = item;
+    if (approval.action !== "read_files" || !approval.result) return null;
+    const files = approval.result.files ?? [];
+    const skipped = approval.result.skipped ?? [];
+    if (!files.length && !skipped.length && !approval.result.totalBytes) return null;
+
+    return (
+      <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+        <div className="font-medium uppercase text-foreground">File-read details</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Metric label="Files read" value={String(files.length)} />
+          <Metric label="Skipped" value={String(skipped.length)} />
+          <Metric label="Total bytes" value={formatBytes(approval.result.totalBytes ?? 0)} />
+        </div>
+        {files.length ? (
+          <div className="mt-2">
+            Read: {files.map((file) => `${file.path} (${formatBytes(file.size)})`).join(", ")}
+          </div>
+        ) : null}
+        {skipped.length ? (
+          <div className="mt-1">
+            Skipped: {skipped.map((item) => `${item.path} (${item.reason})`).join(", ")}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const { artifact } = item;
+  if (artifact.type === "draft_patch") {
+    const diffSummary = summarizeUnifiedDiff(artifact.payload.unifiedDiff);
+    const changedFiles = extractUnifiedDiffFileNames(artifact.payload.unifiedDiff);
+    const risks = artifact.payload.risks ?? [];
+    const tests = artifact.payload.tests ?? [];
+    const filesRead = artifact.payload.filesRead ?? [];
+
+    return (
+      <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+        <div className="font-medium uppercase text-foreground">Draft patch details</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Metric label="Files used" value={String(filesRead.length)} />
+          <Metric label="Changed files" value={String(changedFiles.length)} />
+          <Metric
+            label="Diff"
+            value={diffSummary ? `+${diffSummary.additions} / -${diffSummary.deletions}` : "none"}
+          />
+        </div>
+        {changedFiles.length ? (
+          <div className="mt-2">Changes: {changedFiles.join(", ")}</div>
+        ) : null}
+        {risks.length ? <div className="mt-1">Risks: {risks.join("; ")}</div> : null}
+        {tests.length ? <div className="mt-1">Suggested tests: {tests.join("; ")}</div> : null}
+      </div>
+    );
+  }
+
+  if (artifact.type === "sandbox_result") {
+    const changedFiles = artifact.payload.changedFiles ?? [];
+    const errors = artifact.payload.errors ?? [];
+
+    return (
+      <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+        <div className="font-medium uppercase text-foreground">Sandbox details</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Metric label="Applied" value={artifact.payload.applied ? "yes" : "no"} />
+          <Metric label="Changed files" value={String(changedFiles.length)} />
+          <Metric label="Errors" value={String(errors.length)} />
+        </div>
+        {changedFiles.length ? (
+          <div className="mt-2">
+            Changed:{" "}
+            {changedFiles
+              .map((file) => `${file.path} (+${file.additions} / -${file.deletions})`)
+              .join(", ")}
+          </div>
+        ) : null}
+        {errors.length ? (
+          <div className="mt-1 text-destructive">Errors: {errors.join(" ")}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (artifact.type === "command_result") {
+    const commands = artifact.payload.commands ?? [];
+    const passed = commands.filter((command) => command.status === "passed");
+    const failed = commands.filter((command) => command.status === "failed");
+
+    return (
+      <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+        <div className="font-medium uppercase text-foreground">Checks details</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Metric label="Passed" value={String(passed.length)} />
+          <Metric label="Failed" value={String(failed.length)} />
+          <Metric label="Total" value={String(commands.length)} />
+        </div>
+        {failed.length ? (
+          <div className="mt-2 text-destructive">
+            Failed:{" "}
+            {failed
+              .map((command) => `${command.label || command.id}: ${command.message}`)
+              .join("; ")}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (artifact.type === "github_pr_result") {
+    const filesChanged = artifact.payload.filesChanged ?? [];
+
+    return (
+      <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+        <div className="font-medium uppercase text-foreground">Pull request details</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Metric label="Branch" value={artifact.payload.branchName ?? "unknown"} />
+          <Metric
+            label="PR"
+            value={
+              artifact.payload.pullRequestNumber ? `#${artifact.payload.pullRequestNumber}` : "none"
+            }
+          />
+          <Metric label="Files changed" value={String(filesChanged.length)} />
+        </div>
+        {filesChanged.length ? <div className="mt-2">Files: {filesChanged.join(", ")}</div> : null}
+        {artifact.payload.pullRequestUrl ? (
+          <a
+            href={artifact.payload.pullRequestUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
+          >
+            Open pull request
+          </a>
+        ) : null}
+        {artifact.payload.error ? <FailureNotice failure={artifact.payload.error} /> : null}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function extractUnifiedDiffFileNames(diff?: string): string[] {
+  if (!diff?.trim()) return [];
+  const paths = diff
+    .split("\n")
+    .filter((line) => line.startsWith("+++ b/"))
+    .map((line) => line.replace("+++ b/", "").trim())
+    .filter((path) => path && path !== "/dev/null");
+  return Array.from(new Set(paths)).slice(0, 12);
+}
+
+function summarizeUnifiedDiff(diff?: string): { additions: number; deletions: number } | null {
+  if (!diff?.trim()) return null;
+  return diff.split("\n").reduce(
+    (summary, line) => {
+      if (line.startsWith("+") && !line.startsWith("+++")) summary.additions += 1;
+      if (line.startsWith("-") && !line.startsWith("---")) summary.deletions += 1;
+      return summary;
+    },
+    { additions: 0, deletions: 0 },
+  );
 }
 
 function Metric({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
