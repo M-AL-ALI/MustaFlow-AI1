@@ -14,8 +14,6 @@
  * All routes require authentication (mounted after the auth wall in index.ts).
  * ISOLATION: this file MUST NOT import from builder.ts or any pipeline module.
  */
-import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { Router, type IRouter } from "express";
 import multer from "multer";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -30,7 +28,7 @@ import {
   preflightImageJobs,
   enqueueImageEditJob,
 } from "../lib/image-generation-jobs";
-import { storeUploadedImage } from "../lib/image-storage";
+import { storeUploadedImage, getImageBuffer } from "../lib/image-storage";
 import { IMAGE_CREDIT_COSTS } from "./image-credits";
 import { logger } from "../lib/logger";
 import { resolveTierForUser } from "../lib/public-ai/authed-user";
@@ -447,6 +445,7 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
     .select({
       id: generatedImagesTable.id,
       storageKey: generatedImagesTable.storageKey,
+      fileUrl: generatedImagesTable.fileUrl,
       status: generatedImagesTable.status,
     })
     .from(generatedImagesTable)
@@ -464,27 +463,26 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
   }
 
   const storageKey = row.storageKey;
-  if (!storageKey) {
+  const fileUrl = row.fileUrl;
+  if (!storageKey && !fileUrl) {
     res.status(404).json({ error: "Image file not available" });
     return;
   }
 
-  // Security: only serve from the OS temp directory to prevent path traversal
-  const sysTmpDir = tmpdir();
-  if (!storageKey.startsWith(sysTmpDir)) {
-    logger.warn({ imageId, storageKey }, "image-gen: /file storageKey outside tmpdir — rejected");
-    res.status(403).json({ error: "File not accessible" });
-    return;
-  }
-
   try {
-    const buffer = await readFile(storageKey);
+    // getImageBuffer resolves the bytes from whichever backend holds them:
+    // dev tmpdir (storageKey under tmpdir), R2 (authenticated GetObject), or a
+    // public HTTPS URL. Serving through this authenticated route means the
+    // browser never has to reach R2 directly — critical when R2 is configured
+    // without a public URL (the stored fileUrl is then a private S3 endpoint
+    // that an <img src> cannot load).
+    const buffer = await getImageBuffer(storageKey, fileUrl ?? "");
     res.set("Content-Type", "image/webp");
     res.set("Cache-Control", "private, max-age=3600");
     res.send(buffer);
   } catch (err) {
     logger.warn({ err, imageId, storageKey }, "image-gen: /file read failed");
-    res.status(404).json({ error: "Image file not found on disk" });
+    res.status(404).json({ error: "Image file not found" });
   }
 });
 

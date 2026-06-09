@@ -1577,21 +1577,26 @@ export function useOraChat(): UseOraChatReturn {
         }
         if (!fileUrl) throw new Error("Image edit timed out. Please try again.");
 
-        // Prefer the durable public URL when the storage layer returns one
-        // (production R2 → absolute https URL, safe to persist + survives
-        // reload). The dev file route is auth-walled and relative, so it can't
-        // be used directly in an <img src>; fall back to a session-local object
-        // URL there (tracked for revocation to avoid a memory leak).
-        let displayUrl: string;
-        if (fileUrl.startsWith("http")) {
-          displayUrl = fileUrl;
-        } else {
-          const imgRes = await authFetch(`${BASE}${fileUrl}`);
-          if (!imgRes.ok) throw new Error("Could not load the edited image.");
-          const blob = await imgRes.blob();
-          displayUrl = URL.createObjectURL(blob);
-          objectUrlsRef.current.push(displayUrl);
-        }
+        // Always load the edited bytes through the authenticated file route
+        // rather than trusting the returned fileUrl directly. The stored fileUrl
+        // can be a private R2 S3 endpoint (when R2 is configured without a public
+        // URL) which an <img src> cannot fetch — that produced a "completed" edit
+        // that rendered as a broken image. The /file route resolves the bytes
+        // from whichever backend holds them (dev tmpdir or authenticated R2).
+        const imgRes = await authFetch(`${BASE}/api/images/${newImageId}/file`);
+        if (!imgRes.ok) throw new Error("Could not load the edited image.");
+        const blob = await imgRes.blob();
+        if (blob.size === 0) throw new Error("The edited image was empty. Please try again.");
+        // Persist as a self-contained data URL (not a session-local object URL)
+        // so the edited image renders immediately AND survives a transcript
+        // reload — mirroring inline generation, which persists the provider data
+        // URI. An object URL would be revoked/invalid after refresh.
+        const displayUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Could not read the edited image."));
+          reader.readAsDataURL(blob);
+        });
 
         setMessages((prev) => {
           const next = [
