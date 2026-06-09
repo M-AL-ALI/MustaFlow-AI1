@@ -26,3 +26,6 @@ is a separate coding-agent surface from normal Ora chat and the AI Builder.
   `/sign-in`, 401 on `/api/me`); the only viable auth is the Google OAuth UI, which
   the tool can't drive. Verify authed ORAX behavior via unit tests (orax-wiring) +
   route/auth curl checks + architect code review instead of live Playwright.
+
+## Verification environment split (Windows dev vs Replit)
+The user authors ORAX/Ora changes in a **separate Windows checkout** where vitest and full typecheck CANNOT run (Linux-only esbuild binary installed; lucide-react/react-helmet-async fail to resolve there). They push to GitHub main, then Replit is the canonical verification environment. Role here = pull 4a7442c-style commits and run the real checks: `pnpm exec vitest run src/lib/__tests__/orax-wiring.test.ts` + `pnpm --filter @workspace/mustaflow run typecheck` + isolation grep (every /api/ call in orax.tsx must be /api/orax/*). The `format` workflow fails on a PRE-EXISTING generated file `artifacts/ora-mobile/expo-env.d.ts` — not a regression.
