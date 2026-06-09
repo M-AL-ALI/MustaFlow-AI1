@@ -1,0 +1,141 @@
+Apply this Phase 4G git patch, then commit and push it.
+
+Commit message:
+Add ORAX chat-first task entry
+
+Patch:
+
+diff --git a/artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts b/artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts
+index faaaced..dc7e101 100644
+--- a/artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts
++++ b/artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts
+@@ -43,6 +43,11 @@ describe("ORAX product-surface wiring", () => {
+     expect(oraxPage).toContain('"pnpm-test"');
+     expect(oraxPage).toContain('"pnpm-build"');
+     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
++    expect(oraxPage).toContain("Start ORAX chat");
++    expect(oraxPage).toContain("appendTaskMessage");
++    expect(oraxPage).toContain("createTask({ startThread: true })");
++    expect(oraxPage).toContain("The first message becomes the task prompt");
++    expect(oraxPage).toContain("normal Ora history or AI Builder");
+     expect(oraxPage).toContain('confirmationText: "CREATE PR"');
+     expect(oraxPage).toContain("Type CREATE PR to enable approval");
+     expect(oraxPage).toContain("ArtifactTrace");
+diff --git a/artifacts/mustaflow/src/pages/orax.tsx b/artifacts/mustaflow/src/pages/orax.tsx
+index e2412ef..5a7c74f 100644
+--- a/artifacts/mustaflow/src/pages/orax.tsx
++++ b/artifacts/mustaflow/src/pages/orax.tsx
+@@ -614,8 +614,23 @@ export default function OraxPage() {
+     }
+   }
+ 
+-  async function createTask() {
+-    if (!selectedRepository || !prompt.trim() || submittingTask) return;
++  async function appendTaskMessage(taskId: number, content: string): Promise<OraxTaskMessage[]> {
++    const res = await authFetch(`/api/orax/tasks/${taskId}/messages`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ content }),
++    });
++    if (!res.ok) {
++      const body = (await res.json().catch(() => ({}))) as { error?: string };
++      throw new Error(body.error ?? "Could not save task message");
++    }
++    const body = (await res.json()) as { messages: OraxTaskMessage[] };
++    return body.messages;
++  }
++
++  async function createTask(options: { startThread?: boolean } = {}) {
++    const firstMessage = prompt.trim();
++    if (!selectedRepository || !firstMessage || submittingTask) return;
+     setSubmittingTask(true);
+     setError(null);
+     try {
+@@ -625,7 +640,7 @@ export default function OraxPage() {
+         body: JSON.stringify({
+           repositoryId: selectedRepository.id,
+           kind: taskKind,
+-          prompt,
++          prompt: firstMessage,
+         }),
+       });
+       if (!res.ok) {
+@@ -635,6 +650,10 @@ export default function OraxPage() {
+       const body = (await res.json()) as { task: OraxTask };
+       setTasks((prev) => [body.task, ...prev]);
+       setSelectedTaskId(body.task.id);
++      if (options.startThread) {
++        const messages = await appendTaskMessage(body.task.id, firstMessage);
++        setTaskMessages(messages);
++      }
+       setPrompt("");
+     } catch (err) {
+       setError(err instanceof Error ? err.message : "Could not create ORAX task");
+@@ -649,17 +668,8 @@ export default function OraxPage() {
+     setSendingTaskMessage(true);
+     setError(null);
+     try {
+-      const res = await authFetch(`/api/orax/tasks/${selectedTask.id}/messages`, {
+-        method: "POST",
+-        headers: { "Content-Type": "application/json" },
+-        body: JSON.stringify({ content }),
+-      });
+-      if (!res.ok) {
+-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+-        throw new Error(body.error ?? "Could not save task message");
+-      }
+-      const body = (await res.json()) as { messages: OraxTaskMessage[] };
+-      setTaskMessages((prev) => [...prev, ...body.messages]);
++      const messages = await appendTaskMessage(selectedTask.id, content);
++      setTaskMessages((prev) => [...prev, ...messages]);
+       setTaskMessageDraft("");
+     } catch (err) {
+       setError(err instanceof Error ? err.message : "Could not save task message");
+@@ -1331,11 +1341,11 @@ export default function OraxPage() {
+               <div>
+                 <div className="flex items-center gap-2">
+                   <Bot className="h-4 w-4 text-primary" />
+-                  <h2 className="text-sm font-semibold">Create ORAX task</h2>
++                  <h2 className="text-sm font-semibold">Start ORAX chat</h2>
+                 </div>
+                 <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+-                  ORAX creates a safe coding-agent plan. File reads, patch previews, controlled
+-                  checks, and PR creation all stay approval-gated.
++                  Start by describing the coding work. ORAX will create a task from this message,
++                  save it in the task thread, and continue with approval-gated next steps.
+                 </p>
+               </div>
+               <div className="flex rounded-md border border-border p-1">
+@@ -1359,7 +1369,7 @@ export default function OraxPage() {
+             <textarea
+               value={prompt}
+               onChange={(event) => setPrompt(event.target.value)}
+-              placeholder="Ask ORAX to inspect, plan, review, or prepare a fix for this repository..."
++              placeholder="Chat with ORAX. Example: review this repository and prepare a safe fix for the login bug..."
+               className="mt-4 min-h-32 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+             />
+             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+@@ -1374,7 +1384,7 @@ export default function OraxPage() {
+                 )}
+               </p>
+               <button
+-                onClick={() => void createTask()}
++                onClick={() => void createTask({ startThread: true })}
+                 disabled={!selectedRepository || !prompt.trim() || submittingTask}
+                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+               >
+@@ -1383,9 +1393,13 @@ export default function OraxPage() {
+                 ) : (
+                   <Play className="h-4 w-4" />
+                 )}
+-                Create safe plan
++                Start chat
+               </button>
+             </div>
++            <p className="mt-2 text-xs text-muted-foreground">
++              The first message becomes the task prompt and the first message in the ORAX-only task
++              conversation. It never enters normal Ora history or AI Builder.
++            </p>
+           </section>
+ 
+           <section className="rounded-lg border border-border bg-card p-4">
