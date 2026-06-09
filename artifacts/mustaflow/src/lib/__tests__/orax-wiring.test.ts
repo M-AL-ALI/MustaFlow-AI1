@@ -32,7 +32,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/repositories/${selectedRepository.id}/scan");
     expect(oraxPage).toContain("/api/orax/tasks");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/messages");
-    expect(oraxPage).toContain("appendTaskMessage(selectedTask.id, content)");
+    expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content)");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/artifacts");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/draft-patch");
