@@ -7,7 +7,7 @@
  * OpenAI client and assert the outbound `instructions` reflect the flag.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 const createMock = vi.fn();
 
@@ -25,9 +25,29 @@ function mockResponse(text: string) {
   createMock.mockResolvedValueOnce({ output_text: text, output: [] });
 }
 
+const SEARCH_ENV_NAMES = [
+  "ORA_FREE_SEARCH_MODEL",
+  "ORA_CORE_SEARCH_MODEL",
+  "ORA_WAVE_SEARCH_MODEL",
+  "ORA_SEARCH_MODEL",
+] as const;
+const ORIGINAL_SEARCH_ENV = new Map(SEARCH_ENV_NAMES.map((name) => [name, process.env[name]]));
+
 describe("runOraWebSearch forwards wantsVideos into instructions", () => {
   beforeEach(() => {
     createMock.mockReset();
+    for (const name of SEARCH_ENV_NAMES) delete process.env[name];
+  });
+
+  afterEach(() => {
+    for (const name of SEARCH_ENV_NAMES) {
+      const original = ORIGINAL_SEARCH_ENV.get(name);
+      if (original === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = original;
+      }
+    }
   });
 
   it("includes the video directive when wantsVideos is true", async () => {
@@ -47,5 +67,18 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
     const arg = createMock.mock.calls[0][0] as { instructions: string };
     expect(arg.instructions).not.toContain("specifically asking for a video");
+  });
+
+  it("uses the plan-aware search model override", async () => {
+    process.env.ORA_WAVE_SEARCH_MODEL = "gpt-wave-search";
+    mockResponse('Latest info.\n```ora-media\n{"images":[],"videos":[]}\n```');
+    await runOraWebSearch({
+      query: "latest AI news",
+      subscriptionTier: "wave",
+    });
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const arg = createMock.mock.calls[0][0] as { model: string };
+    expect(arg.model).toBe("gpt-wave-search");
   });
 });

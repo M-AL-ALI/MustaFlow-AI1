@@ -18,6 +18,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   normalizeOraPlanTier,
   openAiModelForOraRoute,
+  openAiModelForOraSearch,
   openAiModelForOraVision,
   selectOraModelRoute,
   runCandidateChain,
@@ -63,6 +64,10 @@ const ROUTER_ENV_NAMES = [
   "ORA_CORE_VISION_MODEL",
   "ORA_WAVE_VISION_MODEL",
   "ORA_VISION_MODEL",
+  "ORA_FREE_SEARCH_MODEL",
+  "ORA_CORE_SEARCH_MODEL",
+  "ORA_WAVE_SEARCH_MODEL",
+  "ORA_SEARCH_MODEL",
 ] as const;
 const ORIGINAL_ROUTER_ENV = new Map(ROUTER_ENV_NAMES.map((name) => [name, process.env[name]]));
 
@@ -102,6 +107,18 @@ describe("Ora model helper functions", () => {
 
     expect(openAiModelForOraRoute("premium", "free")).toBe("gpt-free");
     expect(openAiModelForOraVision("free")).toBe("gpt-vision");
+  });
+
+  it("uses plan-aware OpenAI env overrides for web search while preserving the default", () => {
+    expect(openAiModelForOraSearch("free")).toBe("gpt-4o");
+
+    process.env.ORA_FREE_SEARCH_MODEL = "gpt-free-search";
+    process.env.ORA_CORE_SEARCH_MODEL = "gpt-core-search";
+    process.env.ORA_WAVE_SEARCH_MODEL = "gpt-wave-search";
+
+    expect(openAiModelForOraSearch("free")).toBe("gpt-free-search");
+    expect(openAiModelForOraSearch("core")).toBe("gpt-core-search");
+    expect(openAiModelForOraSearch("wave")).toBe("gpt-wave-search");
   });
 });
 
