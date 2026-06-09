@@ -173,6 +173,58 @@ describe("routeOraMessage picks the search tool for live-info questions", () => 
   });
 });
 
+// ─── isImageGenerationRequest ─────────────────────────────────────────────────
+
+describe("isImageGenerationRequest", () => {
+  it("matches natural image-generation phrasings", () => {
+    // Verb + visual noun (already covered, kept as sanity)
+    expect(isImageGenerationRequest("generate an image of a sunset")).toBe(true);
+    expect(isImageGenerationRequest("create a logo for my bakery")).toBe(true);
+    expect(isImageGenerationRequest("make me a picture of a cat")).toBe(true);
+    // Drawing/painting verbs without an explicit visual noun
+    expect(isImageGenerationRequest("draw a dog")).toBe(true);
+    expect(isImageGenerationRequest("sketch a robot")).toBe(true);
+    expect(isImageGenerationRequest("paint a dragon")).toBe(true);
+    // Request/desire framing + visual noun
+    expect(isImageGenerationRequest("give me a banner")).toBe(true);
+    expect(isImageGenerationRequest("I need a logo")).toBe(true);
+    expect(isImageGenerationRequest("I'd like an illustration of a forest")).toBe(true);
+    // Bare brandable noun + preposition, no leading verb
+    expect(isImageGenerationRequest("a logo for my mechanic app")).toBe(true);
+    expect(isImageGenerationRequest("an icon for the button")).toBe(true);
+    // Drawing verb behind a genuine request lead-in still matches
+    expect(isImageGenerationRequest("I want to draw a dog")).toBe(true);
+    expect(isImageGenerationRequest("can you draw a cat")).toBe(true);
+  });
+
+  it("does NOT hijack figurative or non-image requests", () => {
+    expect(isImageGenerationRequest("draw a conclusion from this data")).toBe(false);
+    expect(isImageGenerationRequest("draw the line at three retries")).toBe(false);
+    expect(isImageGenerationRequest("illustrate my point with an example")).toBe(false);
+    expect(isImageGenerationRequest("illustrate a concept with an example")).toBe(false);
+    expect(isImageGenerationRequest("draw my attention to the key risks")).toBe(false);
+    expect(isImageGenerationRequest("I need a website for my bakery")).toBe(false);
+    expect(isImageGenerationRequest("give me a summary of this file")).toBe(false);
+    expect(isImageGenerationRequest("make a plan for the launch")).toBe(false);
+    expect(isImageGenerationRequest("what is the best logo design software")).toBe(false);
+    // Mid-sentence mention of a logo is a statement, not a request.
+    expect(isImageGenerationRequest("I used a logo for my app")).toBe(false);
+    // Instructional / how-to framing wants a tutorial, not an image.
+    expect(isImageGenerationRequest("how to paint a room")).toBe(false);
+    expect(isImageGenerationRequest("how do i draw a dog")).toBe(false);
+    // Video creation must not be treated as image generation.
+    expect(isImageGenerationRequest("generate a video of a sunset")).toBe(false);
+  });
+
+  it("routes a verb-less image request to image_generation, not the conversational path", async () => {
+    const decision = await routeOraMessage({
+      message: "a logo for my mechanic app",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("image_generation");
+  });
+});
+
 // ─── checkToolAccess for search ───────────────────────────────────────────────
 
 describe("checkToolAccess('search')", () => {

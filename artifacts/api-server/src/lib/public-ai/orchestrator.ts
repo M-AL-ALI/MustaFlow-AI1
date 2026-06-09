@@ -155,6 +155,19 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   /\b(dall-?e|stable\s+diffusion|midjourney|ai\s+art)\b/i,
   // "Can you generate/make/draw a picture/image/graphic"
   /\bcan\s+you\s+(generate|create|make|draw|render|produce|design)\b.*\b(images?|pictures?|photos?|visuals?|graphics?|illustrations?)\b/i,
+  // Drawing/painting verbs imply image creation even without a "visual noun"
+  // ("draw a dog"). The idiom guard excludes figurative uses ("draw a
+  // conclusion", "illustrate my point", "illustrate a concept"); the leading
+  // lookbehind excludes instructional/how-to framing ("how to paint a room",
+  // "how do i draw a dog") which wants a tutorial, not an image.
+  /(?<!\bhow\s(?:to|do\si|can\si|should\si|would\si)\s)\b(draw|sketch|paint|illustrate)\s+(?:me\s+|us\s+|for\s+me\s+)?(?:a|an|the|some|my)\s+(?!(?:conclusion|conclusions|distinction|distinctions|comparison|comparisons|parallel|parallels|line|lines|blank|attention|point|points|example|examples|case|cases|map|maps|plan|plans|concept|concepts|idea|ideas|scenario|scenarios)\b)\w+/i,
+  // Request/desire framing + a visual noun ("give me a banner", "I need a
+  // logo", "I'd like an illustration of a forest").
+  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?)\b/i,
+  // Bare brandable visual noun + preposition, no leading verb ("a logo for my
+  // bakery", "an icon for the button"). Anchored to the start of the message so
+  // mid-sentence statements ("I used a logo for my app") do NOT match.
+  /^\s*(?:a|an|the|another|new)\s+(?:logos?|banners?|icons?|posters?|flyers?|thumbnails?|avatars?|illustrations?|graphics?|mockups?|badges?|portraits?|wallpapers?)\s+(?:for|of|with|showing|depicting|featuring)\b/i,
 ];
 
 export function isImageGenerationRequest(message: string): boolean {
