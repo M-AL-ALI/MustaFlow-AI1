@@ -9,8 +9,8 @@
  * plus a snapshot of provider availability and open circuit breakers, and
  * returns an ordered list of candidates. The caller (chat.ts) iterates the
  * list, attempting each provider in turn until one succeeds. OpenAI is always
- * guaranteed to appear in the chain as the final safety net, because it is the
- * only provider that is always configured.
+ * guaranteed to appear in the chain because it is the only provider that is
+ * always configured.
  *
  * Scope guard: this only selects the model for Ora's *conversational* branch.
  * It does NOT touch the Builder pipeline, the web-search grounding path (which
@@ -36,14 +36,22 @@ export interface ModelCandidate {
  *  - `premium` → everything else (default substantive reasoning)
  */
 export type OraRouteTier = "fast" | "premium" | "deep";
+export type OraPlanTier = "anonymous" | "free" | "core" | "wave";
 
 export interface OraModelRouteInput {
   tier: OraRouteTier;
+  /**
+   * User's effective Ora plan tier. Anonymous visitors are represented
+   * explicitly so the router can bias toward low-latency/cost providers.
+   */
+  subscriptionTier?: string | null;
   topic: OraTopic;
   intent: OraIntent;
   confidence: OraConfidence;
   /** True when the user's message/locale is a non-English language. */
   multilingual: boolean;
+  /** True when prior uploaded document content is being carried into context. */
+  hasDocumentContext?: boolean;
   /** Which providers are currently configured/reachable. */
   available: Record<Provider, boolean>;
   /** Providers whose circuit breaker is currently OPEN (deprioritized, not removed). */
@@ -62,18 +70,38 @@ export interface OraModelRouteInput {
  * a complete fallback chain.
  */
 const FAST_ORDER: Provider[] = ["openai", "gemini", "deepseek", "anthropic"];
-const PREMIUM_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
-const DEEP_ORDER: Provider[] = ["openai", "deepseek", "anthropic", "gemini"];
-const TECHNICAL_ORDER: Provider[] = ["anthropic", "openai", "deepseek", "gemini"];
+const COST_SENSITIVE_ORDER: Provider[] = ["openai", "gemini", "deepseek", "anthropic"];
+const CORE_GENERAL_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
+const WAVE_GENERAL_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
+const CORE_DEEP_ORDER: Provider[] = ["openai", "anthropic", "deepseek", "gemini"];
+const WAVE_DEEP_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
+const COST_SENSITIVE_TECHNICAL_ORDER: Provider[] = ["openai", "deepseek", "gemini", "anthropic"];
+const SPECIALIST_TECHNICAL_ORDER: Provider[] = ["anthropic", "openai", "deepseek", "gemini"];
+const DOCUMENT_ORDER: Provider[] = ["gemini", "openai", "anthropic", "deepseek"];
 const MULTILINGUAL_ORDER: Provider[] = ["gemini", "openai", "anthropic", "deepseek"];
+
+function normalizePlanTier(raw: string | null | undefined): OraPlanTier {
+  if (raw === "core" || raw === "wave" || raw === "free") return raw;
+  return raw ? "free" : "anonymous";
+}
+
+function isCostSensitivePlan(plan: OraPlanTier): boolean {
+  return plan === "anonymous" || plan === "free";
+}
+
+function isBuilderLikeIntent(input: OraModelRouteInput): boolean {
+  return input.intent === "builder_request" || input.topic === "technical";
+}
 
 /**
  * Map a routing tier onto the existing agent-mode dial so non-OpenAI providers
  * pick a tier-appropriate model from MODEL_DEFAULTS.
  */
-function tierToAgentMode(tier: OraRouteTier): "lite" | "power" | "pro" {
-  if (tier === "deep") return "pro";
+function tierToAgentMode(tier: OraRouteTier, plan: OraPlanTier): "lite" | "eco" | "power" | "pro" {
   if (tier === "fast") return "lite";
+  if (isCostSensitivePlan(plan)) return tier === "deep" ? "power" : "eco";
+  if (tier === "deep") return plan === "wave" ? "pro" : "power";
+  if (plan === "wave") return "pro";
   return "power";
 }
 
@@ -81,16 +109,22 @@ function tierToAgentMode(tier: OraRouteTier): "lite" | "power" | "pro" {
  * Choose the provider preference ordering for this message. Precedence:
  *  1. Deep Thinking mode → reasoning-first ordering (explicit user intent).
  *  2. Non-English message → Gemini-first multilingual ordering.
- *  3. Technical topic → Anthropic-first ordering.
- *  4. Confident simple FAQ → fast/cheap ordering.
- *  5. Otherwise → premium default ordering.
+ *  3. Carried document context -> Gemini-first long-context ordering.
+ *  4. Technical/builder-like work -> specialist technical ordering.
+ *  5. Confident simple FAQ -> fast/cheap ordering.
+ *  6. Otherwise -> plan-aware premium default ordering.
  */
 function pickProviderOrder(input: OraModelRouteInput): Provider[] {
-  if (input.tier === "deep") return DEEP_ORDER;
+  const plan = normalizePlanTier(input.subscriptionTier);
+  if (input.tier === "deep") return plan === "wave" ? WAVE_DEEP_ORDER : CORE_DEEP_ORDER;
   if (input.multilingual) return MULTILINGUAL_ORDER;
-  if (input.topic === "technical") return TECHNICAL_ORDER;
+  if (input.hasDocumentContext) return DOCUMENT_ORDER;
+  if (isBuilderLikeIntent(input)) {
+    return isCostSensitivePlan(plan) ? COST_SENSITIVE_TECHNICAL_ORDER : SPECIALIST_TECHNICAL_ORDER;
+  }
   if (input.tier === "fast") return FAST_ORDER;
-  return PREMIUM_ORDER;
+  if (isCostSensitivePlan(plan)) return COST_SENSITIVE_ORDER;
+  return plan === "wave" ? WAVE_GENERAL_ORDER : CORE_GENERAL_ORDER;
 }
 
 /**
@@ -99,7 +133,7 @@ function pickProviderOrder(input: OraModelRouteInput): Provider[] {
  */
 function modelFor(provider: Provider, input: OraModelRouteInput): string {
   if (provider === "openai") return input.openaiModel;
-  const mode = tierToAgentMode(input.tier);
+  const mode = tierToAgentMode(input.tier, normalizePlanTier(input.subscriptionTier));
   return MODEL_DEFAULTS[provider][mode];
 }
 
@@ -108,7 +142,7 @@ function modelFor(provider: Provider, input: OraModelRouteInput): string {
  *
  * Guarantees:
  *  - Only configured/reachable providers appear (availability filter).
- *  - OpenAI is always present as the final fallback (it is always configured).
+ *  - OpenAI is always present as a safety-net candidate (it is always configured).
  *  - Providers with an OPEN circuit are pushed to the back (deprioritized, not
  *    dropped — the breaker's own half-open probing still gets a chance, and a
  *    fully-degraded fleet still has *something* to try).
@@ -132,7 +166,7 @@ export function selectOraModelRoute(input: OraModelRouteInput): ModelCandidate[]
     return aOpen - bOpen;
   });
 
-  // Guarantee OpenAI is always reachable as the last resort.
+  // Guarantee OpenAI is always reachable as a last resort when filtering removed it.
   if (!providers.includes("openai")) providers.push("openai");
 
   return providers.map((provider) => ({ provider, model: modelFor(provider, input) }));

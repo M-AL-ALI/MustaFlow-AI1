@@ -33,6 +33,7 @@ const ALL_AVAILABLE: Record<Provider, boolean> = {
 function makeInput(overrides: Partial<OraModelRouteInput> = {}): OraModelRouteInput {
   return {
     tier: "premium",
+    subscriptionTier: "core",
     topic: "general",
     intent: "premium",
     confidence: "high",
@@ -59,16 +60,28 @@ describe("selectOraModelRoute — tier ordering", () => {
     expect(providersOf(candidates)).toEqual(["openai", "anthropic", "gemini", "deepseek"]);
   });
 
-  it("orders the deep tier openai → deepseek → anthropic → gemini", () => {
+  it("orders the core deep tier openai -> anthropic -> deepseek -> gemini", () => {
     const candidates = selectOraModelRoute(makeInput({ tier: "deep" }));
-    expect(providersOf(candidates)).toEqual(["openai", "deepseek", "anthropic", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "deepseek", "gemini"]);
+  });
+
+  it("orders the wave deep tier openai -> anthropic -> gemini -> deepseek", () => {
+    const candidates = selectOraModelRoute(
+      makeInput({ tier: "deep", subscriptionTier: "wave" }),
+    );
+    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "gemini", "deepseek"]);
   });
 
   it("deep tier wins even when the topic is technical or the message is multilingual", () => {
     const candidates = selectOraModelRoute(
       makeInput({ tier: "deep", topic: "technical", multilingual: true }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "deepseek", "anthropic", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "deepseek", "gemini"]);
+  });
+
+  it("keeps free premium traffic on the cost-sensitive provider order", () => {
+    const candidates = selectOraModelRoute(makeInput({ subscriptionTier: "free" }));
+    expect(providersOf(candidates)).toEqual(["openai", "gemini", "deepseek", "anthropic"]);
   });
 });
 
@@ -93,6 +106,18 @@ describe("selectOraModelRoute — topic / language overrides", () => {
       makeInput({ tier: "fast", topic: "technical", intent: "simple_faq" }),
     );
     expect(providersOf(candidates)).toEqual(["anthropic", "openai", "deepseek", "gemini"]);
+  });
+
+  it("uses a cost-sensitive technical order for free users", () => {
+    const candidates = selectOraModelRoute(
+      makeInput({ subscriptionTier: "free", topic: "technical" }),
+    );
+    expect(providersOf(candidates)).toEqual(["openai", "deepseek", "gemini", "anthropic"]);
+  });
+
+  it("puts Gemini first when document context is being carried", () => {
+    const candidates = selectOraModelRoute(makeInput({ hasDocumentContext: true }));
+    expect(providersOf(candidates)).toEqual(["gemini", "openai", "anthropic", "deepseek"]);
   });
 });
 
@@ -210,7 +235,16 @@ describe("selectOraModelRoute — guarantees", () => {
   it("maps non-OpenAI providers to their tier-appropriate MODEL_DEFAULTS", () => {
     const candidates = selectOraModelRoute(makeInput({ tier: "deep" }));
     const byProvider = Object.fromEntries(candidates.map((c) => [c.provider, c.model]));
-    // deep → "pro" agent mode.
+    expect(byProvider.deepseek).toBe(MODEL_DEFAULTS.deepseek.power);
+    expect(byProvider.anthropic).toBe(MODEL_DEFAULTS.anthropic.power);
+    expect(byProvider.gemini).toBe(MODEL_DEFAULTS.gemini.power);
+  });
+
+  it("maps wave deep non-OpenAI providers to pro MODEL_DEFAULTS", () => {
+    const candidates = selectOraModelRoute(
+      makeInput({ tier: "deep", subscriptionTier: "wave" }),
+    );
+    const byProvider = Object.fromEntries(candidates.map((c) => [c.provider, c.model]));
     expect(byProvider.deepseek).toBe(MODEL_DEFAULTS.deepseek.pro);
     expect(byProvider.anthropic).toBe(MODEL_DEFAULTS.anthropic.pro);
     expect(byProvider.gemini).toBe(MODEL_DEFAULTS.gemini.pro);
