@@ -398,6 +398,11 @@ export default function OraxPage() {
     artifacts.find((artifact) => artifact.type === "command_result") ?? null;
   const latestGithubPrResult =
     artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
+  const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+  const latestArtifact = artifacts[0] ?? null;
+  const timelineMessageCount = taskMessages.filter(
+    (message) => message.role === "system" || message.role === "tool",
+  ).length;
   const commandFailureCount =
     latestCommandResult?.payload.commands?.filter((command) => command.status === "failed")
       .length ?? 0;
@@ -1416,12 +1421,12 @@ export default function OraxPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-primary" />
-                  <h2 className="text-sm font-semibold">Approval-gated file read</h2>
+                  <Bot className="h-4 w-4 text-primary" />
+                  <h2 className="text-sm font-semibold">ORAX task thread</h2>
                 </div>
                 <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                  ORAX can read selected source files only after approval. It still cannot edit,
-                  execute terminal commands, push branches, open PRs, or deploy.
+                  Chat with ORAX inside one coding task. Checkpoints, timeline events, pending
+                  approvals, and workflow results stay in this ORAX-only thread.
                 </p>
               </div>
               {loadingApprovals ? (
@@ -1442,6 +1447,28 @@ export default function OraxPage() {
                     </option>
                   ))}
                 </select>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">Thread status</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Live task context for this ORAX conversation. These counts are task-scoped
+                        and never enter normal Ora history or AI Builder.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
+                      Task #{selectedTask.id}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-5">
+                    <Metric label="Messages" value={String(taskMessages.length)} />
+                    <Metric label="Timeline" value={String(timelineMessageCount)} />
+                    <Metric label="Pending approvals" value={String(pendingApprovals.length)} />
+                    <Metric label="Artifacts" value={String(artifacts.length)} />
+                    <Metric label="Latest artifact" value={latestArtifact?.type ?? "none"} />
+                  </div>
+                </div>
 
                 <div className="rounded-md border border-border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1562,6 +1589,55 @@ export default function OraxPage() {
                     ) : null}
                   </div>
 
+                  {pendingApprovals.length ? (
+                    <div className="mt-3 space-y-2">
+                      {pendingApprovals.map((approval) => (
+                        <article
+                          key={`thread-pending-${approval.id}`}
+                          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold uppercase">
+                                Pending approval
+                              </div>
+                              <div className="mt-1 font-medium">
+                                {approval.action} request #{approval.id}
+                              </div>
+                              <p className="mt-1 text-xs">
+                                {approval.action === "read_files"
+                                  ? (approval.request.paths ?? []).join(", ")
+                                  : (approval.request.scope ??
+                                    `Artifact #${approval.request.artifactId ?? "unknown"}`)}
+                              </p>
+                              {approval.riskSummary ? (
+                                <p className="mt-1 text-xs">{approval.riskSummary}</p>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={() => void decideApproval(approval.id, "approved")}
+                                disabled={decidingApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-amber-300 bg-background px-2 text-xs font-medium text-foreground hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:hover:bg-amber-900/30"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => void decideApproval(approval.id, "denied")}
+                                disabled={decidingApprovalId === approval.id}
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-amber-300 bg-background px-2 text-xs font-medium text-foreground hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:hover:bg-amber-900/30"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                                Deny
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+
                   <div className="mt-3 max-h-72 space-y-2 overflow-auto rounded-md border border-border bg-background p-3">
                     {taskMessages.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
@@ -1572,6 +1648,12 @@ export default function OraxPage() {
                       taskMessages.map((message) => {
                         const isAssistant = message.role === "assistant";
                         const isTimeline = message.role === "system" || message.role === "tool";
+                        const timelineLabel =
+                          message.metadata?.source === "orax-task-checkpoint"
+                            ? "Checkpoint"
+                            : message.role === "tool"
+                              ? "Tool result"
+                              : "Timeline";
                         const suggestions = isAssistant
                           ? (message.metadata?.actionSuggestions ?? [])
                           : [];
@@ -1595,9 +1677,23 @@ export default function OraxPage() {
                                   : "text-primary-foreground/80",
                               )}
                             >
-                              {isAssistant ? "ORAX" : isTimeline ? "Timeline" : "You"} -{" "}
+                              {isAssistant ? "ORAX" : isTimeline ? timelineLabel : "You"} -{" "}
                               {new Date(message.createdAt).toLocaleString()}
                             </div>
+                            {isTimeline ? (
+                              <div className="mb-2 flex flex-wrap gap-1.5">
+                                {message.approvalId ? (
+                                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+                                    Approval #{message.approvalId}
+                                  </span>
+                                ) : null}
+                                {message.artifactId ? (
+                                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+                                    Artifact #{message.artifactId}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
                             <div className="whitespace-pre-wrap leading-relaxed">
                               {message.content}
                             </div>
@@ -1725,6 +1821,18 @@ export default function OraxPage() {
                       Send
                     </button>
                   </div>
+                </div>
+
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    <div className="text-sm font-semibold">Workflow controls</div>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Approval-gated file reads, draft patches, sandbox validation, controlled checks,
+                    and PR creation stay secondary to the task thread. ORAX still cannot edit,
+                    execute arbitrary commands, push, open PRs, or deploy without explicit approval.
+                  </p>
                 </div>
 
                 <textarea
