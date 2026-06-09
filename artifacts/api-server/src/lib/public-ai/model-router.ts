@@ -9,7 +9,7 @@
  * plus a snapshot of provider availability and open circuit breakers, and
  * returns an ordered list of candidates. The caller (chat.ts) iterates the
  * list, attempting each provider in turn until one succeeds. OpenAI is always
- * guaranteed to appear in the chain because it is the only provider that is
+ * appended as the terminal safety net because it is the only provider that is
  * always configured.
  *
  * Scope guard: this only selects the model for Ora's *conversational* branch.
@@ -65,20 +65,20 @@ export interface OraModelRouteInput {
 }
 
 /**
- * Per-tier provider preference orderings. Each ordering is a full permutation
- * of the four providers so that, after availability filtering, we always have
- * a complete fallback chain.
+ * Per-tier specialist provider preference orderings. OpenAI is intentionally
+ * absent from these arrays; `selectOraModelRoute` appends it once as the
+ * terminal safety-net candidate after availability filtering.
  */
-const FAST_ORDER: Provider[] = ["openai", "gemini", "deepseek", "anthropic"];
-const COST_SENSITIVE_ORDER: Provider[] = ["openai", "gemini", "deepseek", "anthropic"];
-const CORE_GENERAL_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
-const WAVE_GENERAL_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
-const CORE_DEEP_ORDER: Provider[] = ["openai", "anthropic", "deepseek", "gemini"];
-const WAVE_DEEP_ORDER: Provider[] = ["openai", "anthropic", "gemini", "deepseek"];
-const COST_SENSITIVE_TECHNICAL_ORDER: Provider[] = ["openai", "deepseek", "gemini", "anthropic"];
-const SPECIALIST_TECHNICAL_ORDER: Provider[] = ["anthropic", "openai", "deepseek", "gemini"];
-const DOCUMENT_ORDER: Provider[] = ["gemini", "openai", "anthropic", "deepseek"];
-const MULTILINGUAL_ORDER: Provider[] = ["gemini", "openai", "anthropic", "deepseek"];
+const FAST_ORDER: Provider[] = ["gemini", "deepseek", "anthropic"];
+const COST_SENSITIVE_ORDER: Provider[] = ["gemini", "deepseek", "anthropic"];
+const CORE_GENERAL_ORDER: Provider[] = ["anthropic", "gemini", "deepseek"];
+const WAVE_GENERAL_ORDER: Provider[] = ["anthropic", "gemini", "deepseek"];
+const CORE_DEEP_ORDER: Provider[] = ["anthropic", "deepseek", "gemini"];
+const WAVE_DEEP_ORDER: Provider[] = ["anthropic", "gemini", "deepseek"];
+const COST_SENSITIVE_TECHNICAL_ORDER: Provider[] = ["deepseek", "gemini", "anthropic"];
+const SPECIALIST_TECHNICAL_ORDER: Provider[] = ["anthropic", "deepseek", "gemini"];
+const DOCUMENT_ORDER: Provider[] = ["gemini", "anthropic", "deepseek"];
+const MULTILINGUAL_ORDER: Provider[] = ["gemini", "anthropic", "deepseek"];
 
 function normalizePlanTier(raw: string | null | undefined): OraPlanTier {
   if (raw === "core" || raw === "wave" || raw === "free") return raw;
@@ -142,7 +142,7 @@ function modelFor(provider: Provider, input: OraModelRouteInput): string {
  *
  * Guarantees:
  *  - Only configured/reachable providers appear (availability filter).
- *  - OpenAI is always present as a safety-net candidate (it is always configured).
+ *  - OpenAI is always present as the final safety-net candidate.
  *  - Providers with an OPEN circuit are pushed to the back (deprioritized, not
  *    dropped — the breaker's own half-open probing still gets a chance, and a
  *    fully-degraded fleet still has *something* to try).
@@ -151,8 +151,8 @@ function modelFor(provider: Provider, input: OraModelRouteInput): string {
 export function selectOraModelRoute(input: OraModelRouteInput): ModelCandidate[] {
   const order = pickProviderOrder(input);
 
-  // Filter to available providers, but always keep OpenAI as the safety net.
-  let providers = order.filter((p) => input.available[p] || p === "openai");
+  // Filter to available specialist providers. OpenAI is appended once below.
+  let providers = order.filter((p) => p !== "openai" && input.available[p]);
 
   // Deduplicate while preserving order (defensive — orderings are permutations).
   providers = providers.filter((p, i) => providers.indexOf(p) === i);
@@ -166,8 +166,8 @@ export function selectOraModelRoute(input: OraModelRouteInput): ModelCandidate[]
     return aOpen - bOpen;
   });
 
-  // Guarantee OpenAI is always reachable as a last resort when filtering removed it.
-  if (!providers.includes("openai")) providers.push("openai");
+  // Guarantee OpenAI is always reachable as the terminal safety net.
+  providers.push("openai");
 
   return providers.map((provider) => ({ provider, model: modelFor(provider, input) }));
 }

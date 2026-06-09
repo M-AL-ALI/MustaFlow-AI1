@@ -48,74 +48,74 @@ function makeInput(overrides: Partial<OraModelRouteInput> = {}): OraModelRouteIn
 const providersOf = (candidates: ModelCandidate[]): Provider[] => candidates.map((c) => c.provider);
 
 describe("selectOraModelRoute — tier ordering", () => {
-  it("orders the fast tier openai → gemini → deepseek → anthropic", () => {
+  it("orders the fast tier gemini -> deepseek -> anthropic -> openai", () => {
     const candidates = selectOraModelRoute(
       makeInput({ tier: "fast", intent: "simple_faq", confidence: "high" }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "gemini", "deepseek", "anthropic"]);
+    expect(providersOf(candidates)).toEqual(["gemini", "deepseek", "anthropic", "openai"]);
   });
 
-  it("orders the premium (default) tier openai → anthropic → gemini → deepseek", () => {
+  it("orders the premium (default) tier anthropic -> gemini -> deepseek -> openai", () => {
     const candidates = selectOraModelRoute(makeInput({ tier: "premium" }));
-    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "gemini", "deepseek"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "gemini", "deepseek", "openai"]);
   });
 
-  it("orders the core deep tier openai -> anthropic -> deepseek -> gemini", () => {
+  it("orders the core deep tier anthropic -> deepseek -> gemini -> openai", () => {
     const candidates = selectOraModelRoute(makeInput({ tier: "deep" }));
-    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "deepseek", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "deepseek", "gemini", "openai"]);
   });
 
-  it("orders the wave deep tier openai -> anthropic -> gemini -> deepseek", () => {
+  it("orders the wave deep tier anthropic -> gemini -> deepseek -> openai", () => {
     const candidates = selectOraModelRoute(makeInput({ tier: "deep", subscriptionTier: "wave" }));
-    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "gemini", "deepseek"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "gemini", "deepseek", "openai"]);
   });
 
   it("deep tier wins even when the topic is technical or the message is multilingual", () => {
     const candidates = selectOraModelRoute(
       makeInput({ tier: "deep", topic: "technical", multilingual: true }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "deepseek", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "deepseek", "gemini", "openai"]);
   });
 
   it("keeps free premium traffic on the cost-sensitive provider order", () => {
     const candidates = selectOraModelRoute(makeInput({ subscriptionTier: "free" }));
-    expect(providersOf(candidates)).toEqual(["openai", "gemini", "deepseek", "anthropic"]);
+    expect(providersOf(candidates)).toEqual(["gemini", "deepseek", "anthropic", "openai"]);
   });
 });
 
 describe("selectOraModelRoute — topic / language overrides", () => {
   it("puts Anthropic first for a technical topic (non-deep tier)", () => {
     const candidates = selectOraModelRoute(makeInput({ topic: "technical" }));
-    expect(providersOf(candidates)).toEqual(["anthropic", "openai", "deepseek", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "deepseek", "gemini", "openai"]);
   });
 
   it("puts Gemini first for a multilingual message", () => {
     const candidates = selectOraModelRoute(makeInput({ multilingual: true }));
-    expect(providersOf(candidates)).toEqual(["gemini", "openai", "anthropic", "deepseek"]);
+    expect(providersOf(candidates)).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
   });
 
   it("prioritizes the multilingual ordering over a technical topic", () => {
     const candidates = selectOraModelRoute(makeInput({ multilingual: true, topic: "technical" }));
-    expect(providersOf(candidates)).toEqual(["gemini", "openai", "anthropic", "deepseek"]);
+    expect(providersOf(candidates)).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
   });
 
   it("prioritizes a technical topic over the fast tier", () => {
     const candidates = selectOraModelRoute(
       makeInput({ tier: "fast", topic: "technical", intent: "simple_faq" }),
     );
-    expect(providersOf(candidates)).toEqual(["anthropic", "openai", "deepseek", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "deepseek", "gemini", "openai"]);
   });
 
   it("uses a cost-sensitive technical order for free users", () => {
     const candidates = selectOraModelRoute(
       makeInput({ subscriptionTier: "free", topic: "technical" }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "deepseek", "gemini", "anthropic"]);
+    expect(providersOf(candidates)).toEqual(["deepseek", "gemini", "anthropic", "openai"]);
   });
 
   it("puts Gemini first when document context is being carried", () => {
     const candidates = selectOraModelRoute(makeInput({ hasDocumentContext: true }));
-    expect(providersOf(candidates)).toEqual(["gemini", "openai", "anthropic", "deepseek"]);
+    expect(providersOf(candidates)).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
   });
 });
 
@@ -124,14 +124,14 @@ describe("selectOraModelRoute — availability filtering", () => {
     const candidates = selectOraModelRoute(
       makeInput({ available: { ...ALL_AVAILABLE, deepseek: false } }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "anthropic", "gemini"]);
+    expect(providersOf(candidates)).toEqual(["anthropic", "gemini", "openai"]);
   });
 
   it("drops Anthropic and Gemini when both are unavailable", () => {
     const candidates = selectOraModelRoute(
       makeInput({ available: { ...ALL_AVAILABLE, anthropic: false, gemini: false } }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "deepseek"]);
+    expect(providersOf(candidates)).toEqual(["deepseek", "openai"]);
   });
 
   it("falls back to OpenAI-only when every other provider is unavailable", () => {
@@ -155,8 +155,7 @@ describe("selectOraModelRoute — availability filtering", () => {
 
 describe("selectOraModelRoute — open-circuit deprioritization", () => {
   it("pushes an open-circuit provider to the back without dropping it", () => {
-    // Premium order is openai → anthropic → gemini → deepseek; opening OpenAI's
-    // circuit moves it last but it must still appear.
+    // OpenAI is always terminal; an open circuit keeps it present but last.
     const candidates = selectOraModelRoute(
       makeInput({ openCircuits: new Set<Provider>(["openai"]) }),
     );
@@ -167,16 +166,16 @@ describe("selectOraModelRoute — open-circuit deprioritization", () => {
     const candidates = selectOraModelRoute(
       makeInput({ openCircuits: new Set<Provider>(["anthropic"]) }),
     );
-    expect(providersOf(candidates)).toEqual(["openai", "gemini", "deepseek", "anthropic"]);
+    expect(providersOf(candidates)).toEqual(["gemini", "deepseek", "anthropic", "openai"]);
   });
 
   it("keeps relative order among multiple open circuits (stable partition)", () => {
     const candidates = selectOraModelRoute(
       makeInput({ openCircuits: new Set<Provider>(["openai", "anthropic"]) }),
     );
-    // Closed first (gemini, deepseek in premium order), then open ones in their
-    // original premium order (openai before anthropic).
-    expect(providersOf(candidates)).toEqual(["gemini", "deepseek", "openai", "anthropic"]);
+    // Closed first (gemini, deepseek in premium order), then open non-OpenAI
+    // providers, then the terminal OpenAI safety net.
+    expect(providersOf(candidates)).toEqual(["gemini", "deepseek", "anthropic", "openai"]);
   });
 });
 
@@ -194,11 +193,7 @@ describe("selectOraModelRoute — guarantees", () => {
     for (const input of inputs) {
       const candidates = selectOraModelRoute(input);
       expect(candidates.length).toBeGreaterThan(0);
-      expect(candidates.some((c) => c.provider === "openai")).toBe(true);
-      // OpenAI must be the terminal safety-net candidate UNLESS a higher-priority
-      // ordering legitimately places it earlier (and another provider last). It is
-      // guaranteed last only when its circuit is open or it is the sole survivor;
-      // in every case it must always be present (asserted above).
+      expect(candidates[candidates.length - 1].provider).toBe("openai");
     }
   });
 
