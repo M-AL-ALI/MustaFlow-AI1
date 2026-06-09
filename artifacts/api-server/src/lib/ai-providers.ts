@@ -18,6 +18,7 @@
  * billed at the same flat rate as a build run on gpt-5-mini.
  */
 
+import OpenAI from "openai";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import type {
   ChatCompletion,
@@ -29,7 +30,32 @@ import type {
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
 
-export type Provider = "openai" | "anthropic" | "gemini";
+export type Provider = "openai" | "anthropic" | "gemini" | "deepseek";
+
+/** DeepSeek's OpenAI-compatible REST endpoint. */
+const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+
+/**
+ * Lazily-constructed direct OpenAI-SDK client pointed at DeepSeek's
+ * OpenAI-compatible API. DeepSeek is NOT carried by the Replit AI-integrations
+ * proxy (which only fronts OpenAI/Anthropic/Gemini), so — exactly like the Ora
+ * TTS path — we talk to it with a direct client keyed by `DEEPSEEK_API_KEY`.
+ * Throws if the key is unset so callers can fall back to another provider.
+ */
+let deepseekClient: OpenAI | null = null;
+function getDeepSeekClient(): OpenAI {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error("DEEPSEEK_API_KEY is not configured");
+  if (!deepseekClient) {
+    deepseekClient = new OpenAI({ apiKey, baseURL: DEEPSEEK_BASE_URL });
+  }
+  return deepseekClient;
+}
+
+/** True when DeepSeek is reachable (its API key is configured). */
+export function isDeepSeekAvailable(): boolean {
+  return !!process.env.DEEPSEEK_API_KEY;
+}
 
 /**
  * Total message-content character count above which we route tool-free Anthropic
@@ -47,8 +73,12 @@ export const ANTHROPIC_STREAM_THRESHOLD_CHARS = 15_000;
 
 export type Stage = "build" | "refine" | "plan" | "architect" | "intent" | "converse";
 
-/** Vision-capable model per provider — used by the screenshot tool path. */
-export const VISION_MODEL: Record<Provider, string> = {
+/**
+ * Vision-capable model per provider — used by the screenshot tool path.
+ * DeepSeek has no vision model, so it is intentionally absent; callers that
+ * need vision while routed to DeepSeek must fall back to a vision provider.
+ */
+export const VISION_MODEL: Partial<Record<Provider, string>> = {
   openai: "gpt-5.4",
   anthropic: "claude-sonnet-4-6",
   gemini: "gemini-2.5-pro",
@@ -58,7 +88,7 @@ export const VISION_MODEL: Record<Provider, string> = {
  * Default per-(agent-mode, provider) model. The agent-mode tier is the
  * existing speed/quality dial; the provider is set by per-stage env routing.
  */
-const MODEL_DEFAULTS: Record<Provider, Record<AgentMode, string>> = {
+export const MODEL_DEFAULTS: Record<Provider, Record<AgentMode, string>> = {
   openai: {
     lite: "gpt-5-nano",
     eco: "gpt-5-mini",
@@ -76,6 +106,14 @@ const MODEL_DEFAULTS: Record<Provider, Record<AgentMode, string>> = {
     eco: "gemini-2.5-flash",
     power: "gemini-2.5-pro",
     pro: "gemini-2.5-pro",
+  },
+  deepseek: {
+    // DeepSeek's everyday chat model handles fast/cheap tiers; the reasoner
+    // model powers the harder reasoning tiers.
+    lite: "deepseek-chat",
+    eco: "deepseek-chat",
+    power: "deepseek-reasoner",
+    pro: "deepseek-reasoner",
   },
 };
 
@@ -102,7 +140,12 @@ export function parseProviderSpec(raw: string | undefined): {
   if (!trimmed) return null;
   const [providerPart, ...rest] = trimmed.split(":");
   const provider = providerPart;
-  if (provider !== "openai" && provider !== "anthropic" && provider !== "gemini") {
+  if (
+    provider !== "openai" &&
+    provider !== "anthropic" &&
+    provider !== "gemini" &&
+    provider !== "deepseek"
+  ) {
     return null;
   }
   const rawModel = rest.length > 0 ? rest.join(":").trim() : null;
@@ -180,6 +223,15 @@ export function resolveStageProvider(
     );
     provider = "openai";
   }
+  // DeepSeek reaches a direct client keyed by DEEPSEEK_API_KEY. When the key is
+  // absent we silently fall back to OpenAI (matches the graceful-degradation
+  // pattern used for the other optional providers).
+  if (provider === "deepseek" && !process.env.DEEPSEEK_API_KEY) {
+    warnOnce(
+      `${STAGE_ENV_VAR[stage]} set to deepseek but DEEPSEEK_API_KEY is missing. Falling back to OpenAI.`,
+    );
+    provider = "openai";
+  }
 
   // Only honor the env-supplied model when the requested provider actually ran;
   // if we fell back to OpenAI, ignore any Anthropic/Gemini model string and use
@@ -220,6 +272,9 @@ const PROVIDER_COST_MULTIPLIER: Record<Provider, number> = {
   openai: 1.0,
   anthropic: 1.6,
   gemini: 0.7,
+  // DeepSeek is markedly cheaper per token than the gpt-5 family at comparable
+  // quality, so it carries the lowest multiplier.
+  deepseek: 0.5,
 };
 
 const BASE_COST: Record<AgentMode, number> = {
@@ -264,14 +319,22 @@ export async function createChatCompletion(
   // Wrap AI provider calls with a per-provider circuit breaker + retry.
   // Each provider gets its own breaker so an Anthropic outage does not open
   // the OpenAI breaker and vice versa.
-  const { openaiCircuit, anthropicCircuit, geminiCircuit, withRetry, isTransientError } =
-    await import("./resilience");
+  const {
+    openaiCircuit,
+    anthropicCircuit,
+    geminiCircuit,
+    deepseekCircuit,
+    withRetry,
+    isTransientError,
+  } = await import("./resilience");
   const circuit =
     params.provider === "anthropic"
       ? anthropicCircuit
       : params.provider === "gemini"
         ? geminiCircuit
-        : openaiCircuit;
+        : params.provider === "deepseek"
+          ? deepseekCircuit
+          : openaiCircuit;
 
   return circuit.call(() =>
     withRetry(
@@ -316,6 +379,9 @@ export async function createChatCompletion(
             }
           }
           return callAnthropic(params);
+        }
+        if (params.provider === "deepseek") {
+          return callDeepSeek(params);
         }
         return callGemini(params);
       },
@@ -374,7 +440,37 @@ export async function* streamChatCompletion(
     return;
   }
 
+  if (params.provider === "deepseek") {
+    yield* streamDeepSeek(params);
+    return;
+  }
+
   yield* streamGemini(params);
+}
+
+/**
+ * DeepSeek streaming via its OpenAI-compatible API. Mirrors the OpenAI branch
+ * but uses the direct DeepSeek client and `max_tokens` (DeepSeek does not
+ * accept `max_completion_tokens`).
+ */
+async function* streamDeepSeek(
+  params: StreamChatCompletionParams,
+): AsyncGenerator<string, void, void> {
+  const client = getDeepSeekClient();
+  const stream = await client.chat.completions.create(
+    {
+      model: params.model,
+      max_tokens: params.max_completion_tokens,
+      stream: true,
+      messages: params.messages,
+    },
+    params.signal ? { signal: params.signal } : undefined,
+  );
+  for await (const chunk of stream) {
+    if (params.signal?.aborted) return;
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
+  }
 }
 
 async function* streamAnthropic(
@@ -906,6 +1002,32 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
     promptTokens: usage.promptTokenCount ?? 0,
     completionTokens: usage.candidatesTokenCount ?? 0,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DeepSeek adapter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Non-streaming DeepSeek completion via its OpenAI-compatible API. The wire
+ * shape matches OpenAI's `chat.completions.create`, so the returned
+ * `ChatCompletion` is passed straight through. DeepSeek uses `max_tokens`
+ * (not `max_completion_tokens`) and does not support OpenAI's `tool_choice`
+ * variety beyond auto, which Ora's conversational path does not rely on.
+ */
+async function callDeepSeek(params: CreateChatCompletionParams): Promise<ChatCompletion> {
+  const client = getDeepSeekClient();
+  return client.chat.completions.create(
+    {
+      model: params.model,
+      messages: params.messages,
+      tools: params.tools,
+      tool_choice: params.tool_choice,
+      response_format: params.response_format,
+      max_tokens: params.max_completion_tokens,
+    },
+    { signal: params.signal },
+  ) as Promise<ChatCompletion>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

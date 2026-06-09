@@ -296,6 +296,11 @@ export const geminiCircuit = new CircuitBreaker("gemini", {
   cooldownMs: 30_000,
 });
 
+export const deepseekCircuit = new CircuitBreaker("deepseek", {
+  failureThreshold: 5,
+  cooldownMs: 30_000,
+});
+
 export const containerCircuit = new CircuitBreaker("fly-containers", {
   failureThreshold: 8,
   cooldownMs: 60_000,
@@ -314,6 +319,7 @@ export const ALL_BREAKERS = [
   openaiCircuit,
   anthropicCircuit,
   geminiCircuit,
+  deepseekCircuit,
   containerCircuit,
   stripeCircuit,
 ];

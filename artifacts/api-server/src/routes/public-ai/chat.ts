@@ -17,6 +17,12 @@ import {
   extractMemorySaveCandidate,
 } from "../../lib/public-ai/orchestrator";
 import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
+import type { Provider } from "../../lib/ai-providers";
+import {
+  selectOraModelRoute,
+  type OraRouteTier,
+  type ModelCandidate,
+} from "../../lib/public-ai/model-router";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
@@ -968,7 +974,6 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
   const deepModel = process.env.ORA_DEEP_MODEL ?? premiumModel;
-  const fallbackModel = "claude-sonnet-4-6";
 
   // Deep Thinking always uses the strongest model with a larger token budget so
   // the step-by-step reasoning has room to land. Otherwise fall back to the
@@ -979,6 +984,11 @@ router.post("/public-ai/chat", async (req, res) => {
     classifierResult.confidence === "high";
   const primaryModel = deepAllowed ? deepModel : usesMini ? "gpt-5-mini" : premiumModel;
   const maxTokens = deepAllowed ? 2400 : usesMini ? 400 : 1200;
+
+  // The routing tier mirrors the model/token dial above. `openaiModel` is the
+  // env-aware OpenAI model the router uses verbatim for its OpenAI candidate.
+  const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
+  const isMultilingual = !!language && language !== "auto" && !/^en/i.test(language);
 
   // Chat history is opt-out: when the user turns off "reference chat history"
   // in their memory settings, each message is treated as a fresh conversation.
@@ -1055,7 +1065,36 @@ router.post("/public-ai/chat", async (req, res) => {
       .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });
     return;
   }
-  const { createChatCompletion } = aiProvidersModule;
+  const { createChatCompletion, isDeepSeekAvailable } = aiProvidersModule;
+
+  // Smart-route across all four providers (Task #1400). Build a snapshot of
+  // which providers are configured and which circuits are currently open, then
+  // ask the router for an availability-aware ordered candidate chain.
+  const { ALL_BREAKERS } = await import("../../lib/resilience");
+  const openCircuits = new Set(
+    ALL_BREAKERS.filter((b) => b.toJSON().state === "open").map((b) => b.toJSON().name as Provider),
+  );
+  const available: Record<Provider, boolean> = {
+    openai: true,
+    anthropic: !!(
+      process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL &&
+      process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY
+    ),
+    gemini: !!(
+      process.env.AI_INTEGRATIONS_GEMINI_BASE_URL && process.env.AI_INTEGRATIONS_GEMINI_API_KEY
+    ),
+    deepseek: isDeepSeekAvailable(),
+  };
+  const candidates: ModelCandidate[] = selectOraModelRoute({
+    tier: routeTier,
+    topic: classifierResult.topic,
+    intent: classifierResult.intent,
+    confidence: classifierResult.confidence,
+    multilingual: isMultilingual,
+    available,
+    openCircuits,
+    openaiModel: primaryModel,
+  });
 
   // Run the main reply and suggestion generation in parallel to reduce latency.
   // Suggestions use the conversation history + current message + topic context;
@@ -1064,39 +1103,40 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const [mainResult, suggestionResult] = await Promise.allSettled([
     (async () => {
-      try {
-        const result = await createChatCompletion({
-          provider: "openai",
-          model: primaryModel,
-          messages: callMessages,
-          response_format: { type: "text" },
-          max_completion_tokens: maxTokens,
-        });
-        return {
-          reply: result.choices[0]?.message?.content?.trim() ?? null,
-          usedFallback: false,
-          modelUsed: primaryModel,
-          provider: "openai" as const,
-        };
-      } catch (primaryErr) {
-        logger.warn(
-          { component: "ora-chat", model: primaryModel, err: primaryErr },
-          "Primary model failed — trying fallback",
-        );
-        const result = await createChatCompletion({
-          provider: "anthropic",
-          model: fallbackModel,
-          messages: callMessages,
-          response_format: { type: "text" },
-          max_completion_tokens: maxTokens,
-        });
-        return {
-          reply: result.choices[0]?.message?.content?.trim() ?? null,
-          usedFallback: true,
-          modelUsed: fallbackModel,
-          provider: "anthropic" as const,
-        };
+      let lastErr: unknown = null;
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        try {
+          const result = await createChatCompletion({
+            provider: candidate.provider,
+            model: candidate.model,
+            messages: callMessages,
+            response_format: { type: "text" },
+            max_completion_tokens: maxTokens,
+          });
+          return {
+            reply: result.choices[0]?.message?.content?.trim() ?? null,
+            // "usedFallback" means we did not land on the first-choice provider.
+            usedFallback: i > 0,
+            modelUsed: candidate.model,
+            provider: candidate.provider,
+          };
+        } catch (candidateErr) {
+          lastErr = candidateErr;
+          logger.warn(
+            {
+              component: "ora-chat",
+              provider: candidate.provider,
+              model: candidate.model,
+              attempt: i + 1,
+              ofCandidates: candidates.length,
+              err: candidateErr,
+            },
+            "Ora model candidate failed — trying next provider in fallback chain",
+          );
+        }
       }
+      throw lastErr ?? new Error("All Ora model candidates failed");
     })(),
     createChatCompletion({
       provider: "openai",
@@ -1121,7 +1161,7 @@ router.post("/public-ai/chat", async (req, res) => {
   let reply: string | null = null;
   let usedFallback = false;
   let modelUsed = primaryModel;
-  let provider: "openai" | "anthropic" = "openai";
+  let provider: Provider = "openai";
 
   if (mainResult.status === "fulfilled") {
     ({ reply, usedFallback, modelUsed, provider } = mainResult.value);

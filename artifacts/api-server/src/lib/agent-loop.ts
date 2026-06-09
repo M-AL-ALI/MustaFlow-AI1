@@ -2256,16 +2256,28 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         model,
       );
       // Vision-override: if a screenshot was just pushed, this turn must use a
-      // vision-capable model regardless of stage routing (Task #533).
+      // vision-capable model regardless of stage routing (Task #533). Some
+      // providers (e.g. DeepSeek) have no vision model — fall back to OpenAI's
+      // vision model+provider for that turn so the screenshot is still analyzed.
       const useVision = visionTurnsRemaining > 0;
       if (useVision) visionTurnsRemaining -= 1;
-      const effectiveModel = useVision ? VISION_MODEL[provider] : routedModel;
+      let effectiveProvider = provider;
+      let effectiveModel = routedModel;
+      if (useVision) {
+        const visionModel = VISION_MODEL[provider];
+        if (visionModel) {
+          effectiveModel = visionModel;
+        } else {
+          effectiveProvider = "openai";
+          effectiveModel = VISION_MODEL.openai as string;
+        }
+      }
       // Combine the wall-clock abort signal with a per-call timeout so a hung
       // AI response never blocks the loop for more than 3 minutes, regardless
       // of how much wall-clock budget remains.
       const perCallSignal = AbortSignal.any([input.signal, AbortSignal.timeout(3 * 60_000)]);
       response = await createChatCompletion({
-        provider,
+        provider: effectiveProvider,
         model: effectiveModel,
         messages,
         tools: toolsForLoop,
