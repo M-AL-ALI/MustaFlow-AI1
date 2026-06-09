@@ -650,11 +650,21 @@ export default function OraxPage() {
       const body = (await res.json()) as { task: OraxTask };
       setTasks((prev) => [body.task, ...prev]);
       setSelectedTaskId(body.task.id);
-      if (options.startThread) {
-        const messages = await appendTaskMessage(body.task.id, firstMessage);
-        setTaskMessages(messages);
-      }
       setPrompt("");
+      if (options.startThread) {
+        try {
+          const messages = await appendTaskMessage(body.task.id, firstMessage);
+          setTaskMessages(messages);
+        } catch (messageErr) {
+          setTaskMessageDraft(firstMessage);
+          setError(
+            messageErr instanceof Error
+              ? `Task created, but first message failed to save. Retry message: ${messageErr.message}`
+              : "Task created, but first message failed to save. Retry message.",
+          );
+          return;
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create ORAX task");
     } finally {

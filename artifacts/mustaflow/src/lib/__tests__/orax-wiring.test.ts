@@ -48,6 +48,8 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("createTask({ startThread: true })");
     expect(oraxPage).toContain("The first message becomes the task prompt");
     expect(oraxPage).toContain("normal Ora history or AI Builder");
+    expect(oraxPage).toContain("Task created, but first message failed to save");
+    expect(oraxPage).toContain("setTaskMessageDraft(firstMessage)");
     expect(oraxPage).toContain('confirmationText: "CREATE PR"');
     expect(oraxPage).toContain("Type CREATE PR to enable approval");
     expect(oraxPage).toContain("ArtifactTrace");
