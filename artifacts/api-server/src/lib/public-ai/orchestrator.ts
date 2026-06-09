@@ -285,6 +285,24 @@ const FILE_CONTINUATION_PATTERNS: RegExp[] = [
   /\b(still\s+waiting|i'?m\s+waiting|where\s+is\s+it|i\s+don'?t\s+see\s+it|nothing\s+(showed|appeared)|didn'?t\s+(get|see)\s+it)\b/i,
 ];
 
+// A PURE affirmation lead — the only kind of reply that may resolve to a
+// context-derived image prompt. Used by image continuation (NOT file
+// continuation, which can tolerate "make it one" because it re-derives the
+// format from the offer). We deliberately do NOT reuse the broad
+// FILE_CONTINUATION "make/give it" pattern for images: a modifier-bearing reply
+// like "make it blue" or "go ahead with neon colors" carries a NEW qualifier
+// that a context-derived prompt would silently discard, producing the WRONG
+// image. Those must fall through to the conversational path instead.
+const AFFIRMATION_LEAD_PATTERN =
+  /^(yes|yeah|yep|yup|sure|ok|okay|please|please\s+do|do\s+it|go\s+ahead|go\s+for\s+it|proceed|continue|sounds\s+good|that\s+works|perfect|great)\b/i;
+
+// Trailing words that follow an affirmation without adding any image instruction
+// ("go ahead AND DO IT", "yes PLEASE"). If anything else remains after the lead,
+// the reply carries a real qualifier and must NOT be treated as a pure
+// continuation.
+const AFFIRMATION_BENIGN_TRAILER =
+  /^(?:[\s,.!]+|please|thanks|thank\s+you|now|and|do\s+it|it|that|this|for\s+me|go\s+ahead|go\s+for\s+it|sounds\s+good|sounds\s+great|perfect|great|cool|nice|awesome|sure|yes|yeah|yep|yup|ok(?:ay)?)+$/i;
+
 // An explicit OFFER to generate a file in the assistant's last turn. We require
 // this (not a bare format mention) so "here's how PDFs work" + a user "yes"
 // can't spuriously trigger file generation. Matches "I can/I'll/would you like
@@ -293,6 +311,29 @@ const FILE_CONTINUATION_PATTERNS: RegExp[] = [
 // detectFileRequest on the same message.
 const ASSISTANT_FILE_OFFER_PATTERN =
   /\b(i\s+can|i'?ll|i\s+will|i\s+could|let\s+me|shall\s+i|would\s+you\s+like\s+me\s+to|want\s+me\s+to|do\s+you\s+want\s+me\s+to|happy\s+to)\b[^.?!]*\b(create|generate|make|build|put\s+together|prepare|draft|whip\s+up|export|produce|write\s+up)\b/i;
+
+// An explicit OFFER to generate an IMAGE in the assistant's last turn — mirrors
+// ASSISTANT_FILE_OFFER_PATTERN but requires a visual noun. We require this (not
+// a bare image mention) so "here's how logos work" + a user "yes" can't trigger
+// image generation.
+const ASSISTANT_IMAGE_OFFER_PATTERN =
+  /\b(i\s+can|i'?ll|i\s+will|i\s+could|let\s+me|shall\s+i|would\s+you\s+like\s+me\s+to|want\s+me\s+to|do\s+you\s+want\s+me\s+to|happy\s+to)\b[^.?!]*\b(generate|create|make|design|produce|render|draw|sketch|paint|illustrate)\b[^.?!]*\b(images?|pictures?|photos?|illustrations?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|artworks?)\b/i;
+
+// Pulls the descriptive clause out of an image offer ("…generate a logo for your
+// bakery" → "a logo for your bakery") so a short continuation reply can become a
+// concrete generation prompt. Returns null when no clause is found.
+const IMAGE_OFFER_DESCRIPTION =
+  /\b(?:generate|create|make|design|produce|render|draw|sketch|paint|illustrate)\s+(?:you\s+|us\s+|me\s+|for\s+you\s+|for\s+us\s+)?((?:a|an|the|some)\s+(?:image|picture|photo|illustration|graphic|visual|logo|banner|icon|thumbnail|avatar|mockup|poster|flyer|badge|painting|portrait|sketch|wallpaper|artwork)[^.?!\n—]*)/i;
+
+function extractImageOfferDescription(content: string): string | null {
+  const m = content.match(IMAGE_OFFER_DESCRIPTION);
+  if (!m) return null;
+  const desc = m[1]
+    .trim()
+    .replace(/\s+(for\s+you|right|ok(?:ay)?)\s*$/i, "")
+    .trim();
+  return desc.length >= 3 ? desc : null;
+}
 
 /**
  * Resolve a short continuation reply to the file format the assistant just
@@ -323,11 +364,65 @@ function detectFileContinuation(
   return null;
 }
 
+/**
+ * Resolve a short continuation reply ("yes", "go ahead and do it") to a concrete
+ * image-generation prompt when the latest assistant turn explicitly OFFERED to
+ * generate an image. Returns the resolved prompt, or null when this is not an
+ * image continuation.
+ *
+ * The prompt is resolved from context because the affirmation itself carries no
+ * description: we prefer the user's own most recent image request before the
+ * offer (their exact words), and fall back to the descriptive clause inside the
+ * offer ("…a logo for your bakery").
+ */
+function detectImageContinuation(
+  message: string,
+  recentMessages: Array<{ role: "user" | "assistant"; content: string }>,
+): string | null {
+  const trimmed = message.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) return null;
+  // Pure affirmation only. The reply must START with an affirmation and contain
+  // nothing beyond benign trailing words — anything else ("make it blue",
+  // "go ahead with neon colors", "make it 16:9") is a NEW qualifier that a
+  // context-derived prompt would silently discard, so we let it fall through.
+  const lead = trimmed.match(AFFIRMATION_LEAD_PATTERN);
+  if (!lead) return null;
+  const rest = trimmed.slice(lead[0].length).trim();
+  if (rest.length > 0 && !AFFIRMATION_BENIGN_TRAILER.test(rest)) return null;
+
+  // The single latest assistant turn (the one being replied to) must be an
+  // explicit image offer for this to count.
+  let offerIdx = -1;
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    if (recentMessages[i].role === "assistant") {
+      offerIdx = i;
+      break;
+    }
+  }
+  if (offerIdx === -1) return null;
+  if (!ASSISTANT_IMAGE_OFFER_PATTERN.test(recentMessages[offerIdx].content)) return null;
+
+  // Prefer the user's own most recent image request before the offer.
+  for (let j = offerIdx - 1; j >= 0; j--) {
+    const m = recentMessages[j];
+    if (m.role === "user" && isImageGenerationRequest(m.content)) {
+      return m.content.trim();
+    }
+  }
+  return extractImageOfferDescription(recentMessages[offerIdx].content);
+}
+
 export interface OraRouteDecision {
   tool: OraTool;
   reason: string;
   /** Set when tool === "file_generation". */
   fileFormat?: FileFormat;
+  /**
+   * Set when tool === "image_generation" was reached via a continuation reply
+   * ("go ahead and do it"). Carries the prompt resolved from prior context so
+   * the image branch generates the offered image instead of the literal reply.
+   */
+  imagePrompt?: string;
   /**
    * Set when tool === "search" AND the message specifically asked for a video.
    * The route passes this to the web-search pipeline so the model is explicitly
@@ -393,6 +488,25 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
       confidence: "high",
       topic: "general",
     };
+  }
+
+  // 2b. Image generation continuation. A short "yes / go ahead and do it" reply
+  //     to a turn where the assistant OFFERED to generate an image must actually
+  //     generate it (with a prompt resolved from prior context) instead of
+  //     falling through to a conversational answer that only claims it — or
+  //     wrongly hedges that the user must sign in first.
+  if (input.recentMessages?.length) {
+    const resolvedImagePrompt = detectImageContinuation(message, input.recentMessages);
+    if (resolvedImagePrompt) {
+      return {
+        tool: "image_generation",
+        reason: "Continuation of an offered image generation.",
+        imagePrompt: resolvedImagePrompt,
+        intent: "premium",
+        confidence: "high",
+        topic: "general",
+      };
+    }
   }
 
   // 3. Web-search fast-path — current-info questions need live results. Runs

@@ -515,19 +515,36 @@ const bodySchema = z.object({
  * very short messages so the model defaults to the user's preferred language
  * instead of picking arbitrarily.
  */
-function buildSystemPrompt(language: string | undefined, languageHint: string | undefined): string {
+// Tells the model the CURRENT user's auth state so it never has to guess.
+// Without this, the prompt's "signed-in vs visitor" branches leave the model to
+// infer auth status — and it wrongly defaults to the "you need to sign in"
+// hedge even for users who are already signed in (the reported bug).
+function sessionAuthBlock(isSignedIn: boolean): string {
+  return isSignedIn
+    ? `\n\n## Current session (authoritative)\nThe user you are talking to right now IS signed in. Every capability — image generation, file generation, and live web search — is fully available to them this turn. NEVER tell this user they need to sign in, sign up, or create an account to use any feature, and never ask them to "sign in first" or hand them a prompt "to use after signing in". Just proceed.`
+    : `\n\n## Current session (authoritative)\nThe user you are talking to right now is NOT signed in. Image generation and live web search require an account: warmly invite them to sign up to unlock these, and never claim you are technically unable to do them.`;
+}
+
+function buildSystemPrompt(
+  language: string | undefined,
+  languageHint: string | undefined,
+  isSignedIn: boolean,
+): string {
+  const authBlock = sessionAuthBlock(isSignedIn);
   if (!language || language === "auto") {
-    if (!languageHint) return ORA_SYSTEM_PROMPT;
+    if (!languageHint) return ORA_SYSTEM_PROMPT + authBlock;
     // Normalise: "fr-FR" → "fr", "en-US" → "en"
     const primaryLang = languageHint.split("-")[0].toLowerCase();
-    if (primaryLang === "en") return ORA_SYSTEM_PROMPT; // English is the default — no hint needed
+    if (primaryLang === "en") return ORA_SYSTEM_PROMPT + authBlock; // English is the default — no hint needed
     return (
       ORA_SYSTEM_PROMPT +
+      authBlock +
       `\n\n## Language tiebreaker\nThe visitor's browser is set to "${languageHint}". When their message is too short or ambiguous to reliably detect a language, default to responding in ${primaryLang}. If the message is clearly in a different language, match that language instead.`
     );
   }
   return (
     ORA_SYSTEM_PROMPT +
+    authBlock +
     `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`
   );
 }
@@ -772,6 +789,9 @@ router.post("/public-ai/chat", async (req, res) => {
   // ── Image generation tool (inline, signed-in users) ─────────────────────────
   // Anonymous visitors are caught by checkToolAccess above (image_signin_required).
   if (decision.tool === "image_generation") {
+    // For a continuation reply ("go ahead and do it") the user's message carries
+    // no description — use the prompt resolved from prior context by the router.
+    const imagePrompt = decision.imagePrompt ?? message;
     let imageProviderModule: typeof import("../../lib/image-provider");
     try {
       imageProviderModule = await import("../../lib/image-provider");
@@ -801,7 +821,7 @@ router.post("/public-ai/chat", async (req, res) => {
     }
     try {
       const result = await generateImage({
-        prompt: message,
+        prompt: imagePrompt,
         quality: "standard",
         aspectRatio: "1:1",
         style: "vivid",
@@ -819,7 +839,7 @@ router.post("/public-ai/chat", async (req, res) => {
             .insert(generatedImagesTable)
             .values({
               userId: authed.userId,
-              prompt: message,
+              prompt: imagePrompt,
               quality: "standard",
               aspectRatio: "1:1",
               style: "vivid",
@@ -889,7 +909,7 @@ router.post("/public-ai/chat", async (req, res) => {
                 fileName: `ora-image-${Date.now()}.${ext}`,
                 mimeType,
                 format: ext,
-                prompt: message,
+                prompt: imagePrompt,
                 base64,
               });
             }
@@ -1040,7 +1060,7 @@ router.post("/public-ai/chat", async (req, res) => {
     : "";
 
   const systemPrompt =
-    buildSystemPrompt(language, languageHint) +
+    buildSystemPrompt(language, languageHint, !!authed) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
     profileContext +
     memory.text +

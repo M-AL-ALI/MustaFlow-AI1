@@ -27,6 +27,15 @@ import {
   type OraSource,
 } from "../../../lib/public-ai/web-search";
 
+// A precomputed classifier result lets routeOraMessage skip the live LLM
+// classifier call on the conversational fallthrough — keeping these routing
+// tests fast and deterministic (no network).
+const STUB_CLASSIFIER = {
+  intent: "premium",
+  confidence: "high",
+  topic: "general",
+} as const;
+
 // ─── isWebSearchRequest ───────────────────────────────────────────────────────
 
 describe("isWebSearchRequest", () => {
@@ -222,6 +231,102 @@ describe("isImageGenerationRequest", () => {
       mode: "instant",
     });
     expect(decision.tool).toBe("image_generation");
+  });
+});
+
+describe("image generation continuation", () => {
+  it("routes 'go ahead and do it' after an image offer to image_generation with a resolved prompt", async () => {
+    const decision = await routeOraMessage({
+      message: "go ahead and do it",
+      mode: "instant",
+      recentMessages: [
+        { role: "user", content: "I run a mechanic shop" },
+        {
+          role: "assistant",
+          content: "I can generate a logo for your mechanic shop — want me to?",
+        },
+      ],
+    });
+    expect(decision.tool).toBe("image_generation");
+    expect(decision.imagePrompt).toBe("a logo for your mechanic shop");
+  });
+
+  it("prefers the user's own prior image request as the resolved prompt", async () => {
+    const decision = await routeOraMessage({
+      message: "yes please",
+      mode: "instant",
+      recentMessages: [
+        { role: "user", content: "make me a picture of a red sports car at sunset" },
+        {
+          role: "assistant",
+          content: "Sure — I can generate that image for you. Want me to go ahead?",
+        },
+      ],
+    });
+    expect(decision.tool).toBe("image_generation");
+    expect(decision.imagePrompt).toBe("make me a picture of a red sports car at sunset");
+  });
+
+  it("does NOT treat an affirmation after a FILE offer as an image continuation", async () => {
+    const decision = await routeOraMessage({
+      message: "go ahead",
+      mode: "instant",
+      recentMessages: [
+        { role: "assistant", content: "I can put together a PDF report for you. Want me to?" },
+      ],
+    });
+    expect(decision.tool).toBe("file_generation");
+    expect(decision.imagePrompt).toBeUndefined();
+  });
+
+  it("does NOT generate when there was no offer to continue", async () => {
+    const decision = await routeOraMessage({
+      message: "go ahead",
+      mode: "instant",
+      recentMessages: [
+        { role: "assistant", content: "Here is some general advice about running a shop." },
+      ],
+      classifier: STUB_CLASSIFIER,
+    });
+    expect(decision.tool).toBe("answer");
+  });
+
+  it("does NOT treat a follow-up question after an image offer as a continuation", async () => {
+    const decision = await routeOraMessage({
+      message: "what would it cost?",
+      mode: "instant",
+      recentMessages: [
+        { role: "assistant", content: "I can generate a banner for your site. Want me to?" },
+      ],
+      classifier: STUB_CLASSIFIER,
+    });
+    expect(decision.tool).toBe("answer");
+  });
+
+  it("does NOT treat a modifier-bearing reply as a pure continuation (would discard the qualifier)", async () => {
+    const offer = [
+      {
+        role: "assistant" as const,
+        content: "I can generate a logo for your shop — want me to?",
+      },
+    ];
+    // Each of these carries a NEW qualifier; routing to the stale context prompt
+    // would silently drop it, so they must fall through to the conversational path.
+    for (const message of [
+      "make it blue",
+      "go ahead with neon colors",
+      "make it 16:9",
+      "make it pop with red",
+    ]) {
+      const decision = await routeOraMessage({
+        message,
+        mode: "instant",
+        recentMessages: offer,
+        classifier: STUB_CLASSIFIER,
+      });
+      expect(decision.tool, `"${message}" should not be an image continuation`).toBe("answer");
+      expect(decision.imagePrompt).toBeUndefined();
+    }
   });
 });
 
