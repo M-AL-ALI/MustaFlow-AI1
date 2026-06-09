@@ -12,10 +12,9 @@
  * appended as the terminal safety net because it is the only provider that is
  * always configured.
  *
- * Scope guard: this only selects the model for Ora's *conversational* branch.
- * It does NOT touch the Builder pipeline, the web-search grounding path (which
- * requires a direct OpenAI Responses API call), image/vision routing, or any
- * user-facing model picker.
+ * Scope guard: this only selects models for Ora public-AI paths. It does NOT
+ * touch the Builder pipeline, the AI Builder provider picker, or any user-facing
+ * model picker.
  */
 
 import { isDeepSeekAvailable, MODEL_DEFAULTS, type Provider } from "../ai-providers";
@@ -142,6 +141,30 @@ export function openAiModelForOraVision(planTier: OraPlanTier): string {
     );
   }
   return envModel("ORA_FREE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+}
+
+export function openAiModelForOraSearch(planTier: OraPlanTier): string {
+  if (planTier === "wave") {
+    return (
+      envModel(
+        "ORA_WAVE_SEARCH_MODEL",
+        "ORA_SEARCH_MODEL",
+        "ORA_WAVE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-4o"
+    );
+  }
+  if (planTier === "core") {
+    return (
+      envModel(
+        "ORA_CORE_SEARCH_MODEL",
+        "ORA_SEARCH_MODEL",
+        "ORA_CORE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-4o"
+    );
+  }
+  return envModel("ORA_FREE_SEARCH_MODEL", "ORA_SEARCH_MODEL") ?? "gpt-4o";
 }
 
 export function getOraProviderRoutingSnapshot(): {

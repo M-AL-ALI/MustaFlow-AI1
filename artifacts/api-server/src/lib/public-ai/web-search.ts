@@ -15,6 +15,7 @@
  */
 import OpenAI from "openai";
 import { logger } from "../logger";
+import { normalizeOraPlanTier, openAiModelForOraSearch, type OraPlanTier } from "./model-router";
 
 export interface OraSource {
   title: string;
@@ -55,6 +56,8 @@ export interface OraWebSearchInput {
    * raw watch URL into the prose.
    */
   wantsVideos?: boolean;
+  /** Signed-in user's effective Ora plan tier; anonymous callers may omit it. */
+  subscriptionTier?: string | null;
 }
 
 export interface OraWebSearchResult {
@@ -469,7 +472,8 @@ export function buildInstructions(
  */
 export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebSearchResult> {
   const { query, history = [], language, personalContext, wantsVideos } = input;
-  const model = process.env.ORA_SEARCH_MODEL ?? "gpt-4o";
+  const planTier: OraPlanTier = normalizeOraPlanTier(input.subscriptionTier);
+  const model = openAiModelForOraSearch(planTier);
 
   // Build a compact input: recent turns for follow-up context, then the query.
   const messages = [
@@ -500,6 +504,8 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     {
       component: "ora-web-search",
       model,
+      planTier,
+      wantsVideos: wantsVideos === true,
       latencyMs: Date.now() - start,
       sourceCount: sources.length,
       imageCount: images.length,

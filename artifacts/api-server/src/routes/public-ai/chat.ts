@@ -981,6 +981,7 @@ router.post("/public-ai/chat", async (req, res) => {
         language,
         personalContext: searchPersonalContext || undefined,
         wantsVideos: decision.wantsVideos,
+        subscriptionTier: oraPlanTier(authed),
       });
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
