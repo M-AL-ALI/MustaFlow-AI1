@@ -251,6 +251,68 @@ describe("image generation continuation", () => {
     expect(decision.imagePrompt).toBe("a logo for your mechanic shop");
   });
 
+  it("routes generation-verb continuations ('go ahead and create it', 'yes create it') to image_generation", async () => {
+    const offer = [
+      {
+        role: "assistant" as const,
+        content: "I can generate a logo for your shop — want me to?",
+      },
+    ];
+    for (const message of [
+      "go ahead and create it",
+      "go ahead and make it",
+      "yes create it",
+      "create it",
+      "go ahead and generate the image",
+    ]) {
+      const decision = await routeOraMessage({ message, mode: "instant", recentMessages: offer });
+      expect(decision.tool, `"${message}" should be an image continuation`).toBe(
+        "image_generation",
+      );
+    }
+  });
+
+  it("does not reuse a STALE earlier image request when the nearest user turn is unrelated", async () => {
+    const decision = await routeOraMessage({
+      message: "yes go ahead",
+      mode: "instant",
+      recentMessages: [
+        { role: "user", content: "make me a logo for my bakery" },
+        { role: "assistant", content: "Here's a bakery logo concept..." },
+        { role: "user", content: "what hours should a bakery keep?" },
+        {
+          role: "assistant",
+          content: "I can generate an illustration of a coffee cup — want me to?",
+        },
+      ],
+    });
+    expect(decision.tool).toBe("image_generation");
+    // Must resolve to the offer's subject (coffee cup), NOT the stale bakery logo.
+    expect(decision.imagePrompt ?? "").not.toContain("bakery");
+    expect((decision.imagePrompt ?? "").toLowerCase()).toContain("coffee");
+  });
+
+  it("does NOT treat a question after an image offer as a continuation", async () => {
+    // Questions share tokens with continuations ("make it", "do it") but ask
+    // rather than affirm — the continuation gate must reject them so they don't
+    // silently auto-generate the offered image.
+    const offer = [
+      {
+        role: "assistant" as const,
+        content: "I can generate a logo for your shop — want me to?",
+      },
+    ];
+    for (const message of ["can you make it", "make it?", "do it?"]) {
+      const decision = await routeOraMessage({
+        message,
+        mode: "instant",
+        recentMessages: offer,
+        classifier: STUB_CLASSIFIER,
+      });
+      expect(decision.tool, `"${message}" should not auto-generate`).not.toBe("image_generation");
+    }
+  });
+
   it("prefers the user's own prior image request as the resolved prompt", async () => {
     const decision = await routeOraMessage({
       message: "yes please",

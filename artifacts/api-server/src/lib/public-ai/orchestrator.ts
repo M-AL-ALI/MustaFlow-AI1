@@ -285,23 +285,105 @@ const FILE_CONTINUATION_PATTERNS: RegExp[] = [
   /\b(still\s+waiting|i'?m\s+waiting|where\s+is\s+it|i\s+don'?t\s+see\s+it|nothing\s+(showed|appeared)|didn'?t\s+(get|see)\s+it)\b/i,
 ];
 
-// A PURE affirmation lead — the only kind of reply that may resolve to a
-// context-derived image prompt. Used by image continuation (NOT file
-// continuation, which can tolerate "make it one" because it re-derives the
-// format from the offer). We deliberately do NOT reuse the broad
-// FILE_CONTINUATION "make/give it" pattern for images: a modifier-bearing reply
-// like "make it blue" or "go ahead with neon colors" carries a NEW qualifier
-// that a context-derived prompt would silently discard, producing the WRONG
-// image. Those must fall through to the conversational path instead.
-const AFFIRMATION_LEAD_PATTERN =
-  /^(yes|yeah|yep|yup|sure|ok|okay|please|please\s+do|do\s+it|go\s+ahead|go\s+for\s+it|proceed|continue|sounds\s+good|that\s+works|perfect|great)\b/i;
+// ── Image-continuation vocabulary ────────────────────────────────────────────
+// A short reply may resolve to a context-derived image prompt ONLY when every
+// word is a "pure continuation" token: an affirmation ("yes", "sure"), a bare
+// generation verb referring to the offered thing ("create it", "go ahead and
+// make it"), a reference to that thing ("it", "the image"), or benign filler
+// ("and", "please"). Any OTHER word is a NEW qualifier (a color, size, style,
+// aspect ratio, or new subject) that a context-derived prompt would silently
+// discard — producing the WRONG image — so it must fall through to the
+// conversational path instead.
+//
+// We deliberately do NOT reuse the broad FILE_CONTINUATION "make/give it"
+// pattern for images: file continuation re-derives the format from the offer and
+// carries no descriptive prompt, so a stray qualifier there is harmless; for
+// images the resolved prompt is the whole point, so the gate must be strict.
+const IMAGE_CONTINUATION_TOKENS = new Set([
+  // affirmations / acknowledgements
+  "yes",
+  "yeah",
+  "yep",
+  "yup",
+  "sure",
+  "ok",
+  "okay",
+  "please",
+  "proceed",
+  "continue",
+  "perfect",
+  "great",
+  "cool",
+  "nice",
+  "awesome",
+  "thanks",
+  "thank",
+  "sounds",
+  "good",
+  "works",
+  "go",
+  "ahead",
+  // benign fillers
+  "and",
+  "then",
+  "now",
+  "for",
+  "me",
+  // generation verbs (refer to the already-offered image, not a new subject)
+  "create",
+  "make",
+  "generate",
+  "build",
+  "produce",
+  "render",
+  "draw",
+  "design",
+  "sketch",
+  "paint",
+  "do",
+  // references to the offered thing
+  "it",
+  "that",
+  "this",
+  "one",
+  "them",
+  "the",
+  "image",
+  "images",
+  "picture",
+  "pictures",
+  "photo",
+  "photos",
+]);
 
-// Trailing words that follow an affirmation without adding any image instruction
-// ("go ahead AND DO IT", "yes PLEASE"). If anything else remains after the lead,
-// the reply carries a real qualifier and must NOT be treated as a pure
-// continuation.
-const AFFIRMATION_BENIGN_TRAILER =
-  /^(?:[\s,.!]+|please|thanks|thank\s+you|now|and|do\s+it|it|that|this|for\s+me|go\s+ahead|go\s+for\s+it|sounds\s+good|sounds\s+great|perfect|great|cool|nice|awesome|sure|yes|yeah|yep|yup|ok(?:ay)?)+$/i;
+// At least one of these (an affirmation or a generation verb) must be present —
+// a reply made only of references/filler ("the image") is not a continuation.
+const IMAGE_CONTINUATION_INTENT_TOKENS = new Set([
+  "yes",
+  "yeah",
+  "yep",
+  "yup",
+  "sure",
+  "ok",
+  "okay",
+  "please",
+  "proceed",
+  "continue",
+  "perfect",
+  "great",
+  "ahead",
+  "create",
+  "make",
+  "generate",
+  "build",
+  "produce",
+  "render",
+  "draw",
+  "design",
+  "sketch",
+  "paint",
+  "do",
+]);
 
 // An explicit OFFER to generate a file in the assistant's last turn. We require
 // this (not a bare format mention) so "here's how PDFs work" + a user "yes"
@@ -381,14 +463,25 @@ function detectImageContinuation(
 ): string | null {
   const trimmed = message.trim();
   if (trimmed.length === 0 || trimmed.length > 80) return null;
-  // Pure affirmation only. The reply must START with an affirmation and contain
-  // nothing beyond benign trailing words — anything else ("make it blue",
-  // "go ahead with neon colors", "make it 16:9") is a NEW qualifier that a
+  // A question is never an affirmation. "do you create images?" shares tokens
+  // with a continuation but asks about capability — it must not auto-generate.
+  if (trimmed.includes("?")) return null;
+  if (/^(do|does|can|could|will|would|should|are|is|have|has)\s+you\b/i.test(trimmed)) return null;
+  // Pure-continuation gate: every word must be a continuation token (affirmation,
+  // generation verb referring to the offered thing, a reference to it, or benign
+  // filler), AND at least one must signal intent. Any other word ("make it BLUE",
+  // "go ahead WITH NEON colors", "make it 16:9") is a NEW qualifier that a
   // context-derived prompt would silently discard, so we let it fall through.
-  const lead = trimmed.match(AFFIRMATION_LEAD_PATTERN);
-  if (!lead) return null;
-  const rest = trimmed.slice(lead[0].length).trim();
-  if (rest.length > 0 && !AFFIRMATION_BENIGN_TRAILER.test(rest)) return null;
+  const words = trimmed
+    .toLowerCase()
+    .split(/\s+/)
+    // Strip only EDGE punctuation ("yes," -> "yes") so internal qualifier tokens
+    // like "16:9" survive and fail the allowlist instead of being scrubbed away.
+    .map((w) => w.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ""))
+    .filter(Boolean);
+  if (words.length === 0) return null;
+  if (!words.every((w) => IMAGE_CONTINUATION_TOKENS.has(w))) return null;
+  if (!words.some((w) => IMAGE_CONTINUATION_INTENT_TOKENS.has(w))) return null;
 
   // The single latest assistant turn (the one being replied to) must be an
   // explicit image offer for this to count.
@@ -402,12 +495,17 @@ function detectImageContinuation(
   if (offerIdx === -1) return null;
   if (!ASSISTANT_IMAGE_OFFER_PATTERN.test(recentMessages[offerIdx].content)) return null;
 
-  // Prefer the user's own most recent image request before the offer.
+  // Prefer the user's own image request ONLY when it is the turn that
+  // immediately prompted this offer — a tight locality window. Walking all the
+  // way back would let a STALE, unrelated image request earlier in the chat
+  // override the offer's actual subject and generate the wrong image. So we
+  // inspect just the nearest preceding user turn; if it isn't an image request
+  // we fall back to the offer's own descriptive clause.
   for (let j = offerIdx - 1; j >= 0; j--) {
     const m = recentMessages[j];
-    if (m.role === "user" && isImageGenerationRequest(m.content)) {
-      return m.content.trim();
-    }
+    if (m.role !== "user") continue;
+    if (isImageGenerationRequest(m.content)) return m.content.trim();
+    break;
   }
   return extractImageOfferDescription(recentMessages[offerIdx].content);
 }
