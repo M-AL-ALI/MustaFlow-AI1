@@ -351,10 +351,13 @@ function clearStoredTranscript(): void {
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  // authFetch (not raw fetch) so a fresh Clerk bearer token is attached: the
+  // dev-mode JWT cookie expires ~60s and is unreliable in the preview iframe,
+  // and /public-ai/chat resolves auth from getAuth(req). A cookie-only call
+  // makes a signed-in user look anonymous, so Ora wrongly hedges "sign in first".
+  const res = await authFetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -365,9 +368,8 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await authFetch(`${BASE}${path}`, {
     method: "GET",
-    credentials: "include",
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -377,9 +379,8 @@ async function apiGet<T>(path: string): Promise<T> {
 }
 
 async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await authFetch(`${BASE}${path}`, {
     method: "DELETE",
-    credentials: "include",
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -876,9 +877,8 @@ export function useOraChat(): UseOraChatReturn {
         const formData = new FormData();
         formData.append("file", uploadBlob, uploadName);
 
-        const res = await fetch(`${BASE}/api/public-ai/upload`, {
+        const res = await authFetch(`${BASE}/api/public-ai/upload`, {
           method: "POST",
-          credentials: "include",
           body: formData,
         });
 

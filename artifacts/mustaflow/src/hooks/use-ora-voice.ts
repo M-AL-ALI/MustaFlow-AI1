@@ -10,6 +10,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { authFetch } from "@/lib/api-fetch";
 
 // ─── Minimal inline Speech API declarations ───────────────────────────────────
 // SpeechRecognition is in lib.dom, but some TypeScript configs don't resolve
@@ -532,20 +533,18 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
         try {
           const ttsBody = JSON.stringify({ text: trimmed, language: lang });
           const requestTts = () =>
-            fetch("/api/public-ai/tts", {
+            authFetch("/api/public-ai/tts", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              credentials: "include",
               signal: abort.signal,
               body: ttsBody,
             });
 
           let resp = await requestTts();
           if (resp.status === 401 && !abort.signal.aborted) {
-            await fetch("/api/public-ai/session", {
+            await authFetch("/api/public-ai/session", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              credentials: "include",
               signal: abort.signal,
               body: "{}",
             });

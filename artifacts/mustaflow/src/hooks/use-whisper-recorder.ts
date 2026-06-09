@@ -17,6 +17,7 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import { authFetch } from "@/lib/api-fetch";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -309,13 +310,15 @@ export function useWhisperRecorder(
           const langParam = lang && lang !== "auto" ? `&lang=${encodeURIComponent(lang)}` : "";
           const abort = new AbortController();
           transcribeAbortRef.current = abort;
-          const resp = await fetch(`/api/public-ai/transcribe?format=${audioFormat}${langParam}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/octet-stream" },
-            body: blob,
-            credentials: "include",
-            signal: abort.signal,
-          });
+          const resp = await authFetch(
+            `/api/public-ai/transcribe?format=${audioFormat}${langParam}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/octet-stream" },
+              body: blob,
+              signal: abort.signal,
+            },
+          );
 
           if (!resp.ok) {
             let message = `Transcription failed (HTTP ${resp.status}).`;

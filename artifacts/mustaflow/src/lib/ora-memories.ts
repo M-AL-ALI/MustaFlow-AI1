@@ -148,9 +148,8 @@ export async function rememberDocument(
   fileRef: string,
   confirmSensitive = false,
 ): Promise<RememberDocumentResult> {
-  const res = await fetch(`${BASE}/api/public-ai/remember-document`, {
+  const res = await authFetch(`${BASE}/api/public-ai/remember-document`, {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileRef, ...(confirmSensitive ? { confirmSensitive: true } : {}) }),
   });
