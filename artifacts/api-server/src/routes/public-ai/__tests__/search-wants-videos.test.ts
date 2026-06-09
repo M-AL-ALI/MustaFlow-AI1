@@ -9,7 +9,7 @@
 
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
-const createMock = vi.fn();
+const createMock = vi.hoisted(() => vi.fn());
 
 vi.mock("openai", () => {
   return {
