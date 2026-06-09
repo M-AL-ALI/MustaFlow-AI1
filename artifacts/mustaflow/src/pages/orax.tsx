@@ -404,6 +404,24 @@ export default function OraxPage() {
   const timelineMessageCount = taskMessages.filter(
     (message) => message.role === "system" || message.role === "tool",
   ).length;
+  const latestAssistantSuggestions = useMemo(() => {
+    const assistantMessage = [...taskMessages]
+      .reverse()
+      .find(
+        (message) => message.role === "assistant" && message.metadata?.actionSuggestions?.length,
+      );
+    return assistantMessage?.metadata?.actionSuggestions ?? [];
+  }, [taskMessages]);
+  const primaryThreadSuggestion = latestAssistantSuggestions[0] ?? null;
+  const threadNextAction = pendingApprovals.length
+    ? `Review ${pendingApprovals.length} pending approval${
+        pendingApprovals.length === 1 ? "" : "s"
+      } before ORAX continues.`
+    : pendingSuggestionConfirmation
+      ? `Confirm or cancel: ${pendingSuggestionConfirmation.title}`
+      : primaryThreadSuggestion
+        ? primaryThreadSuggestion.title
+        : (currentCheckpoint?.nextStep ?? "Ask ORAX what to inspect or approve next.");
   const commandFailureCount =
     latestCommandResult?.payload.commands?.filter((command) => command.status === "failed")
       .length ?? 0;
@@ -1636,6 +1654,66 @@ export default function OraxPage() {
                     ) : null}
                   </div>
 
+                  <div className="mt-3 rounded-md border border-primary/25 bg-primary/10 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase text-primary">
+                          Next action in this thread
+                        </div>
+                        <p className="mt-1 text-sm font-medium text-foreground">
+                          {threadNextAction}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          ORAX can discuss, prepare approval requests, and summarize results here.
+                          Execution still requires explicit approval controls.
+                        </p>
+                      </div>
+                      {primaryThreadSuggestion?.buttonLabel ? (
+                        <button
+                          type="button"
+                          onClick={() => applyTaskActionSuggestion(primaryThreadSuggestion)}
+                          className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-foreground hover:bg-muted"
+                        >
+                          {primaryThreadSuggestion.buttonLabel}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTaskMessageDraft(
+                            "Where are we right now, and what is the next approved step?",
+                          )
+                        }
+                        className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        Resume task
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTaskMessageDraft("What should I approve next, and why is it safe?")
+                        }
+                        className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        Explain approval
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTaskMessageDraft(
+                            "Summarize the latest result, blocker, and safest next step.",
+                          )
+                        }
+                        className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        Summarize result
+                      </button>
+                    </div>
+                  </div>
+
                   {pendingApprovals.length ? (
                     <div className="mt-3 space-y-2">
                       {pendingApprovals.map((approval) => (
@@ -1793,6 +1871,32 @@ export default function OraxPage() {
                       })
                     )}
                   </div>
+
+                  {latestArtifact ? (
+                    <div className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-semibold uppercase text-muted-foreground">
+                            Latest execution result
+                          </div>
+                          <div className="mt-1 font-medium text-foreground">
+                            {latestArtifact.title}
+                          </div>
+                        </div>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                          {latestArtifact.type} - {latestArtifact.status}
+                        </span>
+                      </div>
+                      {latestArtifact.summary ? (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {latestArtifact.summary}
+                        </p>
+                      ) : null}
+                      {latestArtifact.payload.error ? (
+                        <FailureNotice failure={latestArtifact.payload.error} />
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {pendingSuggestionConfirmation ? (
                     <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100">

@@ -65,6 +65,15 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Pending approval");
     expect(oraxPage).toContain("Workflow controls");
     expect(oraxPage).toContain("Task conversation");
+    expect(oraxPage).toContain("latestAssistantSuggestions");
+    expect(oraxPage).toContain("primaryThreadSuggestion");
+    expect(oraxPage).toContain("threadNextAction");
+    expect(oraxPage).toContain("Next action in this thread");
+    expect(oraxPage).toContain("Execution still requires explicit approval controls");
+    expect(oraxPage).toContain("Resume task");
+    expect(oraxPage).toContain("Explain approval");
+    expect(oraxPage).toContain("Summarize result");
+    expect(oraxPage).toContain("Latest execution result");
     expect(oraxPage).toContain("stored separately from Ora chat and");
     expect(oraxPage).toContain('message.role === "system" || message.role === "tool"');
     expect(oraxPage).toContain("Timeline");
