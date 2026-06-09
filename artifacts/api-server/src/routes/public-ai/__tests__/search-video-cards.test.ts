@@ -30,7 +30,9 @@ const TEST_SECRET = "search-video-cards-test-secret";
 // carries a trailing ora-media block with one safe YouTube video and one unsafe
 // (loopback) URL. The route's real sanitizeVideos must keep the first and drop
 // the second.
-const createMock = vi.fn();
+// vi.hoisted so the (hoisted) vi.mock("openai") factory below can reference it
+// without a TDZ error when the openai module is constructed during import.
+const createMock = vi.hoisted(() => vi.fn());
 vi.mock("openai", () => ({
   default: class {
     responses = { create: createMock };
@@ -225,6 +227,36 @@ describe("POST /public-ai/chat — video cards via live web search (mocked provi
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.videos)).toBe(true);
     expect(res.body.videos.length).toBe(0);
+  });
+
+  it("lifts a video URL inlined in the prose into a verified card and strips it from the reply", async () => {
+    createMock.mockResolvedValueOnce({
+      output_text:
+        "Sure — here's a great one: https://www.youtube.com/watch?v=dQw4w9WgXcQ enjoy!" +
+        "\n\n```ora-media\n" +
+        JSON.stringify({ images: [], videos: [] }) +
+        "\n```",
+      output: [],
+    });
+
+    const { token } = makeSession();
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${token}`)
+      .send({
+        message: "show me a video about tying a tie",
+        messages: [],
+        referenceSavedMemories: false,
+      });
+
+    expect(res.status).toBe(200);
+    // The inline prose URL became a verified card...
+    expect(Array.isArray(res.body.videos)).toBe(true);
+    expect(res.body.videos.length).toBe(1);
+    expect(res.body.videos[0].url).toContain("dQw4w9WgXcQ");
+    // ...and the raw link no longer appears in the visible reply (no dead link).
+    expect(res.body.reply).not.toContain("youtube.com");
+    expect(res.body.reply).not.toContain("http");
   });
 
   it("drops a well-formed YouTube URL whose video does not exist (oEmbed 404)", async () => {

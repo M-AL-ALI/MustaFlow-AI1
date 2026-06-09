@@ -18,6 +18,7 @@ import {
 } from "../../lib/public-ai/orchestrator";
 import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
 import type { Provider } from "../../lib/ai-providers";
+import type { OraVideo } from "../../lib/public-ai/web-search";
 import {
   getOraProviderRoutingSnapshot,
   normalizeOraPlanTier,
@@ -1368,6 +1369,25 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
+  // Video links in conversational replies: the model occasionally volunteers a
+  // YouTube/Vimeo URL inline in its prose. Lift those out and render them as
+  // verified play cards (same pipeline as the search branch) instead of plain,
+  // unverified, often-dead links. Only runs when the reply actually contains an
+  // embeddable video URL, so normal replies pay no extra cost.
+  let videos: OraVideo[] = [];
+  {
+    const { extractProseVideos, verifyVideos } = await import("../../lib/public-ai/web-search");
+    const lifted = extractProseVideos(reply);
+    if (lifted.videos.length > 0) {
+      videos = await verifyVideos(lifted.videos);
+      // Only swap in the stripped text if something remains; if the reply was
+      // essentially just the lifted URL(s), keep a short lead-in so the bubble
+      // is never empty (the cards carry the payload).
+      const stripped = lifted.text.trim();
+      reply = stripped.length > 0 ? lifted.text : "Here you go:";
+    }
+  }
+
   // Extract suggestions — failures are silently swallowed so the main reply is never blocked.
   let suggestions: string[] = [];
   if (suggestionResult.status === "fulfilled") {
@@ -1407,13 +1427,13 @@ router.post("/public-ai/chat", async (req, res) => {
   // detector and never throws.
   // Temporary ("incognito") chats never surface a memory-save candidate, so the
   // client has nothing to persist.
-  const memoryCandidate =
-    authed && !temporary ? await extractMemorySaveCandidate(message) : null;
+  const memoryCandidate = authed && !temporary ? await extractMemorySaveCandidate(message) : null;
   const usage = await oraUsageResponse(authed, payload.msgCount);
 
   res.json({
     reply,
     suggestions,
+    ...(videos.length > 0 ? { videos } : {}),
     ...(memoryCandidate
       ? {
           memorySaveCandidate: memoryCandidate.fact,

@@ -386,6 +386,80 @@ export async function verifyVideos(videos: OraVideo[], timeoutMs = 4500): Promis
 }
 
 /**
+ * Lift YouTube/Vimeo watch URLs the model left inline in its prose answer out of
+ * the text, returning them as structured video entries plus the cleaned text.
+ *
+ * Ora is instructed to put videos in the trailing ora-media block (so the UI
+ * renders verified, playable cards), but the model sometimes ignores that and
+ * pastes a URL straight into the prose. Those inline URLs bypass verification
+ * and render as plain markdown links — frequently dead ("video no longer
+ * available") and never as an inline play card. We pull every embeddable video
+ * URL out here so it joins the same verify + card pipeline, and we strip it from
+ * the text so no raw video link is ever shown. Only hosts we can positively
+ * verify + embed (YouTube / Vimeo) are lifted; any other link stays as prose.
+ */
+export function extractProseVideos(text: string): { text: string; videos: OraVideo[] } {
+  if (!text) return { text: "", videos: [] };
+  const videos: OraVideo[] = [];
+  const seen = new Set<string>();
+  const add = (url: string, title?: string): boolean => {
+    const cleaned = cleanSourceUrl(url);
+    if (!cleaned) return false;
+    // Only lift hosts we can verify + embed; leave anything else as prose text.
+    if (!videoOembedEndpoint(cleaned)) return false;
+    // De-dupe by video identity, not raw URL, so the same clip in two forms
+    // (youtu.be/X and youtube.com/watch?v=X) is only lifted once.
+    const key = youtubeId(cleaned) ?? cleaned;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    const thumb = youtubeThumbnail(cleaned);
+    const t = title?.trim();
+    videos.push({
+      url: cleaned,
+      ...(t ? { title: t } : {}),
+      ...(thumb ? { thumbnailUrl: thumb } : {}),
+    });
+    return true;
+  };
+
+  // 1. Markdown links [label](url): keep the label text, drop the URL.
+  let out = text.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (whole, label: string, url: string) => (add(url, label) ? label : whole),
+  );
+  // 2. Bare or angle-bracketed URLs: remove the URL entirely.
+  out = out.replace(/<?(https?:\/\/[^\s<>)\]]+)>?/g, (whole, url: string) =>
+    add(url) ? "" : whole,
+  );
+  // Tidy whitespace and dangling punctuation left where a URL was removed.
+  out = out
+    .replace(/[ \t]*\(\s*\)/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([.,!?;:])/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text: out, videos };
+}
+
+/** Merge video lists, de-duplicating by canonical URL and preserving order. */
+export function mergeVideos(...lists: OraVideo[][]): OraVideo[] {
+  const seen = new Set<string>();
+  const out: OraVideo[] = [];
+  for (const list of lists) {
+    for (const v of list) {
+      // De-dupe by video identity, not raw URL, so the same clip surfacing in
+      // both the media block and the prose (youtu.be/X vs watch?v=X) renders a
+      // single card rather than two.
+      const key = youtubeId(v.url) ?? v.url;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+/**
  * Pull the trailing ```ora-media JSON block (or a JSON block carrying
  * `images`/`videos` keys) out of the model reply, returning the cleaned answer
  * text plus the sanitized media. Never throws on malformed JSON.
@@ -493,12 +567,20 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
 
   const rawReply = (resp.output_text ?? "").trim();
   const sources = dedupeSources(extractSources(resp.output));
-  const { text: reply, images, videos: parsedVideos } = parseOraMediaBlock(rawReply);
-  // The videos array is the model's own recollection, not grounded by the
-  // search tool, so confirm each one is a real, embeddable video before
+  const parsed = parseOraMediaBlock(rawReply);
+  const images = parsed.images;
+  // The model is told to put videos in the media block, but it routinely inlines
+  // a watch URL in the prose instead. Lift those out (and strip them from the
+  // text) so they join the media-block videos rather than rendering as plain,
+  // unverified, often-dead links.
+  const prose = extractProseVideos(parsed.text);
+  const reply = prose.text;
+  // The combined videos array is the model's own recollection, not grounded by
+  // the search tool, so confirm each one is a real, embeddable video before
   // surfacing it. Anything unverifiable (hallucinated/dead YouTube IDs) is
   // dropped here so the UI never renders a broken player or a dead link.
-  const videos = await verifyVideos(parsedVideos);
+  const candidateVideos = mergeVideos(parsed.videos, prose.videos);
+  const videos = await verifyVideos(candidateVideos);
 
   logger.info(
     {
@@ -510,7 +592,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
       sourceCount: sources.length,
       imageCount: images.length,
       videoCount: videos.length,
-      droppedVideoCount: parsedVideos.length - videos.length,
+      droppedVideoCount: candidateVideos.length - videos.length,
       hasReply: reply.length > 0,
     },
     "Ora web search completed",
