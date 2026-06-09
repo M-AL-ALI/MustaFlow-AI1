@@ -66,9 +66,7 @@ describe("selectOraModelRoute — tier ordering", () => {
   });
 
   it("orders the wave deep tier openai -> anthropic -> gemini -> deepseek", () => {
-    const candidates = selectOraModelRoute(
-      makeInput({ tier: "deep", subscriptionTier: "wave" }),
-    );
+    const candidates = selectOraModelRoute(makeInput({ tier: "deep", subscriptionTier: "wave" }));
     expect(providersOf(candidates)).toEqual(["openai", "anthropic", "gemini", "deepseek"]);
   });
 
@@ -241,9 +239,7 @@ describe("selectOraModelRoute — guarantees", () => {
   });
 
   it("maps wave deep non-OpenAI providers to pro MODEL_DEFAULTS", () => {
-    const candidates = selectOraModelRoute(
-      makeInput({ tier: "deep", subscriptionTier: "wave" }),
-    );
+    const candidates = selectOraModelRoute(makeInput({ tier: "deep", subscriptionTier: "wave" }));
     const byProvider = Object.fromEntries(candidates.map((c) => [c.provider, c.model]));
     expect(byProvider.deepseek).toBe(MODEL_DEFAULTS.deepseek.pro);
     expect(byProvider.anthropic).toBe(MODEL_DEFAULTS.anthropic.pro);
