@@ -17,6 +17,14 @@ import {
 import { PassThrough } from "stream";
 import { createChatCompletion } from "../ai-providers";
 import type { FileFormat } from "./prompt";
+import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  openAiModelForOraRoute,
+  runCandidateChain,
+  selectOraModelRoute,
+  type ModelCandidate,
+} from "./model-router";
 import PptxGenJS from "pptxgenjs";
 
 export type { FileFormat };
@@ -892,12 +900,19 @@ function repairTruncatedJson(s: string): string | null {
   return body + closers;
 }
 
+function isNonEnglishLanguage(value: string | undefined): boolean {
+  if (!value || value === "auto") return false;
+  const primary = value.split(",")[0].trim().split("-")[0].toLowerCase();
+  return !!primary && primary !== "en";
+}
+
 export async function generateFileFromPrompt(
   message: string,
   format: FileFormat,
   history: Array<{ role: "user" | "assistant"; content: string }>,
   language?: string,
   hasSourceData = false,
+  subscriptionTier?: string | null,
 ): Promise<GeneratedFileResult> {
   const isTabular = format === "csv" || format === "xlsx";
   const isPptx = format === "pptx";
@@ -917,18 +932,42 @@ export async function generateFileFromPrompt(
     { role: "user" as const, content: message },
   ];
 
-  const result = await createChatCompletion({
-    provider: "openai",
-    model: process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4",
-    messages: callMessages,
-    response_format: { type: "json_object" },
-    // Higher cap so extracting a real dataset into a file isn't truncated
-    // mid-JSON (which previously threw on parse and 500'd the request).
-    max_completion_tokens: 8000,
+  const routeTier = "premium" as const;
+  const planTier = normalizeOraPlanTier(subscriptionTier);
+  const openaiModel = openAiModelForOraRoute(routeTier, planTier);
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  const candidates: ModelCandidate[] = selectOraModelRoute({
+    tier: routeTier,
+    subscriptionTier: planTier,
+    topic: isTabular ? "technical" : "general",
+    intent: "premium",
+    confidence: "high",
+    multilingual: isNonEnglishLanguage(language),
+    hasDocumentContext: hasSourceData,
+    available,
+    openCircuits,
+    openaiModel,
   });
 
-  const raw = result.choices[0]?.message?.content?.trim() ?? "{}";
-  const aiData = safeParseFileJson(raw);
+  const chain = await runCandidateChain(candidates, async (candidate) => {
+    const result = await createChatCompletion({
+      provider: candidate.provider,
+      model: candidate.model,
+      messages: callMessages,
+      response_format: { type: "json_object" },
+      // Higher cap so extracting a real dataset into a file isn't truncated
+      // mid-JSON (which previously threw on parse and 500'd the request).
+      max_completion_tokens: 8000,
+    });
+
+    const raw = result.choices[0]?.message?.content?.trim() ?? "";
+    const parsed = safeParseFileJson(raw);
+    if (Object.keys(parsed).length === 0) {
+      throw new Error("empty file-generation JSON");
+    }
+    return parsed;
+  });
+  const aiData = chain.result;
 
   let fileBuffer: Buffer;
   // eslint-disable-next-line no-useless-assignment

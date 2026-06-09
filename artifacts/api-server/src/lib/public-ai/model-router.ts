@@ -18,8 +18,8 @@
  * user-facing model picker.
  */
 
-import type { Provider } from "../ai-providers";
-import { MODEL_DEFAULTS } from "../ai-providers";
+import { isDeepSeekAvailable, MODEL_DEFAULTS, type Provider } from "../ai-providers";
+import { ALL_BREAKERS } from "../resilience";
 import type { OraIntent, OraConfidence, OraTopic } from "./classifier";
 
 /** A single provider+model the caller can attempt. */
@@ -80,9 +80,83 @@ const SPECIALIST_TECHNICAL_ORDER: Provider[] = ["anthropic", "deepseek", "gemini
 const DOCUMENT_ORDER: Provider[] = ["gemini", "anthropic", "deepseek"];
 const MULTILINGUAL_ORDER: Provider[] = ["gemini", "anthropic", "deepseek"];
 
-function normalizePlanTier(raw: string | null | undefined): OraPlanTier {
+export function normalizeOraPlanTier(raw: string | null | undefined): OraPlanTier {
   if (raw === "core" || raw === "wave" || raw === "free") return raw;
   return raw ? "free" : "anonymous";
+}
+
+function envModel(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+export function openAiModelForOraRoute(routeTier: OraRouteTier, planTier: OraPlanTier): string {
+  if (routeTier === "fast") {
+    return envModel("ORA_FAST_MODEL") ?? "gpt-5-mini";
+  }
+
+  if (routeTier === "deep") {
+    if (planTier === "wave") {
+      return (
+        envModel("ORA_WAVE_DEEP_MODEL", "ORA_DEEP_MODEL", "ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ??
+        "gpt-5.4"
+      );
+    }
+    return (
+      envModel("ORA_CORE_DEEP_MODEL", "ORA_DEEP_MODEL", "ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ??
+      "gpt-5.4"
+    );
+  }
+
+  if (planTier === "wave") {
+    return envModel("ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+  }
+  if (planTier === "core") {
+    return envModel("ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+  }
+  return envModel("ORA_FREE_MODEL", "ORA_FAST_MODEL") ?? "gpt-5-mini";
+}
+
+export function openAiModelForOraVision(planTier: OraPlanTier): string {
+  if (planTier === "wave") {
+    return (
+      envModel("ORA_WAVE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ??
+      "gpt-5.4"
+    );
+  }
+  if (planTier === "core") {
+    return (
+      envModel("ORA_CORE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ??
+      "gpt-5.4"
+    );
+  }
+  return envModel("ORA_FREE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+}
+
+export function getOraProviderRoutingSnapshot(): {
+  available: Record<Provider, boolean>;
+  openCircuits: Set<Provider>;
+} {
+  const openCircuits = new Set(
+    ALL_BREAKERS.filter((b) => b.toJSON().state === "open").map((b) => b.toJSON().name as Provider),
+  );
+  return {
+    openCircuits,
+    available: {
+      openai: true,
+      anthropic: !!(
+        process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL &&
+        process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY
+      ),
+      gemini: !!(
+        process.env.AI_INTEGRATIONS_GEMINI_BASE_URL && process.env.AI_INTEGRATIONS_GEMINI_API_KEY
+      ),
+      deepseek: isDeepSeekAvailable(),
+    },
+  };
 }
 
 function isCostSensitivePlan(plan: OraPlanTier): boolean {
@@ -115,7 +189,7 @@ function tierToAgentMode(tier: OraRouteTier, plan: OraPlanTier): "lite" | "eco" 
  *  6. Otherwise -> plan-aware premium default ordering.
  */
 function pickProviderOrder(input: OraModelRouteInput): Provider[] {
-  const plan = normalizePlanTier(input.subscriptionTier);
+  const plan = normalizeOraPlanTier(input.subscriptionTier);
   if (input.tier === "deep") return plan === "wave" ? WAVE_DEEP_ORDER : CORE_DEEP_ORDER;
   if (input.multilingual) return MULTILINGUAL_ORDER;
   if (input.hasDocumentContext) return DOCUMENT_ORDER;
@@ -133,7 +207,7 @@ function pickProviderOrder(input: OraModelRouteInput): Provider[] {
  */
 function modelFor(provider: Provider, input: OraModelRouteInput): string {
   if (provider === "openai") return input.openaiModel;
-  const mode = tierToAgentMode(input.tier, normalizePlanTier(input.subscriptionTier));
+  const mode = tierToAgentMode(input.tier, normalizeOraPlanTier(input.subscriptionTier));
   return MODEL_DEFAULTS[provider][mode];
 }
 

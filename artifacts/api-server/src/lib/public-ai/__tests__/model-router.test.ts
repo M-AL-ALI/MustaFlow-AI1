@@ -14,8 +14,11 @@
  * These are pure-function tests (no DB, no network).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
+  normalizeOraPlanTier,
+  openAiModelForOraRoute,
+  openAiModelForOraVision,
   selectOraModelRoute,
   runCandidateChain,
   type OraModelRouteInput,
@@ -46,6 +49,61 @@ function makeInput(overrides: Partial<OraModelRouteInput> = {}): OraModelRouteIn
 }
 
 const providersOf = (candidates: ModelCandidate[]): Provider[] => candidates.map((c) => c.provider);
+
+const ROUTER_ENV_NAMES = [
+  "ORA_FAST_MODEL",
+  "ORA_FREE_MODEL",
+  "ORA_CORE_MODEL",
+  "ORA_WAVE_MODEL",
+  "ORA_PREMIUM_MODEL",
+  "ORA_CORE_DEEP_MODEL",
+  "ORA_WAVE_DEEP_MODEL",
+  "ORA_DEEP_MODEL",
+  "ORA_FREE_VISION_MODEL",
+  "ORA_CORE_VISION_MODEL",
+  "ORA_WAVE_VISION_MODEL",
+  "ORA_VISION_MODEL",
+] as const;
+const ORIGINAL_ROUTER_ENV = new Map(ROUTER_ENV_NAMES.map((name) => [name, process.env[name]]));
+
+describe("Ora model helper functions", () => {
+  afterEach(() => {
+    for (const name of ROUTER_ENV_NAMES) {
+      const original = ORIGINAL_ROUTER_ENV.get(name);
+      if (original === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = original;
+      }
+    }
+  });
+
+  it("normalizes anonymous and unknown plan tiers", () => {
+    expect(normalizeOraPlanTier(null)).toBe("anonymous");
+    expect(normalizeOraPlanTier("starter")).toBe("free");
+    expect(normalizeOraPlanTier("core")).toBe("core");
+    expect(normalizeOraPlanTier("wave")).toBe("wave");
+  });
+
+  it("uses plan-aware OpenAI env overrides for chat routes", () => {
+    process.env.ORA_FREE_MODEL = "gpt-free";
+    process.env.ORA_CORE_MODEL = "gpt-core";
+    process.env.ORA_WAVE_DEEP_MODEL = "gpt-wave-deep";
+
+    expect(openAiModelForOraRoute("premium", "free")).toBe("gpt-free");
+    expect(openAiModelForOraRoute("premium", "core")).toBe("gpt-core");
+    expect(openAiModelForOraRoute("deep", "wave")).toBe("gpt-wave-deep");
+  });
+
+  it("keeps image analysis on a vision model instead of the fast/free chat model", () => {
+    process.env.ORA_FAST_MODEL = "gpt-fast";
+    process.env.ORA_FREE_MODEL = "gpt-free";
+    process.env.ORA_VISION_MODEL = "gpt-vision";
+
+    expect(openAiModelForOraRoute("premium", "free")).toBe("gpt-free");
+    expect(openAiModelForOraVision("free")).toBe("gpt-vision");
+  });
+});
 
 describe("selectOraModelRoute — tier ordering", () => {
   it("orders the fast tier gemini -> deepseek -> anthropic -> openai", () => {

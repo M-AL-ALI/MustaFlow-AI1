@@ -19,6 +19,9 @@ import {
 import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
 import type { Provider } from "../../lib/ai-providers";
 import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  openAiModelForOraRoute,
   selectOraModelRoute,
   runCandidateChain,
   type OraRouteTier,
@@ -53,43 +56,7 @@ function oraMessageLimit(tier: string): number {
 }
 
 function oraPlanTier(authed: AuthedOraUser | null): OraPlanTier {
-  if (!authed) return "anonymous";
-  return authed.tier === "core" || authed.tier === "wave" ? authed.tier : "free";
-}
-
-function envModel(...names: string[]): string | null {
-  for (const name of names) {
-    const value = process.env[name]?.trim();
-    if (value) return value;
-  }
-  return null;
-}
-
-function openAiModelForOraRoute(routeTier: OraRouteTier, planTier: OraPlanTier): string {
-  if (routeTier === "fast") {
-    return envModel("ORA_FAST_MODEL") ?? "gpt-5-mini";
-  }
-
-  if (routeTier === "deep") {
-    if (planTier === "wave") {
-      return (
-        envModel("ORA_WAVE_DEEP_MODEL", "ORA_DEEP_MODEL", "ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ??
-        "gpt-5.4"
-      );
-    }
-    return (
-      envModel("ORA_CORE_DEEP_MODEL", "ORA_DEEP_MODEL", "ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ??
-      "gpt-5.4"
-    );
-  }
-
-  if (planTier === "wave") {
-    return envModel("ORA_WAVE_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
-  }
-  if (planTier === "core") {
-    return envModel("ORA_CORE_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
-  }
-  return envModel("ORA_FREE_MODEL", "ORA_FAST_MODEL") ?? "gpt-5-mini";
+  return normalizeOraPlanTier(authed?.tier ?? null);
 }
 
 function isNonEnglishLanguage(value: string | undefined): boolean {
@@ -749,6 +716,7 @@ router.post("/public-ai/chat", async (req, res) => {
         history,
         language,
         carriedDocs.length > 0,
+        authed?.tier ?? null,
       );
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
@@ -1112,26 +1080,12 @@ router.post("/public-ai/chat", async (req, res) => {
       .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });
     return;
   }
-  const { createChatCompletion, isDeepSeekAvailable } = aiProvidersModule;
+  const { createChatCompletion } = aiProvidersModule;
 
   // Smart-route across all four providers (Task #1400). Build a snapshot of
   // which providers are configured and which circuits are currently open, then
   // ask the router for an availability-aware ordered candidate chain.
-  const { ALL_BREAKERS } = await import("../../lib/resilience");
-  const openCircuits = new Set(
-    ALL_BREAKERS.filter((b) => b.toJSON().state === "open").map((b) => b.toJSON().name as Provider),
-  );
-  const available: Record<Provider, boolean> = {
-    openai: true,
-    anthropic: !!(
-      process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL &&
-      process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY
-    ),
-    gemini: !!(
-      process.env.AI_INTEGRATIONS_GEMINI_BASE_URL && process.env.AI_INTEGRATIONS_GEMINI_API_KEY
-    ),
-    deepseek: isDeepSeekAvailable(),
-  };
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
   const candidates: ModelCandidate[] = selectOraModelRoute({
     tier: routeTier,
     subscriptionTier: planTier,

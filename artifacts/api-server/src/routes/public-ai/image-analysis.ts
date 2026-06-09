@@ -13,6 +13,15 @@ import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
 import { consumeOraQuota, refundOraQuota, getOraUsage } from "../../lib/public-ai/ora-usage";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
+import type { Provider } from "../../lib/ai-providers";
+import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  openAiModelForOraVision,
+  runCandidateChain,
+  selectOraModelRoute,
+  type ModelCandidate,
+} from "../../lib/public-ai/model-router";
 
 const router = Router();
 
@@ -58,6 +67,12 @@ function buildImageUserBlock(message: string): string {
     "",
     message,
   ].join("\n");
+}
+
+function isNonEnglishLanguage(value: string | undefined): boolean {
+  if (!value || value === "auto") return false;
+  const primary = value.split(",")[0].trim().split("-")[0].toLowerCase();
+  return !!primary && primary !== "en";
 }
 
 router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, res) => {
@@ -159,35 +174,72 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     visionUserMessage,
   ];
 
-  // Always use the premium model for vision — never mini/nano.
-  const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
+  // Vision requires a vision-capable provider; DeepSeek is filtered out below.
+  const routeTier = "premium" as const;
+  const planTier = normalizeOraPlanTier(authed?.tier ?? null);
+  const openaiModel = openAiModelForOraVision(planTier);
+  const { available: providerAvailability, openCircuits } = getOraProviderRoutingSnapshot();
+  const available: Record<Provider, boolean> = { ...providerAvailability, deepseek: false };
+  const candidates: ModelCandidate[] = selectOraModelRoute({
+    tier: routeTier,
+    subscriptionTier: planTier,
+    topic: "general",
+    intent: "premium",
+    confidence: "high",
+    multilingual: isNonEnglishLanguage(language),
+    hasDocumentContext: true,
+    available,
+    openCircuits,
+    openaiModel,
+  });
   const maxTokens = 1500;
 
   const start = Date.now();
   let reply: string | null = null;
-  const modelUsed = premiumModel;
+  let usedFallback = false;
+  let modelUsed = openaiModel;
+  let provider: Provider = "openai";
 
   try {
     const { createChatCompletion } = await import("../../lib/ai-providers");
-    const result = await createChatCompletion({
-      provider: "openai",
-      model: premiumModel,
-      messages: callMessages,
-      response_format: { type: "text" },
-      max_completion_tokens: maxTokens,
-    });
-    reply = result.choices[0]?.message?.content?.trim() ?? null;
-  } catch (_err) {
-    logger.warn(
-      {
-        component: "ora-image-analysis",
-        model: premiumModel,
-        imageType: imageEntry.mimeType,
-        sizeBytes: imageEntry.sizeBytes,
+    const chain = await runCandidateChain(
+      candidates,
+      async (candidate) => {
+        const result = await createChatCompletion({
+          provider: candidate.provider,
+          model: candidate.model,
+          messages: callMessages,
+          response_format: { type: "text" },
+          max_completion_tokens: maxTokens,
+        });
+        const content = result.choices[0]?.message?.content?.trim() ?? "";
+        if (!content) throw new Error("empty image-analysis response");
+        return content;
       },
-      "Vision model call failed",
+      (candidate, i, candidateErr) =>
+        logger.warn(
+          {
+            component: "ora-image-analysis",
+            provider: candidate.provider,
+            model: candidate.model,
+            attempt: i + 1,
+            ofCandidates: candidates.length,
+            imageType: imageEntry.mimeType,
+            sizeBytes: imageEntry.sizeBytes,
+            err: candidateErr,
+          },
+          "Ora image-analysis candidate failed - trying next provider",
+        ),
     );
-    // No fallback — return graceful message. Do NOT expose raw model error.
+    reply = chain.result;
+    usedFallback = chain.usedFallback;
+    modelUsed = chain.candidate.model;
+    provider = chain.candidate.provider;
+  } catch (err) {
+    logger.warn(
+      { component: "ora-image-analysis", err, candidates: candidates.map((c) => c.provider) },
+      "All image-analysis candidates failed",
+    );
   }
 
   const latencyMs = Date.now() - start;
@@ -197,6 +249,9 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
       {
         component: "ora-image-analysis",
         model: modelUsed,
+        provider,
+        planTier,
+        candidates: candidates.map((c) => `${c.provider}:${c.model}`),
         imageType: imageEntry.mimeType,
         sizeBytes: imageEntry.sizeBytes,
         latencyMs,
@@ -222,11 +277,15 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     {
       component: "ora-image-analysis",
       model: modelUsed,
+      provider,
+      planTier,
+      candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       imageType: imageEntry.mimeType,
       sizeBytes: imageEntry.sizeBytes,
       width: imageEntry.width,
       height: imageEntry.height,
       latencyMs,
+      usedFallback,
       imageAnalysisCount: payload.imageAnalysisCount,
     },
     "Ora image analysis complete",

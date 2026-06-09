@@ -17,6 +17,15 @@ import {
 import { DatasetAnalysisAiSchema } from "../../lib/public-ai/dataset-schema";
 import type { DatasetAnalysisAiOutput } from "../../lib/public-ai/dataset-schema";
 import { logger } from "../../lib/logger";
+import type { Provider } from "../../lib/ai-providers";
+import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  openAiModelForOraRoute,
+  runCandidateChain,
+  selectOraModelRoute,
+  type ModelCandidate,
+} from "../../lib/public-ai/model-router";
 
 const router = Router();
 
@@ -41,6 +50,12 @@ function extractJsonFromText(text: string): string {
     return text.slice(braceStart, braceEnd + 1);
   }
   return text;
+}
+
+function isNonEnglishLanguage(value: string | undefined): boolean {
+  if (!value || value === "auto") return false;
+  const primary = value.split(",")[0].trim().split("-")[0].toLowerCase();
+  return !!primary && primary !== "en";
 }
 
 router.post("/public-ai/dataset-analysis", async (req, res) => {
@@ -138,59 +153,69 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
     { role: "user" as const, content: contextBlock },
   ];
 
-  const premiumModel = process.env.ORA_PREMIUM_MODEL ?? "gpt-5.4";
-  const fallbackModel = "claude-sonnet-4-6";
+  const routeTier = "premium" as const;
+  const planTier = normalizeOraPlanTier(authed?.tier ?? null);
+  const openaiModel = openAiModelForOraRoute(routeTier, planTier);
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  const candidates: ModelCandidate[] = selectOraModelRoute({
+    tier: routeTier,
+    subscriptionTier: planTier,
+    topic: "technical",
+    intent: "premium",
+    confidence: "high",
+    multilingual: isNonEnglishLanguage(language),
+    hasDocumentContext: true,
+    available,
+    openCircuits,
+    openaiModel,
+  });
   const maxTokens = 5000;
 
   const start = Date.now();
   let usedFallback = false;
-  let modelUsed = premiumModel;
-  let provider: "openai" | "anthropic" = "openai";
+  let modelUsed = openaiModel;
+  let provider: Provider = "openai";
   let aiOutput: DatasetAnalysisAiOutput | null = null;
 
   try {
     const { createChatCompletion } = await import("../../lib/ai-providers");
-    const result = await createChatCompletion({
-      provider: "openai",
-      model: premiumModel,
-      messages: callMessages,
-      response_format: { type: "json_object" },
-      max_completion_tokens: maxTokens,
-    });
-    const raw = result.choices[0]?.message?.content?.trim() ?? "";
-    const parsedJson = JSON.parse(raw) as unknown;
-    aiOutput = DatasetAnalysisAiSchema.parse(parsedJson);
-  } catch (primaryErr) {
-    logger.warn(
-      {
-        component: "ora-dataset-analysis",
-        model: premiumModel,
-        err: (primaryErr as Error).message,
+    const chain = await runCandidateChain(
+      candidates,
+      async (candidate) => {
+        const result = await createChatCompletion({
+          provider: candidate.provider,
+          model: candidate.model,
+          messages: callMessages,
+          response_format: { type: "json_object" },
+          max_completion_tokens: maxTokens,
+        });
+        const raw = result.choices[0]?.message?.content?.trim() ?? "";
+        const jsonStr = extractJsonFromText(raw);
+        const parsedJson = JSON.parse(jsonStr) as unknown;
+        return DatasetAnalysisAiSchema.parse(parsedJson);
       },
-      "Primary model failed or returned invalid JSON — trying Anthropic fallback",
+      (candidate, i, candidateErr) =>
+        logger.warn(
+          {
+            component: "ora-dataset-analysis",
+            provider: candidate.provider,
+            model: candidate.model,
+            attempt: i + 1,
+            ofCandidates: candidates.length,
+            err: candidateErr,
+          },
+          "Ora dataset-analysis candidate failed - trying next provider",
+        ),
     );
-    usedFallback = true;
-    modelUsed = fallbackModel;
-    provider = "anthropic";
-
-    try {
-      const { createChatCompletion } = await import("../../lib/ai-providers");
-      const result = await createChatCompletion({
-        provider: "anthropic",
-        model: fallbackModel,
-        messages: callMessages,
-        max_completion_tokens: maxTokens,
-      });
-      const raw = result.choices[0]?.message?.content?.trim() ?? "";
-      const jsonStr = extractJsonFromText(raw);
-      const parsedJson = JSON.parse(jsonStr) as unknown;
-      aiOutput = DatasetAnalysisAiSchema.parse(parsedJson);
-    } catch (fallbackErr) {
-      logger.error(
-        { component: "ora-dataset-analysis", err: (fallbackErr as Error).message },
-        "Fallback model also failed or returned invalid JSON",
-      );
-    }
+    aiOutput = chain.result;
+    usedFallback = chain.usedFallback;
+    modelUsed = chain.candidate.model;
+    provider = chain.candidate.provider;
+  } catch (err) {
+    logger.error(
+      { component: "ora-dataset-analysis", err },
+      "All dataset-analysis candidates failed or returned invalid JSON",
+    );
   }
 
   const latencyMs = Date.now() - start;
@@ -200,6 +225,8 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
       component: "ora-dataset-analysis",
       model: modelUsed,
       provider,
+      planTier,
+      candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       fileType: fileEntry.mimeType,
       rowCount: summary.rowCount,
       colCount: summary.colCount,

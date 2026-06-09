@@ -104,6 +104,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       history,
       language,
       hasSourceData,
+      authed?.tier ?? null,
     );
 
     // Persist to the durable asset library for signed-in users so the file
