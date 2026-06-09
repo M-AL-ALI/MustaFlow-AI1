@@ -103,9 +103,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("const switchedTasks = activeTaskIdRef.current !== selectedTask.id");
     expect(oraxPage).toContain("activeTaskIdRef.current = selectedTask.id");
     expect(collapse(oraxPage)).toContain(
-      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setReadResult(null); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setTaskMessageDraft(""); }',
+      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setReadResult(null); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setPrConfirmationText(""); setTaskMessageDraft(""); }',
     );
+    expect(oraxPage).toContain("const targetTaskId = body.task.id;");
+    expect(oraxPage).toContain("const targetTaskId = selectedTask.id;");
     expect(oraxPage).toContain("if (activeTaskIdRef.current !== taskId) return");
+    expect(oraxPage).toContain("if (activeTaskIdRef.current !== targetTaskId) return");
   });
 
   it("mounts the authenticated /orax API prefix", () => {

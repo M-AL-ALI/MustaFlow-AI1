@@ -541,6 +541,7 @@ export default function OraxPage() {
       setReadResult(null);
       setPendingSuggestionConfirmation(null);
       setSuggestionPrConfirmationText("");
+      setPrConfirmationText("");
       setTaskMessageDraft("");
       setLoadingApprovals(false);
       setLoadingArtifacts(false);
@@ -557,6 +558,7 @@ export default function OraxPage() {
       setReadResult(null);
       setPendingSuggestionConfirmation(null);
       setSuggestionPrConfirmationText("");
+      setPrConfirmationText("");
       setTaskMessageDraft("");
     }
 
@@ -683,14 +685,26 @@ export default function OraxPage() {
         throw new Error(body.error ?? "Could not create ORAX task");
       }
       const body = (await res.json()) as { task: OraxTask };
+      const targetTaskId = body.task.id;
       setTasks((prev) => [body.task, ...prev]);
-      setSelectedTaskId(body.task.id);
+      activeTaskIdRef.current = targetTaskId;
+      setSelectedTaskId(targetTaskId);
+      setApprovals([]);
+      setArtifacts([]);
+      setTaskMessages([]);
+      setReadResult(null);
+      setPendingSuggestionConfirmation(null);
+      setSuggestionPrConfirmationText("");
+      setPrConfirmationText("");
+      setTaskMessageDraft("");
       setPrompt("");
       if (options.startThread) {
         try {
-          const messages = await appendTaskMessage(body.task.id, firstMessage);
+          const messages = await appendTaskMessage(targetTaskId, firstMessage);
+          if (activeTaskIdRef.current !== targetTaskId) return;
           setTaskMessages(messages);
         } catch (messageErr) {
+          if (activeTaskIdRef.current !== targetTaskId) return;
           setTaskMessageDraft(firstMessage);
           setError(
             messageErr instanceof Error
@@ -709,14 +723,17 @@ export default function OraxPage() {
 
   async function sendTaskMessage() {
     if (!selectedTask || !taskMessageDraft.trim() || sendingTaskMessage) return;
+    const targetTaskId = selectedTask.id;
     const content = taskMessageDraft.trim();
     setSendingTaskMessage(true);
     setError(null);
     try {
-      const messages = await appendTaskMessage(selectedTask.id, content);
+      const messages = await appendTaskMessage(targetTaskId, content);
+      if (activeTaskIdRef.current !== targetTaskId) return;
       setTaskMessages((prev) => [...prev, ...messages]);
       setTaskMessageDraft("");
     } catch (err) {
+      if (activeTaskIdRef.current !== targetTaskId) return;
       setError(err instanceof Error ? err.message : "Could not save task message");
     } finally {
       setSendingTaskMessage(false);
