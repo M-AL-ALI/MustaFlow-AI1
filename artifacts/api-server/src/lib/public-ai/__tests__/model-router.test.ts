@@ -84,9 +84,7 @@ describe("selectOraModelRoute — topic / language overrides", () => {
   });
 
   it("prioritizes the multilingual ordering over a technical topic", () => {
-    const candidates = selectOraModelRoute(
-      makeInput({ multilingual: true, topic: "technical" }),
-    );
+    const candidates = selectOraModelRoute(makeInput({ multilingual: true, topic: "technical" }));
     expect(providersOf(candidates)).toEqual(["gemini", "openai", "anthropic", "deepseek"]);
   });
 
@@ -174,7 +172,27 @@ describe("selectOraModelRoute — guarantees", () => {
       const candidates = selectOraModelRoute(input);
       expect(candidates.length).toBeGreaterThan(0);
       expect(candidates.some((c) => c.provider === "openai")).toBe(true);
+      // OpenAI must be the terminal safety-net candidate UNLESS a higher-priority
+      // ordering legitimately places it earlier (and another provider last). It is
+      // guaranteed last only when its circuit is open or it is the sole survivor;
+      // in every case it must always be present (asserted above).
     }
+  });
+
+  it("ends the chain with OpenAI when OpenAI is the only available provider", () => {
+    const candidates = selectOraModelRoute(
+      makeInput({
+        available: { openai: true, anthropic: false, gemini: false, deepseek: false },
+      }),
+    );
+    expect(candidates[candidates.length - 1].provider).toBe("openai");
+  });
+
+  it("ends the chain with OpenAI when its circuit is open (deprioritized to last)", () => {
+    const candidates = selectOraModelRoute(
+      makeInput({ openCircuits: new Set<Provider>(["openai"]) }),
+    );
+    expect(candidates[candidates.length - 1].provider).toBe("openai");
   });
 
   it("never repeats a provider in the chain", () => {
@@ -199,9 +217,7 @@ describe("selectOraModelRoute — guarantees", () => {
   });
 
   it("maps the fast tier onto the lite agent mode for non-OpenAI providers", () => {
-    const candidates = selectOraModelRoute(
-      makeInput({ tier: "fast", intent: "simple_faq" }),
-    );
+    const candidates = selectOraModelRoute(makeInput({ tier: "fast", intent: "simple_faq" }));
     const byProvider = Object.fromEntries(candidates.map((c) => [c.provider, c.model]));
     expect(byProvider.gemini).toBe(MODEL_DEFAULTS.gemini.lite);
     expect(byProvider.deepseek).toBe(MODEL_DEFAULTS.deepseek.lite);
@@ -272,9 +288,7 @@ describe("runCandidateChain — chat.ts fallback loop", () => {
 
   it("throws a default error when given an empty candidate chain", async () => {
     const attempt = vi.fn();
-    await expect(runCandidateChain([], attempt)).rejects.toThrow(
-      "All Ora model candidates failed",
-    );
+    await expect(runCandidateChain([], attempt)).rejects.toThrow("All Ora model candidates failed");
     expect(attempt).not.toHaveBeenCalled();
   });
 });
