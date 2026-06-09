@@ -352,12 +352,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     messages.forEach((msg) => {
       const candidate = msg.memorySaveCandidate;
       const sensitiveGated = msg.memorySaveCandidateSensitive === true && askBeforeSensitive;
-      if (
-        msg.role === "assistant" &&
-        candidate &&
-        !sensitiveGated &&
-        !msg.memorySaved
-      ) {
+      if (msg.role === "assistant" && candidate && !sensitiveGated && !msg.memorySaved) {
         // Key the in-flight guard by content identity, not array index, so a
         // transcript edit/truncation mid-save can't collide with a stale index.
         const key = `${msg.content}\u0000${candidate}`;
@@ -1029,7 +1024,9 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         temporary ? "text-[hsl(265_85%_65%)]" : "text-muted-foreground/60",
                       )}
                     />
-                    <span className={cn("flex-1", temporary && "text-[hsl(265_85%_65%)] font-medium")}>
+                    <span
+                      className={cn("flex-1", temporary && "text-[hsl(265_85%_65%)] font-medium")}
+                    >
                       {temporary ? "Temporary chat on" : "Temporary chat"}
                     </span>
                   </button>

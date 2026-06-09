@@ -45,11 +45,7 @@ function MemoryUsageMeter({ count, limit }: { count: number; limit: number }) {
   const pct = Math.min(100, Math.round((count / limit) * 100));
   const full = count >= limit;
   const near = !full && pct >= 80;
-  const barColor = full
-    ? "bg-destructive"
-    : near
-      ? "bg-amber-500"
-      : "bg-[hsl(265_85%_65%)]";
+  const barColor = full ? "bg-destructive" : near ? "bg-amber-500" : "bg-[hsl(265_85%_65%)]";
   return (
     <div className="rounded-lg border border-border/60 px-3 py-2.5">
       <div className="flex items-center justify-between">
@@ -59,7 +55,10 @@ function MemoryUsageMeter({ count, limit }: { count: number; limit: number }) {
         </p>
       </div>
       <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${pct}%` }} />
+        <div
+          className={cn("h-full rounded-full transition-all", barColor)}
+          style={{ width: `${pct}%` }}
+        />
       </div>
       {full ? (
         <p className="mt-1.5 text-xs text-destructive">
@@ -311,9 +310,7 @@ export function OraMemoryManager({
             />
           </div>
 
-          {usage && usage.limit > 0 && (
-            <MemoryUsageMeter count={usage.count} limit={usage.limit} />
-          )}
+          {usage && usage.limit > 0 && <MemoryUsageMeter count={usage.count} limit={usage.limit} />}
         </div>
 
         {isLoading ? (
