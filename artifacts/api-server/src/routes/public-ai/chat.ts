@@ -1204,6 +1204,7 @@ router.post("/public-ai/chat", async (req, res) => {
     conversationSummary = await updateConversationSummary({
       priorSummary: conversationSummary,
       newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
+      subscriptionTier: planTier,
     });
   }
   const summaryContext = conversationSummary
@@ -1427,7 +1428,8 @@ router.post("/public-ai/chat", async (req, res) => {
   // detector and never throws.
   // Temporary ("incognito") chats never surface a memory-save candidate, so the
   // client has nothing to persist.
-  const memoryCandidate = authed && !temporary ? await extractMemorySaveCandidate(message) : null;
+  const memoryCandidate =
+    authed && !temporary ? await extractMemorySaveCandidate(message, planTier) : null;
   const usage = await oraUsageResponse(authed, payload.msgCount);
 
   res.json({

@@ -13,6 +13,12 @@
  */
 import { logger } from "../logger";
 import { classifyIntent, type OraConfidence, type OraIntent, type OraTopic } from "./classifier";
+import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  runCandidateChain,
+  selectOraMemoryModelRoute,
+} from "./model-router";
 import { detectFileRequest, type FileFormat } from "./prompt";
 
 // ── Tool taxonomy ───────────────────────────────────────────────────────────
@@ -831,6 +837,7 @@ Respond ONLY with strict JSON of the form: {"save": boolean, "fact": string, "ex
  */
 export async function extractMemorySaveCandidate(
   message: string,
+  subscriptionTier?: string | null,
 ): Promise<MemorySaveCandidate | null> {
   const trimmed = message.trim();
   // Below the regex detector's minimum there is never a durable fact, so skip
@@ -842,32 +849,59 @@ export async function extractMemorySaveCandidate(
   if (trimmed.length < 6) return null;
   if (trimmed.length > 2000) return detectMemorySaveCandidate(message);
 
-  const model = process.env.ORA_MEMORY_MODEL ?? "gpt-5-nano";
+  const planTier = normalizeOraPlanTier(subscriptionTier);
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  const candidates = selectOraMemoryModelRoute({
+    task: "extract",
+    subscriptionTier: planTier,
+    available,
+    openCircuits,
+  });
   // Hard latency ceiling: this runs inline before the chat response is sent, so
-  // a slow provider must not stall the reply. On timeout we fall back to the
-  // regex detector (via the catch below) instead of blocking. Tunable via env.
+  // a slow provider chain must not stall the reply. On timeout we fall back to
+  // the regex detector (via the catch below) instead of blocking. Tunable via env.
   const timeoutMs = Number(process.env.ORA_MEMORY_TIMEOUT_MS) || 1500;
   const start = Date.now();
+  let winningProvider = "none";
+  let winningModel = candidates[candidates.length - 1]?.model ?? "none";
 
   try {
     const { createChatCompletion } = await import("../ai-providers");
     const result = await Promise.race([
-      createChatCompletion({
-        provider: "openai",
-        model,
-        messages: [
-          { role: "system", content: MEMORY_EXTRACT_SYSTEM_PROMPT },
-          { role: "user", content: trimmed.slice(0, 1000) },
-        ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 120,
-      }),
+      runCandidateChain(
+        candidates,
+        (candidate) =>
+          createChatCompletion({
+            provider: candidate.provider,
+            model: candidate.model,
+            messages: [
+              { role: "system", content: MEMORY_EXTRACT_SYSTEM_PROMPT },
+              { role: "user", content: trimmed.slice(0, 1000) },
+            ],
+            response_format: { type: "json_object" },
+            max_completion_tokens: 120,
+          }),
+        (candidate, i, err) =>
+          logger.warn(
+            {
+              component: "ora-memory-extract",
+              provider: candidate.provider,
+              model: candidate.model,
+              attempt: i + 1,
+              ofCandidates: candidates.length,
+              err,
+            },
+            "Memory extraction model candidate failed — trying next provider",
+          ),
+      ),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("memory-extract-timeout")), timeoutMs),
       ),
     ]);
+    winningProvider = result.candidate.provider;
+    winningModel = result.candidate.model;
 
-    const raw = result.choices[0]?.message?.content?.trim() ?? "";
+    const raw = result.result.choices[0]?.message?.content?.trim() ?? "";
     if (!raw) return detectMemorySaveCandidate(message);
 
     let parsed: { save?: unknown; fact?: unknown; explicit?: unknown };
@@ -881,7 +915,14 @@ export async function extractMemorySaveCandidate(
     const fact = typeof parsed.fact === "string" ? parsed.fact.trim() : "";
     if (!save || fact.length === 0) {
       logger.info(
-        { component: "ora-memory-extract", model, latencyMs: Date.now() - start, save: false },
+        {
+          component: "ora-memory-extract",
+          provider: winningProvider,
+          model: winningModel,
+          planTier,
+          latencyMs: Date.now() - start,
+          save: false,
+        },
         "Memory extraction: no durable fact",
       );
       return null;
@@ -897,7 +938,9 @@ export async function extractMemorySaveCandidate(
     logger.info(
       {
         component: "ora-memory-extract",
-        model,
+        provider: winningProvider,
+        model: winningModel,
+        planTier,
         latencyMs: Date.now() - start,
         save: true,
         explicit: isExplicit,
@@ -915,7 +958,14 @@ export async function extractMemorySaveCandidate(
     // Fail safe to the regex detector rather than erroring the chat. This keeps
     // explicit "remember…" phrasing working even if the model call fails.
     logger.info(
-      { component: "ora-memory-extract", model, latencyMs: Date.now() - start, err },
+      {
+        component: "ora-memory-extract",
+        provider: winningProvider,
+        model: winningModel,
+        planTier,
+        latencyMs: Date.now() - start,
+        err,
+      },
       "Memory extraction threw — falling back to regex detector",
     );
     return detectMemorySaveCandidate(message);
@@ -946,13 +996,23 @@ Respond ONLY with strict JSON of the form: {"summary": string}. If the document 
 export async function summarizeDocumentForMemory(
   filename: string,
   extractedText: string,
+  subscriptionTier?: string | null,
 ): Promise<string | null> {
   const text = extractedText.trim();
   if (text.length === 0) return null;
 
-  const model = process.env.ORA_MEMORY_MODEL ?? "gpt-5-nano";
+  const planTier = normalizeOraPlanTier(subscriptionTier);
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  const candidates = selectOraMemoryModelRoute({
+    task: "document_summary",
+    subscriptionTier: planTier,
+    available,
+    openCircuits,
+  });
   const timeoutMs = Number(process.env.ORA_DOC_MEMORY_TIMEOUT_MS) || 8000;
   const start = Date.now();
+  let winningProvider = "none";
+  let winningModel = candidates[candidates.length - 1]?.model ?? "none";
 
   // Bound the prompt: summarize the head of the document. A concise summary of
   // the opening pages captures the purpose and key facts without paying for an
@@ -968,22 +1028,40 @@ export async function summarizeDocumentForMemory(
   try {
     const { createChatCompletion } = await import("../ai-providers");
     const result = await Promise.race([
-      createChatCompletion({
-        provider: "openai",
-        model,
-        messages: [
-          { role: "system", content: DOCUMENT_MEMORY_SYSTEM_PROMPT },
-          { role: "user", content: userBlock },
-        ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 300,
-      }),
+      runCandidateChain(
+        candidates,
+        (candidate) =>
+          createChatCompletion({
+            provider: candidate.provider,
+            model: candidate.model,
+            messages: [
+              { role: "system", content: DOCUMENT_MEMORY_SYSTEM_PROMPT },
+              { role: "user", content: userBlock },
+            ],
+            response_format: { type: "json_object" },
+            max_completion_tokens: 300,
+          }),
+        (candidate, i, err) =>
+          logger.warn(
+            {
+              component: "ora-doc-memory",
+              provider: candidate.provider,
+              model: candidate.model,
+              attempt: i + 1,
+              ofCandidates: candidates.length,
+              err,
+            },
+            "Document memory model candidate failed — trying next provider",
+          ),
+      ),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("doc-memory-timeout")), timeoutMs),
       ),
     ]);
+    winningProvider = result.candidate.provider;
+    winningModel = result.candidate.model;
 
-    const raw = result.choices[0]?.message?.content?.trim() ?? "";
+    const raw = result.result.choices[0]?.message?.content?.trim() ?? "";
     if (!raw) return null;
 
     let parsed: { summary?: unknown };
@@ -996,20 +1074,41 @@ export async function summarizeDocumentForMemory(
     const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
     if (summary.length === 0) {
       logger.info(
-        { component: "ora-doc-memory", model, latencyMs: Date.now() - start, ok: false },
+        {
+          component: "ora-doc-memory",
+          provider: winningProvider,
+          model: winningModel,
+          planTier,
+          latencyMs: Date.now() - start,
+          ok: false,
+        },
         "Document memory summarization: no durable content",
       );
       return null;
     }
 
     logger.info(
-      { component: "ora-doc-memory", model, latencyMs: Date.now() - start, ok: true },
+      {
+        component: "ora-doc-memory",
+        provider: winningProvider,
+        model: winningModel,
+        planTier,
+        latencyMs: Date.now() - start,
+        ok: true,
+      },
       "Document memory summarization: summary produced",
     );
     return summary.slice(0, 1000);
   } catch (err) {
     logger.info(
-      { component: "ora-doc-memory", model, latencyMs: Date.now() - start, err },
+      {
+        component: "ora-doc-memory",
+        provider: winningProvider,
+        model: winningModel,
+        planTier,
+        latencyMs: Date.now() - start,
+        err,
+      },
       "Document memory summarization failed",
     );
     return null;

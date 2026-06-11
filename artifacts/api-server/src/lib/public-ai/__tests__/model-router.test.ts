@@ -17,9 +17,11 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   normalizeOraPlanTier,
+  openAiModelForOraMemory,
   openAiModelForOraRoute,
   openAiModelForOraSearch,
   openAiModelForOraVision,
+  selectOraMemoryModelRoute,
   selectOraModelRoute,
   runCandidateChain,
   type OraModelRouteInput,
@@ -68,6 +70,22 @@ const ROUTER_ENV_NAMES = [
   "ORA_CORE_SEARCH_MODEL",
   "ORA_WAVE_SEARCH_MODEL",
   "ORA_SEARCH_MODEL",
+  "ORA_FREE_MEMORY_EXTRACT_MODEL",
+  "ORA_CORE_MEMORY_EXTRACT_MODEL",
+  "ORA_WAVE_MEMORY_EXTRACT_MODEL",
+  "ORA_MEMORY_EXTRACT_MODEL",
+  "ORA_FREE_SUMMARY_MODEL",
+  "ORA_CORE_SUMMARY_MODEL",
+  "ORA_WAVE_SUMMARY_MODEL",
+  "ORA_SUMMARY_MODEL",
+  "ORA_FREE_DOC_MEMORY_MODEL",
+  "ORA_CORE_DOC_MEMORY_MODEL",
+  "ORA_WAVE_DOC_MEMORY_MODEL",
+  "ORA_DOC_MEMORY_MODEL",
+  "ORA_FREE_MEMORY_MODEL",
+  "ORA_CORE_MEMORY_MODEL",
+  "ORA_WAVE_MEMORY_MODEL",
+  "ORA_MEMORY_MODEL",
 ] as const;
 const ORIGINAL_ROUTER_ENV = new Map(ROUTER_ENV_NAMES.map((name) => [name, process.env[name]]));
 
@@ -119,6 +137,38 @@ describe("Ora model helper functions", () => {
     expect(openAiModelForOraSearch("free")).toBe("gpt-free-search");
     expect(openAiModelForOraSearch("core")).toBe("gpt-core-search");
     expect(openAiModelForOraSearch("wave")).toBe("gpt-wave-search");
+  });
+
+  it("uses stronger plan-aware OpenAI defaults and env overrides for memory tasks", () => {
+    expect(openAiModelForOraMemory("extract", "free")).toBe("gpt-5-nano");
+    expect(openAiModelForOraMemory("extract", "core")).toBe("gpt-5-mini");
+    expect(openAiModelForOraMemory("conversation_summary", "wave")).toBe("gpt-5.4");
+
+    process.env.ORA_CORE_MEMORY_EXTRACT_MODEL = "gpt-core-memory-extract";
+    process.env.ORA_WAVE_SUMMARY_MODEL = "gpt-wave-summary";
+    process.env.ORA_FREE_DOC_MEMORY_MODEL = "gpt-free-doc-memory";
+
+    expect(openAiModelForOraMemory("extract", "core")).toBe("gpt-core-memory-extract");
+    expect(openAiModelForOraMemory("conversation_summary", "wave")).toBe("gpt-wave-summary");
+    expect(openAiModelForOraMemory("document_summary", "free")).toBe("gpt-free-doc-memory");
+  });
+
+  it("routes memory through specialist providers and keeps document memory Gemini-first", () => {
+    const extraction = selectOraMemoryModelRoute({
+      task: "extract",
+      subscriptionTier: "core",
+      available: { ...ALL_AVAILABLE },
+      openCircuits: new Set<Provider>(),
+    });
+    expect(providersOf(extraction)).toEqual(["anthropic", "gemini", "deepseek", "openai"]);
+
+    const documentSummary = selectOraMemoryModelRoute({
+      task: "document_summary",
+      subscriptionTier: "wave",
+      available: { ...ALL_AVAILABLE },
+      openCircuits: new Set<Provider>(),
+    });
+    expect(providersOf(documentSummary)).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
   });
 });
 

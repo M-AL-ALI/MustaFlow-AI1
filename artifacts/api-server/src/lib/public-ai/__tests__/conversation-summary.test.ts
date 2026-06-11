@@ -10,12 +10,39 @@
  *   6. Empty model output → fails safe to the prior summary
  *   7. Constants stay in lockstep with the documented contract
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 
-const createChatCompletion = vi.fn();
+const createChatCompletion = vi.hoisted(() => vi.fn());
 
 vi.mock("../../ai-providers", () => ({
   createChatCompletion: (...args: unknown[]) => createChatCompletion(...args),
+  isDeepSeekAvailable: () => false,
+  MODEL_DEFAULTS: {
+    openai: {
+      lite: "gpt-5-nano",
+      eco: "gpt-5-mini",
+      power: "gpt-5.4",
+      pro: "gpt-5.4",
+    },
+    anthropic: {
+      lite: "claude-haiku-4-5",
+      eco: "claude-haiku-4-5",
+      power: "claude-sonnet-4-6",
+      pro: "claude-opus-4-7",
+    },
+    gemini: {
+      lite: "gemini-2.5-flash",
+      eco: "gemini-2.5-flash",
+      power: "gemini-2.5-pro",
+      pro: "gemini-2.5-pro",
+    },
+    deepseek: {
+      lite: "deepseek-chat",
+      eco: "deepseek-chat",
+      power: "deepseek-reasoner",
+      pro: "deepseek-reasoner",
+    },
+  },
 }));
 
 import {
@@ -36,9 +63,36 @@ const TURNS: SummaryTurn[] = [
   { role: "assistant", content: "Nice to meet you, Sam." },
 ];
 
+const SUMMARY_ENV_NAMES = [
+  "ORA_FREE_SUMMARY_MODEL",
+  "ORA_CORE_SUMMARY_MODEL",
+  "ORA_WAVE_SUMMARY_MODEL",
+  "ORA_SUMMARY_MODEL",
+  "AI_INTEGRATIONS_ANTHROPIC_BASE_URL",
+  "AI_INTEGRATIONS_ANTHROPIC_API_KEY",
+  "AI_INTEGRATIONS_GEMINI_BASE_URL",
+  "AI_INTEGRATIONS_GEMINI_API_KEY",
+] as const;
+const ORIGINAL_SUMMARY_ENV = new Map(SUMMARY_ENV_NAMES.map((name) => [name, process.env[name]]));
+
 describe("updateConversationSummary", () => {
   beforeEach(() => {
     createChatCompletion.mockReset();
+    delete process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+    delete process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+    delete process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+    delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  });
+
+  afterEach(() => {
+    for (const name of SUMMARY_ENV_NAMES) {
+      const original = ORIGINAL_SUMMARY_ENV.get(name);
+      if (original === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = original;
+      }
+    }
   });
 
   it("returns empty string with no prior summary and nothing to fold in", async () => {
@@ -64,6 +118,22 @@ describe("updateConversationSummary", () => {
     });
     expect(out).toBe("The user is Sam, runs a bakery.");
     expect(createChatCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the plan-aware summary model for paid tiers", async () => {
+    process.env.ORA_WAVE_SUMMARY_MODEL = "gpt-wave-summary";
+    mockReply("The user is Sam, runs a bakery.");
+    await updateConversationSummary({
+      priorSummary: "",
+      newMessages: TURNS,
+      subscriptionTier: "wave",
+    });
+    expect(createChatCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-wave-summary",
+      }),
+    );
   });
 
   it("ignores whitespace-only messages (nothing to fold in)", async () => {

@@ -1,32 +1,97 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the AI provider so extractMemorySaveCandidate doesn't make a real model
 // call. Each test sets `mockContent` to the JSON the model would return (or
 // configures the mock to throw / return empty to exercise the fail-safe paths).
-let mockContent: string | null = "{}";
-let mockThrows = false;
-let mockDelayMs = 0;
+const mockAi = vi.hoisted(() => {
+  const state = {
+    content: "{}" as string | null,
+    throws: false,
+    delayMs: 0,
+  };
+  return {
+    state,
+    createChatCompletion: vi.fn(async () => {
+      if (state.delayMs > 0) await new Promise((r) => setTimeout(r, state.delayMs));
+      if (state.throws) throw new Error("model unavailable");
+      return { choices: [{ message: { content: state.content } }] };
+    }),
+  };
+});
 
 vi.mock("../../../lib/ai-providers", () => ({
-  createChatCompletion: vi.fn(async () => {
-    if (mockDelayMs > 0) await new Promise((r) => setTimeout(r, mockDelayMs));
-    if (mockThrows) throw new Error("model unavailable");
-    return { choices: [{ message: { content: mockContent } }] };
-  }),
+  createChatCompletion: mockAi.createChatCompletion,
+  isDeepSeekAvailable: () => false,
+  MODEL_DEFAULTS: {
+    openai: {
+      lite: "gpt-5-nano",
+      eco: "gpt-5-mini",
+      power: "gpt-5.4",
+      pro: "gpt-5.4",
+    },
+    anthropic: {
+      lite: "claude-haiku-4-5",
+      eco: "claude-haiku-4-5",
+      power: "claude-sonnet-4-6",
+      pro: "claude-opus-4-7",
+    },
+    gemini: {
+      lite: "gemini-2.5-flash",
+      eco: "gemini-2.5-flash",
+      power: "gemini-2.5-pro",
+      pro: "gemini-2.5-pro",
+    },
+    deepseek: {
+      lite: "deepseek-chat",
+      eco: "deepseek-chat",
+      power: "deepseek-reasoner",
+      pro: "deepseek-reasoner",
+    },
+  },
 }));
 
-import { extractMemorySaveCandidate } from "../../../lib/public-ai/orchestrator";
+import {
+  extractMemorySaveCandidate,
+  summarizeDocumentForMemory,
+} from "../../../lib/public-ai/orchestrator";
+
+const MEMORY_TEST_ENV_NAMES = [
+  "ORA_MEMORY_TIMEOUT_MS",
+  "AI_INTEGRATIONS_ANTHROPIC_BASE_URL",
+  "AI_INTEGRATIONS_ANTHROPIC_API_KEY",
+  "AI_INTEGRATIONS_GEMINI_BASE_URL",
+  "AI_INTEGRATIONS_GEMINI_API_KEY",
+] as const;
+const ORIGINAL_MEMORY_TEST_ENV = new Map(
+  MEMORY_TEST_ENV_NAMES.map((name) => [name, process.env[name]]),
+);
+
+afterEach(() => {
+  for (const name of MEMORY_TEST_ENV_NAMES) {
+    const original = ORIGINAL_MEMORY_TEST_ENV.get(name);
+    if (original === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = original;
+    }
+  }
+});
 
 describe("extractMemorySaveCandidate (model-based)", () => {
   beforeEach(() => {
-    mockContent = "{}";
-    mockThrows = false;
-    mockDelayMs = 0;
+    mockAi.state.content = "{}";
+    mockAi.state.throws = false;
+    mockAi.state.delayMs = 0;
+    mockAi.createChatCompletion.mockClear();
+    delete process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+    delete process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+    delete process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+    delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
   });
 
   it("returns a low-confidence candidate for a durable fact phrased outside the regex patterns", async () => {
     // "I do all my work in the evenings" matches no MEMORY_SAVE_* regex.
-    mockContent = JSON.stringify({
+    mockAi.state.content = JSON.stringify({
       save: true,
       fact: "Works in the evenings",
       explicit: false,
@@ -39,7 +104,7 @@ describe("extractMemorySaveCandidate (model-based)", () => {
   });
 
   it("returns high confidence when the model flags an explicit save request", async () => {
-    mockContent = JSON.stringify({
+    mockAi.state.content = JSON.stringify({
       save: true,
       fact: "Company is Acme Corp",
       explicit: true,
@@ -49,8 +114,24 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     expect(c?.sensitive).toBe(false);
   });
 
+  it("uses the stronger Core memory extraction model by plan tier", async () => {
+    mockAi.state.content = JSON.stringify({
+      save: true,
+      fact: "Prefers concise answers",
+      explicit: true,
+    });
+    const c = await extractMemorySaveCandidate("remember that I prefer concise answers", "core");
+    expect(c?.fact).toBe("Prefers concise answers");
+    expect(mockAi.createChatCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-5-mini",
+      }),
+    );
+  });
+
   it("returns null for transient chatter the model declines to save", async () => {
-    mockContent = JSON.stringify({ save: false, fact: "", explicit: false });
+    mockAi.state.content = JSON.stringify({ save: false, fact: "", explicit: false });
     const c = await extractMemorySaveCandidate("haha that's hilarious, thanks!");
     expect(c).toBeNull();
   });
@@ -58,7 +139,7 @@ describe("extractMemorySaveCandidate (model-based)", () => {
   it("forces a sensitive fact to low confidence even when the model marks it explicit", async () => {
     // The model paraphrased away the email, but the raw message still carries it
     // — the sensitive guard must catch it from the original message.
-    mockContent = JSON.stringify({
+    mockAi.state.content = JSON.stringify({
       save: true,
       fact: "Contact email on file",
       explicit: true,
@@ -69,7 +150,7 @@ describe("extractMemorySaveCandidate (model-based)", () => {
   });
 
   it("forces low confidence when the extracted fact itself contains PII", async () => {
-    mockContent = JSON.stringify({
+    mockAi.state.content = JSON.stringify({
       save: true,
       fact: "Phone number is +1 (415) 555-0192",
       explicit: true,
@@ -84,7 +165,7 @@ describe("extractMemorySaveCandidate (model-based)", () => {
   });
 
   it("falls back to the regex detector when the model throws", async () => {
-    mockThrows = true;
+    mockAi.state.throws = true;
     // Explicit phrasing the regex detector recognizes — must still work.
     const c = await extractMemorySaveCandidate("remember that I prefer dark mode");
     expect(c).not.toBeNull();
@@ -93,21 +174,21 @@ describe("extractMemorySaveCandidate (model-based)", () => {
   });
 
   it("falls back to the regex detector when the model returns empty content", async () => {
-    mockContent = "";
+    mockAi.state.content = "";
     const c = await extractMemorySaveCandidate("Don't forget I ship to the EU");
     expect(c?.confidence).toBe("high");
   });
 
   it("falls back to the regex detector when the model returns invalid JSON", async () => {
-    mockContent = "not json at all";
+    mockAi.state.content = "not json at all";
     const c = await extractMemorySaveCandidate("keep a note that my budget is $5k");
     expect(c?.confidence).toBe("high");
   });
 
   it("falls back to the regex detector when the model call exceeds the timeout", async () => {
     process.env.ORA_MEMORY_TIMEOUT_MS = "50";
-    mockDelayMs = 300; // slower than the 50ms ceiling
-    mockContent = JSON.stringify({ save: true, fact: "ignored", explicit: false });
+    mockAi.state.delayMs = 300; // slower than the 50ms ceiling
+    mockAi.state.content = JSON.stringify({ save: true, fact: "ignored", explicit: false });
     const c = await extractMemorySaveCandidate("remember that I prefer dark mode");
     // The slow model result is discarded; regex fallback recognises the explicit phrasing.
     expect(c?.confidence).toBe("high");
@@ -116,8 +197,39 @@ describe("extractMemorySaveCandidate (model-based)", () => {
   });
 
   it("returns null when the model reports save:true but an empty fact", async () => {
-    mockContent = JSON.stringify({ save: true, fact: "   ", explicit: false });
+    mockAi.state.content = JSON.stringify({ save: true, fact: "   ", explicit: false });
     const c = await extractMemorySaveCandidate("some ambiguous message here");
     expect(c).toBeNull();
+  });
+});
+
+describe("summarizeDocumentForMemory (model-based)", () => {
+  beforeEach(() => {
+    mockAi.state.content = "{}";
+    mockAi.state.throws = false;
+    mockAi.state.delayMs = 0;
+    mockAi.createChatCompletion.mockClear();
+    delete process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+    delete process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+    delete process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+    delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  });
+
+  it("uses a plan-aware document memory model and returns the durable summary", async () => {
+    mockAi.state.content = JSON.stringify({
+      summary: "The document defines Acme's Q3 launch plan and budget constraints.",
+    });
+    const summary = await summarizeDocumentForMemory(
+      "launch-plan.md",
+      "Acme Q3 launch plan. Budget capped at $50k.",
+      "wave",
+    );
+    expect(summary).toBe("The document defines Acme's Q3 launch plan and budget constraints.");
+    expect(mockAi.createChatCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-5.4",
+      }),
+    );
   });
 });

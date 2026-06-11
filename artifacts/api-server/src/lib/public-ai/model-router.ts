@@ -36,6 +36,7 @@ export interface ModelCandidate {
  */
 export type OraRouteTier = "fast" | "premium" | "deep";
 export type OraPlanTier = "anonymous" | "free" | "core" | "wave";
+export type OraMemoryTask = "extract" | "conversation_summary" | "document_summary";
 
 export interface OraModelRouteInput {
   tier: OraRouteTier;
@@ -167,6 +168,114 @@ export function openAiModelForOraSearch(planTier: OraPlanTier): string {
   return envModel("ORA_FREE_SEARCH_MODEL", "ORA_SEARCH_MODEL") ?? "gpt-4o";
 }
 
+export function openAiModelForOraMemory(task: OraMemoryTask, planTier: OraPlanTier): string {
+  if (task === "extract") {
+    if (planTier === "wave") {
+      return (
+        envModel(
+          "ORA_WAVE_MEMORY_EXTRACT_MODEL",
+          "ORA_MEMORY_EXTRACT_MODEL",
+          "ORA_WAVE_MEMORY_MODEL",
+          "ORA_MEMORY_MODEL",
+          "ORA_WAVE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5-mini"
+      );
+    }
+    if (planTier === "core") {
+      return (
+        envModel(
+          "ORA_CORE_MEMORY_EXTRACT_MODEL",
+          "ORA_MEMORY_EXTRACT_MODEL",
+          "ORA_CORE_MEMORY_MODEL",
+          "ORA_MEMORY_MODEL",
+          "ORA_CORE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5-mini"
+      );
+    }
+    return (
+      envModel(
+        "ORA_FREE_MEMORY_EXTRACT_MODEL",
+        "ORA_MEMORY_EXTRACT_MODEL",
+        "ORA_FREE_MEMORY_MODEL",
+        "ORA_MEMORY_MODEL",
+        "ORA_FAST_MODEL",
+      ) ?? "gpt-5-nano"
+    );
+  }
+
+  if (task === "conversation_summary") {
+    if (planTier === "wave") {
+      return (
+        envModel(
+          "ORA_WAVE_SUMMARY_MODEL",
+          "ORA_SUMMARY_MODEL",
+          "ORA_WAVE_MEMORY_MODEL",
+          "ORA_MEMORY_MODEL",
+          "ORA_WAVE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5.4"
+      );
+    }
+    if (planTier === "core") {
+      return (
+        envModel(
+          "ORA_CORE_SUMMARY_MODEL",
+          "ORA_SUMMARY_MODEL",
+          "ORA_CORE_MEMORY_MODEL",
+          "ORA_MEMORY_MODEL",
+          "ORA_CORE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5.4"
+      );
+    }
+    return (
+      envModel(
+        "ORA_FREE_SUMMARY_MODEL",
+        "ORA_SUMMARY_MODEL",
+        "ORA_FREE_MEMORY_MODEL",
+        "ORA_MEMORY_MODEL",
+        "ORA_FAST_MODEL",
+      ) ?? "gpt-5-mini"
+    );
+  }
+
+  if (planTier === "wave") {
+    return (
+      envModel(
+        "ORA_WAVE_DOC_MEMORY_MODEL",
+        "ORA_DOC_MEMORY_MODEL",
+        "ORA_WAVE_MEMORY_MODEL",
+        "ORA_MEMORY_MODEL",
+        "ORA_WAVE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-5.4"
+    );
+  }
+  if (planTier === "core") {
+    return (
+      envModel(
+        "ORA_CORE_DOC_MEMORY_MODEL",
+        "ORA_DOC_MEMORY_MODEL",
+        "ORA_CORE_MEMORY_MODEL",
+        "ORA_MEMORY_MODEL",
+        "ORA_CORE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-5.4"
+    );
+  }
+  return (
+    envModel(
+      "ORA_FREE_DOC_MEMORY_MODEL",
+      "ORA_DOC_MEMORY_MODEL",
+      "ORA_FREE_MEMORY_MODEL",
+      "ORA_MEMORY_MODEL",
+      "ORA_PREMIUM_MODEL",
+    ) ?? "gpt-5-mini"
+  );
+}
+
 export function getOraProviderRoutingSnapshot(): {
   available: Record<Provider, boolean>;
   openCircuits: Set<Provider>;
@@ -188,6 +297,30 @@ export function getOraProviderRoutingSnapshot(): {
       deepseek: isDeepSeekAvailable(),
     },
   };
+}
+
+export function selectOraMemoryModelRoute(input: {
+  task: OraMemoryTask;
+  subscriptionTier?: string | null;
+  multilingual?: boolean;
+  hasDocumentContext?: boolean;
+  available: Record<Provider, boolean>;
+  openCircuits: ReadonlySet<Provider>;
+  openaiModel?: string;
+}): ModelCandidate[] {
+  const planTier = normalizeOraPlanTier(input.subscriptionTier);
+  return selectOraModelRoute({
+    tier: "premium",
+    subscriptionTier: planTier,
+    topic: "general",
+    intent: "premium",
+    confidence: "high",
+    multilingual: input.multilingual ?? false,
+    hasDocumentContext: input.task === "document_summary" || input.hasDocumentContext,
+    available: input.available,
+    openCircuits: input.openCircuits,
+    openaiModel: input.openaiModel ?? openAiModelForOraMemory(input.task, planTier),
+  });
 }
 
 function isCostSensitivePlan(plan: OraPlanTier): boolean {
