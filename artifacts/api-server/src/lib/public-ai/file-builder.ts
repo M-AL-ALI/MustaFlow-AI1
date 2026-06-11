@@ -20,9 +20,9 @@ import type { FileFormat } from "./prompt";
 import {
   getOraProviderRoutingSnapshot,
   normalizeOraPlanTier,
-  openAiModelForOraRoute,
+  openAiModelForOraFile,
   runCandidateChain,
-  selectOraModelRoute,
+  selectOraFileModelRoute,
   type ModelCandidate,
 } from "./model-router";
 import PptxGenJS from "pptxgenjs";
@@ -857,6 +857,40 @@ export function safeParseFileJson(raw: string): Record<string, unknown> {
   }
 }
 
+export function hasUsableFileJson(parsed: Record<string, unknown>, format: FileFormat): boolean {
+  if (format === "csv" || format === "xlsx") {
+    const headers = Array.isArray(parsed.headers)
+      ? parsed.headers.map((h) => String(h ?? "").trim()).filter(Boolean)
+      : [];
+    const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+    return headers.length > 0 && rows.some((r) => Array.isArray(r) && r.length > 0);
+  }
+
+  if (format === "pptx") {
+    const slides = Array.isArray(parsed.slides) ? parsed.slides : [];
+    return slides.some((slide) => {
+      if (!slide || typeof slide !== "object") return false;
+      const s = slide as Record<string, unknown>;
+      const heading = String(s.heading ?? "").trim();
+      const bullets = Array.isArray(s.bullets)
+        ? s.bullets.map((b) => String(b ?? "").trim()).filter(Boolean)
+        : [];
+      return heading.length > 0 || bullets.length > 0;
+    });
+  }
+
+  const sections = Array.isArray(parsed.sections) ? parsed.sections : [];
+  return sections.some((section) => {
+    if (!section || typeof section !== "object") return false;
+    const s = section as Record<string, unknown>;
+    const content = String(s.content ?? "").trim();
+    const bullets = Array.isArray(s.bullets)
+      ? s.bullets.map((b) => String(b ?? "").trim()).filter(Boolean)
+      : [];
+    return content.length > 0 || bullets.length > 0;
+  });
+}
+
 function repairTruncatedJson(s: string): string | null {
   // Walk the string tracking structure depth, ignoring brackets inside strings.
   // Each time we close a bracket we record that index together with a snapshot
@@ -932,16 +966,13 @@ export async function generateFileFromPrompt(
     { role: "user" as const, content: message },
   ];
 
-  const routeTier = "premium" as const;
   const planTier = normalizeOraPlanTier(subscriptionTier);
-  const openaiModel = openAiModelForOraRoute(routeTier, planTier);
+  const openaiModel = openAiModelForOraFile("generation", planTier);
   const { available, openCircuits } = getOraProviderRoutingSnapshot();
-  const candidates: ModelCandidate[] = selectOraModelRoute({
-    tier: routeTier,
+  const candidates: ModelCandidate[] = selectOraFileModelRoute({
+    task: "generation",
     subscriptionTier: planTier,
     topic: isTabular ? "technical" : "general",
-    intent: "premium",
-    confidence: "high",
     multilingual: isNonEnglishLanguage(language),
     hasDocumentContext: hasSourceData,
     available,
@@ -962,8 +993,8 @@ export async function generateFileFromPrompt(
 
     const raw = result.choices[0]?.message?.content?.trim() ?? "";
     const parsed = safeParseFileJson(raw);
-    if (Object.keys(parsed).length === 0) {
-      throw new Error("empty file-generation JSON");
+    if (Object.keys(parsed).length === 0 || !hasUsableFileJson(parsed, format)) {
+      throw new Error("unusable file-generation JSON");
     }
     return parsed;
   });

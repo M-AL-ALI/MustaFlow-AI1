@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { safeParseFileJson, FileGenerationError } from "./file-builder.js";
+import { safeParseFileJson, hasUsableFileJson, FileGenerationError } from "./file-builder.js";
 import { buildDatasetContextBlock } from "./dataset-prompt.js";
 import { buildCarriedDocumentContext } from "./carried-docs.js";
 import { storeFile } from "./file-store.js";
@@ -140,5 +140,28 @@ describe("FileGenerationError", () => {
     expect(err).toBeInstanceOf(FileGenerationError);
     expect(err.name).toBe("FileGenerationError");
     expect(err.message).toBe("Could not extract the data from your file.");
+  });
+});
+
+describe("hasUsableFileJson", () => {
+  it("accepts tabular JSON only when headers and at least one row are present", () => {
+    expect(hasUsableFileJson({ headers: ["Name"], rows: [["Alice"]] }, "csv")).toBe(true);
+    expect(hasUsableFileJson({ headers: ["Name"], rows: [] }, "csv")).toBe(false);
+  });
+
+  it("accepts presentations only when at least one slide has content", () => {
+    expect(hasUsableFileJson({ slides: [{ heading: "Plan", bullets: ["Launch"] }] }, "pptx")).toBe(
+      true,
+    );
+    expect(hasUsableFileJson({ slides: [{ heading: "", bullets: [] }] }, "pptx")).toBe(false);
+  });
+
+  it("accepts documents only when at least one section has content or bullets", () => {
+    expect(
+      hasUsableFileJson({ sections: [{ heading: "Overview", content: "Summary" }] }, "docx"),
+    ).toBe(true);
+    expect(hasUsableFileJson({ sections: [{ heading: "Overview", content: "" }] }, "docx")).toBe(
+      false,
+    );
   });
 });

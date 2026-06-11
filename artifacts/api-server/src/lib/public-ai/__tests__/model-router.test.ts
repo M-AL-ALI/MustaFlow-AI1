@@ -17,10 +17,12 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   normalizeOraPlanTier,
+  openAiModelForOraFile,
   openAiModelForOraMemory,
   openAiModelForOraRoute,
   openAiModelForOraSearch,
   openAiModelForOraVision,
+  selectOraFileModelRoute,
   selectOraMemoryModelRoute,
   selectOraModelRoute,
   runCandidateChain,
@@ -86,6 +88,22 @@ const ROUTER_ENV_NAMES = [
   "ORA_CORE_MEMORY_MODEL",
   "ORA_WAVE_MEMORY_MODEL",
   "ORA_MEMORY_MODEL",
+  "ORA_FREE_FILE_GENERATION_MODEL",
+  "ORA_CORE_FILE_GENERATION_MODEL",
+  "ORA_WAVE_FILE_GENERATION_MODEL",
+  "ORA_FILE_GENERATION_MODEL",
+  "ORA_FREE_FILE_ANALYSIS_MODEL",
+  "ORA_CORE_FILE_ANALYSIS_MODEL",
+  "ORA_WAVE_FILE_ANALYSIS_MODEL",
+  "ORA_FILE_ANALYSIS_MODEL",
+  "ORA_FREE_DATASET_ANALYSIS_MODEL",
+  "ORA_CORE_DATASET_ANALYSIS_MODEL",
+  "ORA_WAVE_DATASET_ANALYSIS_MODEL",
+  "ORA_DATASET_ANALYSIS_MODEL",
+  "ORA_FREE_FILE_MODEL",
+  "ORA_CORE_FILE_MODEL",
+  "ORA_WAVE_FILE_MODEL",
+  "ORA_FILE_MODEL",
 ] as const;
 const ORIGINAL_ROUTER_ENV = new Map(ROUTER_ENV_NAMES.map((name) => [name, process.env[name]]));
 
@@ -169,6 +187,38 @@ describe("Ora model helper functions", () => {
       openCircuits: new Set<Provider>(),
     });
     expect(providersOf(documentSummary)).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
+  });
+
+  it("uses plan-aware OpenAI env overrides for file tasks", () => {
+    expect(openAiModelForOraFile("generation", "free")).toBe("gpt-5-mini");
+    expect(openAiModelForOraFile("analysis", "core")).toBe("gpt-5.4");
+
+    process.env.ORA_WAVE_FILE_GENERATION_MODEL = "gpt-wave-file-gen";
+    process.env.ORA_CORE_FILE_ANALYSIS_MODEL = "gpt-core-file-analysis";
+    process.env.ORA_FREE_DATASET_ANALYSIS_MODEL = "gpt-free-dataset";
+
+    expect(openAiModelForOraFile("generation", "wave")).toBe("gpt-wave-file-gen");
+    expect(openAiModelForOraFile("analysis", "core")).toBe("gpt-core-file-analysis");
+    expect(openAiModelForOraFile("dataset_analysis", "free")).toBe("gpt-free-dataset");
+  });
+
+  it("routes file tasks through document-aware chains and keeps OpenAI terminal", () => {
+    const documentAnalysis = selectOraFileModelRoute({
+      task: "analysis",
+      subscriptionTier: "core",
+      available: { ...ALL_AVAILABLE },
+      openCircuits: new Set<Provider>(),
+    });
+    expect(providersOf(documentAnalysis)).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
+
+    const tabularGeneration = selectOraFileModelRoute({
+      task: "generation",
+      subscriptionTier: "core",
+      topic: "technical",
+      available: { ...ALL_AVAILABLE },
+      openCircuits: new Set<Provider>(),
+    });
+    expect(providersOf(tabularGeneration)).toEqual(["anthropic", "deepseek", "gemini", "openai"]);
   });
 });
 

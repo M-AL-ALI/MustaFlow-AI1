@@ -21,9 +21,9 @@ import type { Provider } from "../../lib/ai-providers";
 import {
   getOraProviderRoutingSnapshot,
   normalizeOraPlanTier,
-  openAiModelForOraRoute,
+  openAiModelForOraFile,
   runCandidateChain,
-  selectOraModelRoute,
+  selectOraFileModelRoute,
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
 
@@ -153,18 +153,14 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
     { role: "user" as const, content: contextBlock },
   ];
 
-  const routeTier = "premium" as const;
   const planTier = normalizeOraPlanTier(authed?.tier ?? null);
-  const openaiModel = openAiModelForOraRoute(routeTier, planTier);
+  const openaiModel = openAiModelForOraFile("dataset_analysis", planTier);
   const { available, openCircuits } = getOraProviderRoutingSnapshot();
-  const candidates: ModelCandidate[] = selectOraModelRoute({
-    tier: routeTier,
+  const candidates: ModelCandidate[] = selectOraFileModelRoute({
+    task: "dataset_analysis",
     subscriptionTier: planTier,
     topic: "technical",
-    intent: "premium",
-    confidence: "high",
     multilingual: isNonEnglishLanguage(language),
-    hasDocumentContext: true,
     available,
     openCircuits,
     openaiModel,

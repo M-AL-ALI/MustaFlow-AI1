@@ -37,6 +37,7 @@ export interface ModelCandidate {
 export type OraRouteTier = "fast" | "premium" | "deep";
 export type OraPlanTier = "anonymous" | "free" | "core" | "wave";
 export type OraMemoryTask = "extract" | "conversation_summary" | "document_summary";
+export type OraFileTask = "generation" | "analysis" | "dataset_analysis";
 
 export interface OraModelRouteInput {
   tier: OraRouteTier;
@@ -276,6 +277,123 @@ export function openAiModelForOraMemory(task: OraMemoryTask, planTier: OraPlanTi
   );
 }
 
+export function openAiModelForOraFile(task: OraFileTask, planTier: OraPlanTier): string {
+  if (task === "generation") {
+    if (planTier === "wave") {
+      return (
+        envModel(
+          "ORA_WAVE_FILE_GENERATION_MODEL",
+          "ORA_FILE_GENERATION_MODEL",
+          "ORA_WAVE_FILE_MODEL",
+          "ORA_FILE_MODEL",
+          "ORA_WAVE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5.4"
+      );
+    }
+    if (planTier === "core") {
+      return (
+        envModel(
+          "ORA_CORE_FILE_GENERATION_MODEL",
+          "ORA_FILE_GENERATION_MODEL",
+          "ORA_CORE_FILE_MODEL",
+          "ORA_FILE_MODEL",
+          "ORA_CORE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5.4"
+      );
+    }
+    return (
+      envModel(
+        "ORA_FREE_FILE_GENERATION_MODEL",
+        "ORA_FILE_GENERATION_MODEL",
+        "ORA_FREE_FILE_MODEL",
+        "ORA_FILE_MODEL",
+        "ORA_FREE_MODEL",
+        "ORA_FAST_MODEL",
+      ) ?? "gpt-5-mini"
+    );
+  }
+
+  if (task === "dataset_analysis") {
+    if (planTier === "wave") {
+      return (
+        envModel(
+          "ORA_WAVE_DATASET_ANALYSIS_MODEL",
+          "ORA_DATASET_ANALYSIS_MODEL",
+          "ORA_WAVE_FILE_ANALYSIS_MODEL",
+          "ORA_FILE_ANALYSIS_MODEL",
+          "ORA_WAVE_FILE_MODEL",
+          "ORA_FILE_MODEL",
+          "ORA_WAVE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5.4"
+      );
+    }
+    if (planTier === "core") {
+      return (
+        envModel(
+          "ORA_CORE_DATASET_ANALYSIS_MODEL",
+          "ORA_DATASET_ANALYSIS_MODEL",
+          "ORA_CORE_FILE_ANALYSIS_MODEL",
+          "ORA_FILE_ANALYSIS_MODEL",
+          "ORA_CORE_FILE_MODEL",
+          "ORA_FILE_MODEL",
+          "ORA_CORE_MODEL",
+          "ORA_PREMIUM_MODEL",
+        ) ?? "gpt-5.4"
+      );
+    }
+    return (
+      envModel(
+        "ORA_FREE_DATASET_ANALYSIS_MODEL",
+        "ORA_DATASET_ANALYSIS_MODEL",
+        "ORA_FREE_FILE_ANALYSIS_MODEL",
+        "ORA_FILE_ANALYSIS_MODEL",
+        "ORA_FREE_FILE_MODEL",
+        "ORA_FILE_MODEL",
+        "ORA_FREE_MODEL",
+        "ORA_FAST_MODEL",
+      ) ?? "gpt-5-mini"
+    );
+  }
+
+  if (planTier === "wave") {
+    return (
+      envModel(
+        "ORA_WAVE_FILE_ANALYSIS_MODEL",
+        "ORA_FILE_ANALYSIS_MODEL",
+        "ORA_WAVE_FILE_MODEL",
+        "ORA_FILE_MODEL",
+        "ORA_WAVE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-5.4"
+    );
+  }
+  if (planTier === "core") {
+    return (
+      envModel(
+        "ORA_CORE_FILE_ANALYSIS_MODEL",
+        "ORA_FILE_ANALYSIS_MODEL",
+        "ORA_CORE_FILE_MODEL",
+        "ORA_FILE_MODEL",
+        "ORA_CORE_MODEL",
+        "ORA_PREMIUM_MODEL",
+      ) ?? "gpt-5.4"
+    );
+  }
+  return (
+    envModel(
+      "ORA_FREE_FILE_ANALYSIS_MODEL",
+      "ORA_FILE_ANALYSIS_MODEL",
+      "ORA_FREE_FILE_MODEL",
+      "ORA_FILE_MODEL",
+      "ORA_FREE_MODEL",
+      "ORA_FAST_MODEL",
+    ) ?? "gpt-5-mini"
+  );
+}
+
 export function getOraProviderRoutingSnapshot(): {
   available: Record<Provider, boolean>;
   openCircuits: Set<Provider>;
@@ -320,6 +438,32 @@ export function selectOraMemoryModelRoute(input: {
     available: input.available,
     openCircuits: input.openCircuits,
     openaiModel: input.openaiModel ?? openAiModelForOraMemory(input.task, planTier),
+  });
+}
+
+export function selectOraFileModelRoute(input: {
+  task: OraFileTask;
+  subscriptionTier?: string | null;
+  topic?: OraTopic;
+  multilingual?: boolean;
+  hasDocumentContext?: boolean;
+  available: Record<Provider, boolean>;
+  openCircuits: ReadonlySet<Provider>;
+  openaiModel?: string;
+}): ModelCandidate[] {
+  const planTier = normalizeOraPlanTier(input.subscriptionTier);
+  const hasDocumentContext = input.task !== "generation" || !!input.hasDocumentContext;
+  return selectOraModelRoute({
+    tier: "premium",
+    subscriptionTier: planTier,
+    topic: input.topic ?? (input.task === "dataset_analysis" ? "technical" : "general"),
+    intent: "premium",
+    confidence: "high",
+    multilingual: input.multilingual ?? false,
+    hasDocumentContext,
+    available: input.available,
+    openCircuits: input.openCircuits,
+    openaiModel: input.openaiModel ?? openAiModelForOraFile(input.task, planTier),
   });
 }
 
