@@ -19,7 +19,7 @@ import {
   normalizeOraPlanTier,
   openAiModelForOraVision,
   runCandidateChain,
-  selectOraModelRoute,
+  selectOraVisionModelRoute,
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
 
@@ -174,21 +174,14 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     visionUserMessage,
   ];
 
-  // Vision requires a vision-capable provider; DeepSeek is filtered out below.
-  const routeTier = "premium" as const;
+  // Vision requires a vision-capable provider; the router helper filters out DeepSeek.
   const planTier = normalizeOraPlanTier(authed?.tier ?? null);
   const openaiModel = openAiModelForOraVision(planTier);
   const { available: providerAvailability, openCircuits } = getOraProviderRoutingSnapshot();
-  const available: Record<Provider, boolean> = { ...providerAvailability, deepseek: false };
-  const candidates: ModelCandidate[] = selectOraModelRoute({
-    tier: routeTier,
+  const candidates: ModelCandidate[] = selectOraVisionModelRoute({
     subscriptionTier: planTier,
-    topic: "general",
-    intent: "premium",
-    confidence: "high",
     multilingual: isNonEnglishLanguage(language),
-    hasDocumentContext: true,
-    available,
+    available: providerAvailability,
     openCircuits,
     openaiModel,
   });

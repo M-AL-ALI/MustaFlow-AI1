@@ -92,6 +92,7 @@ router.post("/images/generate", async (req, res): Promise<void> => {
   } = parsed.data;
 
   const safeVariationCount = variationCount;
+  const imageUser = await resolveTierForUser(userId);
 
   const baseOpts = {
     userId,
@@ -103,6 +104,7 @@ router.post("/images/generate", async (req, res): Promise<void> => {
     purpose,
     transparentBackground,
     projectId: typeof projectId === "number" ? projectId : undefined,
+    subscriptionTier: imageUser.tier,
   };
 
   try {
@@ -574,9 +576,11 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
   let oraImageCount: number | undefined;
   let oraImageLimit: number | undefined;
   let oraResetsAt: string | null | undefined;
+  let oraTier: string | null = null;
   try {
     if (isOraEdit) {
       const oraUser = await resolveTierForUser(userId);
+      oraTier = oraUser.tier;
       const quota = await consumeOraQuota(userId, oraUser.tier, "image");
       if (!quota.allowed) {
         res.status(429).json({
@@ -601,8 +605,9 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
       parentFileUrl: parent.fileUrl,
       parentAspectRatio: parent.aspectRatio,
       instruction: instruction.trim(),
-      quality,
+      quality: isOraEdit ? undefined : quality,
       projectId,
+      subscriptionTier: isOraEdit ? oraTier : undefined,
       billingMode: isOraEdit ? "ora" : "credits",
     });
 

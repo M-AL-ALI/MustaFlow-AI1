@@ -8,7 +8,9 @@
  *   OPENAI_IMAGE_API_KEY — direct OpenAI API key for image models (preferred)
  *   IMAGE_API_KEY        — legacy alias (still accepted)
  *   OPENAI_API_KEY       — fallback if neither image-specific key is set
- *   IMAGE_MODEL          — model override (default: gpt-image-1)
+ *   IMAGE_MODEL          — legacy model override (default: gpt-image-1)
+ *   ORA_*_IMAGE_MODEL    — plan-aware model overrides (free/core/wave)
+ *   ORA_*_IMAGE_QUALITY  — plan-aware default quality overrides
  *
  * Model families supported:
  *   gpt-image-1 / gpt-image-* / chatgpt-image-* family:
@@ -22,9 +24,15 @@
  */
 import OpenAI, { toFile } from "openai";
 import { logger } from "./logger";
+import {
+  normalizeOraPlanTier,
+  openAiModelForOraImage,
+  oraImageQualityForPlan,
+  type OraImageQuality,
+} from "./public-ai/model-router";
 
 export type ImageAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
-export type ImageQuality = "draft" | "standard" | "high";
+export type ImageQuality = OraImageQuality;
 export type ImageStyle = "vivid" | "natural";
 
 export interface ImageGenerateOptions {
@@ -33,6 +41,7 @@ export interface ImageGenerateOptions {
   aspectRatio?: ImageAspectRatio;
   style?: ImageStyle;
   transparentBackground?: boolean;
+  subscriptionTier?: string | null;
 }
 
 export interface ImageGenerateResult {
@@ -46,6 +55,9 @@ export interface ImageGenerateResult {
   width: number;
   height: number;
   mimeType: string;
+  providerName: "openai";
+  modelName: string;
+  quality: ImageQuality;
 }
 
 /**
@@ -168,11 +180,13 @@ export async function generateImage(opts: ImageGenerateOptions): Promise<ImageGe
     );
   }
 
-  const { prompt, quality = "standard", aspectRatio = "1:1", style = "vivid" } = opts;
+  const { prompt, aspectRatio = "1:1", style = "vivid" } = opts;
+  const planTier = normalizeOraPlanTier(opts.subscriptionTier);
 
   // Default to gpt-image-1 — available on all current OpenAI API tiers;
   // set IMAGE_MODEL=dall-e-3 explicitly if your API key has legacy DALL-E access.
-  const model = process.env.IMAGE_MODEL ?? "gpt-image-1";
+  const model = openAiModelForOraImage("generation", planTier);
+  const quality = oraImageQualityForPlan(planTier, "generation", opts.quality);
   const size = resolveSize(aspectRatio, model);
   const resolvedQuality = resolveQuality(quality, model);
   const { width, height } = sizeToPixels(size);
@@ -180,7 +194,7 @@ export async function generateImage(opts: ImageGenerateOptions): Promise<ImageGe
   const client = getClient();
 
   logger.info(
-    { model, size, quality: resolvedQuality, promptLen: prompt.length },
+    { model, planTier, size, quality, providerQuality: resolvedQuality, promptLen: prompt.length },
     "image-provider: generating image",
   );
 
@@ -231,7 +245,7 @@ export async function generateImage(opts: ImageGenerateOptions): Promise<ImageGe
     throw new Error("Image generation returned neither a URL nor base64 data");
   }
 
-  logger.info({ model, size }, "image-provider: generation complete");
+  logger.info({ model, planTier, size, quality }, "image-provider: generation complete");
 
   return {
     openaiUrl: imageSource,
@@ -239,6 +253,9 @@ export async function generateImage(opts: ImageGenerateOptions): Promise<ImageGe
     width,
     height,
     mimeType: "image/png",
+    providerName: "openai",
+    modelName: model,
+    quality,
   };
 }
 
@@ -249,6 +266,7 @@ export interface ImageEditOptions {
   instruction: string;
   quality?: ImageQuality;
   aspectRatio?: ImageAspectRatio;
+  subscriptionTier?: string | null;
 }
 
 /**
@@ -256,9 +274,11 @@ export interface ImageEditOptions {
  * Converts the source buffer to a File object and calls client.images.edit().
  */
 export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateResult> {
-  const { imageBuffer, instruction, quality = "standard", aspectRatio = "1:1" } = opts;
+  const { imageBuffer, instruction, aspectRatio = "1:1" } = opts;
+  const planTier = normalizeOraPlanTier(opts.subscriptionTier);
 
-  const model = process.env.IMAGE_MODEL ?? "gpt-image-1";
+  const model = openAiModelForOraImage("edit", planTier);
+  const quality = oraImageQualityForPlan(planTier, "edit", opts.quality);
   const size = resolveSize(aspectRatio, model);
   const resolvedQuality = resolveQuality(quality, model);
   const { width, height } = sizeToPixels(size);
@@ -266,7 +286,14 @@ export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateRe
   const client = getClient();
 
   logger.info(
-    { model, size, quality: resolvedQuality, instructionLen: instruction.length },
+    {
+      model,
+      planTier,
+      size,
+      quality,
+      providerQuality: resolvedQuality,
+      instructionLen: instruction.length,
+    },
     "image-provider: editing image",
   );
 
@@ -321,7 +348,7 @@ export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateRe
     throw new Error("Image edit returned neither a URL nor base64 data");
   }
 
-  logger.info({ model, size }, "image-provider: edit complete");
+  logger.info({ model, planTier, size, quality }, "image-provider: edit complete");
 
   return {
     openaiUrl: imageSource,
@@ -329,6 +356,9 @@ export async function editImage(opts: ImageEditOptions): Promise<ImageGenerateRe
     width,
     height,
     mimeType: "image/png",
+    providerName: "openai",
+    modelName: model,
+    quality,
   };
 }
 

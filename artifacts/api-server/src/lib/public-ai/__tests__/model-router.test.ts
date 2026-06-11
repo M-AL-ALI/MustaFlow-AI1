@@ -18,13 +18,16 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   normalizeOraPlanTier,
   openAiModelForOraFile,
+  openAiModelForOraImage,
   openAiModelForOraMemory,
   openAiModelForOraRoute,
   openAiModelForOraSearch,
   openAiModelForOraVision,
+  oraImageQualityForPlan,
   selectOraFileModelRoute,
   selectOraMemoryModelRoute,
   selectOraModelRoute,
+  selectOraVisionModelRoute,
   runCandidateChain,
   type OraModelRouteInput,
   type ModelCandidate,
@@ -68,6 +71,23 @@ const ROUTER_ENV_NAMES = [
   "ORA_CORE_VISION_MODEL",
   "ORA_WAVE_VISION_MODEL",
   "ORA_VISION_MODEL",
+  "ORA_FREE_IMAGE_MODEL",
+  "ORA_CORE_IMAGE_MODEL",
+  "ORA_WAVE_IMAGE_MODEL",
+  "ORA_IMAGE_MODEL",
+  "ORA_FREE_IMAGE_EDIT_MODEL",
+  "ORA_CORE_IMAGE_EDIT_MODEL",
+  "ORA_WAVE_IMAGE_EDIT_MODEL",
+  "ORA_IMAGE_EDIT_MODEL",
+  "IMAGE_MODEL",
+  "ORA_FREE_IMAGE_QUALITY",
+  "ORA_CORE_IMAGE_QUALITY",
+  "ORA_WAVE_IMAGE_QUALITY",
+  "ORA_IMAGE_QUALITY",
+  "ORA_FREE_IMAGE_EDIT_QUALITY",
+  "ORA_CORE_IMAGE_EDIT_QUALITY",
+  "ORA_WAVE_IMAGE_EDIT_QUALITY",
+  "ORA_IMAGE_EDIT_QUALITY",
   "ORA_FREE_SEARCH_MODEL",
   "ORA_CORE_SEARCH_MODEL",
   "ORA_WAVE_SEARCH_MODEL",
@@ -143,6 +163,47 @@ describe("Ora model helper functions", () => {
 
     expect(openAiModelForOraRoute("premium", "free")).toBe("gpt-free");
     expect(openAiModelForOraVision("free")).toBe("gpt-vision");
+  });
+
+  it("routes vision analysis through vision-capable providers and excludes DeepSeek", () => {
+    const candidates = selectOraVisionModelRoute({
+      subscriptionTier: "wave",
+      available: { ...ALL_AVAILABLE },
+      openCircuits: new Set<Provider>(),
+      openaiModel: "gpt-vision-terminal",
+    });
+
+    expect(providersOf(candidates)).toEqual(["gemini", "anthropic", "openai"]);
+    expect(candidates[candidates.length - 1]).toEqual({
+      provider: "openai",
+      model: "gpt-vision-terminal",
+    });
+  });
+
+  it("uses plan-aware OpenAI env overrides for image generation and editing", () => {
+    expect(openAiModelForOraImage("generation", "free")).toBe("gpt-image-1");
+    expect(openAiModelForOraImage("edit", "core")).toBe("gpt-image-1");
+
+    process.env.ORA_WAVE_IMAGE_MODEL = "gpt-wave-image";
+    process.env.ORA_CORE_IMAGE_EDIT_MODEL = "gpt-core-image-edit";
+    process.env.IMAGE_MODEL = "gpt-global-image";
+
+    expect(openAiModelForOraImage("generation", "wave")).toBe("gpt-wave-image");
+    expect(openAiModelForOraImage("edit", "core")).toBe("gpt-core-image-edit");
+    expect(openAiModelForOraImage("generation", "free")).toBe("gpt-global-image");
+  });
+
+  it("uses stronger image quality defaults for paid Ora plans without overriding requests", () => {
+    expect(oraImageQualityForPlan("free", "generation")).toBe("standard");
+    expect(oraImageQualityForPlan("core", "generation")).toBe("high");
+    expect(oraImageQualityForPlan("wave", "edit")).toBe("high");
+    expect(oraImageQualityForPlan("wave", "generation", "standard")).toBe("standard");
+
+    process.env.ORA_CORE_IMAGE_QUALITY = "standard";
+    process.env.ORA_WAVE_IMAGE_EDIT_QUALITY = "draft";
+
+    expect(oraImageQualityForPlan("core", "generation")).toBe("standard");
+    expect(oraImageQualityForPlan("wave", "edit")).toBe("draft");
   });
 
   it("uses plan-aware OpenAI env overrides for web search while preserving the default", () => {

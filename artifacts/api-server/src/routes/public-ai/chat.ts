@@ -961,9 +961,9 @@ router.post("/public-ai/chat", async (req, res) => {
     try {
       const result = await generateImage({
         prompt: imagePrompt,
-        quality: "standard",
         aspectRatio: "1:1",
         style: "vivid",
+        subscriptionTier: authed?.tier ?? null,
       });
       let editableImageId: number | undefined;
       if (authed) {
@@ -979,11 +979,11 @@ router.post("/public-ai/chat", async (req, res) => {
             .values({
               userId: authed.userId,
               prompt: imagePrompt,
-              quality: "standard",
+              quality: result.quality,
               aspectRatio: "1:1",
               style: "vivid",
-              providerName: "openai",
-              modelName: process.env.IMAGE_MODEL ?? "gpt-image-1",
+              providerName: result.providerName,
+              modelName: result.modelName,
               status: "pending",
               safetyStatus: "passed",
               creditCost: 0,

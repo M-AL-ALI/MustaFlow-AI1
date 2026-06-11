@@ -38,6 +38,8 @@ export type OraRouteTier = "fast" | "premium" | "deep";
 export type OraPlanTier = "anonymous" | "free" | "core" | "wave";
 export type OraMemoryTask = "extract" | "conversation_summary" | "document_summary";
 export type OraFileTask = "generation" | "analysis" | "dataset_analysis";
+export type OraImageTask = "generation" | "edit";
+export type OraImageQuality = "draft" | "standard" | "high";
 
 export interface OraModelRouteInput {
   tier: OraRouteTier;
@@ -94,6 +96,14 @@ function envModel(...names: string[]): string | null {
   return null;
 }
 
+function envImageQuality(...names: string[]): OraImageQuality | null {
+  for (const name of names) {
+    const value = process.env[name]?.trim().toLowerCase();
+    if (value === "draft" || value === "standard" || value === "high") return value;
+  }
+  return null;
+}
+
 export function openAiModelForOraRoute(routeTier: OraRouteTier, planTier: OraPlanTier): string {
   if (routeTier === "fast") {
     return envModel("ORA_FAST_MODEL") ?? "gpt-5-mini";
@@ -143,6 +153,69 @@ export function openAiModelForOraVision(planTier: OraPlanTier): string {
     );
   }
   return envModel("ORA_FREE_VISION_MODEL", "ORA_VISION_MODEL", "ORA_PREMIUM_MODEL") ?? "gpt-5.4";
+}
+
+export function openAiModelForOraImage(task: OraImageTask, planTier: OraPlanTier): string {
+  if (task === "edit") {
+    if (planTier === "wave") {
+      return (
+        envModel(
+          "ORA_WAVE_IMAGE_EDIT_MODEL",
+          "ORA_IMAGE_EDIT_MODEL",
+          "ORA_WAVE_IMAGE_MODEL",
+          "ORA_IMAGE_MODEL",
+          "IMAGE_MODEL",
+        ) ?? "gpt-image-1"
+      );
+    }
+    if (planTier === "core") {
+      return (
+        envModel(
+          "ORA_CORE_IMAGE_EDIT_MODEL",
+          "ORA_IMAGE_EDIT_MODEL",
+          "ORA_CORE_IMAGE_MODEL",
+          "ORA_IMAGE_MODEL",
+          "IMAGE_MODEL",
+        ) ?? "gpt-image-1"
+      );
+    }
+    return (
+      envModel(
+        "ORA_FREE_IMAGE_EDIT_MODEL",
+        "ORA_IMAGE_EDIT_MODEL",
+        "ORA_FREE_IMAGE_MODEL",
+        "ORA_IMAGE_MODEL",
+        "IMAGE_MODEL",
+      ) ?? "gpt-image-1"
+    );
+  }
+
+  if (planTier === "wave") {
+    return envModel("ORA_WAVE_IMAGE_MODEL", "ORA_IMAGE_MODEL", "IMAGE_MODEL") ?? "gpt-image-1";
+  }
+  if (planTier === "core") {
+    return envModel("ORA_CORE_IMAGE_MODEL", "ORA_IMAGE_MODEL", "IMAGE_MODEL") ?? "gpt-image-1";
+  }
+  return envModel("ORA_FREE_IMAGE_MODEL", "ORA_IMAGE_MODEL", "IMAGE_MODEL") ?? "gpt-image-1";
+}
+
+export function oraImageQualityForPlan(
+  planTier: OraPlanTier,
+  task: OraImageTask,
+  requestedQuality?: OraImageQuality,
+): OraImageQuality {
+  if (requestedQuality) return requestedQuality;
+
+  const taskPrefix = task === "edit" ? "IMAGE_EDIT" : "IMAGE";
+  const planPrefix =
+    planTier === "wave" ? "ORA_WAVE" : planTier === "core" ? "ORA_CORE" : "ORA_FREE";
+  return (
+    envImageQuality(
+      `${planPrefix}_${taskPrefix}_QUALITY`,
+      `ORA_${taskPrefix}_QUALITY`,
+      ...(task === "edit" ? [`${planPrefix}_IMAGE_QUALITY`, "ORA_IMAGE_QUALITY"] : []),
+    ) ?? (planTier === "core" || planTier === "wave" ? "high" : "standard")
+  );
 }
 
 export function openAiModelForOraSearch(planTier: OraPlanTier): string {
@@ -464,6 +537,28 @@ export function selectOraFileModelRoute(input: {
     available: input.available,
     openCircuits: input.openCircuits,
     openaiModel: input.openaiModel ?? openAiModelForOraFile(input.task, planTier),
+  });
+}
+
+export function selectOraVisionModelRoute(input: {
+  subscriptionTier?: string | null;
+  multilingual?: boolean;
+  available: Record<Provider, boolean>;
+  openCircuits: ReadonlySet<Provider>;
+  openaiModel?: string;
+}): ModelCandidate[] {
+  const planTier = normalizeOraPlanTier(input.subscriptionTier);
+  return selectOraModelRoute({
+    tier: "premium",
+    subscriptionTier: planTier,
+    topic: "general",
+    intent: "premium",
+    confidence: "high",
+    multilingual: input.multilingual ?? false,
+    hasDocumentContext: true,
+    available: { ...input.available, deepseek: false },
+    openCircuits: input.openCircuits,
+    openaiModel: input.openaiModel ?? openAiModelForOraVision(planTier),
   });
 }
 

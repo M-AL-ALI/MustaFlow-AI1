@@ -42,6 +42,11 @@ import {
 import { CREDITS_ENFORCEMENT_ENABLED } from "../routes/credits";
 import { isSuperuser } from "./superusers";
 import { refundOraQuota } from "./public-ai/ora-usage";
+import {
+  normalizeOraPlanTier,
+  openAiModelForOraImage,
+  oraImageQualityForPlan,
+} from "./public-ai/model-router";
 import { logger } from "./logger";
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
@@ -86,6 +91,7 @@ export interface EnqueueImageJobOpts {
   style?: ImageStyle;
   transparentBackground?: boolean;
   projectId?: number;
+  subscriptionTier?: string | null;
   /**
    * When true, the completed image is also copied into the signed-in user's
    * durable Ora asset library (best-effort, after the DB row is finalized).
@@ -232,11 +238,12 @@ export async function enqueueImageJob(
     prompt,
     negativePrompt,
     purpose,
-    quality = "standard",
+    quality,
     aspectRatio = "1:1",
     style = "vivid",
     transparentBackground = false,
     projectId,
+    subscriptionTier,
   } = opts;
 
   // Step 1: Safety check — zero cost, no provider call
@@ -288,9 +295,11 @@ export async function enqueueImageJob(
   }
 
   // Step 3: Resolve provider / model info
+  const planTier = normalizeOraPlanTier(subscriptionTier ?? (await resolveImageTier(userId)));
+  const resolvedQuality = oraImageQualityForPlan(planTier, "generation", quality);
   const providerName = "openai";
-  const modelName = process.env.IMAGE_MODEL ?? "gpt-image-1";
-  const creditCost = IMAGE_CREDIT_COSTS[quality] ?? 3;
+  const modelName = openAiModelForOraImage("generation", planTier);
+  const creditCost = IMAGE_CREDIT_COSTS[resolvedQuality] ?? 3;
 
   // Step 4: Create DB row with status=pending
   const [imageRow] = await db
@@ -301,7 +310,7 @@ export async function enqueueImageJob(
       prompt,
       negativePrompt: negativePrompt ?? null,
       purpose: purpose ?? null,
-      quality,
+      quality: resolvedQuality,
       aspectRatio,
       style: style ?? null,
       transparentBackground,
@@ -322,7 +331,7 @@ export async function enqueueImageJob(
   // Step 5: Deduct credits atomically
   const deduction = await deductCreditsAtomic(userId, creditCost, {
     type: "creative",
-    description: `Image generation (${quality} quality) — image #${imageId}`,
+    description: `Image generation (${resolvedQuality} quality) — image #${imageId}`,
   });
 
   if ("insufficient" in deduction) {
@@ -354,7 +363,12 @@ export async function enqueueImageJob(
   // Kick off background processing (fire-and-forget, errors handled internally).
   // creditsWereDeducted is false when CREDITS_ENFORCEMENT_ENABLED is off so that
   // refundCredits is not called unconditionally (which would create free credits).
-  void runImageJob(job, opts, creditCost, CREDITS_ENFORCEMENT_ENABLED);
+  void runImageJob(
+    job,
+    { ...opts, quality: resolvedQuality, subscriptionTier: planTier },
+    creditCost,
+    CREDITS_ENFORCEMENT_ENABLED,
+  );
 
   return { jobId, imageId };
 }
@@ -370,6 +384,7 @@ export interface EnqueueImageEditJobOpts {
   instruction: string;
   quality?: ImageQuality;
   projectId?: number;
+  subscriptionTier?: string | null;
   /** Image Studio edits use credits; Ora inline edits use Ora's daily image quota. */
   billingMode?: "credits" | "ora";
 }
@@ -381,9 +396,10 @@ export async function enqueueImageEditJob(
     userId,
     parentImageId,
     instruction,
-    quality = "standard",
+    quality,
     parentAspectRatio,
     projectId,
+    subscriptionTier,
     billingMode = "credits",
   } = opts;
 
@@ -396,9 +412,11 @@ export async function enqueueImageEditJob(
     });
   }
 
-  const creditCost = billingMode === "ora" ? 0 : (IMAGE_CREDIT_COSTS[quality] ?? 3);
+  const planTier = normalizeOraPlanTier(subscriptionTier ?? (await resolveImageTier(userId)));
+  const resolvedQuality = oraImageQualityForPlan(planTier, "edit", quality);
+  const creditCost = billingMode === "ora" ? 0 : (IMAGE_CREDIT_COSTS[resolvedQuality] ?? 3);
   const providerName = "openai";
-  const modelName = process.env.IMAGE_MODEL ?? "gpt-image-1";
+  const modelName = openAiModelForOraImage("edit", planTier);
 
   // Create DB row with status=pending
   const [imageRow] = await db
@@ -407,7 +425,7 @@ export async function enqueueImageEditJob(
       userId,
       projectId: projectId ?? null,
       prompt: instruction,
-      quality,
+      quality: resolvedQuality,
       aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
       providerName,
       modelName,
@@ -427,7 +445,7 @@ export async function enqueueImageEditJob(
     // Deduct credits atomically
     const deduction = await deductCreditsAtomic(userId, creditCost, {
       type: "creative",
-      description: `Image edit (${quality} quality) — image #${imageId}`,
+      description: `Image edit (${resolvedQuality} quality) — image #${imageId}`,
     });
 
     if ("insufficient" in deduction) {
@@ -459,7 +477,7 @@ export async function enqueueImageEditJob(
 
   void runImageEditJob(
     job,
-    opts,
+    { ...opts, quality: resolvedQuality, subscriptionTier: planTier },
     creditCost,
     billingMode === "credits" && CREDITS_ENFORCEMENT_ENABLED,
   );
@@ -480,6 +498,7 @@ async function runImageEditJob(
     instruction,
     quality = "standard",
     parentAspectRatio,
+    subscriptionTier,
   } = opts;
 
   try {
@@ -500,6 +519,7 @@ async function runImageEditJob(
       instruction,
       quality,
       aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
+      subscriptionTier,
     });
 
     logger.info({ jobId, imageId }, "image-jobs: storing edit result");
@@ -514,6 +534,9 @@ async function runImageEditJob(
         thumbnailUrl,
         storageKey,
         revisedPrompt: result.revisedPrompt,
+        providerName: result.providerName,
+        modelName: result.modelName,
+        quality: result.quality,
         updatedAt: sql`now()`,
       })
       .where(eq(generatedImagesTable.id, imageId));
@@ -601,6 +624,7 @@ async function runImageJob(
     aspectRatio = "1:1",
     style = "vivid",
     transparentBackground = false,
+    subscriptionTier,
   } = opts;
 
   try {
@@ -624,6 +648,7 @@ async function runImageJob(
       aspectRatio,
       style,
       transparentBackground,
+      subscriptionTier,
     });
 
     logger.info({ jobId, imageId }, "image-jobs: storing result");
@@ -642,6 +667,9 @@ async function runImageJob(
         thumbnailUrl,
         storageKey,
         revisedPrompt: result.revisedPrompt,
+        providerName: result.providerName,
+        modelName: result.modelName,
+        quality: result.quality,
         updatedAt: sql`now()`,
       })
       .where(eq(generatedImagesTable.id, imageId));
