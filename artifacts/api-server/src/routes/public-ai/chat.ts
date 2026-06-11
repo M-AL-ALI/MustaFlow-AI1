@@ -30,6 +30,7 @@ import {
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
+import { buildOraExpertiseProfile } from "../../lib/public-ai/expertise";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
 import { eq, and, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import {
@@ -1161,7 +1162,16 @@ router.post("/public-ai/chat", async (req, res) => {
   const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
   const planTier = oraPlanTier(authed);
   const primaryModel = openAiModelForOraRoute(routeTier, planTier);
-  const maxTokens = deepAllowed ? 2400 : usesMini ? 400 : 1200;
+  const expertiseProfile = buildOraExpertiseProfile({
+    message,
+    topic: classifierResult.topic,
+    planTier,
+    routeTier,
+    intent: classifierResult.intent,
+    confidence: classifierResult.confidence,
+    hasDocumentContext: carriedDocs.trim().length > 0,
+  });
+  const maxTokens = expertiseProfile.maxTokens;
   const isMultilingual =
     isNonEnglishLanguage(language) ||
     ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
@@ -1214,6 +1224,7 @@ router.post("/public-ai/chat", async (req, res) => {
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
+    expertiseProfile.systemAddendum +
     profileContext +
     memory.text +
     crossConvContext +
@@ -1354,6 +1365,8 @@ router.post("/public-ai/chat", async (req, res) => {
       topic: classifierResult.topic,
       routeTier,
       planTier,
+      expertiseDomain: expertiseProfile.domain,
+      answerDepth: expertiseProfile.depth,
       candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       latencyMs,
       usedFallback,
