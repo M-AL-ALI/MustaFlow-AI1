@@ -1,36 +1,81 @@
 #!/usr/bin/env bash
 # Push current main branch to GitHub (M-AL-ALI/MustaFlow-AI1).
+#
+# ALWAYS: fetch GitHub first → merge any upstream commits → then push.
+# This guarantees commits pushed from another machine (Windows dev checkout)
+# are never silently overwritten by a Replit checkpoint push.
+#
+# --force is accepted for backward compatibility with the configured workflow
+# command but is IGNORED.  If you genuinely need to force-push to reset a
+# broken remote state, pass --really-force instead (manual use only).
+#
 # Usage:
-#   bash scripts/push-to-github.sh           # normal push (after first sync)
-#   bash scripts/push-to-github.sh --force   # force-push (initial sync only)
+#   bash scripts/push-to-github.sh              # normal safe push
+#   bash scripts/push-to-github.sh --force      # same as above (--force ignored)
+#   bash scripts/push-to-github.sh --really-force  # destructive, manual only
 set -euo pipefail
 
 REMOTE_URL="https://github.com/M-AL-ALI/MustaFlow-AI1.git"
 BRANCH="main"
-FORCE_FLAG="${1:-}"
+ARG="${1:-}"
 
 if [ -z "${GITHUB_PAT:-}" ]; then
   echo "ERROR: GITHUB_PAT env var is not set — cannot push to GitHub" >&2
   exit 1
 fi
 
-echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub $FORCE_FLAG …"
+CRED_HELPER='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'
 
-# GitHub occasionally rejects with "cannot lock ref 'refs/heads/main': is at X
-# but expected Y" when a concurrent push (e.g. the husky post-commit auto-push
-# racing this workflow) updates the ref mid-transaction. It is transient — a
-# fresh push that re-reads the current remote tip succeeds. Retry a few times
-# with backoff so the race self-heals instead of leaving GitHub stale.
+# Warn and downgrade the legacy --force flag so checkpoints can't overwrite
+# commits pushed from Windows / another machine.
+if [ "$ARG" = "--force" ]; then
+  echo "WARN: --force is deprecated for automated pushes and has been ignored." >&2
+  echo "      Replit checkpoints will now safely merge upstream commits first." >&2
+  ARG=""
+fi
+
+REALLY_FORCE=""
+if [ "$ARG" = "--really-force" ]; then
+  REALLY_FORCE="--force"
+  echo "WARN: --really-force requested — skipping upstream merge." >&2
+fi
+
+# ── Fetch → merge upstream (skipped only for --really-force) ─────────────────
+if [ -z "$REALLY_FORCE" ]; then
+  echo "Fetching from GitHub MustaFlow-AI1 …"
+  git -c credential.helper="$CRED_HELPER" \
+    fetch "$REMOTE_URL" "+$BRANCH:refs/remotes/github/$BRANCH" 2>&1 || {
+    echo "WARN: fetch failed — will attempt push without pre-merge" >&2
+  }
+
+  if git rev-parse --verify "refs/remotes/github/$BRANCH" >/dev/null 2>&1; then
+    AHEAD=$(git rev-list HEAD..refs/remotes/github/$BRANCH --count 2>/dev/null || echo 0)
+    if [ "$AHEAD" -gt 0 ]; then
+      echo "GitHub has $AHEAD commit(s) ahead of local — merging before push …"
+      git -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
+          -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
+          merge --no-edit "refs/remotes/github/$BRANCH" || {
+        echo "ERROR: merge conflict — resolve manually and re-run push" >&2
+        exit 1
+      }
+    else
+      echo "Local is up to date with (or ahead of) GitHub — no merge needed."
+    fi
+  fi
+fi
+
+# ── Push with retry for transient ref-lock races ─────────────────────────────
+echo "Pushing $BRANCH → MustaFlow-AI1 on GitHub …"
+
 ATTEMPTS=5
 for i in $(seq 1 "$ATTEMPTS"); do
-  if git \
-    -c credential.helper='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f' \
-    push "$REMOTE_URL" "$BRANCH:$BRANCH" $FORCE_FLAG; then
+  if git -c credential.helper="$CRED_HELPER" \
+       push "$REMOTE_URL" "$BRANCH:$BRANCH" $REALLY_FORCE; then
     echo "Done."
     exit 0
   fi
   if [ "$i" -lt "$ATTEMPTS" ]; then
-    echo "Push attempt $i/$ATTEMPTS failed (likely a concurrent ref update) — retrying in $((i * 2))s …" >&2
+    echo "Push attempt $i/$ATTEMPTS failed — retrying in $((i * 2))s …" >&2
     sleep "$((i * 2))"
   fi
 done

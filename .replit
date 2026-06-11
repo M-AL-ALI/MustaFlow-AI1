@@ -34,10 +34,6 @@ args = "quality-gate"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "push-to-github"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "pull-from-github"
 
 [[workflows.workflow]]
@@ -83,17 +79,6 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run lint && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck"
-
-[[workflows.workflow]]
-name = "push-to-github"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/push-to-github.sh --force"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "pull-from-github"
