@@ -24,6 +24,7 @@ import {
   runCandidateChain,
   selectOraFileModelRoute,
   type ModelCandidate,
+  type OraPlanTier,
 } from "./model-router";
 import PptxGenJS from "pptxgenjs";
 
@@ -84,6 +85,68 @@ export interface GeneratedFileResult {
   slideCount?: number;
 }
 
+export type OraFileQualityDepth = "standard" | "polished" | "premium";
+
+export interface OraFileQualityProfile {
+  depth: OraFileQualityDepth;
+  minSyntheticRows: number;
+  minSyntheticSlides: number;
+  minSyntheticSections: number;
+  maxCompletionTokens: number;
+  instruction: string;
+}
+
+export function resolveOraFileQualityProfile(input: {
+  format: FileFormat;
+  planTier: OraPlanTier;
+  hasSourceData?: boolean;
+}): OraFileQualityProfile {
+  const sourceBoost = input.hasSourceData ? 1000 : 0;
+  const sourceLine = input.hasSourceData
+    ? "Source fidelity check: preserve real uploaded values, keep the user's requested subset/filter exact, and never replace missing source facts with invented filler."
+    : "Synthetic content check: make examples realistic, internally consistent, useful, and free of placeholder text.";
+
+  if (input.planTier === "wave") {
+    return {
+      depth: "premium",
+      minSyntheticRows: 24,
+      minSyntheticSlides: 10,
+      minSyntheticSections: 7,
+      maxCompletionTokens: 10000 + sourceBoost,
+      instruction:
+        `\n\nQUALITY PROFILE: premium.\n` +
+        `${sourceLine}\n` +
+        `Before returning JSON, internally verify that the structure is complete, polished, deduplicated, and aligned with the requested ${input.format.toUpperCase()} purpose. Prefer executive-ready wording, clear sectioning, and practical details over generic filler.`,
+    };
+  }
+
+  if (input.planTier === "core") {
+    return {
+      depth: "polished",
+      minSyntheticRows: 16,
+      minSyntheticSlides: 7,
+      minSyntheticSections: 5,
+      maxCompletionTokens: 9000 + sourceBoost,
+      instruction:
+        `\n\nQUALITY PROFILE: polished.\n` +
+        `${sourceLine}\n` +
+        `Before returning JSON, internally verify that every required field is present, naming is clean, rows/sections/slides are coherent, and the result is ready to download without manual cleanup.`,
+    };
+  }
+
+  return {
+    depth: "standard",
+    minSyntheticRows: 10,
+    minSyntheticSlides: 5,
+    minSyntheticSections: 4,
+    maxCompletionTokens: 8000 + sourceBoost,
+    instruction:
+      `\n\nQUALITY PROFILE: standard.\n` +
+      `${sourceLine}\n` +
+      `Before returning JSON, internally verify that required fields are present, no placeholder text remains, and the file is usable as-is.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // AI system prompts
 // ---------------------------------------------------------------------------
@@ -104,6 +167,11 @@ function buildTabularSystemPrompt(
   format: "csv" | "xlsx",
   language?: string,
   hasSourceData = false,
+  quality: OraFileQualityProfile = resolveOraFileQualityProfile({
+    format,
+    planTier: "free",
+    hasSourceData,
+  }),
 ): string {
   const langNote =
     language && language !== "auto"
@@ -111,7 +179,7 @@ function buildTabularSystemPrompt(
       : "";
   const rowRule = hasSourceData
     ? `4. Use the real rows from the attached data — include all of them (or exactly the subset requested). Do NOT add invented rows.\n`
-    : `4. Generate at least 10 realistic, varied, logically sorted rows.\n`;
+    : `4. Generate at least ${quality.minSyntheticRows} realistic, varied, logically sorted rows.\n`;
   return (
     `You are a data generation expert. The user wants a professionally organized ${format.toUpperCase()} file.\n` +
     `Return ONLY valid JSON — no prose, no markdown, no code fences.\n\n` +
@@ -137,11 +205,20 @@ function buildTabularSystemPrompt(
     rowRule +
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
     `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}` +
+    quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
 }
 
-function buildPresentationSystemPrompt(language?: string, hasSourceData = false): string {
+function buildPresentationSystemPrompt(
+  language?: string,
+  hasSourceData = false,
+  quality: OraFileQualityProfile = resolveOraFileQualityProfile({
+    format: "pptx",
+    planTier: "free",
+    hasSourceData,
+  }),
+): string {
   const langNote =
     language && language !== "auto"
       ? `\nRespond in ${language}. All generated content must be in ${language}.`
@@ -163,13 +240,14 @@ function buildPresentationSystemPrompt(language?: string, hasSourceData = false)
     `RULES:\n` +
     (hasSourceData
       ? `1. Build the slides from the actual content of the attached file(s); do not invent facts or figures.\n`
-      : `1. Include at least 5 slides with meaningful, distinct headings.\n`) +
+      : `1. Include at least ${quality.minSyntheticSlides} slides with meaningful, distinct headings.\n`) +
     `2. Each slide must have 3-6 concise bullet points -- short, professional, no leading dashes.\n` +
     `3. Bullet text must be plain -- no markdown, no asterisks, no hyphens at the start.\n` +
     `4. Headings must be short (3-7 words max) and clearly titled.\n` +
     `5. The subtitle is optional -- use it for a tagline, date, or author.\n` +
     `6. Match the presentation topic and purpose to exactly what the user asked for.\n` +
     `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}` +
+    quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
 }
@@ -178,6 +256,11 @@ function buildDocumentSystemPrompt(
   format: "docx" | "pdf",
   language?: string,
   hasSourceData = false,
+  quality: OraFileQualityProfile = resolveOraFileQualityProfile({
+    format,
+    planTier: "free",
+    hasSourceData,
+  }),
 ): string {
   const langNote =
     language && language !== "auto"
@@ -204,12 +287,13 @@ function buildDocumentSystemPrompt(
       : `1. Write substantive, professional content — not placeholder text.\n`) +
     (hasSourceData
       ? `2. Use as many sections as the source content needs.\n`
-      : `2. Include at least 4 sections with meaningful headings.\n`) +
+      : `2. Include at least ${quality.minSyntheticSections} sections with meaningful headings.\n`) +
     `3. Each section needs either "content", "bullets", or both.\n` +
     `4. "bullets" is an array of concise bullet points (no leading dashes — just the text).\n` +
     `5. Match the document type and purpose to what the user asked for exactly.\n` +
     `6. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
     `7. Only these keys are allowed: title, subtitle, sections (with heading, content, bullets).${langNote}` +
+    quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
 }
@@ -950,14 +1034,26 @@ export async function generateFileFromPrompt(
 ): Promise<GeneratedFileResult> {
   const isTabular = format === "csv" || format === "xlsx";
   const isPptx = format === "pptx";
+  const planTier = normalizeOraPlanTier(subscriptionTier);
+  const quality = resolveOraFileQualityProfile({ format, planTier, hasSourceData });
 
   let systemPrompt: string;
   if (isTabular) {
-    systemPrompt = buildTabularSystemPrompt(format as "csv" | "xlsx", language, hasSourceData);
+    systemPrompt = buildTabularSystemPrompt(
+      format as "csv" | "xlsx",
+      language,
+      hasSourceData,
+      quality,
+    );
   } else if (isPptx) {
-    systemPrompt = buildPresentationSystemPrompt(language, hasSourceData);
+    systemPrompt = buildPresentationSystemPrompt(language, hasSourceData, quality);
   } else {
-    systemPrompt = buildDocumentSystemPrompt(format as "docx" | "pdf", language, hasSourceData);
+    systemPrompt = buildDocumentSystemPrompt(
+      format as "docx" | "pdf",
+      language,
+      hasSourceData,
+      quality,
+    );
   }
 
   const callMessages = [
@@ -966,7 +1062,6 @@ export async function generateFileFromPrompt(
     { role: "user" as const, content: message },
   ];
 
-  const planTier = normalizeOraPlanTier(subscriptionTier);
   const openaiModel = openAiModelForOraFile("generation", planTier);
   const { available, openCircuits } = getOraProviderRoutingSnapshot();
   const candidates: ModelCandidate[] = selectOraFileModelRoute({
@@ -988,7 +1083,7 @@ export async function generateFileFromPrompt(
       response_format: { type: "json_object" },
       // Higher cap so extracting a real dataset into a file isn't truncated
       // mid-JSON (which previously threw on parse and 500'd the request).
-      max_completion_tokens: 8000,
+      max_completion_tokens: quality.maxCompletionTokens,
     });
 
     const raw = result.choices[0]?.message?.content?.trim() ?? "";

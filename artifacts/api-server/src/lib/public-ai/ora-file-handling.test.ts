@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { safeParseFileJson, hasUsableFileJson, FileGenerationError } from "./file-builder.js";
+import {
+  safeParseFileJson,
+  hasUsableFileJson,
+  FileGenerationError,
+  resolveOraFileQualityProfile,
+} from "./file-builder.js";
 import { buildDatasetContextBlock } from "./dataset-prompt.js";
 import { buildCarriedDocumentContext } from "./carried-docs.js";
 import { storeFile } from "./file-store.js";
@@ -163,5 +168,46 @@ describe("hasUsableFileJson", () => {
     expect(hasUsableFileJson({ sections: [{ heading: "Overview", content: "" }] }, "docx")).toBe(
       false,
     );
+  });
+});
+
+describe("resolveOraFileQualityProfile", () => {
+  it("scales generated file depth by Ora plan", () => {
+    const free = resolveOraFileQualityProfile({
+      format: "pptx",
+      planTier: "free",
+    });
+    const core = resolveOraFileQualityProfile({
+      format: "pptx",
+      planTier: "core",
+    });
+    const wave = resolveOraFileQualityProfile({
+      format: "pptx",
+      planTier: "wave",
+    });
+
+    expect(free.depth).toBe("standard");
+    expect(core.depth).toBe("polished");
+    expect(wave.depth).toBe("premium");
+    expect(core.minSyntheticSlides).toBeGreaterThan(free.minSyntheticSlides);
+    expect(wave.minSyntheticSlides).toBeGreaterThan(core.minSyntheticSlides);
+    expect(wave.maxCompletionTokens).toBeGreaterThan(core.maxCompletionTokens);
+  });
+
+  it("adds source-data budget and fidelity guidance when building from uploads", () => {
+    const plain = resolveOraFileQualityProfile({
+      format: "xlsx",
+      planTier: "core",
+      hasSourceData: false,
+    });
+    const sourced = resolveOraFileQualityProfile({
+      format: "xlsx",
+      planTier: "core",
+      hasSourceData: true,
+    });
+
+    expect(sourced.maxCompletionTokens).toBeGreaterThan(plain.maxCompletionTokens);
+    expect(sourced.instruction).toContain("Source fidelity check");
+    expect(sourced.instruction).toContain("never replace missing source facts");
   });
 });
