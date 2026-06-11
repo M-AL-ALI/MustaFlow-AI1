@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, eq, desc, isNull, sql } from "drizzle-orm";
 import { db, oraConversationsTable, oraProjectsTable, knowledgeEntriesTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { resolveTierForUser } from "../lib/public-ai/authed-user";
 
 const router = Router();
 
@@ -343,7 +344,7 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
     // This PUT is the ONLY place that writes ora_conversations.summary, so there
     // is no double-write race. Best-effort and fully detached from the response:
     // it never blocks the save and never throws into the request.
-    void maybeUpdateConversationSummary(row.id, messages, row.summary, row.summaryMsgCount);
+    void maybeUpdateConversationSummary(userId, row.id, messages, row.summary, row.summaryMsgCount);
   } catch (err) {
     logger.error({ component: "ora-conversations", err }, "Failed to save messages");
     res.status(500).json({ error: "Failed to save conversation" });
@@ -362,6 +363,7 @@ router.put("/ora/conversations/:id/messages", async (req, res) => {
  * the chat reply are unaffected.
  */
 async function maybeUpdateConversationSummary(
+  userId: string,
   conversationId: number,
   rawMessages: { role: "user" | "assistant"; content: string }[],
   priorSummary: string | null,
@@ -378,6 +380,7 @@ async function maybeUpdateConversationSummary(
     if (hasSummary && newTurnCount < 3) return;
 
     const { updateConversationSummary } = await import("../lib/public-ai/conversation-summary");
+    const userTier = await resolveTierForUser(userId);
     // When we already have a summary, only fold in the turns added since it was
     // generated; otherwise summarise the whole (bounded) conversation.
     const source = hasSummary ? turns.slice(priorCount) : turns;
@@ -386,6 +389,7 @@ async function maybeUpdateConversationSummary(
     const summary = await updateConversationSummary({
       priorSummary: priorSummary ?? "",
       newMessages: source.slice(-40).map((m) => ({ role: m.role, content: m.content })),
+      subscriptionTier: userTier.tier,
     });
     if (!summary || summary.trim().length === 0) return;
 

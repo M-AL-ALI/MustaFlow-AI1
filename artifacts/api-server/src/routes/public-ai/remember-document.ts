@@ -71,7 +71,11 @@ router.post("/public-ai/remember-document", async (req, res) => {
     return;
   }
 
-  const summary = await summarizeDocumentForMemory(fileEntry.filename, fileEntry.extractedText);
+  const summary = await summarizeDocumentForMemory(
+    fileEntry.filename,
+    fileEntry.extractedText,
+    authed.tier,
+  );
   if (!summary) {
     res.status(422).json({
       error: "Couldn't summarize this document for memory. Please try again.",

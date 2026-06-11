@@ -81,6 +81,20 @@ task = "shell.exec"
 args = "pnpm run lint && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck"
 
 [[workflows.workflow]]
+<<<<<<< HEAD
+=======
+name = "push-to-github"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/push-to-github.sh"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+>>>>>>> refs/remotes/github/main
 name = "pull-from-github"
 author = "agent"
 

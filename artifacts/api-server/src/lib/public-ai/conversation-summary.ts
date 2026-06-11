@@ -19,6 +19,12 @@
  * purely ephemeral context for the current chat.
  */
 import { logger } from "../logger";
+import {
+  getOraProviderRoutingSnapshot,
+  normalizeOraPlanTier,
+  runCandidateChain,
+  selectOraMemoryModelRoute,
+} from "./model-router";
 
 /**
  * Number of most-recent messages kept verbatim in Ora's context window. Turns
@@ -88,6 +94,7 @@ function formatTurns(turns: SummaryTurn[]): string {
 export async function updateConversationSummary(input: {
   priorSummary: string;
   newMessages: SummaryTurn[];
+  subscriptionTier?: string | null;
 }): Promise<string> {
   const priorSummary = input.priorSummary.trim();
   const batch = input.newMessages.slice(-ORA_SUMMARIZE_BATCH_MAX);
@@ -96,8 +103,18 @@ export async function updateConversationSummary(input: {
   // Nothing new to fold in — keep whatever we already have.
   if (formatted.length === 0) return priorSummary;
 
-  const model = process.env.ORA_SUMMARY_MODEL ?? "gpt-5-mini";
+  const planTier = normalizeOraPlanTier(input.subscriptionTier);
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  const candidates = selectOraMemoryModelRoute({
+    task: "conversation_summary",
+    subscriptionTier: planTier,
+    available,
+    openCircuits,
+  });
+  const timeoutMs = Number(process.env.ORA_SUMMARY_TIMEOUT_MS) || 5000;
   const start = Date.now();
+  let winningProvider = "none";
+  let winningModel = candidates[candidates.length - 1]?.model ?? "none";
 
   try {
     const { createChatCompletion } = await import("../ai-providers");
@@ -110,21 +127,50 @@ export async function updateConversationSummary(input: {
       formatted,
     ].join("\n");
 
-    const result = await createChatCompletion({
-      provider: "openai",
-      model,
-      messages: [
-        { role: "system", content: SUMMARY_SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-      response_format: { type: "text" },
-      max_completion_tokens: 600,
-    });
+    const result = await Promise.race([
+      runCandidateChain(
+        candidates,
+        (candidate) =>
+          createChatCompletion({
+            provider: candidate.provider,
+            model: candidate.model,
+            messages: [
+              { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+              { role: "user", content: userContent },
+            ],
+            response_format: { type: "text" },
+            max_completion_tokens: 600,
+          }),
+        (candidate, i, err) =>
+          logger.warn(
+            {
+              component: "ora-summary",
+              provider: candidate.provider,
+              model: candidate.model,
+              attempt: i + 1,
+              ofCandidates: candidates.length,
+              err,
+            },
+            "Summary model candidate failed — trying next provider",
+          ),
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("ora-summary-timeout")), timeoutMs),
+      ),
+    ]);
+    winningProvider = result.candidate.provider;
+    winningModel = result.candidate.model;
 
-    const updated = result.choices[0]?.message?.content?.trim() ?? "";
+    const updated = result.result.choices[0]?.message?.content?.trim() ?? "";
     if (!updated) {
       logger.warn(
-        { component: "ora-summary", model, latencyMs: Date.now() - start },
+        {
+          component: "ora-summary",
+          provider: winningProvider,
+          model: winningModel,
+          planTier,
+          latencyMs: Date.now() - start,
+        },
         "Summary model returned empty — keeping prior summary",
       );
       return priorSummary;
@@ -133,7 +179,9 @@ export async function updateConversationSummary(input: {
     logger.info(
       {
         component: "ora-summary",
-        model,
+        provider: winningProvider,
+        model: winningModel,
+        planTier,
         latencyMs: Date.now() - start,
         foldedMessages: batch.length,
         summaryChars: updated.length,
@@ -145,7 +193,13 @@ export async function updateConversationSummary(input: {
     // Best-effort: never block a reply on summarization. Degrade to the recent
     // window by returning whatever summary we already had.
     logger.error(
-      { component: "ora-summary", model, err },
+      {
+        component: "ora-summary",
+        provider: winningProvider,
+        model: winningModel,
+        planTier,
+        err,
+      },
       "Conversation summarization failed — keeping prior summary",
     );
     return priorSummary;
