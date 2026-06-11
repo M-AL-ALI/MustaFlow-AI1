@@ -19,7 +19,11 @@ vi.mock("openai", () => {
   };
 });
 
-import { runOraWebSearch } from "../../../lib/public-ai/web-search";
+import {
+  buildInstructions,
+  resolveOraSearchProfile,
+  runOraWebSearch,
+} from "../../../lib/public-ai/web-search";
 
 function mockResponse(text: string) {
   createMock.mockResolvedValueOnce({ output_text: text, output: [] });
@@ -80,5 +84,49 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
     const arg = createMock.mock.calls[0][0] as { model: string };
     expect(arg.model).toBe("gpt-wave-search");
+  });
+
+  it("uses a deeper Wave search profile for research-style queries", async () => {
+    mockResponse('Comparison summary.\n```ora-media\n{"images":[],"videos":[]}\n```');
+    await runOraWebSearch({
+      query: "compare the best CRM platforms this year and recommend one",
+      subscriptionTier: "wave",
+    });
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const arg = createMock.mock.calls[0][0] as {
+      instructions: string;
+      max_output_tokens: number;
+    };
+    expect(arg.max_output_tokens).toBe(2200);
+    expect(arg.instructions).toContain("Search depth: research");
+    expect(arg.instructions).toContain("Compare recency, authority, and disagreements");
+  });
+
+  it("keeps ordinary free searches compact", async () => {
+    mockResponse('Current price is X.\n```ora-media\n{"images":[],"videos":[]}\n```');
+    await runOraWebSearch({
+      query: "current bitcoin price",
+      subscriptionTier: "free",
+    });
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const arg = createMock.mock.calls[0][0] as {
+      instructions: string;
+      max_output_tokens: number;
+    };
+    expect(arg.max_output_tokens).toBe(900);
+    expect(arg.instructions).toContain("Search depth: quick");
+  });
+
+  it("raises media limits for Wave video searches", () => {
+    const profile = resolveOraSearchProfile({
+      query: "find me a youtube video about composting",
+      planTier: "wave",
+      wantsVideos: true,
+    });
+
+    expect(profile.videoLimit).toBe(4);
+    expect(buildInstructions("auto", undefined, true, profile)).toContain("up to 4 videos");
   });
 });

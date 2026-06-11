@@ -67,6 +67,17 @@ export interface OraWebSearchResult {
   videos: OraVideo[];
 }
 
+export type OraSearchDepth = "quick" | "standard" | "research";
+
+export interface OraSearchProfile {
+  depth: OraSearchDepth;
+  maxOutputTokens: number;
+  sourceLimit: number;
+  imageLimit: number;
+  videoLimit: number;
+  instruction: string;
+}
+
 /** Whether a live web search backend is available in this environment. */
 export function isWebSearchConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
@@ -242,6 +253,77 @@ export function youtubeThumbnail(raw: string): string | null {
 
 function asString(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+const RESEARCH_SEARCH_PATTERNS: RegExp[] = [
+  /\b(deep|thorough|comprehensive|detailed|research|investigate|analysis|analyze|analyse)\b/i,
+  /\b(compare|versus|vs\.?|alternatives?|best|top|recommend|ranking|ranked|pros\s+and\s+cons)\b/i,
+  /\b(review|evaluate|benchmark|market\s+research|competitive\s+analysis|due\s+diligence)\b/i,
+  /\b(what\s+should\s+i\s+(?:choose|buy|use|pick)|which\s+(?:one|tool|service|platform|plan))\b/i,
+];
+
+export function isResearchSearchQuery(query: string): boolean {
+  return RESEARCH_SEARCH_PATTERNS.some((pattern) => pattern.test(query));
+}
+
+export function resolveOraSearchProfile(input: {
+  query: string;
+  planTier: OraPlanTier;
+  wantsVideos?: boolean;
+}): OraSearchProfile {
+  const researchIntent = isResearchSearchQuery(input.query);
+
+  if (input.planTier === "wave") {
+    const depth: OraSearchDepth = researchIntent ? "research" : "standard";
+    return {
+      depth,
+      maxOutputTokens: researchIntent ? 2200 : 1500,
+      sourceLimit: researchIntent ? 10 : 8,
+      imageLimit: 6,
+      videoLimit: input.wantsVideos ? 4 : 3,
+      instruction:
+        depth === "research"
+          ? "Search depth: research. Run a deeper research pass across several reputable sources. Compare recency, authority, and disagreements; include exact dates for volatile facts; call out uncertainty instead of flattening it. For recommendations, give a clear ranked answer with tradeoffs and a practical next step."
+          : "Search depth: standard. Check multiple reputable sources, prioritize official or primary sources, include important dates, and give a direct answer with enough context for the user to act.",
+    };
+  }
+
+  if (input.planTier === "core") {
+    const depth: OraSearchDepth = researchIntent ? "research" : "standard";
+    return {
+      depth,
+      maxOutputTokens: researchIntent ? 1800 : 1300,
+      sourceLimit: researchIntent ? 8 : 6,
+      imageLimit: 4,
+      videoLimit: input.wantsVideos ? 3 : 2,
+      instruction:
+        depth === "research"
+          ? "Search depth: research. Compare several reliable sources, verify recent claims against dates, highlight meaningful disagreements, and end with a concrete recommendation or summary."
+          : "Search depth: standard. Use more than one reliable source when the answer is volatile, prefer official sources, and keep the answer direct with the key evidence included.",
+    };
+  }
+
+  if (researchIntent) {
+    return {
+      depth: "standard",
+      maxOutputTokens: 1200,
+      sourceLimit: 5,
+      imageLimit: 3,
+      videoLimit: input.wantsVideos ? 2 : 1,
+      instruction:
+        "Search depth: standard. Give a useful comparison from reliable sources, but keep it compact. Prioritize the most important evidence, dates, and recommendation.",
+    };
+  }
+
+  return {
+    depth: "quick",
+    maxOutputTokens: 900,
+    sourceLimit: 4,
+    imageLimit: 2,
+    videoLimit: input.wantsVideos ? 2 : 1,
+    instruction:
+      "Search depth: quick. Answer directly from the strongest sources, include only the key facts and dates, and avoid unnecessary background.",
+  };
 }
 
 /**
@@ -464,7 +546,10 @@ export function mergeVideos(...lists: OraVideo[][]): OraVideo[] {
  * `images`/`videos` keys) out of the model reply, returning the cleaned answer
  * text plus the sanitized media. Never throws on malformed JSON.
  */
-export function parseOraMediaBlock(reply: string): {
+export function parseOraMediaBlock(
+  reply: string,
+  limits?: { imageLimit?: number; videoLimit?: number },
+): {
   text: string;
   images: OraImage[];
   videos: OraVideo[];
@@ -494,8 +579,8 @@ export function parseOraMediaBlock(reply: string): {
   if (!parsed) return { ...empty, text };
   return {
     text,
-    images: sanitizeImages(parsed.images),
-    videos: sanitizeVideos(parsed.videos),
+    images: sanitizeImages(parsed.images, limits?.imageLimit ?? 4),
+    videos: sanitizeVideos(parsed.videos, limits?.videoLimit ?? 3),
   };
 }
 
@@ -503,17 +588,25 @@ export function buildInstructions(
   language: string | undefined,
   personalContext?: string,
   wantsVideos?: boolean,
+  profile: OraSearchProfile = resolveOraSearchProfile({
+    query: "",
+    planTier: "free",
+    wantsVideos,
+  }),
 ): string {
+  const imageWord = profile.imageLimit === 1 ? "image" : "images";
+  const videoWord = profile.videoLimit === 1 ? "video" : "videos";
   const base = [
     "You are Ora, a helpful assistant with live web access.",
     "Use the web_search tool thoroughly to find current, accurate information from reputable sources, then answer the user's question (or help troubleshoot) concisely and directly.",
     "Base your answer only on what the search returns. Quote specific facts, numbers, and dates where relevant, and prefer authoritative or official sources so the user can trust the result.",
     "If the search returns nothing useful, say so honestly instead of guessing. Never fabricate sources, facts, or URLs.",
     "Keep the answer focused — a few short paragraphs at most. Do not append a raw list of URLs; the sources are shown separately.",
+    profile.instruction,
     // Media: real images + videos found during search, returned as a structured
     // trailing block the server parses and strips before display.
     "When (and only when) the user would benefit from seeing them, include relevant media you ACTUALLY found via web search. Use direct image file URLs (jpg/png/webp/gif) for images and watch-page URLs for videos. Never invent or guess a URL — omit anything you are not confident is real and reachable.",
-    'At the very END of your reply, append exactly one fenced code block tagged ora-media containing JSON of the form {"images":[{"url":"https://...","title":"...","source":"https://page-it-was-on"}],"videos":[{"url":"https://...","title":"..."}]}. Use up to 4 images and up to 3 videos. If you found none, use {"images":[],"videos":[]}. Put nothing after this block.',
+    `At the very END of your reply, append exactly one fenced code block tagged ora-media containing JSON of the form {"images":[{"url":"https://...","title":"...","source":"https://page-it-was-on"}],"videos":[{"url":"https://...","title":"..."}]}. Use up to ${profile.imageLimit} ${imageWord} and up to ${profile.videoLimit} ${videoWord}. If you found none, use {"images":[],"videos":[]}. Put nothing after this block.`,
   ];
   if (wantsVideos) {
     // The user explicitly asked for a video. Make the videos array the primary
@@ -548,6 +641,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   const { query, history = [], language, personalContext, wantsVideos } = input;
   const planTier: OraPlanTier = normalizeOraPlanTier(input.subscriptionTier);
   const model = openAiModelForOraSearch(planTier);
+  const profile = resolveOraSearchProfile({ query, planTier, wantsVideos });
 
   // Build a compact input: recent turns for follow-up context, then the query.
   const messages = [
@@ -559,15 +653,19 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   const client = getClient();
   const resp = (await client.responses.create({
     model,
-    instructions: buildInstructions(language, personalContext, wantsVideos),
+    instructions: buildInstructions(language, personalContext, wantsVideos, profile),
     // The web_search tool is enabled per request; the model decides when to call it.
     tools: [{ type: "web_search" }] as never,
+    max_output_tokens: profile.maxOutputTokens,
     input: messages as never,
   })) as { output_text?: string; output?: unknown };
 
   const rawReply = (resp.output_text ?? "").trim();
-  const sources = dedupeSources(extractSources(resp.output));
-  const parsed = parseOraMediaBlock(rawReply);
+  const sources = dedupeSources(extractSources(resp.output), profile.sourceLimit);
+  const parsed = parseOraMediaBlock(rawReply, {
+    imageLimit: profile.imageLimit,
+    videoLimit: profile.videoLimit,
+  });
   const images = parsed.images;
   // The model is told to put videos in the media block, but it routinely inlines
   // a watch URL in the prose instead. Lift those out (and strip them from the
@@ -580,13 +678,15 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   // surfacing it. Anything unverifiable (hallucinated/dead YouTube IDs) is
   // dropped here so the UI never renders a broken player or a dead link.
   const candidateVideos = mergeVideos(parsed.videos, prose.videos);
-  const videos = await verifyVideos(candidateVideos);
+  const videos = (await verifyVideos(candidateVideos)).slice(0, profile.videoLimit);
 
   logger.info(
     {
       component: "ora-web-search",
       model,
       planTier,
+      searchDepth: profile.depth,
+      maxOutputTokens: profile.maxOutputTokens,
       wantsVideos: wantsVideos === true,
       latencyMs: Date.now() - start,
       sourceCount: sources.length,
