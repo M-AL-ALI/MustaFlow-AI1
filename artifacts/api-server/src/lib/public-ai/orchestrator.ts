@@ -90,7 +90,7 @@ export const ORA_TOOL_REGISTRY: Record<OraTool, OraToolMeta> = {
     description: "Edit a previously generated or uploaded image.",
     minAccess: "free",
     creditCost: 3,
-    status: "planned",
+    status: "live",
   },
   image_analysis: {
     tool: "image_analysis",

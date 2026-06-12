@@ -16,6 +16,7 @@ import {
 } from "docx";
 import { PassThrough } from "stream";
 import { createChatCompletion } from "../ai-providers";
+import { logger } from "../logger";
 import type { FileFormat } from "./prompt";
 import {
   getOraProviderRoutingSnapshot,
@@ -1307,6 +1308,22 @@ export async function generateFileFromPrompt(
     return parsed;
   });
   const aiData = chain.result;
+
+  logger.info(
+    {
+      component: "ora-file-generation",
+      format,
+      planTier,
+      qualityDepth: quality.depth,
+      model: chain.candidate.model,
+      provider: chain.candidate.provider,
+      candidates: candidates.map((c) => `${c.provider}:${c.model}`),
+      usedFallback: chain.usedFallback,
+      hasSourceData,
+      maxTokens: quality.maxCompletionTokens,
+    },
+    "Ora file-generation model route",
+  );
 
   let fileBuffer: Buffer;
   // eslint-disable-next-line no-useless-assignment

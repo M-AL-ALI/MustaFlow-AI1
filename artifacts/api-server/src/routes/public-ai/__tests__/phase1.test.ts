@@ -585,11 +585,17 @@ describe("Ora orchestrator plan gating", () => {
 
   it("blocks planned (not-live) tools with tool_unavailable", async () => {
     const { checkToolAccess } = await import("../../../lib/public-ai/orchestrator");
-    // image_editing is still status:"planned" — search is now live (Task #1276).
-    expect(checkToolAccess("image_editing", { authed: true, isPaid: true })).toEqual({
+    // memory_lookup is injected into context by the chat route; it is not a
+    // directly invokable user tool yet.
+    expect(checkToolAccess("memory_lookup", { authed: true, isPaid: true })).toEqual({
       allowed: false,
       denyCode: "tool_unavailable",
     });
+  });
+
+  it("allows image_editing for any signed-in user", async () => {
+    const { checkToolAccess } = await import("../../../lib/public-ai/orchestrator");
+    expect(checkToolAccess("image_editing", { authed: true, isPaid: false }).allowed).toBe(true);
   });
 
   it("blocks search for anon with search_signin_required", async () => {
