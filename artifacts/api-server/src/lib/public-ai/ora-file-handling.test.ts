@@ -4,6 +4,9 @@ import {
   hasUsableFileJson,
   FileGenerationError,
   resolveOraFileQualityProfile,
+  normalizeTabularFileData,
+  normalizePresentationFileData,
+  normalizeDocumentFileData,
 } from "./file-builder.js";
 import { buildDatasetContextBlock } from "./dataset-prompt.js";
 import { buildCarriedDocumentContext } from "./carried-docs.js";
@@ -154,6 +157,10 @@ describe("hasUsableFileJson", () => {
     expect(hasUsableFileJson({ headers: ["Name"], rows: [] }, "csv")).toBe(false);
   });
 
+  it("accepts object-shaped tabular rows after normalization", () => {
+    expect(hasUsableFileJson({ columns: ["Name"], rows: [{ Name: "Alice" }] }, "xlsx")).toBe(true);
+  });
+
   it("accepts presentations only when at least one slide has content", () => {
     expect(hasUsableFileJson({ slides: [{ heading: "Plan", bullets: ["Launch"] }] }, "pptx")).toBe(
       true,
@@ -168,6 +175,61 @@ describe("hasUsableFileJson", () => {
     expect(hasUsableFileJson({ sections: [{ heading: "Overview", content: "" }] }, "docx")).toBe(
       false,
     );
+  });
+});
+
+describe("file JSON normalization", () => {
+  it("repairs tabular headers, object rows, duplicate rows, and column types", () => {
+    const data = normalizeTabularFileData({
+      title: " Sales export ",
+      columns: ["customer_name", "amount", "amount"],
+      rows: [
+        { customer_name: "Alice", amount: "$100.00" },
+        ["Bob", "200", "300"],
+        ["Bob", "200", "300"],
+        ["", "", ""],
+      ],
+    });
+
+    expect(data.title).toBe("Sales export");
+    expect(data.headers).toEqual(["Customer Name", "Amount", "Amount 2"]);
+    expect(data.rows).toEqual([
+      ["Alice", "$100.00", "$100.00"],
+      ["Bob", "200", "300"],
+    ]);
+    expect(data.columnTypes).toEqual(["text", "currency", "currency"]);
+  });
+
+  it("normalizes presentation slides and strips bullet markdown", () => {
+    const data = normalizePresentationFileData({
+      title: "Launch plan",
+      slides: [
+        { heading: " Roadmap ", bullets: ["- Prepare beta", "* Prepare beta", "placeholder text"] },
+        { heading: "", bullets: [] },
+        "Measure results\nShare findings",
+      ],
+    });
+
+    expect(data.slides).toEqual([
+      { heading: "Roadmap", bullets: ["Prepare beta"] },
+      { heading: "Slide 3", bullets: ["Measure results", "Share findings"] },
+    ]);
+  });
+
+  it("normalizes document sections and promotes top-level content", () => {
+    expect(
+      normalizeDocumentFileData({
+        title: " Report ",
+        content: "Executive summary.",
+      }).sections,
+    ).toEqual([{ heading: "Overview", content: "Executive summary." }]);
+
+    const data = normalizeDocumentFileData({
+      sections: [{ heading: " Next steps ", content: "", bullets: ["* Launch beta", "todo item"] }],
+    });
+    expect(data.sections).toEqual([
+      { heading: "Next steps", content: "", bullets: ["Launch beta"] },
+    ]);
   });
 });
 

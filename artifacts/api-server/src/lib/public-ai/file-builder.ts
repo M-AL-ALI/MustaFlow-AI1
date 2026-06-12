@@ -901,6 +901,240 @@ function mimeForFormat(format: FileFormat): string {
   }
 }
 
+const VALID_COLUMN_TYPES = new Set<ColumnType>(["text", "number", "currency", "date", "percent"]);
+const EMPTY_TEXT_RE = /^(?:n\/a|none|null|undefined)$/i;
+const PLACEHOLDER_TEXT_RE = /\b(?:lorem ipsum|placeholder text|placeholder|todo item)\b/i;
+
+function cleanText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isMeaningfulText(value: string): boolean {
+  return value.length > 0 && !EMPTY_TEXT_RE.test(value) && !PLACEHOLDER_TEXT_RE.test(value);
+}
+
+function stripLeadingBullet(value: unknown): string {
+  return cleanText(value)
+    .replace(/^[-*\u2022]\s+/, "")
+    .trim();
+}
+
+function titleCaseLabel(value: string): string {
+  return value.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+function cleanHeader(value: unknown, index: number): string {
+  const raw = cleanText(value)
+    .replace(/^[-*\u2022]\s+/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s/%().#]+/gu, "")
+    .trim();
+  const header = raw || `Column ${index + 1}`;
+  return titleCaseLabel(header);
+}
+
+function uniqueLabels(labels: string[], fallbackPrefix: string): string[] {
+  const seen = new Map<string, number>();
+  return labels.map((label, index) => {
+    const base = cleanText(label) || `${fallbackPrefix} ${index + 1}`;
+    const key = base.toLowerCase();
+    const count = seen.get(key) ?? 0;
+    seen.set(key, count + 1);
+    return count === 0 ? base : `${base} ${count + 1}`;
+  });
+}
+
+function normalizedObjectKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function readObjectCell(row: Record<string, unknown>, sourceKey: string, header: string): unknown {
+  if (Object.prototype.hasOwnProperty.call(row, sourceKey)) return row[sourceKey];
+  if (Object.prototype.hasOwnProperty.call(row, header)) return row[header];
+
+  const sourceLookup = normalizedObjectKey(sourceKey);
+  const headerLookup = normalizedObjectKey(header);
+  for (const [key, value] of Object.entries(row)) {
+    const normalized = normalizedObjectKey(key);
+    if (normalized === sourceLookup || normalized === headerLookup) return value;
+  }
+  return "";
+}
+
+function rowSourceCandidates(parsed: Record<string, unknown>): unknown[] {
+  if (Array.isArray(parsed.rows)) return parsed.rows;
+  if (Array.isArray(parsed.data)) return parsed.data;
+  if (Array.isArray(parsed.records)) return parsed.records;
+  return [];
+}
+
+function headerSourceCandidates(parsed: Record<string, unknown>, rows: unknown[]): string[] {
+  if (Array.isArray(parsed.headers)) {
+    return parsed.headers.map((h) => cleanText(h)).filter(Boolean);
+  }
+  if (Array.isArray(parsed.columns)) {
+    return parsed.columns.map((h) => cleanText(h)).filter(Boolean);
+  }
+  const firstObject = rows.find(
+    (row): row is Record<string, unknown> =>
+      !!row && typeof row === "object" && !Array.isArray(row),
+  );
+  return firstObject ? Object.keys(firstObject) : [];
+}
+
+function parseColumnType(value: unknown): ColumnType | null {
+  const raw = cleanText(value).toLowerCase();
+  if (VALID_COLUMN_TYPES.has(raw as ColumnType)) return raw as ColumnType;
+  if (raw === "money" || raw === "amount" || raw === "price") return "currency";
+  if (raw === "integer" || raw === "float" || raw === "decimal") return "number";
+  if (raw === "percentage") return "percent";
+  return null;
+}
+
+function inferColumnType(values: string[]): ColumnType {
+  const nonEmpty = values.map((v) => v.trim()).filter(Boolean);
+  if (nonEmpty.length === 0) return "text";
+
+  const numeric = (v: string) => /^[$\u20ac\u00a3]?\s*-?\d+(?:,\d{3})*(?:\.\d+)?$/.test(v);
+  if (nonEmpty.every((v) => /^-?\d+(?:\.\d+)?%$/.test(v))) return "percent";
+  if (nonEmpty.every(numeric)) {
+    return nonEmpty.some((v) => /^[$\u20ac\u00a3]/.test(v.trim())) ? "currency" : "number";
+  }
+  if (nonEmpty.every((v) => /^\d{4}-\d{2}-\d{2}$/.test(v))) return "date";
+  return "text";
+}
+
+export function normalizeTabularFileData(
+  parsed: Record<string, unknown>,
+  options: { preserveDuplicateRows?: boolean } = {},
+): TabularData {
+  const rawRows = rowSourceCandidates(parsed);
+  const sourceHeaders = headerSourceCandidates(parsed, rawRows);
+  const headers = uniqueLabels(
+    (sourceHeaders.length > 0 ? sourceHeaders : ["Column A"]).map((h, i) => cleanHeader(h, i)),
+    "Column",
+  );
+  const colCount = headers.length;
+
+  const rows: string[][] = [];
+  const seenRows = new Set<string>();
+  for (const rawRow of rawRows) {
+    let cells: string[] | null = null;
+    if (Array.isArray(rawRow)) {
+      cells = rawRow.map((cell) => cleanText(cell));
+    } else if (rawRow && typeof rawRow === "object") {
+      const rowObject = rawRow as Record<string, unknown>;
+      cells = headers.map((header, index) =>
+        cleanText(readObjectCell(rowObject, sourceHeaders[index] ?? header, header)),
+      );
+    }
+    if (!cells) continue;
+    while (cells.length < colCount) cells.push("");
+    const normalized = cells.slice(0, colCount);
+    if (!normalized.some((cell) => cell.length > 0)) continue;
+
+    const signature = normalized.join("\u0001").toLowerCase();
+    if (!options.preserveDuplicateRows && seenRows.has(signature)) continue;
+    seenRows.add(signature);
+    rows.push(normalized);
+  }
+
+  const rawTypes = Array.isArray(parsed.columnTypes) ? parsed.columnTypes : [];
+  const columnTypes = headers.map((_, index) => {
+    return parseColumnType(rawTypes[index]) ?? inferColumnType(rows.map((row) => row[index] ?? ""));
+  });
+
+  return {
+    title: cleanText(parsed.title) || "Data",
+    sheetName: cleanText(parsed.sheetName) || "Sheet1",
+    headers,
+    columnTypes,
+    rows,
+  };
+}
+
+function normalizeBulletArray(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\n+/) : [];
+  const bullets: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const bullet = stripLeadingBullet(item);
+    if (!isMeaningfulText(bullet)) continue;
+    const key = bullet.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    bullets.push(bullet);
+  }
+  return bullets;
+}
+
+export function normalizePresentationFileData(parsed: Record<string, unknown>): PresentationData {
+  const rawSlides = Array.isArray(parsed.slides) ? parsed.slides : [];
+  const slides: PresentationSlide[] = [];
+
+  rawSlides.forEach((rawSlide, index) => {
+    const slide: Record<string, unknown> =
+      rawSlide && typeof rawSlide === "object" && !Array.isArray(rawSlide)
+        ? (rawSlide as Record<string, unknown>)
+        : { content: rawSlide };
+    const content = cleanText(slide.content);
+    const contentLines = content.split(/\n+/).map(stripLeadingBullet).filter(isMeaningfulText);
+    const bullets = normalizeBulletArray(slide.bullets ?? contentLines).slice(0, 6);
+    const explicitHeading = cleanText(slide.heading) || cleanText(slide.title);
+    if (!isMeaningfulText(explicitHeading) && bullets.length === 0) return;
+    slides.push({
+      heading: isMeaningfulText(explicitHeading) ? explicitHeading : `Slide ${index + 1}`,
+      bullets,
+    });
+  });
+
+  return {
+    title: cleanText(parsed.title) || "Presentation",
+    subtitle: cleanText(parsed.subtitle) || undefined,
+    slides,
+  };
+}
+
+export function normalizeDocumentFileData(parsed: Record<string, unknown>): DocumentData {
+  const rawSections = Array.isArray(parsed.sections) ? parsed.sections : [];
+  const sections: DocumentSection[] = [];
+
+  rawSections.forEach((rawSection, index) => {
+    const section: Record<string, unknown> =
+      rawSection && typeof rawSection === "object" && !Array.isArray(rawSection)
+        ? (rawSection as Record<string, unknown>)
+        : { content: rawSection };
+    const content = cleanText(section.content);
+    const bullets = normalizeBulletArray(section.bullets);
+    const heading =
+      cleanText(section.heading) || cleanText(section.title) || `Section ${index + 1}`;
+    if (!isMeaningfulText(content) && bullets.length === 0) return;
+    sections.push({
+      heading: isMeaningfulText(heading) ? heading : undefined,
+      content,
+      bullets: bullets.length > 0 ? bullets : undefined,
+    });
+  });
+
+  const topLevelContent = cleanText(parsed.content);
+  if (sections.length === 0 && isMeaningfulText(topLevelContent)) {
+    sections.push({
+      heading: "Overview",
+      content: topLevelContent,
+    });
+  }
+
+  return {
+    title: cleanText(parsed.title) || "Document",
+    subtitle: cleanText(parsed.subtitle) || undefined,
+    sections,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -943,36 +1177,15 @@ export function safeParseFileJson(raw: string): Record<string, unknown> {
 
 export function hasUsableFileJson(parsed: Record<string, unknown>, format: FileFormat): boolean {
   if (format === "csv" || format === "xlsx") {
-    const headers = Array.isArray(parsed.headers)
-      ? parsed.headers.map((h) => String(h ?? "").trim()).filter(Boolean)
-      : [];
-    const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-    return headers.length > 0 && rows.some((r) => Array.isArray(r) && r.length > 0);
+    const data = normalizeTabularFileData(parsed);
+    return data.headers.length > 0 && data.rows.length > 0;
   }
 
   if (format === "pptx") {
-    const slides = Array.isArray(parsed.slides) ? parsed.slides : [];
-    return slides.some((slide) => {
-      if (!slide || typeof slide !== "object") return false;
-      const s = slide as Record<string, unknown>;
-      const heading = String(s.heading ?? "").trim();
-      const bullets = Array.isArray(s.bullets)
-        ? s.bullets.map((b) => String(b ?? "").trim()).filter(Boolean)
-        : [];
-      return heading.length > 0 || bullets.length > 0;
-    });
+    return normalizePresentationFileData(parsed).slides.length > 0;
   }
 
-  const sections = Array.isArray(parsed.sections) ? parsed.sections : [];
-  return sections.some((section) => {
-    if (!section || typeof section !== "object") return false;
-    const s = section as Record<string, unknown>;
-    const content = String(s.content ?? "").trim();
-    const bullets = Array.isArray(s.bullets)
-      ? s.bullets.map((b) => String(b ?? "").trim()).filter(Boolean)
-      : [];
-    return content.length > 0 || bullets.length > 0;
-  });
+  return normalizeDocumentFileData(parsed).sections.length > 0;
 }
 
 function repairTruncatedJson(s: string): string | null {
@@ -1103,35 +1316,7 @@ export async function generateFileFromPrompt(
   let slideCount = 0;
 
   if (isTabular) {
-    const rawHeaders = Array.isArray(aiData.headers)
-      ? (aiData.headers as string[]).map((h) => String(h).trim()).filter(Boolean)
-      : ["Column A"];
-    const colCount = rawHeaders.length;
-
-    const rawColTypes = Array.isArray(aiData.columnTypes)
-      ? (aiData.columnTypes as string[]).map((t) =>
-          ["text", "number", "currency", "date", "percent"].includes(t)
-            ? (t as ColumnType)
-            : "text",
-        )
-      : undefined;
-
-    const rawRows = Array.isArray(aiData.rows) ? (aiData.rows as unknown[]) : [];
-    const normalizedRows = rawRows
-      .filter((r) => Array.isArray(r) && (r as unknown[]).length > 0)
-      .map((r) => {
-        const cells = (r as unknown[]).map((v) => String(v ?? "").trim());
-        while (cells.length < colCount) cells.push("");
-        return cells.slice(0, colCount);
-      });
-
-    const data: TabularData = {
-      title: String(aiData.title ?? "Data"),
-      sheetName: String(aiData.sheetName ?? "Sheet1"),
-      headers: rawHeaders,
-      columnTypes: rawColTypes,
-      rows: normalizedRows,
-    };
+    const data = normalizeTabularFileData(aiData, { preserveDuplicateRows: hasSourceData });
     title = data.title;
     rowCount = data.rows.length;
     // When the user attached real data, an empty extraction means the model
@@ -1144,17 +1329,7 @@ export async function generateFileFromPrompt(
     }
     fileBuffer = format === "csv" ? await buildCsv(data) : await buildXlsx(data);
   } else if (isPptx) {
-    const rawSlides = Array.isArray(aiData.slides) ? aiData.slides : [];
-    const data: PresentationData = {
-      title: String(aiData.title ?? "Presentation"),
-      subtitle: aiData.subtitle != null ? String(aiData.subtitle) : undefined,
-      slides: (rawSlides as Record<string, unknown>[]).map((s) => ({
-        heading: s.heading != null ? String(s.heading).trim() : "Slide",
-        bullets: Array.isArray(s.bullets)
-          ? (s.bullets as unknown[]).map((b) => String(b).trim()).filter(Boolean)
-          : [],
-      })),
-    };
+    const data = normalizePresentationFileData(aiData);
     title = data.title;
     slideCount = data.slides.length;
     if (hasSourceData && slideCount === 0) {
@@ -1164,18 +1339,7 @@ export async function generateFileFromPrompt(
     }
     fileBuffer = await buildPptx(data);
   } else {
-    const rawSections = Array.isArray(aiData.sections) ? aiData.sections : [];
-    const data: DocumentData = {
-      title: String(aiData.title ?? "Document"),
-      subtitle: aiData.subtitle != null ? String(aiData.subtitle) : undefined,
-      sections: (rawSections as Record<string, unknown>[]).map((s) => ({
-        heading: s.heading != null ? String(s.heading) : undefined,
-        content: s.content != null ? String(s.content) : "",
-        bullets: Array.isArray(s.bullets)
-          ? (s.bullets as unknown[]).map((b) => String(b).trim()).filter(Boolean)
-          : undefined,
-      })),
-    };
+    const data = normalizeDocumentFileData(aiData);
     title = data.title;
     sectionCount = data.sections.length;
     if (hasSourceData && sectionCount === 0) {
