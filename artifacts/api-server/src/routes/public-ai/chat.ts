@@ -31,6 +31,7 @@ import {
 } from "../../lib/public-ai/model-router";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
 import { buildOraExpertiseProfile } from "../../lib/public-ai/expertise";
+import { buildOraImageGenerationProfile } from "../../lib/public-ai/image-quality";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
 import { eq, and, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import {
@@ -1050,10 +1051,15 @@ router.post("/public-ai/chat", async (req, res) => {
       return;
     }
     try {
-      const result = await generateImage({
+      const imageProfile = buildOraImageGenerationProfile({
         prompt: imagePrompt,
-        aspectRatio: "1:1",
-        style: "vivid",
+        subscriptionTier: authed?.tier ?? null,
+      });
+      const result = await generateImage({
+        prompt: imageProfile.prompt,
+        quality: imageProfile.quality,
+        aspectRatio: imageProfile.aspectRatio,
+        style: imageProfile.style,
         subscriptionTier: authed?.tier ?? null,
       });
       let editableImageId: number | undefined;
@@ -1069,10 +1075,10 @@ router.post("/public-ai/chat", async (req, res) => {
             .insert(generatedImagesTable)
             .values({
               userId: authed.userId,
-              prompt: imagePrompt,
+              prompt: imageProfile.originalPrompt,
               quality: result.quality,
-              aspectRatio: "1:1",
-              style: "vivid",
+              aspectRatio: imageProfile.aspectRatio,
+              style: imageProfile.style,
               providerName: result.providerName,
               modelName: result.modelName,
               status: "pending",
@@ -1090,6 +1096,7 @@ router.post("/public-ai/chat", async (req, res) => {
                 fileUrl: stored.fileUrl,
                 thumbnailUrl: stored.thumbnailUrl,
                 storageKey: stored.storageKey,
+                revisedPrompt: result.revisedPrompt,
                 updatedAt: sql`now()`,
               })
               .where(eq(generatedImagesTable.id, imageRow.id));
@@ -1139,7 +1146,7 @@ router.post("/public-ai/chat", async (req, res) => {
                 fileName: `ora-image-${Date.now()}.${ext}`,
                 mimeType,
                 format: ext,
-                prompt: imagePrompt,
+                prompt: imageProfile.originalPrompt,
                 base64,
               });
             }

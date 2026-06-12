@@ -47,6 +47,7 @@ import {
   openAiModelForOraImage,
   oraImageQualityForPlan,
 } from "./public-ai/model-router";
+import { buildOraImageEditProfile } from "./public-ai/image-quality";
 import { logger } from "./logger";
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
@@ -385,6 +386,7 @@ export interface EnqueueImageEditJobOpts {
   quality?: ImageQuality;
   projectId?: number;
   subscriptionTier?: string | null;
+  providerInstruction?: string;
   /** Image Studio edits use credits; Ora inline edits use Ora's daily image quota. */
   billingMode?: "credits" | "ora";
 }
@@ -413,7 +415,17 @@ export async function enqueueImageEditJob(
   }
 
   const planTier = normalizeOraPlanTier(subscriptionTier ?? (await resolveImageTier(userId)));
-  const resolvedQuality = oraImageQualityForPlan(planTier, "edit", quality);
+  const oraEditProfile =
+    billingMode === "ora"
+      ? buildOraImageEditProfile({
+          instruction,
+          subscriptionTier: planTier,
+          requestedQuality: quality,
+        })
+      : null;
+  const resolvedQuality =
+    oraEditProfile?.quality ?? oraImageQualityForPlan(planTier, "edit", quality);
+  const providerInstruction = oraEditProfile?.instruction ?? opts.providerInstruction;
   const creditCost = billingMode === "ora" ? 0 : (IMAGE_CREDIT_COSTS[resolvedQuality] ?? 3);
   const providerName = "openai";
   const modelName = openAiModelForOraImage("edit", planTier);
@@ -477,7 +489,7 @@ export async function enqueueImageEditJob(
 
   void runImageEditJob(
     job,
-    { ...opts, quality: resolvedQuality, subscriptionTier: planTier },
+    { ...opts, quality: resolvedQuality, subscriptionTier: planTier, providerInstruction },
     creditCost,
     billingMode === "credits" && CREDITS_ENFORCEMENT_ENABLED,
   );
@@ -496,6 +508,7 @@ async function runImageEditJob(
     parentStorageKey,
     parentFileUrl,
     instruction,
+    providerInstruction,
     quality = "standard",
     parentAspectRatio,
     subscriptionTier,
@@ -516,7 +529,7 @@ async function runImageEditJob(
 
     const result = await editImage({
       imageBuffer,
-      instruction,
+      instruction: providerInstruction ?? instruction,
       quality,
       aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
       subscriptionTier,

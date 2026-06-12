@@ -18,6 +18,7 @@ import {
   routeOraMessage,
   checkToolAccess,
   isImageGenerationRequest,
+  isImageSearchRequest,
 } from "../../../lib/public-ai/orchestrator";
 import {
   isSafeHttpUrl,
@@ -181,6 +182,17 @@ describe("routeOraMessage picks the search tool for live-info questions", () => 
       mode: "instant",
     });
     expect(decision.tool).toBe("image_generation");
+  });
+
+  it("routes image/logo lookup to search instead of image generation", async () => {
+    expect(isImageSearchRequest("find the official logo images for Perdue")).toBe(true);
+    expect(isImageGenerationRequest("find the official logo images for Perdue")).toBe(false);
+
+    const decision = await routeOraMessage({
+      message: "find the official logo images for Perdue",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("search");
   });
 });
 

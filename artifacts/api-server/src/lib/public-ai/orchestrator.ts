@@ -176,7 +176,27 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   /^\s*(?:a|an|the|another|new)\s+(?:logos?|banners?|icons?|posters?|flyers?|thumbnails?|avatars?|illustrations?|graphics?|mockups?|badges?|portraits?|wallpapers?)\s+(?:for|of|with|showing|depicting|featuring)\b/i,
 ];
 
+const ORA_IMAGE_CREATION_VERB_PATTERN =
+  /\b(generate|create|make|draw|render|produce|design|paint|sketch|illustrate)\b/i;
+
+/**
+ * Retrieval-style image/logo asks should use live search/media, not image
+ * generation. Kept separate from web-search's media profile so the tool router
+ * can make the correct quota decision before the image-generation fast-path.
+ */
+export const ORA_IMAGE_SEARCH_PATTERNS: RegExp[] = [
+  /\b(?:find|search(?:\s+for|\s+up)?|look\s*up|locate|fetch)\b[^.?!]{0,80}\b(?:official\s+)?(?:logos?|brand\s+assets?|images?|photos?|pictures?|screenshots?|icons?|press\s+photos?|product\s+photos?)\b/i,
+  /\b(?:find|search(?:\s+for|\s+up)?|look\s*up|locate|fetch|get)\b[^.?!]{0,80}\b(?:official|source|real|actual|reference|online|web)\b[^.?!]{0,80}\b(?:logos?|images?|photos?|pictures?|screenshots?|icons?)\b/i,
+  /\bshow\s+me\b[^.?!]{0,80}\b(?:official|source|real|actual|reference|online|web)\b[^.?!]{0,80}\b(?:logos?|images?|photos?|pictures?|screenshots?|icons?)\b/i,
+];
+
+export function isImageSearchRequest(message: string): boolean {
+  if (ORA_IMAGE_CREATION_VERB_PATTERN.test(message)) return false;
+  return ORA_IMAGE_SEARCH_PATTERNS.some((p) => p.test(message));
+}
+
 export function isImageGenerationRequest(message: string): boolean {
+  if (isImageSearchRequest(message)) return false;
   return ORA_IMAGE_PATTERNS.some((p) => p.test(message));
 }
 
@@ -583,7 +603,19 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
     }
   }
 
-  // 2. Image generation fast-path.
+  // 2. Image/logo retrieval fast-path. These need live sources, not generated art.
+  const imageSearchRequest = isImageSearchRequest(message);
+  if (imageSearchRequest) {
+    return {
+      tool: "search",
+      reason: "Detected a request to find real image/logo sources.",
+      intent: "premium",
+      confidence: "high",
+      topic: "general",
+    };
+  }
+
+  // 2b. Image generation fast-path.
   if (isImageGenerationRequest(message)) {
     return {
       tool: "image_generation",
@@ -594,7 +626,7 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
     };
   }
 
-  // 2b. Image generation continuation. A short "yes / go ahead and do it" reply
+  // 2c. Image generation continuation. A short "yes / go ahead and do it" reply
   //     to a turn where the assistant OFFERED to generate an image must actually
   //     generate it (with a prompt resolved from prior context) instead of
   //     falling through to a conversational answer that only claims it — or
