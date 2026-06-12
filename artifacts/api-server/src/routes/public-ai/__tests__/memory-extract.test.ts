@@ -101,6 +101,7 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     expect(c?.fact).toBe("Works in the evenings");
     expect(c?.confidence).toBe("low");
     expect(c?.sensitive).toBe(false);
+    expect(c?.category).toBe("other");
   });
 
   it("returns high confidence when the model flags an explicit save request", async () => {
@@ -122,6 +123,7 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     });
     const c = await extractMemorySaveCandidate("remember that I prefer concise answers", "core");
     expect(c?.fact).toBe("Prefers concise answers");
+    expect(c?.category).toBe("preference");
     expect(mockAi.createChatCompletion).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "openai",
@@ -200,6 +202,27 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     mockAi.state.content = JSON.stringify({ save: true, fact: "   ", explicit: false });
     const c = await extractMemorySaveCandidate("some ambiguous message here");
     expect(c).toBeNull();
+  });
+
+  it("accepts a model-provided memory category", async () => {
+    mockAi.state.content = JSON.stringify({
+      save: true,
+      fact: "Is building a scheduling app for salons",
+      explicit: false,
+      category: "project",
+    });
+    const c = await extractMemorySaveCandidate("I'm building a scheduling app for salons");
+    expect(c?.category).toBe("project");
+  });
+
+  it("falls back to heuristic category when the model category is missing", async () => {
+    mockAi.state.content = JSON.stringify({
+      save: true,
+      fact: "Company is Acme Corp",
+      explicit: false,
+    });
+    const c = await extractMemorySaveCandidate("my company is Acme Corp");
+    expect(c?.category).toBe("personal");
   });
 });
 

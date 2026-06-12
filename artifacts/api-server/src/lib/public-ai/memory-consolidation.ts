@@ -151,6 +151,54 @@ function combinedText(m: { title: string; content: string }): string {
   return `${m.title} ${m.content}`.trim();
 }
 
+const ATTRIBUTE_SLOT_PATTERNS: Array<{ key: string; patterns: RegExp[] }> = [
+  {
+    key: "name",
+    patterns: [/\bmy name is\b/i, /\bname is\b/i, /\bcall me\b/i],
+  },
+  {
+    key: "company_identity",
+    patterns: [
+      /\bmy (?:company|business|shop) is\b/i,
+      /\b(?:company|business|shop) (?:is|called|named)\b/i,
+      /\bour (?:company|business|shop) is\b/i,
+      /\bworks? (?:at|for)\b/i,
+    ],
+  },
+  {
+    key: "role",
+    patterns: [
+      /\bmy (?:role|job|title) is\b/i,
+      /\bi(?:'m| am) (?:a|an) (?:developer|designer|engineer|founder|manager|marketer|consultant|student|teacher|writer|analyst|operator|owner|ceo|cto|cfo|product manager|project manager)\b/i,
+      /\bworks? as\b/i,
+    ],
+  },
+  {
+    key: "timezone",
+    patterns: [/\btime\s?zone\b/i],
+  },
+  {
+    key: "location",
+    patterns: [/\bi live in\b/i, /\bi(?:'m| am) based in\b/i, /\bbased in\b/i, /\blocated in\b/i],
+  },
+  {
+    key: "budget",
+    patterns: [/\bbudget\b/i],
+  },
+  {
+    key: "answer_style",
+    patterns: [/\b(?:prefer|wants?) (?:concise|brief|detailed|thorough|short|long)\b/i],
+  },
+];
+
+export function memoryAttributeSlots(text: string): Set<string> {
+  const slots = new Set<string>();
+  for (const slot of ATTRIBUTE_SLOT_PATTERNS) {
+    if (slot.patterns.some((pattern) => pattern.test(text))) slots.add(slot.key);
+  }
+  return slots;
+}
+
 /**
  * High-confidence overlap test: should `existing` be superseded by `incoming`?
  *
@@ -175,8 +223,18 @@ export function shouldSupersede(
   incoming: { title: string; content: string },
   existing: { title: string; content: string },
 ): boolean {
-  const a = tokenizeMemory(combinedText(incoming));
-  const b = tokenizeMemory(combinedText(existing));
+  const incomingText = combinedText(incoming);
+  const existingText = combinedText(existing);
+  const incomingSlots = memoryAttributeSlots(incomingText);
+  if (incomingSlots.size > 0) {
+    const existingSlots = memoryAttributeSlots(existingText);
+    for (const slot of incomingSlots) {
+      if (existingSlots.has(slot)) return true;
+    }
+  }
+
+  const a = tokenizeMemory(incomingText);
+  const b = tokenizeMemory(existingText);
   if (a.size < 2 || b.size < 2) return false;
 
   let shared = 0;

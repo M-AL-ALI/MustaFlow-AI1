@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { tokenizeMemory, shouldSupersede, findMemoriesToSupersede } from "./memory-consolidation";
+import {
+  tokenizeMemory,
+  shouldSupersede,
+  findMemoriesToSupersede,
+  memoryAttributeSlots,
+} from "./memory-consolidation";
 
 describe("tokenizeMemory", () => {
   it("drops stopwords, short tokens, and lowercases", () => {
@@ -42,6 +47,24 @@ describe("shouldSupersede — supersedes overlapping facts", () => {
       ),
     ).toBe(true);
   });
+
+  it("company identity update", () => {
+    expect(
+      shouldSupersede(
+        { title: "my company is Globex", content: "" },
+        { title: "my company is Acme", content: "" },
+      ),
+    ).toBe(true);
+  });
+
+  it("timezone update", () => {
+    expect(
+      shouldSupersede(
+        { title: "my timezone is EST", content: "" },
+        { title: "my timezone is PST", content: "" },
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("shouldSupersede — keeps distinct facts (conservative)", () => {
@@ -50,15 +73,6 @@ describe("shouldSupersede — keeps distinct facts (conservative)", () => {
       shouldSupersede(
         { title: "I like coffee", content: "" },
         { title: "I like tea", content: "" },
-      ),
-    ).toBe(false);
-  });
-
-  it("different companies — only one shared noun", () => {
-    expect(
-      shouldSupersede(
-        { title: "my company is Acme", content: "" },
-        { title: "my company is Globex", content: "" },
       ),
     ).toBe(false);
   });
@@ -98,5 +112,16 @@ describe("findMemoriesToSupersede", () => {
     expect(findMemoriesToSupersede({ title: "I prefer dark mode", content: "" }, existing)).toEqual(
       [],
     );
+  });
+});
+
+describe("memoryAttributeSlots", () => {
+  it("detects narrow profile slots", () => {
+    expect(memoryAttributeSlots("my company is Acme")).toContain("company_identity");
+    expect(memoryAttributeSlots("my timezone is PST")).toContain("timezone");
+  });
+
+  it("does not treat every identity statement as a role", () => {
+    expect(memoryAttributeSlots("I'm a vegetarian").size).toBe(0);
   });
 });

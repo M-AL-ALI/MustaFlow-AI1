@@ -70,6 +70,7 @@ describe("detectMemorySaveCandidate sensitive gate", () => {
     expect(c).not.toBeNull();
     expect(c?.sensitive).toBe(false);
     expect(c?.confidence).toBe("high");
+    expect(c?.category).toBe("preference");
   });
 
   it("non-sensitive implicit candidates stay low and not sensitive", () => {

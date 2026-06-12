@@ -14,6 +14,8 @@ import {
   tokeniseMemory,
   selectMemoriesWithinBudget,
   rankMemoriesByRelevance,
+  resolveOraMemoryRecallProfile,
+  inferMemoryQueryCategories,
   type OraMemoryRow,
 } from "../public-ai/chat";
 
@@ -23,12 +25,18 @@ import {
 // is mocked to throw so the ranker falls back to TF-IDF keyword overlap — which
 // is exactly the path we assert.
 
-function mem(id: number, title: string, content: string, ageDays: number): OraMemoryRow {
+function mem(
+  id: number,
+  title: string,
+  content: string,
+  ageDays: number,
+  category: string | null = null,
+): OraMemoryRow {
   return {
     id,
     title,
     content,
-    category: null,
+    category,
     embedding: null,
     createdAt: new Date(Date.now() - ageDays * 86_400_000),
   };
@@ -49,6 +57,28 @@ describe("selectMemoriesWithinBudget", () => {
   it("caps at the max-entry ceiling", () => {
     const rows = Array.from({ length: 50 }, (_, i) => mem(i, `t${i}`, "c", i));
     expect(selectMemoriesWithinBudget(rows).length).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("resolveOraMemoryRecallProfile", () => {
+  it("gives Core and Wave deeper recall than Free", () => {
+    const free = resolveOraMemoryRecallProfile("free");
+    const core = resolveOraMemoryRecallProfile("core");
+    const wave = resolveOraMemoryRecallProfile("wave");
+
+    expect(core.charBudget).toBeGreaterThan(free.charBudget);
+    expect(wave.charBudget).toBeGreaterThan(core.charBudget);
+    expect(core.candidateLimit).toBeGreaterThan(free.candidateLimit);
+    expect(wave.maxEntries).toBeGreaterThan(core.maxEntries);
+  });
+});
+
+describe("inferMemoryQueryCategories", () => {
+  it("detects preference, personal, project, and document query categories", () => {
+    expect(inferMemoryQueryCategories("what answer style do I prefer?")).toContain("preference");
+    expect(inferMemoryQueryCategories("what company do I work for?")).toContain("personal");
+    expect(inferMemoryQueryCategories("what tech stack is my app using?")).toContain("project");
+    expect(inferMemoryQueryCategories("what did my uploaded document say?")).toContain("document");
   });
 });
 
@@ -79,5 +109,19 @@ describe("rankMemoriesByRelevance (TF-IDF fallback)", () => {
     // so the old database memory is NOT promoted to the top.
     const selected = await rankMemoriesByRelevance(rows, "tell me a joke about penguins");
     expect(selected[0]?.id).not.toBe(1);
+  });
+
+  it("uses category query intent as a tiebreaker", async () => {
+    const rows: OraMemoryRow[] = [
+      mem(1, "General product note", "The user ships a SaaS product", 0, "project"),
+      mem(2, "Answer style", "The user prefers concise answers", 3, "preference"),
+    ];
+
+    const selected = await rankMemoriesByRelevance(
+      rows,
+      "what answer style do I prefer?",
+      resolveOraMemoryRecallProfile("wave"),
+    );
+    expect(selected[0]?.id).toBe(2);
   });
 });

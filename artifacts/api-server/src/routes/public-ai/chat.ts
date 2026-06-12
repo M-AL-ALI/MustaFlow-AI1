@@ -109,6 +109,16 @@ const ORA_MEMORY_SEMANTIC_WEIGHT = 6.0;
 /** Max time we'll wait for the query embedding before falling back to TF-IDF. */
 const ORA_MEMORY_EMBED_TIMEOUT_MS = 2500;
 
+export interface OraMemoryRecallProfile {
+  planTier: OraPlanTier;
+  charBudget: number;
+  maxEntries: number;
+  candidateLimit: number;
+  semanticWeight: number;
+  categoryBaseBoost: Record<string, number>;
+  categoryMatchBoost: number;
+}
+
 export interface OraMemoryRow {
   id: number;
   title: string;
@@ -130,6 +140,73 @@ const ORA_MEMORY_CATEGORY_BOOST: Record<string, number> = {
   personal: 0.15,
 };
 
+export function resolveOraMemoryRecallProfile(
+  subscriptionTier?: string | null,
+): OraMemoryRecallProfile {
+  const planTier = normalizeOraPlanTier(subscriptionTier);
+  if (planTier === "wave") {
+    return {
+      planTier,
+      charBudget: Math.round(ORA_MEMORY_CHAR_BUDGET * 1.8),
+      maxEntries: 50,
+      candidateLimit: 350,
+      semanticWeight: 7.0,
+      categoryBaseBoost: { preference: 0.35, personal: 0.25, project: 0.2, document: 0.15 },
+      categoryMatchBoost: 0.75,
+    };
+  }
+  if (planTier === "core") {
+    return {
+      planTier,
+      charBudget: Math.round(ORA_MEMORY_CHAR_BUDGET * 1.35),
+      maxEntries: 38,
+      candidateLimit: 260,
+      semanticWeight: 6.5,
+      categoryBaseBoost: { preference: 0.3, personal: 0.2, project: 0.15, document: 0.1 },
+      categoryMatchBoost: 0.55,
+    };
+  }
+  return {
+    planTier,
+    charBudget: ORA_MEMORY_CHAR_BUDGET,
+    maxEntries: ORA_MEMORY_MAX_ENTRIES,
+    candidateLimit: ORA_MEMORY_CANDIDATE_LIMIT,
+    semanticWeight: ORA_MEMORY_SEMANTIC_WEIGHT,
+    categoryBaseBoost: ORA_MEMORY_CATEGORY_BOOST,
+    categoryMatchBoost: 0.35,
+  };
+}
+
+export function inferMemoryQueryCategories(message: string): Set<string> {
+  const text = message.toLowerCase();
+  const categories = new Set<string>();
+  if (
+    /\b(prefer|preference|favorite|favourite|tone|style|format|theme|dark mode|light mode|concise|verbose|answer)\b/.test(
+      text,
+    )
+  ) {
+    categories.add("preference");
+  }
+  if (
+    /\b(name|role|job|title|company|business|location|live|based|timezone|time zone|language|about me|who am i)\b/.test(
+      text,
+    )
+  ) {
+    categories.add("personal");
+  }
+  if (
+    /\b(project|app|product|stack|database|repo|client|customer|launch|feature|deadline|integration)\b/.test(
+      text,
+    )
+  ) {
+    categories.add("project");
+  }
+  if (/\b(document|file|upload|pdf|docx|spreadsheet|csv|xlsx|deck|report)\b/.test(text)) {
+    categories.add("document");
+  }
+  return categories;
+}
+
 /** Lowercase tokens (≥3 chars) for TF-IDF keyword overlap. */
 export function tokeniseMemory(text: string): string[] {
   return text
@@ -143,13 +220,16 @@ export function tokeniseMemory(text: string): string[] {
  * max-entry ceiling is hit. Always keeps at least the first entry so recall
  * never silently returns nothing when a single memory exceeds the budget.
  */
-export function selectMemoriesWithinBudget(ordered: OraMemoryRow[]): OraMemoryRow[] {
+export function selectMemoriesWithinBudget(
+  ordered: OraMemoryRow[],
+  profile: OraMemoryRecallProfile = resolveOraMemoryRecallProfile(),
+): OraMemoryRow[] {
   const selected: OraMemoryRow[] = [];
   let chars = 0;
   for (const r of ordered) {
-    if (selected.length >= ORA_MEMORY_MAX_ENTRIES) break;
+    if (selected.length >= profile.maxEntries) break;
     const cost = r.title.length + (r.content?.length ?? 0) + 4;
-    if (selected.length > 0 && chars + cost > ORA_MEMORY_CHAR_BUDGET) break;
+    if (selected.length > 0 && chars + cost > profile.charBudget) break;
     selected.push(r);
     chars += cost;
   }
@@ -167,9 +247,10 @@ export function selectMemoriesWithinBudget(ordered: OraMemoryRow[]): OraMemoryRo
 export async function rankMemoriesByRelevance(
   rows: OraMemoryRow[],
   message: string,
+  profile: OraMemoryRecallProfile = resolveOraMemoryRecallProfile(),
 ): Promise<OraMemoryRow[]> {
   const trimmed = message.trim();
-  if (trimmed.length === 0) return selectMemoriesWithinBudget(rows);
+  if (trimmed.length === 0) return selectMemoriesWithinBudget(rows, profile);
 
   // Best-effort prompt embedding, raced against a short timeout. On any failure
   // OR if the provider is slow, we fall back to TF-IDF for every entry — never
@@ -185,6 +266,7 @@ export async function rankMemoriesByRelevance(
   }
 
   const promptTokens = tokeniseMemory(trimmed);
+  const queryCategories = inferMemoryQueryCategories(trimmed);
   const rowTokens = rows.map((e) => tokeniseMemory(`${e.title} ${e.content}`));
   const N = rows.length;
 
@@ -213,7 +295,7 @@ export async function rankMemoriesByRelevance(
     ) {
       // Primary: semantic similarity.
       const sim = cosineSimilarity(promptEmbedding, entryEmbedding);
-      score += sim * ORA_MEMORY_SEMANTIC_WEIGHT;
+      score += sim * profile.semanticWeight;
       if (sim > 0.05) signal = true;
     } else {
       // Fallback: TF-IDF keyword overlap (per-entry, graceful).
@@ -241,17 +323,23 @@ export async function rankMemoriesByRelevance(
     // Soft category signal: gently favour categories that should usually be in
     // scope (preferences, personal facts). Additive and small — never sets the
     // relevance `signal`, so it can't manufacture a match where none exists.
-    if (e.category) score += ORA_MEMORY_CATEGORY_BOOST[e.category] ?? 0;
+    if (e.category) {
+      score += profile.categoryBaseBoost[e.category] ?? 0;
+      if (queryCategories.has(e.category)) score += profile.categoryMatchBoost;
+    }
 
     if (signal) anySignal = true;
     return { entry: e, score };
   });
 
   // No relevance signal anywhere → preserve the recency-based floor.
-  if (!anySignal) return selectMemoriesWithinBudget(rows);
+  if (!anySignal) return selectMemoriesWithinBudget(rows, profile);
 
   scored.sort((a, b) => b.score - a.score);
-  return selectMemoriesWithinBudget(scored.map((s) => s.entry));
+  return selectMemoriesWithinBudget(
+    scored.map((s) => s.entry),
+    profile,
+  );
 }
 
 /**
@@ -322,8 +410,10 @@ export async function buildMemoryContext(
   userId: string,
   oraProjectId?: number | null,
   currentMessage?: string,
+  subscriptionTier?: string | null,
 ): Promise<MemoryContextResult> {
   try {
+    const profile = resolveOraMemoryRecallProfile(subscriptionTier);
     // ISOLATION (project vs general): a project chat sees ONLY that project's
     // memories; a standalone chat sees ONLY user-level memories. The two tiers
     // are never mixed — a project's context must not leak general facts, and a
@@ -361,7 +451,7 @@ export async function buildMemoryContext(
           ),
         )
         .orderBy(desc(knowledgeEntriesTable.createdAt))
-        .limit(ORA_MEMORY_CANDIDATE_LIMIT);
+        .limit(profile.candidateLimit);
     }
 
     // Project memories persist across every conversation in an Ora project, but
@@ -404,7 +494,7 @@ export async function buildMemoryContext(
             ),
           )
           .orderBy(desc(knowledgeEntriesTable.createdAt))
-          .limit(ORA_MEMORY_CANDIDATE_LIMIT);
+          .limit(profile.candidateLimit);
       }
     }
 
@@ -416,8 +506,8 @@ export async function buildMemoryContext(
 
     const selected =
       currentMessage && currentMessage.trim().length > 0
-        ? await rankMemoriesByRelevance(pool, currentMessage)
-        : selectMemoriesWithinBudget(pool);
+        ? await rankMemoriesByRelevance(pool, currentMessage, profile)
+        : selectMemoriesWithinBudget(pool, profile);
 
     // Lazily index any memories missing an embedding so later retrievals can
     // use semantic similarity. Fire-and-forget; never blocks this reply.
@@ -429,7 +519,7 @@ export async function buildMemoryContext(
       .map((r) => `- ${r.title}${r.content ? `: ${r.content}` : ""}`)
       .join("\n");
     return {
-      text: `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation:\n${lines}`,
+      text: `\n\n## Saved memories\nThe user has saved these preferences and facts about themselves and their projects. Apply them when relevant, but defer to anything they say in the current conversation. Ignore any saved memory that conflicts with the current message:\n${lines}`,
       used: selected.map((r) => ({ id: r.id, title: r.title })),
     };
   } catch {
@@ -1112,7 +1202,7 @@ router.post("/public-ai/chat", async (req, res) => {
     // Temporary ("incognito") chats never read long-term saved memories.
     const searchMemory =
       authed && referenceSavedMemories && !temporary
-        ? await buildMemoryContext(authed.userId, oraProjectId, message)
+        ? await buildMemoryContext(authed.userId, oraProjectId, message, authed.tier)
         : { text: "", used: [] };
     const searchPersonalContext = searchProfileContext + searchMemory.text;
     try {
@@ -1187,7 +1277,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // ("incognito") chats never read long-term memory.
   const memory =
     authed && referenceSavedMemories && !temporary
-      ? await buildMemoryContext(authed.userId, oraProjectId, message)
+      ? await buildMemoryContext(authed.userId, oraProjectId, message, planTier)
       : { text: "", used: [] };
 
   // Cross-conversation recall: pull relevant gist from the user's OTHER recent

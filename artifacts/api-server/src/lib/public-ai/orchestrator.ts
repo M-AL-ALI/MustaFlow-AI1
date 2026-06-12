@@ -711,8 +711,11 @@ const MEMORY_SAVE_EXPLICIT_PATTERNS: RegExp[] = [
 // Implicit durable facts the user stated in passing. Worth offering to save,
 // but only as a LOW-confidence suggestion — never auto-saved.
 const MEMORY_SAVE_IMPLICIT_PATTERNS: RegExp[] = [
-  /\bmy\s+(?:name|company|business|product|preference|budget|timezone|stack)\s+is\b/i,
+  /\bmy\s+(?:name|company|business|product|preference|budget|timezone|time\s+zone|stack|role|job|title)\s+is\b/i,
   /\bi\s+(?:prefer|always|usually)\b/i,
+  /\bmy\s+(?:favorite|favourite)\s+\w+\s+is\b/i,
+  /\bi(?:'m| am)\s+(?:based|located)\s+in\b/i,
+  /\bi(?:'m| am)\s+(?:building|working\s+on|launching)\b/i,
 ];
 
 // Sensitive-data signals. A candidate matching ANY of these is treated as
@@ -769,6 +772,53 @@ export interface MemorySaveCandidate {
    * explicit click to persist.
    */
   sensitive: boolean;
+  /**
+   * Best-effort category for downstream storage/default UI grouping. Existing
+   * clients may ignore it; the save endpoint still reclassifies on persistence.
+   */
+  category?: "preference" | "personal" | "project" | "document" | "other";
+}
+
+function inferMemoryCandidateCategory(fact: string): NonNullable<MemorySaveCandidate["category"]> {
+  const text = fact.toLowerCase();
+  if (
+    /\b(prefer|preference|favorite|favourite|always|usually|never|tone|style|concise|verbose|dark mode|light mode|format)\b/.test(
+      text,
+    )
+  ) {
+    return "preference";
+  }
+  if (
+    /\b(name|company|business|role|job|title|live|based|located|timezone|time zone|language|speak)\b/.test(
+      text,
+    )
+  ) {
+    return "personal";
+  }
+  if (
+    /\b(project|app|product|building|launch|stack|database|repo|client|customer|integration|deadline)\b/.test(
+      text,
+    )
+  ) {
+    return "project";
+  }
+  if (/\b(document|file|upload|report|deck|spreadsheet|pdf|docx|xlsx|csv)\b/.test(text)) {
+    return "document";
+  }
+  return "other";
+}
+
+function parseMemoryCandidateCategory(
+  value: unknown,
+  fact: string,
+): NonNullable<MemorySaveCandidate["category"]> {
+  return value === "preference" ||
+    value === "personal" ||
+    value === "project" ||
+    value === "document" ||
+    value === "other"
+    ? value
+    : inferMemoryCandidateCategory(fact);
 }
 
 /**
@@ -800,6 +850,7 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
     fact: cleanFact,
     confidence: sensitive ? "low" : isExplicit ? "high" : "low",
     sensitive,
+    category: inferMemoryCandidateCategory(cleanFact),
   };
 }
 
@@ -807,15 +858,17 @@ export function detectMemorySaveCandidate(message: string): MemorySaveCandidate 
 
 const MEMORY_EXTRACT_SYSTEM_PROMPT = `You extract durable, user-specific facts worth remembering long-term from a single user message to a chat assistant named Ora.
 
-A DURABLE fact is a stable preference, attribute, constraint, or piece of context about the user, their business, or their projects that would still be useful to know in a future, unrelated conversation. Examples: their name, company, role, industry, the product they're building, a standing preference ("I prefer dark mode", "always answer concisely"), their tech stack, budget, timezone, target audience, or recurring constraints.
+A DURABLE fact is a stable preference, attribute, constraint, instruction, or piece of context about the user, their business, or their projects that would still be useful to know in a future, unrelated conversation. Examples: their name, company, role, industry, location/timezone, the product they're building, standing answer preferences ("always answer concisely"), design/style preferences, their tech stack, budget, target audience, recurring constraints, or long-lived project context.
 
-NOT durable (return save=false): greetings, small talk, one-off questions, requests/commands for the current task, transient state ("I'm tired today", "what's the weather"), opinions about the current answer, or anything only relevant to this single exchange.
+NOT durable (return save=false): greetings, small talk, one-off questions, requests/commands for the current task, transient state ("I'm tired today", "what's the weather"), opinions about the current answer, temporary travel/schedule details, or anything only relevant to this single exchange.
 
 Set "explicit" to true ONLY when the user directly asks you to remember/note/save something (e.g. "remember that…", "don't forget…", "keep a note that…", "for future reference…"). Otherwise false.
 
 Write "fact" as one concise, self-contained declarative sentence in third person about the user (e.g. "Prefers dark mode", "Is building an e-commerce app for handmade jewelry", "Works as a product manager at Acme"). Strip any imperative preamble. Keep it under 200 characters.
 
-Respond ONLY with strict JSON of the form: {"save": boolean, "fact": string, "explicit": boolean}. When save is false, set fact to "" and explicit to false.`;
+Set "category" to one of: "preference", "personal", "project", "document", "other".
+
+Respond ONLY with strict JSON of the form: {"save": boolean, "fact": string, "explicit": boolean, "category": string}. When save is false, set fact to "", explicit to false, and category to "other".`;
 
 /**
  * Model-based extraction of a durable, user-specific fact worth saving to Ora
@@ -904,9 +957,14 @@ export async function extractMemorySaveCandidate(
     const raw = result.result.choices[0]?.message?.content?.trim() ?? "";
     if (!raw) return detectMemorySaveCandidate(message);
 
-    let parsed: { save?: unknown; fact?: unknown; explicit?: unknown };
+    let parsed: { save?: unknown; fact?: unknown; explicit?: unknown; category?: unknown };
     try {
-      parsed = JSON.parse(raw) as { save?: unknown; fact?: unknown; explicit?: unknown };
+      parsed = JSON.parse(raw) as {
+        save?: unknown;
+        fact?: unknown;
+        explicit?: unknown;
+        category?: unknown;
+      };
     } catch {
       return detectMemorySaveCandidate(message);
     }
@@ -953,6 +1011,7 @@ export async function extractMemorySaveCandidate(
       fact: fact.slice(0, 300),
       confidence: sensitive ? "low" : isExplicit ? "high" : "low",
       sensitive,
+      category: parseMemoryCandidateCategory(parsed.category, fact),
     };
   } catch (err) {
     // Fail safe to the regex detector rather than erroring the chat. This keeps
