@@ -58,6 +58,7 @@ import type {
   AdminJobQueue,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { OraRoutingDiagnosticsPanel } from "@/components/admin/ora-routing-diagnostics-panel";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
   return (
@@ -203,6 +204,8 @@ export default function AdminPage() {
       <EvalResultsTile />
 
       <InboxRecentUnreadTile />
+
+      <OraRoutingDiagnosticsPanel />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <SupportTicketsTile />
