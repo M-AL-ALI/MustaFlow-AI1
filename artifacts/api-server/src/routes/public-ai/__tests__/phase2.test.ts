@@ -17,9 +17,24 @@ vi.mock("../../../lib/ai-providers", () => ({
   isDeepSeekAvailable: () => false,
   MODEL_DEFAULTS: {
     openai: { lite: "gpt-5-nano", eco: "gpt-5-mini", power: "gpt-5.4", pro: "gpt-5.4" },
-    anthropic: { lite: "claude-haiku-4-5", eco: "claude-haiku-4-5", power: "claude-sonnet-4-6", pro: "claude-opus-4-7" },
-    gemini: { lite: "gemini-2.5-flash", eco: "gemini-2.5-flash", power: "gemini-2.5-pro", pro: "gemini-2.5-pro" },
-    deepseek: { lite: "deepseek-chat", eco: "deepseek-chat", power: "deepseek-reasoner", pro: "deepseek-reasoner" },
+    anthropic: {
+      lite: "claude-haiku-4-5",
+      eco: "claude-haiku-4-5",
+      power: "claude-sonnet-4-6",
+      pro: "claude-opus-4-7",
+    },
+    gemini: {
+      lite: "gemini-2.5-flash",
+      eco: "gemini-2.5-flash",
+      power: "gemini-2.5-pro",
+      pro: "gemini-2.5-pro",
+    },
+    deepseek: {
+      lite: "deepseek-chat",
+      eco: "deepseek-chat",
+      power: "deepseek-reasoner",
+      pro: "deepseek-reasoner",
+    },
   },
 }));
 
