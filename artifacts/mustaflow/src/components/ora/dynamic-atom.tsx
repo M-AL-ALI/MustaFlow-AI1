@@ -261,6 +261,7 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
       animationTimingFunction: "linear",
       animationIterationCount: "infinite",
       animationDelay: delay,
+      transition: "fill 250ms ease",
     }) as CSSProperties;
 
   const coreStyle: CSSProperties = isActive
@@ -304,7 +305,7 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
       aria-hidden
     >
       {/* Glow */}
-      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowStyle} />
+      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={{ ...glowStyle, transition: "fill 250ms ease" }} />
 
       {/* Orbit ring 1 — tilted */}
       <ellipse
@@ -316,6 +317,7 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
         stroke={orbitRingColor}
         strokeWidth="0.8"
         transform={`rotate(-35, ${cx}, ${cy})`}
+        style={{ transition: "stroke 250ms ease" }}
       />
       {/* Orbit ring 2 — tilted other way */}
       <ellipse
@@ -327,6 +329,7 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
         stroke={orbitRingColor}
         strokeWidth="0.8"
         transform={`rotate(35, ${cx}, ${cy})`}
+        style={{ transition: "stroke 250ms ease" }}
       />
 
       {/* Electron 1 */}
@@ -355,7 +358,7 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
       />
 
       {/* Core */}
-      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreStyle} />
+      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={{ ...coreStyle, transition: "fill 250ms ease" }} />
       <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
 
       {/* Badge overlay for contextual states */}

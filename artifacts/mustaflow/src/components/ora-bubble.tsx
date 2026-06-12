@@ -1271,7 +1271,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                       <span
                         key={i}
                         className="block h-1.5 w-1.5 rounded-full animate-pulse"
-                        style={{ backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`, animationDelay: `${i * 200}ms` }}
+                        style={{ backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`, animationDelay: `${i * 200}ms`, transition: "background-color 250ms ease" }}
                       />
                     ))}
                   </div>
