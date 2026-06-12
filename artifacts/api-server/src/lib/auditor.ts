@@ -192,7 +192,8 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     }
 
     // 6. Low contrast heuristic — inline style color checks
-    const inlineColorStyles: string[] = html.match(/style\s*=\s*["'][^"']*color\s*:[^;'"]+/gi) ?? [];
+    const inlineColorStyles: string[] =
+      html.match(/style\s*=\s*["'][^"']*color\s*:[^;'"]+/gi) ?? [];
     const suspiciousContrast = inlineColorStyles.filter((s) => {
       const lower = s.toLowerCase();
       // Flag when text color and background color appear to be both light or both dark
