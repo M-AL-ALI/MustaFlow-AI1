@@ -16,6 +16,12 @@ interface DynamicAtomProps {
   state?: AtomState;
   size?: number;
   className?: string;
+  accentColor?: string;
+}
+
+function parseHsl(hsl: string): [number, number, number] {
+  const m = hsl.match(/hsl\(\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%/);
+  return m ? [+m[1], +m[2], +m[3]] : [265, 85, 65];
 }
 
 const STATE_KEYFRAMES = `
@@ -187,7 +193,7 @@ function BadgeIcon({ state, r }: { state: AtomState; r: number }) {
   );
 }
 
-export function DynamicAtom({ state = "idle", size = 32, className }: DynamicAtomProps) {
+export function DynamicAtom({ state = "idle", size = 32, className, accentColor }: DynamicAtomProps) {
   injectStyles();
 
   const cx = size / 2;
@@ -209,36 +215,38 @@ export function DynamicAtom({ state = "idle", size = 32, className }: DynamicAto
   const orbitDuration = isActive ? "0.9s" : "3.2s";
   const orbitRevDuration = isActive ? "1.3s" : "4.8s";
 
+  const [aH, aS, aL] = parseHsl(accentColor ?? "hsl(265 85% 65%)");
+
   const coreColor = isSuccess
     ? "hsl(145 65% 55%)"
     : isError
       ? "hsl(0 75% 58%)"
       : state === "replying"
         ? "hsl(230 80% 65%)"
-        : "hsl(265 85% 65%)";
+        : `hsl(${aH} ${aS}% ${aL}%)`;
 
   const electronColor1 = isSuccess
     ? "hsl(145 65% 65%)"
     : isError
       ? "hsl(30 85% 60%)"
-      : "hsl(265 85% 75%)";
+      : `hsl(${aH} ${aS}% ${Math.min(aL + 10, 90)}%)`;
   const electronColor2 = isSuccess
     ? "hsl(145 55% 70%)"
     : isError
       ? "hsl(0 75% 65%)"
-      : "hsl(220 80% 70%)";
+      : `hsl(${Math.max(aH - 40, 0)} ${Math.max(aS - 5, 40)}% ${Math.min(aL + 5, 88)}%)`;
 
   const glowColor = isSuccess
     ? "hsl(145 65% 55% / 0.45)"
     : isError
       ? "hsl(0 75% 55% / 0.45)"
-      : "hsl(265 85% 65% / 0.3)";
+      : `hsl(${aH} ${aS}% ${aL}% / 0.3)`;
 
   const orbitRingColor = isError
     ? "hsl(30 85% 58% / 0.35)"
     : isSuccess
       ? "hsl(145 65% 55% / 0.35)"
-      : "hsl(265 85% 65% / 0.2)";
+      : `hsl(${aH} ${aS}% ${aL}% / 0.2)`;
 
   const orbitStyle = (reverse: boolean, delay = "0s"): CSSProperties =>
     ({

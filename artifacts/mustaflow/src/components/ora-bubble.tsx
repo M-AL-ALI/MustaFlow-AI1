@@ -24,6 +24,7 @@ import { OraMessageActions } from "@/components/ora/ora-message-actions";
 import { OraExportMenu } from "@/components/ora/ora-export-menu";
 import { OraUsageInline } from "@/components/ora-usage-inline";
 import { cn } from "@/lib/utils";
+import { authFetch } from "@/lib/api-fetch";
 import type {
   UseOraChatReturn,
   UploadState,
@@ -102,6 +103,12 @@ const STATUS_LABELS: Record<string, string> = {
   analyzing: "Analyzing dataset…",
   "analyzing-image": "Analyzing image…",
 };
+
+function oraAccentColor(tier: string): string {
+  if (tier === "core") return "hsl(175 70% 55%)";
+  if (tier === "wave") return "hsl(35 85% 60%)";
+  return "hsl(265 85% 65%)";
+}
 
 interface OraBubbleProps {
   chat: UseOraChatReturn;
@@ -208,6 +215,23 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   } = chat;
 
   const { isSignedIn } = useUser();
+  const [tier, setTier] = useState("free");
+
+  useEffect(() => {
+    if (!isSignedIn) { setTier("free"); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        let res = await authFetch("/api/public-ai/session");
+        if (res.status === 401) res = await authFetch("/api/public-ai/session", { method: "POST" });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as { tier?: string };
+        if (!cancelled) setTier(data.tier ?? "free");
+      } catch { if (!cancelled) setTier("free"); }
+    })();
+    return () => { cancelled = true; };
+  }, [isSignedIn]);
+
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -1217,20 +1241,20 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
             {isLoading && (
               <div className="flex items-start gap-2">
-                <DynamicAtom state={atomState} size={20} className="shrink-0 mt-0.5" />
+                <DynamicAtom state={atomState} size={20} className="shrink-0 mt-0.5" accentColor={oraAccentColor(tier)} />
                 <div className="flex flex-col gap-1 pt-0.5">
                   <div className="flex items-center gap-1">
                     {[0, 1, 2].map((i) => (
                       <span
                         key={i}
-                        className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
-                        style={{ animationDelay: `${i * 200}ms` }}
+                        className="block h-1.5 w-1.5 rounded-full animate-pulse"
+                        style={{ backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`, animationDelay: `${i * 200}ms` }}
                       />
                     ))}
                   </div>
                   {oraStatus !== "idle" && (
-                    <span className="text-[11px] text-muted-foreground">
-                      Ora · {STATUS_LABELS[oraStatus]}
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {STATUS_LABELS[oraStatus]}
                     </span>
                   )}
                 </div>
