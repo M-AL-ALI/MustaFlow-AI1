@@ -6545,6 +6545,12 @@ async function syncAgenticPreviewRuntime(opts: {
   }
 }
 
+/**
+ * Apply a task-agent staging snapshot: works entirely against task.stagingSnapshot
+ * (the draft array persisted while the job is in "needs_review") and patches
+ * project_files exactly as a normal build would, making the staged changes live
+ * in one atomic write. Safe to retry — idempotent per path.
+ */
 export async function applyTaskAgentStaging(taskId: number, projectId: number): Promise<void> {
   const [task] = await db
     .select()

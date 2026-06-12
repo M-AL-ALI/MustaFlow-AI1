@@ -52,6 +52,12 @@ vi.mock("../../lib/ai-providers", () => ({
   createChatCompletion: vi.fn(async () => ({ choices: [{ message: { content: "ok" } }] })),
 }));
 
+// Bypass rate limiting so tests aren't throttled by the escalate limiter.
+vi.mock("../../lib/rateLimit", () => ({
+  supportChatLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  supportEscalateLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
+
 import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
 
 const SUFFIX = Date.now();

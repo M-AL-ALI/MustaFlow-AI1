@@ -110,9 +110,12 @@ function makeRes(): FakeRes {
 }
 
 function makeReq(body: unknown) {
-  return { headers: {} as Record<string, string>, body } as unknown as Parameters<
-    typeof handleStripeWebhook
-  >[0];
+  const rawBody = Buffer.from(JSON.stringify(body));
+  return {
+    headers: { "stripe-signature": "test-sig" } as Record<string, string>,
+    body,
+    rawBody,
+  } as unknown as Parameters<typeof handleStripeWebhook>[0];
 }
 
 // Invoke the handler with a fake req/res, casting the lightweight FakeRes to the
@@ -133,6 +136,11 @@ beforeEach(() => {
   h.updateWhere.mockClear();
   h.getStripeClientMock.mockReset();
   h.getStripeClientMock.mockResolvedValue(stripeStub);
+  // constructEvent: decode the rawBody so the handler sees the same event object
+  // the test passed into invoke(), bypassing real signature verification.
+  stripeStub.webhooks.constructEvent.mockImplementation((rawBody: Buffer) =>
+    JSON.parse(rawBody.toString()),
+  );
 });
 
 // ─── extractSubscriptionPeriod ───────────────────────────────────────────────
