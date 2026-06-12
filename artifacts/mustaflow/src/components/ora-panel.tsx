@@ -137,6 +137,12 @@ const STATUS_LABELS: Record<string, string> = {
   "analyzing-image": "Analyzing image…",
 };
 
+function oraAccentColor(tier: string): string {
+  if (tier === "core") return "hsl(175 70% 55%)";
+  if (tier === "wave") return "hsl(35 85% 60%)";
+  return "hsl(265 85% 65%)";
+}
+
 interface OraPanelProps {
   chat: UseOraChatReturn;
   /**
@@ -1424,20 +1430,20 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           {/* Loading state */}
           {isLoading && (
             <div className="flex items-start gap-2.5">
-              <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" />
+              <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" accentColor={oraAccentColor(tier)} />
               <div className="flex flex-col gap-1 pt-0.5">
                 <div className="flex items-center gap-1">
                   {[0, 1, 2].map((i) => (
                     <span
                       key={i}
-                      className="block h-1.5 w-1.5 rounded-full bg-[hsl(265_85%_65%/0.5)] animate-pulse"
-                      style={{ animationDelay: `${i * 200}ms` }}
+                      className="block h-1.5 w-1.5 rounded-full animate-pulse"
+                      style={{ backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`, animationDelay: `${i * 200}ms` }}
                     />
                   ))}
                 </div>
                 {oraStatus !== "idle" && (
-                  <span className="text-[11px] text-muted-foreground">
-                    Ora · {STATUS_LABELS[oraStatus]}
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {STATUS_LABELS[oraStatus]}
                   </span>
                 )}
               </div>
