@@ -36,7 +36,7 @@ const TEST_SECRET = "search-image-cards-test-secret";
 // carries a trailing ora-media block with two safe image URLs and one unsafe
 // (loopback) URL. The route's real sanitizeImages must keep the first two and
 // drop the third.
-const createMock = vi.fn();
+const createMock = vi.hoisted(() => vi.fn());
 vi.mock("openai", () => ({
   default: class {
     responses = { create: createMock };

@@ -35,7 +35,7 @@ const TEST_SECRET = "search-source-links-test-secret";
 // carries URL citations in the Responses-API `output` annotations. The route's
 // real extractSources → cleanSourceUrl → dedupeSources must strip tracking
 // params, drop unsafe/non-http URLs, and dedupe the duplicate citation.
-const createMock = vi.fn();
+const createMock = vi.hoisted(() => vi.fn());
 vi.mock("openai", () => ({
   default: class {
     responses = { create: createMock };
