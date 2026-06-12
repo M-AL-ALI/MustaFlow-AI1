@@ -68,6 +68,17 @@ export interface OraWebSearchResult {
 }
 
 export type OraSearchDepth = "quick" | "standard" | "research";
+export type OraSearchFreshness = "current" | "evergreen";
+export type OraSearchSourceStrategy = "official" | "primary" | "balanced";
+export type OraSearchMediaIntent = "none" | "image" | "video";
+
+export interface OraSearchPlan {
+  researchIntent: boolean;
+  freshness: OraSearchFreshness;
+  sourceStrategy: OraSearchSourceStrategy;
+  mediaIntent: OraSearchMediaIntent;
+  instruction: string;
+}
 
 export interface OraSearchProfile {
   depth: OraSearchDepth;
@@ -75,6 +86,7 @@ export interface OraSearchProfile {
   sourceLimit: number;
   imageLimit: number;
   videoLimit: number;
+  searchPlan: OraSearchPlan;
   instruction: string;
 }
 
@@ -205,10 +217,10 @@ export function extractSources(output: unknown): OraSource[] {
   return sources;
 }
 
-/** Dedupe sources by normalized URL (host + path), preserving first-seen order. */
+/** Dedupe sources by normalized URL, then prefer stronger source-quality signals. */
 export function dedupeSources(sources: OraSource[], limit = 6): OraSource[] {
   const seen = new Set<string>();
-  const out: OraSource[] = [];
+  const out: Array<{ source: OraSource; index: number }> = [];
   for (const s of sources) {
     let key: string;
     try {
@@ -219,10 +231,69 @@ export function dedupeSources(sources: OraSource[], limit = 6): OraSource[] {
     }
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(s);
-    if (out.length >= limit) break;
+    out.push({ source: s, index: out.length });
   }
-  return out;
+  return out
+    .sort(
+      (a, b) => sourceQualityScore(b.source) - sourceQualityScore(a.source) || a.index - b.index,
+    )
+    .slice(0, limit)
+    .map((item) => item.source);
+}
+
+const LOW_QUALITY_SOURCE_HOSTS = [
+  "pinterest.",
+  "facebook.",
+  "instagram.",
+  "tiktok.",
+  "x.com",
+  "twitter.",
+  "quora.",
+  "answers.",
+];
+
+const TRUSTED_NEWS_HOSTS = [
+  "reuters.com",
+  "apnews.com",
+  "bbc.com",
+  "npr.org",
+  "who.int",
+  "sec.gov",
+];
+
+export function sourceQualityScore(source: OraSource): number {
+  let score = 0;
+  let host = "";
+  let path: string;
+  try {
+    const u = new URL(source.url);
+    host = u.hostname.replace(/^www\./, "").toLowerCase();
+    path = u.pathname.toLowerCase();
+  } catch {
+    return -10;
+  }
+
+  const title = source.title.toLowerCase();
+  if (/\.(?:gov|mil)$/.test(host)) score += 8;
+  if (/\.(?:edu)$/.test(host)) score += 5;
+  if (TRUSTED_NEWS_HOSTS.some((trusted) => host === trusted || host.endsWith(`.${trusted}`))) {
+    score += 4;
+  }
+  if (
+    /\b(?:official|primary source|documentation|docs|developer|api reference|manual)\b/.test(title)
+  ) {
+    score += 5;
+  }
+  if (/\/(?:docs|documentation|developers?|support|help|manual|api|reference)(?:\/|$)/.test(path)) {
+    score += 3;
+  }
+  if (/\/(?:press|news|releases?|blog)(?:\/|$)/.test(path)) score += 1;
+  if (/\b(?:latest|current|today|202[5-9])\b/.test(title) || /\/202[5-9]\//.test(path)) {
+    score += 1;
+  }
+  if (LOW_QUALITY_SOURCE_HOSTS.some((low) => host.includes(low))) score -= 5;
+  if (/\/(?:search|tag|tags|category|categories)(?:\/|$)/.test(path)) score -= 2;
+  return score;
 }
 
 /** Extract a YouTube video id from any common YouTube URL shape. */
@@ -262,8 +333,76 @@ const RESEARCH_SEARCH_PATTERNS: RegExp[] = [
   /\b(what\s+should\s+i\s+(?:choose|buy|use|pick)|which\s+(?:one|tool|service|platform|plan))\b/i,
 ];
 
+const CURRENT_SEARCH_PATTERNS: RegExp[] = [
+  /\b(latest|current|today|yesterday|tomorrow|this\s+(?:week|month|year)|now|recent|new|updated)\b/i,
+  /\b(news|price|weather|score|schedule|release|version|available|stock|crypto|rate|law|regulation)\b/i,
+];
+
+const OFFICIAL_SOURCE_PATTERNS: RegExp[] = [
+  /\b(official|primary source|source of truth|government|gov|documentation|docs|api reference)\b/i,
+  /\b(homepage|website|site|pricing page|terms|policy|manual|release notes)\b/i,
+];
+
+const IMAGE_SEARCH_PATTERNS: RegExp[] = [
+  /\b(find|show|search|look up|get)\b.*\b(images?|photos?|pictures?|screenshots?|logos?|icons?)\b/i,
+  /\b(official\s+logo|product\s+photo|press\s+image|brand\s+assets?)\b/i,
+];
+
 export function isResearchSearchQuery(query: string): boolean {
   return RESEARCH_SEARCH_PATTERNS.some((pattern) => pattern.test(query));
+}
+
+function matchesAny(patterns: RegExp[], value: string): boolean {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function inferOraSearchPlan(input: { query: string; wantsVideos?: boolean }): OraSearchPlan {
+  const query = input.query.trim();
+  const researchIntent = isResearchSearchQuery(query);
+  const freshness: OraSearchFreshness = matchesAny(CURRENT_SEARCH_PATTERNS, query)
+    ? "current"
+    : "evergreen";
+  const sourceStrategy: OraSearchSourceStrategy = matchesAny(OFFICIAL_SOURCE_PATTERNS, query)
+    ? "official"
+    : researchIntent
+      ? "primary"
+      : "balanced";
+  const mediaIntent: OraSearchMediaIntent = input.wantsVideos
+    ? "video"
+    : matchesAny(IMAGE_SEARCH_PATTERNS, query)
+      ? "image"
+      : "none";
+
+  const steps = [
+    researchIntent
+      ? "silently decompose the request into targeted searches before answering"
+      : "use the most direct targeted search needed to answer",
+    freshness === "current"
+      ? `treat freshness as important; today's date is ${todayIso()} and volatile facts need exact dates`
+      : "do not over-search evergreen background unless the query needs verification",
+    sourceStrategy === "official"
+      ? "prefer official, primary, or documentation pages over summaries"
+      : sourceStrategy === "primary"
+        ? "prefer primary sources, reputable analysis, and sources that show their methodology"
+        : "prefer reputable sources and avoid low-quality aggregators",
+    mediaIntent === "image"
+      ? "the user is asking for visual references; return direct image URLs in the media block when found"
+      : mediaIntent === "video"
+        ? "the user is asking for videos; return verified watch-page URLs in the media block"
+        : "include media only when it materially helps the answer",
+  ];
+
+  return {
+    researchIntent,
+    freshness,
+    sourceStrategy,
+    mediaIntent,
+    instruction: `Search plan: ${steps.join("; ")}.`,
+  };
 }
 
 export function resolveOraSearchProfile(input: {
@@ -271,7 +410,11 @@ export function resolveOraSearchProfile(input: {
   planTier: OraPlanTier;
   wantsVideos?: boolean;
 }): OraSearchProfile {
-  const researchIntent = isResearchSearchQuery(input.query);
+  const searchPlan = inferOraSearchPlan({
+    query: input.query,
+    wantsVideos: input.wantsVideos,
+  });
+  const researchIntent = searchPlan.researchIntent;
 
   if (input.planTier === "wave") {
     const depth: OraSearchDepth = researchIntent ? "research" : "standard";
@@ -281,6 +424,7 @@ export function resolveOraSearchProfile(input: {
       sourceLimit: researchIntent ? 10 : 8,
       imageLimit: 6,
       videoLimit: input.wantsVideos ? 4 : 3,
+      searchPlan,
       instruction:
         depth === "research"
           ? "Search depth: research. Run a deeper research pass across several reputable sources. Compare recency, authority, and disagreements; include exact dates for volatile facts; call out uncertainty instead of flattening it. For recommendations, give a clear ranked answer with tradeoffs and a practical next step."
@@ -296,6 +440,7 @@ export function resolveOraSearchProfile(input: {
       sourceLimit: researchIntent ? 8 : 6,
       imageLimit: 4,
       videoLimit: input.wantsVideos ? 3 : 2,
+      searchPlan,
       instruction:
         depth === "research"
           ? "Search depth: research. Compare several reliable sources, verify recent claims against dates, highlight meaningful disagreements, and end with a concrete recommendation or summary."
@@ -310,6 +455,7 @@ export function resolveOraSearchProfile(input: {
       sourceLimit: 5,
       imageLimit: 3,
       videoLimit: input.wantsVideos ? 2 : 1,
+      searchPlan,
       instruction:
         "Search depth: standard. Give a useful comparison from reliable sources, but keep it compact. Prioritize the most important evidence, dates, and recommendation.",
     };
@@ -321,6 +467,7 @@ export function resolveOraSearchProfile(input: {
     sourceLimit: 4,
     imageLimit: 2,
     videoLimit: input.wantsVideos ? 2 : 1,
+    searchPlan,
     instruction:
       "Search depth: quick. Answer directly from the strongest sources, include only the key facts and dates, and avoid unnecessary background.",
   };
@@ -602,6 +749,7 @@ export function buildInstructions(
     "Base your answer only on what the search returns. Quote specific facts, numbers, and dates where relevant, and prefer authoritative or official sources so the user can trust the result.",
     "If the search returns nothing useful, say so honestly instead of guessing. Never fabricate sources, facts, or URLs.",
     "Keep the answer focused — a few short paragraphs at most. Do not append a raw list of URLs; the sources are shown separately.",
+    profile.searchPlan.instruction,
     profile.instruction,
     // Media: real images + videos found during search, returned as a structured
     // trailing block the server parses and strips before display.
@@ -614,6 +762,11 @@ export function buildInstructions(
     // watch URLs MUST go in the media block, not the prose.
     base.push(
       'The user is specifically asking for a video. Use web_search to find one or more real, relevant videos on the topic (prefer YouTube watch-page URLs, e.g. https://www.youtube.com/watch?v=...). You MUST list every video you found in the "videos" array of the trailing ora-media block — never paste a video URL into your prose, because the videos array is rendered as clickable cards. Keep your text reply to a short sentence or two introducing them. Only include real, reachable URLs you actually found; if you genuinely found none, say so and leave the videos array empty.',
+    );
+  }
+  if (profile.searchPlan.mediaIntent === "image") {
+    base.push(
+      "The user is asking to find images or visual references, not generate a new image. Use web_search to find real direct image URLs and source pages. Populate the images array with the best relevant results and keep the prose short.",
     );
   }
   if (language && language !== "auto") {
@@ -686,6 +839,9 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
       model,
       planTier,
       searchDepth: profile.depth,
+      sourceStrategy: profile.searchPlan.sourceStrategy,
+      freshness: profile.searchPlan.freshness,
+      mediaIntent: profile.searchPlan.mediaIntent,
       maxOutputTokens: profile.maxOutputTokens,
       wantsVideos: wantsVideos === true,
       latencyMs: Date.now() - start,

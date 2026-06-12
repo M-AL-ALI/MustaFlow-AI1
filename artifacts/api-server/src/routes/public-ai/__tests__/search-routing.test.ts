@@ -24,6 +24,8 @@ import {
   cleanSourceUrl,
   extractSources,
   dedupeSources,
+  sourceQualityScore,
+  inferOraSearchPlan,
   type OraSource,
 } from "../../../lib/public-ai/web-search";
 
@@ -448,6 +450,38 @@ describe("dedupeSources", () => {
     expect(deduped.length).toBe(2);
     expect(deduped[0].url).toBe("https://example.com/1");
     expect(deduped[1].url).toBe("https://example.com/2");
+  });
+
+  it("ranks official and primary sources ahead of lower-quality first-seen sources", () => {
+    const sources: OraSource[] = [
+      { title: "Forum discussion", url: "https://www.quora.com/example-product" },
+      { title: "Official documentation", url: "https://example.com/docs/product" },
+      { title: "Latest AP report", url: "https://apnews.com/article/example" },
+    ];
+
+    const deduped = dedupeSources(sources, 2);
+    expect(deduped[0].url).toBe("https://example.com/docs/product");
+    expect(deduped.map((s) => s.url)).not.toContain("https://www.quora.com/example-product");
+    expect(sourceQualityScore(deduped[0])).toBeGreaterThan(sourceQualityScore(sources[0]));
+  });
+});
+
+describe("inferOraSearchPlan", () => {
+  it("detects current official-source searches", () => {
+    const plan = inferOraSearchPlan({
+      query: "find the latest official pricing page for OpenAI",
+    });
+    expect(plan.freshness).toBe("current");
+    expect(plan.sourceStrategy).toBe("official");
+    expect(plan.instruction).toContain("exact dates");
+  });
+
+  it("detects image-search intent separately from image generation", () => {
+    const plan = inferOraSearchPlan({
+      query: "find the official logo images for Perdue",
+    });
+    expect(plan.mediaIntent).toBe("image");
+    expect(plan.instruction).toContain("direct image URLs");
   });
 });
 

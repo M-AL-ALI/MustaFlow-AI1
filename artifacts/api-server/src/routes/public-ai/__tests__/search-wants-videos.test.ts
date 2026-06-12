@@ -117,6 +117,8 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
     };
     expect(arg.max_output_tokens).toBe(900);
     expect(arg.instructions).toContain("Search depth: quick");
+    expect(arg.instructions).toContain("Search plan:");
+    expect(arg.instructions).toContain("volatile facts need exact dates");
   });
 
   it("raises media limits for Wave video searches", () => {
@@ -128,5 +130,21 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
 
     expect(profile.videoLimit).toBe(4);
     expect(buildInstructions("auto", undefined, true, profile)).toContain("up to 4 videos");
+  });
+
+  it("adds visual-reference guidance for image-finding searches", async () => {
+    mockResponse(
+      'Here are the official logo references.\n```ora-media\n{"images":[],"videos":[]}\n```',
+    );
+    await runOraWebSearch({
+      query: "find the official logo images for Perdue",
+      subscriptionTier: "core",
+    });
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const arg = createMock.mock.calls[0][0] as { instructions: string };
+    expect(arg.instructions).toContain("find images or visual references");
+    expect(arg.instructions).toContain("direct image URLs");
+    expect(arg.instructions).toContain("prefer official, primary, or documentation pages");
   });
 });
