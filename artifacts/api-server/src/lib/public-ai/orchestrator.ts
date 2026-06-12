@@ -151,8 +151,10 @@ export const ORA_TOOL_REGISTRY: Record<OraTool, OraToolMeta> = {
  * Centralized here so the router is the single source of truth for image intent.
  */
 export const ORA_IMAGE_PATTERNS: RegExp[] = [
-  // Verb + optional filler + singular or plural visual noun
-  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?)\b/i,
+  // Verb + optional filler + optional adjectives + singular or plural visual noun.
+  // The adjective slot allows up to 3 extra words (e.g. "a clean", "a modern bold") but
+  // excludes prepositions (of/from/about) so "create a table of images" does NOT match.
+  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?)\b/i,
   // Visual noun + preposition (describing what's in it)
   /\b(images?|photos?|pictures?|illustrations?|artworks?|graphic)\s+(of|showing|depicting|featuring|with)\b/i,
   // Image generation feature references
