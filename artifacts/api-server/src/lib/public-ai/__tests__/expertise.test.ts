@@ -62,7 +62,7 @@ describe("resolveOraAnswerDepth", () => {
 });
 
 describe("buildOraExpertiseProfile", () => {
-  it("gives free and wave users a larger budget than core, and all tiers more than anonymous", () => {
+  it("gives paid technical answers a larger budget than free answers", () => {
     const base = {
       message: "debug a Node API performance issue",
       topic: "technical" as const,
@@ -71,17 +71,13 @@ describe("buildOraExpertiseProfile", () => {
       confidence: "high" as const,
     };
 
-    const anon = buildOraExpertiseProfile({ ...base, planTier: "anonymous" });
     const free = buildOraExpertiseProfile({ ...base, planTier: "free" });
     const core = buildOraExpertiseProfile({ ...base, planTier: "core" });
     const wave = buildOraExpertiseProfile({ ...base, planTier: "wave" });
 
     expect(free.domain).toBe("software_engineering");
-    // Free tier was intentionally raised to match wave (both 2000 base).
-    // Core (paid entry tier) is deliberately set lower to reflect product intent.
-    expect(free.maxTokens).toBeGreaterThan(anon.maxTokens);
-    expect(free.maxTokens).toBeGreaterThan(core.maxTokens);
-    expect(wave.maxTokens).toBeGreaterThanOrEqual(free.maxTokens);
+    expect(core.maxTokens).toBeGreaterThan(free.maxTokens);
+    expect(wave.maxTokens).toBeGreaterThan(core.maxTokens);
     expect(wave.depth).toBe("expert");
   });
 

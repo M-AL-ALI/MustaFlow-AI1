@@ -811,18 +811,9 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     tools: [{ type: "web_search" }] as never,
     max_output_tokens: profile.maxOutputTokens,
     input: messages as never,
-  })) as {
-    output_text?: string;
-    output?: unknown;
-    status?: string;
-    incomplete_details?: { reason?: string };
-  };
+  })) as { output_text?: string; output?: unknown };
 
   const rawReply = (resp.output_text ?? "").trim();
-  // Detect token-ceiling truncation so the user is never left with a silently
-  // cut-off answer. The Responses API sets status="incomplete" + reason="max_output_tokens".
-  const searchWasTruncated =
-    resp.status === "incomplete" && resp.incomplete_details?.reason === "max_output_tokens";
   const sources = dedupeSources(extractSources(resp.output), profile.sourceLimit);
   const parsed = parseOraMediaBlock(rawReply, {
     imageLimit: profile.imageLimit,
@@ -834,10 +825,7 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   // text) so they join the media-block videos rather than rendering as plain,
   // unverified, often-dead links.
   const prose = extractProseVideos(parsed.text);
-  const reply =
-    searchWasTruncated && prose.text
-      ? prose.text + "\n\n*Reply was cut off — ask me to continue if needed.*"
-      : prose.text;
+  const reply = prose.text;
   // The combined videos array is the model's own recollection, not grounded by
   // the search tool, so confirm each one is a real, embeddable video before
   // surfacing it. Anything unverifiable (hallucinated/dead YouTube IDs) is
