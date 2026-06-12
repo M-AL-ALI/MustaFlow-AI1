@@ -137,7 +137,7 @@ function tokenBudgetFor(input: {
   domain: OraExpertiseDomain;
   hasDocumentContext?: boolean;
 }): number {
-  if (input.routeTier === "fast" || input.depth === "concise") return 450;
+  if (input.routeTier === "fast" || input.depth === "concise") return 700;
 
   const substantiveDomain = new Set<OraExpertiseDomain>([
     "software_engineering",
@@ -155,8 +155,8 @@ function tokenBudgetFor(input: {
   }
 
   if (input.planTier === "wave") return 2000 + domainBoost;
-  if (input.planTier === "core") return 1600 + domainBoost;
-  return 1200 + Math.min(domainBoost, 150);
+  if (input.planTier === "core") return 2000 + domainBoost;
+  return 1800 + Math.min(domainBoost, 250);
 }
 
 function domainGuidance(domain: OraExpertiseDomain): string {

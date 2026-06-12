@@ -1250,10 +1250,15 @@ router.post("/public-ai/chat", async (req, res) => {
   // Deep Thinking always uses the strongest model with a larger token budget so
   // the step-by-step reasoning has room to land. Otherwise fall back to the
   // mini model only when the classifier is highly confident this is a simple FAQ.
+  // Only route genuinely one-line platform FAQs to the fast (mini/concise) path.
+  // General questions ("what can I build?", "how does X work?") stay on premium
+  // even when the classifier returns simple_faq, so they get a full token budget.
+  const FAST_ROUTE_TOPICS = new Set(["pricing", "product-features", "onboarding"]);
   const usesMini =
     !deepAllowed &&
     classifierResult.intent === "simple_faq" &&
-    classifierResult.confidence === "high";
+    classifierResult.confidence === "high" &&
+    FAST_ROUTE_TOPICS.has(classifierResult.topic ?? "");
   // The routing tier mirrors the model/token dial above. `openaiModel` is the
   // env-aware OpenAI model the router uses verbatim for its OpenAI candidate.
   const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
@@ -1410,8 +1415,13 @@ router.post("/public-ai/chat", async (req, res) => {
             "Ora model candidate failed — trying next provider in fallback chain",
           ),
       );
+      const rawReply = chain.result.choices[0]?.message?.content?.trim() ?? null;
+      const finishReason = chain.result.choices[0]?.finish_reason;
       return {
-        reply: chain.result.choices[0]?.message?.content?.trim() ?? null,
+        reply:
+          rawReply !== null && finishReason === "length"
+            ? rawReply + "\n\n*Reply was cut off — ask me to continue if needed.*"
+            : rawReply,
         // "usedFallback" means we did not land on the first-choice provider.
         usedFallback: chain.usedFallback,
         modelUsed: chain.candidate.model,
