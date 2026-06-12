@@ -67,7 +67,7 @@ describe("Talk to Ora voice-session wiring", () => {
     const hook = readFe("hooks/use-ora-voice.ts");
     expect(hook).toContain("onFinalRef.current(finalText)");
     expect(hook).not.toContain("sendMessage(");
-    expect(hook).toContain('fetch("/api/public-ai/tts"');
+    expect(hook).toContain('authFetch("/api/public-ai/tts"');
     expect(hook).toContain("speakTextForce");
     expect(hook).toContain("prepareVoicePlayback");
     expect(hook).toContain("decodeAudioData");
@@ -105,9 +105,9 @@ describe("Talk to Ora voice-session wiring", () => {
 
   it("retries server TTS once after refreshing an expired Ora session", () => {
     const hook = readFe("hooks/use-ora-voice.ts");
-    expect(hook).toContain('fetch("/api/public-ai/tts"');
+    expect(hook).toContain('authFetch("/api/public-ai/tts"');
     expect(hook).toContain("resp.status === 401");
-    expect(hook).toContain('fetch("/api/public-ai/session"');
+    expect(hook).toContain('authFetch("/api/public-ai/session"');
     expect(hook).toContain("resp = await requestTts()");
   });
 });

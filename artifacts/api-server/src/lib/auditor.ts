@@ -133,7 +133,7 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     }
 
     // 3. Form inputs without associated labels
-    const inputTags = html.match(/<input(?:\s[^>]*)?\/?>/gi) ?? [];
+    const inputTags: string[] = html.match(/<input(?:\s[^>]*)?\/?>/gi) ?? [];
     const labelFors = extractAttr(html, "for");
     const unlabeledInputs = inputTags.filter((tag) => {
       const type = (tag.match(/type\s*=\s*["']([^"']*)["']/i)?.[1] ?? "").toLowerCase();
@@ -157,7 +157,7 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     }
 
     // 4. Buttons without accessible text
-    const buttonTags = html.match(/<button(?:\s[^>]*)?>[\s\S]*?<\/button>/gi) ?? [];
+    const buttonTags: string[] = html.match(/<button(?:\s[^>]*)?>[\s\S]*?<\/button>/gi) ?? [];
     const iconOnlyButtons = buttonTags.filter((btn) => {
       const hasAriaLabel = /aria-label\s*=/i.test(btn);
       const hasAriaLabelledBy = /aria-labelledby\s*=/i.test(btn);
@@ -192,7 +192,7 @@ export function auditAccessibility(files: BuilderFile[]): AuditFinding[] {
     }
 
     // 6. Low contrast heuristic — inline style color checks
-    const inlineColorStyles = html.match(/style\s*=\s*["'][^"']*color\s*:[^;'"]+/gi) ?? [];
+    const inlineColorStyles: string[] = html.match(/style\s*=\s*["'][^"']*color\s*:[^;'"]+/gi) ?? [];
     const suspiciousContrast = inlineColorStyles.filter((s) => {
       const lower = s.toLowerCase();
       // Flag when text color and background color appear to be both light or both dark
@@ -351,7 +351,7 @@ export function auditPerformance(files: BuilderFile[]): AuditFinding[] {
 
     // 1. Render-blocking scripts in <head> without defer/async
     const headMatch = html.match(/<head[\s\S]*?<\/head>/i)?.[0] ?? "";
-    const headScripts = headMatch.match(/<script(?:\s[^>]*)?\/?>/gi) ?? [];
+    const headScripts: string[] = headMatch.match(/<script(?:\s[^>]*)?\/?>/gi) ?? [];
     const blockingScripts = headScripts.filter((s) => {
       const hasSrc = hasAttr(s, "src");
       const hasDefer = /\bdefer\b/i.test(s);
