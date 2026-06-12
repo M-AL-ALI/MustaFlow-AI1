@@ -193,7 +193,12 @@ function BadgeIcon({ state, r }: { state: AtomState; r: number }) {
   );
 }
 
-export function DynamicAtom({ state = "idle", size = 32, className, accentColor }: DynamicAtomProps) {
+export function DynamicAtom({
+  state = "idle",
+  size = 32,
+  className,
+  accentColor,
+}: DynamicAtomProps) {
   injectStyles();
 
   const cx = size / 2;
@@ -305,7 +310,13 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
       aria-hidden
     >
       {/* Glow */}
-      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={{ ...glowStyle, transition: "fill 250ms ease" }} />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={glowR}
+        fill={glowColor}
+        style={{ ...glowStyle, transition: "fill 250ms ease" }}
+      />
 
       {/* Orbit ring 1 — tilted */}
       <ellipse
@@ -358,7 +369,13 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
       />
 
       {/* Core */}
-      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={{ ...coreStyle, transition: "fill 250ms ease" }} />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={coreR}
+        fill={coreColor}
+        style={{ ...coreStyle, transition: "fill 250ms ease" }}
+      />
       <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
 
       {/* Badge overlay for contextual states */}

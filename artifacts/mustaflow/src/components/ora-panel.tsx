@@ -1453,14 +1453,23 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           {/* Loading state */}
           {isLoading && (
             <div className="flex items-start gap-2.5">
-              <DynamicAtom state={atomState} size={24} className="shrink-0 mt-0.5" accentColor={oraAccentColor(tier)} />
+              <DynamicAtom
+                state={atomState}
+                size={24}
+                className="shrink-0 mt-0.5"
+                accentColor={oraAccentColor(tier)}
+              />
               <div className="flex flex-col gap-1 pt-0.5">
                 <div className="flex items-center gap-1">
                   {[0, 1, 2].map((i) => (
                     <span
                       key={i}
                       className="block h-1.5 w-1.5 rounded-full animate-pulse"
-                      style={{ backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`, animationDelay: `${i * 200}ms`, transition: "background-color 250ms ease" }}
+                      style={{
+                        backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`,
+                        animationDelay: `${i * 200}ms`,
+                        transition: "background-color 250ms ease",
+                      }}
                     />
                   ))}
                 </div>

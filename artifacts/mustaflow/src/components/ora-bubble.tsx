@@ -240,7 +240,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [tier, setTier] = useState("free");
 
   useEffect(() => {
-    if (!isSignedIn) { setTier("free"); return; }
+    if (!isSignedIn) {
+      setTier("free");
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -249,9 +252,13 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as { tier?: string };
         if (!cancelled) setTier(data.tier ?? "free");
-      } catch { if (!cancelled) setTier("free"); }
+      } catch {
+        if (!cancelled) setTier("free");
+      }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isSignedIn]);
 
   const [open, setOpen] = useState(false);
@@ -875,9 +882,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               <span className="text-sm font-semibold tracking-tight">Ora</span>
               {isSignedIn && <OraTierBadge tier={tier} />}
               {!isSignedIn && (
-                <span className="text-[10px] text-muted-foreground/70">
-                  Free · No sign-in
-                </span>
+                <span className="text-[10px] text-muted-foreground/70">Free · No sign-in</span>
               )}
             </div>
             {oraStatus !== "idle" && (
@@ -1264,14 +1269,23 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
 
             {isLoading && (
               <div className="flex items-start gap-2">
-                <DynamicAtom state={atomState} size={20} className="shrink-0 mt-0.5" accentColor={oraAccentColor(tier)} />
+                <DynamicAtom
+                  state={atomState}
+                  size={20}
+                  className="shrink-0 mt-0.5"
+                  accentColor={oraAccentColor(tier)}
+                />
                 <div className="flex flex-col gap-1 pt-0.5">
                   <div className="flex items-center gap-1">
                     {[0, 1, 2].map((i) => (
                       <span
                         key={i}
                         className="block h-1.5 w-1.5 rounded-full animate-pulse"
-                        style={{ backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`, animationDelay: `${i * 200}ms`, transition: "background-color 250ms ease" }}
+                        style={{
+                          backgroundColor: `${oraAccentColor(tier).replace(")", " / 0.5)")}`,
+                          animationDelay: `${i * 200}ms`,
+                          transition: "background-color 250ms ease",
+                        }}
                       />
                     ))}
                   </div>
