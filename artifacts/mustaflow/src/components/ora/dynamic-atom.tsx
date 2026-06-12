@@ -1,4 +1,4 @@
-import { type CSSProperties } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export type AtomState =
@@ -217,8 +217,10 @@ export function DynamicAtom({
   const isSuccess = state === "success";
   const isError = state === "error";
 
-  const orbitDuration = isActive ? "0.9s" : "3.2s";
-  const orbitRevDuration = isActive ? "1.3s" : "4.8s";
+  const isFast = isActive || isWorking;
+
+  const orbitDuration = isFast ? "0.9s" : "3.2s";
+  const orbitRevDuration = isFast ? "1.3s" : "4.8s";
 
   const [aH, aS, aL] = parseHsl(accentColor ?? "hsl(265 85% 65%)");
 
@@ -251,15 +253,30 @@ export function DynamicAtom({
       ? "hsl(145 65% 55% / 0.35)"
       : `hsl(${aH} ${aS}% ${aL}% / 0.2)`;
 
+  // ── Smooth orbit speed transition ─────────────────────────────────────────
+  // CSS cannot animate `animation-duration`, so we briefly fade the electrons
+  // out while the new speed snaps in, then fade them back. The 220ms fade
+  // out/in window makes the speed change imperceptible.
+  const [electronsVisible, setElectronsVisible] = useState(true);
+  const prevIsFastRef = useRef(isFast);
+
+  useEffect(() => {
+    if (prevIsFastRef.current === isFast) return;
+    prevIsFastRef.current = isFast;
+    setElectronsVisible(false);
+    const t = setTimeout(() => setElectronsVisible(true), 220);
+    return () => clearTimeout(t);
+  }, [isFast]);
+
   const orbitStyle = (reverse: boolean, delay = "0s"): CSSProperties =>
     ({
       "--orbit-r": `${orbitR}px`,
       transformOrigin: `${cx}px ${cy}px`,
       animationName: reverse
-        ? isActive || isWorking
+        ? isFast
           ? "ora-orbit-rev-fast"
           : "ora-orbit-rev-slow"
-        : isActive || isWorking
+        : isFast
           ? "ora-orbit-fast"
           : "ora-orbit-slow",
       animationDuration: reverse ? orbitRevDuration : orbitDuration,
@@ -269,37 +286,62 @@ export function DynamicAtom({
       transition: "fill 250ms ease",
     }) as CSSProperties;
 
-  const coreStyle: CSSProperties = isActive
-    ? {
-        transformOrigin: `${cx}px ${cy}px`,
-        animation: `ora-core-thinking 1.1s ease-in-out infinite`,
-      }
-    : isWorking
-      ? {
-          transformOrigin: `${cx}px ${cy}px`,
-          animation: `ora-core-pulse 1.8s ease-in-out infinite`,
-        }
-      : {};
+  // ── Glow cross-fade ───────────────────────────────────────────────────────
+  // Two stacked glow circles — one for each animation style — fade between
+  // them with CSS opacity transitions so the breathing speed cross-fades.
+  const glowSharedBase: CSSProperties = {
+    transformOrigin: `${cx}px ${cy}px`,
+    transition: "opacity 350ms ease, fill 250ms ease",
+  };
 
-  const glowStyle: CSSProperties = isSuccess
-    ? {
-        transformOrigin: `${cx}px ${cy}px`,
-        animation: `ora-success-shimmer 1.6s ease-in-out infinite`,
-      }
-    : isError
-      ? {
-          transformOrigin: `${cx}px ${cy}px`,
-          animation: `ora-error-pulse 0.9s ease-in-out infinite`,
-        }
-      : isActive
-        ? {
-            transformOrigin: `${cx}px ${cy}px`,
-            animation: `ora-glow-active 0.8s ease-in-out infinite`,
-          }
-        : {
-            transformOrigin: `${cx}px ${cy}px`,
-            animation: `ora-glow-idle 2.4s ease-in-out infinite`,
-          };
+  const glowIdleStyle: CSSProperties = {
+    ...glowSharedBase,
+    animation: "ora-glow-idle 2.4s ease-in-out infinite",
+    opacity: !isActive && !isSuccess && !isError ? 1 : 0,
+  };
+
+  const glowActiveStyle: CSSProperties = {
+    ...glowSharedBase,
+    animation: "ora-glow-active 0.8s ease-in-out infinite",
+    opacity: isActive ? 1 : 0,
+  };
+
+  const glowSuccessStyle: CSSProperties = {
+    ...glowSharedBase,
+    animation: "ora-success-shimmer 1.6s ease-in-out infinite",
+    opacity: isSuccess ? 1 : 0,
+  };
+
+  const glowErrorStyle: CSSProperties = {
+    ...glowSharedBase,
+    animation: "ora-error-pulse 0.9s ease-in-out infinite",
+    opacity: isError ? 1 : 0,
+  };
+
+  // ── Core animation cross-fade ─────────────────────────────────────────────
+  // Two stacked core circles — idle (no animation) and thinking — fade between
+  // them so the pulsing animation eases in/out rather than snapping.
+  const coreSharedBase: CSSProperties = {
+    transformOrigin: `${cx}px ${cy}px`,
+    transition: "opacity 350ms ease, fill 250ms ease",
+  };
+
+  const coreIdleStyle: CSSProperties = {
+    ...coreSharedBase,
+    opacity: !isActive && !isWorking ? 1 : 0,
+  };
+
+  const coreThinkingStyle: CSSProperties = {
+    ...coreSharedBase,
+    animation: "ora-core-thinking 1.1s ease-in-out infinite",
+    opacity: isActive ? 1 : 0,
+  };
+
+  const coreWorkingStyle: CSSProperties = {
+    ...coreSharedBase,
+    animation: "ora-core-pulse 1.8s ease-in-out infinite",
+    opacity: isWorking ? 1 : 0,
+  };
 
   return (
     <svg
@@ -309,14 +351,11 @@ export function DynamicAtom({
       className={cn("shrink-0", className)}
       aria-hidden
     >
-      {/* Glow */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={glowR}
-        fill={glowColor}
-        style={{ ...glowStyle, transition: "fill 250ms ease" }}
-      />
+      {/* Glow — four stacked layers, opacity cross-fades between them */}
+      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowIdleStyle} />
+      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowActiveStyle} />
+      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowSuccessStyle} />
+      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowErrorStyle} />
 
       {/* Orbit ring 1 — tilted */}
       <ellipse
@@ -343,39 +382,38 @@ export function DynamicAtom({
         style={{ transition: "stroke 250ms ease" }}
       />
 
-      {/* Electron 1 */}
-      <circle
-        cx={cx + orbitR}
-        cy={cy}
-        r={electronR}
-        fill={electronColor1}
-        style={orbitStyle(false)}
-      />
-      {/* Electron 2 — reverse, offset */}
-      <circle
-        cx={cx - orbitR}
-        cy={cy}
-        r={electronR * 0.85}
-        fill={electronColor2}
-        style={orbitStyle(true, "-0.4s")}
-      />
-      {/* Electron 3 — 3rd ring, slower phase */}
-      <circle
-        cx={cx + orbitR}
-        cy={cy}
-        r={electronR * 0.7}
-        fill="hsl(200 75% 70%)"
-        style={orbitStyle(false, "-1.2s")}
-      />
+      {/* Electrons — group fades out/in on speed change so the snap is hidden */}
+      <g style={{ opacity: electronsVisible ? 1 : 0, transition: "opacity 200ms ease" }}>
+        {/* Electron 1 */}
+        <circle
+          cx={cx + orbitR}
+          cy={cy}
+          r={electronR}
+          fill={electronColor1}
+          style={orbitStyle(false)}
+        />
+        {/* Electron 2 — reverse, offset */}
+        <circle
+          cx={cx - orbitR}
+          cy={cy}
+          r={electronR * 0.85}
+          fill={electronColor2}
+          style={orbitStyle(true, "-0.4s")}
+        />
+        {/* Electron 3 — 3rd ring, slower phase */}
+        <circle
+          cx={cx + orbitR}
+          cy={cy}
+          r={electronR * 0.7}
+          fill="hsl(200 75% 70%)"
+          style={orbitStyle(false, "-1.2s")}
+        />
+      </g>
 
-      {/* Core */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={coreR}
-        fill={coreColor}
-        style={{ ...coreStyle, transition: "fill 250ms ease" }}
-      />
+      {/* Core — three stacked layers, opacity cross-fades between animation styles */}
+      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreIdleStyle} />
+      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreThinkingStyle} />
+      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreWorkingStyle} />
       <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
 
       {/* Badge overlay for contextual states */}
