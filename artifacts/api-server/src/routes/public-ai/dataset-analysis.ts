@@ -69,12 +69,14 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
+    req.resume();
     res.status(401).json({ error: "No active session. Please start a session first." });
     return;
   }
 
   const session = validateSession(sessionToken);
   if (!session) {
+    req.resume();
     res.status(401).json({ error: "Session expired. Please start a new session." });
     return;
   }

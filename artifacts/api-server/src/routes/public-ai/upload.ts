@@ -36,22 +36,31 @@ const upload = multer({
 
 router.post(
   "/public-ai/upload",
-  oraUploadLimiter,
-  // Auth guard runs BEFORE multer so unauthenticated requests fail fast
-  // without consuming body-parsing resources or stalling the busboy pipeline.
+  // Auth guard is FIRST — before the rate limiter and multer — so that
+  // unauthenticated requests get a fast 401 without any response headers
+  // being touched.
+  // req.resume() drains the incoming multipart body stream immediately.
+  // socket.end() (in the finish handler) half-closes the TCP connection so
+  // supertest's ephemeral server.close() resolves in < 10 ms instead of
+  // waiting on Node.js's default 5-second keep-alive timeout.
   (req, res, next) => {
     const sessionToken = req.cookies?.["ora-session"] as string | undefined;
     if (!sessionToken) {
+      req.resume();
       res.status(401).json({ error: "No active session. Please start a session first." });
+      res.once("finish", () => req.socket?.end());
       return;
     }
     const session = validateSession(sessionToken);
     if (!session) {
+      req.resume();
       res.status(401).json({ error: "Session expired. Please start a new session." });
+      res.once("finish", () => req.socket?.end());
       return;
     }
     next();
   },
+  oraUploadLimiter,
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
