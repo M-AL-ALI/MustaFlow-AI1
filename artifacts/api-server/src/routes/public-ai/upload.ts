@@ -37,6 +37,21 @@ const upload = multer({
 router.post(
   "/public-ai/upload",
   oraUploadLimiter,
+  // Auth guard runs BEFORE multer so unauthenticated requests fail fast
+  // without consuming body-parsing resources or stalling the busboy pipeline.
+  (req, res, next) => {
+    const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+    if (!sessionToken) {
+      res.status(401).json({ error: "No active session. Please start a session first." });
+      return;
+    }
+    const session = validateSession(sessionToken);
+    if (!session) {
+      res.status(401).json({ error: "Session expired. Please start a new session." });
+      return;
+    }
+    next();
+  },
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
@@ -53,17 +68,8 @@ router.post(
     });
   },
   async (req, res) => {
-    const sessionToken = req.cookies?.["ora-session"] as string | undefined;
-    if (!sessionToken) {
-      res.status(401).json({ error: "No active session. Please start a session first." });
-      return;
-    }
-
-    const session = validateSession(sessionToken);
-    if (!session) {
-      res.status(401).json({ error: "Session expired. Please start a new session." });
-      return;
-    }
+    const sessionToken = req.cookies["ora-session"] as string;
+    const session = validateSession(sessionToken)!;
 
     const file = req.file;
     if (!file) {
