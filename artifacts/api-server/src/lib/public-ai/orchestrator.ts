@@ -19,7 +19,7 @@ import {
   runCandidateChain,
   selectOraMemoryModelRoute,
 } from "./model-router";
-import { detectFileRequest, type FileFormat } from "./prompt";
+import { detectFileRequest, isPastedReferenceAnalysisRequest, type FileFormat } from "./prompt";
 
 // ── Tool taxonomy ───────────────────────────────────────────────────────────
 
@@ -569,6 +569,19 @@ export interface OraRouteDecision {
  */
 export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDecision> {
   const { message, mode } = input;
+
+  // Pasted Replit/Codex/GitHub/CI reports are reference material to analyze.
+  // Route them to an answer before file/image/search fast-paths so log text that
+  // mentions "files", "create", "workflow", or "latest" does not trigger tools.
+  if (isPastedReferenceAnalysisRequest(message)) {
+    return {
+      tool: mode === "deep" ? "deep_thinking" : "answer",
+      reason: "Detected pasted tool/workflow output for conversational analysis.",
+      intent: "premium",
+      confidence: "high",
+      topic: "technical",
+    };
+  }
 
   // 1. File generation fast-path (no classifier needed).
   const fileFormat = detectFileRequest(message);

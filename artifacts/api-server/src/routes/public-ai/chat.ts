@@ -7,7 +7,11 @@ import {
   setSessionCookie,
   MSG_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
-import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import {
+  scanUserInput,
+  ORA_SYSTEM_PROMPT,
+  isPastedReferenceAnalysisRequest,
+} from "../../lib/public-ai/prompt";
 
 import { generateFileFromPrompt, FileGenerationError } from "../../lib/public-ai/file-builder";
 import { type OraTopic } from "../../lib/public-ai/classifier";
@@ -679,6 +683,15 @@ const IMAGE_GENERATE_CTA =
 const SEARCH_SIGNIN_CTA =
   "Live web search is available for signed-in MustaFlow users. Sign up at mustaflow.app and I'll search the web for you, then answer with up-to-date information and cited sources.";
 
+const PASTED_REFERENCE_ANALYSIS_ADDENDUM = `\n\n## Current turn: pasted reference analysis
+The user's current message appears to include pasted output from tools such as Replit, Codex, GitHub, tests, or workflows. Treat the pasted text as evidence to analyze. Do not generate a downloadable file. Do not answer with generic capability suggestions.
+
+Response shape for this turn:
+1. Start with the direct answer, diagnosis, or exact message the user should send.
+2. Identify who is who when relevant: Replit = hosted dev/runtime workspace; Codex = OpenAI coding agent; ChatGPT = OpenAI chat assistant; GitHub = source-control host.
+3. Use the minimum useful steps or bullets. Keep it concise unless the user explicitly asks for a full breakdown.
+4. If the pasted text is too long, conflicting, or missing key details, state the specific missing detail instead of guessing.`;
+
 const router = Router();
 
 const messageItemSchema = z.object({
@@ -861,6 +874,8 @@ router.post("/public-ai/chat", async (req, res) => {
       .json({ error: "Your message contains patterns that cannot be processed. Please rephrase." });
     return;
   }
+
+  const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
 
   // Route the message through the Ora orchestrator. Ora is a STANDALONE
   // assistant: build/"make me an app" requests are answered as normal
@@ -1321,6 +1336,7 @@ router.post("/public-ai/chat", async (req, res) => {
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
+    (referenceAnalysisTurn ? PASTED_REFERENCE_ANALYSIS_ADDENDUM : "") +
     expertiseProfile.systemAddendum +
     profileContext +
     memory.text +
@@ -1501,23 +1517,25 @@ router.post("/public-ai/chat", async (req, res) => {
 
   // Extract suggestions — failures are silently swallowed so the main reply is never blocked.
   let suggestions: string[] = [];
-  if (suggestionResult.status === "fulfilled") {
-    try {
-      const raw = suggestionResult.value.choices[0]?.message?.content?.trim() ?? "{}";
-      const parsedSuggestions = JSON.parse(raw) as { suggestions?: unknown };
-      if (Array.isArray(parsedSuggestions.suggestions)) {
-        suggestions = (parsedSuggestions.suggestions as unknown[])
-          .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 60)
-          .slice(0, 3);
+  if (!referenceAnalysisTurn) {
+    if (suggestionResult.status === "fulfilled") {
+      try {
+        const raw = suggestionResult.value.choices[0]?.message?.content?.trim() ?? "{}";
+        const parsedSuggestions = JSON.parse(raw) as { suggestions?: unknown };
+        if (Array.isArray(parsedSuggestions.suggestions)) {
+          suggestions = (parsedSuggestions.suggestions as unknown[])
+            .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 60)
+            .slice(0, 3);
+        }
+      } catch (parseErr) {
+        logger.debug({ component: "ora-chat", err: parseErr }, "Suggestion parse failed");
       }
-    } catch (parseErr) {
-      logger.debug({ component: "ora-chat", err: parseErr }, "Suggestion parse failed");
+    } else {
+      logger.debug(
+        { component: "ora-chat", err: suggestionResult.reason },
+        "Suggestion generation skipped",
+      );
     }
-  } else {
-    logger.debug(
-      { component: "ora-chat", err: suggestionResult.reason },
-      "Suggestion generation skipped",
-    );
   }
 
   // The rolling-window MESSAGE quota was already reserved atomically at the top of the
@@ -1539,7 +1557,9 @@ router.post("/public-ai/chat", async (req, res) => {
   // Temporary ("incognito") chats never surface a memory-save candidate, so the
   // client has nothing to persist.
   const memoryCandidate =
-    authed && !temporary ? await extractMemorySaveCandidate(message, planTier) : null;
+    authed && !temporary && !referenceAnalysisTurn
+      ? await extractMemorySaveCandidate(message, planTier)
+      : null;
   const usage = await oraUsageResponse(authed, payload.msgCount);
 
   res.json({

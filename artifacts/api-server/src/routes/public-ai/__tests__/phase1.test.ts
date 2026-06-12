@@ -336,6 +336,47 @@ describe("Ora orchestrator routing", () => {
     expect(decision.fileFormat).toBeTruthy();
   });
 
+  it("routes pasted Replit/Codex reports to conversational analysis, not file generation", async () => {
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    const { detectFileRequest, isPastedReferenceAnalysisRequest } =
+      await import("../../../lib/public-ai/prompt");
+    const pastedReport = `Task #1412 landed, the stale lock cleared, and now you've pushed new code from GitHub.
+The pull-from-github and quality-gate workflows failed — let me check those logs and pull your commit.
+There's a merge conflict in dynamic-atom.tsx — Task #1412 touched that file on the platform side.
+Resolution: take HEAD for all conflicts and keep the glow ring implementation.
+Tests
+admin-ora-routing-diagnostics.test.ts — 5/5 PASS
+routing-diagnostics.test.ts — 4/4 PASS
+format, lint, codegen-drift, quality-gate, typecheck — all green.
+
+What should I tell Replit?`;
+
+    expect(isPastedReferenceAnalysisRequest(pastedReport)).toBe(true);
+    expect(detectFileRequest(pastedReport)).toBeNull();
+
+    const decision = await routeOraMessage({
+      message: pastedReport,
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("answer");
+    expect(decision.topic).toBe("technical");
+  });
+
+  it("does not treat a short GitHub file request as pasted reference analysis", async () => {
+    const { isPastedReferenceAnalysisRequest } = await import("../../../lib/public-ai/prompt");
+    expect(isPastedReferenceAnalysisRequest("create a GitHub Actions workflow file")).toBe(false);
+  });
+
+  it("understands direct Replit/Codex reply questions as conversational analysis", async () => {
+    const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
+    const decision = await routeOraMessage({
+      message: "What should I tell Replit?",
+      mode: "instant",
+    });
+    expect(decision.tool).toBe("answer");
+    expect(decision.topic).toBe("technical");
+  });
+
   it("routes varied PowerPoint phrasings to file_generation/pptx", async () => {
     const { routeOraMessage } = await import("../../../lib/public-ai/orchestrator");
     const phrasings = [

@@ -8,6 +8,7 @@
     "seed": "tsx ./src/seed.ts",
     "seed:stripe": "tsx ./src/seed-stripe-products.ts",
     "check-cdn-versions": "tsx ./src/check-cdn-versions.ts",
+    "ora-routing-audit": "tsx ./src/ora-routing-audit.ts",
     "migrate-containers": "tsx ./src/migrate-containers.ts",
     "migrate-production-container": "tsx ./src/migrate-production-container.ts",
     "migrate-prod-containers": "tsx ./src/migrate-prod-containers.ts",
