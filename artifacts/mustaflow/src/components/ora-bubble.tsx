@@ -110,6 +110,28 @@ function oraAccentColor(tier: string): string {
   return "hsl(265 85% 65%)";
 }
 
+function oraTierLabel(tier: string): string {
+  if (tier === "core") return "Core Pack";
+  if (tier === "wave") return "Deep Wave";
+  return "Free";
+}
+
+function OraTierBadge({ tier }: { tier: string }) {
+  const color = oraAccentColor(tier);
+  return (
+    <span
+      className="inline-flex items-center text-[10px] font-medium rounded-full px-1.5 py-0.5"
+      style={{
+        color,
+        border: `1px solid ${color.replace(")", " / 0.4)")}`,
+        backgroundColor: color.replace(")", " / 0.08)"),
+      }}
+    >
+      {oraTierLabel(tier)}
+    </span>
+  );
+}
+
 interface OraBubbleProps {
   chat: UseOraChatReturn;
 }
@@ -849,10 +871,11 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
           <div className="flex items-center gap-2.5">
             <DynamicAtom state={atomState} size={26} />
-            <div>
+            <div className="flex items-baseline gap-1.5">
               <span className="text-sm font-semibold tracking-tight">Ora</span>
+              {isSignedIn && <OraTierBadge tier={tier} />}
               {!isSignedIn && (
-                <span className="ml-1.5 text-[10px] text-muted-foreground/70">
+                <span className="text-[10px] text-muted-foreground/70">
                   Free · No sign-in
                 </span>
               )}

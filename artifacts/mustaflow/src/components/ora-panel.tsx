@@ -143,6 +143,28 @@ function oraAccentColor(tier: string): string {
   return "hsl(265 85% 65%)";
 }
 
+function oraTierLabel(tier: string): string {
+  if (tier === "core") return "Core Pack";
+  if (tier === "wave") return "Deep Wave";
+  return "Free";
+}
+
+function OraTierBadge({ tier }: { tier: string }) {
+  const color = oraAccentColor(tier);
+  return (
+    <span
+      className="inline-flex items-center text-[10px] font-medium rounded-full px-1.5 py-0.5"
+      style={{
+        color,
+        border: `1px solid ${color.replace(")", " / 0.4)")}`,
+        backgroundColor: color.replace(")", " / 0.08)"),
+      }}
+    >
+      {oraTierLabel(tier)}
+    </span>
+  );
+}
+
 interface OraPanelProps {
   chat: UseOraChatReturn;
   /**
@@ -861,6 +883,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           <DynamicAtom state={atomState} size={28} />
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold tracking-tight">Ora</span>
+            {isSignedIn && <OraTierBadge tier={tier} />}
             {!isSignedIn && (
               <span className="text-[10px] text-muted-foreground/70 font-medium border border-border/50 rounded-full px-1.5 py-0.5">
                 Free · No sign-in required
