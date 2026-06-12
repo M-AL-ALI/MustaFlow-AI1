@@ -358,96 +358,91 @@ export function DynamicAtom({
         transition: "box-shadow 250ms ease",
       }}
     >
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      aria-hidden
-    >
-      {/* Glow — four stacked layers, opacity cross-fades between them */}
-      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowIdleStyle} />
-      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowActiveStyle} />
-      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowSuccessStyle} />
-      <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowErrorStyle} />
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+        {/* Glow — four stacked layers, opacity cross-fades between them */}
+        <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowIdleStyle} />
+        <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowActiveStyle} />
+        <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowSuccessStyle} />
+        <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowErrorStyle} />
 
-      {/* Orbit ring 1 — tilted */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={orbitR}
-        ry={orbitR * 0.38}
-        fill="none"
-        stroke={orbitRingColor}
-        strokeWidth="0.8"
-        transform={`rotate(-35, ${cx}, ${cy})`}
-        style={{ transition: "stroke 250ms ease" }}
-      />
-      {/* Orbit ring 2 — tilted other way */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={orbitR}
-        ry={orbitR * 0.38}
-        fill="none"
-        stroke={orbitRingColor}
-        strokeWidth="0.8"
-        transform={`rotate(35, ${cx}, ${cy})`}
-        style={{ transition: "stroke 250ms ease" }}
-      />
-
-      {/* Electrons — group fades out/in on speed change so the snap is hidden */}
-      <g style={{ opacity: electronsVisible ? 1 : 0, transition: "opacity 200ms ease" }}>
-        {/* Electron 1 */}
-        <circle
-          cx={cx + orbitR}
-          cy={cy}
-          r={electronR}
-          fill={electronColor1}
-          style={orbitStyle(false)}
-        />
-        {/* Electron 2 — reverse, offset */}
-        <circle
-          cx={cx - orbitR}
-          cy={cy}
-          r={electronR * 0.85}
-          fill={electronColor2}
-          style={orbitStyle(true, "-0.4s")}
-        />
-        {/* Electron 3 — 3rd ring, slower phase */}
-        <circle
-          cx={cx + orbitR}
-          cy={cy}
-          r={electronR * 0.7}
-          fill="hsl(200 75% 70%)"
-          style={orbitStyle(false, "-1.2s")}
-        />
-      </g>
-
-      {/* Core — three stacked layers, opacity cross-fades between animation styles */}
-      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreIdleStyle} />
-      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreThinkingStyle} />
-      <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreWorkingStyle} />
-      <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
-
-      {/* Badge overlay for contextual states */}
-      {isWorking && <BadgeIcon state={state} r={size * 0.42} />}
-
-      {/* Error ring */}
-      {isError && (
-        <circle
+        {/* Orbit ring 1 — tilted */}
+        <ellipse
           cx={cx}
           cy={cy}
-          r={size * 0.42}
+          rx={orbitR}
+          ry={orbitR * 0.38}
           fill="none"
-          stroke="hsl(0 75% 58% / 0.6)"
-          strokeWidth="1.2"
-          style={{
-            transformOrigin: `${cx}px ${cy}px`,
-            animation: "ora-error-pulse 0.9s ease-in-out infinite",
-          }}
+          stroke={orbitRingColor}
+          strokeWidth="0.8"
+          transform={`rotate(-35, ${cx}, ${cy})`}
+          style={{ transition: "stroke 250ms ease" }}
         />
-      )}
-    </svg>
+        {/* Orbit ring 2 — tilted other way */}
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={orbitR}
+          ry={orbitR * 0.38}
+          fill="none"
+          stroke={orbitRingColor}
+          strokeWidth="0.8"
+          transform={`rotate(35, ${cx}, ${cy})`}
+          style={{ transition: "stroke 250ms ease" }}
+        />
+
+        {/* Electrons — group fades out/in on speed change so the snap is hidden */}
+        <g style={{ opacity: electronsVisible ? 1 : 0, transition: "opacity 200ms ease" }}>
+          {/* Electron 1 */}
+          <circle
+            cx={cx + orbitR}
+            cy={cy}
+            r={electronR}
+            fill={electronColor1}
+            style={orbitStyle(false)}
+          />
+          {/* Electron 2 — reverse, offset */}
+          <circle
+            cx={cx - orbitR}
+            cy={cy}
+            r={electronR * 0.85}
+            fill={electronColor2}
+            style={orbitStyle(true, "-0.4s")}
+          />
+          {/* Electron 3 — 3rd ring, slower phase */}
+          <circle
+            cx={cx + orbitR}
+            cy={cy}
+            r={electronR * 0.7}
+            fill="hsl(200 75% 70%)"
+            style={orbitStyle(false, "-1.2s")}
+          />
+        </g>
+
+        {/* Core — three stacked layers, opacity cross-fades between animation styles */}
+        <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreIdleStyle} />
+        <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreThinkingStyle} />
+        <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreWorkingStyle} />
+        <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
+
+        {/* Badge overlay for contextual states */}
+        {isWorking && <BadgeIcon state={state} r={size * 0.42} />}
+
+        {/* Error ring */}
+        {isError && (
+          <circle
+            cx={cx}
+            cy={cy}
+            r={size * 0.42}
+            fill="none"
+            stroke="hsl(0 75% 58% / 0.6)"
+            strokeWidth="1.2"
+            style={{
+              transformOrigin: `${cx}px ${cy}px`,
+              animation: "ora-error-pulse 0.9s ease-in-out infinite",
+            }}
+          />
+        )}
+      </svg>
     </span>
   );
 }
