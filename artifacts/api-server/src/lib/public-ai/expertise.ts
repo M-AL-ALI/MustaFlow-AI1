@@ -120,12 +120,11 @@ export function resolveOraAnswerDepth(input: {
   confidence: OraConfidence;
 }): OraAnswerDepth {
   if (input.routeTier === "deep") return "deep";
-  if (
-    input.routeTier === "fast" ||
-    (input.intent === "simple_faq" && input.confidence === "high")
-  ) {
-    return "concise";
-  }
+  // Only the fast route (one-line platform FAQ topics) gets concise depth.
+  // Removing the intent/confidence branch ensures questions that are
+  // classified simple_faq on non-FAQ topics still receive standard depth
+  // and the full token budget, since routeTier will be "premium" for them.
+  if (input.routeTier === "fast") return "concise";
   if (input.planTier === "wave") return "expert";
   return "standard";
 }
