@@ -221,9 +221,7 @@ export function DynamicAtom({ state = "idle", size = 32, className, accentColor 
     ? "hsl(145 65% 55%)"
     : isError
       ? "hsl(0 75% 58%)"
-      : state === "replying"
-        ? "hsl(230 80% 65%)"
-        : `hsl(${aH} ${aS}% ${aL}%)`;
+      : `hsl(${aH} ${aS}% ${aL}%)`;
 
   const electronColor1 = isSuccess
     ? "hsl(145 65% 65%)"
