@@ -880,7 +880,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
         )}
       >
         <div className="flex items-center gap-2.5">
-          <DynamicAtom state={atomState} size={28} />
+          <DynamicAtom state={atomState} size={28} accentColor={oraAccentColor(tier)} />
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold tracking-tight">Ora</span>
             {isSignedIn && <OraTierBadge tier={tier} />}

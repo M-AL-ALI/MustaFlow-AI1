@@ -249,11 +249,7 @@ export function DynamicAtom({
       ? "hsl(0 75% 55% / 0.45)"
       : `hsl(${aH} ${aS}% ${aL}% / 0.3)`;
 
-  const ringColorBase = isSuccess
-    ? `145 65% 55%`
-    : isError
-      ? `0 75% 58%`
-      : `${aH} ${aS}% ${aL}%`;
+  const ringColorBase = isSuccess ? `145 65% 55%` : isError ? `0 75% 58%` : `${aH} ${aS}% ${aL}%`;
   const ringBoxShadow = `0 0 ${ringBlur.toFixed(1)}px ${ringSpread.toFixed(1)}px hsl(${ringColorBase} / ${ringOpacity})`;
 
   const orbitRingColor = isError
@@ -320,100 +316,95 @@ export function DynamicAtom({
         transition: "box-shadow 250ms ease",
       }}
     >
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      aria-hidden
-    >
-      {/* Glow */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={glowR}
-        fill={glowColor}
-        style={{ ...glowStyle, transition: "fill 250ms ease" }}
-      />
-
-      {/* Orbit ring 1 — tilted */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={orbitR}
-        ry={orbitR * 0.38}
-        fill="none"
-        stroke={orbitRingColor}
-        strokeWidth="0.8"
-        transform={`rotate(-35, ${cx}, ${cy})`}
-        style={{ transition: "stroke 250ms ease" }}
-      />
-      {/* Orbit ring 2 — tilted other way */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={orbitR}
-        ry={orbitR * 0.38}
-        fill="none"
-        stroke={orbitRingColor}
-        strokeWidth="0.8"
-        transform={`rotate(35, ${cx}, ${cy})`}
-        style={{ transition: "stroke 250ms ease" }}
-      />
-
-      {/* Electron 1 */}
-      <circle
-        cx={cx + orbitR}
-        cy={cy}
-        r={electronR}
-        fill={electronColor1}
-        style={orbitStyle(false)}
-      />
-      {/* Electron 2 — reverse, offset */}
-      <circle
-        cx={cx - orbitR}
-        cy={cy}
-        r={electronR * 0.85}
-        fill={electronColor2}
-        style={orbitStyle(true, "-0.4s")}
-      />
-      {/* Electron 3 — 3rd ring, slower phase */}
-      <circle
-        cx={cx + orbitR}
-        cy={cy}
-        r={electronR * 0.7}
-        fill="hsl(200 75% 70%)"
-        style={orbitStyle(false, "-1.2s")}
-      />
-
-      {/* Core */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={coreR}
-        fill={coreColor}
-        style={{ ...coreStyle, transition: "fill 250ms ease" }}
-      />
-      <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
-
-      {/* Badge overlay for contextual states */}
-      {isWorking && <BadgeIcon state={state} r={size * 0.42} />}
-
-      {/* Error ring */}
-      {isError && (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+        {/* Glow */}
         <circle
           cx={cx}
           cy={cy}
-          r={size * 0.42}
-          fill="none"
-          stroke="hsl(0 75% 58% / 0.6)"
-          strokeWidth="1.2"
-          style={{
-            transformOrigin: `${cx}px ${cy}px`,
-            animation: "ora-error-pulse 0.9s ease-in-out infinite",
-          }}
+          r={glowR}
+          fill={glowColor}
+          style={{ ...glowStyle, transition: "fill 250ms ease" }}
         />
-      )}
-    </svg>
+
+        {/* Orbit ring 1 — tilted */}
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={orbitR}
+          ry={orbitR * 0.38}
+          fill="none"
+          stroke={orbitRingColor}
+          strokeWidth="0.8"
+          transform={`rotate(-35, ${cx}, ${cy})`}
+          style={{ transition: "stroke 250ms ease" }}
+        />
+        {/* Orbit ring 2 — tilted other way */}
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={orbitR}
+          ry={orbitR * 0.38}
+          fill="none"
+          stroke={orbitRingColor}
+          strokeWidth="0.8"
+          transform={`rotate(35, ${cx}, ${cy})`}
+          style={{ transition: "stroke 250ms ease" }}
+        />
+
+        {/* Electron 1 */}
+        <circle
+          cx={cx + orbitR}
+          cy={cy}
+          r={electronR}
+          fill={electronColor1}
+          style={orbitStyle(false)}
+        />
+        {/* Electron 2 — reverse, offset */}
+        <circle
+          cx={cx - orbitR}
+          cy={cy}
+          r={electronR * 0.85}
+          fill={electronColor2}
+          style={orbitStyle(true, "-0.4s")}
+        />
+        {/* Electron 3 — 3rd ring, slower phase */}
+        <circle
+          cx={cx + orbitR}
+          cy={cy}
+          r={electronR * 0.7}
+          fill="hsl(200 75% 70%)"
+          style={orbitStyle(false, "-1.2s")}
+        />
+
+        {/* Core */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={coreR}
+          fill={coreColor}
+          style={{ ...coreStyle, transition: "fill 250ms ease" }}
+        />
+        <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
+
+        {/* Badge overlay for contextual states */}
+        {isWorking && <BadgeIcon state={state} r={size * 0.42} />}
+
+        {/* Error ring */}
+        {isError && (
+          <circle
+            cx={cx}
+            cy={cy}
+            r={size * 0.42}
+            fill="none"
+            stroke="hsl(0 75% 58% / 0.6)"
+            strokeWidth="1.2"
+            style={{
+              transformOrigin: `${cx}px ${cy}px`,
+              animation: "ora-error-pulse 0.9s ease-in-out infinite",
+            }}
+          />
+        )}
+      </svg>
     </span>
   );
 }

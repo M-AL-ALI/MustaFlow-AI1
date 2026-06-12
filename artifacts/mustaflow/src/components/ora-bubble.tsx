@@ -877,7 +877,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         {/* Drawer header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
           <div className="flex items-center gap-2.5">
-            <DynamicAtom state={atomState} size={26} />
+            <DynamicAtom state={atomState} size={26} accentColor={oraAccentColor(tier)} />
             <div className="flex items-baseline gap-1.5">
               <span className="text-sm font-semibold tracking-tight">Ora</span>
               {isSignedIn && <OraTierBadge tier={tier} />}
