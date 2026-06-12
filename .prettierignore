@@ -8,3 +8,4 @@ artifacts/mockup-sandbox/src/.generated/
 pnpm-lock.yaml
 .config/
 .agents/
+artifacts/ora-mobile/expo-env.d.ts
