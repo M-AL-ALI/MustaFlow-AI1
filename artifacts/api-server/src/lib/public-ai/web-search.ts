@@ -811,7 +811,12 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
     tools: [{ type: "web_search" }] as never,
     max_output_tokens: profile.maxOutputTokens,
     input: messages as never,
-  })) as { output_text?: string; output?: unknown; status?: string; incomplete_details?: { reason?: string } };
+  })) as {
+    output_text?: string;
+    output?: unknown;
+    status?: string;
+    incomplete_details?: { reason?: string };
+  };
 
   const rawReply = (resp.output_text ?? "").trim();
   // Detect token-ceiling truncation so the user is never left with a silently

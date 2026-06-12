@@ -723,7 +723,12 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
     model: res.model ?? params.model,
     content: text,
     toolCalls: outToolCalls,
-    finishReason: res.stop_reason === "tool_use" ? "tool_calls" : "stop",
+    finishReason:
+      res.stop_reason === "tool_use"
+        ? "tool_calls"
+        : res.stop_reason === "max_tokens"
+          ? "length"
+          : "stop",
     promptTokens: res.usage?.input_tokens ?? 0,
     completionTokens: res.usage?.output_tokens ?? 0,
   });
@@ -812,6 +817,7 @@ async function callAnthropicAccumulated(
   let promptTokens = 0;
   let completionTokens = 0;
   let promptTokensCaptured = false;
+  let accStopReason: string | undefined;
 
   for await (const event of stream) {
     if (params.signal?.aborted) break;
@@ -833,11 +839,16 @@ async function callAnthropicAccumulated(
       continue;
     }
 
-    // message_delta carries the completion (output) token count.
+    // message_delta carries the completion (output) token count and stop_reason.
     if (event?.type === "message_delta") {
       const outputTokens = event?.usage?.output_tokens;
       if (typeof outputTokens === "number") {
         completionTokens = outputTokens;
+      }
+      // delta.stop_reason tells us why the stream ended ("end_turn", "max_tokens", etc.)
+      const stopReason = event?.delta?.stop_reason;
+      if (typeof stopReason === "string") {
+        accStopReason = stopReason;
       }
     }
   }
@@ -853,7 +864,7 @@ async function callAnthropicAccumulated(
     model: params.model,
     content: fullText,
     toolCalls: [],
-    finishReason: "stop",
+    finishReason: accStopReason === "max_tokens" ? "length" : "stop",
     promptTokens,
     completionTokens,
   });
@@ -994,11 +1005,17 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const usage = (res as any).usageMetadata ?? {};
+  const geminiFinishReason: string | undefined = candidate?.finishReason;
   return synthesizeChatCompletion({
     model: params.model,
     content: text,
     toolCalls: outToolCalls,
-    finishReason: outToolCalls.length > 0 ? "tool_calls" : "stop",
+    finishReason:
+      outToolCalls.length > 0
+        ? "tool_calls"
+        : geminiFinishReason === "MAX_TOKENS"
+          ? "length"
+          : "stop",
     promptTokens: usage.promptTokenCount ?? 0,
     completionTokens: usage.candidatesTokenCount ?? 0,
   });
