@@ -217,6 +217,10 @@ export function DynamicAtom({
   const isSuccess = state === "success";
   const isError = state === "error";
 
+  const ringBlur = isActive ? size * 0.32 : size * 0.22;
+  const ringSpread = isActive ? size * 0.06 : size * 0.02;
+  const ringOpacity = isSuccess || isError ? 0.55 : isActive ? 0.48 : isWorking ? 0.36 : 0.28;
+
   const orbitDuration = isActive ? "0.9s" : "3.2s";
   const orbitRevDuration = isActive ? "1.3s" : "4.8s";
 
@@ -244,6 +248,13 @@ export function DynamicAtom({
     : isError
       ? "hsl(0 75% 55% / 0.45)"
       : `hsl(${aH} ${aS}% ${aL}% / 0.3)`;
+
+  const ringColorBase = isSuccess
+    ? `145 65% 55%`
+    : isError
+      ? `0 75% 58%`
+      : `${aH} ${aS}% ${aL}%`;
+  const ringBoxShadow = `0 0 ${ringBlur.toFixed(1)}px ${ringSpread.toFixed(1)}px hsl(${ringColorBase} / ${ringOpacity})`;
 
   const orbitRingColor = isError
     ? "hsl(30 85% 58% / 0.35)"
@@ -302,11 +313,17 @@ export function DynamicAtom({
           };
 
   return (
+    <span
+      className={cn("inline-flex shrink-0 rounded-full", className)}
+      style={{
+        boxShadow: ringBoxShadow,
+        transition: "box-shadow 250ms ease",
+      }}
+    >
     <svg
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
-      className={cn("shrink-0", className)}
       aria-hidden
     >
       {/* Glow */}
@@ -397,5 +414,6 @@ export function DynamicAtom({
         />
       )}
     </svg>
+    </span>
   );
 }
