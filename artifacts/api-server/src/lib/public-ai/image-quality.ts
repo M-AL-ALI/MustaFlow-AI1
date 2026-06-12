@@ -65,6 +65,7 @@ export function inferOraImagePromptKind(prompt: string): OraImagePromptKind {
 }
 
 function resolveOraImageAspectRatio(prompt: string, kind: OraImagePromptKind): ImageAspectRatio {
+  if (kind === "logo" || kind === "icon") return "1:1";
   const text = prompt.toLowerCase();
   if (/\b(16:9|landscape|wide|banner|header|hero|cover|youtube\s+thumbnail)\b/.test(text)) {
     return "16:9";
