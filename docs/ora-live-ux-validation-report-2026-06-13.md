@@ -438,11 +438,11 @@ development environment by Clerk's dev-key throttle. The browser was redirected 
 
 **Manual checklist** — open the Replit preview, sign in, navigate to `/ora`, and verify:
 
-| Prompt | What to type | What to look for |
-|--------|-------------|------------------|
-| 7 (memory save) | "Please remember that I prefer TypeScript over JavaScript for all my projects." | A chip/badge near the assistant bubble labeled "Saved to memory" or similar |
-| 8 (memory recall) | "What do you remember about my coding preferences?" | A chip showing recalled memory + reply mentioning TypeScript |
-| 5 (image, signed-in) | "Generate an image of a mountain lake at sunset" | An inline image card in the chat bubble (not a sign-up invite) |
+| Prompt               | What to type                                                                    | What to look for                                                            |
+| -------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 7 (memory save)      | "Please remember that I prefer TypeScript over JavaScript for all my projects." | A chip/badge near the assistant bubble labeled "Saved to memory" or similar |
+| 8 (memory recall)    | "What do you remember about my coding preferences?"                             | A chip showing recalled memory + reply mentioning TypeScript                |
+| 5 (image, signed-in) | "Generate an image of a mountain lake at sunset"                                | An inline image card in the chat bubble (not a sign-up invite)              |
 
 If any chip is missing: the response payload likely has the correct `detectedIntent` but the
 frontend render path isn't reaching the chip component. Check `ora-bubble.tsx`
