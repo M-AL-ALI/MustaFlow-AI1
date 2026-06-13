@@ -213,6 +213,74 @@ export function inferMemoryQueryCategories(message: string): Set<string> {
   return categories;
 }
 
+// Answer-style conflict vocabulary for saved memory recall.
+const CONCISE_STYLE_TERMS = [
+  "direct",
+  "minimum",
+  "minimal",
+  "concise",
+  "brief",
+  "short",
+  "to the point",
+  "straight to the point",
+  "no fluff",
+];
+
+const DETAILED_STYLE_TERMS = [
+  "detailed",
+  "thorough",
+  "full breakdown",
+  "long form",
+  "long-form",
+  "verbose",
+  "step by step",
+  "step-by-step",
+  "deep explanation",
+  "explain the reasoning",
+];
+
+function mentionsAnyPhrase(text: string, phrases: string[]): boolean {
+  return phrases.some((phrase) => text.includes(phrase));
+}
+
+function statesCurrentPreference(text: string): boolean {
+  return /\b(?:i\s+(?:now\s+)?prefer|i\s+(?:want|need|like)\s+you\s+to|from\s+now\s+on|going\s+forward|actually,\s*i\s+prefer|please\s+(?:answer|respond|keep)|change\s+(?:my\s+)?(?:answer\s+)?style|switch\s+(?:my\s+)?(?:answer\s+)?style)\b/i.test(
+    text,
+  );
+}
+
+/**
+ * Avoid surfacing stale saved preferences when the current user message states
+ * a different preference. This keeps `memoriesUsed` honest: it should only show
+ * memories that were eligible to shape the answer, not facts the model was told
+ * to ignore because the user just changed direction.
+ */
+export function memoryConflictsWithCurrentMessage(
+  memory: Pick<OraMemoryRow, "title" | "content" | "category">,
+  currentMessage?: string,
+): boolean {
+  const message = currentMessage?.trim().toLowerCase() ?? "";
+  if (!message || !statesCurrentPreference(message)) return false;
+
+  const category = memory.category?.toLowerCase() ?? "";
+  const memoryText = `${memory.title} ${memory.content}`.toLowerCase();
+  const looksLikeStyleMemory =
+    category === "preference" ||
+    /\b(answer|reply|response|tone|style|concise|brief|direct|detailed|verbose|step[-\s]?by[-\s]?step)\b/.test(
+      memoryText,
+    );
+  if (!looksLikeStyleMemory) return false;
+
+  const currentWantsConcise = mentionsAnyPhrase(message, CONCISE_STYLE_TERMS);
+  const currentWantsDetailed = mentionsAnyPhrase(message, DETAILED_STYLE_TERMS);
+  const memoryWantsConcise = mentionsAnyPhrase(memoryText, CONCISE_STYLE_TERMS);
+  const memoryWantsDetailed = mentionsAnyPhrase(memoryText, DETAILED_STYLE_TERMS);
+
+  return (
+    (currentWantsConcise && memoryWantsDetailed) || (currentWantsDetailed && memoryWantsConcise)
+  );
+}
+
 /** Lowercase tokens (≥3 chars) for TF-IDF keyword overlap. */
 export function tokeniseMemory(text: string): string[] {
   return text
@@ -507,7 +575,9 @@ export async function buildMemoryContext(
     // Single-tier candidate pool (project chat → project memories only; general
     // chat → user-level only), then apply the Builder-style semantic/TF-IDF
     // ranker so only pertinent memories surface within the budget.
-    const pool = isProjectChat ? projectRows : userRows;
+    const pool = (isProjectChat ? projectRows : userRows).filter(
+      (row) => !memoryConflictsWithCurrentMessage(row, currentMessage),
+    );
     if (pool.length === 0) return { text: "", used: [] };
 
     const selected =

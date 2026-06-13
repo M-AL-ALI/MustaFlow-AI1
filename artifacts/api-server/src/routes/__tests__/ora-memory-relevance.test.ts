@@ -16,6 +16,7 @@ import {
   rankMemoriesByRelevance,
   resolveOraMemoryRecallProfile,
   inferMemoryQueryCategories,
+  memoryConflictsWithCurrentMessage,
   type OraMemoryRow,
 } from "../public-ai/chat";
 
@@ -79,6 +80,35 @@ describe("inferMemoryQueryCategories", () => {
     expect(inferMemoryQueryCategories("what company do I work for?")).toContain("personal");
     expect(inferMemoryQueryCategories("what tech stack is my app using?")).toContain("project");
     expect(inferMemoryQueryCategories("what did my uploaded document say?")).toContain("document");
+  });
+});
+
+describe("memoryConflictsWithCurrentMessage", () => {
+  it("filters a saved concise-answer preference when the current message asks for detail", () => {
+    expect(
+      memoryConflictsWithCurrentMessage(
+        mem(1, "Answer style", "Prefers direct answers with minimal steps", 1, "preference"),
+        "Actually, from now on I prefer detailed explanations with reasoning.",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat a recall question as a preference conflict", () => {
+    expect(
+      memoryConflictsWithCurrentMessage(
+        mem(1, "Answer style", "Prefers direct answers with minimal steps", 1, "preference"),
+        "What answer style do I prefer?",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not filter unrelated non-style memories", () => {
+    expect(
+      memoryConflictsWithCurrentMessage(
+        mem(1, "Company", "The user's company is Acme Corp", 1, "personal"),
+        "Actually, from now on I prefer detailed explanations.",
+      ),
+    ).toBe(false);
   });
 });
 

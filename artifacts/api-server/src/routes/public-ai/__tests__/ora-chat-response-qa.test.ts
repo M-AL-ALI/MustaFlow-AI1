@@ -466,6 +466,38 @@ What should I tell Replit?`;
     expect(systemPrompt).toContain("Prefers direct answers with minimal steps");
   });
 
+  it("does not surface a saved answer-style memory that conflicts with the current message", async () => {
+    authState.user = { userId: "ora-user-2", tier: "core", isPaid: true };
+    memoryState.rows = [
+      {
+        id: 42,
+        title: "Answer style",
+        content: "Prefers direct answers with minimal steps",
+        category: "preference",
+        embedding: [1, 0, 0],
+        createdAt: new Date(),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({
+        message: "Actually, from now on I prefer detailed explanations with reasoning.",
+        messages: [],
+        referenceSavedMemories: true,
+        referenceChatHistory: false,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.memoriesUsed).toBeUndefined();
+
+    const [mainCall] = mainCompletionCalls();
+    const systemPrompt = mainCall.messages?.[0]?.content ?? "";
+    expect(systemPrompt).not.toContain("## Saved memories");
+    expect(systemPrompt).not.toContain("Prefers direct answers with minimal steps");
+  });
+
   it("surfaces memory-save candidate chips without persisting automatically", async () => {
     authState.user = { userId: "ora-user-3", tier: "core", isPaid: true };
 

@@ -760,6 +760,8 @@ const MEMORY_SAVE_EXPLICIT_PATTERNS: RegExp[] = [
 const MEMORY_SAVE_IMPLICIT_PATTERNS: RegExp[] = [
   /\bmy\s+(?:name|company|business|product|preference|budget|timezone|time\s+zone|stack|role|job|title)\s+is\b/i,
   /\bi\s+(?:prefer|always|usually)\b/i,
+  /\bi\s+(?:like|want|need)\s+(?:direct|concise|short|brief|minimal|minimum|detailed|thorough|step[-\s]?by[-\s]?step|verbose)\b/i,
+  /\bi\s+(?:use|work\s+(?:with|in)|rely\s+on)\b.{0,80}\b(?:replit|codex|chatgpt|github)\b/i,
   /\bmy\s+(?:favorite|favourite)\s+\w+\s+is\b/i,
   /\bi(?:'m| am)\s+(?:based|located)\s+in\b/i,
   /\bi(?:'m| am)\s+(?:building|working\s+on|launching)\b/i,
@@ -803,6 +805,10 @@ export function detectSensitiveFact(text: string): boolean {
   return SENSITIVE_FACT_PATTERNS.some((p) => p.test(text));
 }
 
+function hasExplicitMemorySaveIntent(text: string): boolean {
+  return MEMORY_SAVE_EXPLICIT_PATTERNS.some((p) => p.test(text));
+}
+
 export interface MemorySaveCandidate {
   /** A short, declarative fact extracted from the user's message. */
   fact: string;
@@ -843,7 +849,7 @@ function inferMemoryCandidateCategory(fact: string): NonNullable<MemorySaveCandi
     return "personal";
   }
   if (
-    /\b(project|app|product|building|launch|stack|database|repo|client|customer|integration|deadline)\b/.test(
+    /\b(project|app|product|building|launch|stack|database|repo|client|customer|integration|deadline|workflow|replit|codex|github)\b/.test(
       text,
     )
   ) {
@@ -876,7 +882,7 @@ function parseMemoryCandidateCategory(
 export function detectMemorySaveCandidate(message: string): MemorySaveCandidate | null {
   const trimmed = message.trim();
   if (trimmed.length < 6 || trimmed.length > 400) return null;
-  const isExplicit = MEMORY_SAVE_EXPLICIT_PATTERNS.some((p) => p.test(trimmed));
+  const isExplicit = hasExplicitMemorySaveIntent(trimmed);
   const isImplicit = MEMORY_SAVE_IMPLICIT_PATTERNS.some((p) => p.test(trimmed));
   if (!isExplicit && !isImplicit) return null;
 
@@ -1019,6 +1025,9 @@ export async function extractMemorySaveCandidate(
     const save = parsed.save === true;
     const fact = typeof parsed.fact === "string" ? parsed.fact.trim() : "";
     if (!save || fact.length === 0) {
+      const fallback = detectMemorySaveCandidate(message);
+      if (fallback?.confidence === "high") return fallback;
+
       logger.info(
         {
           component: "ora-memory-extract",
@@ -1033,7 +1042,7 @@ export async function extractMemorySaveCandidate(
       return null;
     }
 
-    const isExplicit = parsed.explicit === true;
+    const isExplicit = parsed.explicit === true || hasExplicitMemorySaveIntent(trimmed);
     // The sensitive guard is non-negotiable: scan the model's extracted fact AND
     // the raw user message (the PII may live in phrasing the model paraphrased
     // away). A sensitive candidate is always forced to low confidence so it can

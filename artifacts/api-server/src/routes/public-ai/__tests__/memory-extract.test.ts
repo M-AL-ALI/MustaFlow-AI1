@@ -115,6 +115,34 @@ describe("extractMemorySaveCandidate (model-based)", () => {
     expect(c?.sensitive).toBe(false);
   });
 
+  it("preserves explicit remember requests when the model incorrectly declines to save", async () => {
+    mockAi.state.content = JSON.stringify({ save: false, fact: "", explicit: false });
+
+    const c = await extractMemorySaveCandidate(
+      "remember that I use Replit and Codex as my development workflow",
+    );
+
+    expect(c).not.toBeNull();
+    expect(c?.fact).toBe("I use Replit and Codex as my development workflow");
+    expect(c?.confidence).toBe("high");
+    expect(c?.category).toBe("project");
+  });
+
+  it("lets explicit phrasing override a model that extracts the fact but misses explicitness", async () => {
+    mockAi.state.content = JSON.stringify({
+      save: true,
+      fact: "Prefers minimum-step answers",
+      explicit: false,
+      category: "preference",
+    });
+
+    const c = await extractMemorySaveCandidate("remember that I prefer minimum-step answers");
+
+    expect(c?.fact).toBe("Prefers minimum-step answers");
+    expect(c?.confidence).toBe("high");
+    expect(c?.category).toBe("preference");
+  });
+
   it("uses the stronger Core memory extraction model by plan tier", async () => {
     mockAi.state.content = JSON.stringify({
       save: true,
