@@ -16,6 +16,7 @@ export type OraImagePromptKind =
   | "mockup"
   | "infographic"
   | "diagram"
+  | "interior"
   | "illustration"
   | "general";
 
@@ -25,6 +26,7 @@ export type OraImageAnalysisTask =
   | "chart"
   | "ui"
   | "product"
+  | "interior_design"
   | "safety"
   | "comparison"
   | "general";
@@ -87,6 +89,13 @@ export function inferOraImagePromptKind(prompt: string): OraImagePromptKind {
   if (/\b(diagrams?|flowcharts?|process\s+maps?|system\s+maps?)\b/.test(text)) {
     return "diagram";
   }
+  if (
+    /\b(interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|mood\s+boards?|home\s+staging|living\s+rooms?|bedrooms?|kitchens?|bathrooms?|furniture\s+layouts?)\b/.test(
+      text,
+    )
+  ) {
+    return "interior";
+  }
   if (/\b(illustrations?|artworks?|drawings?|paintings?|sketches?|comic|anime)\b/.test(text)) {
     return "illustration";
   }
@@ -130,6 +139,13 @@ export function inferOraImageAnalysisTask(message: string): OraImageAnalysisTask
     return "ui";
   }
   if (
+    /\b(interior|decor|decoration|decorate|redesign|room\s+design|living\s+room|bedroom|kitchen|bathroom|furniture|layout|staging|paint\s+color|wall\s+color|lighting|rug|curtains|sofa|cabinet|shelf|shelves|renovation|remodel|makeover|mood\s+board)\b/.test(
+      text,
+    )
+  ) {
+    return "interior_design";
+  }
+  if (
     /\b(product|item|object|brand|logo|package|packaging|model|condition|part|component)\b/.test(
       text,
     )
@@ -153,6 +169,7 @@ function resolveOraImageAspectRatio(prompt: string, kind: OraImagePromptKind): I
   if (kind === "banner") return "16:9";
   if (kind === "poster") return "9:16";
   if (kind === "infographic") return "9:16";
+  if (kind === "interior") return "16:9";
   return "1:1";
 }
 
@@ -161,7 +178,13 @@ function resolveOraImageStyle(prompt: string, kind: OraImagePromptKind): ImageSt
   if (/\b(photo|photoreal|photorealistic|realistic|cinematic|studio\s+shot)\b/.test(text)) {
     return "natural";
   }
-  if (kind === "logo" || kind === "icon" || kind === "product" || kind === "mockup") {
+  if (
+    kind === "logo" ||
+    kind === "icon" ||
+    kind === "product" ||
+    kind === "mockup" ||
+    kind === "interior"
+  ) {
     return "natural";
   }
   return "vivid";
@@ -179,6 +202,8 @@ function imageAnalysisGuidance(task: OraImageAnalysisTask): string {
       return "Analyze the interface visually: layout, hierarchy, readability, spacing, visual clarity, likely usability issues, and practical improvements.";
     case "product":
       return "Identify visible product/object details, branding, materials, condition, and distinguishing features without claiming facts that are not visually supported.";
+    case "interior_design":
+      return "Act like a professional interior designer. Assess the visible space, style, layout, color palette, lighting, furniture scale, storage, focal points, and practical constraints. Give prioritized redesign or decoration recommendations with specific, realistic changes, and separate quick wins from bigger upgrades. Do not invent unseen dimensions, budgets, or materials.";
     case "safety":
       return "Give high-level visual observations only, call out visible safety concerns, avoid repair instructions for hazardous systems, and recommend a qualified professional where appropriate.";
     case "comparison":
@@ -252,6 +277,8 @@ function kindGuidance(kind: OraImagePromptKind): string {
       return "Use a clear information hierarchy, simple visual blocks, legible labels, and enough spacing that the graphic remains readable.";
     case "diagram":
       return "Use clean shapes, simple connectors, readable labels, and a logical visual flow without unnecessary decoration.";
+    case "interior":
+      return "Create a professional interior design concept with coherent style, realistic furniture scale, balanced lighting, practical circulation, a coordinated color palette, and no impossible architecture.";
     case "illustration":
       return "Use a cohesive illustration style, intentional color palette, and clear subject separation.";
     case "general":
@@ -261,6 +288,13 @@ function kindGuidance(kind: OraImagePromptKind): string {
 
 function editTaskGuidance(instruction: string): string {
   const text = instruction.toLowerCase();
+  if (
+    /\b(interior|decor|decoration|decorate|redesign|room\s+design|living\s+room|bedroom|kitchen|bathroom|furniture|layout|staging|paint\s+color|wall\s+color|lighting|rug|curtains|sofa|cabinet|shelf|shelves|renovation|remodel|makeover|mood\s+board)\b/.test(
+      text,
+    )
+  ) {
+    return "Apply interior-design changes professionally: preserve the room's architecture and perspective unless explicitly changed, improve furniture layout, lighting, color palette, materials, and decor cohesion, and keep the result realistic and livable.";
+  }
   if (/\b(remove|erase|delete|take\s+out|clean\s+up)\b/.test(text)) {
     return "Remove only the requested elements and reconstruct the background naturally without leaving smears, halos, or obvious fill artifacts.";
   }

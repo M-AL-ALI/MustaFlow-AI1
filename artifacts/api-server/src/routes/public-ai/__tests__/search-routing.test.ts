@@ -94,6 +94,7 @@ describe("isVideoRequest", () => {
     expect(isVideoRequest("got any clips on this")).toBe(true);
     expect(isVideoRequest("show me more videos like that")).toBe(true);
     expect(isVideoRequest("YouTube tutorials for changing brake pads")).toBe(true);
+    expect(isVideoRequest("tutorials for decorating a small bedroom")).toBe(true);
     expect(isVideoRequest("best videos about mobile mechanic marketing")).toBe(true);
   });
 
@@ -227,6 +228,8 @@ describe("isImageGenerationRequest", () => {
     expect(isImageGenerationRequest("I'd like an illustration of a forest")).toBe(true);
     expect(isImageGenerationRequest("create a simple infographic for onboarding")).toBe(true);
     expect(isImageGenerationRequest("make a clean diagram for the checkout flow")).toBe(true);
+    expect(isImageGenerationRequest("create an interior design for my living room")).toBe(true);
+    expect(isImageGenerationRequest("make a mood board for a modern bedroom")).toBe(true);
     // Bare brandable noun + preposition, no leading verb
     expect(isImageGenerationRequest("a logo for my mechanic app")).toBe(true);
     expect(isImageGenerationRequest("an icon for the button")).toBe(true);

@@ -15,6 +15,9 @@ describe("Ora image quality profiles", () => {
     expect(inferOraImagePromptKind("realistic product photo of a sneaker")).toBe("product");
     expect(inferOraImagePromptKind("create an infographic for onboarding")).toBe("infographic");
     expect(inferOraImagePromptKind("make a flowchart diagram for signup")).toBe("diagram");
+    expect(inferOraImagePromptKind("create an interior design for my living room")).toBe(
+      "interior",
+    );
   });
 
   it("uses plan-aware quality and inferred layout for generated images", () => {
@@ -61,6 +64,9 @@ describe("Ora image quality profiles", () => {
     expect(inferOraImageAnalysisTask("read the text in this receipt")).toBe("ocr");
     expect(inferOraImageAnalysisTask("analyze this dashboard chart")).toBe("chart");
     expect(inferOraImageAnalysisTask("review this app screen UI")).toBe("ui");
+    expect(inferOraImageAnalysisTask("give me decoration recommendations for this room")).toBe(
+      "interior_design",
+    );
 
     const ocr = buildOraImageAnalysisProfile({
       message: "Read and extract all visible text from this invoice",
@@ -81,5 +87,38 @@ describe("Ora image quality profiles", () => {
     expect(waveGeneral.task).toBe("general");
     expect(waveGeneral.detail).toBe("high");
     expect(waveGeneral.guidance).toContain("visible evidence");
+  });
+
+  it("gives uploaded room redesign requests professional interior-design guidance", () => {
+    const profile = buildOraImageAnalysisProfile({
+      message: "Redesign this living room and give decoration recommendations",
+      subscriptionTier: "core",
+    });
+
+    expect(profile.task).toBe("interior_design");
+    expect(profile.detail).toBe("high");
+    expect(profile.guidance).toContain("professional interior designer");
+    expect(profile.guidance).toContain("furniture scale");
+    expect(profile.guidance).toContain("quick wins");
+  });
+
+  it("builds professional interior generation and edit instructions", () => {
+    const generated = buildOraImageGenerationProfile({
+      prompt: "create an interior design concept for a modern living room",
+      subscriptionTier: "wave",
+    });
+
+    expect(generated.kind).toBe("interior");
+    expect(generated.aspectRatio).toBe("16:9");
+    expect(generated.style).toBe("natural");
+    expect(generated.prompt).toContain("realistic furniture scale");
+
+    const edited = buildOraImageEditProfile({
+      instruction: "redesign this bedroom with better decor and lighting",
+      subscriptionTier: "wave",
+    });
+
+    expect(edited.instruction).toContain("Apply interior-design changes professionally");
+    expect(edited.instruction).toContain("preserve the room's architecture");
   });
 });
