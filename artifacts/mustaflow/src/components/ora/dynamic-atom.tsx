@@ -203,9 +203,9 @@ export function DynamicAtom({
 
   const cx = size / 2;
   const cy = size / 2;
-  const coreR = size * 0.15;
-  const glowR = size * 0.28;
-  const orbitR = size * 0.3;
+  const coreR = size * 0.30;
+  const glowR = size * 0.36;
+  const orbitR = size * 0.38;
   const electronR = size * 0.055;
 
   const isActive = state === "thinking" || state === "replying";
@@ -365,28 +365,24 @@ export function DynamicAtom({
         <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowSuccessStyle} />
         <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowErrorStyle} />
 
-        {/* Orbit ring 1 — tilted */}
-        <ellipse
+        {/* Orbit ring — flat circular path where electrons travel */}
+        <circle
           cx={cx}
           cy={cy}
-          rx={orbitR}
-          ry={orbitR * 0.38}
+          r={orbitR}
           fill="none"
           stroke={orbitRingColor}
-          strokeWidth="0.8"
-          transform={`rotate(-35, ${cx}, ${cy})`}
+          strokeWidth="0.7"
           style={{ transition: "stroke 250ms ease" }}
         />
-        {/* Orbit ring 2 — tilted other way */}
-        <ellipse
+        {/* Outer ring — prominent thin circle ring slightly outside the orbit */}
+        <circle
           cx={cx}
           cy={cy}
-          rx={orbitR}
-          ry={orbitR * 0.38}
+          r={size * 0.45}
           fill="none"
           stroke={orbitRingColor}
-          strokeWidth="0.8"
-          transform={`rotate(35, ${cx}, ${cy})`}
+          strokeWidth="0.9"
           style={{ transition: "stroke 250ms ease" }}
         />
 
