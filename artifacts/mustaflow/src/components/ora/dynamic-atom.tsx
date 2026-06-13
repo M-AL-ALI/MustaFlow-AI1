@@ -203,10 +203,12 @@ export function DynamicAtom({
 
   const cx = size / 2;
   const cy = size / 2;
-  const coreR = size * 0.3;
-  const glowR = size * 0.36;
-  const orbitR = size * 0.38;
-  const electronR = size * 0.055;
+  const coreR = size * 0.15;
+  const glowR = size * 0.28;
+  const orbitR = size * 0.40;
+  const ellipseRx = size * 0.44;
+  const ellipseRy = size * 0.175;
+  const electronR = size * 0.065;
 
   const isActive = state === "thinking" || state === "replying";
   const isWorking =
@@ -365,24 +367,28 @@ export function DynamicAtom({
         <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowSuccessStyle} />
         <circle cx={cx} cy={cy} r={glowR} fill={glowColor} style={glowErrorStyle} />
 
-        {/* Orbit ring — flat circular path where electrons travel */}
-        <circle
+        {/* Orbit ring 1 — tilted -40° (3D perspective ellipse) */}
+        <ellipse
           cx={cx}
           cy={cy}
-          r={orbitR}
+          rx={ellipseRx}
+          ry={ellipseRy}
           fill="none"
           stroke={orbitRingColor}
-          strokeWidth="0.7"
+          strokeWidth="0.8"
+          transform={`rotate(-40 ${cx} ${cy})`}
           style={{ transition: "stroke 250ms ease" }}
         />
-        {/* Outer ring — prominent thin circle ring slightly outside the orbit */}
-        <circle
+        {/* Orbit ring 2 — tilted +40° (3D perspective ellipse) */}
+        <ellipse
           cx={cx}
           cy={cy}
-          r={size * 0.45}
+          rx={ellipseRx}
+          ry={ellipseRy}
           fill="none"
           stroke={orbitRingColor}
-          strokeWidth="0.9"
+          strokeWidth="0.8"
+          transform={`rotate(40 ${cx} ${cy})`}
           style={{ transition: "stroke 250ms ease" }}
         />
 
@@ -418,7 +424,8 @@ export function DynamicAtom({
         <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreIdleStyle} />
         <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreThinkingStyle} />
         <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreWorkingStyle} />
-        <circle cx={cx} cy={cy} r={coreR * 0.5} fill="white" opacity="0.35" />
+        {/* 3D sphere highlight — offset upper-left to give depth illusion */}
+        <circle cx={cx - coreR * 0.3} cy={cy - coreR * 0.3} r={coreR * 0.42} fill="white" opacity="0.45" />
 
         {/* Badge overlay for contextual states */}
         {isWorking && <BadgeIcon state={state} r={size * 0.42} />}
