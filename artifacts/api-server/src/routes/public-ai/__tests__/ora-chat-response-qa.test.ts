@@ -3,6 +3,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import jwt from "jsonwebtoken";
+import { evaluateOraResponseQuality } from "../../../lib/public-ai/response-quality";
 
 const TEST_SECRET = "ora-chat-response-qa-secret";
 
@@ -329,6 +330,18 @@ What should I tell Replit?`;
     expect(res.body.fileName).toBeUndefined();
     expect(res.body.fileData).toBeUndefined();
     expect(res.body.imageUrl).toBeUndefined();
+    expect(
+      evaluateOraResponseQuality({
+        scenario: "pasted_report",
+        userMessage: pastedReport,
+        reply: res.body.reply,
+        suggestions: res.body.suggestions,
+        fileName: res.body.fileName,
+        fileData: res.body.fileData,
+        mimeType: res.body.mimeType,
+        imageUrl: res.body.imageUrl,
+      }).passed,
+    ).toBe(true);
 
     const [mainCall] = mainCompletionCalls();
     expect(mainCall).toBeDefined();
@@ -354,6 +367,16 @@ What should I tell Replit?`;
     expect(res.body.imageUrl).toBeUndefined();
     expect(fileBuilderMock.generateFileFromPrompt).toHaveBeenCalledTimes(1);
     expect(mainCompletionCalls()).toEqual([]);
+    expect(
+      evaluateOraResponseQuality({
+        scenario: "file_generation",
+        userMessage: "Create a CSV of my service packages.",
+        reply: res.body.reply,
+        fileName: res.body.fileName,
+        fileData: res.body.fileData,
+        mimeType: res.body.mimeType,
+      }).passed,
+    ).toBe(true);
   });
 
   it("returns inline image fields for signed-in image generation without sign-in hedging", async () => {
@@ -378,6 +401,15 @@ What should I tell Replit?`;
       }),
     );
     expect(usageMock.consumeOraQuota).toHaveBeenCalledWith("ora-user-1", "core", "image");
+    expect(
+      evaluateOraResponseQuality({
+        scenario: "image_generation",
+        signedIn: true,
+        userMessage: "Create a clean logo for my mobile mechanic app.",
+        reply: res.body.reply,
+        imageUrl: res.body.imageUrl,
+      }).passed,
+    ).toBe(true);
   });
 
   it("surfaces memoriesUsed chips and injects saved memory context into the model prompt", async () => {
@@ -406,6 +438,14 @@ What should I tell Replit?`;
     expect(res.status).toBe(200);
     expect(res.body.reply).toBe("You prefer direct answers with minimal steps.");
     expect(res.body.memoriesUsed).toEqual([{ id: 42, title: "Answer style" }]);
+    expect(
+      evaluateOraResponseQuality({
+        scenario: "memory_recall",
+        userMessage: "What answer style do I prefer?",
+        reply: res.body.reply,
+        memoriesUsed: res.body.memoriesUsed,
+      }).passed,
+    ).toBe(true);
 
     const [mainCall] = mainCompletionCalls();
     const systemPrompt = mainCall.messages?.[0]?.content ?? "";
