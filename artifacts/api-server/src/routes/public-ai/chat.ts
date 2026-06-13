@@ -862,6 +862,52 @@ function buildSystemPrompt(
   );
 }
 
+export function isOraMemoryRecallRequest(message: string): boolean {
+  const text = message.toLowerCase();
+  if (/\bremember\s+(?:that|this|to|my|our)\b/.test(text)) return false;
+  return (
+    /\b(?:what|which|do|did|can|could|have|has|tell|remind)\b[\s\S]{0,120}\b(?:remember|know|saved|memory|memories|prefer|preference|answer style|about me)\b/i.test(
+      message,
+    ) || /\b(?:what|which)\b[\s\S]{0,80}\b(?:answer|reply|response)\s+style\b/i.test(message)
+  );
+}
+
+function buildMemoryStatusContext({
+  authed,
+  temporary,
+  referenceSavedMemories,
+  message,
+  memoryUsedCount,
+  hasCrossConversationContext,
+}: {
+  authed: boolean;
+  temporary: boolean;
+  referenceSavedMemories: boolean;
+  message: string;
+  memoryUsedCount: number;
+  hasCrossConversationContext: boolean;
+}): string {
+  if (temporary) {
+    return "\n\n## Memory status for this turn\nThis is a temporary chat. Do not read, write, or claim to remember saved memories or past conversations outside this temporary chat.";
+  }
+
+  if (!isOraMemoryRecallRequest(message)) return "";
+
+  if (!authed) {
+    return "\n\n## Memory status for this turn\nNo saved Ora memories are available because the user is not signed in. If they ask what you remember, say you do not have that saved.";
+  }
+
+  if (!referenceSavedMemories) {
+    return "\n\n## Memory status for this turn\nSaved-memory reference is turned off for this user. If they ask what you remember, say memory reference is off rather than guessing.";
+  }
+
+  if (memoryUsedCount === 0 && !hasCrossConversationContext) {
+    return "\n\n## Memory status for this turn\nNo relevant saved memories or past-conversation summaries were available. If the user asks what you remember, say you do not have that saved instead of guessing.";
+  }
+
+  return "";
+}
+
 /**
  * Returns topic-specific guidance injected into the suggestion system prompt
  * so follow-up questions are relevant to the detected conversation domain.
@@ -1391,8 +1437,8 @@ router.post("/public-ai/chat", async (req, res) => {
   // facts/decisions from early in the chat stay in context. Bounded + fail-safe
   // (returns the prior summary on any error). Skipped entirely when the user
   // has chat history turned off, or for short chats with no overflow.
-  let conversationSummary = referenceChatHistory ? (priorSummary ?? "").trim() : "";
-  if (referenceChatHistory && summarizeMessages.length > 0) {
+  let conversationSummary = referenceChatHistory && !temporary ? (priorSummary ?? "").trim() : "";
+  if (referenceChatHistory && !temporary && summarizeMessages.length > 0) {
     const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
     conversationSummary = await updateConversationSummary({
       priorSummary: conversationSummary,
@@ -1403,6 +1449,14 @@ router.post("/public-ai/chat", async (req, res) => {
   const summaryContext = conversationSummary
     ? `\n\n## Earlier in this conversation\nThe following is a running summary of earlier parts of THIS conversation that have scrolled out of the recent message window. Treat these as established context and stay consistent with them, but defer to anything more recent:\n${conversationSummary}`
     : "";
+  const memoryStatusContext = buildMemoryStatusContext({
+    authed: !!authed,
+    temporary,
+    referenceSavedMemories,
+    message,
+    memoryUsedCount: memory.used.length,
+    hasCrossConversationContext: crossConvContext.trim().length > 0,
+  });
 
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed) +
@@ -1412,6 +1466,7 @@ router.post("/public-ai/chat", async (req, res) => {
       : "") +
     expertiseProfile.systemAddendum +
     profileContext +
+    memoryStatusContext +
     memory.text +
     crossConvContext +
     summaryContext;
@@ -1651,7 +1706,7 @@ router.post("/public-ai/chat", async (req, res) => {
     // Echo the (possibly updated) rolling summary so the client can persist it
     // and re-send it on the next turn. Always present when chat history is on so
     // the client can advance its "already summarized" pointer.
-    ...(referenceChatHistory ? { conversationSummary } : {}),
+    ...(referenceChatHistory && !temporary ? { conversationSummary } : {}),
     // Surface which saved Ora memories shaped this reply (Ora-scoped only) so
     // the client can show an unobtrusive "based on your saved memories"
     // indicator that deep-links to the Memory Center.

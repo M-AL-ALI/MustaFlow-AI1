@@ -167,6 +167,19 @@ export function OraMemoryManager({
     }
   };
 
+  const handleEnabledToggle = async (m: OraMemory, enabled: boolean) => {
+    setBusyId(m.id);
+    try {
+      await updateOraMemory(m.id, { enabled });
+      await load();
+      toast({ title: enabled ? "Memory enabled" : "Memory disabled" });
+    } catch {
+      toast({ title: "Failed to update memory", variant: "destructive" });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleReferenceToggle = (v: boolean) => {
     setReferenceSavedState(v);
     setReferenceSavedMemories(v);
@@ -243,9 +256,27 @@ export function OraMemoryManager({
               From document
             </span>
           )}
-          <p className="text-xs text-muted-foreground break-words mt-0.5">{m.content}</p>
+          <p
+            className={cn(
+              "text-xs text-muted-foreground break-words mt-0.5",
+              !m.enabled && "line-through opacity-70",
+            )}
+          >
+            {m.content}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
+          <div className="mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1">
+            <span className="sr-only" id={`ora-memory-enabled-${m.id}`}>
+              Reference memory
+            </span>
+            <Switch
+              aria-labelledby={`ora-memory-enabled-${m.id}`}
+              checked={m.enabled}
+              disabled={busyId === m.id}
+              onCheckedChange={(checked) => void handleEnabledToggle(m, checked)}
+            />
+          </div>
           <button
             type="button"
             aria-label="Edit memory"

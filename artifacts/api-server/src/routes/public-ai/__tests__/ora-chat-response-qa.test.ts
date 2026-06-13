@@ -22,6 +22,15 @@ const memoryState = vi.hoisted(() => ({
   }>,
 }));
 
+const conversationState = vi.hoisted(() => ({
+  rows: [] as Array<{
+    id: number;
+    title: string | null;
+    summary: string | null;
+    lastMessageAt: Date;
+  }>,
+}));
+
 const aiMock = vi.hoisted(() => ({
   createChatCompletion: vi.fn(async (input: Record<string, unknown>) => {
     const messages = (input.messages ?? []) as Array<{ role: string; content: string }>;
@@ -83,13 +92,19 @@ const aiMock = vi.hoisted(() => ({
       choices: [
         {
           message: {
-            content: user.includes("42e493f1")
-              ? "Tell Replit: commit 42e493f1 is clean and admin.tsx is wired; ask them to confirm quality-gate and typecheck stay green."
-              : user.includes("What should I tell Replit")
-                ? "Tell Replit: pull the latest commit and run the canonical checks."
-                : user.includes("answer style")
-                  ? "You prefer direct answers with minimal steps."
-                  : "Direct answer first. Then the minimum useful details.",
+            content: system.includes("temporary chat")
+              ? "I don't have saved memories available in this temporary chat."
+              : system.includes("No relevant saved memories")
+                ? "I don't have that saved."
+                : system.includes("From your past conversations")
+                  ? "You previously discussed the Core launch checklist in another Ora conversation."
+                  : user.includes("42e493f1")
+                    ? "Tell Replit: commit 42e493f1 is clean and admin.tsx is wired; ask them to confirm quality-gate and typecheck stay green."
+                    : user.includes("What should I tell Replit")
+                      ? "Tell Replit: pull the latest commit and run the canonical checks."
+                      : user.includes("answer style")
+                        ? "You prefer direct answers with minimal steps."
+                        : "Direct answer first. Then the minimum useful details.",
           },
         },
       ],
@@ -223,6 +238,7 @@ vi.mock("@workspace/db", () => {
         ? Object.keys(selection as Record<string, unknown>)
         : [];
     if (keys.includes("embedding") && keys.includes("content")) return memoryState.rows;
+    if (keys.includes("summary") && keys.includes("lastMessageAt")) return conversationState.rows;
     return [];
   }
 
@@ -307,6 +323,7 @@ describe("POST /public-ai/chat response QA", () => {
     vi.clearAllMocks();
     authState.user = null;
     memoryState.rows = [];
+    conversationState.rows = [];
     app = await buildApp();
   });
 
@@ -495,6 +512,109 @@ What should I tell Replit?`;
     const [mainCall] = mainCompletionCalls();
     const systemPrompt = mainCall.messages?.[0]?.content ?? "";
     expect(systemPrompt).not.toContain("## Saved memories");
+    expect(systemPrompt).not.toContain("Prefers direct answers with minimal steps");
+  });
+
+  it("does not fake memory recall when no relevant saved memories are available", async () => {
+    authState.user = { userId: "ora-user-2", tier: "core", isPaid: true };
+    memoryState.rows = [];
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({
+        message: "What do you remember about my answer style?",
+        messages: [],
+        referenceSavedMemories: true,
+        referenceChatHistory: false,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("I don't have that saved.");
+    expect(res.body.memoriesUsed).toBeUndefined();
+
+    const [mainCall] = mainCompletionCalls();
+    const systemPrompt = mainCall.messages?.[0]?.content ?? "";
+    expect(systemPrompt).toContain("No relevant saved memories");
+    expect(systemPrompt).toContain("say you do not have that saved instead of guessing");
+  });
+
+  it("uses relevant past-conversation summaries without surfacing memoriesUsed chips", async () => {
+    authState.user = { userId: "ora-user-2", tier: "core", isPaid: true };
+    conversationState.rows = [
+      {
+        id: 10,
+        title: "Core launch checklist",
+        summary: "The user discussed a Core launch checklist for Ora memory validation.",
+        lastMessageAt: new Date(),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({
+        message: "What did we discuss about the Core launch checklist?",
+        messages: [],
+        referenceSavedMemories: true,
+        referenceChatHistory: true,
+        conversationId: 99,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toContain("Core launch checklist");
+    expect(res.body.memoriesUsed).toBeUndefined();
+
+    const [mainCall] = mainCompletionCalls();
+    const systemPrompt = mainCall.messages?.[0]?.content ?? "";
+    expect(systemPrompt).toContain("## From your past conversations");
+    expect(systemPrompt).toContain("Core launch checklist");
+    expect(systemPrompt).not.toContain("## Saved memories");
+  });
+
+  it("keeps temporary chats isolated from saved memory reads and writes", async () => {
+    authState.user = { userId: "ora-user-2", tier: "core", isPaid: true };
+    memoryState.rows = [
+      {
+        id: 42,
+        title: "Answer style",
+        content: "Prefers direct answers with minimal steps",
+        category: "preference",
+        embedding: [1, 0, 0],
+        createdAt: new Date(),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({
+        message: "What answer style do I prefer?",
+        messages: [],
+        temporary: true,
+        referenceSavedMemories: true,
+        referenceChatHistory: true,
+        conversationSummary: "Earlier saved summary that must not enter temporary mode.",
+        summarizeMessages: [
+          {
+            role: "user",
+            content: "Old non-temporary context",
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe("I don't have saved memories available in this temporary chat.");
+    expect(res.body.memoriesUsed).toBeUndefined();
+    expect(res.body.memorySaveCandidate).toBeUndefined();
+    expect(res.body.conversationSummary).toBeUndefined();
+
+    const [mainCall] = mainCompletionCalls();
+    const systemPrompt = mainCall.messages?.[0]?.content ?? "";
+    expect(systemPrompt).toContain("This is a temporary chat");
+    expect(systemPrompt).not.toContain("## Saved memories");
+    expect(systemPrompt).not.toContain("## Earlier in this conversation");
+    expect(systemPrompt).not.toContain("Earlier saved summary");
     expect(systemPrompt).not.toContain("Prefers direct answers with minimal steps");
   });
 
