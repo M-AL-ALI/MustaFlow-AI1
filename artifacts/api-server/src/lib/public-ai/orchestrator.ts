@@ -286,7 +286,7 @@ export const ORA_VIDEO_PATTERNS: RegExp[] = [
   /\b(watch|find|recommend|suggest)\b[^.?!]{0,30}\byoutube\b/i,
   // Standalone tutorial/media phrasing without an explicit retrieval verb:
   // "YouTube tutorials for oil changes", "video tutorials about React hooks".
-  /\b(?:youtube\s+)?(?:video\s+tutorials?|tutorial\s+videos?|videos?|clips?)\s+(?:for|about|on|explaining|covering|showing)\b/i,
+  /\b(?:youtube\s+)?(?:video\s+tutorials?|tutorial\s+videos?|tutorials?|videos?|clips?)\s+(?:for|about|on|explaining|covering|showing)\b/i,
   /\b(?:best|top|good|helpful|relevant)\s+(?:youtube\s+)?(?:videos?|clips?|tutorials?)\s+(?:for|about|on)\b/i,
 ];
 
