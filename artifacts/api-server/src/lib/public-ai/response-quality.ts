@@ -200,7 +200,7 @@ export function evaluateOraResponseQuality(
       addIssue(
         issues,
         "missing_memory_signal",
-        "warning",
+        "error",
         "Memory recall answer did not surface a memoriesUsed signal.",
       );
     }
