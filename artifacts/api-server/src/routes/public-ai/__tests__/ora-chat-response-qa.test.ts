@@ -94,17 +94,19 @@ const aiMock = vi.hoisted(() => ({
           message: {
             content: system.includes("temporary chat")
               ? "I don't have saved memories available in this temporary chat."
-              : system.includes("No relevant saved memories")
-                ? "I don't have that saved."
-                : system.includes("From your past conversations")
-                  ? "You previously discussed the Core launch checklist in another Ora conversation."
-                  : user.includes("42e493f1")
-                    ? "Tell Replit: commit 42e493f1 is clean and admin.tsx is wired; ask them to confirm quality-gate and typecheck stay green."
-                    : user.includes("What should I tell Replit")
-                      ? "Tell Replit: pull the latest commit and run the canonical checks."
-                      : user.includes("answer style")
-                        ? "You prefer direct answers with minimal steps."
-                        : "Direct answer first. Then the minimum useful details.",
+              : system.includes("Saved-memory reference is turned off")
+                ? "Memory reference is off, so I won't use saved memories for this answer."
+                : system.includes("No relevant saved memories")
+                  ? "I don't have that saved."
+                  : system.includes("From your past conversations")
+                    ? "You previously discussed the Core launch checklist in another Ora conversation."
+                    : user.includes("42e493f1")
+                      ? "Tell Replit: commit 42e493f1 is clean and admin.tsx is wired; ask them to confirm quality-gate and typecheck stay green."
+                      : user.includes("What should I tell Replit")
+                        ? "Tell Replit: pull the latest commit and run the canonical checks."
+                        : user.includes("answer style")
+                          ? "You prefer direct answers with minimal steps."
+                          : "Direct answer first. Then the minimum useful details.",
           },
         },
       ],
@@ -537,6 +539,42 @@ What should I tell Replit?`;
     const systemPrompt = mainCall.messages?.[0]?.content ?? "";
     expect(systemPrompt).toContain("No relevant saved memories");
     expect(systemPrompt).toContain("say you do not have that saved instead of guessing");
+  });
+
+  it("honors the Memory Center reference toggle by skipping saved memories", async () => {
+    authState.user = { userId: "ora-user-2", tier: "core", isPaid: true };
+    memoryState.rows = [
+      {
+        id: 42,
+        title: "Answer style",
+        content: "Prefers direct answers with minimal steps",
+        category: "preference",
+        embedding: [1, 0, 0],
+        createdAt: new Date(),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({
+        message: "What answer style do I prefer?",
+        messages: [],
+        referenceSavedMemories: false,
+        referenceChatHistory: false,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toBe(
+      "Memory reference is off, so I won't use saved memories for this answer.",
+    );
+    expect(res.body.memoriesUsed).toBeUndefined();
+
+    const [mainCall] = mainCompletionCalls();
+    const systemPrompt = mainCall.messages?.[0]?.content ?? "";
+    expect(systemPrompt).toContain("Saved-memory reference is turned off");
+    expect(systemPrompt).not.toContain("## Saved memories");
+    expect(systemPrompt).not.toContain("Prefers direct answers with minimal steps");
   });
 
   it("uses relevant past-conversation summaries without surfacing memoriesUsed chips", async () => {

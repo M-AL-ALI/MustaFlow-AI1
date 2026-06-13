@@ -17,6 +17,10 @@ import {
   persistMessages,
   clearStoredMessages,
   parseSupportReportParams,
+  supportConversationListQueryKey,
+  supportConversationDetailQueryKey,
+  remainingSupportAttachmentSlots,
+  MAX_SUPPORT_ATTACHMENTS,
 } from "../help";
 
 describe("ticketDetailPath", () => {
@@ -93,5 +97,26 @@ describe("support chat cache scoping", () => {
       ]),
     );
     expect(loadStoredMessages(a)).toEqual([{ role: "user", content: "ok" }]);
+  });
+});
+
+describe("support chat server-history query scoping", () => {
+  it("keys support conversation list/detail caches by Clerk user id", () => {
+    expect(supportConversationListQueryKey("user_a")).not.toEqual(
+      supportConversationListQueryKey("user_b"),
+    );
+    expect(supportConversationDetailQueryKey(42, "user_a")).not.toEqual(
+      supportConversationDetailQueryKey(42, "user_b"),
+    );
+  });
+});
+
+describe("support attachment limit", () => {
+  it("matches the backend's five-attachment cap", () => {
+    expect(MAX_SUPPORT_ATTACHMENTS).toBe(5);
+    expect(remainingSupportAttachmentSlots(0)).toBe(5);
+    expect(remainingSupportAttachmentSlots(4)).toBe(1);
+    expect(remainingSupportAttachmentSlots(5)).toBe(0);
+    expect(remainingSupportAttachmentSlots(9)).toBe(0);
   });
 });

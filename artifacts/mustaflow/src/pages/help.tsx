@@ -52,10 +52,22 @@ export function supportChatKey(userId: string): string {
   return `${SUPPORT_CHAT_STORAGE_PREFIX}:${userId}`;
 }
 
+export function supportConversationListQueryKey(userId: string | null | undefined): unknown[] {
+  return [...getListSupportConversationsQueryKey(), userId ?? "signed-out"];
+}
+
+export function supportConversationDetailQueryKey(
+  conversationId: number,
+  userId: string | null | undefined,
+): unknown[] {
+  return [...getGetSupportConversationQueryKey(conversationId), userId ?? "signed-out"];
+}
+
 // Must match the backend limit in artifacts/api-server/src/routes/help.ts
-// (MAX_ATTACHMENT_BYTES = 5 MB decoded). Keeping these in sync avoids a request
-// that passes the client check but is rejected server-side.
+// (MAX_ATTACHMENT_BYTES = 5 MB decoded, MAX_ATTACHMENTS = 5). Keeping these in
+// sync avoids a request that passes the client check but is rejected server-side.
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB per file
+export const MAX_SUPPORT_ATTACHMENTS = 5;
 const ALLOWED_ATTACHMENT_MIME = new Set([
   "image/png",
   "image/jpeg",
@@ -63,6 +75,10 @@ const ALLOWED_ATTACHMENT_MIME = new Set([
   "image/webp",
   "application/pdf",
 ]);
+
+export function remainingSupportAttachmentSlots(currentCount: number): number {
+  return Math.max(0, MAX_SUPPORT_ATTACHMENTS - Math.max(0, currentCount));
+}
 
 const SUPPORT_CATEGORIES = [
   { value: "general", label: "General question" },
@@ -270,19 +286,38 @@ function SupportChat() {
   // sync as new turns arrive.
   const conversationsQuery = useListSupportConversations({
     query: {
-      enabled: Boolean(isSignedIn),
-      queryKey: getListSupportConversationsQueryKey(),
+      enabled: Boolean(isSignedIn && userId),
+      queryKey: supportConversationListQueryKey(userId),
     },
   });
   const latestConversationId = conversationsQuery.data?.conversations?.[0]?.id ?? 0;
   const conversationDetail = useGetSupportConversation(latestConversationId, {
     query: {
-      enabled: Boolean(isSignedIn) && latestConversationId > 0,
-      queryKey: getGetSupportConversationQueryKey(latestConversationId),
+      enabled: Boolean(isSignedIn && userId) && latestConversationId > 0,
+      queryKey: supportConversationDetailQueryKey(latestConversationId, userId),
     },
   });
   const hydratedRef = useRef(false);
   const cacheLoadedRef = useRef(false);
+  const activeUserRef = useRef<string | null | undefined>(undefined);
+
+  // A shared browser can move from one Clerk account to another without a full
+  // React remount. Reset every client-side support-chat cache latch on user
+  // change so the next account never sees the previous account's draft state.
+  useEffect(() => {
+    const nextUser = isSignedIn && userId ? userId : null;
+    if (activeUserRef.current === nextUser) return;
+    activeUserRef.current = nextUser;
+    hydratedRef.current = false;
+    cacheLoadedRef.current = false;
+    setMessages([]);
+    setInput("");
+    setCanEscalate(false);
+    setShowEscalate(false);
+    setSubject("");
+    setAttachments([]);
+    setEscalateResult(null);
+  }, [isSignedIn, userId]);
 
   // Purge the legacy pre-scoping global key once so an earlier account's
   // transcript can never leak to the next user on a shared browser.
@@ -379,8 +414,27 @@ function SupportChat() {
 
   const handlePickFiles = async (files: FileList | null) => {
     if (!files) return;
+    const remainingSlots = remainingSupportAttachmentSlots(attachments.length);
+    if (remainingSlots <= 0) {
+      toast({
+        title: "Attachment limit reached",
+        description: `You can attach up to ${MAX_SUPPORT_ATTACHMENTS} files per support request.`,
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const picked = Array.from(files);
+    if (picked.length > remainingSlots) {
+      toast({
+        title: "Some files were not attached",
+        description: `Support requests allow ${MAX_SUPPORT_ATTACHMENTS} files. Add another ticket if you need to share more.`,
+      });
+    }
+
     const accepted: PendingAttachment[] = [];
-    for (const file of Array.from(files)) {
+    for (const file of picked.slice(0, remainingSlots)) {
       if (!ALLOWED_ATTACHMENT_MIME.has(file.type)) {
         toast({
           title: "Unsupported file",
@@ -497,7 +551,7 @@ function SupportChat() {
                     : "max-w-[85%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm text-foreground"
                 }
               >
-                <p className="whitespace-pre-wrap">{m.content}</p>
+                <p className="whitespace-pre-wrap break-words">{m.content}</p>
               </div>
             </div>
           ))

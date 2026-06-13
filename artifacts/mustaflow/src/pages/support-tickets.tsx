@@ -55,6 +55,12 @@ function statusLabel(status: string): string {
   }
 }
 
+export function parseSupportTicketRouteId(value?: string): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const active = isActiveStatus(status);
   return (
@@ -278,10 +284,18 @@ function TicketList() {
   );
 }
 
+function InvalidTicketId() {
+  return (
+    <div className="rounded-lg border border-border bg-card p-6 text-center">
+      <p className="text-sm text-muted-foreground">This support ticket link is invalid.</p>
+    </div>
+  );
+}
+
 export default function SupportTicketsPage() {
   const { isSignedIn, isLoaded } = useAuth();
   const params = useParams<{ id?: string }>();
-  const ticketId = params.id ? Number(params.id) : null;
+  const ticketId = parseSupportTicketRouteId(params.id);
 
   if (!isLoaded) {
     return (
@@ -295,7 +309,7 @@ export default function SupportTicketsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      {ticketId != null ? (
+      {params.id ? (
         <>
           <Link
             href="/support/tickets"
@@ -304,7 +318,7 @@ export default function SupportTicketsPage() {
             <ChevronLeft className="h-4 w-4" />
             All tickets
           </Link>
-          <TicketDetail ticketId={ticketId} />
+          {ticketId != null ? <TicketDetail ticketId={ticketId} /> : <InvalidTicketId />}
         </>
       ) : (
         <>
