@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { routeOraMessage } from "../orchestrator";
 import { buildOraRoutingDiagnostic } from "../routing-diagnostics";
-import { detectFileRequest, isPastedReferenceAnalysisRequest, ORA_SYSTEM_PROMPT } from "../prompt";
+import {
+  collectPastedReferenceSignals,
+  detectFileRequest,
+  isPastedReferenceAnalysisRequest,
+  ORA_SYSTEM_PROMPT,
+  summarizePastedReferenceSignals,
+} from "../prompt";
 
 const premiumClassifier = {
   intent: "premium",
@@ -108,6 +114,24 @@ describe("Ora real-user behavior QA", () => {
     expect(diagnostic.routeTier).toBe("premium");
     expect(diagnostic.quotaKind).toBe("message");
     expect(diagnostic.providerOrder).toEqual(["deepseek", "gemini", "anthropic", "openai"]);
+  });
+
+  it("extracts visible pasted-report signals so long logs are not skimmed", () => {
+    const signals = collectPastedReferenceSignals(longReplitReport);
+
+    expect(signals.actors).toContain("Replit");
+    expect(signals.commits).toContain("42e493f1");
+    expect(signals.files).toEqual(
+      expect.arrayContaining(["ora-routing-diagnostics-panel.tsx", "admin.tsx"]),
+    );
+    expect(signals.replyTargets).toEqual(["Replit"]);
+    expect(signals.statusLines.join("\n")).toContain("quality-gate: PASS");
+
+    const promptSummary = summarizePastedReferenceSignals(longReplitReport);
+    expect(promptSummary).toContain("Pasted reference signals");
+    expect(promptSummary).toContain("42e493f1");
+    expect(promptSummary).toContain("admin.tsx");
+    expect(promptSummary).toContain("User is asking what to tell: Replit");
   });
 
   it("keeps memory recall conversational while routing memory extraction and document memory through specialist chains", async () => {

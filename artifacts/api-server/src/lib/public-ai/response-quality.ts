@@ -26,6 +26,8 @@ export interface OraResponseQualityInput {
   memoriesUsed?: Array<{ id: number; title: string }>;
   memorySaveCandidate?: string;
   suggestions?: string[];
+  requiredEvidence?: string[];
+  maxReplyLines?: number;
   signedIn?: boolean;
 }
 
@@ -134,6 +136,27 @@ export function evaluateOraResponseQuality(
         "Ora treated reference text as an artifact generation task.",
       );
     }
+
+    if (input.suggestions?.length) {
+      addIssue(
+        issues,
+        "unwanted_suggestions",
+        "error",
+        "Pasted/direct tool replies should not add generic follow-up suggestion chips.",
+      );
+    }
+
+    if (input.maxReplyLines) {
+      const visibleLines = reply.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+      if (visibleLines > input.maxReplyLines) {
+        addIssue(
+          issues,
+          "too_many_steps",
+          "warning",
+          "Ora used more lines/steps than this direct-answer turn should need.",
+        );
+      }
+    }
   }
 
   if (scenario === "pasted_report" || scenario === "pasted_error_log") {
@@ -149,6 +172,21 @@ export function evaluateOraResponseQuality(
         "missing_tool_actor",
         "error",
         "Ora did not identify the relevant tool/workspace actor from the pasted text.",
+      );
+    }
+
+    const requiredEvidence = (input.requiredEvidence ?? [])
+      .map((detail) => detail.trim())
+      .filter(Boolean);
+    const missingEvidence = requiredEvidence.filter(
+      (detail) => !reply.toLowerCase().includes(detail.toLowerCase()),
+    );
+    if (missingEvidence.length > 0) {
+      addIssue(
+        issues,
+        "missing_pasted_detail",
+        "error",
+        `Ora did not mention key pasted detail(s): ${missingEvidence.join(", ")}.`,
       );
     }
   }

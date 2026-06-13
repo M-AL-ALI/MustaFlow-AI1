@@ -83,11 +83,13 @@ const aiMock = vi.hoisted(() => ({
       choices: [
         {
           message: {
-            content: user.includes("What should I tell Replit")
-              ? "Tell Replit: pull the latest commit and run the canonical checks."
-              : user.includes("answer style")
-                ? "You prefer direct answers with minimal steps."
-                : "Direct answer first. Then the minimum useful details.",
+            content: user.includes("42e493f1")
+              ? "Tell Replit: commit 42e493f1 is clean and admin.tsx is wired; ask them to confirm quality-gate and typecheck stay green."
+              : user.includes("What should I tell Replit")
+                ? "Tell Replit: pull the latest commit and run the canonical checks."
+                : user.includes("answer style")
+                  ? "You prefer direct answers with minimal steps."
+                  : "Direct answer first. Then the minimum useful details.",
           },
         },
       ],
@@ -324,7 +326,7 @@ What should I tell Replit?`;
 
     expect(res.status).toBe(200);
     expect(res.body.reply).toBe(
-      "Tell Replit: pull the latest commit and run the canonical checks.",
+      "Tell Replit: commit 42e493f1 is clean and admin.tsx is wired; ask them to confirm quality-gate and typecheck stay green.",
     );
     expect(res.body.suggestions).toEqual([]);
     expect(res.body.fileName).toBeUndefined();
@@ -336,6 +338,8 @@ What should I tell Replit?`;
         userMessage: pastedReport,
         reply: res.body.reply,
         suggestions: res.body.suggestions,
+        requiredEvidence: ["42e493f1", "admin.tsx"],
+        maxReplyLines: 2,
         fileName: res.body.fileName,
         fileData: res.body.fileData,
         mimeType: res.body.mimeType,
@@ -350,7 +354,16 @@ What should I tell Replit?`;
     expect(systemPrompt).toContain("Start with the direct answer");
     expect(systemPrompt).toContain("Replit = hosted dev/runtime workspace");
     expect(systemPrompt).toContain("Use the minimum useful steps");
+    expect(systemPrompt).toContain("Pasted reference signals");
+    expect(systemPrompt).toContain("Commits/refs: 42e493f1");
+    expect(systemPrompt).toContain("Files mentioned: admin.tsx");
+    expect(systemPrompt).toContain("User is asking what to tell: Replit");
     expect(mainCall.messages?.at(-1)?.content).toBe(pastedReport);
+    expect(
+      aiMock.createChatCompletion.mock.calls.some((call) =>
+        JSON.stringify(call[0]).includes("follow-up questions"),
+      ),
+    ).toBe(false);
   });
 
   it("returns generated-file fields only when the file branch actually creates an artifact", async () => {

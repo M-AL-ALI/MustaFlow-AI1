@@ -11,6 +11,7 @@ import {
   scanUserInput,
   ORA_SYSTEM_PROMPT,
   isPastedReferenceAnalysisRequest,
+  summarizePastedReferenceSignals,
 } from "../../lib/public-ai/prompt";
 
 import { generateFileFromPrompt, FileGenerationError } from "../../lib/public-ai/file-builder";
@@ -1336,7 +1337,9 @@ router.post("/public-ai/chat", async (req, res) => {
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
-    (referenceAnalysisTurn ? PASTED_REFERENCE_ANALYSIS_ADDENDUM : "") +
+    (referenceAnalysisTurn
+      ? PASTED_REFERENCE_ANALYSIS_ADDENDUM + summarizePastedReferenceSignals(message)
+      : "") +
     expertiseProfile.systemAddendum +
     profileContext +
     memory.text +
@@ -1434,21 +1437,23 @@ router.post("/public-ai/chat", async (req, res) => {
         provider: chain.candidate.provider,
       };
     })(),
-    createChatCompletion({
-      provider: "openai",
-      model: "gpt-5-mini",
-      messages: [
-        { role: "system" as const, content: suggestionSystemPrompt },
-        ...recentHistory,
-        { role: "user" as const, content: message },
-        {
-          role: "user" as const,
-          content: "Suggest 2-3 short follow-up questions I could ask next.",
-        },
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 200,
-    }),
+    referenceAnalysisTurn
+      ? Promise.resolve(null)
+      : createChatCompletion({
+          provider: "openai",
+          model: "gpt-5-mini",
+          messages: [
+            { role: "system" as const, content: suggestionSystemPrompt },
+            ...recentHistory,
+            { role: "user" as const, content: message },
+            {
+              role: "user" as const,
+              content: "Suggest 2-3 short follow-up questions I could ask next.",
+            },
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 200,
+        }),
   ]);
 
   const latencyMs = Date.now() - start;
@@ -1520,7 +1525,7 @@ router.post("/public-ai/chat", async (req, res) => {
   if (!referenceAnalysisTurn) {
     if (suggestionResult.status === "fulfilled") {
       try {
-        const raw = suggestionResult.value.choices[0]?.message?.content?.trim() ?? "{}";
+        const raw = suggestionResult.value?.choices[0]?.message?.content?.trim() ?? "{}";
         const parsedSuggestions = JSON.parse(raw) as { suggestions?: unknown };
         if (Array.isArray(parsedSuggestions.suggestions)) {
           suggestions = (parsedSuggestions.suggestions as unknown[])

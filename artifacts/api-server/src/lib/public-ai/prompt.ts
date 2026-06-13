@@ -116,6 +116,112 @@ const DIRECT_TOOL_REPLY_PATTERN =
 const TOOL_REPORT_QUESTION_PATTERN =
   /\b(?:what\s+(?:does|do|is|are|should)|is\s+this|does\s+this|can\s+you|please)\b[\s\S]{0,160}\b(?:mean|good|okay|safe|next|issue|problem|fix|reply|tell|review|analy[sz]e|diagnos[ei]s?)\b/i;
 
+const PASTED_REFERENCE_ACTORS = ["Replit", "Codex", "ChatGPT", "GitHub"] as const;
+
+const PASTED_REFERENCE_REPLY_TARGET_PATTERN =
+  /\bwhat\s+(?:should|do)\s+i\s+(?:tell|reply\s+to|say\s+to)\s+(replit|codex|chatgpt|github)\b/gi;
+
+const PASTED_REFERENCE_COMMIT_PATTERN = /\b[0-9a-f]{7,12}\b/gi;
+
+const PASTED_REFERENCE_FILE_PATTERN =
+  /\b[\w@./-]+\.(?:tsx?|jsx?|json|md|yml|yaml|css|scss|html|py|sql|toml|lock|csv|xlsx|docx|pdf|pptx)\b/gi;
+
+const PASTED_REFERENCE_STATUS_LINE_PATTERN =
+  /\b(pass(?:ed)?|fail(?:ed|ing)?|clean|green|blocked|conflict|error|warning|typecheck|quality-gate|vitest|eslint|prettier|format|lint|workflow|pull(?:ed|ing)?|push(?:ed|ing)?|merge(?:d|ing)?|commit)\b/i;
+
+const PASTED_REFERENCE_RISK_LINE_PATTERN =
+  /\b(fail(?:ed|ing)?|error|conflict|blocked|stale|lock|rate\s*limit|warning|red)\b/i;
+
+export interface PastedReferenceSignals {
+  actors: string[];
+  replyTargets: string[];
+  commits: string[];
+  files: string[];
+  statusLines: string[];
+  riskLines: string[];
+}
+
+function unique(values: string[], max: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const cleaned = value.trim();
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cleaned);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function cleanSignalLine(line: string): string {
+  const cleaned = line.replace(/\s+/g, " ").trim();
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trim()}...` : cleaned;
+}
+
+function extractMatchingLines(text: string, pattern: RegExp, max: number): string[] {
+  return unique(
+    text
+      .split(/\r?\n/)
+      .map(cleanSignalLine)
+      .filter((line) => line.length > 0 && pattern.test(line)),
+    max,
+  );
+}
+
+export function collectPastedReferenceSignals(text: string): PastedReferenceSignals {
+  const actors = PASTED_REFERENCE_ACTORS.filter((actor) =>
+    new RegExp(`\\b${actor}\\b`, "i").test(text),
+  );
+
+  const replyTargets = unique(
+    Array.from(text.matchAll(PASTED_REFERENCE_REPLY_TARGET_PATTERN)).map((match) => {
+      const raw = match[1] ?? "";
+      return raw ? raw[0].toUpperCase() + raw.slice(1).toLowerCase() : raw;
+    }),
+    4,
+  );
+
+  return {
+    actors,
+    replyTargets,
+    commits: unique(
+      Array.from(text.matchAll(PASTED_REFERENCE_COMMIT_PATTERN)).map((m) => m[0]),
+      6,
+    ),
+    files: unique(
+      Array.from(text.matchAll(PASTED_REFERENCE_FILE_PATTERN)).map((m) => m[0]),
+      8,
+    ),
+    statusLines: extractMatchingLines(text, PASTED_REFERENCE_STATUS_LINE_PATTERN, 8),
+    riskLines: extractMatchingLines(text, PASTED_REFERENCE_RISK_LINE_PATTERN, 5),
+  };
+}
+
+export function summarizePastedReferenceSignals(text: string): string {
+  const signals = collectPastedReferenceSignals(text);
+  const lines: string[] = [];
+
+  if (signals.actors.length > 0) lines.push(`- Actors mentioned: ${signals.actors.join(", ")}`);
+  if (signals.replyTargets.length > 0) {
+    lines.push(`- User is asking what to tell: ${signals.replyTargets.join(", ")}`);
+  }
+  if (signals.commits.length > 0) lines.push(`- Commits/refs: ${signals.commits.join(", ")}`);
+  if (signals.files.length > 0) lines.push(`- Files mentioned: ${signals.files.join(", ")}`);
+  if (signals.riskLines.length > 0) {
+    lines.push(`- Possible blockers/errors: ${signals.riskLines.join(" | ")}`);
+  }
+  if (signals.statusLines.length > 0) {
+    lines.push(`- Visible status lines: ${signals.statusLines.join(" | ")}`);
+  }
+
+  if (lines.length === 0) return "";
+
+  return `\n\n## Pasted reference signals\nUse these visible details when answering so the user can tell you read the full pasted text:\n${lines.join("\n")}`;
+}
+
 export function scanUserInput(text: string): boolean {
   for (const pattern of INJECTION_PATTERNS) {
     if (pattern.test(text)) {
