@@ -129,6 +129,9 @@ const PASTED_REFERENCE_FILE_PATTERN =
 const PASTED_REFERENCE_STATUS_LINE_PATTERN =
   /\b(pass(?:ed)?|fail(?:ed|ing)?|clean|green|blocked|conflict|error|warning|typecheck|quality-gate|vitest|eslint|prettier|format|lint|workflow|pull(?:ed|ing)?|push(?:ed|ing)?|merge(?:d|ing)?|commit)\b/i;
 
+const PASTED_REFERENCE_STATUS_RESULT_PATTERN =
+  /\b[\w][\w -]*:\s+(?:PASS(?:ED)?|FAIL(?:ED)?|CLEAN|GREEN)\b/i;
+
 const PASTED_REFERENCE_RISK_LINE_PATTERN =
   /\b(fail(?:ed|ing)?|error|conflict|blocked|stale|lock|rate\s*limit|warning|red)\b/i;
 
@@ -171,6 +174,15 @@ function extractMatchingLines(text: string, pattern: RegExp, max: number): strin
   );
 }
 
+function extractStatusLines(text: string, max: number): string[] {
+  const explicit = extractMatchingLines(text, PASTED_REFERENCE_STATUS_RESULT_PATTERN, max);
+  const seen = new Set(explicit.map((l) => l.toLowerCase()));
+  const context = extractMatchingLines(text, PASTED_REFERENCE_STATUS_LINE_PATTERN, max).filter(
+    (l) => !seen.has(l.toLowerCase()),
+  );
+  return [...explicit, ...context].slice(0, max);
+}
+
 export function collectPastedReferenceSignals(text: string): PastedReferenceSignals {
   const actors = PASTED_REFERENCE_ACTORS.filter((actor) =>
     new RegExp(`\\b${actor}\\b`, "i").test(text),
@@ -195,7 +207,7 @@ export function collectPastedReferenceSignals(text: string): PastedReferenceSign
       Array.from(text.matchAll(PASTED_REFERENCE_FILE_PATTERN)).map((m) => m[0]),
       8,
     ),
-    statusLines: extractMatchingLines(text, PASTED_REFERENCE_STATUS_LINE_PATTERN, 8),
+    statusLines: extractStatusLines(text, 8),
     riskLines: extractMatchingLines(text, PASTED_REFERENCE_RISK_LINE_PATTERN, 5),
   };
 }
