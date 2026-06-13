@@ -404,15 +404,54 @@ pass code-level verification. No incorrect routing, hallucinated files, or bad t
 observed in any live response.
 
 **OPEN** (requires signed-in browser session):
+
 - Prompt 7: memory-save chip visible in UI
 - Prompt 8: memory-recall chip visible + content correct
 - Prompt 5: actual inline image card renders for signed-in user
 - Prompt 9: confirm full pasted-text comprehension live (covered by automated test)
 
+## DeepSeek 402 — Remediation Applied
+
+`DEEPSEEK_DISABLED=true` added as a shared env var. `isDeepSeekAvailable()` in
+`artifacts/api-server/src/lib/ai-providers.ts` now short-circuits when this flag is set:
+
+```ts
+export function isDeepSeekAvailable(): boolean {
+  if (process.env.DEEPSEEK_DISABLED === "true") return false;
+  return !!process.env.DEEPSEEK_API_KEY;
+}
+```
+
+Verified: api-server boot log after the change shows zero DeepSeek warnings.
+All Ora requests now go straight to the Gemini → Anthropic → OpenAI fallback chain
+without the extra ~400ms DeepSeek 402 hit.
+
+To re-enable DeepSeek once the account is topped up: delete `DEEPSEEK_DISABLED` from
+the Replit env tab (or set it to anything other than `"true"`). The key stays in Secrets;
+no code change needed.
+
+## Signed-In Browser Validation — Manual Required
+
+Automated Playwright tests (via `runTest` with `testClerkAuth: true`) are blocked in the
+development environment by Clerk's dev-key throttle. The browser was redirected to
+`/sign-in` in every attempt. This is a documented environment limitation.
+
+**Manual checklist** — open the Replit preview, sign in, navigate to `/ora`, and verify:
+
+| Prompt | What to type | What to look for |
+|--------|-------------|------------------|
+| 7 (memory save) | "Please remember that I prefer TypeScript over JavaScript for all my projects." | A chip/badge near the assistant bubble labeled "Saved to memory" or similar |
+| 8 (memory recall) | "What do you remember about my coding preferences?" | A chip showing recalled memory + reply mentioning TypeScript |
+| 5 (image, signed-in) | "Generate an image of a mountain lake at sunset" | An inline image card in the chat bubble (not a sign-up invite) |
+
+If any chip is missing: the response payload likely has the correct `detectedIntent` but the
+frontend render path isn't reaching the chip component. Check `ora-bubble.tsx`
+`memoryChips` render branch and `InlineImageResultCard` import.
+
 ## Recommended Next Action
 
-Have a signed-in user open the Ora panel in the Replit preview (or mustaflow.app
-after deploy) and run prompts 5, 7, 8 manually. Results for prompts 1–4 are confirmed.
+Run the three manual prompts above in a signed-in browser session (5 minutes total).
+Results for prompts 1–4 and 5/6 code-level are confirmed.
 Any remaining failure maps to:
 
 - frontend wiring: if payload exists but card/chip does not render

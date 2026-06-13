@@ -52,8 +52,13 @@ function getDeepSeekClient(): OpenAI {
   return deepseekClient;
 }
 
-/** True when DeepSeek is reachable (its API key is configured). */
+/**
+ * True when DeepSeek is reachable (its API key is configured).
+ * Set DEEPSEEK_DISABLED=true to temporarily disable routing to DeepSeek
+ * without removing the API key (e.g. when the account has zero balance).
+ */
 export function isDeepSeekAvailable(): boolean {
+  if (process.env.DEEPSEEK_DISABLED === "true") return false;
   return !!process.env.DEEPSEEK_API_KEY;
 }
 

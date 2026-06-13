@@ -205,7 +205,7 @@ export function DynamicAtom({
   const cy = size / 2;
   const coreR = size * 0.15;
   const glowR = size * 0.28;
-  const orbitR = size * 0.40;
+  const orbitR = size * 0.4;
   const ellipseRx = size * 0.44;
   const ellipseRy = size * 0.175;
   const electronR = size * 0.065;
@@ -425,7 +425,13 @@ export function DynamicAtom({
         <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreThinkingStyle} />
         <circle cx={cx} cy={cy} r={coreR} fill={coreColor} style={coreWorkingStyle} />
         {/* 3D sphere highlight — offset upper-left to give depth illusion */}
-        <circle cx={cx - coreR * 0.3} cy={cy - coreR * 0.3} r={coreR * 0.42} fill="white" opacity="0.45" />
+        <circle
+          cx={cx - coreR * 0.3}
+          cy={cy - coreR * 0.3}
+          r={coreR * 0.42}
+          fill="white"
+          opacity="0.45"
+        />
 
         {/* Badge overlay for contextual states */}
         {isWorking && <BadgeIcon state={state} r={size * 0.42} />}
