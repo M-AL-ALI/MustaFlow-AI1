@@ -105,7 +105,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function oraAccentColor(tier: string): string {
-  if (tier === "core") return "hsl(175 70% 55%)";
+  if (tier === "core") return "hsl(217 90% 60%)";
   if (tier === "wave") return "hsl(35 85% 60%)";
   return "hsl(265 85% 65%)";
 }

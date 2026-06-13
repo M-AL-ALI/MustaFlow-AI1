@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
 import { useUser } from "@clerk/react";
 import { useLocation } from "wouter";
 import {
@@ -137,10 +144,17 @@ const STATUS_LABELS: Record<string, string> = {
   "analyzing-image": "Analyzing image…",
 };
 
+// Plan accent expressed as raw HSL channels (no `hsl(...)` wrapper) so it can be
+// dropped into a CSS custom property and reused with arbitrary opacity, e.g.
+// `hsl(var(--ora-accent-hsl) / 0.5)`.
+function oraAccentHsl(tier: string): string {
+  if (tier === "core") return "217 90% 60%";
+  if (tier === "wave") return "35 85% 60%";
+  return "265 85% 65%";
+}
+
 function oraAccentColor(tier: string): string {
-  if (tier === "core") return "hsl(175 70% 55%)";
-  if (tier === "wave") return "hsl(35 85% 60%)";
-  return "hsl(265 85% 65%)";
+  return `hsl(${oraAccentHsl(tier)})`;
 }
 
 function oraTierLabel(tier: string): string {
@@ -197,7 +211,7 @@ function DatasetChip({
       className={cn(
         "flex items-start gap-2 rounded-xl border px-3 py-2 text-xs mb-2",
         uploadState === "attached" &&
-          "border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] text-foreground",
+          "border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.07)] text-foreground",
         uploadState === "uploading" && "border-border bg-muted/30 text-muted-foreground",
         uploadState === "error" && "border-destructive/40 bg-destructive/10 text-destructive",
       )}
@@ -206,9 +220,9 @@ function DatasetChip({
         {uploadState === "uploading" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         {uploadState === "attached" &&
           (isDataset ? (
-            <Table2 className="h-3.5 w-3.5 text-[hsl(265_85%_65%)]" />
+            <Table2 className="h-3.5 w-3.5 text-[hsl(var(--ora-accent-hsl))]" />
           ) : (
-            <FileText className="h-3.5 w-3.5 text-[hsl(265_85%_65%)]" />
+            <FileText className="h-3.5 w-3.5 text-[hsl(var(--ora-accent-hsl))]" />
           ))}
         {uploadState === "error" && <AlertCircle className="h-3.5 w-3.5" />}
       </div>
@@ -223,12 +237,12 @@ function DatasetChip({
         {uploadState === "attached" && file && isDataset && (file.rowCount || file.colCount) && (
           <div className="flex flex-wrap gap-1 mt-1">
             {file.rowCount != null && (
-              <span className="inline-flex items-center rounded-full bg-[hsl(265_85%_65%/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(265_85%_65%)]">
+              <span className="inline-flex items-center rounded-full bg-[hsl(var(--ora-accent-hsl)/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(var(--ora-accent-hsl))]">
                 {file.rowCount.toLocaleString()} rows
               </span>
             )}
             {file.colCount != null && (
-              <span className="inline-flex items-center rounded-full bg-[hsl(265_85%_65%/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(265_85%_65%)]">
+              <span className="inline-flex items-center rounded-full bg-[hsl(var(--ora-accent-hsl)/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(var(--ora-accent-hsl))]">
                 {file.colCount} cols
               </span>
             )}
@@ -852,6 +866,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           ? "h-full min-h-0 bg-background"
           : "rounded-2xl border border-border/60 bg-card shadow-lg max-h-[70dvh] transition-all duration-500",
       )}
+      style={{ ["--ora-accent-hsl"]: oraAccentHsl(tier) } as CSSProperties}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -860,10 +875,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
       {/* Drag-and-drop overlay */}
       {isDragOver && (
         <div
-          className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-[hsl(265_85%_65%/0.7)] bg-card/90 backdrop-blur-sm pointer-events-none"
+          className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-[hsl(var(--ora-accent-hsl)/0.7)] bg-card/90 backdrop-blur-sm pointer-events-none"
           aria-hidden
         >
-          <div className="flex flex-col items-center gap-2 text-[hsl(265_85%_65%)]">
+          <div className="flex flex-col items-center gap-2 text-[hsl(var(--ora-accent-hsl))]">
             <Upload className="h-8 w-8" />
             <span className="text-sm font-medium">Drop image or file to upload</span>
             <span className="text-xs text-muted-foreground">
@@ -891,7 +906,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
             )}
             {temporary && (
               <span
-                className="inline-flex items-center gap-1 text-[10px] text-[hsl(265_85%_65%)] font-medium border border-[hsl(265_85%_65%/0.4)] bg-[hsl(265_85%_65%/0.08)] rounded-full px-1.5 py-0.5"
+                className="inline-flex items-center gap-1 text-[10px] text-[hsl(var(--ora-accent-hsl))] font-medium border border-[hsl(var(--ora-accent-hsl)/0.4)] bg-[hsl(var(--ora-accent-hsl)/0.08)] rounded-full px-1.5 py-0.5"
                 title="Temporary chat — nothing is saved to memory or history"
               >
                 <Ghost className="h-3 w-3" />
@@ -977,14 +992,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       className={cn(
                         "h-3.5 w-3.5 shrink-0",
                         language === l.value
-                          ? "text-[hsl(265_85%_65%)]"
+                          ? "text-[hsl(var(--ora-accent-hsl))]"
                           : "text-muted-foreground/60",
                       )}
                     />
                     <span
                       className={cn(
                         "flex-1",
-                        language === l.value && "text-[hsl(265_85%_65%)] font-medium",
+                        language === l.value && "text-[hsl(var(--ora-accent-hsl))] font-medium",
                       )}
                     >
                       {l.label}
@@ -1009,7 +1024,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
                   >
                     {voice.isTtsEnabled ? (
-                      <Volume2 className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                      <Volume2 className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--ora-accent-hsl))]" />
                     ) : (
                       <VolumeX className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
                     )}
@@ -1050,11 +1065,16 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     <Ghost
                       className={cn(
                         "h-3.5 w-3.5 shrink-0",
-                        temporary ? "text-[hsl(265_85%_65%)]" : "text-muted-foreground/60",
+                        temporary
+                          ? "text-[hsl(var(--ora-accent-hsl))]"
+                          : "text-muted-foreground/60",
                       )}
                     />
                     <span
-                      className={cn("flex-1", temporary && "text-[hsl(265_85%_65%)] font-medium")}
+                      className={cn(
+                        "flex-1",
+                        temporary && "text-[hsl(var(--ora-accent-hsl))] font-medium",
+                      )}
                     >
                       {temporary ? "Temporary chat on" : "Temporary chat"}
                     </span>
@@ -1093,10 +1113,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           <div className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-4 py-8">
             <div className="w-full max-w-3xl mx-auto text-center">
               <div className="flex justify-center mb-5">
-                <DynamicAtom state={atomState} size={52} />
+                <DynamicAtom state={atomState} size={52} accentColor={oraAccentColor(tier)} />
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                Hi, I&apos;m <span className="text-[hsl(265_85%_65%)]">Ora</span>
+                Hi, I&apos;m <span className="text-[hsl(var(--ora-accent-hsl))]">Ora</span>
               </h1>
               <p className="text-sm text-muted-foreground mt-2.5 max-w-md mx-auto leading-relaxed">
                 Ask anything, think things through, or get work done — planning, strategy, files,
@@ -1108,7 +1128,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     key={chip}
                     type="button"
                     onClick={() => handleChip(chip)}
-                    className="text-xs px-3.5 py-2 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.5)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all"
+                    className="text-xs px-3.5 py-2 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(var(--ora-accent-hsl)/0.5)] hover:bg-[hsl(var(--ora-accent-hsl)/0.07)] transition-all"
                   >
                     {chip}
                   </button>
@@ -1127,7 +1147,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   key={chip}
                   type="button"
                   onClick={() => handleChip(chip)}
-                  className="text-xs px-3 py-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.5)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all"
+                  className="text-xs px-3 py-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-[hsl(var(--ora-accent-hsl)/0.5)] hover:bg-[hsl(var(--ora-accent-hsl)/0.07)] transition-all"
                 >
                   {chip}
                 </button>
@@ -1174,7 +1194,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                 )}
               >
                 {msg.role === "assistant" && (
-                  <DynamicAtom state="idle" size={24} className="shrink-0 mt-0.5" />
+                  <DynamicAtom
+                    state="idle"
+                    size={24}
+                    className="shrink-0 mt-0.5"
+                    accentColor={oraAccentColor(tier)}
+                  />
                 )}
                 <div
                   className={cn(
@@ -1190,13 +1215,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       )}
                     >
                       {msg.attachment && (
-                        <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] px-2.5 py-1.5 text-xs">
+                        <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.07)] px-2.5 py-1.5 text-xs">
                           {msg.attachment.isImage ? (
-                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--ora-accent-hsl))]" />
                           ) : msg.attachment.isDataset ? (
-                            <Table2 className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                            <Table2 className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--ora-accent-hsl))]" />
                           ) : (
-                            <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)]" />
+                            <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--ora-accent-hsl))]" />
                           )}
                           <span className="truncate">{msg.attachment.filename}</span>
                         </div>
@@ -1255,14 +1280,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                                 }}
                                 placeholder="Describe the change, e.g. make the sky purple"
                                 disabled={isLoading}
-                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[hsl(265_85%_65%)] disabled:opacity-60"
+                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ora-accent-hsl))] disabled:opacity-60"
                               />
                               <div className="flex items-center gap-2">
                                 <button
                                   type="button"
                                   onClick={() => submitImageEdit(msg.imageId!)}
                                   disabled={isLoading || !editImageInstruction.trim()}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-[hsl(265_85%_65%)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[hsl(265_85%_60%)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-[hsl(var(--ora-accent-hsl))] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                 >
                                   {isLoading ? (
                                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1308,10 +1333,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       <button
                         type="button"
                         onClick={() => downloadOraFile(msg.generatedFile!)}
-                        className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.06)] hover:bg-[hsl(265_85%_65%/0.12)] hover:border-[hsl(265_85%_65%/0.55)] px-3.5 py-3 transition-all cursor-pointer"
+                        className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.06)] hover:bg-[hsl(var(--ora-accent-hsl)/0.12)] hover:border-[hsl(var(--ora-accent-hsl)/0.55)] px-3.5 py-3 transition-all cursor-pointer"
                       >
-                        <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(265_85%_65%/0.15)]">
-                          <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(265_85%_65%)]" />
+                        <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--ora-accent-hsl)/0.15)]">
+                          <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(var(--ora-accent-hsl))]" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold truncate text-foreground">
@@ -1321,7 +1346,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                             {msg.generatedFile.format.toUpperCase()} · Click to download
                           </p>
                         </div>
-                        <Download className="h-4 w-4 text-[hsl(265_85%_65%)] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                        <Download className="h-4 w-4 text-[hsl(var(--ora-accent-hsl))] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
                       </button>
                     ) : (
                       // Reloaded message: the base64 bytes are not stored, so the
@@ -1438,7 +1463,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                           type="button"
                           onClick={() => handleChip(suggestion)}
                           disabled={isLoading || atLimit}
-                          className="text-xs px-3 py-1.5 rounded-full border border-[hsl(265_85%_65%/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(265_85%_65%/0.6)] hover:bg-[hsl(265_85%_65%/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="text-xs px-3 py-1.5 rounded-full border border-[hsl(var(--ora-accent-hsl)/0.3)] text-muted-foreground hover:text-foreground hover:border-[hsl(var(--ora-accent-hsl)/0.6)] hover:bg-[hsl(var(--ora-accent-hsl)/0.07)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {suggestion}
                         </button>
@@ -1575,7 +1600,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       <button
                         type="button"
                         onClick={() => setLocation("/pricing")}
-                        className="text-[hsl(265_85%_65%)] hover:underline"
+                        className="text-[hsl(var(--ora-accent-hsl))] hover:underline"
                       >
                         Upgrade for a higher limit
                       </button>
@@ -1586,7 +1611,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       <button
                         type="button"
                         onClick={() => setLocation("/sign-up")}
-                        className="text-[hsl(265_85%_65%)] hover:underline"
+                        className="text-[hsl(var(--ora-accent-hsl))] hover:underline"
                       >
                         Sign up for unlimited conversations
                       </button>
@@ -1653,8 +1678,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
 
                     {/* Selected format chip */}
                     {selectedFormat && (
-                      <div className="flex items-center gap-2 rounded-xl border border-[hsl(265_85%_65%/0.35)] bg-[hsl(265_85%_65%/0.07)] px-3 py-2 text-xs mb-2">
-                        <FileSpreadsheet className="h-3.5 w-3.5 text-[hsl(265_85%_65%)] shrink-0" />
+                      <div className="flex items-center gap-2 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.07)] px-3 py-2 text-xs mb-2">
+                        <FileSpreadsheet className="h-3.5 w-3.5 text-[hsl(var(--ora-accent-hsl))] shrink-0" />
                         <span className="flex-1 text-foreground">
                           Generate:{" "}
                           {FILE_FORMAT_OPTIONS.find((f) => f.value === selectedFormat)?.label}
@@ -1673,7 +1698,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     {/* Unified input bar — single row on desktop; on mobile it wraps
                         into a two-tier composer (full-width field on top, action row
                         below) so the placeholder never gets squeezed. */}
-                    <div className="flex flex-wrap sm:flex-nowrap items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(265_85%_65%/0.4)] focus-within:ring-1 focus-within:ring-[hsl(265_85%_65%/0.15)] transition-all">
+                    <div className="flex flex-wrap sm:flex-nowrap items-end gap-2 rounded-xl border border-border/60 bg-background/60 px-2 py-1.5 focus-within:border-[hsl(var(--ora-accent-hsl)/0.4)] focus-within:ring-1 focus-within:ring-[hsl(var(--ora-accent-hsl)/0.15)] transition-all">
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -1715,7 +1740,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                               }}
                               className={cn(
                                 "w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2",
-                                mode === "instant" && "text-[hsl(265_85%_65%)] font-medium",
+                                mode === "instant" &&
+                                  "text-[hsl(var(--ora-accent-hsl))] font-medium",
                               )}
                             >
                               <Zap className="h-3.5 w-3.5 shrink-0" />
@@ -1739,7 +1765,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                                 "w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2",
                                 mode === "deep" &&
                                   deepAllowed &&
-                                  "text-[hsl(265_85%_65%)] font-medium",
+                                  "text-[hsl(var(--ora-accent-hsl))] font-medium",
                               )}
                             >
                               {deepAllowed ? (
@@ -1819,7 +1845,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                           className={cn(
                             "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
                             uploadState === "attached" || selectedFormat
-                              ? "text-[hsl(265_85%_65%)] bg-[hsl(265_85%_65%/0.12)]"
+                              ? "text-[hsl(var(--ora-accent-hsl))] bg-[hsl(var(--ora-accent-hsl)/0.12)]"
                               : "text-muted-foreground hover:text-foreground",
                             isLoading && "opacity-40 cursor-not-allowed",
                           )}
@@ -1867,7 +1893,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                                 className={cn(
                                   "w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center justify-between gap-2",
                                   selectedFormat === opt.value &&
-                                    "text-[hsl(265_85%_65%)] font-medium",
+                                    "text-[hsl(var(--ora-accent-hsl))] font-medium",
                                 )}
                               >
                                 <span className="flex items-center gap-2">
@@ -1923,7 +1949,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         type="button"
                         onClick={handleSend}
                         disabled={!input.trim() || isLoading || uploadState === "uploading"}
-                        className="order-5 ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(265_85%_65%)] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[hsl(265_85%_58%)] transition-colors sm:order-5 sm:ml-0 sm:h-7 sm:w-7"
+                        className="order-5 ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--ora-accent-hsl))] text-white disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-90 transition-colors sm:order-5 sm:ml-0 sm:h-7 sm:w-7"
                       >
                         <Send className="h-3.5 w-3.5" />
                       </button>
