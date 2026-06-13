@@ -54,6 +54,49 @@ const ARTIFACT_CLAIM_PATTERNS = [
   /\b(here'?s the (xlsx|csv|docx|pdf|pptx|spreadsheet|document|presentation))\b/i,
 ];
 
+function stripFencedCode(text: string): string {
+  return text.replace(/```[\s\S]*?```/g, "");
+}
+
+function hasMarkdownTable(text: string): boolean {
+  const lines = stripFencedCode(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+
+  return lines.some((line, index) => {
+    const next = lines[index + 1] ?? "";
+    return (
+      line.includes("|") &&
+      next.includes("|") &&
+      /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(next)
+    );
+  });
+}
+
+function hasPipeSeparatorClutter(text: string): boolean {
+  const linesWithPipes = stripFencedCode(text)
+    .split(/\r?\n/)
+    .filter((line) => /\s\|\s/.test(line));
+  return linesWithPipes.length >= 2;
+}
+
+function hasRawMarkdownHeading(text: string): boolean {
+  return /^#{1,6}\s+\S/m.test(stripFencedCode(text));
+}
+
+function hasDecorativeDivider(text: string): boolean {
+  return /^[\s>*_=|$-]{4,}$/m.test(stripFencedCode(text));
+}
+
+function hasExcessiveBoldMarkers(text: string): boolean {
+  const matches = stripFencedCode(text).match(/\*\*/g) ?? [];
+  return matches.length >= 8;
+}
+
+function hasUnneededMathMarkup(text: string): boolean {
+  return /\$\s*[\w\\][^$\n]{1,80}\$/.test(stripFencedCode(text));
+}
+
 function addIssue(
   issues: OraResponseQualityIssue[],
   code: string,
@@ -80,6 +123,60 @@ function claimsGeneratedArtifact(reply: string): boolean {
 
 function hasGeneratedFile(input: OraResponseQualityInput): boolean {
   return Boolean(input.fileName && input.fileData && input.mimeType);
+}
+
+function addCleanFormattingIssues(reply: string, issues: OraResponseQualityIssue[]) {
+  if (hasMarkdownTable(reply)) {
+    addIssue(
+      issues,
+      "formatting_table_clutter",
+      "error",
+      "Ora used a markdown table in a normal chat reply instead of cleaner prose or bullets.",
+    );
+  } else if (hasPipeSeparatorClutter(reply)) {
+    addIssue(
+      issues,
+      "formatting_pipe_clutter",
+      "warning",
+      "Ora used pipe separators that tend to show as visual clutter in chat.",
+    );
+  }
+
+  if (hasRawMarkdownHeading(reply)) {
+    addIssue(
+      issues,
+      "formatting_heading_clutter",
+      "error",
+      "Ora used raw markdown heading markers instead of plain labels.",
+    );
+  }
+
+  if (hasDecorativeDivider(reply)) {
+    addIssue(
+      issues,
+      "formatting_divider_clutter",
+      "warning",
+      "Ora used decorative divider characters that are not needed in normal chat.",
+    );
+  }
+
+  if (hasExcessiveBoldMarkers(reply)) {
+    addIssue(
+      issues,
+      "formatting_bold_clutter",
+      "warning",
+      "Ora overused bold markers instead of reserving emphasis for important labels.",
+    );
+  }
+
+  if (hasUnneededMathMarkup(reply)) {
+    addIssue(
+      issues,
+      "formatting_math_clutter",
+      "warning",
+      "Ora used dollar-sign math markup where plain language would be cleaner.",
+    );
+  }
 }
 
 function scoreIssues(issues: OraResponseQualityIssue[]): number {
@@ -113,6 +210,8 @@ export function evaluateOraResponseQuality(
       "Ora exposed a raw provider/system error in the user-facing reply.",
     );
   }
+
+  addCleanFormattingIssues(reply, issues);
 
   if (
     scenario === "pasted_report" ||

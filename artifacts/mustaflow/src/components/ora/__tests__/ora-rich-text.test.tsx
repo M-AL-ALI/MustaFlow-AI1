@@ -78,4 +78,44 @@ describe("OraRichText", () => {
     const { container } = render(<OraRichText text="Open https://example.com please" />);
     expect(container.querySelector("button[aria-label='Copy link']")).not.toBeNull();
   });
+
+  it("renders common markdown formatting without exposing raw symbols", () => {
+    const { container } = render(
+      <OraRichText
+        text={[
+          "## Summary",
+          "",
+          "**Result:** Ora should answer directly.",
+          "",
+          "- Read the pasted text",
+          "- Give the shortest useful reply",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.textContent).toContain("Summary");
+    expect(container.textContent).toContain("Result:");
+    expect(container.textContent).not.toContain("##");
+    expect(container.textContent).not.toContain("**");
+    expect(container.querySelector("strong")?.textContent).toBe("Result:");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+  });
+
+  it("renders markdown tables as tables instead of raw pipe text", () => {
+    const { container } = render(
+      <OraRichText
+        text={[
+          "| Area | Status |",
+          "| --- | --- |",
+          "| Routing | Pass |",
+          "| Memory | Needs live auth |",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(container.textContent).toContain("Routing");
+    expect(container.textContent).toContain("Needs live auth");
+    expect(container.textContent).not.toContain("| --- |");
+  });
 });

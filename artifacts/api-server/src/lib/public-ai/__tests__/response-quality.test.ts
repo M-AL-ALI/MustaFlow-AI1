@@ -83,6 +83,38 @@ What should I tell Replit?`,
     expect(result.issues.map((issue) => issue.code)).toContain("raw_provider_error");
   });
 
+  it("flags markdown-heavy chat replies with raw headings and tables", () => {
+    const result = evaluateOraResponseQuality({
+      scenario: "general",
+      userMessage: "So is Ora ready?",
+      reply: ["## Summary", "", "| Area | Status |", "| --- | --- |", "| Ora | **PASS** |"].join(
+        "\n",
+      ),
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(["formatting_heading_clutter", "formatting_table_clutter"]),
+    );
+  });
+
+  it("passes clean ChatGPT-style conversational formatting", () => {
+    const result = evaluateOraResponseQuality({
+      scenario: "direct_tool_reply",
+      userMessage: "What should I tell Replit?",
+      reply: [
+        "Tell Replit to rerun the signed-in browser validation in a fresh session.",
+        "",
+        "Why:",
+        "1. The automated suites already passed.",
+        "2. The only open item is Clerk blocking programmatic auth.",
+      ].join("\n"),
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.issues).toHaveLength(0);
+  });
+
   it("requires complete file payloads for file-generation answers", () => {
     const failed = evaluateOraResponseQuality({
       scenario: "file_generation",
