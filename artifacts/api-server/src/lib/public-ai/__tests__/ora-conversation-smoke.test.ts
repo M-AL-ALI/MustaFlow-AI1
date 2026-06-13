@@ -102,11 +102,12 @@ describe("Ora conversation smoke matrix", () => {
     expect(imageDiagnostic.image).toMatchObject({ kind: "logo", aspectRatio: "1:1" });
 
     const searchDiagnostic = await buildOraRoutingDiagnostic({
-      message: "Search the web for the latest Vercel deployment outage status.",
+      message:
+        "Search the web for a detailed breakdown of the latest Vercel deployment outage status.",
       subscriptionTier: "wave",
     });
     expect(searchDiagnostic.tool).toBe("search");
-    expect(searchDiagnostic.searchProfile?.depth).toBe("deep");
+    expect(searchDiagnostic.searchProfile?.depth).toBe("research");
     expect(searchDiagnostic.searchProfile?.sourceLimit).toBeGreaterThan(0);
   });
 
