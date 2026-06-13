@@ -203,7 +203,7 @@ export function DynamicAtom({
 
   const cx = size / 2;
   const cy = size / 2;
-  const coreR = size * 0.30;
+  const coreR = size * 0.3;
   const glowR = size * 0.36;
   const orbitR = size * 0.38;
   const electronR = size * 0.055;
