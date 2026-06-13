@@ -62,6 +62,8 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
     const arg = createMock.mock.calls[0][0] as { instructions: string };
     expect(arg.instructions).toContain("specifically asking for a video");
     expect(arg.instructions).toContain('"videos" array');
+    expect(arg.instructions).toContain("official channels");
+    expect(arg.instructions).toContain("reputable tutorials");
   });
 
   it("omits the video directive for an ordinary search", async () => {
@@ -145,6 +147,8 @@ describe("runOraWebSearch forwards wantsVideos into instructions", () => {
     const arg = createMock.mock.calls[0][0] as { instructions: string };
     expect(arg.instructions).toContain("find images or visual references");
     expect(arg.instructions).toContain("direct image URLs");
+    expect(arg.instructions).toContain("safe source page");
+    expect(arg.instructions).toContain("clear titles");
     expect(arg.instructions).toContain("prefer official, primary, or documentation pages");
   });
 });

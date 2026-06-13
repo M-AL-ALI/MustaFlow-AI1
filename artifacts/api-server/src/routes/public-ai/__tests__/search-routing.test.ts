@@ -93,6 +93,8 @@ describe("isVideoRequest", () => {
     expect(isVideoRequest("do you have any videos on this topic")).toBe(true);
     expect(isVideoRequest("got any clips on this")).toBe(true);
     expect(isVideoRequest("show me more videos like that")).toBe(true);
+    expect(isVideoRequest("YouTube tutorials for changing brake pads")).toBe(true);
+    expect(isVideoRequest("best videos about mobile mechanic marketing")).toBe(true);
   });
 
   it("does NOT hijack build / app / conversational requests that mention video", () => {
@@ -132,6 +134,15 @@ describe("routeOraMessage routes video requests to the search/media path", () =>
     const decision = await routeOraMessage({
       message: "find me a youtube video on sourdough",
       mode: "deep",
+    });
+    expect(decision.tool).toBe("search");
+    expect(decision.wantsVideos).toBe(true);
+  });
+
+  it("routes standalone video tutorial phrasing to search with wantsVideos set", async () => {
+    const decision = await routeOraMessage({
+      message: "YouTube tutorials for changing brake pads",
+      mode: "instant",
     });
     expect(decision.tool).toBe("search");
     expect(decision.wantsVideos).toBe(true);
@@ -187,6 +198,8 @@ describe("routeOraMessage picks the search tool for live-info questions", () => 
   it("routes image/logo lookup to search instead of image generation", async () => {
     expect(isImageSearchRequest("find the official logo images for Perdue")).toBe(true);
     expect(isImageGenerationRequest("find the official logo images for Perdue")).toBe(false);
+    expect(isImageSearchRequest("show me visual references for bakery logos")).toBe(true);
+    expect(isImageGenerationRequest("show me visual references for bakery logos")).toBe(false);
 
     const decision = await routeOraMessage({
       message: "find the official logo images for Perdue",
@@ -212,6 +225,8 @@ describe("isImageGenerationRequest", () => {
     expect(isImageGenerationRequest("give me a banner")).toBe(true);
     expect(isImageGenerationRequest("I need a logo")).toBe(true);
     expect(isImageGenerationRequest("I'd like an illustration of a forest")).toBe(true);
+    expect(isImageGenerationRequest("create a simple infographic for onboarding")).toBe(true);
+    expect(isImageGenerationRequest("make a clean diagram for the checkout flow")).toBe(true);
     // Bare brandable noun + preposition, no leading verb
     expect(isImageGenerationRequest("a logo for my mechanic app")).toBe(true);
     expect(isImageGenerationRequest("an icon for the button")).toBe(true);

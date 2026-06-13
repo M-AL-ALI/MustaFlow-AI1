@@ -154,7 +154,7 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   // Verb + optional filler + optional adjectives + singular or plural visual noun.
   // The adjective slot allows up to 3 extra words (e.g. "a clean", "a modern bold") but
   // excludes prepositions (of/from/about) so "create a table of images" does NOT match.
-  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?)\b/i,
+  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?)\b/i,
   // Visual noun + preposition (describing what's in it)
   /\b(images?|photos?|pictures?|illustrations?|artworks?|graphic)\s+(of|showing|depicting|featuring|with)\b/i,
   // Image generation feature references
@@ -171,11 +171,11 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   /(?<!\bhow\s(?:to|do\si|can\si|should\si|would\si)\s)\b(draw|sketch|paint|illustrate)\s+(?:me\s+|us\s+|for\s+me\s+)?(?:a|an|the|some|my)\s+(?!(?:conclusion|conclusions|distinction|distinctions|comparison|comparisons|parallel|parallels|line|lines|blank|attention|point|points|example|examples|case|cases|map|maps|plan|plans|concept|concepts|idea|ideas|scenario|scenarios)\b)\w+/i,
   // Request/desire framing + a visual noun ("give me a banner", "I need a
   // logo", "I'd like an illustration of a forest").
-  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?)\b/i,
+  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?)\b/i,
   // Bare brandable visual noun + preposition, no leading verb ("a logo for my
   // bakery", "an icon for the button"). Anchored to the start of the message so
   // mid-sentence statements ("I used a logo for my app") do NOT match.
-  /^\s*(?:a|an|the|another|new)\s+(?:logos?|banners?|icons?|posters?|flyers?|thumbnails?|avatars?|illustrations?|graphics?|mockups?|badges?|portraits?|wallpapers?)\s+(?:for|of|with|showing|depicting|featuring)\b/i,
+  /^\s*(?:a|an|the|another|new)\s+(?:logos?|banners?|icons?|posters?|flyers?|thumbnails?|avatars?|illustrations?|graphics?|mockups?|badges?|portraits?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?)\s+(?:for|of|with|showing|depicting|featuring)\b/i,
 ];
 
 const ORA_IMAGE_CREATION_VERB_PATTERN =
@@ -190,6 +190,8 @@ export const ORA_IMAGE_SEARCH_PATTERNS: RegExp[] = [
   /\b(?:find|search(?:\s+for|\s+up)?|look\s*up|locate|fetch)\b[^.?!]{0,80}\b(?:official\s+)?(?:logos?|brand\s+assets?|images?|photos?|pictures?|screenshots?|icons?|press\s+photos?|product\s+photos?)\b/i,
   /\b(?:find|search(?:\s+for|\s+up)?|look\s*up|locate|fetch|get)\b[^.?!]{0,80}\b(?:official|source|real|actual|reference|online|web)\b[^.?!]{0,80}\b(?:logos?|images?|photos?|pictures?|screenshots?|icons?)\b/i,
   /\bshow\s+me\b[^.?!]{0,80}\b(?:official|source|real|actual|reference|online|web)\b[^.?!]{0,80}\b(?:logos?|images?|photos?|pictures?|screenshots?|icons?)\b/i,
+  /\b(?:find|search(?:\s+for|\s+up)?|look\s*up|locate|get|show\s+me)\b[^.?!]{0,80}\b(?:reference\s+(?:images?|photos?|pictures?)|visual\s+references?|image\s+references?|design\s+inspiration|examples?)\b/i,
+  /\b(?:reference\s+(?:images?|photos?|pictures?)|visual\s+references?|image\s+references?)\s+(?:for|of|about|on)\b/i,
 ];
 
 export function isImageSearchRequest(message: string): boolean {
@@ -282,6 +284,10 @@ export const ORA_VIDEO_PATTERNS: RegExp[] = [
   /(?:\bis\s+there|\bare\s+there|\bdo\s+you\s+have|\byou\s+got|^\s*got|^\s*have\s+you)\s+(?:a|an|any|some)?\s*(?:good\s+|relevant\s+)?(?:youtube\s+)?(?:videos?|clips?)\b/i,
   // Explicit "watch / find a youtube video" intent.
   /\b(watch|find|recommend|suggest)\b[^.?!]{0,30}\byoutube\b/i,
+  // Standalone tutorial/media phrasing without an explicit retrieval verb:
+  // "YouTube tutorials for oil changes", "video tutorials about React hooks".
+  /\b(?:youtube\s+)?(?:video\s+tutorials?|tutorial\s+videos?|videos?|clips?)\s+(?:for|about|on|explaining|covering|showing)\b/i,
+  /\b(?:best|top|good|helpful|relevant)\s+(?:youtube\s+)?(?:videos?|clips?|tutorials?)\s+(?:for|about|on)\b/i,
 ];
 
 export function isVideoRequest(message: string): boolean {

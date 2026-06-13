@@ -346,6 +346,7 @@ const OFFICIAL_SOURCE_PATTERNS: RegExp[] = [
 const IMAGE_SEARCH_PATTERNS: RegExp[] = [
   /\b(find|show|search|look up|get)\b.*\b(images?|photos?|pictures?|screenshots?|logos?|icons?)\b/i,
   /\b(official\s+logo|product\s+photo|press\s+image|brand\s+assets?)\b/i,
+  /\b(reference\s+(?:images?|photos?|pictures?)|visual\s+references?|image\s+references?|design\s+inspiration)\b/i,
 ];
 
 export function isResearchSearchQuery(query: string): boolean {
@@ -754,9 +755,13 @@ export function buildInstructions(
     // Media: real images + videos found during search, returned as a structured
     // trailing block the server parses and strips before display.
     "When (and only when) the user would benefit from seeing them, include relevant media you ACTUALLY found via web search. Use direct image file URLs (jpg/png/webp/gif) for images and watch-page URLs for videos. Never invent or guess a URL — omit anything you are not confident is real and reachable.",
+    "For image results, prefer useful visual references with a safe source page; use clear titles that identify the subject. For logos or brand assets, prefer official source pages when available.",
     `At the very END of your reply, append exactly one fenced code block tagged ora-media containing JSON of the form {"images":[{"url":"https://...","title":"...","source":"https://page-it-was-on"}],"videos":[{"url":"https://...","title":"..."}]}. Use up to ${profile.imageLimit} ${imageWord} and up to ${profile.videoLimit} ${videoWord}. If you found none, use {"images":[],"videos":[]}. Put nothing after this block.`,
   ];
   if (wantsVideos) {
+    base.push(
+      "For video results, favor official channels, reputable tutorials, recent walkthroughs when recency matters, and titles that clearly identify what the user will learn.",
+    );
     // The user explicitly asked for a video. Make the videos array the primary
     // deliverable: the UI renders each entry as a clickable video card, so the
     // watch URLs MUST go in the media block, not the prose.

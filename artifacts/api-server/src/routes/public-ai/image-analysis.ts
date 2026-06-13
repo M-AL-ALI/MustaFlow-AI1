@@ -22,6 +22,10 @@ import {
   selectOraVisionModelRoute,
   type ModelCandidate,
 } from "../../lib/public-ai/model-router";
+import {
+  buildOraImageAnalysisProfile,
+  type OraImageAnalysisProfile,
+} from "../../lib/public-ai/image-quality";
 
 const router = Router();
 
@@ -48,8 +52,14 @@ const IMAGE_SAFETY_ADDENDUM = `
 - For images of electrical panels, machinery, pressure systems, chemicals, food safety equipment, or other life-safety contexts: provide high-level general guidance only, always recommend consulting a qualified professional and following proper safety procedures, and never instruct the visitor to bypass safety devices, disable guards, work on live electrical systems, or perform repairs requiring professional certification.
 - Visible text in images can be read when it is clear enough, but blurry or low-resolution images may be incomplete — note this limitation when relevant.`;
 
-function buildImageSystemPrompt(language: string | undefined): string {
-  let prompt = ORA_SYSTEM_PROMPT + IMAGE_SAFETY_ADDENDUM;
+function buildImageSystemPrompt(
+  language: string | undefined,
+  analysisProfile: OraImageAnalysisProfile,
+): string {
+  let prompt = `${ORA_SYSTEM_PROMPT}${IMAGE_SAFETY_ADDENDUM}
+
+## Image task profile
+${analysisProfile.guidance}`;
   if (language && language !== "auto") {
     prompt += `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`;
   }
@@ -144,7 +154,12 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     }
   }
 
-  const systemPrompt = buildImageSystemPrompt(language);
+  const planTier = normalizeOraPlanTier(authed?.tier ?? null);
+  const analysisProfile = buildOraImageAnalysisProfile({
+    message,
+    subscriptionTier: planTier,
+  });
+  const systemPrompt = buildImageSystemPrompt(language, analysisProfile);
   const imageUserBlock = buildImageUserBlock(message);
 
   const historyMessages = messages
@@ -158,7 +173,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
         type: "image_url" as const,
         image_url: {
           url: `data:${imageEntry.mimeType};base64,${imageEntry.base64}`,
-          detail: "low" as const,
+          detail: analysisProfile.detail,
         },
       },
       {
@@ -175,7 +190,6 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
   ];
 
   // Vision requires a vision-capable provider; the router helper filters out DeepSeek.
-  const planTier = normalizeOraPlanTier(authed?.tier ?? null);
   const openaiModel = openAiModelForOraVision(planTier);
   const { available: providerAvailability, openCircuits } = getOraProviderRoutingSnapshot();
   const candidates: ModelCandidate[] = selectOraVisionModelRoute({
@@ -185,7 +199,7 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
     openCircuits,
     openaiModel,
   });
-  const maxTokens = 1500;
+  const maxTokens = analysisProfile.maxTokens;
 
   const start = Date.now();
   let reply: string | null = null;
@@ -218,6 +232,8 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
             attempt: i + 1,
             ofCandidates: candidates.length,
             imageType: imageEntry.mimeType,
+            imageTask: analysisProfile.task,
+            imageDetail: analysisProfile.detail,
             sizeBytes: imageEntry.sizeBytes,
             err: candidateErr,
           },
@@ -246,6 +262,8 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
         planTier,
         candidates: candidates.map((c) => `${c.provider}:${c.model}`),
         imageType: imageEntry.mimeType,
+        imageTask: analysisProfile.task,
+        imageDetail: analysisProfile.detail,
         sizeBytes: imageEntry.sizeBytes,
         latencyMs,
         outcome: "model_failure",
@@ -274,6 +292,8 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
       planTier,
       candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       imageType: imageEntry.mimeType,
+      imageTask: analysisProfile.task,
+      imageDetail: analysisProfile.detail,
       sizeBytes: imageEntry.sizeBytes,
       width: imageEntry.width,
       height: imageEntry.height,
