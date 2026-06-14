@@ -1007,12 +1007,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   </button>
                 ))}
 
-                {(voice.isSpeechSynthesisSupported || isSignedIn || hasMessages) && (
-                  <div className="my-1 h-px bg-border/60" />
-                )}
+                <div className="my-1 h-px bg-border/60" />
 
                 {/* Voice responses (TTS) */}
-                {voice.isSpeechSynthesisSupported && (
+                {voice.isSpeechSynthesisSupported ? (
                   <button
                     type="button"
                     role="menuitemcheckbox"
@@ -1032,6 +1030,18 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       {voice.isTtsEnabled ? "Voice responses on" : "Voice responses off"}
                     </span>
                   </button>
+                ) : (
+                  <div
+                    role="menuitem"
+                    aria-disabled="true"
+                    className="w-full px-3 py-1.5 text-xs text-muted-foreground/60 flex items-start gap-2 cursor-default"
+                  >
+                    <VolumeX className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                    <span className="flex-1 leading-snug">
+                      Spoken replies aren&apos;t available in this browser. You can still read
+                      Ora&apos;s answers.
+                    </span>
+                  </div>
                 )}
 
                 {/* Memory manager */}

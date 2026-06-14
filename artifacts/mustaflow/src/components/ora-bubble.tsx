@@ -911,7 +911,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
             )}
 
             {/* TTS toggle */}
-            {voice.isSpeechSynthesisSupported && (
+            {voice.isSpeechSynthesisSupported ? (
               <button
                 type="button"
                 onClick={voice.toggleTts}
@@ -932,6 +932,14 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   <VolumeX className="h-3.5 w-3.5" />
                 )}
               </button>
+            ) : (
+              <span
+                title="Spoken replies aren't available in this browser. You can still read Ora's answers."
+                aria-label="Spoken replies aren't available in this browser"
+                className="flex items-center justify-center h-6 w-6 rounded-lg text-muted-foreground/25 cursor-not-allowed"
+              >
+                <VolumeX className="h-3.5 w-3.5" />
+              </span>
             )}
 
             {/* Voice picker — desktop only (hidden on mobile to save header space) */}
