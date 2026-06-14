@@ -550,7 +550,11 @@ export function OraVoiceLiveArea({
 }: OraVoiceLiveAreaProps) {
   const isListening = voiceState === "listening";
   const isSpeaking = voiceState === "speaking";
-  const showNothing = voiceState === "idle" && !voiceReady && !voiceErrorMsg && !interimTranscript;
+  const showNothing =
+    (voiceState === "idle" || voiceState === "unsupported") &&
+    !voiceReady &&
+    !voiceErrorMsg &&
+    !interimTranscript;
 
   if (showNothing) return null;
 
