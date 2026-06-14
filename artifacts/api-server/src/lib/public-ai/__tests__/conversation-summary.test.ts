@@ -33,8 +33,8 @@ vi.mock("../../ai-providers", () => ({
     gemini: {
       lite: "gemini-2.5-flash",
       eco: "gemini-2.5-flash",
-      power: "gemini-2.5-pro",
-      pro: "gemini-2.5-pro",
+      power: "gemini-3.1-pro-preview",
+      pro: "gemini-3.1-pro-preview",
     },
     deepseek: {
       lite: "deepseek-chat",

@@ -86,7 +86,7 @@ export type Stage = "build" | "refine" | "plan" | "architect" | "intent" | "conv
 export const VISION_MODEL: Partial<Record<Provider, string>> = {
   openai: "gpt-5.4",
   anthropic: "claude-sonnet-4-6",
-  gemini: "gemini-2.5-pro",
+  gemini: "gemini-3.1-pro-preview",
 };
 
 /**
@@ -109,8 +109,8 @@ export const MODEL_DEFAULTS: Record<Provider, Record<AgentMode, string>> = {
   gemini: {
     lite: "gemini-2.5-flash",
     eco: "gemini-2.5-flash",
-    power: "gemini-2.5-pro",
-    pro: "gemini-2.5-pro",
+    power: "gemini-3.1-pro-preview",
+    pro: "gemini-3.1-pro-preview",
   },
   deepseek: {
     // DeepSeek's everyday chat model handles fast/cheap tiers; the reasoner
@@ -168,7 +168,7 @@ export function parseProviderSpec(raw: string | undefined): {
 function normalizeModelId(provider: Provider, id: string): string {
   const lower = id.toLowerCase().trim();
   if (provider === "gemini") {
-    // Accept `2.5-pro`, `gemini-2.5-pro`, `models/gemini-2.5-pro`.
+    // Accept `3.1-pro-preview`, `gemini-3.1-pro-preview`, `models/gemini-3.1-pro-preview`.
     if (lower.startsWith("models/")) return lower.slice("models/".length);
     if (lower.startsWith("gemini-")) return lower;
     if (/^\d/.test(lower)) return `gemini-${lower}`;
