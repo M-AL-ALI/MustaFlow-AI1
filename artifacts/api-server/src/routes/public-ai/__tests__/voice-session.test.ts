@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..", "..");
 const FE_SRC = join(REPO_ROOT, "artifacts", "mustaflow", "src");
 const API_SRC = join(REPO_ROOT, "artifacts", "api-server", "src");
+const MOBILE_SRC = join(REPO_ROOT, "artifacts", "ora-mobile");
 const PUBLIC_AI_ROUTES = join(API_SRC, "routes", "public-ai");
 
 function readFe(relPath: string): string {
@@ -21,6 +22,10 @@ function readFe(relPath: string): string {
 
 function readApi(relPath: string): string {
   return readFileSync(join(API_SRC, relPath), "utf-8");
+}
+
+function readMobile(relPath: string): string {
+  return readFileSync(join(MOBILE_SRC, relPath), "utf-8");
 }
 
 function readPublicAiRoute(filename: string): string {
@@ -119,5 +124,23 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(hook).toContain("I included a code block in the written reply.");
     expect(hook).toContain("row");
     expect(hook).toContain('.split("|")');
+  });
+
+  it("keeps mobile Talk to Ora exit from auto-sending a stale recording transcript", () => {
+    const mobileHome = readMobile("app/(home)/index.tsx");
+    const toggleStart = mobileHome.indexOf("const toggleTalkMode = useCallback");
+    const toggleEnd = mobileHome.indexOf("const openConversations = useCallback", toggleStart);
+    const toggleBlock = mobileHome.slice(toggleStart, toggleEnd);
+
+    expect(toggleBlock).toContain("const next = !talkMode");
+    expect(toggleBlock).toContain("setTalkMode(next)");
+    expect(toggleBlock).toContain("talkModeRef.current = next");
+    expect(toggleBlock).toContain("void stopRecordingRef.current()");
+
+    const stopRecordingStart = mobileHome.indexOf("const stopRecording = useCallback");
+    const stopRecordingEnd = mobileHome.indexOf("const speak = useCallback", stopRecordingStart);
+    const stopRecordingBlock = mobileHome.slice(stopRecordingStart, stopRecordingEnd);
+    expect(stopRecordingBlock).toContain("if (talkModeRef.current)");
+    expect(stopRecordingBlock).toContain("void sendMessageRef.current(clean, null)");
   });
 });

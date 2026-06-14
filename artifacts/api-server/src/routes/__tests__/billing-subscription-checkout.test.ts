@@ -3,9 +3,14 @@ import { join } from "path";
 import { describe, expect, it } from "vitest";
 
 const ROUTES_SRC = join(__dirname, "..");
+const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..");
 
 function readRoute(filename: string): string {
   return readFileSync(join(ROUTES_SRC, filename), "utf-8");
+}
+
+function readRepo(relPath: string): string {
+  return readFileSync(join(REPO_ROOT, relPath), "utf-8");
 }
 
 describe("billing subscription checkout wiring", () => {
@@ -64,5 +69,19 @@ describe("billing subscription checkout wiring", () => {
     expect(billing).toContain("attemptCount >= 3");
     expect(billing).toContain('tier: "free"');
     expect(billing).toContain('status: "grace_period"');
+  });
+
+  it("includes a safe Stripe billing verifier for real test-mode smoke checks", () => {
+    const pkg = readRepo("scripts/package.json");
+    const verifier = readRepo("scripts/src/verify-stripe-billing.ts");
+
+    expect(pkg).toContain('"verify:stripe-billing": "tsx ./src/verify-stripe-billing.ts"');
+    expect(verifier).toContain("STRIPE_CORE_PRICE_ID");
+    expect(verifier).toContain("STRIPE_WAVE_PRICE_ID");
+    expect(verifier).toContain("amountCents: 2_000");
+    expect(verifier).toContain("amountCents: 6_500");
+    expect(verifier).toContain('payment_method_collection: "always"');
+    expect(verifier).toContain('payment_method_save: "enabled"');
+    expect(verifier).toContain("This script never prints secret values.");
   });
 });
