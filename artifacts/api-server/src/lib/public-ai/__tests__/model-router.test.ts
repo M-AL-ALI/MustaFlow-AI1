@@ -490,7 +490,7 @@ describe("runCandidateChain — chat.ts fallback loop", () => {
   const chain: ModelCandidate[] = [
     { provider: "openai", model: "gpt-5.4" },
     { provider: "anthropic", model: "claude-opus-4-7" },
-    { provider: "gemini", model: "gemini-2.5-pro" },
+    { provider: "gemini", model: "gemini-3.1-pro-preview" },
   ];
 
   it("returns the first candidate when it succeeds (no fallback)", async () => {
