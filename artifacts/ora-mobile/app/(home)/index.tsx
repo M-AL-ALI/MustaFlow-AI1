@@ -25,6 +25,7 @@ import {
   Image as ImageIcon,
   Mic,
   Paperclip,
+  PhoneCall,
   Plus,
   Share2,
   Sparkles,
@@ -82,6 +83,27 @@ function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function cleanForTts(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.+?)\*\*/gs, "$1")
+    .replace(/\*(.+?)\*/gs, "$1")
+    .replace(/`{1,3}[\s\S]*?`{1,3}/g, "I included a code block in the written reply.")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\|[^\n]+\|/g, (row) =>
+      row
+        .split("|")
+        .map((c) => c.trim())
+        .filter(Boolean)
+        .join(", "),
+    )
+    .replace(/^\s*[-=]{3,}\s*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 const DATASET_TYPES = ["csv", "xlsx", "xls"];
 
 function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] {
@@ -116,6 +138,9 @@ export default function OraChatScreen() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [talkMode, setTalkMode] = useState(false);
+  const talkModeRef = useRef(false);
+  talkModeRef.current = talkMode;
   const recorder = useAudioRecorder({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true,
@@ -179,90 +204,98 @@ export default function OraChatScreen() {
     [conversationId],
   );
 
+  const sendMessage = useCallback(
+    async (text: string, attch: Attachment | null) => {
+      if ((!text && !attch) || sending) return;
+
+      const userMsg: OraMessage = { id: uid(), role: "user", content: text };
+      const pending: OraMessage = {
+        id: uid(),
+        role: "assistant",
+        content: "",
+        pending: true,
+      };
+      const history = messages
+        .filter((m) => !m.pending && !m.error)
+        .slice(-20)
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const next = [...messages, userMsg, pending];
+      setMessages(next);
+      setSending(true);
+      scrollToEnd();
+
+      try {
+        let assistant: OraMessage;
+        if (attch) {
+          const prompt = text || "Please analyze this attachment.";
+          let reply: string;
+          if (attch.kind === "image") {
+            reply = (await analyzeImage(attch.ref, prompt, history)).reply;
+          } else if (attch.kind === "dataset") {
+            reply = (await analyzeDataset(attch.ref, prompt, history)).reply;
+          } else {
+            reply = (await analyzeDocument(attch.ref, prompt, history)).reply;
+          }
+          assistant = { id: pending.id, role: "assistant", content: reply };
+        } else {
+          const res = await sendChat({
+            message: text,
+            messages: history,
+            mode,
+            referenceSavedMemories: true,
+            referenceChatHistory: true,
+          });
+          assistant = {
+            id: pending.id,
+            role: "assistant",
+            content: res.reply,
+            sources: res.sources,
+            imageUrl: res.imageUrl,
+            imageId: res.imageId,
+            file:
+              res.fileName && res.fileData && res.mimeType
+                ? {
+                    fileName: res.fileName,
+                    fileData: res.fileData,
+                    mimeType: res.mimeType,
+                  }
+                : undefined,
+          };
+          if (res.msgCount != null && res.msgLimit != null) {
+            setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
+          }
+        }
+        const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));
+        setMessages(finalMsgs);
+        scrollToEnd();
+        void persist(finalMsgs);
+        // Auto-speak in Talk mode or when the user has enabled auto-read
+        if ((talkModeRef.current || autoReadRef.current) && assistant.content.trim()) {
+          void speakRef.current(assistant);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === pending.id ? { ...m, pending: false, error: true, content: msg } : m,
+          ),
+        );
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, messages, mode, scrollToEnd, persist],
+  );
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if ((!text && !attachment) || sending) return;
-
-    const userMsg: OraMessage = { id: uid(), role: "user", content: text };
-    const pending: OraMessage = {
-      id: uid(),
-      role: "assistant",
-      content: "",
-      pending: true,
-    };
-    const history = messages
-      .filter((m) => !m.pending && !m.error)
-      .slice(-20)
-      .map((m) => ({ role: m.role, content: m.content }));
-
-    const next = [...messages, userMsg, pending];
-    setMessages(next);
+    const attch = attachment;
     setInput("");
-    setSending(true);
-    scrollToEnd();
-
-    const currentAttachment = attachment;
     setAttachment(null);
-
-    try {
-      let assistant: OraMessage;
-      if (currentAttachment) {
-        const prompt = text || "Please analyze this attachment.";
-        let reply: string;
-        if (currentAttachment.kind === "image") {
-          reply = (await analyzeImage(currentAttachment.ref, prompt, history)).reply;
-        } else if (currentAttachment.kind === "dataset") {
-          reply = (await analyzeDataset(currentAttachment.ref, prompt, history)).reply;
-        } else {
-          reply = (await analyzeDocument(currentAttachment.ref, prompt, history)).reply;
-        }
-        assistant = { id: pending.id, role: "assistant", content: reply };
-      } else {
-        const res = await sendChat({
-          message: text,
-          messages: history,
-          mode,
-          referenceSavedMemories: true,
-          referenceChatHistory: true,
-        });
-        assistant = {
-          id: pending.id,
-          role: "assistant",
-          content: res.reply,
-          sources: res.sources,
-          imageUrl: res.imageUrl,
-          imageId: res.imageId,
-          file:
-            res.fileName && res.fileData && res.mimeType
-              ? {
-                  fileName: res.fileName,
-                  fileData: res.fileData,
-                  mimeType: res.mimeType,
-                }
-              : undefined,
-        };
-        if (res.msgCount != null && res.msgLimit != null) {
-          setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
-        }
-      }
-      const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));
-      setMessages(finalMsgs);
-      scrollToEnd();
-      void persist(finalMsgs);
-      if (autoReadRef.current && assistant.content.trim()) {
-        void speakRef.current(assistant);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === pending.id ? { ...m, pending: false, error: true, content: msg } : m,
-        ),
-      );
-    } finally {
-      setSending(false);
-    }
-  }, [input, attachment, sending, messages, mode, scrollToEnd, persist]);
+    await sendMessage(text, attch);
+  }, [input, attachment, sending, sendMessage]);
 
   const startRecording = useCallback(async () => {
     if (recording || transcribing) return;
@@ -292,7 +325,13 @@ export default function OraChatScreen() {
       const text = await transcribeAudio(uri, "m4a", voiceLang);
       const clean = text.trim();
       if (clean) {
-        setInput((prev) => (prev.trim() ? `${prev.trim()} ${clean}` : clean));
+        if (talkModeRef.current) {
+          // Talk mode: auto-send without putting in input field for editing
+          void sendMessageRef.current(clean, null);
+        } else {
+          // Normal dictation: fill the input so the user can review/edit before sending
+          setInput((prev) => (prev.trim() ? `${prev.trim()} ${clean}` : clean));
+        }
       }
     } catch {
       /* surfaced by absence of inserted text */
@@ -315,7 +354,9 @@ export default function OraChatScreen() {
       }
       setSpeakingId(message.id);
       try {
-        const dataUri = await synthesizeSpeech(message.content, "nova", voiceLang);
+        // Strip markdown so the voice sounds natural (no "hashtag hashtag" etc.)
+        const spokenText = cleanForTts(message.content) || message.content;
+        const dataUri = await synthesizeSpeech(spokenText, "nova", voiceLang);
         const base64 = dataUri.split(",")[1] ?? "";
         const fileUri = `${FileSystem.cacheDirectory}ora-tts-${Date.now()}.mp3`;
         await FileSystem.writeAsStringAsync(fileUri, base64, {
@@ -333,11 +374,19 @@ export default function OraChatScreen() {
               /* ignore */
             }
             if (playerRef.current === player) playerRef.current = null;
+            // In Talk mode: automatically start listening for the next turn
+            if (talkModeRef.current && !recordingRef.current) {
+              setTimeout(() => void startRecordingRef.current(), 700);
+            }
           }
         });
         player.play();
       } catch {
         setSpeakingId((cur) => (cur === message.id ? null : cur));
+        // Even on TTS failure, keep the conversation going in Talk mode
+        if (talkModeRef.current && !recordingRef.current) {
+          setTimeout(() => void startRecordingRef.current(), 700);
+        }
       }
     },
     [speakingId, voiceLang],
@@ -347,6 +396,16 @@ export default function OraChatScreen() {
   speakRef.current = speak;
   const autoReadRef = useRef(autoReadReplies);
   autoReadRef.current = autoReadReplies;
+  // Stable refs so async callbacks (TTS listener, stopRecording) always see
+  // the latest function/state without stale closure captures.
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+  const startRecordingRef = useRef(startRecording);
+  startRecordingRef.current = startRecording;
+  const stopRecordingRef = useRef(stopRecording);
+  stopRecordingRef.current = stopRecording;
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
 
   const handleAttach = useCallback(async () => {
     try {
@@ -392,6 +451,37 @@ export default function OraChatScreen() {
     setAttachment(null);
     setInput("");
   }, []);
+
+  const toggleTalkMode = useCallback(() => {
+    const next = !talkMode;
+    setTalkMode(next);
+    if (!next) {
+      // Exiting: stop any TTS that is playing
+      if (speakingId) {
+        try {
+          playerRef.current?.remove();
+        } catch {
+          /* ignore */
+        }
+        playerRef.current = null;
+        setSpeakingId(null);
+      }
+      // If the mic is active, stop it (user is leaving voice mode)
+      if (recording) void stopRecordingRef.current();
+    } else {
+      // Entering Talk mode: stop TTS if playing and immediately start listening
+      if (speakingId) {
+        try {
+          playerRef.current?.remove();
+        } catch {
+          /* ignore */
+        }
+        playerRef.current = null;
+        setSpeakingId(null);
+      }
+      setTimeout(() => void startRecordingRef.current(), 300);
+    }
+  }, [talkMode, speakingId, recording]);
 
   const openConversations = useCallback(async () => {
     setShowConversations(true);
@@ -449,6 +539,14 @@ export default function OraChatScreen() {
         subtitle={usageText}
         right={
           <View style={{ flexDirection: "row", gap: 4 }}>
+            <Pressable
+              onPress={toggleTalkMode}
+              hitSlop={8}
+              style={{ padding: 6 }}
+              accessibilityLabel={talkMode ? "Exit Talk to Ora" : "Talk to Ora"}
+            >
+              <PhoneCall size={22} color={talkMode ? c.accentForeground : c.foreground} />
+            </Pressable>
             <Pressable onPress={openConversations} hitSlop={8} style={{ padding: 6 }}>
               <History size={22} color={c.foreground} />
             </Pressable>
