@@ -73,6 +73,27 @@ export const VOICE_LANG_MAP: Record<string, string> = {
   fr: "fr-FR",
 };
 
+export function cleanOraVoiceReplyForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, "I included a code block in the written reply.")
+    .replace(/\|([^|\n]+(?:\|[^|\n]+)+)\|/g, (_match, row: string) =>
+      row
+        .split("|")
+        .map((cell) => cell.trim())
+        .filter(Boolean)
+        .join("; "),
+    )
+    .replace(/\$(\d+(?:[.,]\d+)?)/g, "$1 dollars")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/[_~#|$]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ─── Female voice preference ──────────────────────────────────────────────────
 // Ordered by quality — known high-quality female voice names across platforms.
 const FEMALE_VOICE_HINTS = [
@@ -531,7 +552,8 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
 
       void (async () => {
         try {
-          const ttsBody = JSON.stringify({ text: trimmed, language: lang });
+          const spokenText = cleanOraVoiceReplyForSpeech(trimmed) || trimmed;
+          const ttsBody = JSON.stringify({ text: spokenText, language: lang });
           const requestTts = () =>
             authFetch("/api/public-ai/tts", {
               method: "POST",

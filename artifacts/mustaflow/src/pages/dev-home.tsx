@@ -3,7 +3,9 @@ import { Link, useLocation } from "wouter";
 import {
   useListProjects,
   useCreateProject,
+  useDeleteProject,
   getListProjectsQueryKey,
+  getListTrashedProjectsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,8 @@ import {
   Smartphone,
   FileCode2,
   Zap,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { useVoiceInput, useVoiceLang } from "@/hooks/use-voice-input";
 
@@ -471,6 +475,8 @@ function CreationZone({ onSubmit }: { onSubmit: (prompt: string) => void }) {
 
 function ProjectCard({
   project,
+  deleting,
+  onDelete,
 }: {
   project: {
     id: number;
@@ -480,6 +486,8 @@ function ProjectCard({
     updatedAt: string;
     kind: string;
   };
+  deleting: boolean;
+  onDelete: (project: { id: number; name: string }) => void;
 }) {
   const StackIcon =
     TEMPLATE_CHIPS.find(
@@ -488,34 +496,54 @@ function ProjectCard({
     )?.icon ?? Code2;
 
   return (
-    <Link href={`/dev/workspace/${project.id}`}>
-      <div className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 hover:border-primary/40 hover:bg-muted/30 transition-all cursor-pointer h-full">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-muted shrink-0 text-muted-foreground group-hover:text-foreground transition-colors">
-            <StackIcon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+    <div className="group relative h-full">
+      <Link href={`/dev/workspace/${project.id}`}>
+        <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 hover:border-primary/40 hover:bg-muted/30 transition-all cursor-pointer h-full">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-muted shrink-0 text-muted-foreground group-hover:text-foreground transition-colors">
+              <StackIcon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+            </div>
+            <span
+              className={cn(
+                "text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 mr-7",
+                project.status === "published"
+                  ? "text-green-400 bg-green-500/10 border-green-500/20"
+                  : project.status === "building"
+                    ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
+                    : "text-muted-foreground bg-muted border-border",
+              )}
+            >
+              {project.status}
+            </span>
           </div>
-          <span
-            className={cn(
-              "text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0",
-              project.status === "published"
-                ? "text-green-400 bg-green-500/10 border-green-500/20"
-                : project.status === "building"
-                  ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-                  : "text-muted-foreground bg-muted border-border",
-            )}
-          >
-            {project.status}
-          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold truncate text-foreground">{project.name}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+              <Clock className="h-3 w-3 shrink-0" />
+              {new Date(project.updatedAt).toLocaleDateString()}
+            </p>
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold truncate text-foreground">{project.name}</p>
-          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-            <Clock className="h-3 w-3 shrink-0" />
-            {new Date(project.updatedAt).toLocaleDateString()}
-          </p>
-        </div>
-      </div>
-    </Link>
+      </Link>
+      <button
+        type="button"
+        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-60"
+        title="Move project to Trash"
+        aria-label={`Move project "${project.name}" to Trash`}
+        disabled={deleting}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onDelete(project);
+        }}
+      >
+        {deleting ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Trash2 className="h-3.5 w-3.5" />
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -523,6 +551,7 @@ export default function DevHomePage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const createProject = useCreateProject();
+  const deleteProject = useDeleteProject();
   const { toast } = useToast();
 
   const { data: projects, isLoading } = useListProjects({ mode: "developer" });
@@ -531,6 +560,7 @@ export default function DevHomePage() {
   const [modalPrompt, setModalPrompt] = useState("");
   const [modalStack, setModalStack] = useState("react-vite");
   const [modalKind, setModalKind] = useState("web");
+  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
 
   function _openModalWithPrompt(prompt: string) {
     setModalPrompt(prompt);
@@ -570,6 +600,31 @@ export default function DevHomePage() {
         },
       },
     );
+  }
+
+  async function handleDeleteProject(project: { id: number; name: string }) {
+    const confirmed = window.confirm(
+      `Move "${project.name}" to Trash? You can restore it from Trash for 30 days.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingProjectId(project.id);
+    try {
+      await deleteProject.mutateAsync({ id: project.id });
+      toast({
+        title: "Project moved to Trash",
+        description: `"${project.name}" can be restored from Trash for 30 days.`,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getListTrashedProjectsQueryKey() }),
+      ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not delete project.";
+      toast({ title: "Delete failed", description: message, variant: "destructive" });
+    } finally {
+      setDeletingProjectId(null);
+    }
   }
 
   return (
@@ -622,7 +677,12 @@ export default function DevHomePage() {
                 </button>
 
                 {projects.map((project) => (
-                  <ProjectCard key={project.id} project={project} />
+                  <ProjectCard
+                    key={project.id}
+                    project={project}
+                    deleting={deletingProjectId === project.id}
+                    onDelete={handleDeleteProject}
+                  />
                 ))}
               </div>
             ) : (

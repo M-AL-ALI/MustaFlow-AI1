@@ -2,16 +2,23 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
 import {
+  getGetProjectsSummaryQueryKey,
+  getGetRecentActivityQueryKey,
   useGetProjectsSummary,
   useGetRecentActivity,
   useGetSecurityBadgeCountsByProject,
   getGetSecurityBadgeCountsByProjectQueryKey,
+  getListProjectsQueryKey,
+  getListTrashedProjectsQueryKey,
+  useDeleteProject,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useClerkUser } from "@/lib/clerk-safe";
+import { useToast } from "@/hooks/use-toast";
 import {
   Globe,
   Smartphone,
@@ -29,6 +36,8 @@ import {
   ShieldAlert,
   FolderKanban,
   RefreshCw,
+  Loader2,
+  Trash2,
 } from "lucide-react";
 import { useVoiceInput, useVoiceLang } from "@/hooks/use-voice-input";
 
@@ -364,6 +373,9 @@ function HomeHero() {
 }
 
 export default function ProjectsPage() {
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const {
     data: summary,
     isError: summaryError,
@@ -374,8 +386,37 @@ export default function ProjectsPage() {
   const { data: securityCounts } = useGetSecurityBadgeCountsByProject({
     query: { queryKey: getGetSecurityBadgeCountsByProjectQueryKey() },
   });
+  const deleteProject = useDeleteProject();
+  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
 
   const hasProjects = (summary?.recent?.length ?? 0) > 0;
+
+  async function handleDeleteProject(project: { id: number; name: string }) {
+    const confirmed = window.confirm(
+      `Move "${project.name}" to Trash? You can restore it from Trash for 30 days.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingProjectId(project.id);
+    try {
+      await deleteProject.mutateAsync({ id: project.id });
+      toast({
+        title: "Project moved to Trash",
+        description: `"${project.name}" can be restored from Trash for 30 days.`,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetRecentActivityQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getListTrashedProjectsQueryKey() }),
+      ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not delete project.";
+      toast({ title: "Delete failed", description: message, variant: "destructive" });
+    } finally {
+      setDeletingProjectId(null);
+    }
+  }
 
   return (
     <div className="w-full min-h-full">
@@ -418,45 +459,78 @@ export default function ProjectsPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {summary?.recent?.map((project) => (
-                  <Link key={project.id} href={`/projects/${project.id}`}>
-                    <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start gap-2">
-                          <div className="flex flex-col gap-1 min-w-0">
-                            <CardTitle className="text-lg leading-tight">{project.name}</CardTitle>
-                            {project.chipLabel && (
-                              <span className="text-[10px] font-medium text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-2 py-0.5 w-fit">
-                                {project.chipLabel}
-                              </span>
-                            )}
-                          </div>
+                  <Card
+                    key={project.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setLocation(`/projects/${project.id}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setLocation(`/projects/${project.id}`);
+                      }
+                    }}
+                    className="hover:border-primary/50 transition-colors cursor-pointer h-full"
+                  >
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <CardTitle className="text-lg leading-tight">{project.name}</CardTitle>
+                          {project.chipLabel && (
+                            <span className="text-[10px] font-medium text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-2 py-0.5 w-fit">
+                              {project.chipLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <Badge
                             variant={project.status === "published" ? "default" : "secondary"}
                             className="shrink-0"
                           >
                             {project.status}
                           </Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            title="Move project to Trash"
+                            aria-label={`Move project "${project.name}" to Trash`}
+                            disabled={deletingProjectId === project.id}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void handleDeleteProject(project);
+                            }}
+                          >
+                            {deletingProjectId === project.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
                         </div>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-                          {project.description || "No description provided."}
-                        </p>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center text-xs text-muted-foreground gap-2">
-                            <Clock className="h-3 w-3" />
-                            Updated {new Date(project.updatedAt).toLocaleDateString()}
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                            <SecurityFindingsBadge
-                              count={securityCounts?.counts?.[String(project.id)] ?? 0}
-                            />
-                            <HealthBadge score={project.healthScore ?? 0} />
-                          </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
+                        {project.description || "No description provided."}
+                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center text-xs text-muted-foreground gap-2">
+                          <Clock className="h-3 w-3" />
+                          Updated {new Date(project.updatedAt).toLocaleDateString()}
                         </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          <SecurityFindingsBadge
+                            count={securityCounts?.counts?.[String(project.id)] ?? 0}
+                          />
+                          <HealthBadge score={project.healthScore ?? 0} />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </div>

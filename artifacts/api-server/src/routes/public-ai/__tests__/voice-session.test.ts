@@ -110,4 +110,14 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(hook).toContain('authFetch("/api/public-ai/session"');
     expect(hook).toContain("resp = await requestTts()");
   });
+
+  it("cleans Markdown-heavy Ora replies before sending them to server TTS", () => {
+    const hook = readFe("hooks/use-ora-voice.ts");
+    expect(hook).toContain("cleanOraVoiceReplyForSpeech");
+    expect(hook).toContain("const spokenText = cleanOraVoiceReplyForSpeech(trimmed) || trimmed");
+    expect(hook).toContain("JSON.stringify({ text: spokenText, language: lang })");
+    expect(hook).toContain("I included a code block in the written reply.");
+    expect(hook).toContain("row");
+    expect(hook).toContain('.split("|")');
+  });
 });

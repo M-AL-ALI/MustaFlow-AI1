@@ -1180,6 +1180,11 @@ router.post("/billing/subscribe", async (req, res): Promise<void> => {
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
       metadata: { userId, tier: tier as string },
+      payment_method_collection: "always",
+      saved_payment_method_options: { payment_method_save: "enabled" },
+      subscription_data: {
+        metadata: { userId, tier: tier as string },
+      },
       success_url: successUrlFinal,
       cancel_url: cancelUrlFinal,
       allow_promotion_codes: true,
