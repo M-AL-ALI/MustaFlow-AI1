@@ -279,8 +279,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     typeof window !== "undefined" &&
     Boolean(
       window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext,
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext,
     );
 
   const [voiceState, setVoiceState] = useState<VoiceState>(isSupported ? "idle" : "unsupported");
