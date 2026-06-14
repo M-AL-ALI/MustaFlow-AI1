@@ -841,8 +841,8 @@ function SubscriptionTab({
       name: "Free",
       priceUsd: 0,
       features: [
-        "15 Ora messages / day",
-        "3 Ora images / day",
+        "30 Ora messages every 5 hours",
+        "4 Ora images every 5 hours",
         "Unlimited file uploads to Ora",
         "Ora Instant replies",
         "150 Builder credits / month",
@@ -856,8 +856,8 @@ function SubscriptionTab({
       name: "Core Pack",
       priceUsd: 20,
       features: [
-        "30 Ora messages / day",
-        "10 Ora images / day",
+        "100 Ora messages every 3 hours",
+        "15 Ora images every 3 hours",
         "Unlimited file uploads to Ora",
         "Ora Instant + Deep Thinking",
         "1,500 Builder credits / month",
@@ -870,10 +870,10 @@ function SubscriptionTab({
     {
       id: "wave",
       name: "Deep Wave",
-      priceUsd: 40,
+      priceUsd: 65,
       features: [
-        "55 Ora messages / day",
-        "20 Ora images / day",
+        "280 Ora messages every 3 hours",
+        "30 Ora images every 3 hours",
         "Unlimited file uploads to Ora",
         "Ora Instant + Deep Thinking",
         "4,000 Builder credits / month",

@@ -29,5 +29,7 @@ describe("project delete wiring", () => {
     expect(src).toContain("restore it from Trash for 30 days");
     expect(src).toContain("getListTrashedProjectsQueryKey");
     expect(src).toContain("Trash2");
+    expect(src).toContain("bg-background/80");
+    expect(src).not.toContain("opacity-0 transition-opacity");
   });
 });

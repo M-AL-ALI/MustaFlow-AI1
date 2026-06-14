@@ -455,6 +455,7 @@ export default function OraChatScreen() {
   const toggleTalkMode = useCallback(() => {
     const next = !talkMode;
     setTalkMode(next);
+    talkModeRef.current = next;
     if (!next) {
       // Exiting: stop any TTS that is playing
       if (speakingId) {

@@ -9,6 +9,19 @@ function readRoute(filename: string): string {
 }
 
 describe("billing subscription checkout wiring", () => {
+  it("exposes current Ora plan limits and prices in subscription metadata", () => {
+    const billing = readRoute("billing.ts");
+
+    expect(billing).toContain("30 Ora messages every 5 hours");
+    expect(billing).toContain("4 Ora images every 5 hours");
+    expect(billing).toContain("100 Ora messages every 3 hours");
+    expect(billing).toContain("15 Ora images every 3 hours");
+    expect(billing).toContain("280 Ora messages every 3 hours");
+    expect(billing).toContain("30 Ora images every 3 hours");
+    expect(billing).not.toContain("3 AI images / month");
+    expect(billing).not.toContain("12 AI images / month");
+  });
+
   it("creates Stripe subscriptions with a saved default payment method for renewals", () => {
     const billing = readRoute("billing.ts");
     const subscribeStart = billing.indexOf('router.post("/billing/subscribe"');
@@ -25,6 +38,19 @@ describe("billing subscription checkout wiring", () => {
     expect(subscribeBlock).toContain('payment_method_save: "enabled"');
     expect(subscribeBlock).toContain("subscription_data");
     expect(subscribeBlock).toContain("metadata: { userId, tier: tier as string }");
+  });
+
+  it("saves payment methods on the plan checkout route used by the UI", () => {
+    const billing = readRoute("billing.ts");
+    const routeStart = billing.indexOf('router.post("/billing/subscription/checkout"');
+    const routeEnd = billing.indexOf('router.post("/billing/subscription/portal"', routeStart);
+    const routeBlock = billing.slice(routeStart, routeEnd);
+
+    expect(routeBlock).toContain('mode: "subscription"');
+    expect(routeBlock).toContain('payment_method_collection: "always"');
+    expect(routeBlock).toContain("saved_payment_method_options");
+    expect(routeBlock).toContain('payment_method_save: "enabled"');
+    expect(routeBlock).toContain("subscription_data");
   });
 
   it("keeps paid features active on successful renewal and downgrades only after failed retries", () => {

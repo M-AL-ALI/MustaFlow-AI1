@@ -206,7 +206,7 @@ export default function PricingPage() {
                 Deep Wave
               </p>
               <div className="flex items-baseline gap-1 mb-1">
-                <span className="text-4xl font-extrabold">$40</span>
+                <span className="text-4xl font-extrabold">$65</span>
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">For power builders</p>
