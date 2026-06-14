@@ -31,6 +31,7 @@ import {
   Sparkles,
   Square,
   Volume2,
+  VolumeX,
   X,
   Zap,
 } from "lucide-react-native";
@@ -139,8 +140,11 @@ export default function OraChatScreen() {
   const [transcribing, setTranscribing] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [talkMode, setTalkMode] = useState(false);
+  const [talkModeMuted, setTalkModeMuted] = useState(false);
   const talkModeRef = useRef(false);
   talkModeRef.current = talkMode;
+  const talkModeMutedRef = useRef(false);
+  talkModeMutedRef.current = talkModeMuted;
   const recorder = useAudioRecorder({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true,
@@ -271,8 +275,12 @@ export default function OraChatScreen() {
         scrollToEnd();
         void persist(finalMsgs);
         // Auto-speak in Talk mode or when the user has enabled auto-read
-        if ((talkModeRef.current || autoReadRef.current) && assistant.content.trim()) {
+        const shouldSpeakInTalkMode = talkModeRef.current && !talkModeMutedRef.current;
+        const shouldSpeakForPreference = !talkModeRef.current && autoReadRef.current;
+        if ((shouldSpeakInTalkMode || shouldSpeakForPreference) && assistant.content.trim()) {
           void speakRef.current(assistant);
+        } else if (talkModeRef.current && !recordingRef.current) {
+          setTimeout(() => void startRecordingRef.current(), 700);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
@@ -407,6 +415,12 @@ export default function OraChatScreen() {
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
 
+  const autoStopTalkRecording = useCallback(() => {
+    if (talkModeRef.current && recordingRef.current) {
+      void stopRecordingRef.current();
+    }
+  }, []);
+
   const handleAttach = useCallback(async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -471,6 +485,8 @@ export default function OraChatScreen() {
       if (recording) void stopRecordingRef.current();
     } else {
       // Entering Talk mode: stop TTS if playing and immediately start listening
+      setTalkModeMuted(false);
+      talkModeMutedRef.current = false;
       if (speakingId) {
         try {
           playerRef.current?.remove();
@@ -496,6 +512,15 @@ export default function OraChatScreen() {
       setTimeout(() => void startRecordingRef.current(), 250);
     }
   }, []);
+
+  const toggleTalkModeMute = useCallback(() => {
+    const next = !talkModeMuted;
+    setTalkModeMuted(next);
+    talkModeMutedRef.current = next;
+    if (next && speakingId) {
+      interruptTalkMode();
+    }
+  }, [interruptTalkMode, speakingId, talkModeMuted]);
 
   const openConversations = useCallback(async () => {
     setShowConversations(true);
@@ -556,15 +581,17 @@ export default function OraChatScreen() {
           ? "Listening"
           : "Voice mode active";
 
-  const talkStatusSubtitle = sending
-    ? "Preparing reply..."
-    : speakingId
-      ? "Tap interrupt to speak"
-      : transcribing
-        ? "Turning speech into text..."
-        : recording
-          ? "Speak naturally - Ora answers when you pause"
-          : "Tap the mic or wait for Ora to listen";
+  const talkStatusSubtitle = talkModeMuted
+    ? "Muted - replies stay on screen"
+    : sending
+      ? "Preparing reply..."
+      : speakingId
+        ? "Tap interrupt to speak"
+        : transcribing
+          ? "Turning speech into text..."
+          : recording
+            ? "Speak naturally - Ora answers when you pause"
+            : "Tap the mic or wait for Ora to listen";
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -717,6 +744,29 @@ export default function OraChatScreen() {
                   </Pressable>
                 )}
                 <Pressable
+                  onPress={toggleTalkModeMute}
+                  style={{
+                    flex: 1,
+                    minHeight: 38,
+                    borderRadius: c.radius,
+                    borderWidth: 1,
+                    borderColor: c.border,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "row",
+                    gap: 6,
+                  }}
+                >
+                  {talkModeMuted ? (
+                    <VolumeX size={14} color={c.foreground} />
+                  ) : (
+                    <Volume2 size={14} color={c.foreground} />
+                  )}
+                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
+                    {talkModeMuted ? "Unmute" : "Mute"}
+                  </Text>
+                </Pressable>
+                <Pressable
                   onPress={toggleTalkMode}
                   style={{
                     flex: 1,
@@ -805,7 +855,11 @@ export default function OraChatScreen() {
               )}
             </Pressable>
             {recording ? (
-              <RecordingIndicator recorder={recorder} />
+              <RecordingIndicator
+                recorder={recorder}
+                autoStopOnSilence={talkMode}
+                onAutoStop={autoStopTalkRecording}
+              />
             ) : (
               <>
                 <TextInput
@@ -873,6 +927,9 @@ export default function OraChatScreen() {
 
 const WAVEFORM_BAR_COUNT = 28;
 const METERING_FLOOR_DB = -50;
+const TALK_MODE_SPEECH_DB = -42;
+const TALK_MODE_SILENCE_DB = -48;
+const TALK_MODE_SILENCE_MS = 1200;
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -883,10 +940,21 @@ function formatElapsed(ms: number): string {
   return `${mm}:${ss}`;
 }
 
-function RecordingIndicator({ recorder }: { recorder: AudioRecorder }) {
+function RecordingIndicator({
+  recorder,
+  autoStopOnSilence = false,
+  onAutoStop,
+}: {
+  recorder: AudioRecorder;
+  autoStopOnSilence?: boolean;
+  onAutoStop?: () => void;
+}) {
   const c = useColors();
   const state = useAudioRecorderState(recorder, 90);
   const [levels, setLevels] = useState<number[]>(() => Array(WAVEFORM_BAR_COUNT).fill(0));
+  const heardSpeechRef = useRef(false);
+  const silenceStartedAtRef = useRef<number | null>(null);
+  const autoStopFiredRef = useRef(false);
 
   const metering = state.metering;
   useEffect(() => {
@@ -895,6 +963,38 @@ function RecordingIndicator({ recorder }: { recorder: AudioRecorder }) {
     const eased = Math.pow(norm, 0.6);
     setLevels((prev) => [...prev.slice(1), eased]);
   }, [metering]);
+
+  useEffect(() => {
+    if (!autoStopOnSilence) {
+      heardSpeechRef.current = false;
+      silenceStartedAtRef.current = null;
+      autoStopFiredRef.current = false;
+      return;
+    }
+
+    const db = typeof metering === "number" ? metering : METERING_FLOOR_DB;
+    if (db > TALK_MODE_SPEECH_DB) {
+      heardSpeechRef.current = true;
+      silenceStartedAtRef.current = null;
+      autoStopFiredRef.current = false;
+      return;
+    }
+
+    if (!heardSpeechRef.current || db > TALK_MODE_SILENCE_DB || autoStopFiredRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if (silenceStartedAtRef.current == null) {
+      silenceStartedAtRef.current = now;
+      return;
+    }
+
+    if (now - silenceStartedAtRef.current >= TALK_MODE_SILENCE_MS) {
+      autoStopFiredRef.current = true;
+      onAutoStop?.();
+    }
+  }, [autoStopOnSilence, metering, onAutoStop]);
 
   return (
     <View

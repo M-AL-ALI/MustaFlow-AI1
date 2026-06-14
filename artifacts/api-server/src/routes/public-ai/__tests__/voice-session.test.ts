@@ -148,8 +148,16 @@ describe("Talk to Ora voice-session wiring", () => {
   it("shows mobile Talk to Ora live status and interrupt controls", () => {
     const mobileHome = readMobile("app/(home)/index.tsx");
 
+    expect(mobileHome).toContain("const [talkModeMuted, setTalkModeMuted]");
+    expect(mobileHome).toContain("talkModeMutedRef.current = talkModeMuted");
+    expect(mobileHome).toContain("talkModeMutedRef.current = false");
+    expect(mobileHome).toContain(
+      "const shouldSpeakInTalkMode = talkModeRef.current && !talkModeMutedRef.current",
+    );
     expect(mobileHome).toContain("const interruptTalkMode = useCallback");
     expect(mobileHome).toContain("setTimeout(() => void startRecordingRef.current(), 250)");
+    expect(mobileHome).toContain("const toggleTalkModeMute = useCallback");
+    expect(mobileHome).toContain("onPress={toggleTalkModeMute}");
     expect(mobileHome).toContain("const talkStatusTitle = sending");
     expect(mobileHome).toContain('"Ora is thinking"');
     expect(mobileHome).toContain('"Ora is speaking"');
@@ -157,8 +165,24 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(mobileHome).toContain('"Listening"');
     expect(mobileHome).toContain('"Voice mode active"');
     expect(mobileHome).toContain('"Tap interrupt to speak"');
+    expect(mobileHome).toContain('"Muted - replies stay on screen"');
     expect(mobileHome).toContain("onPress={interruptTalkMode}");
     expect(mobileHome).toContain("Interrupt");
+    expect(mobileHome).toContain('talkModeMuted ? "Unmute" : "Mute"');
     expect(mobileHome).toContain("End");
+  });
+
+  it("auto-stops mobile Talk mode recording only after speech then silence", () => {
+    const mobileHome = readMobile("app/(home)/index.tsx");
+
+    expect(mobileHome).toContain("const TALK_MODE_SPEECH_DB = -42");
+    expect(mobileHome).toContain("const TALK_MODE_SILENCE_DB = -48");
+    expect(mobileHome).toContain("const TALK_MODE_SILENCE_MS = 1200");
+    expect(mobileHome).toContain("const autoStopTalkRecording = useCallback");
+    expect(mobileHome).toContain("autoStopOnSilence={talkMode}");
+    expect(mobileHome).toContain("onAutoStop={autoStopTalkRecording}");
+    expect(mobileHome).toContain("heardSpeechRef.current = true");
+    expect(mobileHome).toContain("silenceStartedAtRef.current == null");
+    expect(mobileHome).toContain("now - silenceStartedAtRef.current >= TALK_MODE_SILENCE_MS");
   });
 });
