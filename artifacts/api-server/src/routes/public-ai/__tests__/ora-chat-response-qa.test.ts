@@ -166,8 +166,8 @@ vi.mock("../../../lib/ai-providers", () => ({
       pro: "claude-opus-4-7",
     },
     gemini: {
-      lite: "gemini-2.5-flash",
-      eco: "gemini-2.5-flash",
+      lite: "gemini-3-flash-preview",
+      eco: "gemini-3-flash-preview",
       power: "gemini-3.1-pro-preview",
       pro: "gemini-3.1-pro-preview",
     },
