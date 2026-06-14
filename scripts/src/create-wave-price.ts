@@ -14,21 +14,25 @@ const PRODUCT_NAME = "Deep Wave";
 async function main(): Promise<void> {
   const stripe = await getUncachableStripeClient();
   if (!stripe) {
-    console.error("ERROR: Stripe client unavailable (connector not connected or STRIPE_SECRET_KEY missing).");
+    console.error(
+      "ERROR: Stripe client unavailable (connector not connected or STRIPE_SECRET_KEY missing).",
+    );
     process.exit(1);
   }
 
   // 1. Search for an existing active recurring $65/month USD price across all products
   //    whose name contains "wave" (case-insensitive).
-  const prices = await stripe.prices.list({ active: true, currency: CURRENCY, type: "recurring", limit: 100 });
+  const prices = await stripe.prices.list({
+    active: true,
+    currency: CURRENCY,
+    type: "recurring",
+    limit: 100,
+  });
 
   for (const p of prices.data) {
-    if (
-      p.unit_amount === AMOUNT_CENTS &&
-      p.recurring?.interval === INTERVAL
-    ) {
+    if (p.unit_amount === AMOUNT_CENTS && p.recurring?.interval === INTERVAL) {
       // Check product name contains "wave"
-      const productId = typeof p.product === "string" ? p.product : p.product?.id ?? "";
+      const productId = typeof p.product === "string" ? p.product : (p.product?.id ?? "");
       if (productId) {
         const product = await stripe.products.retrieve(productId);
         if (product.name.toLowerCase().includes("wave")) {
@@ -45,7 +49,7 @@ async function main(): Promise<void> {
 
   // Find or create the Deep Wave product
   const products = await stripe.products.list({ active: true, limit: 100 });
-  const existingProduct = products.data.find(p => p.name.toLowerCase().includes("wave"));
+  const existingProduct = products.data.find((p) => p.name.toLowerCase().includes("wave"));
   let productId: string;
   if (existingProduct) {
     productId = existingProduct.id;
