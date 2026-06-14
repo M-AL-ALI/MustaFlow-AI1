@@ -44,12 +44,12 @@ async function main(): Promise<void> {
   console.log("No existing $65/month Deep Wave price found. Creating one…");
 
   // Find or create the Deep Wave product
-  let productId: string | null = null;
   const products = await stripe.products.list({ active: true, limit: 100 });
-  const existing = products.data.find(p => p.name.toLowerCase().includes("wave"));
-  if (existing) {
-    productId = existing.id;
-    console.log(`Using existing product: ${existing.name} (${existing.id})`);
+  const existingProduct = products.data.find(p => p.name.toLowerCase().includes("wave"));
+  let productId: string;
+  if (existingProduct) {
+    productId = existingProduct.id;
+    console.log(`Using existing product: ${existingProduct.name} (${existingProduct.id})`);
   } else {
     const newProduct = await stripe.products.create({
       name: PRODUCT_NAME,
