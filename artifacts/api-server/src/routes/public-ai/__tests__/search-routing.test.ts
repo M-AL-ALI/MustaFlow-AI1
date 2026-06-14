@@ -230,6 +230,9 @@ describe("isImageGenerationRequest", () => {
     expect(isImageGenerationRequest("make a clean diagram for the checkout flow")).toBe(true);
     expect(isImageGenerationRequest("create an interior design for my living room")).toBe(true);
     expect(isImageGenerationRequest("make a mood board for a modern bedroom")).toBe(true);
+    expect(isImageGenerationRequest("generate a redesign concept for my bedroom")).toBe(true);
+    expect(isImageGenerationRequest("make a furniture layout for my studio")).toBe(true);
+    expect(isImageGenerationRequest("create a color palette for a cozy kitchen")).toBe(true);
     // Bare brandable noun + preposition, no leading verb
     expect(isImageGenerationRequest("a logo for my mechanic app")).toBe(true);
     expect(isImageGenerationRequest("an icon for the button")).toBe(true);
@@ -247,6 +250,7 @@ describe("isImageGenerationRequest", () => {
     expect(isImageGenerationRequest("I need a website for my bakery")).toBe(false);
     expect(isImageGenerationRequest("give me a summary of this file")).toBe(false);
     expect(isImageGenerationRequest("make a plan for the launch")).toBe(false);
+    expect(isImageGenerationRequest("what decoration should I use for this room?")).toBe(false);
     expect(isImageGenerationRequest("what is the best logo design software")).toBe(false);
     // Mid-sentence mention of a logo is a statement, not a request.
     expect(isImageGenerationRequest("I used a logo for my app")).toBe(false);

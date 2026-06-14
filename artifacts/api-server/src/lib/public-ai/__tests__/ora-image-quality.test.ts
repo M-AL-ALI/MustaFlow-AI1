@@ -102,7 +102,40 @@ describe("Ora image quality profiles", () => {
     expect(profile.guidance).toContain("quick wins");
   });
 
+  it("keeps free interior design analysis strong and practical", () => {
+    const free = buildOraImageAnalysisProfile({
+      message: "Decorate this small bedroom and tell me what to change",
+      subscriptionTier: "free",
+    });
+
+    expect(free.planTier).toBe("free");
+    expect(free.task).toBe("interior_design");
+    expect(free.detail).toBe("high");
+    expect(free.maxTokens).toBe(1700);
+    expect(free.guidance).toContain("strong, practical interior design review");
+    expect(free.guidance).toContain("3-5 prioritized changes");
+    expect(free.guidance).toContain("avoid vague advice");
+
+    const wave = buildOraImageAnalysisProfile({
+      message: "Redesign this living room with luxury decor options",
+      subscriptionTier: "wave",
+    });
+
+    expect(wave.maxTokens).toBe(2400);
+    expect(wave.guidance).toContain("2-3 viable style directions");
+    expect(wave.guidance).toContain("staged next steps");
+  });
+
   it("builds professional interior generation and edit instructions", () => {
+    const freeGenerated = buildOraImageGenerationProfile({
+      prompt: "generate a redesign concept for my bedroom",
+      subscriptionTier: "free",
+    });
+
+    expect(freeGenerated.kind).toBe("interior");
+    expect(freeGenerated.prompt).toContain("strong, practical interior design concept");
+    expect(freeGenerated.prompt).toContain("not generic");
+
     const generated = buildOraImageGenerationProfile({
       prompt: "create an interior design concept for a modern living room",
       subscriptionTier: "wave",
@@ -120,5 +153,13 @@ describe("Ora image quality profiles", () => {
 
     expect(edited.instruction).toContain("Apply interior-design changes professionally");
     expect(edited.instruction).toContain("preserve the room's architecture");
+
+    const freeEdited = buildOraImageEditProfile({
+      instruction: "redecorate this living room with better lighting",
+      subscriptionTier: "free",
+    });
+
+    expect(freeEdited.instruction).toContain("strong, practical interior-design changes");
+    expect(freeEdited.instruction).toContain("realistic, clean, and livable");
   });
 });
