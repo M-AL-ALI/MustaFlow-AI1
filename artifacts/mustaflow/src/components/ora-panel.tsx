@@ -1038,8 +1038,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                   >
                     <VolumeX className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
                     <span className="flex-1 leading-snug">
-                      Spoken replies aren&apos;t available in this browser. You can still read Ora&apos;s
-                      answers.
+                      Spoken replies aren&apos;t available in this browser. You can still read
+                      Ora&apos;s answers.
                     </span>
                   </div>
                 )}
