@@ -151,8 +151,8 @@ describe("Ora image quality profiles", () => {
       subscriptionTier: "wave",
     });
 
-    expect(edited.instruction).toContain("Apply interior-design changes professionally");
-    expect(edited.instruction).toContain("preserve the room's architecture");
+    expect(edited.instruction).toContain("Apply interior-design changes like a senior designer");
+    expect(edited.instruction).toContain("preserve room architecture");
 
     const freeEdited = buildOraImageEditProfile({
       instruction: "redecorate this living room with better lighting",
