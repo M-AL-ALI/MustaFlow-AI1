@@ -449,7 +449,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   // Stable refs — always current, so effects and callbacks never go stale
   const voiceConvActiveRef = useRef(false);
   const wasConvSpeakingRef = useRef(false);
-  const lastConvAssistantMsgRef = useRef<string | null>(null);
+  const lastSpokenAssistantMsgRef = useRef<string | null>(null);
+  // Whether the auto-speak effect has armed for the currently loaded transcript.
+  // Reset whenever messages clear (new chat / conversation switch) so a freshly
+  // loaded history or a restored "Voice responses on" preference seeds the dedup
+  // ref to the existing last reply instead of replaying it.
+  const autoSpeakArmedRef = useRef(false);
   const languageRef = useRef(language);
   const sendMessageRef = useRef(sendMessage);
 
@@ -507,19 +512,35 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
 
   // ─── Voice Conversation Mode effects ──────────────────────────────────────
 
-  // Auto-TTS: speak each new Ora reply when voice conv mode is active.
-  // Uses speakTextForce so it works regardless of the user's TTS toggle preference —
-  // Voice Conversation Mode has its own mute control (voiceConvTtsMuted).
+  // Auto-TTS: speak each new Ora reply when spoken replies should play.
+  // In Voice Conversation Mode this is gated by its own mute control; in normal
+  // typing mode it is gated by the user's "Voice responses" toggle (isTtsEnabled).
+  // Always uses speakTextForce (server TTS) so replies use the high-quality voice.
   useEffect(() => {
-    if (!voiceConvActive || voiceConvTtsMuted) return;
+    // Re-arm on an empty transcript (new chat / conversation switch / clear).
+    if (messages.length === 0) {
+      autoSpeakArmedRef.current = false;
+      return;
+    }
     const lastMsgIndex = messages.length - 1;
     const lastMsg = messages[lastMsgIndex];
+    // First observation of a non-empty transcript: seed the dedup ref to the
+    // existing last reply so a loaded history or restored preference never
+    // replays an old answer. Only replies that arrive afterwards are spoken.
+    if (!autoSpeakArmedRef.current) {
+      autoSpeakArmedRef.current = true;
+      lastSpokenAssistantMsgRef.current =
+        lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
+      return;
+    }
+    const shouldSpeak = voiceConvActive ? !voiceConvTtsMuted : voice.isTtsEnabled;
+    if (!shouldSpeak) return;
     if (!lastMsg || lastMsg.role !== "assistant") return;
     const playbackKey = `${lastMsgIndex}:${lastMsg.content}`;
-    if (playbackKey === lastConvAssistantMsgRef.current) return;
-    lastConvAssistantMsgRef.current = playbackKey;
+    if (playbackKey === lastSpokenAssistantMsgRef.current) return;
+    lastSpokenAssistantMsgRef.current = playbackKey;
     voiceRef.current.speakTextForce(lastMsg.content, languageRef.current);
-  }, [messages, voiceConvActive, voiceConvTtsMuted]);
+  }, [messages, voiceConvActive, voiceConvTtsMuted, voice.isTtsEnabled]);
 
   // Conversation cycling: track when Ora finishes speaking so the automatic
   // listener can resume.
@@ -827,7 +848,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     wasConvSpeakingRef.current = false;
     const lastMsgIndex = messages.length - 1;
     const lastMsg = messages[lastMsgIndex];
-    lastConvAssistantMsgRef.current =
+    lastSpokenAssistantMsgRef.current =
       lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
     setVoiceConvActive(true);
     voiceConvActiveRef.current = true;
@@ -855,6 +876,23 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
       return next;
     });
   }, []);
+
+  // "Voice responses" toggle (normal typing mode). When enabling, unlock browser
+  // audio inside this click gesture and seed the dedup ref to the current last
+  // reply so only FUTURE replies are auto-spoken (never the existing answer).
+  const handleToggleVoiceResponses = useCallback(() => {
+    const enabling = !voiceRef.current.isTtsEnabled;
+    if (enabling) {
+      void voiceRef.current.prepareVoicePlayback();
+      const lastMsgIndex = messages.length - 1;
+      const lastMsg = messages[lastMsgIndex];
+      lastSpokenAssistantMsgRef.current =
+        lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
+    } else {
+      voiceRef.current.stopSpeaking();
+    }
+    voiceRef.current.toggleTts();
+  }, [messages]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -1016,7 +1054,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     role="menuitemcheckbox"
                     aria-checked={voice.isTtsEnabled}
                     onClick={() => {
-                      voice.toggleTts();
+                      handleToggleVoiceResponses();
                       setShowHeaderMenu(false);
                     }}
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
@@ -1458,7 +1496,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     }
                     onReadAloud={
                       msg.role === "assistant" && voice.isSpeechSynthesisSupported
-                        ? (text) => voice.speakText(text, language)
+                        ? (text) => voice.speakTextForce(text, language)
                         : undefined
                     }
                     isTtsAvailable={voice.isSpeechSynthesisSupported && voice.isTtsEnabled}

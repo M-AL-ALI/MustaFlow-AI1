@@ -6,7 +6,8 @@
  * - TTS defaults OFF; stored in sessionStorage under "ora_tts_enabled".
  * - Voice gender defaults to female; URI stored in localStorage under "ora_voice_uri".
  * - No audio is stored permanently. No transcript text is logged anywhere.
- * - No backend routes needed for Voice-A.
+ * - Spoken replies use the server TTS route (/api/public-ai/tts) for a
+ *   high-quality voice; speech recognition stays browser-native.
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -92,6 +93,18 @@ export function cleanOraVoiceReplyForSpeech(text: string): string {
     .replace(/[_~#|$]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// The server TTS route (/api/public-ai/tts) rejects input over 4000 chars.
+// Keep a safety margin and break on a word boundary so long replies still speak
+// instead of silently failing the request.
+const TTS_MAX_CHARS = 3900;
+
+export function truncateForTts(text: string): string {
+  if (text.length <= TTS_MAX_CHARS) return text;
+  const slice = text.slice(0, TTS_MAX_CHARS);
+  const lastSpace = slice.lastIndexOf(" ");
+  return (lastSpace > TTS_MAX_CHARS * 0.6 ? slice.slice(0, lastSpace) : slice).trim();
 }
 
 // ─── Female voice preference ──────────────────────────────────────────────────
@@ -552,7 +565,8 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
 
       void (async () => {
         try {
-          const spokenText = cleanOraVoiceReplyForSpeech(trimmed) || trimmed;
+          const cleaned = cleanOraVoiceReplyForSpeech(trimmed) || trimmed;
+          const spokenText = truncateForTts(cleaned);
           const ttsBody = JSON.stringify({ text: spokenText, language: lang });
           const requestTts = () =>
             authFetch("/api/public-ai/tts", {
