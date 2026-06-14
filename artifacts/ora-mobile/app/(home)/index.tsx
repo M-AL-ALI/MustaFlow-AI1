@@ -150,6 +150,14 @@ export default function OraChatScreen() {
     isMeteringEnabled: true,
   });
   const playerRef = useRef<AudioPlayer | null>(null);
+  const talkRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startRecordingRef = useRef<() => Promise<void>>(async () => {});
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
+  const transcribingRef = useRef(transcribing);
+  transcribingRef.current = transcribing;
+  const speakingIdRef = useRef<string | null>(speakingId);
+  speakingIdRef.current = speakingId;
 
   const loadPreferences = useCallback(() => {
     getPreferences()
@@ -178,6 +186,10 @@ export default function OraChatScreen() {
 
   useEffect(() => {
     return () => {
+      if (talkRestartTimerRef.current) {
+        clearTimeout(talkRestartTimerRef.current);
+        talkRestartTimerRef.current = null;
+      }
       try {
         playerRef.current?.remove();
       } catch {
@@ -185,6 +197,32 @@ export default function OraChatScreen() {
       }
     };
   }, []);
+
+  const cancelTalkRestart = useCallback(() => {
+    if (talkRestartTimerRef.current) {
+      clearTimeout(talkRestartTimerRef.current);
+      talkRestartTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleTalkRestart = useCallback(
+    (delayMs: number) => {
+      cancelTalkRestart();
+      talkRestartTimerRef.current = setTimeout(() => {
+        talkRestartTimerRef.current = null;
+        if (
+          !talkModeRef.current ||
+          recordingRef.current ||
+          transcribingRef.current ||
+          speakingIdRef.current
+        ) {
+          return;
+        }
+        void startRecordingRef.current();
+      }, delayMs);
+    },
+    [cancelTalkRestart],
+  );
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -280,7 +318,7 @@ export default function OraChatScreen() {
         if ((shouldSpeakInTalkMode || shouldSpeakForPreference) && assistant.content.trim()) {
           void speakRef.current(assistant);
         } else if (talkModeRef.current && !recordingRef.current) {
-          setTimeout(() => void startRecordingRef.current(), 700);
+          scheduleTalkRestart(700);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
@@ -293,7 +331,7 @@ export default function OraChatScreen() {
         setSending(false);
       }
     },
-    [sending, messages, mode, scrollToEnd, persist],
+    [sending, messages, mode, scrollToEnd, persist, scheduleTalkRestart],
   );
 
   const handleSend = useCallback(async () => {
@@ -384,7 +422,7 @@ export default function OraChatScreen() {
             if (playerRef.current === player) playerRef.current = null;
             // In Talk mode: automatically start listening for the next turn
             if (talkModeRef.current && !recordingRef.current) {
-              setTimeout(() => void startRecordingRef.current(), 700);
+              scheduleTalkRestart(700);
             }
           }
         });
@@ -393,11 +431,11 @@ export default function OraChatScreen() {
         setSpeakingId((cur) => (cur === message.id ? null : cur));
         // Even on TTS failure, keep the conversation going in Talk mode
         if (talkModeRef.current && !recordingRef.current) {
-          setTimeout(() => void startRecordingRef.current(), 700);
+          scheduleTalkRestart(700);
         }
       }
     },
-    [speakingId, voiceLang],
+    [scheduleTalkRestart, speakingId, voiceLang],
   );
 
   const speakRef = useRef(speak);
@@ -408,11 +446,9 @@ export default function OraChatScreen() {
   // the latest function/state without stale closure captures.
   const sendMessageRef = useRef(sendMessage);
   sendMessageRef.current = sendMessage;
-  const startRecordingRef = useRef(startRecording);
   startRecordingRef.current = startRecording;
   const stopRecordingRef = useRef(stopRecording);
   stopRecordingRef.current = stopRecording;
-  const recordingRef = useRef(recording);
   recordingRef.current = recording;
 
   const autoStopTalkRecording = useCallback(() => {
@@ -471,6 +507,7 @@ export default function OraChatScreen() {
     setTalkMode(next);
     talkModeRef.current = next;
     if (!next) {
+      cancelTalkRestart();
       // Exiting: stop any TTS that is playing
       if (speakingId) {
         try {
@@ -496,9 +533,9 @@ export default function OraChatScreen() {
         playerRef.current = null;
         setSpeakingId(null);
       }
-      setTimeout(() => void startRecordingRef.current(), 300);
+      scheduleTalkRestart(300);
     }
-  }, [talkMode, speakingId, recording]);
+  }, [cancelTalkRestart, recording, scheduleTalkRestart, speakingId, talkMode]);
 
   const interruptTalkMode = useCallback(() => {
     try {
@@ -509,9 +546,9 @@ export default function OraChatScreen() {
     playerRef.current = null;
     setSpeakingId(null);
     if (talkModeRef.current && !recordingRef.current) {
-      setTimeout(() => void startRecordingRef.current(), 250);
+      scheduleTalkRestart(250);
     }
-  }, []);
+  }, [scheduleTalkRestart]);
 
   const toggleTalkModeMute = useCallback(() => {
     const next = !talkModeMuted;

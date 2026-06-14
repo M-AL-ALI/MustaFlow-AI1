@@ -155,7 +155,7 @@ describe("Talk to Ora voice-session wiring", () => {
       "const shouldSpeakInTalkMode = talkModeRef.current && !talkModeMutedRef.current",
     );
     expect(mobileHome).toContain("const interruptTalkMode = useCallback");
-    expect(mobileHome).toContain("setTimeout(() => void startRecordingRef.current(), 250)");
+    expect(mobileHome).toContain("scheduleTalkRestart(250)");
     expect(mobileHome).toContain("const toggleTalkModeMute = useCallback");
     expect(mobileHome).toContain("onPress={toggleTalkModeMute}");
     expect(mobileHome).toContain("const talkStatusTitle = sending");
@@ -184,5 +184,24 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(mobileHome).toContain("heardSpeechRef.current = true");
     expect(mobileHome).toContain("silenceStartedAtRef.current == null");
     expect(mobileHome).toContain("now - silenceStartedAtRef.current >= TALK_MODE_SILENCE_MS");
+  });
+
+  it("guards mobile Talk mode scheduled restarts against stale timers", () => {
+    const mobileHome = readMobile("app/(home)/index.tsx");
+
+    expect(mobileHome).toContain(
+      "const talkRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)",
+    );
+    expect(mobileHome).toContain("const cancelTalkRestart = useCallback");
+    expect(mobileHome).toContain("const scheduleTalkRestart = useCallback");
+    expect(mobileHome).toContain("cancelTalkRestart();");
+    expect(mobileHome).toContain("talkRestartTimerRef.current = setTimeout");
+    expect(mobileHome).toContain("!talkModeRef.current");
+    expect(mobileHome).toContain("recordingRef.current");
+    expect(mobileHome).toContain("transcribingRef.current");
+    expect(mobileHome).toContain("speakingIdRef.current");
+    expect(mobileHome).toContain("void startRecordingRef.current();");
+    expect(mobileHome).toContain("scheduleTalkRestart(300)");
+    expect(mobileHome).toContain("scheduleTalkRestart(700)");
   });
 });
