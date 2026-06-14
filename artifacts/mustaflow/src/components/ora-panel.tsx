@@ -75,6 +75,7 @@ import { OraImageChip } from "@/components/ora/ora-image-chip";
 import { OraSourceCards } from "@/components/ora/ora-source-cards";
 import { OraImageGallery, OraVideoCards } from "@/components/ora/ora-media-cards";
 import { OraRichText } from "@/components/ora/ora-rich-text";
+import { OraVoiceTip } from "@/components/ora/ora-voice-tip";
 
 function downloadOraFile(file: GeneratedFile) {
   if (!file.fileData) return;
@@ -1715,6 +1716,12 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                 ) : (
                   /* ─── Normal dictation + text input ─────────────────────────── */
                   <>
+                    {/* One-time hint surfacing voice features (browser-dependent) */}
+                    <OraVoiceTip
+                      voiceInputSupported={voice.isSupported || whisperConv.isSupported}
+                      voiceOutputSupported={voice.isSpeechSynthesisSupported}
+                    />
+
                     {/* Voice live area — dictation feedback only */}
                     <OraVoiceLiveArea
                       voiceState={voice.voiceState}

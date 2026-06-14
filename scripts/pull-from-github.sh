@@ -13,6 +13,11 @@ fi
 GIT_ID=(-c "user.name=${GIT_AUTHOR_NAME:-MustaFlow Agent}" -c "user.email=${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}")
 CRED_HELPER='!f() { echo "username=x-access-token"; printf "password=%s\n" "$GITHUB_PAT"; }; f'
 
+# Clear a stale index lock left behind by an interrupted/crashed git process so a
+# resolved merge or fetch can proceed. This script is the only git writer here, so
+# any pre-existing lock at this point is safe to remove.
+rm -f .git/index.lock
+
 # If a merge is already in progress (conflict was manually resolved), complete it first.
 if [ -f .git/MERGE_HEAD ]; then
   echo "Completing in-progress merge (conflict resolved) …"
