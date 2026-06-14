@@ -143,4 +143,21 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(stopRecordingBlock).toContain("if (talkModeRef.current)");
     expect(stopRecordingBlock).toContain("void sendMessageRef.current(clean, null)");
   });
+
+  it("shows mobile Talk to Ora live status and interrupt controls", () => {
+    const mobileHome = readMobile("app/(home)/index.tsx");
+
+    expect(mobileHome).toContain("const interruptTalkMode = useCallback");
+    expect(mobileHome).toContain("setTimeout(() => void startRecordingRef.current(), 250)");
+    expect(mobileHome).toContain("const talkStatusTitle = sending");
+    expect(mobileHome).toContain('"Ora is thinking"');
+    expect(mobileHome).toContain('"Ora is speaking"');
+    expect(mobileHome).toContain('"Transcribing"');
+    expect(mobileHome).toContain('"Listening"');
+    expect(mobileHome).toContain('"Voice mode active"');
+    expect(mobileHome).toContain('"Tap interrupt to speak"');
+    expect(mobileHome).toContain("onPress={interruptTalkMode}");
+    expect(mobileHome).toContain("Interrupt");
+    expect(mobileHome).toContain("End");
+  });
 });

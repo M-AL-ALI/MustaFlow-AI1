@@ -484,6 +484,19 @@ export default function OraChatScreen() {
     }
   }, [talkMode, speakingId, recording]);
 
+  const interruptTalkMode = useCallback(() => {
+    try {
+      playerRef.current?.remove();
+    } catch {
+      /* ignore */
+    }
+    playerRef.current = null;
+    setSpeakingId(null);
+    if (talkModeRef.current && !recordingRef.current) {
+      setTimeout(() => void startRecordingRef.current(), 250);
+    }
+  }, []);
+
   const openConversations = useCallback(async () => {
     setShowConversations(true);
     setLoadingConversations(true);
@@ -532,6 +545,26 @@ export default function OraChatScreen() {
   const usageText = session
     ? `${session.msgCount}/${session.msgLimit} messages${session.tier ? ` · ${session.tier}` : ""}`
     : "Loading…";
+
+  const talkStatusTitle = sending
+    ? "Ora is thinking"
+    : speakingId
+      ? "Ora is speaking"
+      : transcribing
+        ? "Transcribing"
+        : recording
+          ? "Listening"
+          : "Voice mode active";
+
+  const talkStatusSubtitle = sending
+    ? "Preparing reply..."
+    : speakingId
+      ? "Tap interrupt to speak"
+      : transcribing
+        ? "Turning speech into text..."
+        : recording
+          ? "Speak naturally - Ora answers when you pause"
+          : "Tap the mic or wait for Ora to listen";
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -617,6 +650,91 @@ export default function OraChatScreen() {
               onPress={() => setMode("deep")}
             />
           </View>
+
+          {talkMode && (
+            <View
+              style={{
+                backgroundColor: c.card,
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: c.radius,
+                padding: 12,
+                gap: 10,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <View
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 17,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: speakingId ? c.primary : c.secondary,
+                  }}
+                >
+                  <PhoneCall
+                    size={18}
+                    color={speakingId ? c.primaryForeground : c.mutedForeground}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      color: c.foreground,
+                      fontFamily: "Inter_600SemiBold",
+                      fontSize: 14,
+                    }}
+                  >
+                    {talkStatusTitle}
+                  </Text>
+                  <Text style={{ color: c.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                    {talkStatusSubtitle}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {speakingId && (
+                  <Pressable
+                    onPress={interruptTalkMode}
+                    style={{
+                      flex: 1,
+                      minHeight: 38,
+                      borderRadius: c.radius,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexDirection: "row",
+                      gap: 6,
+                    }}
+                  >
+                    <Square size={14} color={c.foreground} fill={c.foreground} />
+                    <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
+                      Interrupt
+                    </Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={toggleTalkMode}
+                  style={{
+                    flex: 1,
+                    minHeight: 38,
+                    borderRadius: c.radius,
+                    backgroundColor: c.secondary,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "row",
+                    gap: 6,
+                  }}
+                >
+                  <X size={14} color={c.mutedForeground} />
+                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>End</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           {attachment && (
             <View
