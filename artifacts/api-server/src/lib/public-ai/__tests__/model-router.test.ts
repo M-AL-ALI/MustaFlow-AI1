@@ -32,7 +32,7 @@ import {
   type OraModelRouteInput,
   type ModelCandidate,
 } from "../model-router";
-import { MODEL_DEFAULTS, type Provider } from "../../ai-providers";
+import { MODEL_DEFAULTS, type Provider } from "../../ai-provider-config";
 
 const ALL_AVAILABLE: Record<Provider, boolean> = {
   openai: true,

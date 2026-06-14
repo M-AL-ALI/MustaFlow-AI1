@@ -14,15 +14,14 @@ import {
   summarizePastedReferenceSignals,
 } from "../../lib/public-ai/prompt";
 
-import { generateFileFromPrompt, FileGenerationError } from "../../lib/public-ai/file-builder";
 import { type OraTopic } from "../../lib/public-ai/classifier";
 import {
   routeOraMessage,
   checkToolAccess,
   extractMemorySaveCandidate,
 } from "../../lib/public-ai/orchestrator";
-import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
-import type { Provider } from "../../lib/ai-providers";
+import type { AuthedOraUser } from "../../lib/public-ai/authed-user";
+import type { Provider } from "../../lib/ai-provider-config";
 import type { OraVideo } from "../../lib/public-ai/web-search";
 import {
   getOraProviderRoutingSnapshot,
@@ -39,28 +38,15 @@ import { buildOraExpertiseProfile } from "../../lib/public-ai/expertise";
 import { buildOraImageGenerationProfile } from "../../lib/public-ai/image-quality";
 import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../lib/embeddings";
 import { eq, and, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
-import {
-  db,
-  knowledgeEntriesTable,
-  oraProfilesTable,
-  oraProjectsTable,
-  oraConversationsTable,
-  generatedImagesTable,
-  TIER_ORA_MESSAGE_LIMIT,
-  type SubscriptionTier,
-} from "@workspace/db";
-import {
-  consumeOraQuota,
-  refundOraQuota,
-  getOraUsage,
-  type OraQuotaKind,
-} from "../../lib/public-ai/ora-usage";
+import type { SubscriptionTier } from "@workspace/db";
+import type { OraQuotaKind } from "../../lib/public-ai/ora-usage";
 
 // Authenticated Ora users are metered by per-user ROLLING-WINDOW quotas per
 // subscription tier (TIER_ORA_MESSAGE_LIMIT / TIER_ORA_IMAGE_LIMIT) — NOT by the
 // AI Builder credit wallet. Anonymous visitors keep the per-session cap.
 
-function oraMessageLimit(tier: string): number {
+async function oraMessageLimit(tier: string): Promise<number> {
+  const { TIER_ORA_MESSAGE_LIMIT } = await import("@workspace/db");
   return TIER_ORA_MESSAGE_LIMIT[tier as SubscriptionTier] ?? TIER_ORA_MESSAGE_LIMIT.free;
 }
 
@@ -84,6 +70,7 @@ async function oraUsageResponse(
   sessionMsgCount: number,
 ): Promise<Record<string, number | string | null>> {
   if (!authed) return { msgCount: sessionMsgCount, msgLimit: MSG_LIMIT_VALUE, resetsAt: null };
+  const { getOraUsage } = await import("../../lib/public-ai/ora-usage");
   const u = await getOraUsage(authed.userId, authed.tier);
   return {
     msgCount: u.messageCount,
@@ -92,6 +79,15 @@ async function oraUsageResponse(
     imageLimit: u.imageLimit,
     resetsAt: u.resetsAt,
   };
+}
+
+async function refundOraQuotaFor(
+  authed: AuthedOraUser | null,
+  quotaKind: OraQuotaKind,
+): Promise<void> {
+  if (!authed) return;
+  const { refundOraQuota } = await import("../../lib/public-ai/ora-usage");
+  await refundOraQuota(authed.userId, quotaKind);
 }
 
 const DEEP_SYSTEM_ADDENDUM = `\n\n## Deep Thinking mode\nYou are in DEEP THINKING mode. Take extra care: reason step by step before answering, weigh trade-offs explicitly, surface assumptions and edge cases, and give a thorough, well-structured response. Prefer concrete specifics (data models, flows, sequencing) over generalities. It is acceptable to be longer here than in normal replies.`;
@@ -428,6 +424,13 @@ function backfillMemoryEmbeddings(rows: OraMemoryRow[]): void {
     .slice(0, ORA_MEMORY_BACKFILL_PER_CALL);
   if (missing.length === 0) return;
   void (async () => {
+    let dbModule: typeof import("@workspace/db");
+    try {
+      dbModule = await import("@workspace/db");
+    } catch {
+      return;
+    }
+    const { db, knowledgeEntriesTable } = dbModule;
     for (const m of missing) {
       try {
         const input = buildEmbeddingInput(m.title, m.content).trim();
@@ -487,6 +490,7 @@ export async function buildMemoryContext(
   subscriptionTier?: string | null,
 ): Promise<MemoryContextResult> {
   try {
+    const { db, knowledgeEntriesTable, oraProjectsTable } = await import("@workspace/db");
     const profile = resolveOraMemoryRecallProfile(subscriptionTier);
     // ISOLATION (project vs general): a project chat sees ONLY that project's
     // memories; a standalone chat sees ONLY user-level memories. The two tiers
@@ -634,6 +638,7 @@ async function buildCrossConversationContext(
   currentConversationId: number | null | undefined,
 ): Promise<string> {
   try {
+    const { db, oraConversationsTable } = await import("@workspace/db");
     const isProjectChat = typeof oraProjectId === "number";
 
     const rows = await db
@@ -726,6 +731,7 @@ async function buildCrossConversationContext(
  */
 async function buildProfileContext(userId: string): Promise<string> {
   try {
+    const { db, oraProfilesTable } = await import("@workspace/db");
     const [p] = await db.select().from(oraProfilesTable).where(eq(oraProfilesTable.userId, userId));
     if (!p) return "";
 
@@ -765,13 +771,22 @@ Response shape for this turn:
 
 const router = Router();
 
+const MAX_USER_MESSAGE_CHARS = 12_000;
+const MAX_HISTORY_MESSAGE_CHARS = 8_000;
+const MAX_SUMMARY_SOURCE_MESSAGE_CHARS = 4_000;
+
 const messageItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string(),
+  content: z.string().max(MAX_HISTORY_MESSAGE_CHARS),
+});
+
+const summarizeMessageItemSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().max(MAX_SUMMARY_SOURCE_MESSAGE_CHARS),
 });
 
 const bodySchema = z.object({
-  message: z.string().min(1),
+  message: z.string().min(1).max(MAX_USER_MESSAGE_CHARS),
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
   languageHint: z.string().max(20).optional(),
@@ -798,7 +813,7 @@ const bodySchema = z.object({
    * are not yet reflected in `conversationSummary`. They are folded into the
    * summary on this request. Bounded by the client; capped again server-side.
    */
-  summarizeMessages: z.array(messageItemSchema).max(40).default([]),
+  summarizeMessages: z.array(summarizeMessageItemSchema).max(40).default([]),
   /**
    * The Ora project this chat belongs to, if any. When set (and owned by the
    * caller), Ora also injects that project's persistent memories alongside the
@@ -972,8 +987,9 @@ router.post("/public-ai/chat", async (req, res) => {
 
   // Resolve the signed-in user (if any). Authenticated users draw on their
   // monthly credit balance and are exempt from the anonymous visitor cap.
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
-  const effectiveMsgLimit = authed ? oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
+  const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
@@ -1063,8 +1079,10 @@ router.post("/public-ai/chat", async (req, res) => {
   // Atomically reserve the quota slot up-front so concurrent requests cannot
   // overshoot the tier limit. Every branch below that does NOT complete the
   // metered action MUST refund this reservation (see refundOraQuota calls).
-  const quotaKind: OraQuotaKind = decision.tool === "image_generation" ? "image" : "message";
+  const quotaKind: OraQuotaKind =
+    decision.tool === "image_generation" || decision.tool === "image_editing" ? "image" : "message";
   if (authed) {
+    const { consumeOraQuota } = await import("../../lib/public-ai/ora-usage");
     const quota = await consumeOraQuota(authed.userId, authed.tier, quotaKind);
     if (!quota.allowed) {
       const usage = await oraUsageResponse(authed, session.msgCount);
@@ -1089,6 +1107,8 @@ router.post("/public-ai/chat", async (req, res) => {
     // When the user is asking for a file built from an earlier upload, feed the
     // re-hydrated source text into the builder so the output reflects it.
     const filePrompt = carriedDocs ? `${message}\n\n${carriedDocs}` : message;
+    const { generateFileFromPrompt, FileGenerationError } =
+      await import("../../lib/public-ai/file-builder");
     try {
       const result = await generateFileFromPrompt(
         filePrompt,
@@ -1133,7 +1153,7 @@ router.post("/public-ai/chat", async (req, res) => {
         })();
       }
     } catch (err) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       logger.error(
         { component: "ora-chat-file", format: detectedFormat, err },
         "Auto file generation failed",
@@ -1159,7 +1179,7 @@ router.post("/public-ai/chat", async (req, res) => {
     try {
       imageProviderModule = await import("../../lib/image-provider");
     } catch (importErr) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       logger.error(
         { component: "ora-chat-image", err: importErr },
         "Failed to load image provider module",
@@ -1171,7 +1191,7 @@ router.post("/public-ai/chat", async (req, res) => {
     }
     const { generateImage, isImageProviderConfigured } = imageProviderModule;
     if (!isImageProviderConfigured()) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -1203,6 +1223,7 @@ router.post("/public-ai/chat", async (req, res) => {
         // NOT the Builder credit wallet, so this record is creditCost:0.
         try {
           const { storeGeneratedImage } = await import("../../lib/image-storage");
+          const { db, generatedImagesTable } = await import("@workspace/db");
           const [imageRow] = await db
             .insert(generatedImagesTable)
             .values({
@@ -1291,7 +1312,7 @@ router.post("/public-ai/chat", async (req, res) => {
         })();
       }
     } catch (err) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
       res.status(500).json({ error: "Failed to generate the image. Please try again." });
     }
@@ -1305,7 +1326,7 @@ router.post("/public-ai/chat", async (req, res) => {
     try {
       webSearchModule = await import("../../lib/public-ai/web-search");
     } catch (importErr) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       logger.error(
         { component: "ora-chat-search", err: importErr },
         "Failed to load web search module",
@@ -1315,7 +1336,7 @@ router.post("/public-ai/chat", async (req, res) => {
     }
     const { isWebSearchConfigured, runOraWebSearch } = webSearchModule;
     if (!isWebSearchConfigured()) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       const { token, payload } = incrementMessageCount(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
@@ -1365,7 +1386,7 @@ router.post("/public-ai/chat", async (req, res) => {
         ...usage,
       });
     } catch (err) {
-      if (authed) await refundOraQuota(authed.userId, quotaKind);
+      await refundOraQuotaFor(authed, quotaKind);
       logger.error({ component: "ora-chat-search", err }, "Ora web search failed");
       res.status(500).json({ error: "Web search failed. Please try again." });
     }
@@ -1498,7 +1519,7 @@ router.post("/public-ai/chat", async (req, res) => {
   try {
     aiProvidersModule = await import("../../lib/ai-providers");
   } catch (importErr) {
-    if (authed) await refundOraQuota(authed.userId, quotaKind);
+    await refundOraQuotaFor(authed, quotaKind);
     logger.error({ component: "ora-chat", err: importErr }, "Failed to load AI providers module");
     res
       .status(502)
@@ -1619,7 +1640,7 @@ router.post("/public-ai/chat", async (req, res) => {
   );
 
   if (!reply) {
-    if (authed) await refundOraQuota(authed.userId, quotaKind);
+    await refundOraQuotaFor(authed, quotaKind);
     res
       .status(502)
       .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });

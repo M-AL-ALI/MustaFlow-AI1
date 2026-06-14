@@ -8,11 +8,7 @@ import {
   MSG_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { scanUserInput } from "../../lib/public-ai/prompt";
-import { generateFileFromPrompt, FileGenerationError } from "../../lib/public-ai/file-builder";
 import { buildCarriedDocumentContext } from "../../lib/public-ai/carried-docs";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { consumeOraQuota, refundOraQuota, oraMessageFields } from "../../lib/public-ai/ora-usage";
-import { persistOraAsset } from "../../lib/ora-assets";
 
 const router = Router();
 
@@ -57,6 +53,11 @@ router.post("/public-ai/generate-file", async (req, res) => {
   // side-effect-free read, so it can be signaled early; only the authed rolling-window
   // quota is RESERVED (consumed), and that reservation is deferred until after
   // cheap validation so rejected requests never consume a user's allowance.
+  const [{ resolveAuthedOraUser }, { consumeOraQuota, refundOraQuota, oraMessageFields }] =
+    await Promise.all([
+      import("../../lib/public-ai/authed-user"),
+      import("../../lib/public-ai/ora-usage"),
+    ]);
   const authed = await resolveAuthedOraUser(req);
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
@@ -97,8 +98,13 @@ router.post("/public-ai/generate-file", async (req, res) => {
   const filePrompt = carriedDocs ? `${message}\n\n${carriedDocs}` : message;
   const hasSourceData = carriedDocs.length > 0;
 
+  let FileGenerationErrorCtor:
+    | (typeof import("../../lib/public-ai/file-builder"))["FileGenerationError"]
+    | null = null;
   try {
-    const result = await generateFileFromPrompt(
+    const fileBuilder = await import("../../lib/public-ai/file-builder");
+    FileGenerationErrorCtor = fileBuilder.FileGenerationError;
+    const result = await fileBuilder.generateFileFromPrompt(
       filePrompt,
       format,
       history,
@@ -110,6 +116,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
     // Persist to the durable asset library for signed-in users so the file
     // survives chat resets, reloads, and other devices. Best-effort.
     if (authed) {
+      const { persistOraAsset } = await import("../../lib/ora-assets");
       await persistOraAsset({
         userId: authed.userId,
         kind: "file",
@@ -147,7 +154,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
     logger.error({ component: "ora-generate-file", format, err }, "File generation failed");
     // FileGenerationError carries a user-safe message (e.g. the model lost the
     // attached data) — surface it instead of the generic 500 fallback.
-    if (err instanceof FileGenerationError) {
+    if (FileGenerationErrorCtor && err instanceof FileGenerationErrorCtor) {
       res.status(422).json({ error: err.message });
     } else {
       res.status(500).json({ error: "Failed to generate file. Please try again." });

@@ -17,7 +17,7 @@
  * model picker.
  */
 
-import { isDeepSeekAvailable, MODEL_DEFAULTS, type Provider } from "../ai-providers";
+import { isDeepSeekAvailable, MODEL_DEFAULTS, type Provider } from "../ai-provider-config";
 import { ALL_BREAKERS } from "../resilience";
 import type { OraIntent, OraConfidence, OraTopic } from "./classifier";
 

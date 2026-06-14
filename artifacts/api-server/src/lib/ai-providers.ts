@@ -29,8 +29,15 @@ import type {
 } from "openai/resources/chat/completions";
 import { logger } from "./logger";
 import type { AgentMode } from "./ai";
+import {
+  isDeepSeekAvailable,
+  MODEL_DEFAULTS,
+  VISION_MODEL,
+  type Provider,
+} from "./ai-provider-config";
 
-export type Provider = "openai" | "anthropic" | "gemini" | "deepseek";
+export { isDeepSeekAvailable, MODEL_DEFAULTS, VISION_MODEL };
+export type { Provider };
 
 /** DeepSeek's OpenAI-compatible REST endpoint. */
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
@@ -50,16 +57,6 @@ function getDeepSeekClient(): OpenAI {
     deepseekClient = new OpenAI({ apiKey, baseURL: DEEPSEEK_BASE_URL });
   }
   return deepseekClient;
-}
-
-/**
- * True when DeepSeek is reachable (its API key is configured).
- * Set DEEPSEEK_DISABLED=true to temporarily disable routing to DeepSeek
- * without removing the API key (e.g. when the account has zero balance).
- */
-export function isDeepSeekAvailable(): boolean {
-  if (process.env.DEEPSEEK_DISABLED === "true") return false;
-  return !!process.env.DEEPSEEK_API_KEY;
 }
 
 /**
@@ -83,45 +80,6 @@ export type Stage = "build" | "refine" | "plan" | "architect" | "intent" | "conv
  * DeepSeek has no vision model, so it is intentionally absent; callers that
  * need vision while routed to DeepSeek must fall back to a vision provider.
  */
-export const VISION_MODEL: Partial<Record<Provider, string>> = {
-  openai: "gpt-5.4",
-  anthropic: "claude-sonnet-4-6",
-  gemini: "gemini-3.1-pro-preview",
-};
-
-/**
- * Default per-(agent-mode, provider) model. The agent-mode tier is the
- * existing speed/quality dial; the provider is set by per-stage env routing.
- */
-export const MODEL_DEFAULTS: Record<Provider, Record<AgentMode, string>> = {
-  openai: {
-    lite: "gpt-5-nano",
-    eco: "gpt-5-mini",
-    power: "gpt-5.4",
-    pro: "gpt-5.4",
-  },
-  anthropic: {
-    lite: "claude-haiku-4-5",
-    eco: "claude-haiku-4-5",
-    power: "claude-sonnet-4-6",
-    pro: "claude-opus-4-7",
-  },
-  gemini: {
-    lite: "gemini-3-flash-preview",
-    eco: "gemini-3-flash-preview",
-    power: "gemini-3.1-pro-preview",
-    pro: "gemini-3.1-pro-preview",
-  },
-  deepseek: {
-    // DeepSeek's everyday chat model handles fast/cheap tiers; the reasoner
-    // model powers the harder reasoning tiers.
-    lite: "deepseek-chat",
-    eco: "deepseek-chat",
-    power: "deepseek-reasoner",
-    pro: "deepseek-reasoner",
-  },
-};
-
 const STAGE_ENV_VAR: Record<Stage, string> = {
   build: "AI_PROVIDER_BUILD",
   refine: "AI_PROVIDER_REFINE",

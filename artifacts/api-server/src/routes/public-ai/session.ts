@@ -10,8 +10,6 @@ import {
   IMAGE_ANALYSIS_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { oraSessionLimiter } from "../../lib/rateLimit";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { getOraUsage } from "../../lib/public-ai/ora-usage";
 import { logger } from "../../lib/logger";
 
 const router = Router();
@@ -38,8 +36,10 @@ router.post("/public-ai/session", oraSessionLimiter, async (req, res) => {
   // Signed-in users are metered by per-user rolling windows per tier; surface
   // current-window usage + reset time so the indicator is accurate from the
   // first paint. Anonymous visitors get the per-session cap.
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
   if (authed) {
+    const { getOraUsage } = await import("../../lib/public-ai/ora-usage");
     const usage = await getOraUsage(authed.userId, authed.tier);
     res.json({
       sessionId: payload.sessionId,
@@ -74,8 +74,11 @@ router.get("/public-ai/session", async (req, res) => {
     return;
   }
 
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
-  const usage = authed ? await getOraUsage(authed.userId, authed.tier) : null;
+  const usage = authed
+    ? await (await import("../../lib/public-ai/ora-usage")).getOraUsage(authed.userId, authed.tier)
+    : null;
 
   res.json({
     sessionId: session.sessionId,
@@ -100,11 +103,13 @@ router.get("/public-ai/session", async (req, res) => {
  * session state. Returns 401 for anonymous callers (the sidebar hides itself).
  */
 router.get("/public-ai/usage", async (req, res) => {
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
   if (!authed) {
     res.status(401).json({ error: "Not signed in" });
     return;
   }
+  const { getOraUsage } = await import("../../lib/public-ai/ora-usage");
   const usage = await getOraUsage(authed.userId, authed.tier);
   res.json({
     messageCount: usage.messageCount,

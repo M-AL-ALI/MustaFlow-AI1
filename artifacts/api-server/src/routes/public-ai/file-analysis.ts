@@ -8,10 +8,8 @@ import {
 } from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { consumeOraQuota, refundOraQuota, oraMessageFields } from "../../lib/public-ai/ora-usage";
 import { logger } from "../../lib/logger";
-import type { Provider } from "../../lib/ai-providers";
+import type { Provider } from "../../lib/ai-provider-config";
 import {
   getOraProviderRoutingSnapshot,
   normalizeOraPlanTier,
@@ -106,6 +104,11 @@ router.post("/public-ai/file-analysis", async (req, res) => {
   // side-effect-free read, so it can be signaled early; only the authed rolling-window
   // quota is RESERVED (consumed), and that reservation is deferred until after
   // cheap validation so rejected/stale requests never consume a user's allowance.
+  const [{ resolveAuthedOraUser }, { consumeOraQuota, refundOraQuota, oraMessageFields }] =
+    await Promise.all([
+      import("../../lib/public-ai/authed-user"),
+      import("../../lib/public-ai/ora-usage"),
+    ]);
   const authed = await resolveAuthedOraUser(req);
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({

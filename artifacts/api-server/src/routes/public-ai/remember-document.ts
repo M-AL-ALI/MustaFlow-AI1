@@ -1,9 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { db, knowledgeEntriesTable } from "@workspace/db";
 import { validateSession } from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
 import { summarizeDocumentForMemory, detectSensitiveFact } from "../../lib/public-ai/orchestrator";
 import { logger } from "../../lib/logger";
 
@@ -57,6 +55,7 @@ router.post("/public-ai/remember-document", async (req, res) => {
   }
 
   // Document memory is per-user — only signed-in users have a memory to save to.
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
   if (!authed) {
     res.status(401).json({ error: "Sign in to save documents to Ora's memory." });
@@ -94,6 +93,7 @@ router.post("/public-ai/remember-document", async (req, res) => {
   }
 
   try {
+    const { db, knowledgeEntriesTable } = await import("@workspace/db");
     const [row] = await db
       .insert(knowledgeEntriesTable)
       .values({

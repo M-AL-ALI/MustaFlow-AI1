@@ -10,8 +10,6 @@ import {
 } from "../../lib/public-ai/session";
 import { getImage } from "../../lib/public-ai/image-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { consumeOraQuota, refundOraQuota, getOraUsage } from "../../lib/public-ai/ora-usage";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
 import type { Provider } from "../../lib/ai-providers";
 import {
@@ -110,6 +108,11 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
   // side-effect-free read, so it can be signaled early; only the authed rolling-window
   // quota is RESERVED (consumed), and that reservation is deferred until after
   // cheap validation so rejected/stale requests never consume a user's allowance.
+  const [{ resolveAuthedOraUser }, { consumeOraQuota, refundOraQuota, getOraUsage }] =
+    await Promise.all([
+      import("../../lib/public-ai/authed-user"),
+      import("../../lib/public-ai/ora-usage"),
+    ]);
   const authed = await resolveAuthedOraUser(req);
   if (!authed && session.imageAnalysisCount >= IMAGE_ANALYSIS_LIMIT_VALUE) {
     res.status(429).json({

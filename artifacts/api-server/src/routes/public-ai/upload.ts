@@ -21,11 +21,24 @@ import {
   MAX_TOTAL_CHARS_PER_SESSION,
 } from "../../lib/public-ai/file-store";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
-import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
-import { persistOraAsset } from "../../lib/ora-assets";
 import { logger } from "../../lib/logger";
 
 const router = Router();
+
+type PersistOraAssetInput = Parameters<
+  (typeof import("../../lib/ora-assets"))["persistOraAsset"]
+>[0];
+
+function persistOraAssetBestEffort(input: PersistOraAssetInput): void {
+  void (async () => {
+    try {
+      const { persistOraAsset } = await import("../../lib/ora-assets");
+      await persistOraAsset(input);
+    } catch (err) {
+      logger.error({ component: "ora-upload", err }, "Failed to persist Ora upload to library");
+    }
+  })();
+}
 
 // Multer limit kept at 10 MB to accommodate documents.
 // Image-specific 4 MB cap is enforced in validateImage() using the buffer.
@@ -88,6 +101,7 @@ router.post(
 
     // Signed-in users get their uploads copied into the durable Ora asset
     // library so they show up under Library across devices. Best-effort.
+    const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
     const authed = await resolveAuthedOraUser(req);
 
     // ── Image branch ────────────────────────────────────────────────────────
@@ -169,7 +183,7 @@ router.post(
       );
 
       if (authed) {
-        void persistOraAsset({
+        persistOraAssetBestEffort({
           userId: authed.userId,
           kind: "image",
           fileName: validation.sanitizedName,
@@ -271,7 +285,7 @@ router.post(
       );
 
       if (authed) {
-        void persistOraAsset({
+        persistOraAssetBestEffort({
           userId: authed.userId,
           kind: "file",
           fileName: validation.sanitizedName,
@@ -356,7 +370,7 @@ router.post(
     );
 
     if (authed) {
-      void persistOraAsset({
+      persistOraAssetBestEffort({
         userId: authed.userId,
         kind: "file",
         fileName: validation.sanitizedName,
