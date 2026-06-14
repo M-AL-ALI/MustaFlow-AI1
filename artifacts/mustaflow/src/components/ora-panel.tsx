@@ -1719,7 +1719,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     {/* One-time hint surfacing voice features (browser-dependent) */}
                     <OraVoiceTip
                       voiceInputSupported={voice.isSupported || whisperConv.isSupported}
-                      voiceOutputSupported={voice.isSpeechSynthesisSupported}
+                      voiceOutputSupported={voice.isServerTtsSupported}
                     />
 
                     {/* Voice live area — dictation feedback only */}

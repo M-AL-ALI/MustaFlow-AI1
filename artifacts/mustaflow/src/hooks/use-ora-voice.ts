@@ -241,6 +241,8 @@ export interface UseOraVoiceReturn {
   interimTranscript: string;
   isSupported: boolean;
   isSpeechSynthesisSupported: boolean;
+  /** True when the browser can decode and play server-side TTS audio (AudioContext API). */
+  isServerTtsSupported: boolean;
   isTtsEnabled: boolean;
   toggleTts: () => void;
   /** All voices available on this device, loaded asynchronously. */
@@ -273,6 +275,13 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
   const SpeechRecognitionClass = getSpeechRecognitionClass();
   const isSupported = SpeechRecognitionClass !== null;
   const isSpeechSynthesisSupported = isSpeechSynthesisAvailable();
+  const isServerTtsSupported =
+    typeof window !== "undefined" &&
+    Boolean(
+      window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext,
+    );
 
   const [voiceState, setVoiceState] = useState<VoiceState>(isSupported ? "idle" : "unsupported");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -636,6 +645,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     interimTranscript,
     isSupported,
     isSpeechSynthesisSupported,
+    isServerTtsSupported,
     isTtsEnabled,
     toggleTts,
     availableVoices,
