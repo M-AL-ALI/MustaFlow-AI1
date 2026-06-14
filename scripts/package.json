@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "seed": "tsx ./src/seed.ts",
     "seed:stripe": "tsx ./src/seed-stripe-products.ts",
+    "verify:stripe-billing": "tsx ./src/verify-stripe-billing.ts",
     "check-cdn-versions": "tsx ./src/check-cdn-versions.ts",
     "ora-routing-audit": "tsx ./src/ora-routing-audit.ts",
     "migrate-containers": "tsx ./src/migrate-containers.ts",
