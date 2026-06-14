@@ -154,15 +154,15 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   // Verb + optional filler + optional adjectives + singular or plural visual noun.
   // The adjective slot allows up to 3 extra words (e.g. "a clean", "a modern bold") but
   // excludes prepositions (of/from/about) so "create a table of images" does NOT match.
-  /\b(generate|create|make|draw|render|produce|design|show\s+me)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?)\b/i,
+  /\b(generate|create|make|draw|render|produce|design|show\s+me|visualize)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|backgrounds?|cartoons?|stickers?|renders?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
   // Visual noun + preposition (describing what's in it)
   /\b(images?|photos?|pictures?|illustrations?|artworks?|graphic)\s+(of|showing|depicting|featuring|with)\b/i,
   // Image generation feature references
   /\bimage\s+(generation|studio|ai)\b/i,
   // AI art tool references
   /\b(dall-?e|stable\s+diffusion|midjourney|ai\s+art)\b/i,
-  // "Can you generate/make/draw a picture/image/graphic"
-  /\bcan\s+you\s+(generate|create|make|draw|render|produce|design)\b.*\b(images?|pictures?|photos?|visuals?|graphics?|illustrations?)\b/i,
+  // "Can you generate/make/draw a picture/image/graphic/scene/render/..."
+  /\bcan\s+you\s+(generate|create|make|draw|render|produce|design|visualize)\b.*\b(images?|pictures?|photos?|visuals?|graphics?|illustrations?|logos?|artworks?|scenes?|landscapes?|renders?|cartoons?|stickers?|characters?|memes?)\b/i,
   // Drawing/painting verbs imply image creation even without a "visual noun"
   // ("draw a dog"). The idiom guard excludes figurative uses ("draw a
   // conclusion", "illustrate my point", "illustrate a concept"); the leading
@@ -171,11 +171,16 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   /(?<!\bhow\s(?:to|do\si|can\si|should\si|would\si)\s)\b(draw|sketch|paint|illustrate)\s+(?:me\s+|us\s+|for\s+me\s+)?(?:a|an|the|some|my)\s+(?!(?:conclusion|conclusions|distinction|distinctions|comparison|comparisons|parallel|parallels|line|lines|blank|attention|point|points|example|examples|case|cases|map|maps|plan|plans|concept|concepts|idea|ideas|scenario|scenarios)\b)\w+/i,
   // Request/desire framing + a visual noun ("give me a banner", "I need a
   // logo", "I'd like an illustration of a forest").
-  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?)\b/i,
+  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|cartoons?|stickers?|renders?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
   // Bare brandable visual noun + preposition, no leading verb ("a logo for my
   // bakery", "an icon for the button"). Anchored to the start of the message so
   // mid-sentence statements ("I used a logo for my app") do NOT match.
-  /^\s*(?:a|an|the|another|new)\s+(?:logos?|banners?|icons?|posters?|flyers?|thumbnails?|avatars?|illustrations?|graphics?|mockups?|badges?|portraits?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?)\s+(?:for|of|with|showing|depicting|featuring)\b/i,
+  /^\s*(?:a|an|the|another|new)\s+(?:logos?|banners?|icons?|posters?|flyers?|thumbnails?|avatars?|illustrations?|graphics?|mockups?|badges?|portraits?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|cartoons?|stickers?|renders?|memes?)\s+(?:for|of|with|showing|depicting|featuring)\b/i,
+  // "visualize X" — when someone says "visualize" to a chat assistant they mean
+  // image generation, not a data chart. Guard out only unambiguous data/analysis
+  // contexts ("visualize the data", "visualize this chart") so "visualize a
+  // robot in a forest" or "visualize my idea as art" are correctly caught.
+  /\bvisualize\b(?!\s+(?:(?:a|an|the|this|my|your|our|that)\s+)?(?:data|dataset|chart|graph|report|table|results?|stats?|statistics|metrics?|numbers?|dashboard|trends?|analytics|information))\b/i,
 ];
 
 const ORA_IMAGE_CREATION_VERB_PATTERN =
@@ -199,8 +204,21 @@ export function isImageSearchRequest(message: string): boolean {
   return ORA_IMAGE_SEARCH_PATTERNS.some((p) => p.test(message));
 }
 
+// Specific phrases that look like image-generation requests but are NOT.
+// These override pattern matches to prevent false positives.
+const ORA_IMAGE_GENERATION_BLOCKLIST: RegExp[] = [
+  // "character profile/description/backstory/arc" → creative writing, not image gen
+  /\bcharacter\s+(?:profiles?|descriptions?|backstory|backstories|building|development|arcs?|traits?|voice)\b/i,
+  // "background on/about X" → informational context, not image background
+  /\bbackground\s+(?:on|about|of)\b/i,
+  // "scene from [book/movie/text]" → narrative reference, not image gen when purely descriptive
+  // Only block when it's a clearly textual context (e.g. "describe a scene from the book")
+  /\b(?:describe|explain|summarize|discuss)\s+(?:a|the)\s+scene\b/i,
+];
+
 export function isImageGenerationRequest(message: string): boolean {
   if (isImageSearchRequest(message)) return false;
+  if (ORA_IMAGE_GENERATION_BLOCKLIST.some((p) => p.test(message))) return false;
   return ORA_IMAGE_PATTERNS.some((p) => p.test(message));
 }
 
@@ -544,6 +562,81 @@ function detectImageContinuation(
   return extractImageOfferDescription(recentMessages[offerIdx].content);
 }
 
+/**
+ * Detects the case where the user is providing image description details in
+ * response to a clarifying question the assistant asked — WITHOUT the user's
+ * message itself matching ORA_IMAGE_PATTERNS.
+ *
+ * Example clarification loop that this breaks:
+ *   User: "make a logo" → Ora generates something generic and asks "What style?"
+ *   User: "minimalist, blue and gold"  ← this message misses all image patterns
+ *   Without this: falls to conversational → Ora asks another question → loop
+ *   With this:    routes to image_generation with combined prompt → image generated
+ *
+ * Returns a combined image prompt (original request + new details), or null when
+ * this is NOT a post-clarification reply.
+ */
+function detectImagePostClarification(
+  message: string,
+  recentMessages: Array<{ role: "user" | "assistant"; content: string }>,
+): string | null {
+  const trimmed = message.trim();
+  // Short messages are handled by detectImageContinuation (affirmations like "yes").
+  // Very long messages are probably new top-level requests, not clarification replies.
+  if (trimmed.length < 8 || trimmed.length > 400) return null;
+  // Questions are not descriptions — the user is still in dialogue, not providing details.
+  if (trimmed.includes("?")) return null;
+
+  // Find the most recent assistant turn.
+  let lastAssistantContent: string | null = null;
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    if (recentMessages[i].role === "assistant") {
+      lastAssistantContent = recentMessages[i].content;
+      break;
+    }
+  }
+  if (!lastAssistantContent) return null;
+
+  // The assistant's last turn must reference image/visual topics.
+  const ASSISTANT_IMAGE_NOUN_PATTERN =
+    /\b(image[s]?|photo[s]?|picture[s]?|logo[s]?|illustration[s]?|graphic[s]?|visual[s]?|banner[s]?|artwork[s]?|drawing[s]?|portrait[s]?|poster[s]?|icon[s]?|thumbnail[s]?|avatar[s]?|wallpaper[s]?|infographic[s]?|diagram[s]?|sketch(?:es)?|mockup[s]?|render[s]?|cartoon[s]?|scene[s]?|landscape[s]?|character[s]?)\b/i;
+  if (!ASSISTANT_IMAGE_NOUN_PATTERN.test(lastAssistantContent)) return null;
+
+  // The assistant's last turn must be asking for clarification or more details
+  // (not just discussing image topics in a factual way). Specific question
+  // patterns are required so "Here's your logo!" doesn't trigger this path.
+  const ASSISTANT_CLARIFYING_PATTERN =
+    /\b(?:what\s+(?:style|colors?|theme|mood|look|feel|design|subject|should|would|kind|type|format|size|tone|aesthetic|you|it\s+(?:should|look))|can\s+you\s+(?:describe|tell\s+me|share|give\s+me|specify|elaborate|clarify)|could\s+you\s+(?:describe|tell|share|give|specify|provide|elaborate|clarify)|do\s+you\s+have\s+(?:a\s+)?(?:specific|particular)|any\s+(?:specific|particular)\s+(?:preference|style|color|theme|mood|detail)|let\s+me\s+know\s+(?:what|how|the)|tell\s+me\s+(?:what|more\s+about|how)|more\s+(?:details?|context|information)\s+(?:about|on|would)|what\s+(?:it|the\s+(?:image|logo|design|photo|picture))\s+(?:should|would|needs?|looks?))\b/i;
+  if (!ASSISTANT_CLARIFYING_PATTERN.test(lastAssistantContent)) return null;
+
+  // Look back through the last 8 messages for an earlier user message that
+  // DID match image patterns — we use that as the base for the combined prompt.
+  const window = recentMessages.slice(-8);
+  let imageContextPrompt: string | null = null;
+  for (let i = window.length - 1; i >= 0; i--) {
+    const m = window[i];
+    if (m.role !== "user") continue;
+    if (m.content.trim() === trimmed) continue; // Skip the current turn itself
+    if (isImageGenerationRequest(m.content)) {
+      imageContextPrompt = m.content.trim();
+      break;
+    }
+  }
+
+  if (imageContextPrompt) {
+    // Combine the original image request with the new clarifying details.
+    return `${imageContextPrompt}. ${trimmed}`;
+  }
+
+  // No earlier matched request — attempt to extract context from the offer/clarification.
+  const offerDesc = extractImageOfferDescription(lastAssistantContent);
+  if (offerDesc) {
+    return `${offerDesc}. ${trimmed}`;
+  }
+
+  return null;
+}
+
 export interface OraRouteDecision {
   tool: OraTool;
   reason: string;
@@ -659,6 +752,27 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
         tool: "image_generation",
         reason: "Continuation of an offered image generation.",
         imagePrompt: resolvedImagePrompt,
+        intent: "premium",
+        confidence: "high",
+        topic: "general",
+      };
+    }
+  }
+
+  // 2d. Image post-clarification — the user provided a description in response
+  //     to a clarifying question the assistant asked about an image. E.g. Ora
+  //     asked "what style would you like?" and the user replied "minimalist with
+  //     blue and gold". That reply alone never matches ORA_IMAGE_PATTERNS, so
+  //     without this step it falls through to a conversational reply that only
+  //     repeats the description — creating a clarification loop. We combine the
+  //     earlier image context with the new details and route to generation.
+  if (input.recentMessages?.length) {
+    const clarificationPrompt = detectImagePostClarification(message, input.recentMessages);
+    if (clarificationPrompt) {
+      return {
+        tool: "image_generation",
+        reason: "User provided image details in response to a clarifying question.",
+        imagePrompt: clarificationPrompt,
         intent: "premium",
         confidence: "high",
         topic: "general",
