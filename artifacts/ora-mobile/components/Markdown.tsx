@@ -160,7 +160,7 @@ export function Markdown({ children }: { children: string }) {
     <MarkdownDisplay
       style={styles as never}
       rules={rules}
-      onLinkPress={(url) => {
+      onLinkPress={(url: string) => {
         if (isHttpUrl(url)) {
           void WebBrowser.openBrowserAsync(url);
         }
