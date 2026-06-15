@@ -678,7 +678,7 @@ describe("b) Model-router — ORA_TOOL_REGISTRY + routeOraMessage + provider pri
       tier: "fast",
       subscriptionTier: null,
       topic: "general",
-      intent: "standard",
+      intent: "simple_faq",
       confidence: "high",
       multilingual: false,
       available: snapshot.available,
