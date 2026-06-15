@@ -138,7 +138,7 @@ jobs:
       # Non-sensitive CI values — safe placeholders for keys that are never
       # used for real crypto when the auth bypass is active.
       SESSION_SECRET: ci-only-session-secret-not-for-production
-      ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
       NODE_ENV: test
       # E2E flags — enable header-based auth bypass and slow builder stub.
       E2E_TEST_ENABLED: "true"
