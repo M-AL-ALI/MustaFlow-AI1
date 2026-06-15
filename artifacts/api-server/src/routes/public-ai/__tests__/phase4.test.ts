@@ -210,7 +210,7 @@ describe("Phase 4 — Voice-A: ora-panel integration", () => {
   });
 
   it("has TTS toggle button in header", () => {
-    expect(panelSrc).toContain("voice.toggleTts");
+    expect(panelSrc).toContain("toggleTts");
     expect(panelSrc).toContain("VolumeX");
   });
 
