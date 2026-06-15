@@ -989,8 +989,9 @@ router.post("/public-ai/chat", async (req, res) => {
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
-      error:
-        "You have reached the message limit for this session. Start a new session to continue.",
+      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at mustaflow.app for unlimited conversations, memory, image generation, and more.`,
+      upgradeCta: true,
+      signUpUrl: "https://mustaflow.app/sign-up",
       msgCount: session.msgCount,
       msgLimit: MSG_LIMIT_VALUE,
     });

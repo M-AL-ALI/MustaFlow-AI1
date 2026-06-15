@@ -135,6 +135,7 @@
     "verify-preview-ws-smoke": "tsx ./src/verify-preview-ws-smoke.ts",
     "probe-preview-ws": "tsx ./src/probe-preview-ws.ts",
     "rotate-encryption-key": "tsx ./src/rotate-encryption-key.ts",
+    "ora-benchmark": "tsx ./src/ora-benchmark.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/"
   },

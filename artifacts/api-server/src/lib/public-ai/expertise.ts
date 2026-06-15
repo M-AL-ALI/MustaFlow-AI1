@@ -49,7 +49,7 @@ const DOMAIN_PATTERNS: Array<{ domain: OraExpertiseDomain; patterns: RegExp[] }>
   {
     domain: "finance",
     patterns: [
-      /\b(finance|financial|invest(?:ment|ing)?|stock|crypto|tax|accounting|budget|valuation|revenue|profit|cash flow|loan|mortgage)\b/i,
+      /\b(invest(?:ment|ing|or|ors)?|stock(?:s| market| price)?|crypto(?:currency)?|personal tax|income tax|tax return|capital gains|loan|mortgage|401k|ira|pension|brokerage|portfolio|dividend|equity stake|personal finance)\b/i,
     ],
   },
   {

@@ -50,6 +50,43 @@ function extractJsonFromText(text: string): string {
   return text;
 }
 
+const VALID_ANALYSIS_TYPES = ["kpi", "pareto", "trend", "root-cause", "strategy", "general"] as const;
+
+function coerceDatasetJson(obj: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...obj };
+
+  if (result.type !== "dataset-analysis") result.type = "dataset-analysis";
+
+  if (!result.analysisType || !VALID_ANALYSIS_TYPES.includes(result.analysisType as (typeof VALID_ANALYSIS_TYPES)[number])) {
+    const at = String(result.analysisType ?? "").toLowerCase();
+    if (/kpi|metric|performance|gap/.test(at)) result.analysisType = "kpi";
+    else if (/pareto|top.n|80.20|top[- ]/.test(at)) result.analysisType = "pareto";
+    else if (/trend|time.series|historical|over.time/.test(at)) result.analysisType = "trend";
+    else if (/root.cause|why|fishbone|five.why/.test(at)) result.analysisType = "root-cause";
+    else if (/strateg|plan|recommend|road.?map/.test(at)) result.analysisType = "strategy";
+    else result.analysisType = "general";
+  }
+
+  if (typeof result.summary === "string" && result.summary.length > 2000) {
+    result.summary = result.summary.slice(0, 1997) + "...";
+  }
+
+  const truncateStringArray = (key: string, maxLen: number) => {
+    const val = result[key];
+    if (Array.isArray(val)) {
+      result[key] = val.map((item) =>
+        typeof item === "string" && item.length > maxLen ? item.slice(0, maxLen - 3) + "..." : item,
+      );
+    }
+  };
+  truncateStringArray("keyFindings", 500);
+  truncateStringArray("recommendations", 500);
+  truncateStringArray("risksAndLimitations", 500);
+  truncateStringArray("nextSteps", 500);
+
+  return result;
+}
+
 function isNonEnglishLanguage(value: string | undefined): boolean {
   if (!value || value === "auto") return false;
   const primary = value.split(",")[0].trim().split("-")[0].toLowerCase();
@@ -91,8 +128,9 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
   const authed = await resolveAuthedOraUser(req);
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
-      error:
-        "You have reached the message limit for this session. Start a new session to continue.",
+      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at mustaflow.app for unlimited conversations, memory, image generation, and more.`,
+      upgradeCta: true,
+      signUpUrl: "https://mustaflow.app/sign-up",
       msgCount: session.msgCount,
       msgLimit: MSG_LIMIT_VALUE,
     });
@@ -170,7 +208,7 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
     openCircuits,
     openaiModel,
   });
-  const maxTokens = 5000;
+  const maxTokens = 8000;
 
   const start = Date.now();
   let usedFallback = false;
@@ -191,9 +229,21 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
           max_completion_tokens: maxTokens,
         });
         const raw = result.choices[0]?.message?.content?.trim() ?? "";
+        if (!raw) throw new Error("Empty response content from model — retrying next candidate");
         const jsonStr = extractJsonFromText(raw);
         const parsedJson = JSON.parse(jsonStr) as unknown;
-        return DatasetAnalysisAiSchema.parse(parsedJson);
+
+        const strict = DatasetAnalysisAiSchema.safeParse(parsedJson);
+        if (strict.success) return strict.data;
+
+        if (typeof parsedJson === "object" && parsedJson !== null) {
+          return DatasetAnalysisAiSchema.parse(
+            coerceDatasetJson(parsedJson as Record<string, unknown>),
+          );
+        }
+        throw new Error(
+          `Dataset analysis JSON did not match schema: ${strict.error.issues.slice(0, 3).map((i) => i.message).join("; ")}`,
+        );
       },
       (candidate, i, candidateErr) =>
         logger.warn(
