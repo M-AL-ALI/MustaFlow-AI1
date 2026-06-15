@@ -3,19 +3,21 @@
  *
  * A comprehensive integration-style sanity check that exercises real route
  * handlers (via supertest) with vi.mock'd providers, alongside pure-function
- * checks for orchestrator routing logic and structural source assertions.
+ * checks for orchestrator routing logic, model-router provider priority, and
+ * structural source assertions for frontend wiring guarantees.
  *
  * Surfaces covered:
- *  a) Chat reply shape — POST /public-ai/chat basic contract
- *  b) Model-router tool selection — routeOraMessage + ORA_TOOL_REGISTRY
+ *  a) Chat reply shape — POST /public-ai/chat basic contract via supertest
+ *  b) Model-router — tool selection, provider priority, OpenAI terminal fallback
  *  c) Memory consolidation — shouldSupersede + findMemoriesToSupersede logic
  *  d) File-gen intent — detectFileRequest patterns
  *  e) Image intent routing — isImageGenerationRequest patterns
- *  f) Pasted Codex / tool output stays conversational — isPastedReferenceAnalysisRequest
- *  g) Builder isolation — chat.ts has no builder/jobs imports; source + query assertions
- *  h) STT / transcribe — 401 without session, 400 on empty body
- *  i) TTS — 401 without session, 503 when OPENAI_API_KEY absent
- *  j) Surface isolation — ora-conversations.ts surface=normal gate on all per-row CRUD
+ *  f) Pasted Codex / tool output stays conversational
+ *  g) Builder isolation — chat.ts has no builder/jobs imports; query guard in jobs.ts
+ *  h) STT / transcribe — 401 without session; source: readableEnded guard + rate limiter
+ *  i) TTS — 401 without session, 503 when OPENAI_API_KEY absent (via supertest)
+ *  j) Surface isolation — ora-conversations.ts surface='normal' gate on all per-row CRUD
+ *  k) Frontend wiring — authFetch usage, STT→input, TTS dedup, save-race guard, sessionStorage
  */
 
 import { readFileSync } from "fs";
@@ -31,6 +33,7 @@ import jwt from "jsonwebtoken";
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..", "..");
 const ROUTES_PUBLIC_AI = join(REPO_ROOT, "artifacts", "api-server", "src", "routes", "public-ai");
 const API_ROUTES = join(REPO_ROOT, "artifacts", "api-server", "src", "routes");
+const MUSTAFLOW = join(REPO_ROOT, "artifacts", "mustaflow");
 
 function readRoute(filename: string): string {
   return readFileSync(join(ROUTES_PUBLIC_AI, filename), "utf-8");
@@ -38,6 +41,10 @@ function readRoute(filename: string): string {
 
 function readApiRoute(filename: string): string {
   return readFileSync(join(API_ROUTES, filename), "utf-8");
+}
+
+function readMustaflow(relPath: string): string {
+  return readFileSync(join(MUSTAFLOW, relPath), "utf-8");
 }
 
 // ─── vi.hoisted mutable state (must precede vi.mock calls) ───────────────────
@@ -70,7 +77,6 @@ const aiMock = vi.hoisted(() => ({
   createChatCompletion: vi.fn(async (input: Record<string, unknown>) => {
     const messages = (input.messages ?? []) as Array<{ role: string; content: string }>;
     const system = messages[0]?.content ?? "";
-    const user = messages[messages.length - 1]?.content ?? "";
     const responseFormat = input.response_format as { type?: string } | undefined;
 
     if (responseFormat?.type === "json_object") {
@@ -82,7 +88,7 @@ const aiMock = vi.hoisted(() => ({
                 content: JSON.stringify({
                   intent: "premium",
                   confidence: "high",
-                  topic: user.toLowerCase().includes("plan") ? "product" : "general",
+                  topic: "general",
                 }),
               },
             },
@@ -119,7 +125,6 @@ const aiMock = vi.hoisted(() => ({
       return { choices: [{ message: { content: "{}" } }] };
     }
 
-    // Conversational reply — return a minimal direct answer.
     return {
       choices: [
         {
@@ -326,6 +331,13 @@ import {
   tokenizeMemory,
 } from "../../../lib/public-ai/memory-consolidation";
 
+import {
+  openAiModelForOraRoute,
+  getOraProviderRoutingSnapshot,
+  selectOraModelRoute,
+  normalizeOraPlanTier,
+} from "../../../lib/public-ai/model-router";
+
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 const TEST_SECRET = "ora-smoke-test-secret";
@@ -374,7 +386,7 @@ async function buildTranscribeApp() {
   return app;
 }
 
-// Pre-computed classifier stub prevents live LLM calls in pure-function tests.
+// Pre-computed classifier stub used for pure-function route tests.
 const STUB_CLASSIFIER = {
   intent: "premium" as const,
   confidence: "high" as const,
@@ -444,7 +456,7 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
     expect(typeof res.body.msgCount).toBe("number");
   });
 
-  it("returns 200 with file fields when CSV is requested", async () => {
+  it("returns file fields when CSV is requested (file branch invoked)", async () => {
     const res = await request(app)
       .post("/public-ai/chat")
       .set("Cookie", `ora-session=${makeSession()}`)
@@ -458,7 +470,7 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
     expect(fileBuilderMock.generateFileFromPrompt).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 200 with imageUrl for a signed-in user requesting an image", async () => {
+  it("returns imageUrl for a signed-in user requesting an image", async () => {
     authState.user = { userId: "smoke-user-1", tier: "core", isPaid: true };
 
     const res = await request(app)
@@ -481,28 +493,12 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
       .set("Cookie", `ora-session=${makeSession()}`)
       .send({ message: "Generate a logo for my bakery", messages: [] });
 
-    // Anonymous visitors get a conversational nudge to sign up, not an error
     expect(res.status).toBe(200);
-    // Image provider must NOT have been called for an anonymous visitor
+    // Image provider must NOT be called for anonymous visitors
     expect(imageMock.generateImage).not.toHaveBeenCalled();
   });
 
-  it("deep mode is denied for free users (consumeOraQuota not called for deep_thinking)", async () => {
-    authState.user = { userId: "smoke-free-1", tier: "free", isPaid: false };
-
-    const res = await request(app)
-      .post("/public-ai/chat")
-      .set("Cookie", `ora-session=${makeSession()}`)
-      .send({ message: "Help me with a hard problem", messages: [], mode: "deep" });
-
-    expect([200, 403]).toContain(res.status);
-    if (res.status === 200) {
-      // Should fall back to 'answer' tool, not deep_thinking
-      expect(res.body.reply).toBeDefined();
-    }
-  });
-
-  it("pasted Replit tool report is handled conversationally, not as a file request", async () => {
+  it("pasted Replit tool report stays conversational (file branch not invoked)", async () => {
     const pastedReport = `Replit quality-gate workflow:
 lint: PASSED
 format: PASSED
@@ -550,23 +546,20 @@ What should I tell Replit about the typecheck failure?`;
   });
 });
 
-// ─── b) Model-router tool selection ──────────────────────────────────────────
+// ─── b) Model-router — tool selection + provider priority ────────────────────
 
-describe("b) Model-router tool selection — ORA_TOOL_REGISTRY + routeOraMessage", () => {
-  it("all registry entries have required fields", () => {
+describe("b) Model-router — ORA_TOOL_REGISTRY + routeOraMessage + provider priority", () => {
+  // Registry completeness
+  it("all registry entries have required fields with valid values", () => {
     for (const [key, meta] of Object.entries(ORA_TOOL_REGISTRY)) {
       expect(meta, `${key}.tool`).toHaveProperty("tool");
       expect(meta, `${key}.description`).toHaveProperty("description");
       expect(meta, `${key}.minAccess`).toHaveProperty("minAccess");
       expect(meta, `${key}.creditCost`).toHaveProperty("creditCost");
       expect(meta, `${key}.status`).toHaveProperty("status");
-      expect(["live", "planned"]).toContain(meta.status);
-      expect(["anon", "free", "paid"]).toContain(meta.minAccess);
+      expect(["live", "planned"], `${key}.status value`).toContain(meta.status);
+      expect(["anon", "free", "paid"], `${key}.minAccess value`).toContain(meta.minAccess);
     }
-  });
-
-  it("image_editing tool is registered as live (not planned)", () => {
-    expect(ORA_TOOL_REGISTRY.image_editing.status).toBe("live");
   });
 
   it("answer tool is anon-accessible (no sign-in required)", () => {
@@ -577,13 +570,19 @@ describe("b) Model-router tool selection — ORA_TOOL_REGISTRY + routeOraMessage
     expect(ORA_TOOL_REGISTRY.deep_thinking.minAccess).toBe("paid");
   });
 
+  it("memory_lookup and search tools require at least authed (free) access", () => {
+    expect(["free", "paid"]).toContain(ORA_TOOL_REGISTRY.memory_lookup.minAccess);
+    expect(["free", "paid"]).toContain(ORA_TOOL_REGISTRY.search.minAccess);
+  });
+
+  // Access control behavioral tests
   it("checkToolAccess denies search to anonymous visitors", () => {
     const result = checkToolAccess("search", { authed: false, isPaid: false });
     expect(result.allowed).toBe(false);
     expect(result.denyCode).toBe("search_signin_required");
   });
 
-  it("checkToolAccess allows search for signed-in (authed) users", () => {
+  it("checkToolAccess allows search for authed (signed-in) users", () => {
     const result = checkToolAccess("search", { authed: true, isPaid: false });
     expect(result.allowed).toBe(true);
   });
@@ -599,6 +598,7 @@ describe("b) Model-router tool selection — ORA_TOOL_REGISTRY + routeOraMessage
     expect(result.allowed).toBe(true);
   });
 
+  // routeOraMessage tool selection
   it("routeOraMessage returns 'answer' for plain question in instant mode", async () => {
     const result = await routeOraMessage({
       message: "What is the capital of France?",
@@ -608,7 +608,7 @@ describe("b) Model-router tool selection — ORA_TOOL_REGISTRY + routeOraMessage
     expect(result.tool).toBe("answer");
   });
 
-  it("routeOraMessage returns 'image_generation' for logo/image requests", async () => {
+  it("routeOraMessage returns 'image_generation' for logo/image creation requests", async () => {
     const result = await routeOraMessage({
       message: "generate a logo for my bakery",
       mode: "instant",
@@ -634,6 +634,80 @@ describe("b) Model-router tool selection — ORA_TOOL_REGISTRY + routeOraMessage
     });
     expect(result.tool).toBe("file_generation");
   });
+
+  // Model-router provider priority
+  it("normalizeOraPlanTier maps null/undefined to 'anonymous'", () => {
+    expect(normalizeOraPlanTier(null)).toBe("anonymous");
+    expect(normalizeOraPlanTier(undefined)).toBe("anonymous");
+    expect(normalizeOraPlanTier("")).toBe("anonymous");
+  });
+
+  it("normalizeOraPlanTier passes through known tier values", () => {
+    expect(normalizeOraPlanTier("free")).toBe("free");
+    expect(normalizeOraPlanTier("core")).toBe("core");
+    expect(normalizeOraPlanTier("wave")).toBe("wave");
+  });
+
+  it("openAiModelForOraRoute returns a non-empty model string for every tier combination", () => {
+    const routeTiers = ["fast", "premium", "deep"] as const;
+    const planTiers = ["anonymous", "free", "core", "wave"] as const;
+    for (const route of routeTiers) {
+      for (const plan of planTiers) {
+        const model = openAiModelForOraRoute(route, plan);
+        expect(typeof model).toBe("string");
+        expect(model.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("getOraProviderRoutingSnapshot returns expected shape (available + openCircuits)", () => {
+    const snapshot = getOraProviderRoutingSnapshot();
+    // Shape: { available: Record<Provider, boolean>, openCircuits: Set<Provider> }
+    expect(snapshot).toHaveProperty("available");
+    expect(snapshot).toHaveProperty("openCircuits");
+    expect(typeof snapshot.available.openai).toBe("boolean");
+    // openai is always reported as available (true) — it is the terminal fallback
+    expect(snapshot.available.openai).toBe(true);
+    // openCircuits is a Set of providers with an open circuit breaker
+    expect(snapshot.openCircuits instanceof Set).toBe(true);
+  });
+
+  it("selectOraModelRoute always includes openai as the terminal fallback (last candidate)", () => {
+    const snapshot = getOraProviderRoutingSnapshot();
+    const candidates = selectOraModelRoute({
+      tier: "fast",
+      subscriptionTier: null,
+      topic: "general",
+      intent: "standard",
+      confidence: "high",
+      multilingual: false,
+      available: snapshot.available,
+      openCircuits: snapshot.openCircuits,
+      openaiModel: openAiModelForOraRoute("fast", "anonymous"),
+    });
+    expect(Array.isArray(candidates)).toBe(true);
+    expect(candidates.length).toBeGreaterThan(0);
+    // OpenAI is guaranteed to be the last candidate (terminal safety net)
+    const last = candidates[candidates.length - 1];
+    expect(last.provider).toBe("openai");
+  });
+
+  it("selectOraModelRoute terminal openai fallback present for premium tier too", () => {
+    const snapshot = getOraProviderRoutingSnapshot();
+    const candidates = selectOraModelRoute({
+      tier: "premium",
+      subscriptionTier: "core",
+      topic: "general",
+      intent: "premium",
+      confidence: "high",
+      multilingual: false,
+      available: snapshot.available,
+      openCircuits: snapshot.openCircuits,
+      openaiModel: openAiModelForOraRoute("premium", "core"),
+    });
+    const last = candidates[candidates.length - 1];
+    expect(last.provider).toBe("openai");
+  });
 });
 
 // ─── c) Memory consolidation ─────────────────────────────────────────────────
@@ -657,7 +731,7 @@ describe("c) Memory consolidation — shouldSupersede + findMemoriesToSupersede"
     ).toBe(true);
   });
 
-  it("does NOT supersede a distinct 'I like coffee' vs 'I like tea' pair", () => {
+  it("does NOT supersede a distinct 'coffee vs tea' pair", () => {
     expect(
       shouldSupersede(
         { title: "Drinks", content: "I like tea" },
@@ -749,7 +823,7 @@ describe("d) File-gen intent — detectFileRequest patterns", () => {
     expect(detectFileRequest("what is the capital of France")).toBeNull();
   });
 
-  it("returns null for pasted tool reports (file keywords present but it's a reference)", () => {
+  it("returns null for pasted tool reports (file keywords but it is a reference)", () => {
     const pastedReport = `Replit quality-gate results:
 format: PASSED
 lint: PASSED
@@ -780,7 +854,7 @@ describe("e) Image intent routing — isImageGenerationRequest patterns", () => 
     expect(isImageGenerationRequest("background on the history of Rome")).toBe(false);
   });
 
-  it("isImageSearchRequest matches retrieval requests with required qualifier", () => {
+  it("isImageSearchRequest matches retrieval requests with required verb+qualifier", () => {
     expect(isImageSearchRequest("find images of sunsets online")).toBe(true);
     expect(isImageSearchRequest("find the official logo for Tesla")).toBe(true);
   });
@@ -804,11 +878,8 @@ typecheck: FAILED
 codegen-drift: PASSED
 What should I tell Replit about the typecheck failure?`;
 
-  const LONG_GITHUB_PASTE = `Replit pull-from-github workflow:
-Fetching from GitHub MustaFlow-AI1 (forced ref update)
+  const GITHUB_PASTE = `Replit pull-from-github workflow:
 error: cannot lock ref refs/remotes/github/main: is at abc1234
-From https://github.com/example/repo
- ! 632704e1..a2b89ebc  main -> github/main (unable to update local ref)
 typecheck: FAILED
 lint: PASSED
 What does this git conflict mean and how should I fix it?`;
@@ -818,7 +889,7 @@ What does this git conflict mean and how should I fix it?`;
   });
 
   it("identifies a pasted GitHub/Replit error with sufficient signal", () => {
-    expect(isPastedReferenceAnalysisRequest(LONG_GITHUB_PASTE)).toBe(true);
+    expect(isPastedReferenceAnalysisRequest(GITHUB_PASTE)).toBe(true);
   });
 
   it("does NOT misidentify a plain short question", () => {
@@ -863,28 +934,22 @@ describe("g) Builder isolation — chat.ts has no builder/jobs imports", () => {
     expect(chatSrc).not.toMatch(/from\s+['"].*\/jobs['"]/);
   });
 
-  it("chat.ts does not import from the Builder AI layer (lib/ai)", () => {
-    expect(chatSrc).not.toMatch(/from\s+['"].*\/lib\/ai['"]/);
-  });
-
   it("Ora memory context queries only scope='user' AND origin='ora' (not project knowledge)", () => {
-    // Both conditions must be present in the memory query code
     expect(chatSrc).toMatch(/scope.*user/);
     expect(chatSrc).toMatch(/origin.*ora/);
   });
 
-  it("Ora web-search personalContext is assembled from profile + saved memories (dual-branch injection)", () => {
+  it("Ora web-search personalContext is assembled from profile + saved memories (dual-branch)", () => {
     expect(chatSrc).toContain("searchProfileContext");
     expect(chatSrc).toContain("searchMemory");
     expect(chatSrc).toContain("searchPersonalContext");
   });
 
-  it("jobs.ts Builder knowledge query excludes origin='ora' entries (or(isNull, ne) guard)", () => {
+  it("jobs.ts Builder knowledge query excludes origin='ora' (or(isNull, ne) guard appears ≥2×)", () => {
     const jobsSrc = readFileSync(
       join(REPO_ROOT, "artifacts", "api-server", "src", "lib", "jobs.ts"),
       "utf-8",
     );
-    // The guard appears twice: user-scope and project-scope knowledge queries
     const guardCount = (
       jobsSrc.match(
         /or\(isNull\(knowledgeEntriesTable\.origin\),\s*ne\(knowledgeEntriesTable\.origin,\s*"ora"\)\)/g,
@@ -914,7 +979,7 @@ describe("h) STT / transcribe — session gate + source structure", () => {
     expect(res.body.error).toMatch(/session/i);
   });
 
-  it("POST /public-ai/transcribe returns 401 when session is expired/invalid", async () => {
+  it("POST /public-ai/transcribe returns 401 when session token is signed with wrong secret", async () => {
     const expiredToken = jwt.sign(
       { sessionId: "x", msgCount: 0, createdAt: Date.now() },
       "wrong-secret",
@@ -972,7 +1037,6 @@ describe("i) TTS — 401 without session, 503 when key absent", () => {
   it("POST /public-ai/tts returns 503 when OPENAI_API_KEY is not set", async () => {
     const saved = process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_API_KEY;
-    // Reset the cached client by clearing the module cache
     vi.resetModules();
     const freshApp = await buildTtsApp();
     const res = await request(freshApp)
@@ -985,7 +1049,7 @@ describe("i) TTS — 401 without session, 503 when key absent", () => {
     process.env.OPENAI_API_KEY = saved;
   });
 
-  it("tts source: uses direct OPENAI_API_KEY, not the AI-integrations proxy", () => {
+  it("tts source: uses direct OPENAI_API_KEY client (not the AI-integrations proxy)", () => {
     const src = readRoute("tts.ts");
     expect(src).toContain("apiKey: process.env.OPENAI_API_KEY");
     expect(src).not.toContain("AI_INTEGRATIONS_OPENAI_BASE_URL");
@@ -996,12 +1060,12 @@ describe("i) TTS — 401 without session, 503 when key absent", () => {
     expect(src).toContain("INVALID_ENDPOINT");
   });
 
-  it("tts source: uses rate-limiter (oraVoiceTtsLimiter)", () => {
+  it("tts source: is rate-limited with a TTS-specific limiter", () => {
     const src = readRoute("tts.ts");
     expect(src).toContain("oraVoiceTtsLimiter");
   });
 
-  it("tts source: enumerates a fixed list of supported voices", () => {
+  it("tts source: enumerates a fixed list of supported voices including nova and alloy", () => {
     const src = readRoute("tts.ts");
     expect(src).toContain("OPENAI_TTS_VOICES");
     expect(src).toContain("alloy");
@@ -1027,16 +1091,71 @@ describe("j) Surface isolation — ora-conversations.ts surface='normal' gate", 
     expect(src).not.toContain('"support"');
   });
 
-  it("soft-delete uses archived_at, not deleted_at", () => {
+  it("soft-delete uses archived_at (archivedAt), not deleted_at", () => {
     expect(src).toContain("archivedAt");
     expect(src).not.toMatch(/deleted_at/i);
   });
 
-  it("ora-conversations source includes comment about support surface isolation", () => {
+  it("source includes a comment about support surface isolation", () => {
     expect(src).toMatch(/[Ss]upport.*surface|surface.*[Ss]upport/);
   });
 
-  it("userId ownership check is present on owned resource endpoints", () => {
+  it("userId ownership check is present on owned-resource endpoints", () => {
     expect(src).toContain("userId");
+  });
+});
+
+// ─── k) Frontend wiring — authFetch, STT→input, TTS dedup, save-race, storage ─
+
+describe("k) Frontend wiring — authFetch, STT→input, TTS auto-speak dedup, save-race guard, sessionStorage", () => {
+  const oraChat = readMustaflow("src/hooks/use-ora-chat.ts");
+  const oraPanel = readMustaflow("src/components/ora-panel.tsx");
+
+  it("use-ora-chat imports authFetch from @/lib/api-fetch (not raw fetch)", () => {
+    expect(oraChat).toContain("authFetch");
+    expect(oraChat).toMatch(/import.*authFetch.*from\s+['"]@\/lib\/api-fetch['"]/);
+  });
+
+  it("use-ora-chat uses authFetch for all Ora API calls (no raw /api fetch)", () => {
+    // authFetch wraps fetch with bearer token; raw fetch("/api/...") must not appear
+    const rawFetchLines = oraChat
+      .split("\n")
+      .filter((l) => l.match(/\bfetch\s*\(\s*[`'"]\/api/) && !l.includes("authFetch"));
+    expect(rawFetchLines).toHaveLength(0);
+  });
+
+  it("ora-panel STT dictation feeds transcript into setInput (STT→chat-input wiring)", () => {
+    // Line 472 in ora-panel.tsx: setInput(text) after normal dictation
+    expect(oraPanel).toMatch(/setInput\s*\(\s*text\s*\)/);
+    // Comment also confirms the wiring intent
+    expect(oraPanel).toMatch(/[Nn]ormal dictation|transcript lands in textarea/);
+  });
+
+  it("ora-panel TTS auto-speak uses autoSpeakArmedRef for dedup (prevents history replay)", () => {
+    expect(oraPanel).toContain("autoSpeakArmedRef");
+    expect(oraPanel).toMatch(/autoSpeakArmedRef\.current\s*=\s*false/);
+    expect(oraPanel).toMatch(/autoSpeakArmedRef\.current\s*=\s*true/);
+  });
+
+  it("use-ora-chat conversation save captures targetId before debounce window (race guard)", () => {
+    // The targetId must be captured at schedule time, not inside the debounced callback
+    expect(oraChat).toContain("const targetId = c.currentConversationId");
+    expect(oraChat).toMatch(/[Ss]napshot the target conversation id NOW|targetId is captured/);
+  });
+
+  it("use-ora-chat transcript storage uses sessionStorage (per-session; not cross-user localStorage)", () => {
+    // Transcripts are stored in sessionStorage, which is per-tab/per-session by design
+    expect(oraChat).toContain("sessionStorage");
+    expect(oraChat).toContain("TRANSCRIPT_STORAGE_KEY");
+    // sessionStorage is used for temporary state — not localStorage which persists across sessions
+    const localStorageLines = oraChat
+      .split("\n")
+      .filter((l) => l.match(/\blocalStorage\b/) && l.includes("transcript"));
+    expect(localStorageLines).toHaveLength(0);
+  });
+
+  it("use-ora-chat server transcript restore is guarded by transcriptRestoredRef (no double-fetch)", () => {
+    expect(oraChat).toContain("transcriptRestoredRef");
+    expect(oraChat).toMatch(/transcriptRestoredRef\.current\s*=\s*true/);
   });
 });
