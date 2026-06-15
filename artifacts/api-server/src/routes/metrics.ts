@@ -6,11 +6,17 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { registry, updateCircuitBreakerMetrics } from "../lib/metrics";
+import { isProductionRuntime } from "../lib/env";
 
 const router: IRouter = Router();
 
 router.get("/metrics", async (req: Request, res: Response): Promise<void> => {
   const token = process.env.METRICS_TOKEN;
+  if (!token && isProductionRuntime()) {
+    res.status(503).json({ error: "Metrics token not configured" });
+    return;
+  }
+
   if (token) {
     const auth = req.headers.authorization ?? "";
     const provided = auth.startsWith("Bearer ") ? auth.slice(7) : (req.query["token"] as string);

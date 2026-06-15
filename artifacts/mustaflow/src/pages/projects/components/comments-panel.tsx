@@ -293,7 +293,7 @@ export function CommentsPanel({ projectId, filePath }: CommentsPanelProps) {
       const url = filePath
         ? `/api/projects/${projectId}/comments?filePath=${encodeURIComponent(filePath)}`
         : `/api/projects/${projectId}/comments`;
-      const r = await fetch(url);
+      const r = await authFetch(url);
       if (r.ok) setComments((await r.json()) as Comment[]);
     } finally {
       setLoading(false);

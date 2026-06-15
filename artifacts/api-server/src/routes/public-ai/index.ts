@@ -16,6 +16,11 @@ import rememberDocumentRouter from "./remember-document";
 const router = Router();
 
 router.use((req: Request, res: Response, next: NextFunction) => {
+  if (!req.path.startsWith("/public-ai")) {
+    next();
+    return;
+  }
+
   if (process.env.PUBLIC_AI_ENABLED === "false") {
     req.resume();
     res.status(503).json({ error: "Ora is currently unavailable" });

@@ -38,6 +38,14 @@ Core:
 - `ENCRYPTION_KEY`
 - `ORA_SESSION_SECRET`
 
+Security-sensitive env:
+
+- `NODE_ENV=production` must be set for production deployments.
+- `E2E_TEST_ENABLED=true` is CI/test-only and must not be set in shared,
+  development, staging, or production Replit env.
+- `ENCRYPTION_KEY` must live in Replit Secrets or deployment secrets only; do
+  not commit it to `.replit` or docs.
+
 Important optional env:
 
 - Ora voice TTS: `OPENAI_API_KEY`

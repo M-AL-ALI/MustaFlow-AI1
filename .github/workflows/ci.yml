@@ -120,7 +120,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: mustaflow_e2e
           POSTGRES_USER: postgres
@@ -138,18 +138,23 @@ jobs:
       # Non-sensitive CI values — safe placeholders for keys that are never
       # used for real crypto when the auth bypass is active.
       SESSION_SECRET: ci-only-session-secret-not-for-production
-      ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      NODE_ENV: development
+      ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      NODE_ENV: test
       # E2E flags — enable header-based auth bypass and slow builder stub.
       E2E_TEST_ENABLED: "true"
       DEV_SLOW_BUILD_DELAY_MS: "15000"
+      BASE_PATH: "/"
+      # CI-only placeholders needed to boot modules that validate env at import
+      # time. The slow builder stub keeps this E2E path from calling OpenAI.
+      AI_INTEGRATIONS_OPENAI_BASE_URL: https://example.invalid/v1
+      AI_INTEGRATIONS_OPENAI_API_KEY: ci-placeholder-not-used
       # Clerk keys — required to start ClerkProvider in the frontend.
       # Add CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, VITE_CLERK_PUBLISHABLE_KEY
       # to GitHub repo secrets.  The x-e2e-test-user bypass means Clerk never
       # validates a real token, but the SDK still needs a well-formed key at init.
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
       CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-      VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+      VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY || 'pk_test_ZGV2LWNpLXRlc3QuY2xlcmsuYWNjb3VudHMuZGV2JA==' }}
 
     steps:
       - name: Checkout
@@ -173,6 +178,11 @@ jobs:
 
       - name: Install Playwright + Chromium
         run: npx playwright install chromium --with-deps
+
+      - name: Enable pgvector extension
+        run: |
+          container_id="$(docker ps --filter "ancestor=pgvector/pgvector:pg16" --format "{{.ID}}" | head -n 1)"
+          docker exec "$container_id" psql -U postgres -d mustaflow_e2e -c "CREATE EXTENSION IF NOT EXISTS vector"
 
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
@@ -212,26 +222,40 @@ jobs:
           NGINX
           sudo ln -sf /etc/nginx/sites-available/e2e /etc/nginx/sites-enabled/e2e
           sudo rm -f /etc/nginx/sites-enabled/default
-          sudo nginx -t && sudo nginx -s reload
+          sudo nginx -t
+          sudo nginx -s reload || { sudo rm -f /run/nginx.pid; sudo nginx; }
 
       - name: Wait for services to be ready
         run: |
           echo "Waiting for API server..."
+          api_ready=false
           for i in $(seq 1 30); do
             if curl -sf http://localhost:80/api/healthz; then
               echo "API ready after ${i}s"
+              api_ready=true
               break
             fi
             sleep 2
           done
+          if [ "$api_ready" != "true" ]; then
+            echo "API server did not become ready"
+            exit 1
+          fi
+
           echo "Waiting for Vite..."
+          vite_ready=false
           for i in $(seq 1 15); do
             if curl -sf http://localhost:80/ | grep -q "MustaFlow\|<div id"; then
               echo "Vite ready after ${i}s"
+              vite_ready=true
               break
             fi
             sleep 2
           done
+          if [ "$vite_ready" != "true" ]; then
+            echo "Vite server did not become ready"
+            exit 1
+          fi
 
       - name: Run Stop-button Playwright test
         run: npx playwright test e2e/stop-button.spec.ts --reporter=line

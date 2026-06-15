@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { authFetch } from "@/lib/api-fetch";
 
 interface ActivityEntry {
   id: number;
@@ -80,7 +81,7 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
         filter === "all"
           ? `/api/projects/${projectId}/activity-log?limit=100`
           : `/api/projects/${projectId}/activity-log?limit=100&eventType=${filter}`;
-      const r = await fetch(url);
+      const r = await authFetch(url);
       if (r.ok) setEntries((await r.json()) as ActivityEntry[]);
     } finally {
       setLoading(false);

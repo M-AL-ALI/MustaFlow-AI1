@@ -40,6 +40,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useVoiceInput, useVoiceLang } from "@/hooks/use-voice-input";
+import { authFetch } from "@/lib/api-fetch";
 
 const EXAMPLE_PROMPTS = [
   "Mobile app proposal",
@@ -140,10 +141,9 @@ function HomeHero() {
     const BASE = (import.meta.env.BASE_URL as string).replace(/\/$/, "");
     void (async () => {
       try {
-        const res = await fetch(`${BASE}/api/builder/handoff/exchange`, {
+        const res = await authFetch(`${BASE}/api/builder/handoff/exchange`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({ token: handoffToken }),
         });
         if (!res.ok || cancelled) return;

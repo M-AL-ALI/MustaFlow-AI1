@@ -3,6 +3,7 @@ import { getAuth } from "@clerk/express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, orgMembersTable } from "@workspace/db";
 import { logger } from "./logger";
+import { isE2ETestRuntime, isProductionRuntime } from "./env";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth Adapter Interface
@@ -45,7 +46,7 @@ class DevOnlyAuthAdapter implements AuthAdapter {
   private static warned = false;
 
   attachUser(req: Request, res: Response, next: NextFunction): void {
-    if (process.env.NODE_ENV === "production") {
+    if (isProductionRuntime()) {
       res.status(500).json({
         error:
           "Authentication is not configured. Replace DevOnlyAuthAdapter with ClerkAuthAdapter.",
@@ -84,8 +85,8 @@ declare global {
 }
 
 /**
- * True only when the explicit, non-production end-to-end test auth bypass is
- * active. Requires BOTH NODE_ENV !== "production" AND E2E_TEST_ENABLED === "true"
+ * True only when the explicit end-to-end test auth bypass is active.
+ * Requires NODE_ENV=test, E2E_TEST_ENABLED=true, and no Replit deployment flag
  * so the bypass can never be silently enabled in production or shared staging.
  *
  * Shared so any pre-auth-wall route (e.g. the public Ora chat endpoint, which
@@ -93,13 +94,12 @@ declare global {
  * same `x-e2e-test-user` header under identical guard conditions.
  */
 export function isE2ETestAuthEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true";
+  return isE2ETestRuntime();
 }
 
 export function attachUser(req: Request, res: Response, next: NextFunction): void {
-  // E2E test bypass: only active when both E2E_TEST_ENABLED=true and NODE_ENV !== "production"
-  // are set. Requiring an explicit opt-in env flag prevents the bypass from
-  // being silently active in shared staging / non-prod deployments.
+  // E2E test bypass: only active in true test runtime. Shared staging/dev
+  // deployments must still use real Clerk authentication.
   if (isE2ETestAuthEnabled()) {
     const testUser = req.headers["x-e2e-test-user"];
     if (typeof testUser === "string" && testUser.length > 0) {

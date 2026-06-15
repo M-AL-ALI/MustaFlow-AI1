@@ -56,6 +56,7 @@ describe("resolveAuthedOraUser — test-only authenticated path", () => {
   afterEach(() => {
     delete process.env.E2E_TEST_ENABLED;
     delete process.env.NODE_ENV;
+    delete process.env.REPLIT_DEPLOYMENT;
   });
 
   it("PAID_TIERS contains the paid tiers and excludes free", () => {

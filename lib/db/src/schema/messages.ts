@@ -42,7 +42,6 @@ export const chatMessagesTable = pgTable(
     index("chat_messages_checkpoint_id_idx")
       .on(table.checkpointId)
       .where(sql`checkpoint_id IS NOT NULL`),
-    index("chat_messages_content_tsv_idx").using("gin", sql`content_tsv`),
   ],
 );
 

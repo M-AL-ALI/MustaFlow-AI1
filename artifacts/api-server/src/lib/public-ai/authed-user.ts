@@ -48,8 +48,8 @@ export async function resolveTierForUser(userId: string): Promise<AuthedOraUser>
  * auth-walled routes) never reaches it. To make authenticated Ora flows (Deep
  * mode, paid gating, memory, saved assets) verifiable in a real browser without
  * Google OAuth, this honours the same `x-e2e-test-user` header — but ONLY when
- * isE2ETestAuthEnabled() is true (NODE_ENV !== "production" AND
- * E2E_TEST_ENABLED === "true"), so it can never activate in production. An
+ * isE2ETestAuthEnabled() is true (NODE_ENV === "test" AND
+ * E2E_TEST_ENABLED === "true" AND not deployed), so it can never activate in production. An
  * optional `x-e2e-test-tier` header lets a test simulate a paid tier so
  * Deep-mode paid gating can be exercised without seeding the database; when it
  * is absent or invalid we fall back to the real subscription lookup so a seeded
