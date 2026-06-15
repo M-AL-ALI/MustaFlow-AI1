@@ -480,8 +480,10 @@ export function OraVoiceConvPanel({
         </button>
 
         {/* Whisper automatic listening status */}
-        {useWhisper && !isSpeaking && !isLoading && (
-          isMicDenied ? (
+        {useWhisper &&
+          !isSpeaking &&
+          !isLoading &&
+          (isMicDenied ? (
             /* Mic permission denied — show alert + Retry instead of the active pill */
             <>
               <span
@@ -525,8 +527,7 @@ export function OraVoiceConvPanel({
                   ? "Transcribing…"
                   : "Auto listening"}
             </span>
-          )
-        )}
+          ))}
 
         {/* Interrupt button (visible while Ora is speaking, whisper or not) */}
         {isSpeaking && onInterrupt && (
