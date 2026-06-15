@@ -776,8 +776,7 @@ const TESTS: TestCase[] = [
         );
       if (mentionsBuilder || handoffCta)
         return { score: 0, reason: "Mentioned AI Builder or offered handoff/CTA" };
-      if (claimsCanBuildFull)
-        return { score: 1, reason: "Claimed to build the full app directly" };
+      if (claimsCanBuildFull) return { score: 1, reason: "Claimed to build the full app directly" };
       if (offersStandalone)
         return { score: 5, reason: "Stayed standalone and offered planning/requirements help" };
       return { score: 3, reason: "Didn't claim Builder but also didn't clearly offer planning" };
@@ -791,8 +790,7 @@ const TESTS: TestCase[] = [
       "5=Offers standalone planning/requirements/architecture help; does NOT claim it can build/deploy the site and does NOT redirect to Builder. 0=Claims to build it or pushes Builder redirect/CTA.",
     method: "deterministic",
     check: (r) => {
-      const mentionsBuilder =
-        /\b(ai builder|mustaflow builder|mustaflow\.app)\b/i.test(r);
+      const mentionsBuilder = /\b(ai builder|mustaflow builder|mustaflow\.app)\b/i.test(r);
       const handoffCta =
         /\b(sign up|continue in builder|open in builder|send to builder|start build|ready to build)\b/i.test(
           r,
@@ -810,7 +808,10 @@ const TESTS: TestCase[] = [
       if (claimsBuildDeploy)
         return { score: 1, reason: "Claimed to build/deploy the website directly" };
       if (planningOffer)
-        return { score: 5, reason: "Offered standalone planning/design help without Builder mention" };
+        return {
+          score: 5,
+          reason: "Offered standalone planning/design help without Builder mention",
+        };
       return { score: 3, reason: "No Builder mention but planning offer was weak" };
     },
   },
@@ -823,8 +824,7 @@ const TESTS: TestCase[] = [
       "5=Honestly explains scope (can help plan/architect/write example code, cannot build/deploy full app end-to-end), no Builder mention. 0=Claims to build it or pushes Builder redirect.",
     method: "deterministic",
     check: (r) => {
-      const mentionsBuilder =
-        /\b(ai builder|mustaflow builder|mustaflow\.app)\b/i.test(r);
+      const mentionsBuilder = /\b(ai builder|mustaflow builder|mustaflow\.app)\b/i.test(r);
       const handoffCta =
         /\b(sign up|continue in builder|open in builder|send to builder|start build|ready to build)\b/i.test(
           r,
