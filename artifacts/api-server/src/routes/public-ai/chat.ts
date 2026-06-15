@@ -771,22 +771,18 @@ Response shape for this turn:
 
 const router = Router();
 
-const MAX_USER_MESSAGE_CHARS = 12_000;
-const MAX_HISTORY_MESSAGE_CHARS = 8_000;
-const MAX_SUMMARY_SOURCE_MESSAGE_CHARS = 4_000;
-
 const messageItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().max(MAX_HISTORY_MESSAGE_CHARS),
+  content: z.string(),
 });
 
 const summarizeMessageItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().max(MAX_SUMMARY_SOURCE_MESSAGE_CHARS),
+  content: z.string(),
 });
 
 const bodySchema = z.object({
-  message: z.string().min(1).max(MAX_USER_MESSAGE_CHARS),
+  message: z.string().min(1),
   messages: z.array(messageItemSchema).max(20).default([]),
   language: z.string().max(20).optional(),
   languageHint: z.string().max(20).optional(),
@@ -807,7 +803,7 @@ const bodySchema = z.object({
    * running summary and re-sent so long conversations stay coherent. Echoed
    * back (possibly updated) in the response so the client can persist it.
    */
-  conversationSummary: z.string().max(8000).optional(),
+  conversationSummary: z.string().optional(),
   /**
    * Earlier overflow turns that have just scrolled out of the recent window and
    * are not yet reflected in `conversationSummary`. They are folded into the

@@ -66,7 +66,13 @@ export async function classifyIntent(userMessage: string): Promise<ClassifierRes
       model,
       messages: [
         { role: "system", content: CLASSIFIER_SYSTEM_PROMPT },
-        { role: "user", content: userMessage.slice(0, 500) },
+        {
+          role: "user",
+          content:
+            userMessage.length > 3000
+              ? userMessage.slice(0, 1500) + "\n...\n" + userMessage.slice(-1500)
+              : userMessage,
+        },
       ],
       response_format: { type: "json_object" },
       max_completion_tokens: 150,

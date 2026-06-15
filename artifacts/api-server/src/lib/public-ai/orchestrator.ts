@@ -1102,7 +1102,7 @@ export async function extractMemorySaveCandidate(
             model: candidate.model,
             messages: [
               { role: "system", content: MEMORY_EXTRACT_SYSTEM_PROMPT },
-              { role: "user", content: trimmed.slice(0, 1000) },
+              { role: "user", content: trimmed.slice(0, 8_000) },
             ],
             response_format: { type: "json_object" },
             max_completion_tokens: 120,
