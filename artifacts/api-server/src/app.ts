@@ -25,7 +25,7 @@ import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
 import { startStuckRunScheduler } from "./lib/stuck-run-scheduler";
-import { isProductionRuntime } from "./lib/env";
+import { isE2ETestRuntime, isProductionRuntime } from "./lib/env";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -174,7 +174,13 @@ app.use(cookieParser());
 // callback form re-creates the Clerk client on every request which prevents
 // JWKS caching and causes spurious 401s once the first JWKS entry expires.
 // CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are read from the environment.
-app.use(clerkMiddleware());
+if (!isE2ETestRuntime()) {
+  app.use(clerkMiddleware());
+} else {
+  logger.warn(
+    "E2E runtime detected; skipping Clerk request middleware so test auth headers can be used.",
+  );
+}
 
 // Custom-domain middleware: intercepts GET requests whose Host header matches
 // a project's configured custom domain and serves the published snapshot directly.
