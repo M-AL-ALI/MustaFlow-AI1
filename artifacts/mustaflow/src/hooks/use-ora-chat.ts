@@ -1371,6 +1371,8 @@ export function useOraChat(): UseOraChatReturn {
           setError(
             "Your session has expired. Please refresh the page to start a new conversation.",
           );
+        } else if (status === 413) {
+          setError("Your message is too large. Try breaking it into shorter parts.");
         } else if (status === 404 && currentAttachment) {
           setError(
             currentAttachment.isImage

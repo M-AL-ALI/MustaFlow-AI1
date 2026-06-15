@@ -42,7 +42,7 @@ export const ORA_RECENT_WINDOW = 20;
 export const ORA_SUMMARIZE_BATCH_MAX = 40;
 
 /** Truncate any single message before feeding it to the summarizer. */
-const PER_MESSAGE_CHAR_CAP = 1500;
+const PER_MESSAGE_CHAR_CAP = 20_000;
 
 /** Soft target length for the rolling summary, to bound its token cost. */
 const SUMMARY_CHAR_TARGET = 1800;

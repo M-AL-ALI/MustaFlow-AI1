@@ -128,6 +128,19 @@ app.use("/api/webhooks/clerk", express.raw({ type: "application/json" }), rawBod
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+// Catch body-parser 413 (payload too large) and return a plain-English JSON error
+// instead of letting Express emit an HTML crash page.
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if ((err as { type?: string }).type === "entity.too.large") {
+    res
+      .status(413)
+      .json({ error: "Your message is too large to send. Try breaking it into smaller parts." });
+    return;
+  }
+  next(err);
+});
+
 app.use(cookieParser());
 
 // Use the static clerkMiddleware form so the Clerk SDK is created once at
