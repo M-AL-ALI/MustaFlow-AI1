@@ -1,8 +1,6 @@
 import type { Request } from "express";
 import { getAuth } from "@clerk/express";
 import { eq } from "drizzle-orm";
-import { db, userSubscriptionsTable } from "@workspace/db";
-import { isE2ETestAuthEnabled } from "../auth";
 
 // Tiers permitted to use Deep Thinking + connectors. Free is Instant-only.
 export const PAID_TIERS = new Set(["core", "wave"]);
@@ -13,6 +11,10 @@ export const PAID_TIERS = new Set(["core", "wave"]);
 const ALLOWED_TEST_TIERS = new Set(["free", "core", "wave"]);
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "grace_period"]);
+
+function isOraE2ETestAuthEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true";
+}
 
 export interface AuthedOraUser {
   userId: string;
@@ -27,6 +29,7 @@ export interface AuthedOraUser {
 export async function resolveTierForUser(userId: string): Promise<AuthedOraUser> {
   let tier = "free";
   try {
+    const { db, userSubscriptionsTable } = await import("@workspace/db");
     const [sub] = await db
       .select({ tier: userSubscriptionsTable.tier, status: userSubscriptionsTable.status })
       .from(userSubscriptionsTable)
@@ -56,7 +59,7 @@ export async function resolveTierForUser(userId: string): Promise<AuthedOraUser>
  * user_subscriptions row is still respected.
  */
 export async function resolveAuthedOraUser(req: Request): Promise<AuthedOraUser | null> {
-  if (isE2ETestAuthEnabled()) {
+  if (isOraE2ETestAuthEnabled()) {
     const testUser = req.headers["x-e2e-test-user"];
     if (typeof testUser === "string" && testUser.length > 0) {
       const testTier = req.headers["x-e2e-test-tier"];

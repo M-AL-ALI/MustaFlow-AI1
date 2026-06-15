@@ -104,11 +104,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
   // side-effect-free read, so it can be signaled early; only the authed rolling-window
   // quota is RESERVED (consumed), and that reservation is deferred until after
   // cheap validation so rejected/stale requests never consume a user's allowance.
-  const [{ resolveAuthedOraUser }, { consumeOraQuota, refundOraQuota, oraMessageFields }] =
-    await Promise.all([
-      import("../../lib/public-ai/authed-user"),
-      import("../../lib/public-ai/ora-usage"),
-    ]);
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
@@ -138,7 +134,9 @@ router.post("/public-ai/file-analysis", async (req, res) => {
   // Signed-in users are metered by rolling-window quotas (MESSAGE bucket). consumeOraQuota
   // is atomic; the reservation is held below and only released via refundOraQuota
   // on model failure.
+  let refundReservedQuota: (() => Promise<void>) | null = null;
   if (authed) {
+    const { consumeOraQuota, refundOraQuota } = await import("../../lib/public-ai/ora-usage");
     const quota = await consumeOraQuota(authed.userId, authed.tier, "message");
     if (!quota.allowed) {
       res.status(429).json({
@@ -150,6 +148,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
       });
       return;
     }
+    refundReservedQuota = () => refundOraQuota(authed.userId, "message");
   }
 
   const systemPrompt = buildSystemPrompt(language);
@@ -245,7 +244,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
   );
 
   if (!reply) {
-    if (authed) await refundOraQuota(authed.userId, "message");
+    if (refundReservedQuota) await refundReservedQuota();
     res.status(502).json({
       error: "Ora is temporarily unavailable. Please try again in a moment.",
     });
@@ -257,7 +256,11 @@ router.post("/public-ai/file-analysis", async (req, res) => {
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
-  const usage = await oraMessageFields(authed, payload.msgCount);
+  const usage = authed
+    ? await (
+        await import("../../lib/public-ai/ora-usage")
+      ).oraMessageFields(authed, payload.msgCount)
+    : { msgCount: payload.msgCount, msgLimit: MSG_LIMIT_VALUE, resetsAt: null };
   res.json({
     reply,
     handoffCta: false,

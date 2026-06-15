@@ -9,7 +9,6 @@
  * Max payload: 10 MB (voice clips are short; 25 MB limit applies to batch).
  */
 import { Router } from "express";
-import { speechToText } from "@workspace/integrations-openai-ai-server/audio";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraVoiceTranscribeLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
@@ -123,6 +122,7 @@ router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res)
   const buf = Buffer.concat(chunks, total);
 
   try {
+    const { speechToText } = await import("@workspace/integrations-openai-ai-server/audio");
     const text = await speechToText(buf, format, language);
     logger.info(
       {

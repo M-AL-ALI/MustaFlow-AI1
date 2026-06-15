@@ -8,6 +8,8 @@ import fileAnalysisRouter from "./file-analysis";
 import datasetAnalysisRouter from "./dataset-analysis";
 import imageAnalysisRouter from "./image-analysis";
 import handoffRouter from "./handoff";
+import transcribeRouter from "./transcribe";
+import ttsRouter from "./tts";
 import generateFileRouter from "./generate-file";
 import rememberDocumentRouter from "./remember-document";
 
@@ -34,6 +36,8 @@ router.use(fileAnalysisRouter);
 router.use(datasetAnalysisRouter);
 router.use(imageAnalysisRouter);
 router.use(handoffRouter);
+router.use(transcribeRouter);
+router.use(ttsRouter);
 router.use(generateFileRouter);
 router.use(rememberDocumentRouter);
 

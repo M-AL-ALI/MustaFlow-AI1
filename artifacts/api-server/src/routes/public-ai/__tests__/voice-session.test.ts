@@ -37,6 +37,10 @@ describe("Talk to Ora voice-session wiring", () => {
     const transcribe = readPublicAiRoute("transcribe.ts");
     expect(transcribe).toContain("oraVoiceTranscribeLimiter");
     expect(transcribe).not.toContain("oraUploadLimiter");
+    expect(transcribe).not.toContain(
+      'import { speechToText } from "@workspace/integrations-openai-ai-server/audio"',
+    );
+    expect(transcribe).toContain('await import("@workspace/integrations-openai-ai-server/audio")');
 
     const rateLimit = readApi("lib/rateLimit.ts");
     expect(rateLimit).toContain('keyPrefix: "ora_voice_transcribe"');
