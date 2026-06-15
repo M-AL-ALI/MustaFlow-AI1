@@ -120,7 +120,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: mustaflow_e2e
           POSTGRES_USER: postgres
@@ -178,6 +178,11 @@ jobs:
 
       - name: Install Playwright + Chromium
         run: npx playwright install chromium --with-deps
+
+      - name: Enable pgvector extension
+        run: |
+          container_id="$(docker ps --filter "name=postgres" --format "{{.ID}}" | head -n 1)"
+          docker exec "$container_id" psql -U postgres -d mustaflow_e2e -c "CREATE EXTENSION IF NOT EXISTS vector"
 
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
