@@ -143,13 +143,18 @@ jobs:
       # E2E flags — enable header-based auth bypass and slow builder stub.
       E2E_TEST_ENABLED: "true"
       DEV_SLOW_BUILD_DELAY_MS: "15000"
+      BASE_PATH: "/"
+      # CI-only placeholders needed to boot modules that validate env at import
+      # time. The slow builder stub keeps this E2E path from calling OpenAI.
+      AI_INTEGRATIONS_OPENAI_BASE_URL: https://example.invalid/v1
+      AI_INTEGRATIONS_OPENAI_API_KEY: ci-placeholder-not-used
       # Clerk keys — required to start ClerkProvider in the frontend.
       # Add CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, VITE_CLERK_PUBLISHABLE_KEY
       # to GitHub repo secrets.  The x-e2e-test-user bypass means Clerk never
       # validates a real token, but the SDK still needs a well-formed key at init.
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
       CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-      VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+      VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY || 'pk_test_ZGV2LWNpLXRlc3QuY2xlcmsuYWNjb3VudHMuZGV2JA==' }}
 
     steps:
       - name: Checkout
@@ -212,7 +217,8 @@ jobs:
           NGINX
           sudo ln -sf /etc/nginx/sites-available/e2e /etc/nginx/sites-enabled/e2e
           sudo rm -f /etc/nginx/sites-enabled/default
-          sudo nginx -t && sudo nginx -s reload
+          sudo nginx -t
+          sudo nginx -s reload || { sudo rm -f /run/nginx.pid; sudo nginx; }
 
       - name: Wait for services to be ready
         run: |
