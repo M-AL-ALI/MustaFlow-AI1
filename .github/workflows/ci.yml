@@ -181,7 +181,7 @@ jobs:
 
       - name: Enable pgvector extension
         run: |
-          container_id="$(docker ps --filter "name=postgres" --format "{{.ID}}" | head -n 1)"
+          container_id="$(docker ps --filter "ancestor=pgvector/pgvector:pg16" --format "{{.ID}}" | head -n 1)"
           docker exec "$container_id" psql -U postgres -d mustaflow_e2e -c "CREATE EXTENSION IF NOT EXISTS vector"
 
       - name: Push database schema
