@@ -55,7 +55,7 @@ test.describe("Stop-button cancellation flow", () => {
     // ── 1. Create project ──────────────────────────────────────────────────
     const projResp = await page.request.post(`${BASE_URL}/api/projects`, {
       headers: E2E_HEADERS,
-      data: { name: "e2e-stop-test", kind: "web" },
+      data: { name: "e2e-stop-test", kind: "web", builderMode: "static-legacy" },
     });
     if (!projResp.ok()) {
       throw new Error(`Create project failed ${projResp.status()}: ${await projResp.text()}`);
