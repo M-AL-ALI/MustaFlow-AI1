@@ -564,6 +564,10 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     if (!whisperSupported) return;
     if (isLoading || voice.voiceState === "speaking") return;
     if (whisperState !== "idle") return;
+    // If the user denied mic permission, do NOT auto-restart — that would
+    // create an infinite retry loop hitting the permission API every ~3.25 s.
+    // Wait for the user to explicitly tap Retry.
+    if (whisperConv.isPermissionDenied) return;
 
     const t = window.setTimeout(() => {
       void startWhisperRecording({ autoStop: true });
@@ -575,6 +579,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     startWhisperRecording,
     voice.voiceState,
     voiceConvActive,
+    whisperConv.isPermissionDenied,
     whisperState,
     whisperSupported,
   ]);
@@ -1709,6 +1714,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     whisperState={whisperConv.state}
                     whisperSupported={whisperConv.isSupported}
                     whisperError={whisperConv.error}
+                    whisperPermissionDenied={whisperConv.isPermissionDenied}
                     onWhisperStart={whisperConv.startRecording}
                     onWhisperStop={whisperConv.stopRecording}
                     onWhisperCancel={whisperConv.cancelRecording}

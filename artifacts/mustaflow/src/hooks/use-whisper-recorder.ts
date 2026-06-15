@@ -44,8 +44,15 @@ export interface UseWhisperRecorderReturn {
   stopRecording: () => void;
   /** Stop capturing and discard — no transcript produced. */
   cancelRecording: () => void;
-  /** Non-null only in "error" state; resets after 3 s. */
+  /** Non-null only in "error" state; resets after 3 s (except permission denial). */
   error: string | null;
+  /**
+   * True when the current error is a microphone permission denial
+   * (NotAllowedError / PermissionDeniedError). The 3-second auto-reset is
+   * suppressed — the error persists until the user explicitly retries or ends
+   * the session, avoiding an infinite retry loop.
+   */
+  isPermissionDenied: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -100,6 +107,7 @@ export function useWhisperRecorder(
 
   const [state, setState] = useState<WhisperState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [isPermissionDenied, setIsPermissionDenied] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -141,14 +149,17 @@ export function useWhisperRecorder(
   }, [stopAnalyser]);
 
   const handleError = useCallback(
-    (msg: string) => {
+    (msg: string, permissionDenied = false) => {
       cleanup();
       setError(msg);
+      setIsPermissionDenied(permissionDenied);
       setState("error");
-      setTimeout(() => {
-        setState("idle");
-        setError(null);
-      }, 3000);
+      if (!permissionDenied) {
+        setTimeout(() => {
+          setState("idle");
+          setError(null);
+        }, 3000);
+      }
     },
     [cleanup],
   );
@@ -240,6 +251,7 @@ export function useWhisperRecorder(
       if (state === "recording" || state === "transcribing") return;
       cancelledRef.current = false;
       setError(null);
+      setIsPermissionDenied(false);
       chunksRef.current = [];
 
       let stream: MediaStream;
@@ -256,7 +268,10 @@ export function useWhisperRecorder(
       } catch (err) {
         const name = err instanceof DOMException ? err.name : "";
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-          handleError("Microphone access denied. Please allow microphone access and try again.");
+          handleError(
+            "Microphone access denied. Allow mic in your browser's address bar, then tap Retry.",
+            true,
+          );
         } else if (name === "NotFoundError") {
           handleError("No microphone found on this device.");
         } else {
@@ -381,5 +396,6 @@ export function useWhisperRecorder(
     stopRecording,
     cancelRecording,
     error,
+    isPermissionDenied,
   };
 }
