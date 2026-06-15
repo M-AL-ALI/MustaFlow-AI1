@@ -224,6 +224,23 @@ describe("Route-level: PUBLIC_AI_ENABLED kill-switch", () => {
     const res = await request(app).post("/api/public-ai/session").send({});
     expect(res.status).toBe(503);
   }, 30000);
+
+  it("does not block non-public-ai routes when Ora is unavailable", async () => {
+    delete process.env.ORA_SESSION_SECRET;
+    process.env.PUBLIC_AI_ENABLED = "true";
+    const app = express();
+    app.use(express.json());
+    app.use(cookieParser());
+    const { default: publicAiRouter } = await import("../index");
+    app.use("/api", publicAiRouter);
+    app.post("/api/projects", (_req, res) => {
+      res.status(201).json({ ok: true });
+    });
+
+    const res = await request(app).post("/api/projects").send({});
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ ok: true });
+  }, 30000);
 });
 
 describe("Route-level: session endpoints", () => {
