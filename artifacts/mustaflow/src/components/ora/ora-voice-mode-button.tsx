@@ -30,6 +30,7 @@ import {
   Volume2,
   VolumeX,
   Loader2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { VoiceState } from "@/hooks/use-ora-voice";
@@ -359,6 +360,9 @@ export interface OraVoiceConvPanelProps {
   onWhisperStart?: () => Promise<void>;
   onWhisperStop?: () => void;
   onWhisperCancel?: () => void;
+  /** Set to true after a TTS failure to show a one-time text-only notice. */
+  ttsUnavailable?: boolean;
+  onDismissTtsNotice?: () => void;
 }
 
 export function OraVoiceConvPanel({
@@ -375,6 +379,8 @@ export function OraVoiceConvPanel({
   whisperError,
   whisperPermissionDenied = false,
   onWhisperStart,
+  ttsUnavailable,
+  onDismissTtsNotice,
 }: OraVoiceConvPanelProps) {
   useEffect(injectKeyframes, []);
 
@@ -459,6 +465,22 @@ export function OraVoiceConvPanel({
           <Loader2 className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)] animate-spin" />
         )}
       </div>
+
+      {/* TTS unavailable notice — shown below state row, above controls */}
+      {ttsUnavailable && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <VolumeX className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">Voice replies unavailable — Ora will reply in text only</span>
+          <button
+            type="button"
+            onClick={onDismissTtsNotice}
+            aria-label="Dismiss"
+            className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Controls row */}
       <div className="flex items-center gap-2">

@@ -867,6 +867,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     wasConvSpeakingRef.current = false;
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
+    voiceRef.current.clearTtsFailed();
     whisperConv.cancelRecording();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1718,6 +1719,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     onWhisperStart={whisperConv.startRecording}
                     onWhisperStop={whisperConv.stopRecording}
                     onWhisperCancel={whisperConv.cancelRecording}
+                    ttsUnavailable={voice.ttsUnavailable}
+                    onDismissTtsNotice={voice.clearTtsFailed}
                   />
                 ) : (
                   /* ─── Normal dictation + text input ─────────────────────────── */

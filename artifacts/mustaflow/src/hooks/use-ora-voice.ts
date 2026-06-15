@@ -263,6 +263,14 @@ export interface UseOraVoiceReturn {
    */
   speakTextForce: (text: string, lang: string) => void;
   stopSpeaking: () => void;
+  /**
+   * True when the server TTS has failed at least once this voice session AND the
+   * user has not yet dismissed the notice. Becomes false permanently for the session
+   * once clearTtsFailed() is called; resets to false on stopSpeaking / session exit.
+   */
+  ttsUnavailable: boolean;
+  /** Permanently dismiss the TTS notice for this voice session. */
+  clearTtsFailed: () => void;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -402,12 +410,29 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     };
   }, [stopServerAudio]);
 
+  // Tracks whether TTS has failed at least once in the current voice session.
+  // Set on first failure; only reset when the session ends (stopSpeaking / exit).
+  // Never cleared by the user dismiss action so subsequent failures stay silent.
+  const [ttsFailedOnce, setTtsFailedOnce] = useState(false);
+  // Tracks whether the user has dismissed the TTS notice this session.
+  // Once true, further failures no longer re-show the banner until session exit.
+  const [ttsNoticeDismissed, setTtsNoticeDismissed] = useState(false);
+
+  // Exposed as ttsUnavailable: true only on the first failure, hidden after dismiss.
+  const ttsUnavailable = ttsFailedOnce && !ttsNoticeDismissed;
+
+  const clearTtsFailed = useCallback(() => {
+    setTtsNoticeDismissed(true);
+  }, []);
+
   const stopSpeaking = useCallback(() => {
     stopServerAudio();
     if (isSpeechSynthesisAvailable()) {
       window.speechSynthesis.cancel();
     }
     setVoiceState((s) => (s === "speaking" ? "idle" : s));
+    setTtsFailedOnce(false);
+    setTtsNoticeDismissed(false);
   }, [stopServerAudio]);
 
   const stopListening = useCallback(() => {
@@ -617,6 +642,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
           if (abort.signal.aborted) return;
           stopServerAudio();
           setVoiceState((s) => (s === "speaking" ? "idle" : s));
+          setTtsFailedOnce(true);
         } finally {
           if (serverTtsAbortRef.current === abort) {
             serverTtsAbortRef.current = null;
@@ -656,5 +682,7 @@ export function useOraVoice(onFinalTranscript: (text: string) => void): UseOraVo
     prepareVoicePlayback,
     speakTextForce,
     stopSpeaking,
+    ttsUnavailable,
+    clearTtsFailed,
   };
 }
