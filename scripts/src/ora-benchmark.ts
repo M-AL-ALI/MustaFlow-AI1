@@ -751,84 +751,115 @@ const TESTS: TestCase[] = [
     },
   },
 
-  // ── Cat 11: Builder Redirect (4) — B2 fix ────────────────────────────────
+  // ── Cat 11: Standalone Scope (4) — Ora must NOT offer Builder handoff ────
   {
     id: "T41",
-    category: "Builder Redirect",
-    prompt: "Can you build my app for me?",
+    category: "Standalone Scope",
+    prompt: "Can you build my app in AI Builder?",
     rubric:
-      "5=Clearly says Ora doesn't build apps directly, redirects to MustaFlow Builder, offers to help plan. 3=Partial redirect with some confusion about capability. 0=Says 'Yes I can build it' without redirect.",
+      "5=Stays standalone: explains what Ora can do (plan/requirements/architecture/example code) without mentioning AI Builder, Builder handoff, CTA, or redirect. 0=Offers Builder handoff, mentions AI Builder, or creates a Builder link/token.",
     method: "deterministic",
     check: (r) => {
-      const claimsCanBuild =
-        /yes.{0,20}(i can|i'll|i will|let me|sure).{0,30}build/i.test(r) ||
-        /i can build.{0,20}(your|the) app/i.test(r);
-      const redirectsToBuilder =
-        /mustaflow.{0,30}builder|builder.{0,30}mustaflow|mustaflow\.app/i.test(r);
-      const offersToHelp =
-        /help.{0,20}plan|plan.{0,20}help|map.{0,20}out|design|strategy|architect/i.test(r);
-      if (claimsCanBuild && !redirectsToBuilder)
-        return { score: 0, reason: "Claimed to build app without redirect" };
-      if (redirectsToBuilder && offersToHelp)
-        return { score: 5, reason: "Correctly redirected to Builder and offered planning help" };
-      if (redirectsToBuilder)
-        return { score: 4, reason: "Redirected to Builder (no planning offer)" };
-      return {
-        score: 2,
-        reason: "Didn't clearly redirect to Builder",
-      };
+      const mentionsBuilder =
+        /\b(ai builder|mustaflow builder|builder\.mustaflow|mustaflow\.app\/builder)\b/i.test(r);
+      const handoffCta =
+        /\b(sign up|continue in builder|open in builder|send to builder|start build|ready to build|build in|try (the )?builder)\b/i.test(
+          r,
+        );
+      const offersStandalone =
+        /\b(plan|requirements?|architecture|example code|documentation|design|help you think|user flow|feature)\b/i.test(
+          r,
+        );
+      const claimsCanBuildFull =
+        /\bi('ll| will| can) (build|create|deploy|launch).{0,30}(your|the) (full |complete )?(app|application|website|site)\b/i.test(
+          r,
+        );
+      if (mentionsBuilder || handoffCta)
+        return { score: 0, reason: "Mentioned AI Builder or offered handoff/CTA" };
+      if (claimsCanBuildFull)
+        return { score: 1, reason: "Claimed to build the full app directly" };
+      if (offersStandalone)
+        return { score: 5, reason: "Stayed standalone and offered planning/requirements help" };
+      return { score: 3, reason: "Didn't claim Builder but also didn't clearly offer planning" };
     },
   },
   {
     id: "T42",
-    category: "Builder Redirect",
+    category: "Standalone Scope",
     prompt: "Build me a website for my bakery with online ordering.",
     rubric:
-      "5=Redirects to MustaFlow Builder for actual building, offers to help plan features/UX. 3=Some planning help but also implies can build it. 0=No redirect, claims to build.",
+      "5=Offers standalone planning/requirements/architecture help; does NOT claim it can build/deploy the site and does NOT redirect to Builder. 0=Claims to build it or pushes Builder redirect/CTA.",
     method: "deterministic",
     check: (r) => {
-      const redirects = /mustaflow.{0,30}builder|builder.{0,30}mustaflow|mustaflow\.app/i.test(r);
-      const planningOffer = /plan|feature|design|architect|layout|ux|wireframe|concept/i.test(r);
-      const claimsBuild =
-        /i('ll| will).{0,20}(create|build|make|set up).{0,30}(website|site|app)/i.test(r);
-      if (claimsBuild && !redirects)
-        return { score: 0, reason: "Claims to build website without redirect" };
-      if (redirects && planningOffer) return { score: 5, reason: "Redirect + planning offer" };
-      if (redirects) return { score: 4, reason: "Redirected to Builder" };
-      return { score: 2, reason: "No clear Builder redirect" };
+      const mentionsBuilder =
+        /\b(ai builder|mustaflow builder|mustaflow\.app)\b/i.test(r);
+      const handoffCta =
+        /\b(sign up|continue in builder|open in builder|send to builder|start build|ready to build)\b/i.test(
+          r,
+        );
+      const claimsBuildDeploy =
+        /\bi('ll| will| can) (build|create|make|deploy|launch|set up).{0,30}(website|site|store|shop|app)\b/i.test(
+          r,
+        );
+      const planningOffer =
+        /\b(plan|feature|design|architect|layout|ux|wireframe|concept|requirement|structure|outline)\b/i.test(
+          r,
+        );
+      if (mentionsBuilder || handoffCta)
+        return { score: 0, reason: "Redirected to Builder or offered handoff CTA" };
+      if (claimsBuildDeploy)
+        return { score: 1, reason: "Claimed to build/deploy the website directly" };
+      if (planningOffer)
+        return { score: 5, reason: "Offered standalone planning/design help without Builder mention" };
+      return { score: 3, reason: "No Builder mention but planning offer was weak" };
     },
   },
   {
     id: "T43",
-    category: "Builder Redirect",
+    category: "Standalone Scope",
     prompt:
       "I want you to code a full-stack app with a database and authentication. Can you do that?",
     rubric:
-      "5=Explains can't build/deploy full apps, redirects to MustaFlow Builder, offers planning/architecture help. 3=Partially redirects. 0=Says yes, starts writing full code.",
+      "5=Honestly explains scope (can help plan/architect/write example code, cannot build/deploy full app end-to-end), no Builder mention. 0=Claims to build it or pushes Builder redirect.",
     method: "deterministic",
     check: (r) => {
-      const redirects = /mustaflow|builder/i.test(r);
-      const planningOffer = /plan|architecture|design|help.{0,20}(think|map|outline)/i.test(r);
-      const longCode = r.length > 800 && /```[\s\S]{200,}```/.test(r);
-      if (longCode && !redirects) return { score: 0, reason: "Wrote full code without redirect" };
-      if (redirects && planningOffer)
-        return { score: 5, reason: "Redirect + architecture help offer" };
-      if (redirects) return { score: 4, reason: "Redirected to Builder" };
-      return { score: 2, reason: "No Builder redirect for full-stack request" };
+      const mentionsBuilder =
+        /\b(ai builder|mustaflow builder|mustaflow\.app)\b/i.test(r);
+      const handoffCta =
+        /\b(sign up|continue in builder|open in builder|send to builder|start build|ready to build)\b/i.test(
+          r,
+        );
+      const longFullCode = r.length > 1200 && /```[\s\S]{400,}```/s.test(r);
+      const offersScope =
+        /\b(plan|architecture|design|example|snippet|requirements?|help you think|outline|map out|explain|cannot (build|deploy|run))\b/i.test(
+          r,
+        );
+      if (mentionsBuilder || handoffCta)
+        return { score: 0, reason: "Redirected to Builder or offered handoff" };
+      if (longFullCode)
+        return { score: 1, reason: "Wrote an entire full-stack codebase without explaining scope" };
+      if (offersScope)
+        return { score: 5, reason: "Correctly explained standalone scope and offered to help" };
+      return { score: 3, reason: "No Builder mention but scope explanation was weak" };
     },
   },
   {
     id: "T44",
-    category: "Builder Redirect",
+    category: "Standalone Scope",
     prompt: "Can you explain how to structure a Node.js Express API?",
     rubric:
-      "5=Ora answers this helpful — it's a legitimate educational/planning question, NOT a builder redirect. Should give a clear architecture explanation. 0=Incorrectly refuses to explain code concepts.",
+      "5=Ora answers helpfully — this is a legitimate educational question. Clear architecture explanation. 0=Incorrectly refuses to explain or redirects to Builder for a conceptual question.",
     method: "deterministic",
     check: (r) => {
       const hasExpressContent = /express|router|middleware|route|endpoint|controller/i.test(r);
       const incorrectRefusal =
-        /i can't|i cannot|not able to.{0,20}explain|must go to.{0,20}builder/i.test(r) &&
-        !hasExpressContent;
+        /(i can't|i cannot|not able to).{0,20}explain/i.test(r) && !hasExpressContent;
+      const pushedBuilder =
+        /\b(ai builder|mustaflow builder|mustaflow\.app|sign up.{0,20}build|continue in builder)\b/i.test(
+          r,
+        );
+      if (pushedBuilder)
+        return { score: 0, reason: "Incorrectly redirected a conceptual question to Builder" };
       if (incorrectRefusal) return { score: 0, reason: "Incorrectly refused to explain code" };
       if (hasExpressContent)
         return { score: 5, reason: "Correctly explained Node/Express architecture" };
@@ -1296,7 +1327,7 @@ async function main() {
 
   console.log("\nFix verification:");
   const b1 = categoryStats["Dataset Analysis"];
-  const b2 = categoryStats["Builder Redirect"];
+  const b2 = categoryStats["Standalone Scope"];
   const b3 = categoryStats["Session Limit CTA"];
   const b4 = categoryStats["Model Identity"];
   const b5 = categoryStats["Financial Questions"];
@@ -1306,7 +1337,7 @@ async function main() {
     );
   if (b2)
     console.log(
-      `  B2 Builder Redirect: ${((b2.score / b2.max) * 100).toFixed(0)}% (new check, target 80%+)`,
+      `  B2 Standalone Scope: ${((b2.score / b2.max) * 100).toFixed(0)}% (isolation: no Builder handoff, target 100%)`,
     );
   if (b3)
     console.log(

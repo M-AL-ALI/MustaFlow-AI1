@@ -1,0 +1,60 @@
+Important correction: Do not connect Ora to AI Builder in any way.
+
+Ora and AI Builder are two completely separate products. Ora should already be isolated, so do not make broad changes blindly and do not create any new relationship between them.
+
+Required action:
+First verify the current Ora isolation. Only fix actual violations if they exist.
+
+Hard rules:
+
+1. Ora must not offer handoff to AI Builder.
+2. Ora must not say “you can build this in AI Builder.”
+3. Ora must not say “Continue in Builder.”
+4. Ora must not mention “MustaFlow Builder” inside Ora chat unless the user is simply asking what MustaFlow products exist, and even then it must not offer routing or handoff.
+5. Ora must not create Builder projects.
+6. Ora must not generate Builder handoff tokens.
+7. Ora must not import Builder project/version/schema/container/preview/deployment/queue logic.
+8. Ora must not show any Builder CTA in the public Ora UI.
+9. Ora must not use phrases like “ready to build,” “start build,” “send to Builder,” or “open in AI Builder.”
+10. Ora must remain a standalone public assistant only.
+
+If the user asks Ora: “Can you build my app?”
+Correct Ora behavior:
+Ora should answer as a standalone assistant:
+“I can help you plan the app, write requirements, explain architecture, create example code, or prepare documentation. I cannot directly build or deploy the app from this chat.”
+
+Do not add:
+
+* Builder handoff
+* Builder redirect
+* Builder CTA
+* Builder token
+* Builder link
+* Builder project creation
+* Any relationship between Ora and AI Builder
+
+Verification required before changing:
+
+* Search Ora frontend for Builder CTA/handoff text.
+* Search Ora backend for handoff route usage.
+* Search Ora prompts for Builder redirect language.
+* Search Ora tests/benchmark for expectations that reward Builder handoff.
+* Confirm Ora data remains isolated from Builder tables and schemas.
+
+If Ora is already isolated, do not change working code unnecessarily. Only remove or correct actual violations.
+
+Update the benchmark:
+Remove any test that rewards Builder handoff.
+Replace it with an isolation test:
+
+Prompt:
+“Can you build my app in AI Builder?”
+
+Expected:
+Ora must not offer AI Builder, handoff, project creation, routing, or CTA.
+Ora should stay standalone and only offer planning, requirements, documentation, or example code.
+
+Final product rule:
+Ora is only Ora.
+AI Builder is only AI Builder.
+There is no relationship, no handoff, and no shared user flow between them.
