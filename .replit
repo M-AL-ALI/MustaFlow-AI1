@@ -183,17 +183,16 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-ENCRYPTION_KEY = "hFUWtwdSp/TfLttnGDuZF8hxwQ+9Q2fpqSVC4+m4/5Y="
 FLY_APP_NAME = "mustaflow-containers"
 FLY_REGION = "iad"
 FLY_ORG_SLUG = "personal"
 STRIPE_PRICE_STARTER = "price_1Tae1ULqqLu7se88cTw00WRi"
 STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
 STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"
-E2E_TEST_ENABLED = "true"
 DEEPSEEK_DISABLED = "true"
 
 [userenv.development]
+NODE_ENV = "development"
 DEV_SLOW_BUILD_DELAY_MS = "30000"
 AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
 AI_PROVIDER_REFINE = "anthropic:claude-sonnet-4-6"
@@ -203,6 +202,7 @@ STRIPE_CORE_PRICE_ID = "price_1TevbdDCzx2AknNDiqa2FXAy"
 STRIPE_WAVE_PRICE_ID = "price_1TiEDUDCzx2AknNDdfTcn6ZL"
 
 [userenv.production]
+NODE_ENV = "production"
 AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"
 AI_PROVIDER_REFINE = "anthropic:claude-sonnet-4-6"
 AI_PROVIDER_PLAN = "anthropic:claude-sonnet-4-6"

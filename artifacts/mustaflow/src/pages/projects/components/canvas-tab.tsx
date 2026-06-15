@@ -246,7 +246,7 @@ function VariantTile({
   useEffect(() => {
     if (!visible || variant.status !== "ready") return;
     const url = `/api/projects/${variant.projectId}/canvas/variants/${variant.id}/touch`;
-    fetch(url, { method: "POST" }).catch(() => {});
+    authFetch(url, { method: "POST" }).catch(() => {});
   }, [visible, variant.id, variant.projectId, variant.status]);
 
   const isReady = variant.status === "ready";

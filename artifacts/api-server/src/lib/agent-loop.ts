@@ -41,6 +41,7 @@ import {
   type E2eScenario,
 } from "./checks/e2e-runner";
 import { logger } from "./logger";
+import { isE2ETestRuntime } from "./env";
 import { CHECK_PROFILES, resolveStackId, type CheckSpec, type StackId } from "./check-profiles";
 import { scanMissingDeps, addMissingToDeps } from "./dep-scanner";
 import {
@@ -407,7 +408,7 @@ const MODEL_FOR_MODE: Record<AgentMode, string> = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // E2E test auto-approve bypass
-// Only active when NODE_ENV !== "production" AND E2E_TEST_ENABLED === "true".
+// Only active when NODE_ENV === "test" AND E2E_TEST_ENABLED === "true".
 // Never bypasses destructive shell operations, database DDL, or deploy commands.
 // pkg_install is always considered safe; run_command is filtered by pattern.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -428,7 +429,7 @@ const E2E_BLOCKED_PATTERNS: RegExp[] = [
 ];
 
 function isE2EAutoApproveEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" && process.env.E2E_TEST_ENABLED === "true";
+  return isE2ETestRuntime();
 }
 
 function isE2ERunCommandSafe(argv: string[]): boolean {

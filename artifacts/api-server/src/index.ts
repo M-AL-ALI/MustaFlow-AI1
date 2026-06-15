@@ -24,6 +24,7 @@ import {
 import { runStartupMigrations } from "./lib/startup-migrations";
 import { isOraSecretConfigured } from "./lib/public-ai/session";
 import { auditImageProviderConfig } from "./lib/image-provider";
+import { isE2ETestRuntime, isProductionRuntime } from "./lib/env";
 
 const execFileAsync = promisify(execFile);
 
@@ -267,17 +268,21 @@ void runStartupMigrations()
   )
   .finally(() => {
     // Safety: the E2E test-auth bypass (x-e2e-test-user / x-e2e-test-tier) is
-    // double-gated and inert in production, but a deployment that leaves
-    // E2E_TEST_ENABLED=true would honor impersonation headers in any non-prod
-    // NODE_ENV. Emit a loud, structured marker at boot so accidental enablement
-    // is immediately visible in logs.
+    // limited to NODE_ENV=test and inert in deployed runtimes. Emit a loud,
+    // structured marker when the flag is present so accidental enablement is
+    // immediately visible in logs.
     if (process.env.E2E_TEST_ENABLED === "true") {
-      const inProd = process.env.NODE_ENV === "production";
+      const active = isE2ETestRuntime();
       logger.warn(
-        { nodeEnv: process.env.NODE_ENV ?? "(unset)", e2eAuthActive: !inProd },
-        inProd
-          ? "E2E_TEST_ENABLED=true but NODE_ENV=production — test auth bypass is IGNORED"
-          : "E2E_TEST_ENABLED=true — test auth bypass is ACTIVE (x-e2e-test-user honored). Never set this in a deployed/shared environment.",
+        {
+          nodeEnv: process.env.NODE_ENV ?? "(unset)",
+          replitDeployment: process.env.REPLIT_DEPLOYMENT ?? "(unset)",
+          productionRuntime: isProductionRuntime(),
+          e2eAuthActive: active,
+        },
+        active
+          ? "E2E_TEST_ENABLED=true and NODE_ENV=test - test auth bypass is ACTIVE."
+          : "E2E_TEST_ENABLED=true outside test runtime - test auth bypass is IGNORED.",
       );
     }
 

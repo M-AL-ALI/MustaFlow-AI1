@@ -139,7 +139,7 @@ jobs:
       # used for real crypto when the auth bypass is active.
       SESSION_SECRET: ci-only-session-secret-not-for-production
       ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      NODE_ENV: development
+      NODE_ENV: test
       # E2E flags — enable header-based auth bypass and slow builder stub.
       E2E_TEST_ENABLED: "true"
       DEV_SLOW_BUILD_DELAY_MS: "15000"

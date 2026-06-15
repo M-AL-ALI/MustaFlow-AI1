@@ -18,6 +18,7 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { logger } from "./logger";
+import { isProductionRuntime } from "./env";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12;
@@ -95,7 +96,7 @@ class DevOnlyPassthroughEncryption implements EncryptionService {
 function buildEncryptionService(): EncryptionService {
   const rawKey = process.env.ENCRYPTION_KEY;
   if (!rawKey) {
-    if (process.env.NODE_ENV === "production") {
+    if (isProductionRuntime()) {
       throw new Error(
         "ENCRYPTION_KEY environment variable is required in production. " +
           "Generate a 32-byte key and add it to Replit Secrets.",
@@ -112,7 +113,7 @@ function buildEncryptionService(): EncryptionService {
     logger.info("AES-256-GCM encryption active");
     return svc;
   } catch (err) {
-    if (process.env.NODE_ENV === "production") throw err;
+    if (isProductionRuntime()) throw err;
     logger.error({ err }, "Invalid ENCRYPTION_KEY — falling back to plaintext");
     return new DevOnlyPassthroughEncryption();
   }

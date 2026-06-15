@@ -25,6 +25,7 @@ import { runGdprErasure } from "./lib/gdpr-erasure-worker";
 import { startDomainRenewalScheduler } from "./lib/domain-renewal-scheduler";
 import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
 import { startStuckRunScheduler } from "./lib/stuck-run-scheduler";
+import { isProductionRuntime } from "./lib/env";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -106,7 +107,45 @@ app.use(
 // Clerk proxy — must come before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ credentials: true, origin: true }));
+function isAllowedCorsOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+    const platformDomain = (process.env.PLATFORM_DOMAIN ?? "mustaflow.app").toLowerCase();
+    const extraOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (extraOrigins.includes(origin)) return true;
+    if (host === platformDomain || host.endsWith(`.${platformDomain}`)) return true;
+
+    if (!isProductionRuntime()) {
+      return (
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "::1" ||
+        host.endsWith(".replit.dev")
+      );
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+app.use(
+  cors({
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, isAllowedCorsOrigin(origin));
+    },
+  }),
+);
 
 // Capture raw body for webhook signature verification.
 // Must run BEFORE express.json() so the Buffer is still intact.

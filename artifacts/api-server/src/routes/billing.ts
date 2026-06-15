@@ -46,9 +46,9 @@ import {
 } from "../lib/plans";
 import { isSuperuser } from "../lib/superusers";
 import { logger } from "../lib/logger";
+import { isProductionRuntime } from "../lib/env";
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
-const IS_PRODUCTION = process.env.REPLIT_DEPLOYMENT === "1";
 
 // ── Credit packages (one-time top-up) ────────────────────────────────────────
 export const CREDIT_PACKAGES = [
@@ -475,7 +475,7 @@ export async function handleStripeWebhook(
       return;
     }
   } else {
-    if (IS_PRODUCTION) {
+    if (isProductionRuntime()) {
       logger.error("STRIPE_WEBHOOK_SECRET not set — refusing unverified webhook in production");
       res.status(500).json({ error: "Webhook secret not configured" });
       return;
