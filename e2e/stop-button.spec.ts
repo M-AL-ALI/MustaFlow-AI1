@@ -36,6 +36,7 @@ import { test, expect } from "@playwright/test";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:80";
 const E2E_TEST_USER = "e2e-test-user";
+const E2E_HEADERS = { "x-e2e-test-user": E2E_TEST_USER };
 
 test.describe("Stop-button cancellation flow", () => {
   test("clicking the UI Cancel button transitions task to 'canceled' and SSE emits 'cancelled'", async ({
@@ -49,26 +50,32 @@ test.describe("Stop-button cancellation flow", () => {
     });
     // Injects x-e2e-test-user into every browser-initiated HTTP request
     // (navigations, fetch(), XHR) so the API auth bypass in auth.ts fires.
-    await page.setExtraHTTPHeaders({ "x-e2e-test-user": E2E_TEST_USER });
+    await page.setExtraHTTPHeaders(E2E_HEADERS);
 
     // ── 1. Create project ──────────────────────────────────────────────────
     const projResp = await page.request.post(`${BASE_URL}/api/projects`, {
+      headers: E2E_HEADERS,
       data: { name: "e2e-stop-test", kind: "web" },
     });
-    expect(projResp.ok()).toBe(true);
+    if (!projResp.ok()) {
+      throw new Error(`Create project failed ${projResp.status()}: ${await projResp.text()}`);
+    }
     const project = (await projResp.json()) as { id: number };
 
     // ── 2. Submit a build task via API ────────────────────────────────────
     // DEV_SLOW_BUILD_DELAY_MS keeps the job sleeping in "building" state so
     // there is time to navigate and click Cancel before it completes.
     const taskResp = await page.request.post(`${BASE_URL}/api/projects/${project.id}/tasks`, {
+      headers: E2E_HEADERS,
       data: {
         title: "Build a minimal todo app",
         kind: "main",
         prompt: "Build a minimal todo app",
       },
     });
-    expect(taskResp.ok()).toBe(true);
+    if (!taskResp.ok()) {
+      throw new Error(`Create task failed ${taskResp.status()}: ${await taskResp.text()}`);
+    }
     const task = (await taskResp.json()) as { id: number; status: string };
 
     // ── 3. Wait until the task enters "building" ──────────────────────────
@@ -77,7 +84,9 @@ test.describe("Stop-button cancellation flow", () => {
     await expect
       .poll(
         async () => {
-          const r = await page.request.get(`${BASE_URL}/api/projects/${project.id}/tasks`);
+          const r = await page.request.get(`${BASE_URL}/api/projects/${project.id}/tasks`, {
+            headers: E2E_HEADERS,
+          });
           const tasks = (await r.json()) as Array<{ id: number; status: string }>;
           return tasks.find((t) => t.id === task.id)?.status;
         },
@@ -156,7 +165,9 @@ test.describe("Stop-button cancellation flow", () => {
     await expect
       .poll(
         async () => {
-          const r = await page.request.get(`${BASE_URL}/api/projects/${project.id}/tasks`);
+          const r = await page.request.get(`${BASE_URL}/api/projects/${project.id}/tasks`, {
+            headers: E2E_HEADERS,
+          });
           const tasks = (await r.json()) as Array<{ id: number; status: string }>;
           return tasks.find((t) => t.id === task.id)?.status;
         },
