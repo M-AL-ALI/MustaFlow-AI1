@@ -1,3 +1,4 @@
+- [Ora chat/upload API contract](ora-api-contract.md) — chat requires `message` (required, current turn) + `messages` (history); response field is `reply` not `content`; file/image-analysis require a UUID ref from /upload first, not inline data; session-create is rate-limited 10/day.
 - [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults cap haiku at 8192 and sonnet/opus at 16000; exceeding model limits causes 400s that trip the circuit breaker.
 - [Anthropic assistant prefill rejection](anthropic-assistant-prefill.md) — Anthropic rejects calls where conversationHistory ends with role:"assistant"; need a bridge user message.
 - [AI provider circuit breaker isolation](circuit-breaker-provider-isolation.md) — each provider needs its own CircuitBreaker; shared breaker causes cross-provider outages silently masked as "Refined 0 files".
