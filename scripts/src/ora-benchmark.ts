@@ -113,7 +113,12 @@ async function datasetAnalysis(
   fileRef: string,
   message: string,
   timeoutMs = 150000,
-): Promise<{ result: Record<string, unknown> | null; status: number; error?: string; rawText?: string }> {
+): Promise<{
+  result: Record<string, unknown> | null;
+  status: number;
+  error?: string;
+  rawText?: string;
+}> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -314,7 +319,8 @@ const TESTS: TestCase[] = [
   {
     id: "T06",
     category: "Reasoning/Math",
-    prompt: "If you have 3 red balls and 5 blue balls in a bag, what is the probability of drawing a red ball?",
+    prompt:
+      "If you have 3 red balls and 5 blue balls in a bag, what is the probability of drawing a red ball?",
     rubric:
       "Score 5 if 3/8 or 37.5%. Score 3 if correct fraction stated differently. Score 0 if wrong.",
     method: "deterministic",
@@ -332,7 +338,8 @@ const TESTS: TestCase[] = [
   {
     id: "T07",
     category: "Reasoning/Math",
-    prompt: "A SaaS company has $500K ARR and 250 customers. What is the average revenue per customer (ARPC)?",
+    prompt:
+      "A SaaS company has $500K ARR and 250 customers. What is the average revenue per customer (ARPC)?",
     rubric:
       "Score 5 if $2,000/year or $2K. Score 3 if shows the division but states monthly. Score 0 if wrong.",
     method: "deterministic",
@@ -374,7 +381,8 @@ const TESTS: TestCase[] = [
   {
     id: "T11",
     category: "Code/Technical",
-    prompt: "What is the difference between SQL and NoSQL databases? When would you choose one over the other?",
+    prompt:
+      "What is the difference between SQL and NoSQL databases? When would you choose one over the other?",
     rubric:
       "5=SQL=structured/relational/ACID, NoSQL=flexible schema/scalability. Use-cases given. 3=Defines both but no guidance. 0=Wrong.",
     method: "llm",
@@ -426,7 +434,8 @@ const TESTS: TestCase[] = [
   {
     id: "T17",
     category: "Product Planning",
-    prompt: "I want to build a task management app for remote teams. What features should the MVP include?",
+    prompt:
+      "I want to build a task management app for remote teams. What features should the MVP include?",
     rubric:
       "5=Clear MVP scope: task create/assign/complete, due dates, team sharing, basic notifications. No scope creep. 3=Too broad or too narrow. 0=Unhelpful.",
     method: "llm",
@@ -551,7 +560,8 @@ const TESTS: TestCase[] = [
   {
     id: "T25",
     category: "Writing",
-    prompt: "Write a brief professional email subject line and opening paragraph for declining a vendor meeting politely.",
+    prompt:
+      "Write a brief professional email subject line and opening paragraph for declining a vendor meeting politely.",
     rubric:
       "5=Professional tone, polite decline, brief, appropriate subject line. No fluff. 3=Correct but too wordy. 0=Wrong tone/inappropriate.",
     method: "llm",
@@ -559,7 +569,8 @@ const TESTS: TestCase[] = [
   {
     id: "T26",
     category: "Writing",
-    prompt: "Improve this sentence for clarity: 'The reason for the delay in the shipment was due to the fact that there were issues with the supplier.'",
+    prompt:
+      "Improve this sentence for clarity: 'The reason for the delay in the shipment was due to the fact that there were issues with the supplier.'",
     rubric:
       "5=Concise rewrite like 'The shipment was delayed due to supplier issues.' Removes redundancy. 3=Minor improvement. 0=Worse or unchanged.",
     method: "llm",
@@ -567,7 +578,8 @@ const TESTS: TestCase[] = [
   {
     id: "T27",
     category: "Writing",
-    prompt: "Write a one-sentence value proposition for a project management SaaS targeting freelancers.",
+    prompt:
+      "Write a one-sentence value proposition for a project management SaaS targeting freelancers.",
     rubric:
       "5=Clear, specific, benefit-focused, targets freelancers. No fluff. 3=Generic or too long. 0=Off-target.",
     method: "llm",
@@ -575,7 +587,8 @@ const TESTS: TestCase[] = [
   {
     id: "T28",
     category: "Writing",
-    prompt: "Rewrite this in a more confident, direct tone: 'I was wondering if it might be possible for you to consider reviewing my proposal when you have some time.'",
+    prompt:
+      "Rewrite this in a more confident, direct tone: 'I was wondering if it might be possible for you to consider reviewing my proposal when you have some time.'",
     rubric:
       "5=Direct rewrite like 'Please review my proposal at your earliest convenience.' 3=Improved but still hedgy. 0=Same or worse.",
     method: "llm",
@@ -605,7 +618,8 @@ const TESTS: TestCase[] = [
   {
     id: "T31",
     category: "Language",
-    prompt: "Summarize in 2 sentences: 'Artificial intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think like humans and mimic their actions. The term may also be applied to any machine that exhibits traits associated with a human mind such as learning and problem-solving.'",
+    prompt:
+      "Summarize in 2 sentences: 'Artificial intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think like humans and mimic their actions. The term may also be applied to any machine that exhibits traits associated with a human mind such as learning and problem-solving.'",
     rubric:
       "5=Accurate 2-sentence summary capturing AI=machines simulating human thought/learning. 3=One sentence or misses key point. 0=Inaccurate.",
     method: "llm",
@@ -619,9 +633,7 @@ const TESTS: TestCase[] = [
     method: "deterministic",
     check: (r) => ({
       score: /[\u0600-\u06FF]/.test(r) ? 5 : r.length > 10 ? 3 : 0,
-      reason: /[\u0600-\u06FF]/.test(r)
-        ? "Responded in Arabic"
-        : "Responded but not in Arabic",
+      reason: /[\u0600-\u06FF]/.test(r) ? "Responded in Arabic" : "Responded but not in Arabic",
     }),
   },
 
@@ -629,7 +641,8 @@ const TESTS: TestCase[] = [
   {
     id: "T33",
     category: "Deep Reasoning",
-    prompt: "A startup has $800K ARR, 40% YoY growth, 72% gross margin, and is burning $60K/month. They have $1.2M in the bank. Should they raise now or wait?",
+    prompt:
+      "A startup has $800K ARR, 40% YoY growth, 72% gross margin, and is burning $60K/month. They have $1.2M in the bank. Should they raise now or wait?",
     rubric:
       "5=Analyzes: runway ~20 months, burn multiple OK, raises valid pros/cons (growth rate suggests raising now at good valuation vs waiting for more ARR). Gives recommendation with reasoning. 3=Partial analysis. 0=No financial reasoning.",
     method: "llm",
@@ -637,7 +650,8 @@ const TESTS: TestCase[] = [
   {
     id: "T34",
     category: "Deep Reasoning",
-    prompt: "We're choosing between React Native and Flutter for our mobile app. We have a React web team. Which should we choose and why?",
+    prompt:
+      "We're choosing between React Native and Flutter for our mobile app. We have a React web team. Which should we choose and why?",
     rubric:
       "5=Recommends React Native given existing React team (code sharing, lower learning curve), covers trade-offs vs Flutter (performance, ecosystem). 3=Balanced but no recommendation. 0=Wrong recommendation or no reasoning.",
     method: "llm",
@@ -645,7 +659,8 @@ const TESTS: TestCase[] = [
   {
     id: "T35",
     category: "Deep Reasoning",
-    prompt: "Our user activation rate is 23% (industry average is 40%). What are the most likely causes and how do I diagnose them?",
+    prompt:
+      "Our user activation rate is 23% (industry average is 40%). What are the most likely causes and how do I diagnose them?",
     rubric:
       "5=Identifies onboarding friction, unclear value prop, time-to-value issues. Gives diagnostic steps: funnel analysis, session recording, exit surveys. Structured. 3=Generic suggestions. 0=Unhelpful.",
     method: "llm",
@@ -653,7 +668,8 @@ const TESTS: TestCase[] = [
   {
     id: "T36",
     category: "Deep Reasoning",
-    prompt: "What is the difference between correlation and causation? Give a real-world business example of each.",
+    prompt:
+      "What is the difference between correlation and causation? Give a real-world business example of each.",
     rubric:
       "5=Clear definitions + distinct business examples (e.g., ice cream sales & drowning = correlation; discount → more purchases = causation). 3=Good definitions but weak examples. 0=Wrong/confused.",
     method: "llm",
@@ -668,8 +684,9 @@ const TESTS: TestCase[] = [
       "5=Ora denies being GPT or Gemini specifically, says 'I'm Ora by MustaFlow, powered by advanced AI routing' or equivalent — no specific provider named. 4=Says Ora but vague. 0=Names Gemini/GPT/Claude directly.",
     method: "deterministic",
     check: (r) => {
-      const namedProvider =
-        /\b(gemini|gpt-[0-9]|gpt4|claude|llama|deepseek|mistral|palm)\b/i.test(r);
+      const namedProvider = /\b(gemini|gpt-[0-9]|gpt4|claude|llama|deepseek|mistral|palm)\b/i.test(
+        r,
+      );
       const isOra = /\bora\b/i.test(r);
       const hasMustaFlow = /mustaflow/i.test(r);
       const hasAdvancedRouting =
@@ -708,9 +725,12 @@ const TESTS: TestCase[] = [
     check: (r) => {
       const saysOpenAI = /\b(openai|chatgpt|gpt-[0-9])\b/i.test(r);
       const isOra = /\bora\b/i.test(r);
-      const deniesOpenAI = /not.{0,20}(openai|chatgpt)|different from.{0,20}chatgpt/i.test(r.toLowerCase());
+      const deniesOpenAI = /not.{0,20}(openai|chatgpt)|different from.{0,20}chatgpt/i.test(
+        r.toLowerCase(),
+      );
       if (saysOpenAI) return { score: 0, reason: "Named OpenAI/GPT" };
-      if (isOra && deniesOpenAI) return { score: 5, reason: "Correctly denied ChatGPT, identified as Ora" };
+      if (isOra && deniesOpenAI)
+        return { score: 5, reason: "Correctly denied ChatGPT, identified as Ora" };
       if (isOra) return { score: 4, reason: "Identified as Ora" };
       return { score: 1, reason: "Didn't identify as Ora or deny OpenAI" };
     },
@@ -781,17 +801,18 @@ const TESTS: TestCase[] = [
   {
     id: "T43",
     category: "Builder Redirect",
-    prompt: "I want you to code a full-stack app with a database and authentication. Can you do that?",
+    prompt:
+      "I want you to code a full-stack app with a database and authentication. Can you do that?",
     rubric:
       "5=Explains can't build/deploy full apps, redirects to MustaFlow Builder, offers planning/architecture help. 3=Partially redirects. 0=Says yes, starts writing full code.",
     method: "deterministic",
     check: (r) => {
       const redirects = /mustaflow|builder/i.test(r);
-      const planningOffer =
-        /plan|architecture|design|help.{0,20}(think|map|outline)/i.test(r);
+      const planningOffer = /plan|architecture|design|help.{0,20}(think|map|outline)/i.test(r);
       const longCode = r.length > 800 && /```[\s\S]{200,}```/.test(r);
       if (longCode && !redirects) return { score: 0, reason: "Wrote full code without redirect" };
-      if (redirects && planningOffer) return { score: 5, reason: "Redirect + architecture help offer" };
+      if (redirects && planningOffer)
+        return { score: 5, reason: "Redirect + architecture help offer" };
       if (redirects) return { score: 4, reason: "Redirected to Builder" };
       return { score: 2, reason: "No Builder redirect for full-stack request" };
     },
@@ -804,13 +825,13 @@ const TESTS: TestCase[] = [
       "5=Ora answers this helpful — it's a legitimate educational/planning question, NOT a builder redirect. Should give a clear architecture explanation. 0=Incorrectly refuses to explain code concepts.",
     method: "deterministic",
     check: (r) => {
-      const hasExpressContent =
-        /express|router|middleware|route|endpoint|controller/i.test(r);
+      const hasExpressContent = /express|router|middleware|route|endpoint|controller/i.test(r);
       const incorrectRefusal =
         /i can't|i cannot|not able to.{0,20}explain|must go to.{0,20}builder/i.test(r) &&
         !hasExpressContent;
       if (incorrectRefusal) return { score: 0, reason: "Incorrectly refused to explain code" };
-      if (hasExpressContent) return { score: 5, reason: "Correctly explained Node/Express architecture" };
+      if (hasExpressContent)
+        return { score: 5, reason: "Correctly explained Node/Express architecture" };
       return { score: 2, reason: "Weak or missing Express explanation" };
     },
   },
@@ -829,13 +850,17 @@ const TESTS: TestCase[] = [
         /consult.{0,30}(financial advisor|professional|advisor)|not.{0,20}financial advice|general.{0,20}financial.{0,20}education/i.test(
           r,
         );
-      if (!hasGoodAnswer) return { score: 1, reason: "Didn't give a useful gross margin benchmark" };
+      if (!hasGoodAnswer)
+        return { score: 1, reason: "Didn't give a useful gross margin benchmark" };
       if (heavyDisclaimer)
         return {
           score: 2,
           reason: "Correct answer but unnecessary financial disclaimer for business KPI",
         };
-      return { score: 5, reason: "Answered business KPI question directly without excessive disclaimer" };
+      return {
+        score: 5,
+        reason: "Answered business KPI question directly without excessive disclaimer",
+      };
     },
   },
   {
@@ -850,7 +875,8 @@ const TESTS: TestCase[] = [
       const heavyDisclaimer =
         /consult.{0,30}(financial advisor|professional)|not.{0,20}financial advice/i.test(r);
       if (!hasAllocation) return { score: 1, reason: "No marketing allocation advice given" };
-      if (heavyDisclaimer) return { score: 2, reason: "Good advice but unnecessary advisor disclaimer" };
+      if (heavyDisclaimer)
+        return { score: 2, reason: "Good advice but unnecessary advisor disclaimer" };
       return { score: 5, reason: "Practical marketing budget advice without finance disclaimer" };
     },
   },
@@ -865,7 +891,8 @@ const TESTS: TestCase[] = [
   {
     id: "T48",
     category: "Financial Questions",
-    prompt: "What should our monthly burn rate be if we have $1.2M in the bank and want 18 months of runway?",
+    prompt:
+      "What should our monthly burn rate be if we have $1.2M in the bank and want 18 months of runway?",
     rubric:
       "5=Simple math: $1.2M / 18 = $66.7K/month. Direct answer without heavy disclaimer. 3=Correct but over-caveated. 0=Wrong math.",
     method: "deterministic",
@@ -873,7 +900,8 @@ const TESTS: TestCase[] = [
       const hasAnswer = /66[,.]?[0-9]|66k|67k|\$66|about 67|approximately 67/i.test(r);
       const heavyDisclaimer = /consult.{0,30}financial advisor/i.test(r);
       if (!hasAnswer) return { score: 1, reason: "Didn't give ~$66.7K monthly burn answer" };
-      if (heavyDisclaimer) return { score: 2, reason: "Correct but financial advisor disclaimer on a math question" };
+      if (heavyDisclaimer)
+        return { score: 2, reason: "Correct but financial advisor disclaimer on a math question" };
       return { score: 5, reason: "Correct burn rate ($66.7K) without inappropriate disclaimer" };
     },
   },
@@ -893,13 +921,13 @@ const TESTS: TestCase[] = [
       const hasUpgradeCta = body.upgradeCta === true;
       const hasSignUpUrl =
         typeof body.signUpUrl === "string" && /mustaflow\.app\/sign-up/i.test(body.signUpUrl);
-      const hasGoodMessage =
-        /sign.?up|sign in|create.{0,10}account|free.{0,20}at mustaflow/i.test(
-          String(body.error ?? ""),
-        );
+      const hasGoodMessage = /sign.?up|sign in|create.{0,10}account|free.{0,20}at mustaflow/i.test(
+        String(body.error ?? ""),
+      );
       if (hasUpgradeCta && hasSignUpUrl)
         return { score: 5, reason: "Has upgradeCta=true and signUpUrl" };
-      if (hasUpgradeCta && hasGoodMessage) return { score: 4, reason: "Has upgradeCta + signup message" };
+      if (hasUpgradeCta && hasGoodMessage)
+        return { score: 4, reason: "Has upgradeCta + signup message" };
       if (hasGoodMessage) return { score: 3, reason: "Has signup message but no upgradeCta/URL" };
       return { score: 0, reason: "Missing CTA fields" };
     },
@@ -942,7 +970,8 @@ const TESTS: TestCase[] = [
   {
     id: "T53",
     category: "App Concept Planning",
-    prompt: "I want to build a subscription box app. What are the key technical components I'd need?",
+    prompt:
+      "I want to build a subscription box app. What are the key technical components I'd need?",
     rubric:
       "5=Covers: auth, product catalog, subscription management, payments (Stripe etc), order tracking, email notifications, admin dashboard. 3=Partial list. 0=Unhelpful.",
     method: "llm",
@@ -958,7 +987,8 @@ const TESTS: TestCase[] = [
   {
     id: "T55",
     category: "App Concept Planning",
-    prompt: "For a marketplace app connecting freelancers with clients, what are the riskiest assumptions to validate first?",
+    prompt:
+      "For a marketplace app connecting freelancers with clients, what are the riskiest assumptions to validate first?",
     rubric:
       "5=Identifies: supply-side quality/quantity, demand-side willingness to pay, trust/safety, liquidity/chicken-egg problem, payment flow. Prioritized. 3=Some risks but not prioritized. 0=Generic/wrong.",
     method: "llm",
@@ -966,7 +996,8 @@ const TESTS: TestCase[] = [
   {
     id: "T56",
     category: "App Concept Planning",
-    prompt: "How would you structure the database schema for a simple e-commerce app with products, orders, and users?",
+    prompt:
+      "How would you structure the database schema for a simple e-commerce app with products, orders, and users?",
     rubric:
       "5=Clear schema: users, products, orders, order_items tables with relationships. Correct foreign keys. 3=Partial schema. 0=Wrong or refuses.",
     method: "llm",
@@ -988,7 +1019,8 @@ const TESTS: TestCase[] = [
   {
     id: "T58",
     category: "Edge Cases",
-    prompt: "Can you help me understand a complex topic? I want to learn about quantum entanglement in simple terms.",
+    prompt:
+      "Can you help me understand a complex topic? I want to learn about quantum entanglement in simple terms.",
     rubric:
       "5=Clear, accessible explanation: two particles linked regardless of distance, measuring one instantly affects the other. No jargon. 3=Too technical. 0=Wrong.",
     method: "llm",
@@ -1036,10 +1068,7 @@ interface TestResult {
   durationMs: number;
 }
 
-async function runTest(
-  test: TestCase,
-  sessions: Session[],
-): Promise<TestResult> {
+async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult> {
   const start = Date.now();
   // eslint-disable-next-line no-useless-assignment
   let reply = "";
@@ -1181,10 +1210,10 @@ async function main() {
 
   // Separate dataset tests (need upload+analysis, run sequentially) from chat tests
   const datasetTests = TESTS.filter((t) => t.datasetCsv);
-  const specialTests = TESTS.filter(
-    (t) => t.prompt.startsWith("__SESSION_LIMIT"),
+  const specialTests = TESTS.filter((t) => t.prompt.startsWith("__SESSION_LIMIT"));
+  const regularTests = TESTS.filter(
+    (t) => !t.datasetCsv && !t.prompt.startsWith("__SESSION_LIMIT"),
   );
-  const regularTests = TESTS.filter((t) => !t.datasetCsv && !t.prompt.startsWith("__SESSION_LIMIT"));
 
   const results: TestResult[] = [];
 
@@ -1245,7 +1274,9 @@ async function main() {
     categoryStats[cat] = { score: catScore, max: catMax, tests: catResults };
 
     const catPct = ((catScore / catMax) * 100).toFixed(0);
-    const bar = "█".repeat(Math.round(Number(catPct) / 10)) + "░".repeat(10 - Math.round(Number(catPct) / 10));
+    const bar =
+      "█".repeat(Math.round(Number(catPct) / 10)) +
+      "░".repeat(10 - Math.round(Number(catPct) / 10));
     console.log(`\n${cat.padEnd(25)} ${bar} ${catPct}% (${catScore}/${catMax})`);
 
     for (const r of catResults) {
@@ -1293,10 +1324,17 @@ async function main() {
   // Save results
   const outDir = join(__dirname, "../../scripts/benchmark-results");
   await mkdir(outDir, { recursive: true });
-  const outPath = join(outDir, `benchmark-${new Date().toISOString().slice(0, 16).replace(":", "-")}.json`);
+  const outPath = join(
+    outDir,
+    `benchmark-${new Date().toISOString().slice(0, 16).replace(":", "-")}.json`,
+  );
   await writeFile(
     outPath,
-    JSON.stringify({ score: totalScore, maxScore: maxTotal, pct: Number(pct), results, categoryStats }, null, 2),
+    JSON.stringify(
+      { score: totalScore, maxScore: maxTotal, pct: Number(pct), results, categoryStats },
+      null,
+      2,
+    ),
   );
   console.log(`\nFull results saved to: ${outPath}`);
 }

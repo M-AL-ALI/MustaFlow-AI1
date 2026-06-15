@@ -50,14 +50,24 @@ function extractJsonFromText(text: string): string {
   return text;
 }
 
-const VALID_ANALYSIS_TYPES = ["kpi", "pareto", "trend", "root-cause", "strategy", "general"] as const;
+const VALID_ANALYSIS_TYPES = [
+  "kpi",
+  "pareto",
+  "trend",
+  "root-cause",
+  "strategy",
+  "general",
+] as const;
 
 function coerceDatasetJson(obj: Record<string, unknown>): Record<string, unknown> {
   const result = { ...obj };
 
   if (result.type !== "dataset-analysis") result.type = "dataset-analysis";
 
-  if (!result.analysisType || !VALID_ANALYSIS_TYPES.includes(result.analysisType as (typeof VALID_ANALYSIS_TYPES)[number])) {
+  if (
+    !result.analysisType ||
+    !VALID_ANALYSIS_TYPES.includes(result.analysisType as (typeof VALID_ANALYSIS_TYPES)[number])
+  ) {
     const at = String(result.analysisType ?? "").toLowerCase();
     if (/kpi|metric|performance|gap/.test(at)) result.analysisType = "kpi";
     else if (/pareto|top.n|80.20|top[- ]/.test(at)) result.analysisType = "pareto";
@@ -242,7 +252,10 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
           );
         }
         throw new Error(
-          `Dataset analysis JSON did not match schema: ${strict.error.issues.slice(0, 3).map((i) => i.message).join("; ")}`,
+          `Dataset analysis JSON did not match schema: ${strict.error.issues
+            .slice(0, 3)
+            .map((i) => i.message)
+            .join("; ")}`,
         );
       },
       (candidate, i, candidateErr) =>
