@@ -1,0 +1,103 @@
+Streaming is now working correctly. Ora is visibly responding word-by-word in the real UI, which satisfies the main streaming requirement.
+
+Move to the next step: Ora Response Experience Polish.
+
+Goal:
+Make Ora feel closer to ChatGPT/DeepSeek from the user’s perspective now that real streaming works.
+
+Important:
+Do not show private chain-of-thought. Ora should not reveal hidden reasoning. The goal is to show safe, brief thinking/status labels and then stream the final answer smoothly.
+
+Next step requirements:
+
+1. Lock the streaming feature
+
+* Keep /api/public-ai/chat/stream working.
+* Keep /api/public-ai/chat fallback working.
+* Keep all streaming tests passing.
+* Add a regression test that proves the UI receives multiple token events, not one final response.
+* Confirm streaming works on web and mobile.
+
+2. Improve the “thinking” experience
+    Before the first word appears, show a polished safe status such as:
+
+* Ora is thinking…
+* Understanding your question…
+* Preparing your answer…
+* Reviewing the details…
+* Reading your file…
+* Analyzing your image…
+* Checking the data…
+
+Do not show hidden reasoning or private thoughts.
+
+3. Smooth transition from thinking to streaming
+
+* Assistant bubble appears immediately.
+* Thinking indicator appears immediately.
+* Once first token arrives, the thinking label fades away.
+* The streamed answer starts in the same bubble.
+* No empty box.
+* No jump.
+* No duplicate bubble.
+
+4. Improve streaming visual polish
+
+* Keep word-by-word streaming.
+* Add subtle fade-in for new words.
+* Keep blinking cursor while streaming.
+* Remove cursor after done.
+* Avoid jitter, layout shift, and broken spacing.
+* Markdown should remain clean while streaming.
+
+5. Improve final message state
+    After streaming finishes:
+
+* Show copy button.
+* Show TTS/speak button if available.
+* Show regenerate/retry if available.
+* Final message should feel complete and stable.
+* No loading status should remain after done.
+
+6. Improve error state
+    If streaming fails after partial text:
+
+* Keep the partial text visible.
+* Show a small inline error.
+* Show Retry.
+* Retry should not duplicate the user message.
+* Retry should replace/continue the assistant response cleanly.
+
+7. Improve scroll behavior
+
+* Auto-scroll only if user is near the bottom.
+* If user scrolls up, stop auto-scroll.
+* Show “Jump to latest.”
+* Mobile keyboard should not cause jumping.
+
+8. Add UX verification checklist
+    Run a real browser/mobile check:
+
+* First bubble appears immediately.
+* Thinking appears immediately.
+* Words stream progressively.
+* Cursor appears while streaming.
+* Cursor disappears after done.
+* Markdown is clean.
+* Scroll behavior works.
+* Mobile works.
+* TTS only fires after final message.
+* No AI Builder / Builder / handoff language appears anywhere.
+
+9. Keep Ora isolated
+    Do not add:
+
+* AI Builder
+* Builder
+* handoff
+* Builder CTA
+* Builder token
+* shared Builder flow
+
+Acceptance:
+This next step is complete only when Ora does not just stream technically, but feels polished, smooth, and premium like ChatGPT/DeepSeek.

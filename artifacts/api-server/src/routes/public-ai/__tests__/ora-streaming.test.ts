@@ -459,6 +459,58 @@ describe("POST /public-ai/chat/stream", () => {
     }
   });
 
+  it("regression: streams MULTIPLE discrete token events incrementally (not one buffered reply)", async () => {
+    process.env.ORA_STREAMING_ENABLED = "true";
+    // Yield three distinct deltas so "multiple" is unambiguous: this proves the
+    // UI receives content as separate token frames as they arrive, rather than a
+    // single buffered final response. This is the core streaming guarantee.
+    streamChatCompletionMock.mockImplementationOnce(async function* () {
+      yield "The ";
+      yield "quick ";
+      yield "fox";
+    });
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send(VALID_BODY)
+      .buffer(true);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+
+    // Ordered list of SSE event names, read from each frame's `event:` line.
+    const eventOrder = res.text
+      .split("\n\n")
+      .map((frame) =>
+        frame
+          .split("\n")
+          .find((l) => l.startsWith("event: "))
+          ?.slice(7)
+          .trim(),
+      )
+      .filter((e): e is string => Boolean(e));
+
+    // There must be at least two discrete token frames (incremental delivery).
+    const tokenCount = eventOrder.filter((e) => e === "token").length;
+    expect(tokenCount).toBeGreaterThanOrEqual(2);
+
+    // Token texts, concatenated in arrival order, reconstruct the full reply.
+    const tokens = (parseSseEvents(res.text)["token"] ?? []) as Array<{ text?: string }>;
+    const streamedText = tokens.map((t) => t.text ?? "").join("");
+    expect(streamedText).toBe("The quick fox");
+
+    // Ordering: first frame is `start`; the final `token` precedes the single
+    // terminal `done` event.
+    expect(eventOrder[0]).toBe("start");
+    const firstTokenIdx = eventOrder.indexOf("token");
+    const lastTokenIdx = eventOrder.lastIndexOf("token");
+    const doneIdx = eventOrder.indexOf("done");
+    expect(firstTokenIdx).toBeGreaterThan(-1);
+    expect(doneIdx).toBeGreaterThan(lastTokenIdx);
+    expect(eventOrder.filter((e) => e === "done").length).toBe(1);
+  });
+
   it("successful stream: done event carries an 'isRealStreaming' field", async () => {
     process.env.ORA_STREAMING_ENABLED = "true";
     const app = await buildTestApp();

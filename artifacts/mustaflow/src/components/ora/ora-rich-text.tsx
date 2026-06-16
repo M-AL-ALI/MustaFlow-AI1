@@ -271,11 +271,15 @@ function parseOraBlocks(text: string): OraRichBlock[] {
   return blocks.length > 0 ? blocks : [{ type: "paragraph", text }];
 }
 
-function renderLinkedSegments(value: string, keyPrefix: string) {
+function renderLinkedSegments(value: string, keyPrefix: string, animate = false) {
   return parseOraSegments(value).map((seg, i) => {
     const key = `${keyPrefix}-seg-${i}`;
     if (seg.type === "text" || !seg.href) {
-      return <span key={key}>{seg.value}</span>;
+      return animate ? (
+        <FadeText key={key} value={seg.value} keyPrefix={key} />
+      ) : (
+        <span key={key}>{seg.value}</span>
+      );
     }
     if (!isSafeHttpUrl(seg.href)) {
       return <span key={key}>{seg.value}</span>;
@@ -287,7 +291,7 @@ function renderLinkedSegments(value: string, keyPrefix: string) {
   });
 }
 
-function renderInline(value: string, keyPrefix: string) {
+function renderInline(value: string, keyPrefix: string, animate = false) {
   return value.split(/(\*\*[^*\n]+?\*\*)/g).flatMap((part, i) => {
     const key = `${keyPrefix}-inline-${i}`;
     if (part.startsWith("**") && part.endsWith("**")) {
@@ -295,12 +299,12 @@ function renderInline(value: string, keyPrefix: string) {
       if (inner) {
         return (
           <strong key={key} className="font-semibold">
-            {renderLinkedSegments(inner, key)}
+            {renderLinkedSegments(inner, key, animate)}
           </strong>
         );
       }
     }
-    return renderLinkedSegments(part, key);
+    return renderLinkedSegments(part, key, animate);
   });
 }
 
@@ -352,11 +356,18 @@ export function OraRichText({
 
   return (
     <div className="space-y-2" aria-live={isStreaming ? "polite" : "off"} aria-atomic="false">
+      {isStreaming && (
+        <style>{`
+          @keyframes ora-word-fade{from{opacity:0}to{opacity:1}}
+          .ora-fade-word{animation:ora-word-fade 260ms ease-out both}
+          @media(prefers-reduced-motion:reduce){.ora-fade-word{animation:none!important;opacity:1!important}}
+        `}</style>
+      )}
       {blocks.map((block, i) => {
         if (block.type === "heading") {
           return (
             <p key={i} className="font-semibold text-foreground">
-              {renderInline(block.text, `heading-${i}`)}
+              {renderInline(block.text, `heading-${i}`, isStreaming && i === blocks.length - 1)}
               {isStreaming && i === blocks.length - 1 && <OraStreamCursor />}
             </p>
           );
@@ -390,7 +401,11 @@ export function OraRichText({
             <ul key={i} className="my-1 list-disc space-y-1 pl-5">
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
-                  {renderInline(item, `ul-${i}-${itemIndex}`)}
+                  {renderInline(
+                    item,
+                    `ul-${i}-${itemIndex}`,
+                    isStreaming && i === blocks.length - 1 && itemIndex === block.items.length - 1,
+                  )}
                   {isStreaming &&
                     i === blocks.length - 1 &&
                     itemIndex === block.items.length - 1 && <OraStreamCursor />}
@@ -405,7 +420,11 @@ export function OraRichText({
             <ol key={i} className="my-1 list-decimal space-y-1 pl-5">
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
-                  {renderInline(item, `ol-${i}-${itemIndex}`)}
+                  {renderInline(
+                    item,
+                    `ol-${i}-${itemIndex}`,
+                    isStreaming && i === blocks.length - 1 && itemIndex === block.items.length - 1,
+                  )}
                   {isStreaming &&
                     i === blocks.length - 1 &&
                     itemIndex === block.items.length - 1 && <OraStreamCursor />}
@@ -446,7 +465,7 @@ export function OraRichText({
 
         return (
           <p key={i} className="whitespace-pre-wrap">
-            {renderInline(block.text, `p-${i}`)}
+            {renderInline(block.text, `p-${i}`, isStreaming && i === blocks.length - 1)}
             {isStreaming && i === blocks.length - 1 && <OraStreamCursor />}
           </p>
         );
@@ -470,4 +489,28 @@ function OraStreamCursor() {
       />
     </>
   );
+}
+
+/**
+ * Renders streaming text as whitespace-preserving word spans, each carrying a
+ * one-shot fade-in animation. Because the animation only fires when a span
+ * first mounts, words that are already visible keep their position and never
+ * re-animate as later tokens arrive — only the freshly appended words fade in.
+ * This keeps the live stream feeling smooth (no whole-bubble flicker, no
+ * jitter) and is used only while a reply is actively streaming.
+ */
+function FadeText({ value, keyPrefix }: { value: string; keyPrefix: string }) {
+  // Split on whitespace runs, keeping the separators so spacing is preserved.
+  return value.split(/(\s+)/).map((part, i) => {
+    if (!part) return null;
+    const key = `${keyPrefix}-w-${i}`;
+    if (/^\s+$/.test(part)) {
+      return <span key={key}>{part}</span>;
+    }
+    return (
+      <span key={key} className="ora-fade-word">
+        {part}
+      </span>
+    );
+  });
 }
