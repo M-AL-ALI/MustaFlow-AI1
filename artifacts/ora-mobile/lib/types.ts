@@ -65,6 +65,13 @@ export interface ChatRequest {
   mode: OraMode;
   referenceSavedMemories: boolean;
   referenceChatHistory: boolean;
+  /**
+   * Set to `true` when this is a fallback retry after a streaming attempt
+   * pre-incremented the session quota but failed before delivering the first
+   * token. Signals the server to acknowledge the prior increment instead of
+   * charging again.
+   */
+  isStreamingFallback?: boolean;
 }
 
 export interface ChatResponse {

@@ -15,7 +15,12 @@ const isOraSecretConfiguredMock = vi.hoisted(() => vi.fn().mockReturnValue(true)
 const markSessionAsPreIncrementedMock = vi.hoisted(() =>
   vi.fn().mockReturnValue({
     token: "pre-incremented-token",
-    payload: { msgCount: 1, imageCount: 0, streamingPreIncremented: true },
+    payload: {
+      msgCount: 1,
+      imageCount: 0,
+      streamingPreIncremented: true,
+      preIncrementedAt: Date.now(),
+    },
   }),
 );
 const acknowledgeStreamingIncrementMock = vi.hoisted(() =>
@@ -544,6 +549,7 @@ describe("POST /public-ai/chat/stream", () => {
     validateSessionMock.mockReturnValue({
       ...FAKE_SESSION,
       streamingPreIncremented: true as const,
+      preIncrementedAt: Date.now() - 5_000,
       msgCount: 1,
     });
     createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
@@ -565,6 +571,7 @@ describe("POST /public-ai/chat/stream", () => {
     validateSessionMock.mockReturnValue({
       ...FAKE_SESSION,
       streamingPreIncremented: true as const,
+      preIncrementedAt: Date.now() - 5_000, // 5 s ago — well within the 60 s TTL
       msgCount: 1,
     });
     createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
@@ -578,5 +585,29 @@ describe("POST /public-ai/chat/stream", () => {
     expect(acknowledgeStreamingIncrementMock).toHaveBeenCalled();
     // incrementMessageCount must NOT be called (would be a double-charge)
     expect(incrementMessageCountMock).not.toHaveBeenCalled();
+  });
+
+  it("/chat with isStreamingFallback:true + STALE preIncrementedAt: falls through to incrementMessageCount", async () => {
+    // Regression: a successful streaming turn left streamingPreIncremented: true
+    // in the cookie, but the pre-increment is older than the TTL window. A later
+    // request claiming isStreamingFallback:true must still be charged normally —
+    // the server must not honour a stale flag regardless of the client assertion.
+    validateSessionMock.mockReturnValue({
+      ...FAKE_SESSION,
+      streamingPreIncremented: true as const,
+      preIncrementedAt: Date.now() - 90_000, // 90 s ago — outside the 60 s TTL
+      msgCount: 1,
+    });
+    createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", "ora-session=stale-pre-increment")
+      .send({ ...VALID_BODY, isStreamingFallback: true });
+    expect(res.status).toBe(200);
+    // incrementMessageCount must be called (stale pre-increment = fresh independent turn)
+    expect(incrementMessageCountMock).toHaveBeenCalled();
+    // acknowledgeStreamingIncrement must NOT be called (TTL expired)
+    expect(acknowledgeStreamingIncrementMock).not.toHaveBeenCalled();
   });
 }, 30000);

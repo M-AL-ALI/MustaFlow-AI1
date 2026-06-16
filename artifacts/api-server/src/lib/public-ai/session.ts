@@ -32,6 +32,13 @@ export interface OraSessionPayload {
    * a fallback retry, preventing an anonymous-session double-count.
    */
   streamingPreIncremented?: true;
+  /**
+   * Unix timestamp (ms) when `streamingPreIncremented` was last set.
+   * chargeSession validates this to ensure the pre-increment is still within
+   * the allowed retry window — preventing a stale flag from a *successful*
+   * streaming turn from being reused to skip a charge on a later independent turn.
+   */
+  preIncrementedAt?: number;
 }
 
 export function createSession(): { token: string; payload: OraSessionPayload } {
@@ -61,6 +68,7 @@ export function validateSession(token: string): OraSessionPayload | null {
       imageAnalysisCount: decoded.imageAnalysisCount ?? 0,
       createdAt: decoded.createdAt,
       ...(decoded.streamingPreIncremented ? { streamingPreIncremented: true as const } : {}),
+      ...(decoded.preIncrementedAt != null ? { preIncrementedAt: decoded.preIncrementedAt } : {}),
     };
   } catch {
     return null;
@@ -94,6 +102,7 @@ export function markSessionAsPreIncremented(session: OraSessionPayload): {
     ...session,
     msgCount: session.msgCount + 1,
     streamingPreIncremented: true,
+    preIncrementedAt: Date.now(),
   };
   const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
   return { token, payload: updated };
@@ -108,7 +117,7 @@ export function acknowledgeStreamingIncrement(session: OraSessionPayload): {
   token: string;
   payload: OraSessionPayload;
 } {
-  const { streamingPreIncremented: _, ...rest } = session;
+  const { streamingPreIncremented: _, preIncrementedAt: __, ...rest } = session;
   const updated: OraSessionPayload = rest;
   const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
   return { token, payload: updated };

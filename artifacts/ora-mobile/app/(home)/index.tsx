@@ -318,7 +318,9 @@ export default function OraChatScreen() {
             }
           } else {
             // Streaming unavailable — use regular (non-streaming) chat.
-            const res = await sendChat(chatReq);
+            // Signal the server that the streaming route may have already
+            // pre-incremented the session quota so it doesn't double-charge.
+            const res = await sendChat({ ...chatReq, isStreamingFallback: true });
             assistant = {
               id: pending.id,
               role: "assistant",

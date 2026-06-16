@@ -779,17 +779,24 @@ const router = Router();
  *
  * The streaming route pre-increments `msgCount` and sets `streamingPreIncremented: true`
  * before flushing SSE headers (the only window where Set-Cookie is possible). If a
- * pre-first-token failure causes the client to silently retry via /chat, the client
- * sends `isStreamingFallback: true` in the request body. This helper honours the
- * skip-increment ONLY when BOTH signals are present, preventing a stale
- * `streamingPreIncremented` cookie from a prior *successful* streaming turn from
- * causing the next independent turn to be uncharged.
+ * pre-first-token failure causes the client to retry via /chat, the client sends
+ * `isStreamingFallback: true`. This helper honours the skip-increment ONLY when
+ * BOTH signals are present AND the pre-increment is within the TTL window —
+ * preventing a stale flag from a prior *successful* streaming turn from being
+ * reused to skip a charge on a later independent turn.
+ *
+ * After a successful stream the flag persists in the cookie (SSE headers are
+ * already flushed; Set-Cookie is no longer possible), so the server uses a
+ * time-bound guard instead of a one-time-consume approach.
  */
+const STREAM_PREINCREMENT_TTL_MS = 60_000;
+
 function chargeSession(
   session: OraSessionPayload,
   isStreamingFallback: boolean,
 ): { token: string; payload: OraSessionPayload } {
-  if (isStreamingFallback && session.streamingPreIncremented) {
+  const age = Date.now() - (session.preIncrementedAt ?? 0);
+  if (isStreamingFallback && session.streamingPreIncremented && age < STREAM_PREINCREMENT_TTL_MS) {
     return acknowledgeStreamingIncrement(session);
   }
   return incrementMessageCount(session);
