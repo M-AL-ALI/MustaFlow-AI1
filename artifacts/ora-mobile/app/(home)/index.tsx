@@ -325,35 +325,25 @@ export default function OraChatScreen() {
             message: text,
             messages: history,
             mode,
-            referenceSavedMemories: true,
-            referenceChatHistory: true,
+            referenceSavedMemories: true as const,
+            referenceChatHistory: true as const,
           };
 
           // Try streaming first; fall back to regular sendChat when unavailable.
           let streamedContent = "";
-          const streamResult = await streamChatNative(
-            chatReq,
-            (delta) => {
-              streamedContent += delta;
-              // Update the pending bubble token-by-token.
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === pendingId);
-                if (idx === -1) return prev;
-                const updated: OraMessage = {
-                  ...prev[idx],
-                  content: prev[idx].content + delta,
-                  pending: false,
-                  isStreaming: true,
-                };
-                const copy = [...prev];
-                copy[idx] = updated;
-                return copy;
-              });
-              scrollToEnd();
-            },
-            abortController.signal,
-          );
+          const streamResult = await streamChatNative(chatReq, (delta) => {
+            streamedContent += delta;
+            const content = streamedContent;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
+              ),
+            );
+          }, abortController.signal);
 
+          if (streamResult === null) {
+            // Feature disabled or ReadableStream missing — total fallback.
+            const res = await sendChat(chatReq);
             assistant = {
               id: pendingId,
               role: "assistant",
@@ -361,15 +351,16 @@ export default function OraChatScreen() {
               sources: res.sources,
               imageUrl: res.imageUrl,
               imageId: res.imageId,
-              viaFallback: true,
-              file:
-                res.fileName && res.fileData && res.mimeType
-                  ? {
+              isStreamingFallback: true,
+              ...(res.fileName && res.fileData && res.mimeType
+                ? {
+                    file: {
                       fileName: res.fileName,
                       fileData: res.fileData,
                       mimeType: res.mimeType,
-                    }
-                  : undefined,
+                    },
+                  }
+                : {}),
             };
             if (res.msgCount != null && res.msgLimit != null) {
               setSession((s) =>
@@ -383,13 +374,11 @@ export default function OraChatScreen() {
               role: "assistant",
               content: streamResult.reply || streamedContent,
               isStreaming: false,
-              ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
+              ...(streamResult.isRealStreaming === false ? { isStreamingFallback: true } : {}),
             };
             if (streamResult.msgCount != null && streamResult.msgLimit != null) {
               setSession((s) =>
-                s
-                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
-                  : s,
+                s ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! } : s,
               );
             }
           } else if (!streamResult.firstToken) {
@@ -409,14 +398,10 @@ export default function OraChatScreen() {
               sources: res.sources,
               imageUrl: res.imageUrl,
               imageId: res.imageId,
-              viaFallback: true,
+              isStreamingFallback: true,
               file:
                 res.fileName && res.fileData && res.mimeType
-                  ? {
-                      fileName: res.fileName,
-                      fileData: res.fileData,
-                      mimeType: res.mimeType,
-                    }
+                  ? { fileName: res.fileName, fileData: res.fileData, mimeType: res.mimeType }
                   : undefined,
             };
             if (res.msgCount != null && res.msgLimit != null) {

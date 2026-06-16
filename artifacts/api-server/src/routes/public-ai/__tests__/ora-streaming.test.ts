@@ -880,3 +880,219 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
     });
   }, 12000);
 }, 30000);
+
+// ---------------------------------------------------------------------------
+// Full token-flow end-to-end tests — verifies real SSE accumulation logic.
+// ---------------------------------------------------------------------------
+
+describe("POST /public-ai/chat/stream — full token flow", () => {
+  beforeEach(() => {
+    process.env.ORA_STREAMING_ENABLED = "true";
+    validateSessionMock.mockReturnValue(FAKE_SESSION);
+    markSessionAsPreIncrementedMock.mockReturnValue({
+      token: "pre-incremented-token",
+      payload: { sessionId: "test-session-id", msgCount: 1, imageCount: 0 },
+    });
+    setSessionCookieMock.mockImplementation(() => undefined);
+
+    // Default: createChatCompletion returns valid suggestions JSON.
+    createChatCompletionMock.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              suggestions: [
+                "What is React?",
+                "How do I learn JavaScript?",
+                "Tell me about TypeScript",
+              ],
+            }),
+          },
+        },
+      ],
+    });
+
+    // Default streamChatCompletion: emit two token chunks immediately.
+    streamChatCompletionMock.mockImplementation(async function* () {
+      yield "Hello";
+      yield " World";
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ORA_STREAMING_ENABLED;
+  });
+
+  it("emits start → token events → done event with correct fields", async () => {
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+
+    const events = parseSSEEvents(res.text);
+
+    // Must have a start event first
+    const startEvent = events.find((e) => e.type === "start");
+    expect(startEvent).toBeDefined();
+    expect(events[0]?.type).toBe("start");
+
+    // Must have token events
+    const tokenEvents = events.filter((e) => e.type === "token");
+    expect(tokenEvents.length).toBeGreaterThanOrEqual(1);
+    expect(tokenEvents.every((e) => typeof e.text === "string")).toBe(true);
+
+    // Accumulated text from tokens must match streamed content
+    const accumulated = tokenEvents.map((e) => e.text as string).join("");
+    expect(accumulated).toBe("Hello World");
+
+    // Must end with a done event
+    const doneEvent = events.find((e) => e.type === "done");
+    expect(doneEvent).toBeDefined();
+    expect(events[events.length - 1]?.type).toBe("done");
+
+    // done payload must carry required fields
+    const payload = doneEvent?.payload as Record<string, unknown>;
+    expect(payload).toBeDefined();
+    expect(typeof payload.msgCount).toBe("number");
+    expect(typeof payload.msgLimit).toBe("number");
+    expect(typeof payload.isRealStreaming).toBe("boolean");
+    // openai provider → isRealStreaming must be true
+    expect(payload.isRealStreaming).toBe(true);
+
+    // reply must equal the trimmed accumulated text
+    expect(payload.reply).toBe("Hello World");
+
+    // mode must be a valid value
+    expect(["instant", "deep"]).toContain(payload.mode);
+  });
+
+  it("populates the suggestions array in the done payload", async () => {
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+
+    const events = parseSSEEvents(res.text);
+    const doneEvent = events.find((e) => e.type === "done");
+    expect(doneEvent).toBeDefined();
+
+    const payload = doneEvent?.payload as Record<string, unknown>;
+    expect(Array.isArray(payload.suggestions)).toBe(true);
+    const suggestions = payload.suggestions as string[];
+    expect(suggestions.length).toBeGreaterThan(0);
+    suggestions.forEach((s) => expect(typeof s).toBe("string"));
+  });
+
+  it("done payload reflects pre-incremented session msgCount and correct msgLimit", async () => {
+    // Pre-incremented payload has msgCount: 1; MSG_LIMIT_VALUE mock is 10.
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+
+    const events = parseSSEEvents(res.text);
+    const donePayload = (events.find((e) => e.type === "done")?.payload ?? {}) as Record<
+      string,
+      unknown
+    >;
+
+    // Anonymous session: msgCount comes from pre-incremented payload (1),
+    // msgLimit comes from MSG_LIMIT_VALUE mock (10).
+    expect(donePayload.msgCount).toBe(1);
+    expect(donePayload.msgLimit).toBe(10);
+  });
+
+  it("mid-stream abort: client closing connection before done suppresses the done event", async () => {
+    // This generator emits one token then pauses, giving the test time to
+    // destroy the TCP socket so the server detects req "close" and aborts.
+    streamChatCompletionMock.mockImplementation(async function* () {
+      yield "Hello";
+      await new Promise<void>((r) => setTimeout(r, 400));
+      yield " World";
+    });
+
+    const app = await buildTestApp();
+
+    await new Promise<void>((resolve, reject) => {
+      const server = http.createServer(app as Parameters<typeof http.createServer>[1]);
+
+      server.listen(0, () => {
+        const addr = server.address() as { port: number };
+        const receivedChunks: string[] = [];
+        let socketDestroyed = false;
+
+        const body = JSON.stringify(VALID_BODY);
+        const clientReq = http.request({
+          hostname: "127.0.0.1",
+          port: addr.port,
+          path: "/public-ai/chat/stream",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body),
+            Cookie: "ora-session=fake",
+          },
+        });
+
+        const finish = (err?: Error) => {
+          server.closeAllConnections?.();
+          server.close(() => {
+            if (err) reject(err);
+            else resolve();
+          });
+        };
+
+        // Safety timeout — prevent the test from hanging indefinitely.
+        const safetyTimer = setTimeout(() => {
+          finish(new Error("Abort test timed out after 8 s"));
+        }, 8000);
+
+        clientReq.on("response", (serverRes) => {
+          serverRes.on("data", (chunk: Buffer) => {
+            receivedChunks.push(chunk.toString());
+
+            // Destroy the socket immediately after the first token event arrives.
+            if (!socketDestroyed && receivedChunks.join("").includes("event: token")) {
+              socketDestroyed = true;
+              clientReq.destroy();
+
+              // Wait long enough for the server to process the close event and
+              // finish its loop before we check the accumulated SSE output.
+              setTimeout(() => {
+                clearTimeout(safetyTimer);
+                const fullBody = receivedChunks.join("");
+                try {
+                  // The route must NOT emit a "done" event after an abort.
+                  expect(fullBody, "done event must not be emitted after abort").not.toContain(
+                    "event: done",
+                  );
+                  finish();
+                } catch (e) {
+                  finish(e as Error);
+                }
+              }, 700);
+            }
+          });
+          serverRes.on("error", () => {});
+        });
+
+        clientReq.on("error", () => {});
+        clientReq.write(body);
+        clientReq.end();
+      });
+
+      server.on("error", (e) => reject(e));
+    });
+  }, 12000);
+}, 30000);
