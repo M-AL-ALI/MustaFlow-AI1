@@ -370,6 +370,15 @@ export interface StreamChatCompletionParams {
   messages: ChatCompletionMessageParam[];
   max_completion_tokens?: number;
   signal?: AbortSignal;
+  /**
+   * Prefer a fast first token over extended provider reasoning. When true, the
+   * Gemini adapter disables Gemini 3's silent "thinking" phase (which otherwise
+   * adds ~4-5s of time-to-first-token), so live token-by-token streaming starts
+   * promptly instead of showing an empty bubble. Currently only affects Gemini;
+   * other providers ignore it. Off by default so deep-reasoning callers (e.g.
+   * the Builder code-generation stream) keep full thinking.
+   */
+  disableThinking?: boolean;
 }
 
 /**
@@ -521,6 +530,18 @@ async function* streamGemini(
   const config: Record<string, any> = {
     maxOutputTokens: params.max_completion_tokens ?? 1200,
   };
+  if (params.disableThinking) {
+    // Disable Gemini 3's "thinking" phase. With thinking enabled the model
+    // reasons silently for several seconds before emitting any output token
+    // (~9s time-to-first-token observed for gemini-3-flash-preview vs ~5s with
+    // it off). For live token-by-token chat that silent gap reads as "nothing
+    // is streaming" and can outlast the client's patience, so latency-sensitive
+    // callers trade extended reasoning for a fast first token. Both router-
+    // selectable Gemini 3 models (flash + 3.1-pro preview) accept
+    // thinkingBudget:0. Deep-reasoning callers (e.g. Builder code generation)
+    // leave this off to keep full thinking.
+    config.thinkingConfig = { thinkingBudget: 0 };
+  }
   if (systemParts.length > 0) {
     config.systemInstruction = { parts: [{ text: systemParts.join("\n\n") }] };
   }

@@ -241,6 +241,11 @@ export async function* streamOraMessage(
         messages,
         max_completion_tokens: maxTokens,
         signal,
+        // Live conversational chat: prioritize a fast first token over Gemini's
+        // multi-second silent "thinking" phase so streaming starts visibly
+        // instead of sitting on an empty bubble. (Builder code-gen leaves this
+        // off to keep full reasoning.)
+        disableThinking: true,
       });
 
       for await (const delta of gen) {
