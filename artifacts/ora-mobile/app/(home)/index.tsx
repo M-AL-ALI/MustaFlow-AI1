@@ -68,6 +68,7 @@ import {
   listConversations,
   saveConversationMessages,
   sendChat,
+  sendChatStream,
   synthesizeSpeech,
   transcribeAudio,
   uploadFile,
@@ -151,6 +152,9 @@ export default function OraChatScreen() {
   });
   const playerRef = useRef<AudioPlayer | null>(null);
   const talkRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Abort controller for any in-flight SSE stream. Aborted on unmount and on
+  // each new send so only one stream is ever active at a time.
+  const streamAbortRef = useRef<AbortController | null>(null);
   const startRecordingRef = useRef<() => Promise<void>>(async () => {});
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
@@ -195,6 +199,10 @@ export default function OraChatScreen() {
       } catch {
         /* ignore */
       }
+      // Abort any in-flight SSE stream so navigation never leaves a dangling
+      // fetch that would try to update unmounted state.
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
     };
   }, []);
 
@@ -250,9 +258,15 @@ export default function OraChatScreen() {
     async (text: string, attch: Attachment | null) => {
       if ((!text && !attch) || sending) return;
 
+      // Abort any previous in-flight stream before starting a new one.
+      streamAbortRef.current?.abort();
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+
       const userMsg: OraMessage = { id: uid(), role: "user", content: text };
-      const pending: OraMessage = {
-        id: uid(),
+      const pendingId = uid();
+      const pendingMsg: OraMessage = {
+        id: pendingId,
         role: "assistant",
         content: "",
         pending: true,
@@ -262,14 +276,16 @@ export default function OraChatScreen() {
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const next = [...messages, userMsg, pending];
+      const next = [...messages, userMsg, pendingMsg];
       setMessages(next);
       setSending(true);
       scrollToEnd();
 
       try {
         let assistant: OraMessage;
+
         if (attch) {
+          // Attachment analysis — no streaming on these specialized endpoints.
           const prompt = text || "Please analyze this attachment.";
           let reply: string;
           if (attch.kind === "image") {
@@ -279,36 +295,113 @@ export default function OraChatScreen() {
           } else {
             reply = (await analyzeDocument(attch.ref, prompt, history)).reply;
           }
-          assistant = { id: pending.id, role: "assistant", content: reply };
+          assistant = { id: pendingId, role: "assistant", content: reply };
         } else {
-          const res = await sendChat({
+          // Plain chat — attempt SSE streaming first.
+          const chatReq = {
             message: text,
             messages: history,
             mode,
             referenceSavedMemories: true,
             referenceChatHistory: true,
-          });
-          assistant = {
-            id: pending.id,
-            role: "assistant",
-            content: res.reply,
-            sources: res.sources,
-            imageUrl: res.imageUrl,
-            imageId: res.imageId,
-            file:
-              res.fileName && res.fileData && res.mimeType
-                ? {
-                    fileName: res.fileName,
-                    fileData: res.fileData,
-                    mimeType: res.mimeType,
-                  }
-                : undefined,
           };
-          if (res.msgCount != null && res.msgLimit != null) {
-            setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
+
+          try {
+            const donePayload = await sendChatStream(
+              chatReq,
+              (delta) => {
+                // Append each token to the message bubble as it arrives.
+                // On the very first token also clear the pending spinner.
+                setMessages((prev) => {
+                  const idx = prev.findIndex((m) => m.id === pendingId);
+                  if (idx === -1) return prev;
+                  const updated: OraMessage = {
+                    ...prev[idx],
+                    content: prev[idx].content + delta,
+                    pending: false,
+                    isStreaming: true,
+                  };
+                  const copy = [...prev];
+                  copy[idx] = updated;
+                  return copy;
+                });
+                scrollToEnd();
+              },
+              abortController.signal,
+            );
+
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: donePayload.reply,
+              sources: donePayload.sources,
+              imageUrl: donePayload.imageUrl,
+              imageId: donePayload.imageId,
+              ...(donePayload.fileName && donePayload.fileData && donePayload.mimeType
+                ? {
+                    file: {
+                      fileName: donePayload.fileName,
+                      fileData: donePayload.fileData,
+                      mimeType: donePayload.mimeType,
+                    },
+                  }
+                : {}),
+            };
+            if (donePayload.msgCount != null && donePayload.msgLimit != null) {
+              setSession((s) =>
+                s
+                  ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit }
+                  : s,
+              );
+            }
+          } catch (streamErr: unknown) {
+            // If the user navigated away, abort is expected — exit silently.
+            if (abortController.signal.aborted) return;
+
+            const asAny = streamErr as Record<string, unknown>;
+
+            if (asAny.streamingFallback) {
+              // Specialist-tool JSON signal, 503, or SSE error before first
+              // token — silently fall back to the non-streaming endpoint.
+              const res = await sendChat(chatReq);
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: res.reply,
+                sources: res.sources,
+                imageUrl: res.imageUrl,
+                imageId: res.imageId,
+                ...(res.fileName && res.fileData && res.mimeType
+                  ? {
+                      file: {
+                        fileName: res.fileName,
+                        fileData: res.fileData,
+                        mimeType: res.mimeType,
+                      },
+                    }
+                  : {}),
+              };
+              if (res.msgCount != null && res.msgLimit != null) {
+                setSession((s) =>
+                  s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
+                );
+              }
+            } else if (typeof asAny.partialContent === "string") {
+              // SSE error arrived after tokens were already emitted — preserve
+              // the partial reply rather than discarding the visible content.
+              assistant = {
+                id: pendingId,
+                role: "assistant",
+                content: asAny.partialContent as string,
+              };
+            } else {
+              // Unexpected error — re-throw so the outer catch can surface it.
+              throw streamErr;
+            }
           }
         }
-        const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));
+
+        const finalMsgs = next.map((m) => (m.id === pendingId ? assistant : m));
         setMessages(finalMsgs);
         scrollToEnd();
         void persist(finalMsgs);
@@ -321,14 +414,18 @@ export default function OraChatScreen() {
           scheduleTalkRestart(700);
         }
       } catch (err) {
+        if (abortController.signal.aborted) return;
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === pending.id ? { ...m, pending: false, error: true, content: msg } : m,
+            m.id === pendingId ? { ...m, pending: false, isStreaming: false, error: true, content: msg } : m,
           ),
         );
       } finally {
         setSending(false);
+        if (streamAbortRef.current === abortController) {
+          streamAbortRef.current = null;
+        }
       }
     },
     [sending, messages, mode, scrollToEnd, persist, scheduleTalkRestart],
@@ -1288,7 +1385,7 @@ function MessageBubble({
           </>
         )}
       </View>
-      {!message.pending && !message.error && (
+      {!message.pending && !message.isStreaming && !message.error && (
         <View
           style={{
             flexDirection: "row",
