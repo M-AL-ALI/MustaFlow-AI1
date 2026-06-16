@@ -372,7 +372,9 @@ export default function OraChatScreen() {
             };
             if (donePayload.msgCount != null && donePayload.msgLimit != null) {
               setSession((s) =>
-                s ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit } : s,
+                s
+                  ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit }
+                  : s,
               );
             }
           } catch (streamErr: unknown) {
