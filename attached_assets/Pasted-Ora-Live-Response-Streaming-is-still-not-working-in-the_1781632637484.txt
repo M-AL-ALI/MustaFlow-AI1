@@ -1,0 +1,99 @@
+Ora Live Response Streaming is still not working in the real UI.
+Current observed behavior:
+•	I send a message.
+•	Ora shows an empty/replying area.
+•	Nothing appears progressively.
+•	Then the full answer appears all at once.
+That is not ChatGPT/DeepSeek-style streaming.
+Do not mark this complete based on tests, backend SSE, or simulated chunking. The acceptance requirement is user-visible streaming in the actual Ora UI.
+Required diagnosis:
+1.	Prove the frontend is calling the streaming endpoint.
+In browser Network tab, confirm the request is:
+POST /api/public-ai/chat/stream
+If it calls:
+POST /api/public-ai/chat
+then streaming is not being used.
+2.	Prove the browser receives chunks progressively.
+In the browser Network response/preview/timing, confirm the SSE chunks arrive over time:
+•	start
+•	status
+•	token
+•	token
+•	token
+•	done
+If all token events arrive at the end, then the stream is still buffered.
+3.	Prove React renders each token immediately.
+Add temporary debug logs in the frontend streaming consumer:
+console.log(”[Ora stream] token received”, Date.now(), token.text)
+console.log(”[Ora stream] message updated”, Date.now(), nextContent.length)
+If tokens are logged progressively but UI does not update, the bug is in React state/rendering.
+If tokens are not logged progressively, the bug is backend/proxy/SSE delivery.
+4.	Prove the assistant bubble is created immediately.
+The Ora bubble should appear before the first token.
+It should not wait for done.
+It should show:
+“Ora is thinking…”
+then transition to streamed text.
+5.	Check feature flags in the running app, not only in env files.
+Confirm:
+•	backend: ORA_STREAMING_ENABLED=true
+•	web: VITE_ORA_STREAMING_ENABLED=true
+•	mobile: EXPO_PUBLIC_ORA_STREAMING_ENABLED=true
+Important:
+Vite env variables are baked at frontend startup/build time. If VITE_ORA_STREAMING_ENABLED was added after the frontend started, the web app must be restarted/rebuilt.
+6.	Check that the app is not silently falling back.
+Add visible/logged debug:
+•	stream path used
+•	fallback path used
+•	fallback reason
+•	first token timestamp
+•	done timestamp
+If fallback is used, explain why.
+7.	Check the SSE parser.
+Make sure the frontend is not waiting until the whole ReadableStream is complete before updating React state.
+The code must update the assistant message inside every token event handler.
+Bad behavior:
+•	collect all chunks
+•	parse after stream ends
+•	then update message once
+Correct behavior:
+•	parse event
+•	if token event, append token immediately
+•	call setMessages immediately
+•	render updated content immediately
+8.	Check markdown renderer.
+If OraRichText hides partial content until markdown is complete, it will look like no streaming.
+During streaming, partial text must still render safely.
+Do not wait for complete markdown before showing text.
+9.	Check buffering.
+Even with SSE headers, a proxy can buffer.
+Verify headers:
+•	Content-Type: text/event-stream
+•	Cache-Control: no-cache, no-transform
+•	X-Accel-Buffering: no
+•	Connection: keep-alive
+Also verify each server write flushes immediately.
+10.	Add a visible streaming debug mode temporarily.
+Show a small dev-only line under the Ora bubble:
+•	Streaming endpoint: yes/no
+•	First token received: timestamp
+•	Token count
+•	Fallback used: yes/no
+•	Done received: yes/no
+Remove or hide this after verification.
+Acceptance rule:
+This is only complete when I can visually see Ora’s answer appear word-by-word or token-by-token in the actual browser UI.
+If the answer still appears all at once, the feature is not complete.
+Do not show private chain-of-thought. The goal is not to reveal hidden reasoning. The goal is:
+•	immediate Ora bubble
+•	safe “Ora is thinking…” status
+•	live streamed answer text
+•	blinking cursor while streaming
+•	clean final message when done
+Also keep Ora fully isolated:
+No AI Builder.
+No Builder.
+No handoff.
+No Builder CTA.
+No Builder token.
+No shared flow.

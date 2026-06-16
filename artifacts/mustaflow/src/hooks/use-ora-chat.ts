@@ -426,8 +426,12 @@ function deriveOraStatus(
       if (isDatasetFileType(attachedFile.fileType, attachedFile.filename)) return "analyzing";
       return "reading";
     }
-    const hasAssistantReply = messages.some((m) => m.role === "assistant");
-    return hasAssistantReply ? "replying" : "thinking";
+    // Show "thinking" while the streaming placeholder is still empty (no
+    // content yet); transition to "replying" once the first token arrives.
+    const hasAssistantContent = messages.some(
+      (m) => m.role === "assistant" && m.content.length > 0,
+    );
+    return hasAssistantContent ? "replying" : "thinking";
   }
   return "idle";
 }
@@ -1474,15 +1478,6 @@ export function useOraChat(): UseOraChatReturn {
           let isRealStreamingPayload = true;
 
           try {
-            // When the streaming feature flag is disabled, bypass /chat/stream
-            // entirely — no probe round-trip — and let the catch block route
-            // directly to /chat using the standard streamingFallback path.
-            if (import.meta.env.VITE_ORA_STREAMING_ENABLED !== "true") {
-              throw Object.assign(new Error("streaming_disabled"), {
-                streamingFallback: true,
-              });
-            }
-
             // Optimistically add a streaming placeholder that updates in real time.
             setMessages((prev) => [
               ...prev,

@@ -145,20 +145,24 @@ export interface StreamOraParams {
 const SIMULATE_THRESHOLD_CHARS = 25;
 
 /**
- * Number of words to group into each simulated token emission. Lower values
- * produce a smoother typing feel but more SSE frames; higher values produce
- * larger jumps. 4 words ≈ 20-30 chars per frame is a natural chunk size that
- * feels similar to GPT-4 streaming output.
+ * Number of words to group into each simulated token emission. 2 words per
+ * group gives a natural word-by-word streaming feel without generating an
+ * excessive number of SSE frames. Lower than 4 (the old default) so the
+ * visual update frequency is doubled, making the streaming effect clearly
+ * perceptible even for short responses.
  */
-const SIMULATE_WORDS_PER_GROUP = 4;
+const SIMULATE_WORDS_PER_GROUP = 2;
 
 /**
- * Milliseconds between simulated token emissions. 30 ms yields ~33 visible
- * text updates per second — enough to look like real streaming without
- * occupying the event loop. Checked against the AbortSignal after each delay
- * so client disconnects are honoured promptly.
+ * Milliseconds between simulated token emissions. 50 ms ≈ 20 visible text
+ * updates per second — perceptibly progressive without appearing slow for
+ * medium-length replies. Checked against the AbortSignal after each delay so
+ * client disconnects are honoured promptly.
+ *
+ * At this rate a 60-word response streams over ~1500 ms; a 240-word response
+ * over ~6000 ms — both clearly visible before the "done" event lands.
  */
-const SIMULATE_DELAY_MS = 30;
+const SIMULATE_DELAY_MS = 50;
 
 /**
  * Split a large provider chunk into word-group sub-tokens with short delays
