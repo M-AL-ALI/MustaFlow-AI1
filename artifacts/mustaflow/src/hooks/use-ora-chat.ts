@@ -111,6 +111,12 @@ export interface OraMessage {
    * token delivery. Useful for developer monitoring of real vs fallback ratios.
    */
   viaFallback?: boolean;
+  /**
+   * Dev-only diagnostic: number of streaming token deltas received so far for
+   * this assistant reply. Surfaced under the bubble in development to make
+   * incremental token streaming visible. Not treated as product state.
+   */
+  streamTokens?: number;
 }
 
 export interface OraSession {
@@ -1484,7 +1490,7 @@ export function useOraChat(): UseOraChatReturn {
             // Optimistically add a streaming placeholder that updates in real time.
             setMessages((prev) => [
               ...prev,
-              { role: "assistant" as const, content: "", isStreaming: true },
+              { role: "assistant" as const, content: "", isStreaming: true, streamTokens: 0 },
             ]);
 
             const donePayload = await consumeOraStream(
@@ -1494,7 +1500,14 @@ export function useOraChat(): UseOraChatReturn {
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
                   if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
-                  return [...prev.slice(0, -1), { ...last, content: last.content + delta }];
+                  return [
+                    ...prev.slice(0, -1),
+                    {
+                      ...last,
+                      content: last.content + delta,
+                      streamTokens: (last.streamTokens ?? 0) + 1,
+                    },
+                  ];
                 });
               },
               streamAbort.signal,

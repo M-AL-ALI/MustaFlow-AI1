@@ -1312,6 +1312,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       )}
                     >
                       <OraRichText text={msg.content} isStreaming={msg.isStreaming} />
+                      {import.meta.env.DEV && msg.isStreaming && (
+                        <span
+                          title="Live token streaming is active via SSE (/chat/stream). This counter increments once per token delta received."
+                          className="mt-1 inline-block select-none rounded border border-emerald-500/20 px-1 py-px font-mono text-[10px] leading-none text-emerald-500/60"
+                        >
+                          streaming live · {msg.streamTokens ?? 0} tokens
+                        </span>
+                      )}
                       {import.meta.env.DEV && msg.viaFallback && !msg.isStreaming && (
                         <span
                           title="This response used the non-streaming fallback path (realProviderStreaming=false or /chat fallback)"
