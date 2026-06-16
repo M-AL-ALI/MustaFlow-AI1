@@ -251,7 +251,6 @@ export async function streamChatNative(
   };
 }
 
-
 export async function uploadFile(file: {
   uri: string;
   name: string;

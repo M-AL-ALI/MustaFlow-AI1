@@ -331,15 +331,19 @@ export default function OraChatScreen() {
 
           // Try streaming first; fall back to regular sendChat when unavailable.
           let streamedContent = "";
-          const streamResult = await streamChatNative(chatReq, (delta) => {
-            streamedContent += delta;
-            const content = streamedContent;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
-              ),
-            );
-          }, abortController.signal);
+          const streamResult = await streamChatNative(
+            chatReq,
+            (delta) => {
+              streamedContent += delta;
+              const content = streamedContent;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
+                ),
+              );
+            },
+            abortController.signal,
+          );
 
           if (streamResult === null) {
             // Feature disabled or ReadableStream missing — total fallback.
@@ -378,7 +382,9 @@ export default function OraChatScreen() {
             };
             if (streamResult.msgCount != null && streamResult.msgLimit != null) {
               setSession((s) =>
-                s ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! } : s,
+                s
+                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
+                  : s,
               );
             }
           } else if (!streamResult.firstToken) {

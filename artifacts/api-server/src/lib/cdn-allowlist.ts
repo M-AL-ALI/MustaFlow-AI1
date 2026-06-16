@@ -57,7 +57,7 @@ export const CDN_ALLOWLIST: CdnPackageEntry[] = [
     urlPatterns: [/unpkg\.com\/lucide/, /cdn\.jsdelivr\.net\/npm\/lucide/],
     versionPattern: /lucide@([\d.]+)/,
     blockedVersions: [],
-    minimumRecommendedVersion: "1.18.0",
+    minimumRecommendedVersion: "1.20.0",
   },
   {
     name: "chartjs",
