@@ -438,13 +438,12 @@ describe("OraMessageActions", () => {
       expect(() => renderActions({ message: imageAnalysisMessage })).not.toThrow();
     });
 
-    it("phase 6 - builder handoff message renders", () => {
-      const handoffMsg: OraMessage = {
+    it("phase 6 - standalone assistant message renders", () => {
+      const msg: OraMessage = {
         role: "assistant",
-        content: "Ready to build your app!",
-        handoffCta: true,
+        content: "Here is a plan for your app idea.",
       };
-      expect(() => renderActions({ message: handoffMsg, isLatestAssistant: true })).not.toThrow();
+      expect(() => renderActions({ message: msg, isLatestAssistant: true })).not.toThrow();
     });
   });
 });

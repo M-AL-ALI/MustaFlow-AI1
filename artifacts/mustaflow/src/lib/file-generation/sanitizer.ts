@@ -4,7 +4,6 @@ const BANNED_EXACT = new Set([
   "fileRef",
   "imageRef",
   "datasetRef",
-  "handoffCta",
   "editedFrom",
   "hadAttachment",
   "suggestions",

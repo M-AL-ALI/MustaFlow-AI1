@@ -192,6 +192,7 @@ STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
 STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"
 E2E_TEST_ENABLED = "true"
 DEEPSEEK_DISABLED = "true"
+ORA_HANDOFF_ENABLED = "false"
 
 [userenv.development]
 DEV_SLOW_BUILD_DELAY_MS = "30000"

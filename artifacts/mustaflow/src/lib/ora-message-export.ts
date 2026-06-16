@@ -200,7 +200,7 @@ function sanitizeMessageForJson(msg: OraMessage): object {
       nextSteps: r.nextSteps,
     };
   }
-  // Intentionally omit: handoffCta, editedFrom, hadAttachment, suggestions
+  // Intentionally omit: editedFrom, hadAttachment, suggestions
   return entry;
 }
 

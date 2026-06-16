@@ -53,7 +53,6 @@ export interface OraMemoryUsed {
 export interface OraMessage {
   role: "user" | "assistant";
   content: string;
-  handoffCta?: boolean;
   datasetResult?: DatasetAnalysisResult;
   suggestions?: string[];
   messageKind?: "image-analysis" | "document-analysis";
@@ -421,7 +420,6 @@ function deriveOraStatus(
 function serializeForStorage(messages: OraMessage[]): Array<{
   role: string;
   content: string;
-  handoffCta?: boolean;
   messageKind?: string;
   suggestions?: string[];
   hadAttachment?: boolean;
@@ -448,7 +446,6 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   return messages.map((m) => ({
     role: m.role,
     content: m.content,
-    ...(m.handoffCta !== undefined ? { handoffCta: m.handoffCta } : {}),
     ...(m.messageKind !== undefined ? { messageKind: m.messageKind } : {}),
     ...(m.suggestions && m.suggestions.length > 0 ? { suggestions: m.suggestions } : {}),
     ...(m.hadAttachment ? { hadAttachment: true } : {}),
@@ -1085,7 +1082,6 @@ export function useOraChat(): UseOraChatReturn {
 
             const data = await apiPost<{
               reply: string;
-              handoffCta: boolean;
               imageAnalysisCount: number;
               imageAnalysisLimit: number;
             }>("/api/public-ai/image-analysis", body);
@@ -1096,7 +1092,6 @@ export function useOraChat(): UseOraChatReturn {
                 {
                   role: "assistant" as const,
                   content: data.reply,
-                  handoffCta: data.handoffCta,
                   messageKind: "image-analysis" as const,
                 },
               ];
@@ -1131,7 +1126,6 @@ export function useOraChat(): UseOraChatReturn {
                 {
                   role: "assistant" as const,
                   content: data.result.summary,
-                  handoffCta: true,
                   datasetResult: data.result,
                 },
               ];
@@ -1144,7 +1138,6 @@ export function useOraChat(): UseOraChatReturn {
             body.fileRef = currentAttachment.fileRef;
             const data = await apiPost<{
               reply: string;
-              handoffCta: boolean;
               msgCount: number;
               msgLimit: number;
               imageCount?: number;
@@ -1159,7 +1152,6 @@ export function useOraChat(): UseOraChatReturn {
                 {
                   role: "assistant" as const,
                   content: data.reply,
-                  handoffCta: data.handoffCta,
                   messageKind: "document-analysis" as const,
                   // Offer to persist a concise summary of this document to Ora's
                   // memory (opt-in). Only for signed-in users — anonymous
@@ -1235,7 +1227,6 @@ export function useOraChat(): UseOraChatReturn {
           }
           const data = await apiPost<{
             reply: string;
-            handoffCta?: boolean;
             suggestions?: string[];
             // Present when the chat route auto-detected a file generation request
             fileName?: string;
@@ -1281,7 +1272,6 @@ export function useOraChat(): UseOraChatReturn {
               {
                 role: "assistant" as const,
                 content: data.reply,
-                handoffCta: data.handoffCta,
                 suggestions: data.suggestions ?? [],
                 ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
                 ...(data.imageId != null ? { imageId: data.imageId } : {}),
