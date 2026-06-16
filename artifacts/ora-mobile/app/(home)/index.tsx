@@ -302,25 +302,11 @@ export default function OraChatScreen() {
             );
           });
 
-          if (streamResult !== null) {
-            assistant = {
-              id: pending.id,
-              role: "assistant",
-              content: streamResult.reply || streamedContent,
-              isStreaming: false,
-            };
-            if (streamResult.msgCount != null && streamResult.msgLimit != null) {
-              setSession((s) =>
-                s
-                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
-                  : s,
-              );
-            }
-          } else {
-            // Streaming unavailable — use regular (non-streaming) chat.
-            // Signal the server that the streaming route may have already
-            // pre-incremented the session quota so it doesn't double-charge.
-            const res = await sendChat({ ...chatReq, isStreamingFallback: true });
+          if (streamResult === null) {
+            // Streaming not available (ReadableStream unsupported or network
+            // error). No pre-increment occurred — use regular chat without a
+            // fallback token.
+            const res = await sendChat(chatReq);
             assistant = {
               id: pending.id,
               role: "assistant",
@@ -342,6 +328,61 @@ export default function OraChatScreen() {
                 s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
               );
             }
+          } else if (streamResult.ok) {
+            // Streaming succeeded — apply final metadata from the done payload.
+            assistant = {
+              id: pending.id,
+              role: "assistant",
+              content: streamResult.reply || streamedContent,
+              isStreaming: false,
+            };
+            if (streamResult.msgCount != null && streamResult.msgLimit != null) {
+              setSession((s) =>
+                s
+                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
+                  : s,
+              );
+            }
+          } else if (!streamResult.firstToken) {
+            // Pre-first-token failure — the stream pre-incremented the session.
+            // Retry via /chat with the signed fallback token so the server
+            // acknowledges the increment without double-charging.
+            const res = await sendChat({
+              ...chatReq,
+              ...(streamResult.fallbackToken
+                ? { streamFallbackToken: streamResult.fallbackToken }
+                : {}),
+            });
+            assistant = {
+              id: pending.id,
+              role: "assistant",
+              content: res.reply,
+              sources: res.sources,
+              imageUrl: res.imageUrl,
+              imageId: res.imageId,
+              file:
+                res.fileName && res.fileData && res.mimeType
+                  ? {
+                      fileName: res.fileName,
+                      fileData: res.fileData,
+                      mimeType: res.mimeType,
+                    }
+                  : undefined,
+            };
+            if (res.msgCount != null && res.msgLimit != null) {
+              setSession((s) =>
+                s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
+              );
+            }
+          } else {
+            // Post-first-token interruption — partial content already rendered
+            // via onToken callbacks. Finalize without retrying.
+            assistant = {
+              id: pending.id,
+              role: "assistant",
+              content: streamedContent,
+              isStreaming: false,
+            };
           }
         }
         const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));

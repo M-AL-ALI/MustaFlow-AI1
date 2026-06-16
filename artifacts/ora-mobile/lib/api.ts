@@ -120,17 +120,37 @@ export function sendChat(req: ChatRequest): Promise<ChatResponse> {
 }
 
 /**
- * Attempts to stream a chat response via Server-Sent Events. Yields token
- * deltas to `onToken` as they arrive, then returns the final done payload with
- * the complete reply and usage counters. Returns `null` when streaming is
- * unavailable: 503, JSON fallback signal, missing ReadableStream support, or
- * any network error — the caller should fall back to `sendChat` in that case.
+ * Result of a native streaming attempt. Discriminated union:
+ *
+ * null
+ *   ReadableStream is unavailable or the network request failed before any
+ *   SSE connection was established. No pre-increment occurred.
+ *
+ * { ok: true }
+ *   Stream completed normally. Use `reply` (or `streamedContent`) as the
+ *   assistant message.
+ *
+ * { ok: false; firstToken: false }
+ *   Stream connected and pre-incremented the session, but failed before the
+ *   first token arrived. The caller should retry via `/chat` and include
+ *   `fallbackToken` (when present) so the server acknowledges the pre-increment
+ *   without double-charging the anonymous-session slot.
+ *
+ * { ok: false; firstToken: true }
+ *   Stream failed after one or more tokens were already forwarded to `onToken`.
+ *   Preserve the partial reply already accumulated by the caller; do NOT retry.
  */
+export type StreamChatNativeResult =
+  | null
+  | { ok: true; reply: string; msgCount?: number; msgLimit?: number }
+  | { ok: false; firstToken: false; fallbackToken?: string }
+  | { ok: false; firstToken: true; reply: string };
+
 export async function streamChatNative(
   req: ChatRequest,
   onToken: (delta: string) => void,
   signal?: AbortSignal,
-): Promise<{ reply: string; msgCount?: number; msgLimit?: number } | null> {
+): Promise<StreamChatNativeResult> {
   if (typeof ReadableStream === "undefined") return null;
 
   const headers = await authHeaders({ "Content-Type": "application/json" });
@@ -155,6 +175,8 @@ export async function streamChatNative(
   const decoder = new TextDecoder();
   let buffer = "";
   let donePayload: { reply: string; msgCount?: number; msgLimit?: number } | null = null;
+  let firstTokenReceived = false;
+  let accumulated = "";
 
   try {
     while (true) {
@@ -185,7 +207,10 @@ export async function streamChatNative(
 
         const type = eventType ?? (parsed.type as string | undefined);
         if (type === "token") {
-          onToken((parsed as { text?: string }).text ?? "");
+          const text = (parsed as { text?: string }).text ?? "";
+          firstTokenReceived = true;
+          accumulated += text;
+          onToken(text);
         } else if (type === "done") {
           const p = ((parsed as { payload?: unknown }).payload ?? parsed) as Record<
             string,
@@ -197,8 +222,16 @@ export async function streamChatNative(
             msgLimit: p.msgLimit as number | undefined,
           };
         } else if (type === "error") {
-          // Server-side error mid-stream; treat as streaming unavailable.
-          return null;
+          const code = (parsed as { code?: string }).code;
+          const fallbackToken = (parsed as { fallbackToken?: string }).fallbackToken;
+          if (!firstTokenReceived || code === "stream_failed") {
+            // Pre-first-token failure — carry the signed token so the caller
+            // can present it to /chat to avoid double-charging the quota.
+            return { ok: false, firstToken: false, fallbackToken };
+          }
+          // Post-first-token interruption — partial text already forwarded.
+          // Do NOT auto-fallback; preserve what the user has seen.
+          return { ok: false, firstToken: true, reply: accumulated };
         }
       }
     }
@@ -206,7 +239,7 @@ export async function streamChatNative(
     reader.releaseLock();
   }
 
-  return donePayload;
+  return donePayload ? { ok: true, ...donePayload } : null;
 }
 
 export async function uploadFile(file: {

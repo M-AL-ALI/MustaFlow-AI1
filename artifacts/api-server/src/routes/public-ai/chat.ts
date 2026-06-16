@@ -7,6 +7,8 @@ import {
   markSessionAsPreIncremented,
   acknowledgeStreamingIncrement,
   setSessionCookie,
+  createStreamFallbackToken,
+  verifyStreamFallbackToken,
   MSG_LIMIT_VALUE,
   type OraSessionPayload,
 } from "../../lib/public-ai/session";
@@ -779,24 +781,22 @@ const router = Router();
  *
  * The streaming route pre-increments `msgCount` and sets `streamingPreIncremented: true`
  * before flushing SSE headers (the only window where Set-Cookie is possible). If a
- * pre-first-token failure causes the client to retry via /chat, the client sends
- * `isStreamingFallback: true`. This helper honours the skip-increment ONLY when
- * BOTH signals are present AND the pre-increment is within the TTL window —
- * preventing a stale flag from a prior *successful* streaming turn from being
- * reused to skip a charge on a later independent turn.
- *
- * After a successful stream the flag persists in the cookie (SSE headers are
- * already flushed; Set-Cookie is no longer possible), so the server uses a
- * time-bound guard instead of a one-time-consume approach.
+ * pre-first-token failure causes the client to retry via /chat, the client presents
+ * the server-signed `streamFallbackToken` from the `stream_failed` SSE event. This
+ * helper honours the skip-increment ONLY when the token is present, the session flag
+ * is set, AND the JWT signature+sessionId verify — preventing both client forgery and
+ * stale-flag reuse after a successful streaming turn (the flag is cleared on first
+ * valid redemption via `acknowledgeStreamingIncrement`).
  */
-const STREAM_PREINCREMENT_TTL_MS = 60_000;
-
 function chargeSession(
   session: OraSessionPayload,
-  isStreamingFallback: boolean,
+  streamFallbackToken?: string,
 ): { token: string; payload: OraSessionPayload } {
-  const age = Date.now() - (session.preIncrementedAt ?? 0);
-  if (isStreamingFallback && session.streamingPreIncremented && age < STREAM_PREINCREMENT_TTL_MS) {
+  if (
+    streamFallbackToken &&
+    session.streamingPreIncremented &&
+    verifyStreamFallbackToken(streamFallbackToken, session)
+  ) {
     return acknowledgeStreamingIncrement(session);
   }
   return incrementMessageCount(session);
@@ -870,7 +870,7 @@ const bodySchema = z.object({
    * (whose quota is tracked server-side and already consumed by the streaming
    * endpoint before the error occurred).
    */
-  isStreamingFallback: z.boolean().default(false),
+  streamFallbackToken: z.string().optional(),
 });
 
 /**
@@ -1008,7 +1008,7 @@ router.post("/public-ai/chat", async (req, res) => {
     oraProjectId,
     temporary,
     conversationId,
-    isStreamingFallback,
+    streamFallbackToken,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -1157,7 +1157,7 @@ router.post("/public-ai/chat", async (req, res) => {
         carriedDocs.length > 0,
         authed?.tier ?? null,
       );
-      const { token, payload } = chargeSession(session, isStreamingFallback);
+      const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1231,7 +1231,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const { generateImage, isImageProviderConfigured } = imageProviderModule;
     if (!isImageProviderConfigured()) {
       await refundOraQuotaFor(authed, quotaKind);
-      const { token, payload } = chargeSession(session, isStreamingFallback);
+      const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1303,7 +1303,7 @@ router.post("/public-ai/chat", async (req, res) => {
           );
         }
       }
-      const { token, payload } = chargeSession(session, isStreamingFallback);
+      const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1376,7 +1376,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const { isWebSearchConfigured, runOraWebSearch } = webSearchModule;
     if (!isWebSearchConfigured()) {
       await refundOraQuotaFor(authed, quotaKind);
-      const { token, payload } = chargeSession(session, isStreamingFallback);
+      const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1413,7 +1413,7 @@ router.post("/public-ai/chat", async (req, res) => {
         wantsVideos: decision.wantsVideos,
         subscriptionTier: oraPlanTier(authed),
       });
-      const { token, payload } = chargeSession(session, isStreamingFallback);
+      const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1731,7 +1731,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // The rolling-window MESSAGE quota was already reserved atomically at the top of the
   // handler (consumeOraQuota). Since the reply succeeded we keep the reservation
   // — no extra increment here, and no refund.
-  const { token, payload } = chargeSession(session, isStreamingFallback);
+  const { token, payload } = chargeSession(session, streamFallbackToken);
   setSessionCookie(res, token);
 
   // Ora is a standalone assistant. It NEVER proactively routes to any external
@@ -2038,7 +2038,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });
     return;
   }
-  const { createChatCompletion, streamChatCompletion } = aiProvidersModule;
+  const { createChatCompletion } = aiProvidersModule;
 
   const { available, openCircuits } = getOraProviderRoutingSnapshot();
   const candidates: ModelCandidate[] = selectOraModelRoute({
@@ -2088,7 +2088,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Import stream helpers BEFORE flushHeaders so anySignal is available for
   // the first-token timeout we create here (timeout must be set up before we
   // start streaming, and cookies must be set before headers flush).
-  const { writeSSE, isRealProviderStreaming, anySignal } =
+  const { writeSSE, isRealProviderStreaming, anySignal, streamOraMessage } =
     await import("../../lib/public-ai/stream-adapter");
 
   // Pre-increment session + set cookie BEFORE flushing SSE headers — once
@@ -2134,68 +2134,41 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   );
   const combinedSignal = anySignal([abortController.signal, firstTokenTimeoutController.signal]);
 
-  // Streaming candidate chain: try each provider in order. Fall back to the
-  // next only if the error occurs BEFORE the first token — once tokens are
-  // flowing we are committed to that provider.
+  // Streaming candidate chain: delegated to `streamOraMessage` which handles
+  // provider-switch logic, fallback semantics, and abort propagation.
+  // The route handles SSE writing, quota accounting, and session cookies.
   const start = Date.now();
   let streamedReply = "";
   let firstTokenSent = false;
   let usedFallback = false;
   let streamProvider: Provider = candidates[0]?.provider ?? "openai";
   let streamModel = candidates[0]?.model ?? primaryModel;
-  let streamError: Error | null = null;
+  let streamFailed = false;
 
   try {
-    candidateLoop: for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      usedFallback = i > 0;
-      streamProvider = candidate.provider;
-      streamModel = candidate.model;
-
-      try {
-        const gen = streamChatCompletion({
-          provider: candidate.provider,
-          model: candidate.model,
-          messages: callMessages,
-          max_completion_tokens: maxTokens,
-          // Use the combined (client-disconnect + first-token timeout) signal
-          // until the first token arrives; after that the timeout is cancelled
-          // and only client-disconnect matters, but combinedSignal stays inert.
-          signal: combinedSignal,
-        });
-
-        for await (const delta of gen) {
-          if (combinedSignal.aborted) break candidateLoop;
-          if (!firstTokenSent) {
-            // Cancel the first-token timeout — we have a live stream.
-            clearTimeout(firstTokenTimer);
-          }
-          firstTokenSent = true;
-          streamedReply += delta;
-          writeSSE(res, { type: "token", text: delta });
+    for await (const event of streamOraMessage({
+      candidates,
+      messages: callMessages,
+      maxTokens,
+      signal: combinedSignal,
+      logger,
+    })) {
+      if (event.type === "candidate") {
+        usedFallback = event.usedFallback;
+        streamProvider = event.provider as Provider;
+        streamModel = event.model;
+      } else if (event.type === "token") {
+        if (!firstTokenSent) {
+          // Cancel the first-token timeout — we have a live stream.
+          clearTimeout(firstTokenTimer);
         }
-
-        break candidateLoop;
-      } catch (candidateErr) {
-        if (firstTokenSent) {
-          streamError = candidateErr as Error;
-          break candidateLoop;
-        }
-        logger.warn(
-          {
-            component: "ora-chat-stream",
-            provider: candidate.provider,
-            model: candidate.model,
-            attempt: i + 1,
-            ofCandidates: candidates.length,
-            err: candidateErr,
-          },
-          "Streaming candidate failed — trying next provider",
-        );
-        if (i === candidates.length - 1) {
-          streamError = candidateErr as Error;
-        }
+        firstTokenSent = true;
+        streamedReply += event.text;
+        writeSSE(res, { type: "token", text: event.text });
+      } else if (event.type === "error") {
+        streamFailed = true;
       }
+      // "done" event: generator finished cleanly; route continues to success path.
     }
   } finally {
     clearTimeout(firstTokenTimer);
@@ -2208,7 +2181,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     return;
   }
 
-  if (streamError || !streamedReply.trim()) {
+  if (streamFailed || !streamedReply.trim()) {
     // Only refund the authed quota when no tokens were delivered. If at least
     // one token was already sent (stream_interrupted), the user received a
     // partial reply and one turn has been consumed — no refund.
@@ -2216,13 +2189,17 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       await refundOraQuotaFor(authed, quotaKind);
     }
     logger.error(
-      { component: "ora-chat-stream", err: streamError },
+      { component: "ora-chat-stream" },
       "Ora streaming failed — all candidates exhausted",
     );
+    // Emit a signed fallback token only on pre-first-token failure so the
+    // client can prove to /chat that the stream pre-incremented the session.
+    const fallbackToken = !firstTokenSent ? createStreamFallbackToken(updatedPayload) : undefined;
     writeSSE(res, {
       type: "error",
       code: firstTokenSent ? "stream_interrupted" : "stream_failed",
       message: "Ora is temporarily unavailable. Please try again in a moment.",
+      ...(fallbackToken !== undefined ? { fallbackToken } : {}),
     });
     res.end();
     return;

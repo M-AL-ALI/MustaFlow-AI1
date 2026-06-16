@@ -1,4 +1,6 @@
 import type { Response } from "express";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { Provider } from "../ai-provider-config";
 
 /**
  * SSE event shapes emitted by /api/public-ai/chat/stream.
@@ -24,7 +26,7 @@ export type OraStreamEvent =
   | { type: "token"; text: string }
   | { type: "status"; label: string }
   | { type: "done"; payload: OraStreamDonePayload }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string; fallbackToken?: string };
 
 export interface OraStreamDonePayload {
   reply: string;
@@ -98,4 +100,97 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
     sig.addEventListener("abort", () => controller.abort(sig.reason), { once: true });
   }
   return controller.signal;
+}
+
+/**
+ * Provider-level event emitted by `streamOraMessage`. Separate from the
+ * SSE-wire `OraStreamEvent` so the route can translate as needed.
+ *
+ * candidate — a new provider/model is being tried (route updates metadata).
+ * token     — one incremental text fragment from the current provider.
+ * done      — all tokens delivered; no error.
+ * error     — streaming failed; `firstTokenSent` tells whether partial text
+ *             was already forwarded so the route can choose code + refund.
+ */
+export type OraStreamProviderEvent =
+  | { type: "candidate"; provider: string; model: string; usedFallback: boolean }
+  | { type: "token"; text: string }
+  | { type: "done" }
+  | { type: "error"; firstTokenSent: boolean; err: Error };
+
+export interface StreamOraParams {
+  candidates: ReadonlyArray<{ provider: Provider; model: string }>;
+  messages: ChatCompletionMessageParam[];
+  maxTokens: number;
+  /** Combined signal: merges client-disconnect + first-token timeout. */
+  signal: AbortSignal;
+  logger: { warn: (obj: object, msg: string) => void };
+}
+
+/**
+ * Provider-switch streaming adapter. Iterates the candidate chain and yields
+ * `OraStreamProviderEvent` values so the route can handle SSE writing, session
+ * accounting, and error recovery without embedding provider-switch logic inline.
+ *
+ * Fallback semantics:
+ * - If a candidate throws BEFORE the first token, log and try the next one.
+ * - If a candidate throws AFTER the first token, emit `error` immediately —
+ *   partial text has already been forwarded so switching providers is unsafe.
+ * - If `signal` aborts mid-stream (client disconnect), return silently so the
+ *   route can detect `abortController.signal.aborted` and close the response.
+ */
+export async function* streamOraMessage(
+  params: StreamOraParams,
+): AsyncGenerator<OraStreamProviderEvent> {
+  const { candidates, messages, maxTokens, signal, logger } = params;
+  // Dynamic import mirrors the pattern used in the non-streaming route and
+  // ensures the vi.mock("../ai-providers") in tests intercepts correctly.
+  const { streamChatCompletion } = await import("../ai-providers");
+
+  let firstTokenSent = false;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    const usedFallback = i > 0;
+    yield { type: "candidate", provider: candidate.provider, model: candidate.model, usedFallback };
+
+    try {
+      const gen = streamChatCompletion({
+        provider: candidate.provider,
+        model: candidate.model,
+        messages,
+        max_completion_tokens: maxTokens,
+        signal,
+      });
+
+      for await (const delta of gen) {
+        if (signal.aborted) return; // client disconnected mid-stream
+        firstTokenSent = true;
+        yield { type: "token", text: delta };
+      }
+
+      yield { type: "done" };
+      return;
+    } catch (candidateErr) {
+      if (firstTokenSent) {
+        // Partial text already forwarded — do not switch providers.
+        yield { type: "error", firstTokenSent: true, err: candidateErr as Error };
+        return;
+      }
+      logger.warn(
+        {
+          component: "ora-chat-stream",
+          provider: candidate.provider,
+          model: candidate.model,
+          attempt: i + 1,
+          ofCandidates: candidates.length,
+          err: candidateErr,
+        },
+        "Streaming candidate failed — trying next provider",
+      );
+      if (i === candidates.length - 1) {
+        yield { type: "error", firstTokenSent: false, err: candidateErr as Error };
+      }
+    }
+  }
 }

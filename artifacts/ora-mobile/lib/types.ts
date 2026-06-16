@@ -66,12 +66,12 @@ export interface ChatRequest {
   referenceSavedMemories: boolean;
   referenceChatHistory: boolean;
   /**
-   * Set to `true` when this is a fallback retry after a streaming attempt
-   * pre-incremented the session quota but failed before delivering the first
-   * token. Signals the server to acknowledge the prior increment instead of
-   * charging again.
+   * Server-signed token from a `stream_failed` SSE error event. Present only
+   * on the non-streaming /chat fallback after a streaming pre-increment that
+   * failed before the first token. Absent means no pre-increment occurred and
+   * the server charges the slot normally.
    */
-  isStreamingFallback?: boolean;
+  streamFallbackToken?: string;
 }
 
 export interface ChatResponse {

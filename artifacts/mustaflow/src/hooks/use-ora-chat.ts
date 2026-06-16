@@ -635,7 +635,13 @@ async function consumeOraStream(
           (parsed as { message: string }).message ?? "Ora is temporarily unavailable.";
         if (!firstTokenReceived) {
           // No tokens yet — silently fall back to /chat (same as 503).
-          throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
+          // Carry the server-signed fallback token so /chat can acknowledge
+          // the pre-increment without double-charging the session quota.
+          const token = (parsed as { fallbackToken?: string }).fallbackToken;
+          throw Object.assign(new Error("streaming_unavailable"), {
+            streamingFallback: true,
+            ...(token ? { streamFallbackToken: token } : {}),
+          });
         }
         // Tokens were already sent; preserve the partial reply.
         throw Object.assign(new Error(message), { partialContent: accumulated });
@@ -1490,6 +1496,7 @@ export function useOraChat(): UseOraChatReturn {
           } catch (streamErr: unknown) {
             const se = streamErr as {
               streamingFallback?: boolean;
+              streamFallbackToken?: string;
               partialContent?: string;
               name?: string;
               status?: number;
@@ -1540,13 +1547,13 @@ export function useOraChat(): UseOraChatReturn {
             }
 
             // Streaming unavailable (503, specialist-tool signal, or error
-            // before first token) — silently fall back to /chat. The
-            // isStreamingFallback flag tells /chat that the streaming route
-            // already pre-incremented the session counter so it should not
-            // double-charge the anonymous-session slot.
+            // before first token) — silently fall back to /chat.
+            // streamFallbackToken (when present) proves to /chat that the
+            // streaming route already pre-incremented the session counter so
+            // it should not double-charge the anonymous-session slot.
             data = await apiPost<ChatResponseData>("/api/public-ai/chat", {
               ...body,
-              isStreamingFallback: true,
+              ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),
             });
           }
 

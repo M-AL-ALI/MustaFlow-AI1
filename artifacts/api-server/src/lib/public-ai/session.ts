@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 
 const SESSION_EXPIRY_SECONDS = 30 * 60;
+const FALLBACK_TOKEN_TTL_SECONDS = 60;
 const MSG_LIMIT = 20;
 const FILE_LIMIT = 3;
 const IMAGE_LIMIT = 2;
@@ -28,17 +29,10 @@ export interface OraSessionPayload {
   /**
    * Set to `true` by the streaming route when it pre-increments msgCount
    * before flushing SSE headers (the only window where Set-Cookie is possible).
-   * Cleared (and msgCount left unchanged) by the non-streaming /chat route on
-   * a fallback retry, preventing an anonymous-session double-count.
+   * Cleared by `acknowledgeStreamingIncrement` on a verified fallback retry,
+   * preventing an anonymous-session double-count.
    */
   streamingPreIncremented?: true;
-  /**
-   * Unix timestamp (ms) when `streamingPreIncremented` was last set.
-   * chargeSession validates this to ensure the pre-increment is still within
-   * the allowed retry window — preventing a stale flag from a *successful*
-   * streaming turn from being reused to skip a charge on a later independent turn.
-   */
-  preIncrementedAt?: number;
 }
 
 export function createSession(): { token: string; payload: OraSessionPayload } {
@@ -68,7 +62,6 @@ export function validateSession(token: string): OraSessionPayload | null {
       imageAnalysisCount: decoded.imageAnalysisCount ?? 0,
       createdAt: decoded.createdAt,
       ...(decoded.streamingPreIncremented ? { streamingPreIncremented: true as const } : {}),
-      ...(decoded.preIncrementedAt != null ? { preIncrementedAt: decoded.preIncrementedAt } : {}),
     };
   } catch {
     return null;
@@ -92,7 +85,7 @@ export function incrementMessageCount(session: OraSessionPayload): {
  * Used by the streaming route to pre-increment msgCount before `flushHeaders`
  * (the only window where a `Set-Cookie` header can be attached).
  * Sets `streamingPreIncremented: true` so the non-streaming /chat route knows
- * not to double-count on a fallback retry.
+ * not to double-count on a verified fallback retry.
  */
 export function markSessionAsPreIncremented(session: OraSessionPayload): {
   token: string;
@@ -102,7 +95,6 @@ export function markSessionAsPreIncremented(session: OraSessionPayload): {
     ...session,
     msgCount: session.msgCount + 1,
     streamingPreIncremented: true,
-    preIncrementedAt: Date.now(),
   };
   const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
   return { token, payload: updated };
@@ -110,17 +102,55 @@ export function markSessionAsPreIncremented(session: OraSessionPayload): {
 
 /**
  * Used by the non-streaming /chat route when it detects a `streamingPreIncremented`
- * flag on the session. The streaming route already consumed one quota slot; this
- * re-signs the JWT to clear the flag without incrementing msgCount further.
+ * flag on the session together with a valid `streamFallbackToken`. The streaming
+ * route already consumed one quota slot; this re-signs the JWT to clear the flag
+ * without incrementing msgCount further.
  */
 export function acknowledgeStreamingIncrement(session: OraSessionPayload): {
   token: string;
   payload: OraSessionPayload;
 } {
-  const { streamingPreIncremented: _, preIncrementedAt: __, ...rest } = session;
+  const { streamingPreIncremented: _, ...rest } = session;
   const updated: OraSessionPayload = rest;
   const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
   return { token, payload: updated };
+}
+
+/**
+ * Create a short-lived signed token that proves the streaming route emitted a
+ * `stream_failed` event (pre-first-token failure) for the given session.
+ *
+ * This token is included in the SSE `stream_failed` error event so the client
+ * can present it on the /chat fallback retry. The server verifies the signature
+ * and `sessionId` match before honouring `acknowledgeStreamingIncrement`,
+ * closing the client-forgery window that a plain boolean flag left open.
+ *
+ * The token is intentionally NOT stored server-side — single-use semantics are
+ * enforced by clearing `streamingPreIncremented` from the session cookie on
+ * the first valid redemption; subsequent requests with a stale cookie (flag
+ * already cleared) fall through to `incrementMessageCount`.
+ */
+export function createStreamFallbackToken(session: OraSessionPayload): string {
+  return jwt.sign({ sessionId: session.sessionId, type: "stream-fallback" }, getSecret(), {
+    expiresIn: FALLBACK_TOKEN_TTL_SECONDS,
+  });
+}
+
+/**
+ * Returns true when `token` is a server-signed stream-fallback JWT that was
+ * issued for the given session. Returns false on any verification failure
+ * (wrong signature, expired, wrong session, missing type claim).
+ */
+export function verifyStreamFallbackToken(token: string, session: OraSessionPayload): boolean {
+  try {
+    const payload = jwt.verify(token, getSecret()) as {
+      sessionId?: string;
+      type?: string;
+    };
+    return payload.type === "stream-fallback" && payload.sessionId === session.sessionId;
+  } catch {
+    return false;
+  }
 }
 
 export function incrementFileCount(session: OraSessionPayload): {

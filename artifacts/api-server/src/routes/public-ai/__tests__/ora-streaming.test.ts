@@ -19,7 +19,6 @@ const markSessionAsPreIncrementedMock = vi.hoisted(() =>
       msgCount: 1,
       imageCount: 0,
       streamingPreIncremented: true,
-      preIncrementedAt: Date.now(),
     },
   }),
 );
@@ -29,6 +28,10 @@ const acknowledgeStreamingIncrementMock = vi.hoisted(() =>
     payload: { msgCount: 1, imageCount: 0 },
   }),
 );
+const createStreamFallbackTokenMock = vi.hoisted(() =>
+  vi.fn().mockReturnValue("fake-fallback-jwt"),
+);
+const verifyStreamFallbackTokenMock = vi.hoisted(() => vi.fn().mockReturnValue(false));
 
 // streamChatCompletion mock: yields two token deltas then returns.
 const streamChatCompletionMock = vi.hoisted(() =>
@@ -47,6 +50,8 @@ vi.mock("../../../lib/public-ai/session", () => ({
   isOraSecretConfigured: isOraSecretConfiguredMock,
   markSessionAsPreIncremented: markSessionAsPreIncrementedMock,
   acknowledgeStreamingIncrement: acknowledgeStreamingIncrementMock,
+  createStreamFallbackToken: createStreamFallbackTokenMock,
+  verifyStreamFallbackToken: verifyStreamFallbackTokenMock,
   MSG_LIMIT_VALUE: 10,
 }));
 
@@ -501,7 +506,7 @@ describe("POST /public-ai/chat/stream", () => {
     const fs = await import("fs");
     const path = await import("path");
     const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
-    const errorBlockStart = src.indexOf("if (streamError || !streamedReply.trim())");
+    const errorBlockStart = src.indexOf("if (streamFailed || !streamedReply.trim())");
     expect(errorBlockStart).toBeGreaterThan(0);
     const errorBlock = src.slice(errorBlockStart, errorBlockStart + 600);
     // The !firstTokenSent guard must exist inside the error block…
@@ -535,21 +540,20 @@ describe("POST /public-ai/chat/stream", () => {
     expect(ev.code).toBe("stream_interrupted");
   });
 
-  // ── chargeSession / isStreamingFallback ───────────────────────────────────
+  // ── chargeSession / streamFallbackToken ───────────────────────────────────
 
-  // The next two tests exercise the non-streaming /chat route to verify
-  // chargeSession correctly guards acknowledgeStreamingIncrement behind the
-  // explicit isStreamingFallback client signal — preventing a stale
-  // streamingPreIncremented cookie from silently undercharging an independent turn.
+  // The next three tests exercise the non-streaming /chat route to verify
+  // chargeSession correctly guards acknowledgeStreamingIncrement behind a
+  // cryptographically-verified streamFallbackToken — preventing a stale
+  // streamingPreIncremented cookie from silently undercharging an independent
+  // turn.
 
-  it("/chat without isStreamingFallback: uses incrementMessageCount even with stale streamingPreIncremented", async () => {
-    // Simulate the failure scenario: a successful streaming turn left a stale
-    // streamingPreIncremented: true cookie. The NEXT user message (a fresh
-    // turn, not a streaming retry) must still be charged normally.
+  it("/chat without streamFallbackToken: uses incrementMessageCount even with stale streamingPreIncremented", async () => {
+    // A successful streaming turn left a stale streamingPreIncremented:true
+    // cookie. The NEXT user message (no token) must be charged normally.
     validateSessionMock.mockReturnValue({
       ...FAKE_SESSION,
       streamingPreIncremented: true as const,
-      preIncrementedAt: Date.now() - 5_000,
       msgCount: 1,
     });
     createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
@@ -557,57 +561,56 @@ describe("POST /public-ai/chat/stream", () => {
     const res = await request(app)
       .post("/public-ai/chat")
       .set("Cookie", "ora-session=stale-flag")
-      .send(VALID_BODY); // no isStreamingFallback → defaults false
+      .send(VALID_BODY); // no streamFallbackToken
     expect(res.status).toBe(200);
-    // incrementMessageCount must be called (normal charge)
+    // incrementMessageCount must be called (normal charge — no token presented)
     expect(incrementMessageCountMock).toHaveBeenCalled();
-    // acknowledgeStreamingIncrement must NOT be called (stale flag ignored)
+    // acknowledgeStreamingIncrement must NOT be called (no valid token)
     expect(acknowledgeStreamingIncrementMock).not.toHaveBeenCalled();
   });
 
-  it("/chat with isStreamingFallback:true + streamingPreIncremented: acknowledges without double-charging", async () => {
-    // Simulate the intended scenario: streaming pre-incremented the session but
-    // failed before the first token; client retries via /chat with the flag.
+  it("/chat with valid streamFallbackToken + streamingPreIncremented: acknowledges without double-charging", async () => {
+    // Streaming pre-incremented the session but failed before the first token.
+    // Client retries via /chat with the server-signed fallback token.
     validateSessionMock.mockReturnValue({
       ...FAKE_SESSION,
       streamingPreIncremented: true as const,
-      preIncrementedAt: Date.now() - 5_000, // 5 s ago — well within the 60 s TTL
       msgCount: 1,
     });
+    // verifyStreamFallbackToken returns true for a valid token
+    verifyStreamFallbackTokenMock.mockReturnValueOnce(true);
     createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
     const app = await buildTestApp();
     const res = await request(app)
       .post("/public-ai/chat")
       .set("Cookie", "ora-session=pre-incremented")
-      .send({ ...VALID_BODY, isStreamingFallback: true });
+      .send({ ...VALID_BODY, streamFallbackToken: "valid-jwt" });
     expect(res.status).toBe(200);
-    // acknowledgeStreamingIncrement must be called (clear flag, no extra increment)
+    // acknowledgeStreamingIncrement must be called (clears flag, no double charge)
     expect(acknowledgeStreamingIncrementMock).toHaveBeenCalled();
     // incrementMessageCount must NOT be called (would be a double-charge)
     expect(incrementMessageCountMock).not.toHaveBeenCalled();
   });
 
-  it("/chat with isStreamingFallback:true + STALE preIncrementedAt: falls through to incrementMessageCount", async () => {
-    // Regression: a successful streaming turn left streamingPreIncremented: true
-    // in the cookie, but the pre-increment is older than the TTL window. A later
-    // request claiming isStreamingFallback:true must still be charged normally —
-    // the server must not honour a stale flag regardless of the client assertion.
+  it("/chat with invalid streamFallbackToken (verify returns false): falls through to incrementMessageCount", async () => {
+    // verifyStreamFallbackToken returns false — expired or forged token.
+    // The server must not honour the pre-increment claim and must charge normally.
     validateSessionMock.mockReturnValue({
       ...FAKE_SESSION,
       streamingPreIncremented: true as const,
-      preIncrementedAt: Date.now() - 90_000, // 90 s ago — outside the 60 s TTL
       msgCount: 1,
     });
+    // verifyStreamFallbackTokenMock defaults to returning false — expired / forged
     createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
     const app = await buildTestApp();
     const res = await request(app)
       .post("/public-ai/chat")
-      .set("Cookie", "ora-session=stale-pre-increment")
-      .send({ ...VALID_BODY, isStreamingFallback: true });
+      .set("Cookie", "ora-session=invalid-token")
+      .send({ ...VALID_BODY, streamFallbackToken: "expired-jwt" });
     expect(res.status).toBe(200);
-    // incrementMessageCount must be called (stale pre-increment = fresh independent turn)
+    // incrementMessageCount must be called (invalid token = fresh independent turn)
     expect(incrementMessageCountMock).toHaveBeenCalled();
-    // acknowledgeStreamingIncrement must NOT be called (TTL expired)
+    // acknowledgeStreamingIncrement must NOT be called (token verification failed)
     expect(acknowledgeStreamingIncrementMock).not.toHaveBeenCalled();
   });
 }, 30000);
