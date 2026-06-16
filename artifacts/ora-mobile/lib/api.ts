@@ -121,58 +121,59 @@ export function sendChat(req: ChatRequest): Promise<ChatResponse> {
 }
 
 /**
- * Consume the /api/public-ai/chat/stream SSE endpoint.
+ * Result of a native streaming attempt. Discriminated union:
  *
- * Calls `onToken` for each incremental text delta. Resolves with the full
- * `done` payload on completion.
+ * null
+ *   ReadableStream is unavailable or the network request failed before any
+ *   SSE connection was established. No pre-increment occurred.
  *
- * Error semantics (mirror the web hook):
- * - `{ streamingFallback: true }` — 503, specialist-tool JSON signal, or SSE
- *   `error` before the first token. Caller should retry via sendChat().
- * - `{ partialContent: string }` — SSE `error` AFTER one or more tokens.
- *   Partial text was already delivered via onToken; caller should preserve it.
- * - `AbortError` — caller aborted (navigation); clean up silently.
- * - `ApiRequestError` — HTTP-level error (401, 429, …); surface to the user.
+ * { ok: true }
+ *   Stream completed normally. Use `reply` (or `streamedContent`) as the
+ *   assistant message.
+ *
+ * { ok: false; firstToken: false }
+ *   Stream connected and pre-incremented the session, but failed before the
+ *   first token arrived. The caller should retry via `/chat` and include
+ *   `fallbackToken` (when present) so the server acknowledges the pre-increment
+ *   without double-charging the anonymous-session slot.
+ *
+ * { ok: false; firstToken: true }
+ *   Stream failed after one or more tokens were already forwarded to `onToken`.
+ *   Preserve the partial reply already accumulated by the caller; do NOT retry.
  */
-export async function sendChatStream(
+export type StreamChatNativeResult =
+  | null
+  | { ok: true; reply: string; msgCount?: number; msgLimit?: number; isRealStreaming?: boolean }
+  | { ok: false; firstToken: false; fallbackToken?: string }
+  | { ok: false; firstToken: true; reply: string };
+
+export async function streamChatNative(
   req: ChatRequest,
   onToken: (delta: string) => void,
-  signal: AbortSignal,
-): Promise<StreamDonePayload> {
-  const headers = await authHeaders({ "Content-Type": "application/json" });
-  const res = await fetch(url("/api/public-ai/chat/stream"), {
-    method: "POST",
-    body: JSON.stringify(req),
-    headers,
-    credentials: "include",
-    signal,
-  });
+  signal?: AbortSignal,
+): Promise<StreamChatNativeResult> {
+  // When the streaming feature flag is disabled, return null immediately so
+  // the caller falls through to the regular sendChat path — no probe request.
+  if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "true") return null;
+  if (typeof ReadableStream === "undefined") return null;
 
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as {
-      error?: string;
-      streamingFallback?: boolean;
-    };
-    if (res.status === 503 || data.streamingFallback) {
-      throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
-    }
-    throw new ApiRequestError(res.status, data.error ?? `HTTP ${res.status}`, data);
+  const headers = await authHeaders({ "Content-Type": "application/json" });
+  let res: Response;
+  try {
+    res = await fetch(url("/api/public-ai/chat/stream"), {
+      method: "POST",
+      body: JSON.stringify(req),
+      headers,
+      credentials: "include",
+      signal,
+    });
+  } catch {
+    return null;
   }
 
   const contentType = res.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/event-stream")) {
-    const data = (await res.json().catch(() => ({}))) as {
-      streamingFallback?: boolean;
-      error?: string;
-    };
-    throw Object.assign(new Error(data.error ?? "streaming_unavailable"), {
-      streamingFallback: true,
-    });
-  }
-
-  if (!res.body) {
-    throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
-  }
+  if (!res.ok || !contentType.includes("text/event-stream")) return null;
+  if (!res.body) return null;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -183,62 +184,71 @@ export async function sendChatStream(
   let firstTokenReceived = false;
   let accumulated = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
 
-    // SSE frames are separated by double newlines.
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
 
-    for (const part of parts) {
-      let eventTypeLine: string | null = null;
-      let dataLine: string | null = null;
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        let eventTypeLine: string | null = null;
+        let dataLine: string | null = null;
 
-      for (const line of part.split("\n")) {
-        if (line.startsWith("event: ")) {
-          eventTypeLine = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          dataLine = line.slice(6).trim();
+        for (const line of part.split("\n")) {
+          if (line.startsWith("event: ")) eventTypeLine = line.slice(7).trim();
+          else if (line.startsWith("data: ")) dataLine = line.slice(6).trim();
         }
-      }
+        if (!dataLine) continue;
 
-      if (!dataLine) continue;
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(dataLine) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-
-      const eventType = eventTypeLine ?? (parsed.type as string | undefined);
-      if (!eventType) continue;
-
-      if (eventType === "start") {
-        // Connection confirmed — no action needed.
-      } else if (eventType === "token") {
-        const text = (parsed as { text: string }).text;
-        firstTokenReceived = true;
-        accumulated += text;
-        onToken(text);
-      } else if (eventType === "done") {
-        donePayload = (parsed as { payload: StreamDonePayload }).payload;
-      } else if (eventType === "error") {
-        const message =
-          (parsed as { message?: string }).message ?? "Ora is temporarily unavailable.";
-        if (!firstTokenReceived) {
-          throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(dataLine) as Record<string, unknown>;
+        } catch {
+          continue;
         }
-        throw Object.assign(new Error(message), { partialContent: accumulated });
+
+        const type = eventTypeLine ?? (parsed.type as string | undefined);
+        if (!type) continue;
+
+        if (type === "start") {
+          // Connection confirmed — no action needed.
+        } else if (type === "token") {
+          const text = (parsed as { text?: string }).text ?? "";
+          firstTokenReceived = true;
+          accumulated += text;
+          onToken(text);
+        } else if (type === "done") {
+          donePayload = (parsed as { payload: StreamDonePayload }).payload;
+        } else if (type === "error") {
+          const code = (parsed as { code?: string }).code;
+          const fallbackToken = (parsed as { fallbackToken?: string }).fallbackToken;
+          if (!firstTokenReceived || code === "stream_failed") {
+            // Pre-first-token failure — carry the signed token so the caller
+            // can present it to /chat to avoid double-charging the quota.
+            return { ok: false, firstToken: false, fallbackToken };
+          }
+          // Post-first-token interruption — partial text already forwarded.
+          // Do NOT auto-fallback; preserve what the user has seen.
+          return { ok: false, firstToken: true, reply: accumulated };
+        }
       }
     }
+  } finally {
+    reader.releaseLock();
   }
 
-  if (!donePayload) {
-    throw new Error("Stream ended without a done event");
-  }
-  return donePayload;
+  if (!donePayload) return null;
+  return {
+    ok: true,
+    reply: donePayload.reply ?? "",
+    msgCount: donePayload.msgCount,
+    msgLimit: donePayload.msgLimit,
+    isRealStreaming: donePayload.isRealStreaming,
+  };
 }
 
 export async function uploadFile(file: {

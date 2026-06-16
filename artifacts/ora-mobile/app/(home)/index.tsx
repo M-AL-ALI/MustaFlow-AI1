@@ -68,7 +68,7 @@ import {
   listConversations,
   saveConversationMessages,
   sendChat,
-  sendChatStream,
+  streamChatNative,
   synthesizeSpeech,
   transcribeAudio,
   uploadFile,
@@ -329,96 +329,110 @@ export default function OraChatScreen() {
             referenceChatHistory: true,
           };
 
-          try {
-            const donePayload = await sendChatStream(
-              chatReq,
-              (delta) => {
-                // Append each token to the message bubble as it arrives.
-                // On the very first token also clear the pending spinner.
-                setMessages((prev) => {
-                  const idx = prev.findIndex((m) => m.id === pendingId);
-                  if (idx === -1) return prev;
-                  const updated: OraMessage = {
-                    ...prev[idx],
-                    content: prev[idx].content + delta,
-                    pending: false,
-                    isStreaming: true,
-                  };
-                  const copy = [...prev];
-                  copy[idx] = updated;
-                  return copy;
-                });
-                scrollToEnd();
-              },
-              abortController.signal,
-            );
+          // Try streaming first; fall back to regular sendChat when unavailable.
+          let streamedContent = "";
+          const streamResult = await streamChatNative(
+            chatReq,
+            (delta) => {
+              streamedContent += delta;
+              // Update the pending bubble token-by-token.
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === pendingId);
+                if (idx === -1) return prev;
+                const updated: OraMessage = {
+                  ...prev[idx],
+                  content: prev[idx].content + delta,
+                  pending: false,
+                  isStreaming: true,
+                };
+                const copy = [...prev];
+                copy[idx] = updated;
+                return copy;
+              });
+              scrollToEnd();
+            },
+            abortController.signal,
+          );
 
             assistant = {
               id: pendingId,
               role: "assistant",
-              content: donePayload.reply,
-              sources: donePayload.sources,
-              imageUrl: donePayload.imageUrl,
-              imageId: donePayload.imageId,
-              ...(donePayload.fileName && donePayload.fileData && donePayload.mimeType
-                ? {
-                    file: {
-                      fileName: donePayload.fileName,
-                      fileData: donePayload.fileData,
-                      mimeType: donePayload.mimeType,
-                    },
-                  }
-                : {}),
+              content: res.reply,
+              sources: res.sources,
+              imageUrl: res.imageUrl,
+              imageId: res.imageId,
+              viaFallback: true,
+              file:
+                res.fileName && res.fileData && res.mimeType
+                  ? {
+                      fileName: res.fileName,
+                      fileData: res.fileData,
+                      mimeType: res.mimeType,
+                    }
+                  : undefined,
             };
-            if (donePayload.msgCount != null && donePayload.msgLimit != null) {
+            if (res.msgCount != null && res.msgLimit != null) {
               setSession((s) =>
-                s ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit } : s,
+                s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
               );
             }
-          } catch (streamErr: unknown) {
-            // If the user navigated away, abort is expected — exit silently.
-            if (abortController.signal.aborted) return;
-
-            const asAny = streamErr as Record<string, unknown>;
-
-            if (asAny.streamingFallback) {
-              // Specialist-tool JSON signal, 503, or SSE error before first
-              // token — silently fall back to the non-streaming endpoint.
-              const res = await sendChat(chatReq);
-              assistant = {
-                id: pendingId,
-                role: "assistant",
-                content: res.reply,
-                sources: res.sources,
-                imageUrl: res.imageUrl,
-                imageId: res.imageId,
-                ...(res.fileName && res.fileData && res.mimeType
-                  ? {
-                      file: {
-                        fileName: res.fileName,
-                        fileData: res.fileData,
-                        mimeType: res.mimeType,
-                      },
-                    }
-                  : {}),
-              };
-              if (res.msgCount != null && res.msgLimit != null) {
-                setSession((s) =>
-                  s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
-                );
-              }
-            } else if (typeof asAny.partialContent === "string") {
-              // SSE error arrived after tokens were already emitted — preserve
-              // the partial reply rather than discarding the visible content.
-              assistant = {
-                id: pendingId,
-                role: "assistant",
-                content: asAny.partialContent as string,
-              };
-            } else {
-              // Unexpected error — re-throw so the outer catch can surface it.
-              throw streamErr;
+          } else if (streamResult.ok) {
+            // Streaming succeeded — apply final metadata from the done payload.
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: streamResult.reply || streamedContent,
+              isStreaming: false,
+              ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
+            };
+            if (streamResult.msgCount != null && streamResult.msgLimit != null) {
+              setSession((s) =>
+                s
+                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
+                  : s,
+              );
             }
+          } else if (!streamResult.firstToken) {
+            // Pre-first-token failure — the stream pre-incremented the session.
+            // Retry via /chat with the signed fallback token so the server
+            // acknowledges the increment without double-charging.
+            const res = await sendChat({
+              ...chatReq,
+              ...(streamResult.fallbackToken
+                ? { streamFallbackToken: streamResult.fallbackToken }
+                : {}),
+            });
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: res.reply,
+              sources: res.sources,
+              imageUrl: res.imageUrl,
+              imageId: res.imageId,
+              viaFallback: true,
+              file:
+                res.fileName && res.fileData && res.mimeType
+                  ? {
+                      fileName: res.fileName,
+                      fileData: res.fileData,
+                      mimeType: res.mimeType,
+                    }
+                  : undefined,
+            };
+            if (res.msgCount != null && res.msgLimit != null) {
+              setSession((s) =>
+                s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
+              );
+            }
+          } else {
+            // Post-first-token interruption — partial content already rendered
+            // via onToken callbacks. Finalize without retrying.
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: streamedContent,
+              isStreaming: false,
+            };
           }
         }
 
