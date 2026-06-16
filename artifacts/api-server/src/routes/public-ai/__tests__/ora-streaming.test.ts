@@ -71,6 +71,8 @@ vi.mock("../../../lib/public-ai/session", () => ({
   isOraSecretConfigured: isOraSecretConfiguredMock,
   createStreamFallbackToken: createStreamFallbackTokenMock,
   verifyStreamFallbackToken: verifyStreamFallbackTokenMock,
+  setSessionCookie: setSessionCookieMock,
+  isOraSecretConfigured: isOraSecretConfiguredMock,
   MSG_LIMIT_VALUE: 10,
 }));
 
@@ -673,7 +675,7 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
     validateSessionMock.mockReturnValue(FAKE_SESSION);
     markSessionAsPreIncrementedMock.mockReturnValue({
       token: "pre-incremented-token",
-      payload: { sessionId: "test-session-id", msgCount: 1, imageCount: 0 },
+      payload: { msgCount: 1, imageCount: 0, streamingPreIncremented: true },
     });
     setSessionCookieMock.mockImplementation(() => undefined);
 
@@ -696,7 +698,7 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
 
     // Default streamChatCompletion: emit two token chunks immediately.
     streamChatCompletionMock.mockImplementation(async function* () {
-      yield " Hello";
+      yield "Hello";
       yield " World";
     });
   });
@@ -730,7 +732,7 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
 
     // Accumulated text from tokens must match streamed content
     const accumulated = tokenEvents.map((e) => e.text as string).join("");
-    expect(accumulated).toBe(" Hello World");
+    expect(accumulated).toBe("Hello World");
 
     // Must end with a done event
     const doneEvent = events.find((e) => e.type === "done");
@@ -799,7 +801,7 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
     // This generator emits one token then pauses, giving the test time to
     // destroy the TCP socket so the server detects req "close" and aborts.
     streamChatCompletionMock.mockImplementation(async function* () {
-      yield " Hello";
+      yield "Hello";
       await new Promise<void>((r) => setTimeout(r, 400));
       yield " World";
     });

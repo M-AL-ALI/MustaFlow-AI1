@@ -31,8 +31,30 @@ export interface OraMessage {
   file?: OraGeneratedFile;
   pending?: boolean;
   error?: boolean;
-  /** True while this assistant message is being streamed token-by-token. */
+  /** True while this assistant message is still being streamed token-by-token. */
   isStreaming?: boolean;
+}
+
+/**
+ * Payload carried by the SSE `done` event from /api/public-ai/chat/stream.
+ * Mirrors the shape the backend stream-adapter emits.
+ */
+export interface StreamDonePayload {
+  reply: string;
+  sources?: OraSource[];
+  fileName?: string;
+  fileData?: string;
+  mimeType?: string;
+  imageUrl?: string;
+  imageId?: number;
+  msgCount: number;
+  msgLimit: number;
+  imageCount?: number;
+  imageLimit?: number;
+  resetsAt?: string | null;
+  windowHours?: number;
+  isRealStreaming?: boolean;
+  streamingFallback?: boolean;
 }
 
 export interface OraSession {

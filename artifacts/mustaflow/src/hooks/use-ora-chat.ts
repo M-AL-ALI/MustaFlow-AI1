@@ -105,11 +105,12 @@ export interface OraMessage {
   /** True while this assistant message is still being streamed token-by-token. */
   isStreaming?: boolean;
   /**
-   * True when the response was retrieved via the non-streaming /chat fallback
-   * rather than real SSE token streaming (e.g. provider unavailable, or the
-   * server returned a JSON streamingFallback signal).
+   * True when this assistant reply did NOT use real provider-level token
+   * streaming — either because the SSE stream endpoint fell back to the plain
+   * /chat API, or because the upstream AI provider does not support incremental
+   * token delivery. Useful for developer monitoring of real vs fallback ratios.
    */
-  isStreamingFallback?: boolean;
+  viaFallback?: boolean;
 }
 
 export interface OraSession {
@@ -1575,15 +1576,6 @@ export function useOraChat(): UseOraChatReturn {
           // single non-streaming completion into the SSE envelope.
           const viaFallback = !usedStreaming || !isRealStreamingPayload;
 
-          // Log the streaming path for every response so the team can monitor
-          // real vs fallback ratios in the browser console.
-          // eslint-disable-next-line no-console
-          console.debug(
-            usedStreaming
-              ? `[Ora] streaming path: SSE — realProviderStreaming=${isRealStreamingPayload}`
-              : "[Ora] streaming path: non-streaming fallback (/chat)",
-          );
-
           // Persist the rolling summary and advance the "already summarized"
           // pointer by exactly what we processed this turn (overflowEnd), so a
           // large backlog drains over successive turns without skipping the
@@ -1601,7 +1593,7 @@ export function useOraChat(): UseOraChatReturn {
               const finalMsg: OraMessage = {
                 ...buildAssistantMsg(data),
                 isStreaming: false,
-                ...(viaFallback ? { isStreamingFallback: true } : {}),
+                ...(viaFallback ? { viaFallback: true } : {}),
               };
               const next = [...prev.slice(0, -1), finalMsg];
               storeTranscript(next);
@@ -1612,10 +1604,7 @@ export function useOraChat(): UseOraChatReturn {
             setMessages((prev) => {
               const next = [
                 ...prev,
-                {
-                  ...buildAssistantMsg(data),
-                  ...(viaFallback ? { isStreamingFallback: true } : {}),
-                },
+                { ...buildAssistantMsg(data), ...(viaFallback ? { viaFallback: true } : {}) },
               ];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);
