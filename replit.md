@@ -103,6 +103,12 @@ If `pnpm db push` prompts for a constraint in a non-interactive shell, run it ma
 - Ora frontend: `artifacts/mustaflow/src/components/ora-panel.tsx`, `artifacts/mustaflow/src/components/ora/*`
 - Support Center: `artifacts/mustaflow/src/pages/support*`, `artifacts/api-server/src/routes/help*`
 
+## Hard Rules
+
+These are permanent, non-negotiable product constraints. Any code, test, or feature that violates them must be rejected.
+
+- **Ora isolation:** Ora must never offer, route to, or mention the AI Builder. Forbidden in any active Ora code path: `handoffCta`, `builder_handoff`, `MustaFlow Builder`, `Continue in Builder`, `ready to build`, any call to `/api/public-ai/handoff/create` or `/api/builder/handoff/exchange`. Enforced by `__tests__/ora-isolation.test.ts` (11 tests).
+
 ## Architecture Decisions
 
 - AI calls are non-streaming Chat Completions. Orval does not generate SSE hooks, so non-streaming keeps server/client contracts simple.
