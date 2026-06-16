@@ -146,6 +146,7 @@ router.use(brainstormRouter);
 
 // ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────
 router.post("/public-ai/chat", oraLimiter);
+router.post("/public-ai/chat/stream", oraLimiter);
 router.use(publicAiRouter);
 
 // ── Help Center + Ora Support Mode ────────────────────────────────────────────

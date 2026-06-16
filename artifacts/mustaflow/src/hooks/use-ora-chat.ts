@@ -102,6 +102,8 @@ export interface OraMessage {
   memoriesUsed?: OraMemoryUsed[];
   /** rolling conversation summary for this conversation. */
   conversationSummary?: string;
+  /** True while this assistant message is still being streamed token-by-token. */
+  isStreaming?: boolean;
 }
 
 export interface OraSession {
@@ -484,6 +486,123 @@ function serializeForStorage(messages: OraMessage[]): Array<{
   }));
 }
 
+// ── SSE stream types (mirror backend stream-adapter.ts) ─────────────────────
+
+interface StreamDonePayload {
+  reply: string;
+  suggestions?: string[];
+  memorySaveCandidate?: string;
+  memorySaveCandidateConfidence?: "high" | "low";
+  memorySaveCandidateSensitive?: boolean;
+  conversationSummary?: string;
+  memoriesUsed?: OraMemoryUsed[];
+  videos?: OraVideo[];
+  mode?: "instant" | "deep";
+  msgCount: number;
+  msgLimit: number;
+  imageCount?: number;
+  imageLimit?: number;
+  resetsAt?: string | null;
+  windowHours?: number;
+  isRealStreaming?: boolean;
+}
+
+type StreamEvent =
+  | { type: "token"; delta: string }
+  | { type: "status"; label: string }
+  | { type: "done"; payload: StreamDonePayload }
+  | { type: "error"; message: string };
+
+/**
+ * Consume the /api/public-ai/chat/stream SSE endpoint.
+ *
+ * Calls `onToken` for each incremental text delta. Resolves with the full
+ * `done` payload on completion.
+ *
+ * Throws with `{ streamingFallback: true }` when the server signals that the
+ * client should retry via /api/public-ai/chat (503 feature-disabled or a
+ * specialist-tool JSON fallback).
+ */
+async function consumeOraStream(
+  base: string,
+  body: Record<string, unknown>,
+  onToken: (delta: string) => void,
+  signal: AbortSignal,
+): Promise<StreamDonePayload> {
+  const res = await authFetch(`${base}/api/public-ai/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      streamingFallback?: boolean;
+    };
+    if (res.status === 503 || data.streamingFallback) {
+      throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
+    }
+    throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status });
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream")) {
+    const data = (await res.json().catch(() => ({}))) as {
+      streamingFallback?: boolean;
+      error?: string;
+    };
+    throw Object.assign(new Error(data.error ?? "streaming_unavailable"), {
+      streamingFallback: true,
+    });
+  }
+
+  if (!res.body) {
+    throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let donePayload: StreamDonePayload | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      for (const line of part.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        let event: StreamEvent;
+        try {
+          event = JSON.parse(raw) as StreamEvent;
+        } catch {
+          continue;
+        }
+        if (event.type === "token") {
+          onToken(event.delta);
+        } else if (event.type === "done") {
+          donePayload = event.payload;
+        } else if (event.type === "error") {
+          throw new Error(event.message);
+        }
+      }
+    }
+  }
+
+  if (!donePayload) {
+    throw new Error("Stream ended without a done event");
+  }
+  return donePayload;
+}
+
 export function useOraChat(): UseOraChatReturn {
   const { isLoaded, isSignedIn } = useUser();
   const [messages, setMessages] = useState<OraMessage[]>([]);
@@ -517,6 +636,7 @@ export function useOraChat(): UseOraChatReturn {
   const sessionInitRef = useRef(false);
   const transcriptRestoredRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
   // Session-local object URLs created for edited images in dev (auth-walled file
   // route). Tracked so we can revoke them on unmount / conversation clear and
   // avoid leaking blob memory across repeated edits.
@@ -525,6 +645,10 @@ export function useOraChat(): UseOraChatReturn {
     const urls = objectUrlsRef.current;
     return () => {
       for (const u of urls) URL.revokeObjectURL(u);
+      // Abort any in-flight SSE stream so navigation never leaves a dangling
+      // fetch that would try to update unmounted state.
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
     };
   }, []);
   // Tracks the conversation id whose messages are currently loaded, so the load
@@ -1225,29 +1349,21 @@ export function useOraChat(): UseOraChatReturn {
           } else {
             body.languageHint = navigator.language;
           }
-          const data = await apiPost<{
+          type ChatResponseData = {
             reply: string;
             suggestions?: string[];
-            // Present when the chat route auto-detected a file generation request
             fileName?: string;
             fileData?: string;
             mimeType?: string;
-            // Present when the chat route generated an image inline
             imageUrl?: string;
-            // Present (authed) when the inline image is editable (generated_images id)
             imageId?: number;
-            // Present when Ora detected a durable fact worth saving to memory
             memorySaveCandidate?: string;
             memorySaveCandidateConfidence?: "high" | "low";
             memorySaveCandidateSensitive?: boolean;
-            // Present when the chat route ran a live web search
             sources?: OraSource[];
-            // Real images + relevant videos found during a live web search
             images?: OraImage[];
             videos?: OraVideo[];
-            // Updated rolling conversation summary (present when chat history on)
             conversationSummary?: string;
-            // Present when saved Ora memories shaped this reply (Ora-scoped only)
             memoriesUsed?: OraMemoryUsed[];
             msgCount: number;
             msgLimit: number;
@@ -1255,7 +1371,107 @@ export function useOraChat(): UseOraChatReturn {
             imageLimit?: number;
             resetsAt?: string | null;
             windowHours?: number;
-          }>("/api/public-ai/chat", body);
+          };
+
+          const buildAssistantMsg = (d: ChatResponseData): OraMessage => ({
+            role: "assistant",
+            content: d.reply,
+            suggestions: d.suggestions ?? [],
+            ...(d.imageUrl ? { imageUrl: d.imageUrl } : {}),
+            ...(d.imageId != null ? { imageId: d.imageId } : {}),
+            ...(d.sources && d.sources.length > 0 ? { sources: d.sources } : {}),
+            ...(d.images && d.images.length > 0 ? { images: d.images } : {}),
+            ...(d.videos && d.videos.length > 0 ? { videos: d.videos } : {}),
+            ...(d.memoriesUsed && d.memoriesUsed.length > 0
+              ? { memoriesUsed: d.memoriesUsed }
+              : {}),
+            ...(d.conversationSummary ? { conversationSummary: d.conversationSummary } : {}),
+            ...(d.memorySaveCandidate
+              ? {
+                  memorySaveCandidate: d.memorySaveCandidate,
+                  ...(d.memorySaveCandidateConfidence
+                    ? { memorySaveCandidateConfidence: d.memorySaveCandidateConfidence }
+                    : {}),
+                  ...(d.memorySaveCandidateSensitive
+                    ? { memorySaveCandidateSensitive: true }
+                    : {}),
+                }
+              : {}),
+            ...(d.fileName && d.fileData && d.mimeType
+              ? {
+                  generatedFile: {
+                    fileName: d.fileName,
+                    fileData: d.fileData,
+                    mimeType: d.mimeType,
+                    format: d.fileName.split(".").pop() as GeneratedFile["format"],
+                  } satisfies GeneratedFile,
+                }
+              : {}),
+          });
+
+          // Streaming-first: try /chat/stream, fall back to /chat on signal.
+          // Abort any in-flight stream from a prior concurrent send.
+          streamAbortRef.current?.abort();
+          const streamAbort = new AbortController();
+          streamAbortRef.current = streamAbort;
+
+          let data: ChatResponseData;
+          let usedStreaming = false;
+
+          try {
+            // Optimistically add a streaming placeholder that updates in real time.
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant" as const, content: "", isStreaming: true },
+            ]);
+
+            const donePayload = await consumeOraStream(
+              BASE,
+              body,
+              (delta) => {
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
+                  return [...prev.slice(0, -1), { ...last, content: last.content + delta }];
+                });
+              },
+              streamAbort.signal,
+            );
+
+            data = donePayload as ChatResponseData;
+            usedStreaming = true;
+          } catch (streamErr: unknown) {
+            const se = streamErr as {
+              streamingFallback?: boolean;
+              name?: string;
+              status?: number;
+            };
+
+            // Remove the optimistic placeholder if it's still there.
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === "assistant" && last.isStreaming) return prev.slice(0, -1);
+              return prev;
+            });
+
+            if (se.name === "AbortError") {
+              // Mid-stream navigation — abort cleanly, no error shown.
+              streamAbortRef.current = null;
+              return;
+            }
+
+            if (!se.streamingFallback) {
+              // Real error (429, 401, network, etc.) — rethrow for the outer
+              // catch block to surface the right message.
+              streamAbortRef.current = null;
+              throw streamErr;
+            }
+
+            // Streaming unavailable (503 or specialist-tool signal) — fall back.
+            data = await apiPost<ChatResponseData>("/api/public-ai/chat", body);
+          }
+
+          streamAbortRef.current = null;
 
           // Persist the rolling summary and advance the "already summarized"
           // pointer by exactly what we processed this turn (overflowEnd), so a
@@ -1266,52 +1482,25 @@ export function useOraChat(): UseOraChatReturn {
             summarizedUpToRef.current = overflowEnd;
           }
 
-          setMessages((prev) => {
-            const next = [
-              ...prev,
-              {
-                role: "assistant" as const,
-                content: data.reply,
-                suggestions: data.suggestions ?? [],
-                ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
-                ...(data.imageId != null ? { imageId: data.imageId } : {}),
-                ...(data.sources && data.sources.length > 0 ? { sources: data.sources } : {}),
-                ...(data.images && data.images.length > 0 ? { images: data.images } : {}),
-                ...(data.videos && data.videos.length > 0 ? { videos: data.videos } : {}),
-                ...(data.memoriesUsed && data.memoriesUsed.length > 0
-                  ? { memoriesUsed: data.memoriesUsed }
-                  : {}),
-                ...(data.conversationSummary
-                  ? { conversationSummary: data.conversationSummary }
-                  : {}),
-                ...(data.memorySaveCandidate
-                  ? {
-                      memorySaveCandidate: data.memorySaveCandidate,
-                      ...(data.memorySaveCandidateConfidence
-                        ? { memorySaveCandidateConfidence: data.memorySaveCandidateConfidence }
-                        : {}),
-                      ...(data.memorySaveCandidateSensitive
-                        ? { memorySaveCandidateSensitive: true }
-                        : {}),
-                    }
-                  : {}),
-                ...(data.fileName && data.fileData && data.mimeType
-                  ? {
-                      generatedFile: {
-                        fileName: data.fileName,
-                        fileData: data.fileData,
-                        mimeType: data.mimeType,
-                        // Infer format from file extension
-                        format: data.fileName.split(".").pop() as GeneratedFile["format"],
-                      } satisfies GeneratedFile,
-                    }
-                  : {}),
-              },
-            ];
-            storeTranscript(next);
-            if (isSignedIn) saveToServer(next);
-            return next;
-          });
+          if (usedStreaming) {
+            // Patch the streaming placeholder with final metadata from the done event.
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.role !== "assistant") return prev;
+              const finalMsg: OraMessage = { ...buildAssistantMsg(data), isStreaming: false };
+              const next = [...prev.slice(0, -1), finalMsg];
+              storeTranscript(next);
+              if (isSignedIn) saveToServer(next);
+              return next;
+            });
+          } else {
+            setMessages((prev) => {
+              const next = [...prev, buildAssistantMsg(data)];
+              storeTranscript(next);
+              if (isSignedIn) saveToServer(next);
+              return next;
+            });
+          }
           setSession((prev) => mergeUsage(prev, data));
         }
       };

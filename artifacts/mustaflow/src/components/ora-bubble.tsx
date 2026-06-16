@@ -1188,7 +1188,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                         dir="auto"
                         className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap break-words"
                       >
-                        <OraRichText text={msg.content} />
+                        <OraRichText text={msg.content} isStreaming={msg.isStreaming} />
                       </div>
                     )}
 

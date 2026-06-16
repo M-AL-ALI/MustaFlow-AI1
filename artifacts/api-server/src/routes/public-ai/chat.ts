@@ -631,7 +631,7 @@ const CROSS_CONV_EXCERPT_CHARS = 500;
  * Callers gate this on `referenceChatHistory` being on and the chat NOT being
  * temporary.
  */
-async function buildCrossConversationContext(
+export async function buildCrossConversationContext(
   userId: string,
   oraProjectId: number | null | undefined,
   currentMessage: string,
@@ -1731,6 +1731,500 @@ router.post("/public-ai/chat", async (req, res) => {
     mode: deepAllowed ? "deep" : "instant",
     ...usage,
   });
+});
+
+// ── Streaming chat: POST /public-ai/chat/stream ─────────────────────────────
+// Requires ORA_STREAMING_ENABLED=true; falls back to /chat when absent.
+// Specialist tools (file_gen, image_gen, search) return a JSON
+// { streamingFallback: true } signal so the client can retry via /chat.
+// Conversational replies stream tokens using streamChatCompletion with the
+// same multi-provider candidate chain as the non-streaming route.
+router.post("/public-ai/chat/stream", async (req, res) => {
+  if (!process.env.ORA_STREAMING_ENABLED) {
+    res.status(503).json({ error: "Streaming is not enabled on this server." });
+    return;
+  }
+
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  const {
+    message,
+    messages,
+    language,
+    languageHint,
+    mode,
+    referenceSavedMemories,
+    referenceChatHistory,
+    documentRefs,
+    conversationSummary: priorSummary,
+    summarizeMessages,
+    oraProjectId,
+    temporary,
+    conversationId,
+  } = parsed.data;
+
+  const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+  if (!sessionToken) {
+    res.status(401).json({ error: "No active session. Please start a session first." });
+    return;
+  }
+  const session = validateSession(sessionToken);
+  if (!session) {
+    res.status(401).json({ error: "Session expired. Please start a new session." });
+    return;
+  }
+
+  if (!scanUserInput(message)) {
+    res
+      .status(400)
+      .json({ error: "Your message contains patterns that cannot be processed. Please rephrase." });
+    return;
+  }
+
+  const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
+  const authed = await resolveAuthedOraUser(req);
+  const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
+
+  if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
+    res.status(429).json({
+      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at mustaflow.app for unlimited conversations, memory, image generation, and more.`,
+      upgradeCta: true,
+      signUpUrl: "https://mustaflow.app/sign-up",
+      msgCount: session.msgCount,
+      msgLimit: MSG_LIMIT_VALUE,
+    });
+    return;
+  }
+  if (authed && session.msgCount >= effectiveMsgLimit) {
+    const usage = await oraUsageResponse(authed, session.msgCount);
+    res.status(429).json({
+      error:
+        "You've reached your Ora message limit for this period. Upgrade your plan or wait for your window to reset.",
+      upgradeCta: true,
+      ...usage,
+    });
+    return;
+  }
+
+  const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
+
+  const decision = await routeOraMessage({
+    message,
+    mode,
+    recentMessages: messages.slice(-8),
+  });
+  const deepAllowed = decision.tool === "deep_thinking";
+
+  const carriedDocs = buildCarriedDocumentContext(documentRefs, session.sessionId, message);
+
+  const access = checkToolAccess(decision.tool, {
+    authed: !!authed,
+    isPaid: authed?.isPaid ?? false,
+  });
+  if (!access.allowed) {
+    if (access.denyCode === "deep_paid_only") {
+      res.json({
+        reply: authed
+          ? "Deep Thinking is available on the Core Pack and Deep Wave plans. It reasons step by step for more thorough, considered answers. Upgrade to unlock it — or keep chatting in Instant mode."
+          : "Deep Thinking is available to signed-in MustaFlow members on the Core Pack and Deep Wave plans. Sign up to unlock it — or keep chatting here in Instant mode.",
+        upgradeCta: true,
+        mode: "instant",
+        msgCount: session.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
+    if (access.denyCode === "image_signin_required") {
+      res.json({
+        reply: IMAGE_GENERATE_CTA,
+        upgradeCta: true,
+        msgCount: session.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
+    if (access.denyCode === "search_signin_required") {
+      res.json({
+        reply: SEARCH_SIGNIN_CTA,
+        upgradeCta: true,
+        msgCount: session.msgCount,
+        msgLimit: effectiveMsgLimit,
+      });
+      return;
+    }
+    res.json({
+      reply:
+        "That capability isn't available yet. I can still help you plan it, analyze your data, generate files, or talk it through.",
+      msgCount: session.msgCount,
+      msgLimit: effectiveMsgLimit,
+    });
+    return;
+  }
+
+  // Specialist tools: fall back to the non-streaming /chat endpoint. The
+  // client receives this JSON signal and immediately re-issues the request to
+  // /api/public-ai/chat which has all the specialised logic.
+  if (
+    decision.tool === "file_generation" ||
+    decision.tool === "image_generation" ||
+    decision.tool === "image_editing" ||
+    decision.tool === "search"
+  ) {
+    res.json({ streamingFallback: true, tool: decision.tool });
+    return;
+  }
+
+  const quotaKind: OraQuotaKind = "message";
+  if (authed) {
+    const { consumeOraQuota } = await import("../../lib/public-ai/ora-usage");
+    const quota = await consumeOraQuota(authed.userId, authed.tier, quotaKind);
+    if (!quota.allowed) {
+      const usage = await oraUsageResponse(authed, session.msgCount);
+      res.status(429).json({
+        error: `You've used all ${quota.limit} Ora messages in your current window. Upgrade for a higher limit, or wait for your window to reset.`,
+        upgradeCta: true,
+        ...usage,
+      });
+      return;
+    }
+  }
+
+  // ── Conversational answer / deep thinking (token streaming) ─────────────────
+
+  const classifierResult = {
+    intent: decision.intent,
+    confidence: decision.confidence,
+    topic: decision.topic,
+  };
+
+  const usesMini =
+    !deepAllowed &&
+    classifierResult.intent === "simple_faq" &&
+    classifierResult.confidence === "high";
+  const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
+  const planTier = oraPlanTier(authed);
+  const primaryModel = openAiModelForOraRoute(routeTier, planTier);
+  const expertiseProfile = buildOraExpertiseProfile({
+    message,
+    topic: classifierResult.topic,
+    planTier,
+    routeTier,
+    intent: classifierResult.intent,
+    confidence: classifierResult.confidence,
+    hasDocumentContext: carriedDocs.trim().length > 0,
+  });
+  const maxTokens = expertiseProfile.maxTokens;
+  const isMultilingual =
+    isNonEnglishLanguage(language) ||
+    ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
+
+  const historyMessages: Array<{ role: "user" | "assistant"; content: string }> =
+    referenceChatHistory
+      ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
+      : [];
+
+  const memory =
+    authed && referenceSavedMemories && !temporary
+      ? await buildMemoryContext(authed.userId, oraProjectId, message, planTier)
+      : { text: "", used: [] };
+
+  const crossConvContext =
+    authed && referenceChatHistory && !temporary
+      ? await buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
+      : "";
+
+  const profileContext = authed ? await buildProfileContext(authed.userId) : "";
+
+  let conversationSummary =
+    referenceChatHistory && !temporary ? (priorSummary ?? "").trim() : "";
+  if (referenceChatHistory && !temporary && summarizeMessages.length > 0) {
+    const { updateConversationSummary } = await import(
+      "../../lib/public-ai/conversation-summary"
+    );
+    conversationSummary = await updateConversationSummary({
+      priorSummary: conversationSummary,
+      newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
+      subscriptionTier: planTier,
+    });
+  }
+  const summaryContext = conversationSummary
+    ? `\n\n## Earlier in this conversation\nThe following is a running summary of earlier parts of THIS conversation that have scrolled out of the recent message window. Treat these as established context and stay consistent with them, but defer to anything more recent:\n${conversationSummary}`
+    : "";
+  const memoryStatusContext = buildMemoryStatusContext({
+    authed: !!authed,
+    temporary,
+    referenceSavedMemories,
+    message,
+    memoryUsedCount: memory.used.length,
+    hasCrossConversationContext: crossConvContext.trim().length > 0,
+  });
+
+  const systemPrompt =
+    buildSystemPrompt(language, languageHint, !!authed) +
+    (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
+    (referenceAnalysisTurn
+      ? PASTED_REFERENCE_ANALYSIS_ADDENDUM + summarizePastedReferenceSignals(message)
+      : "") +
+    expertiseProfile.systemAddendum +
+    profileContext +
+    memoryStatusContext +
+    memory.text +
+    crossConvContext +
+    summaryContext;
+
+  const callMessages = [
+    { role: "system" as const, content: systemPrompt },
+    ...historyMessages,
+    ...(carriedDocs ? [{ role: "user" as const, content: carriedDocs }] : []),
+    { role: "user" as const, content: message },
+  ];
+
+  let aiProvidersModule: typeof import("../../lib/ai-providers");
+  try {
+    aiProvidersModule = await import("../../lib/ai-providers");
+  } catch (importErr) {
+    await refundOraQuotaFor(authed, quotaKind);
+    logger.error(
+      { component: "ora-chat-stream", err: importErr },
+      "Failed to load AI providers module",
+    );
+    res
+      .status(502)
+      .json({ error: "Ora is temporarily unavailable. Please try again in a moment." });
+    return;
+  }
+  const { createChatCompletion, streamChatCompletion } = aiProvidersModule;
+
+  const { available, openCircuits } = getOraProviderRoutingSnapshot();
+  const candidates: ModelCandidate[] = selectOraModelRoute({
+    tier: routeTier,
+    subscriptionTier: planTier,
+    topic: classifierResult.topic,
+    intent: classifierResult.intent,
+    confidence: classifierResult.confidence,
+    multilingual: isMultilingual,
+    hasDocumentContext: carriedDocs.trim().length > 0,
+    available,
+    openCircuits,
+    openaiModel: primaryModel,
+  });
+
+  // Fire suggestion generation in parallel with the main stream.
+  const topicGuidance = topicSuggestionGuidance(classifierResult.topic);
+  const suggestionSystemPrompt = [
+    "You generate follow-up questions for a conversational AI assistant named Ora.",
+    'Given the conversation so far, return a JSON object with a "suggestions" array of 2-3 short follow-up questions the user could ask next.',
+    "Each question must be under 60 characters, natural, and non-repetitive.",
+    "",
+    `Detected conversation topic: ${classifierResult.topic}`,
+    `Topic guidance: ${topicGuidance}`,
+    "",
+    'Generate follow-ups that are specific and useful for this topic — avoid generic questions like "Tell me more" or "What else can you do?".',
+  ].join("\n");
+  const recentHistory = historyMessages.slice(-4);
+  const suggestionPromise = referenceAnalysisTurn
+    ? Promise.resolve(null)
+    : createChatCompletion({
+        provider: "openai",
+        model: "gpt-5-mini",
+        messages: [
+          { role: "system" as const, content: suggestionSystemPrompt },
+          ...recentHistory,
+          { role: "user" as const, content: message },
+          {
+            role: "user" as const,
+            content: "Suggest 2-3 short follow-up questions I could ask next.",
+          },
+        ],
+        response_format: { type: "json_object" },
+        max_completion_tokens: 200,
+      }).catch(() => null);
+
+  // Pre-increment session + set cookie BEFORE flushing SSE headers — once
+  // headers are flushed no further Set-Cookie headers can be added.
+  // On stream failure the session count may be off by 1; the DB-backed quota
+  // (consumeOraQuota above) is the authoritative rate gate for signed-in users,
+  // so this minor inaccuracy is acceptable.
+  const { token: updatedToken, payload: updatedPayload } = incrementMessageCount(session);
+  setSessionCookie(res, updatedToken);
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  // Abort the stream when the client closes the connection.
+  const abortController = new AbortController();
+  req.on("close", () => abortController.abort());
+
+  const { writeSSE, isRealProviderStreaming } = await import("./stream-adapter");
+
+  // Streaming candidate chain: try each provider in order. Fall back to the
+  // next only if the error occurs BEFORE the first token — once tokens are
+  // flowing we are committed to that provider.
+  const start = Date.now();
+  let streamedReply = "";
+  let firstTokenSent = false;
+  let usedFallback = false;
+  let streamProvider: Provider = candidates[0]?.provider ?? "openai";
+  let streamModel = candidates[0]?.model ?? primaryModel;
+  let streamError: Error | null = null;
+
+  candidateLoop: for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    usedFallback = i > 0;
+    streamProvider = candidate.provider;
+    streamModel = candidate.model;
+
+    try {
+      const gen = streamChatCompletion({
+        provider: candidate.provider,
+        model: candidate.model,
+        messages: callMessages,
+        max_completion_tokens: maxTokens,
+        signal: abortController.signal,
+      });
+
+      for await (const delta of gen) {
+        if (abortController.signal.aborted) break candidateLoop;
+        firstTokenSent = true;
+        streamedReply += delta;
+        writeSSE(res, { type: "token", delta });
+      }
+
+      break candidateLoop;
+    } catch (candidateErr) {
+      if (firstTokenSent) {
+        streamError = candidateErr as Error;
+        break candidateLoop;
+      }
+      logger.warn(
+        {
+          component: "ora-chat-stream",
+          provider: candidate.provider,
+          model: candidate.model,
+          attempt: i + 1,
+          ofCandidates: candidates.length,
+          err: candidateErr,
+        },
+        "Streaming candidate failed — trying next provider",
+      );
+      if (i === candidates.length - 1) {
+        streamError = candidateErr as Error;
+      }
+    }
+  }
+
+  const latencyMs = Date.now() - start;
+
+  if (abortController.signal.aborted) {
+    res.end();
+    return;
+  }
+
+  if (streamError || !streamedReply.trim()) {
+    await refundOraQuotaFor(authed, quotaKind);
+    logger.error(
+      { component: "ora-chat-stream", err: streamError },
+      "Ora streaming failed — all candidates exhausted",
+    );
+    writeSSE(res, {
+      type: "error",
+      message: "Ora is temporarily unavailable. Please try again in a moment.",
+    });
+    res.end();
+    return;
+  }
+
+  logger.info(
+    {
+      component: "ora-chat-stream",
+      model: streamModel,
+      provider: streamProvider,
+      intent: classifierResult.intent,
+      confidence: classifierResult.confidence,
+      topic: classifierResult.topic,
+      routeTier,
+      planTier,
+      expertiseDomain: expertiseProfile.domain,
+      answerDepth: expertiseProfile.depth,
+      candidates: candidates.map((c) => `${c.provider}:${c.model}`),
+      latencyMs,
+      usedFallback,
+      maxTokens,
+      replyChars: streamedReply.length,
+    },
+    "Ora streaming completion",
+  );
+
+  let reply = streamedReply.trim();
+
+  let videos: OraVideo[] = [];
+  {
+    const { extractProseVideos, verifyVideos } = await import("../../lib/public-ai/web-search");
+    const lifted = extractProseVideos(reply);
+    if (lifted.videos.length > 0) {
+      videos = await verifyVideos(lifted.videos);
+      const stripped = lifted.text.trim();
+      reply = stripped.length > 0 ? lifted.text : "Here you go:";
+    }
+  }
+
+  let suggestions: string[] = [];
+  const suggestionResult = await suggestionPromise;
+  if (!referenceAnalysisTurn && suggestionResult) {
+    try {
+      const raw = suggestionResult.choices[0]?.message?.content?.trim() ?? "{}";
+      const parsedSuggestions = JSON.parse(raw) as { suggestions?: unknown };
+      if (Array.isArray(parsedSuggestions.suggestions)) {
+        suggestions = (parsedSuggestions.suggestions as unknown[])
+          .filter((s): s is string => typeof s === "string" && s.length > 0 && s.length <= 60)
+          .slice(0, 3);
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  const memoryCandidate =
+    authed && !temporary && !referenceAnalysisTurn
+      ? await extractMemorySaveCandidate(message, planTier)
+      : null;
+
+  const usage = await oraUsageResponse(authed, updatedPayload.msgCount);
+
+  writeSSE(res, {
+    type: "done",
+    payload: {
+      reply,
+      suggestions,
+      ...(videos.length > 0 ? { videos } : {}),
+      ...(memoryCandidate
+        ? {
+            memorySaveCandidate: memoryCandidate.fact,
+            memorySaveCandidateConfidence: memoryCandidate.confidence,
+            memorySaveCandidateSensitive: memoryCandidate.sensitive,
+          }
+        : {}),
+      ...(referenceChatHistory && !temporary ? { conversationSummary } : {}),
+      ...(memory.used.length > 0 ? { memoriesUsed: memory.used } : {}),
+      mode: deepAllowed ? ("deep" as const) : ("instant" as const),
+      msgCount: Number(usage.msgCount ?? 0),
+      msgLimit: Number(usage.msgLimit ?? 0),
+      ...(usage.imageCount != null ? { imageCount: Number(usage.imageCount) } : {}),
+      ...(usage.imageLimit != null ? { imageLimit: Number(usage.imageLimit) } : {}),
+      ...(usage.resetsAt !== undefined
+        ? { resetsAt: typeof usage.resetsAt === "string" ? usage.resetsAt : null }
+        : {}),
+      ...(usage.windowHours != null ? { windowHours: Number(usage.windowHours) } : {}),
+      isRealStreaming: isRealProviderStreaming(streamProvider),
+    },
+  });
+  res.end();
 });
 
 export default router;

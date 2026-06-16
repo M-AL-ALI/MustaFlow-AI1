@@ -289,7 +289,13 @@ function renderInline(value: string, keyPrefix: string) {
  * subset of Markdown. This keeps common model output such as headings, bold
  * labels, lists, and simple tables from showing as raw #, *, and | clutter.
  */
-export function OraRichText({ text }: { text: string }) {
+export function OraRichText({
+  text,
+  isStreaming = false,
+}: {
+  text: string;
+  isStreaming?: boolean;
+}) {
   const blocks = parseOraBlocks(text);
 
   return (
@@ -299,6 +305,7 @@ export function OraRichText({ text }: { text: string }) {
           return (
             <p key={i} className="font-semibold text-foreground">
               {renderInline(block.text, `heading-${i}`)}
+              {isStreaming && i === blocks.length - 1 && <OraStreamCursor />}
             </p>
           );
         }
@@ -307,7 +314,12 @@ export function OraRichText({ text }: { text: string }) {
           return (
             <ul key={i} className="my-1 list-disc space-y-1 pl-5">
               {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{renderInline(item, `ul-${i}-${itemIndex}`)}</li>
+                <li key={itemIndex}>
+                  {renderInline(item, `ul-${i}-${itemIndex}`)}
+                  {isStreaming && i === blocks.length - 1 && itemIndex === block.items.length - 1 && (
+                    <OraStreamCursor />
+                  )}
+                </li>
               ))}
             </ul>
           );
@@ -317,7 +329,12 @@ export function OraRichText({ text }: { text: string }) {
           return (
             <ol key={i} className="my-1 list-decimal space-y-1 pl-5">
               {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{renderInline(item, `ol-${i}-${itemIndex}`)}</li>
+                <li key={itemIndex}>
+                  {renderInline(item, `ol-${i}-${itemIndex}`)}
+                  {isStreaming && i === blocks.length - 1 && itemIndex === block.items.length - 1 && (
+                    <OraStreamCursor />
+                  )}
+                </li>
               ))}
             </ol>
           );
@@ -355,9 +372,24 @@ export function OraRichText({ text }: { text: string }) {
         return (
           <p key={i} className="whitespace-pre-wrap">
             {renderInline(block.text, `p-${i}`)}
+            {isStreaming && i === blocks.length - 1 && <OraStreamCursor />}
           </p>
         );
       })}
+      {isStreaming && blocks.length === 0 && <OraStreamCursor />}
     </div>
+  );
+}
+
+function OraStreamCursor() {
+  return (
+    <>
+      <style>{`@keyframes ora-cursor-blink{0%,100%{opacity:1}50%{opacity:0}}`}</style>
+      <span
+        className="ml-px inline-block h-[0.85em] w-[2px] translate-y-[0.05em] bg-current align-middle"
+        style={{ animation: "ora-cursor-blink 0.9s step-end infinite" }}
+        aria-hidden="true"
+      />
+    </>
   );
 }

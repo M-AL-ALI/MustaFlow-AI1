@@ -1293,7 +1293,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                         isFull ? "text-[15px] text-foreground/90" : "text-sm text-foreground/85",
                       )}
                     >
-                      <OraRichText text={msg.content} />
+                      <OraRichText text={msg.content} isStreaming={msg.isStreaming} />
                     </div>
                   )}
 
