@@ -69,6 +69,12 @@ export function writeSSE(res: Response, event: OraStreamEvent): void {
   res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   const r = res as Response & { flush?: () => void };
   r.flush?.();
+  // Also call the underlying socket's cork/uncork to force a TCP flush when
+  // compression is not active. This prevents Nagle-algorithm batching from
+  // holding small SSE frames until the next write or ACK timeout.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sock = (res.socket ?? (res as any)._socket) as { uncork?: () => void } | null;
+  if (sock?.uncork) sock.uncork();
 }
 
 /**
@@ -128,9 +134,74 @@ export interface StreamOraParams {
 }
 
 /**
+ * Minimum character length of a provider chunk before we split it into
+ * simulated word-group tokens. The Replit AI integrations proxy buffers the
+ * full AI response and returns it as a single chunk regardless of the
+ * `stream: true` flag sent to the provider. Chunks below this threshold are
+ * small enough to emit as-is (they already feel incremental); larger chunks
+ * are split into word groups with short delays so the user sees progressive
+ * text delivery even though the underlying proxy is non-streaming.
+ */
+const SIMULATE_THRESHOLD_CHARS = 25;
+
+/**
+ * Number of words to group into each simulated token emission. Lower values
+ * produce a smoother typing feel but more SSE frames; higher values produce
+ * larger jumps. 4 words ≈ 20-30 chars per frame is a natural chunk size that
+ * feels similar to GPT-4 streaming output.
+ */
+const SIMULATE_WORDS_PER_GROUP = 4;
+
+/**
+ * Milliseconds between simulated token emissions. 30 ms yields ~33 visible
+ * text updates per second — enough to look like real streaming without
+ * occupying the event loop. Checked against the AbortSignal after each delay
+ * so client disconnects are honoured promptly.
+ */
+const SIMULATE_DELAY_MS = 30;
+
+/**
+ * Split a large provider chunk into word-group sub-tokens with short delays
+ * between emissions, simulating token-by-token streaming when the underlying
+ * AI proxy returned the full response as a single chunk.
+ *
+ * Splitting is done at whitespace boundaries so words are never broken.
+ * Each yielded string includes trailing whitespace from the original so the
+ * concatenation of all groups equals the original text exactly.
+ */
+async function* simulateChunkStream(text: string, signal: AbortSignal): AsyncGenerator<string> {
+  // Split preserving inter-word whitespace tokens so we can rebuild faithfully.
+  const tokens = text.split(/(\s+)/);
+  let group = "";
+  let wordCount = 0;
+
+  for (const tok of tokens) {
+    if (signal.aborted) return;
+    group += tok;
+    // Count only non-whitespace tokens as "words".
+    if (tok.trim().length > 0) wordCount++;
+
+    if (wordCount >= SIMULATE_WORDS_PER_GROUP) {
+      yield group;
+      group = "";
+      wordCount = 0;
+      await new Promise<void>((resolve) => setTimeout(resolve, SIMULATE_DELAY_MS));
+    }
+  }
+  // Flush any remaining text (last partial group).
+  if (group && !signal.aborted) yield group;
+}
+
+/**
  * Provider-switch streaming adapter. Iterates the candidate chain and yields
  * `OraStreamProviderEvent` values so the route can handle SSE writing, session
  * accounting, and error recovery without embedding provider-switch logic inline.
+ *
+ * When a provider returns a large chunk in one piece (which happens when the
+ * Replit AI integrations proxy buffers the full completion), `simulateChunkStream`
+ * breaks it into word-group sub-tokens with short delays so the UI sees
+ * progressive text delivery regardless of whether the upstream proxy truly
+ * streams.
  *
  * Fallback semantics:
  * - If a candidate throws BEFORE the first token, log and try the next one.
@@ -152,7 +223,12 @@ export async function* streamOraMessage(
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
     const usedFallback = i > 0;
-    yield { type: "candidate", provider: candidate.provider, model: candidate.model, usedFallback };
+    yield {
+      type: "candidate",
+      provider: candidate.provider,
+      model: candidate.model,
+      usedFallback,
+    };
 
     try {
       const gen = streamChatCompletion({
@@ -165,8 +241,19 @@ export async function* streamOraMessage(
 
       for await (const delta of gen) {
         if (signal.aborted) return; // client disconnected mid-stream
-        firstTokenSent = true;
-        yield { type: "token", text: delta };
+
+        // When the AI proxy returns a large chunk in one piece, split it into
+        // word groups with delays so the frontend sees progressive tokens.
+        if (delta.length > SIMULATE_THRESHOLD_CHARS) {
+          for await (const piece of simulateChunkStream(delta, signal)) {
+            if (signal.aborted) return;
+            firstTokenSent = true;
+            yield { type: "token", text: piece };
+          }
+        } else {
+          firstTokenSent = true;
+          yield { type: "token", text: delta };
+        }
       }
 
       yield { type: "done" };

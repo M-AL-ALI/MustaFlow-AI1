@@ -1,0 +1,45 @@
+Ora Live Response Streaming is still not working correctly in the real UI.
+Observed behavior:
+The Ora response area stays empty while Ora is generating, then the full answer appears at once after Ora finishes.
+That is not real visible streaming.
+Expected behavior:
+1.	User sends message.
+2.	Ora assistant bubble appears immediately.
+3.	“Ora is thinking…” or typing indicator appears immediately.
+4.	Tokens/words start appearing progressively while the provider is still generating.
+5.	The response grows live like ChatGPT/DeepSeek.
+6.	Blinking cursor appears while streaming.
+7.	Thinking state disappears as soon as tokens start.
+8.	Final message actions/TTS appear only after done.
+Important clarification:
+Do not show private chain-of-thought. Ora should not reveal hidden reasoning. The goal is not to expose internal thinking. The goal is to show live streamed answer text and simple safe status labels like:
+•	Ora is thinking…
+•	Preparing your answer…
+•	Reading your file…
+•	Analyzing your image…
+Debug checklist:
+1.	Confirm ORA_STREAMING_ENABLED=true on backend.
+2.	Confirm VITE_ORA_STREAMING_ENABLED=true on web frontend.
+3.	Confirm mobile streaming flag is enabled if testing mobile.
+4.	In browser Network tab, confirm the request goes to:
+/api/public-ai/chat/stream
+not /api/public-ai/chat.
+5.	Confirm the response header is:
+Content-Type: text/event-stream.
+6.	Confirm Network response receives multiple SSE chunks over time:
+event: start
+event: status
+event: token
+event: token
+event: done
+7.	Confirm tokens are not all arriving at the same time at the end.
+8.	Confirm proxy/compression is not buffering SSE.
+9.	Confirm backend calls real provider streaming, not waiting for full model completion and chunking after.
+10.	Confirm frontend appends each token.text to the visible assistant bubble immediately.
+11.	Confirm the assistant bubble is created before first token.
+12.	Confirm fallback to /api/public-ai/chat is not silently happening.
+13.	Confirm no empty bubble remains while waiting.
+14.	Confirm no AI Builder / Builder / handoff language appears anywhere.
+Acceptance rule:
+If the UI stays empty until the full answer is ready, streaming is not complete.
+The feature is only complete when the real Ora UI visibly streams words/tokens progressively like ChatGPT or DeepSeek.

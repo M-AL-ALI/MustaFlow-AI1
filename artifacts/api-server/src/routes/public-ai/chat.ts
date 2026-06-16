@@ -2110,6 +2110,13 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
+  // Disable Nagle's algorithm on the underlying TCP socket so each res.write()
+  // is sent as its own TCP segment immediately without waiting for an ACK.
+  // Without this, small SSE frames can be held in the OS send buffer for up to
+  // the Nagle timeout (~200 ms) before being transmitted.
+  const sock = res.socket as import("net").Socket | null;
+  if (sock?.setNoDelay) sock.setNoDelay(true);
+
   // Emit `start` immediately so the client knows the SSE connection is live
   // before the first AI token arrives (avoids a perceived hang while the
   // candidate chain warms up).
