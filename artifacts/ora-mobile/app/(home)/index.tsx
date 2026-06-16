@@ -355,7 +355,7 @@ export default function OraChatScreen() {
               sources: res.sources,
               imageUrl: res.imageUrl,
               imageId: res.imageId,
-              isStreamingFallback: true,
+              viaFallback: true,
               ...(res.fileName && res.fileData && res.mimeType
                 ? {
                     file: {
@@ -378,7 +378,7 @@ export default function OraChatScreen() {
               role: "assistant",
               content: streamResult.reply || streamedContent,
               isStreaming: false,
-              ...(streamResult.isRealStreaming === false ? { isStreamingFallback: true } : {}),
+              ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
             };
             if (streamResult.msgCount != null && streamResult.msgLimit != null) {
               setSession((s) =>
@@ -404,7 +404,7 @@ export default function OraChatScreen() {
               sources: res.sources,
               imageUrl: res.imageUrl,
               imageId: res.imageId,
-              isStreamingFallback: true,
+              viaFallback: true,
               file:
                 res.fileName && res.fileData && res.mimeType
                   ? { fileName: res.fileName, fileData: res.fileData, mimeType: res.mimeType }
