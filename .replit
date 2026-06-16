@@ -40,6 +40,10 @@ args = "lint"
 task = "workflow.run"
 args = "format"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "quality-gate"
+
 [[workflows.workflow]]
 name = "codegen-drift"
 author = "agent"
@@ -102,6 +106,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run format:check"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "quality-gate"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run lint && pnpm run format:check && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck && pnpm --filter @workspace/api-server exec vitest run"
 
 [workflows.workflow.metadata]
 isValidation = true
