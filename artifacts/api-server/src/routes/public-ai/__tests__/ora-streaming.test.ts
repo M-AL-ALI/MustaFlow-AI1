@@ -248,7 +248,10 @@ describe("POST /public-ai/chat/stream", () => {
     // that the Ora-isolation forbidden tokens are absent.
     const fs = await import("fs");
     const path = await import("path");
-    const src = fs.readFileSync(path.resolve(__dirname, "../stream-adapter.ts"), "utf8");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../../../lib/public-ai/stream-adapter.ts"),
+      "utf8",
+    );
     const forbidden = [
       "handoffCta",
       "builder_handoff",

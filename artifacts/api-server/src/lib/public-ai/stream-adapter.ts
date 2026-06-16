@@ -4,21 +4,27 @@ import type { Response } from "express";
  * SSE event shapes emitted by /api/public-ai/chat/stream.
  *
  * start  — headers flushed, stream open; lets the client know the connection
- *          is established before the first AI token arrives.
- * token  — incremental text delta streamed token-by-token from the AI provider.
+ *          is established before the first AI token arrives. Carries optional
+ *          `conversationId` so the client can correlate stream events to the
+ *          persisted conversation row.
+ * token  — incremental text fragment streamed token-by-token from the AI
+ *          provider. Field is `text` (not `delta`) for readability.
  * status — specialist tool is running (file-gen, image-gen, search); no tokens
  *          follow for that branch (client falls back to /chat).
  * done   — stream complete; carries the full metadata set equivalent to the
  *          non-streaming /api/public-ai/chat JSON response.
  * error  — unrecoverable error that occurred after SSE headers were already
- *          flushed; the client should surface this as a chat error.
+ *          flushed. `code` is a machine-readable category; `message` is
+ *          human-readable. The client distinguishes pre-first-token errors
+ *          (silent /chat fallback) from post-first-token errors (partial text
+ *          already displayed; show a cut-off notice).
  */
 export type OraStreamEvent =
-  | { type: "start" }
-  | { type: "token"; delta: string }
+  | { type: "start"; conversationId?: string; messageId?: string }
+  | { type: "token"; text: string }
   | { type: "status"; label: string }
   | { type: "done"; payload: OraStreamDonePayload }
-  | { type: "error"; message: string };
+  | { type: "error"; code: string; message: string };
 
 export interface OraStreamDonePayload {
   reply: string;
@@ -38,9 +44,9 @@ export interface OraStreamDonePayload {
   windowHours?: number;
   /**
    * True when the upstream AI provider delivered the reply as real incremental
-   * token deltas via its streaming API. False would indicate a simulated chunk
-   * approach. Included in every done event so callers can benchmark / log the
-   * difference.
+   * token fragments via its streaming API. False would indicate a simulated
+   * chunk approach. Included in every done event so callers can benchmark /
+   * log the difference between real and fallback streaming.
    */
   isRealStreaming: boolean;
 }

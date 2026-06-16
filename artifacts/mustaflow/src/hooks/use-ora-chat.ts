@@ -612,10 +612,10 @@ async function consumeOraStream(
       if (eventType === "start") {
         // Connection confirmed — no action needed, just a liveness signal.
       } else if (eventType === "token") {
-        const delta = (parsed as { delta: string }).delta;
+        const text = (parsed as { text: string }).text;
         firstTokenReceived = true;
-        accumulated += delta;
-        onToken(delta);
+        accumulated += text;
+        onToken(text);
       } else if (eventType === "done") {
         donePayload = (parsed as { payload: StreamDonePayload }).payload;
       } else if (eventType === "error") {

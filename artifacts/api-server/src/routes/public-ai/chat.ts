@@ -2065,7 +2065,8 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Import stream helpers BEFORE flushHeaders so anySignal is available for
   // the first-token timeout we create here (timeout must be set up before we
   // start streaming, and cookies must be set before headers flush).
-  const { writeSSE, isRealProviderStreaming, anySignal } = await import("./stream-adapter");
+  const { writeSSE, isRealProviderStreaming, anySignal } =
+    await import("../../lib/public-ai/stream-adapter");
 
   // Pre-increment session + set cookie BEFORE flushing SSE headers — once
   // headers are flushed no further Set-Cookie headers can be added.
@@ -2089,7 +2090,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Emit `start` immediately so the client knows the SSE connection is live
   // before the first AI token arrives (avoids a perceived hang while the
   // candidate chain warms up).
-  writeSSE(res, { type: "start" });
+  writeSSE(res, {
+    type: "start",
+    ...(conversationId ? { conversationId: String(conversationId) } : {}),
+  });
 
   // Abort the stream when the client closes the connection.
   const abortController = new AbortController();
@@ -2145,7 +2149,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
           }
           firstTokenSent = true;
           streamedReply += delta;
-          writeSSE(res, { type: "token", delta });
+          writeSSE(res, { type: "token", text: delta });
         }
 
         break candidateLoop;
@@ -2189,6 +2193,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     );
     writeSSE(res, {
       type: "error",
+      code: firstTokenSent ? "stream_interrupted" : "stream_failed",
       message: "Ora is temporarily unavailable. Please try again in a moment.",
     });
     res.end();
