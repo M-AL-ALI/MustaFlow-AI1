@@ -1,3 +1,4 @@
+- [Ora streaming flags & merge artifacts](ora-streaming-flags.md) — three env vars required (ORA_STREAMING_ENABLED, VITE_*, EXPO_PUBLIC_*); viaFallback not isStreamingFallback; AsyncGenerator literal-type fix.
 - [Ora chat/upload API contract](ora-api-contract.md) — chat requires `message` (required, current turn) + `messages` (history); response field is `reply` not `content`; file/image-analysis require a UUID ref from /upload first, not inline data; session-create is rate-limited 10/day.
 - [Ora isolation rule](ora-isolation-rule.md) — permanent: Ora has zero AI Builder relationship; enforced by ora-isolation.test.ts (11 tests); never reintroduce handoffCta/builder_handoff/MustaFlow Builder.
 - [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults cap haiku at 8192 and sonnet/opus at 16000; exceeding model limits causes 400s that trip the circuit breaker.
