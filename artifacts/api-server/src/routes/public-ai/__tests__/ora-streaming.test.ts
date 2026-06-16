@@ -501,6 +501,30 @@ describe("POST /public-ai/chat/stream", () => {
     expect(ev.code).toBe("stream_failed");
   });
 
+  // ── Latency: fast first token ─────────────────────────────────────────────
+
+  it("Ora live stream opts into a fast first token (disableThinking) on every provider call", async () => {
+    process.env.ORA_STREAMING_ENABLED = "true";
+    const app = await buildTestApp();
+    await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send(VALID_BODY)
+      .buffer(true);
+    // The conversational stream-adapter must request a fast first token so
+    // Gemini 3's silent "thinking" phase cannot leave the bubble empty for
+    // several seconds. Every provider call on this path must carry the flag.
+    expect(streamChatCompletionMock).toHaveBeenCalled();
+    // The mock is declared with no params, so widen the recorded calls to the
+    // real param shape before asserting on the first argument.
+    const calls = streamChatCompletionMock.mock.calls as unknown as Array<
+      [{ disableThinking?: boolean }]
+    >;
+    for (const [params] of calls) {
+      expect(params).toMatchObject({ disableThinking: true });
+    }
+  });
+
   // ── Isolation tests ───────────────────────────────────────────────────────
 
   it("Ora isolation: stream-adapter.ts source contains no Builder handoff strings", async () => {
