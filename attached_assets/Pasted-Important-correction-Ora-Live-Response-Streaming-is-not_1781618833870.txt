@@ -1,0 +1,47 @@
+Important correction: Ora Live Response Streaming is not accepted as fully complete yet because the actual Ora UI is still not visibly streaming.
+Do not mark the streaming feature as fully complete just because the backend/tests/merge passed.
+Current status:
+•	The SSE/backend foundation may be implemented.
+•	The provider stream adapter may be implemented.
+•	The quality gate may be passing.
+•	The streaming tests may be passing.
+•	The merge may be complete.
+•	But the actual Ora user experience is still not showing live token-by-token / word-by-word streaming yet.
+Required before closing #1445:
+1.	Open the actual Ora UI in the browser.
+2.	Send a normal chat message.
+3.	Confirm the Ora bubble appears immediately after the user sends the message.
+4.	Confirm the answer appears progressively token-by-token or word-by-word.
+5.	Confirm it does not wait for the full answer and then display everything all at once.
+6.	Confirm the blinking cursor appears while streaming.
+7.	Confirm the thinking state disappears once tokens start.
+8.	Confirm mobile also streams visibly.
+9.	Confirm TTS still fires only after the final completed message.
+10.	Confirm ORA_STREAMING_ENABLED=true is set on the backend.
+11.	Confirm VITE_ORA_STREAMING_ENABLED=true is set on the web frontend.
+12.	Confirm the mobile equivalent flag is set for the mobile app.
+13.	Confirm the frontend is actually calling /api/public-ai/chat/stream, not silently falling back to /api/public-ai/chat.
+14.	Confirm the browser Network tab shows an active text/event-stream response.
+15.	Confirm streaming is not being buffered by proxy/compression.
+16.	Confirm partial response stays visible if the stream fails after tokens started.
+17.	Confirm retry does not duplicate the user message or assistant bubble.
+18.	Confirm auto-scroll follows only when the user is near the bottom.
+19.	Confirm “Jump to latest” appears when the user scrolls up.
+20.	Confirm markdown, bullets, code blocks, and tables render cleanly while streaming.
+21.	Confirm no AI Builder / Builder / handoff language appears anywhere in Ora UI, SSE events, status labels, or responses.
+22.	Provide the final streaming benchmark score.
+23.	Provide the final GitHub main commit hash after all merge cleanup.
+Acceptance rule:
+Ora Live Response Streaming is only complete when the real user-facing Ora chat visibly streams like ChatGPT/DeepSeek.
+If the UI still displays the full answer all at once, then the feature is not complete, even if tests pass.
+Final target:
+Ora must feel close to ChatGPT/DeepSeek from the user’s perspective:
+•	immediate response bubble
+•	smooth thinking state
+•	real progressive streaming
+•	clean markdown
+•	no stuck loading
+•	no duplicate messages
+•	no proxy buffering
+•	mobile-safe
+•	fully Ora-isolated
