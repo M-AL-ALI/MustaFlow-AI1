@@ -68,6 +68,7 @@ import {
   listConversations,
   saveConversationMessages,
   sendChat,
+  streamChatNative,
   synthesizeSpeech,
   transcribeAudio,
   uploadFile,
@@ -281,31 +282,64 @@ export default function OraChatScreen() {
           }
           assistant = { id: pending.id, role: "assistant", content: reply };
         } else {
-          const res = await sendChat({
+          const chatReq = {
             message: text,
             messages: history,
             mode,
-            referenceSavedMemories: true,
-            referenceChatHistory: true,
-          });
-          assistant = {
-            id: pending.id,
-            role: "assistant",
-            content: res.reply,
-            sources: res.sources,
-            imageUrl: res.imageUrl,
-            imageId: res.imageId,
-            file:
-              res.fileName && res.fileData && res.mimeType
-                ? {
-                    fileName: res.fileName,
-                    fileData: res.fileData,
-                    mimeType: res.mimeType,
-                  }
-                : undefined,
+            referenceSavedMemories: true as const,
+            referenceChatHistory: true as const,
           };
-          if (res.msgCount != null && res.msgLimit != null) {
-            setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
+
+          // Try streaming first; fall back to regular sendChat when unavailable.
+          let streamedContent = "";
+          const streamResult = await streamChatNative(chatReq, (delta) => {
+            streamedContent += delta;
+            const content = streamedContent;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === pending.id ? { ...m, content, isStreaming: true, pending: false } : m,
+              ),
+            );
+          });
+
+          if (streamResult !== null) {
+            assistant = {
+              id: pending.id,
+              role: "assistant",
+              content: streamResult.reply || streamedContent,
+              isStreaming: false,
+            };
+            if (streamResult.msgCount != null && streamResult.msgLimit != null) {
+              setSession((s) =>
+                s
+                  ? { ...s, msgCount: streamResult.msgCount!, msgLimit: streamResult.msgLimit! }
+                  : s,
+              );
+            }
+          } else {
+            // Streaming unavailable — use regular (non-streaming) chat.
+            const res = await sendChat(chatReq);
+            assistant = {
+              id: pending.id,
+              role: "assistant",
+              content: res.reply,
+              sources: res.sources,
+              imageUrl: res.imageUrl,
+              imageId: res.imageId,
+              file:
+                res.fileName && res.fileData && res.mimeType
+                  ? {
+                      fileName: res.fileName,
+                      fileData: res.fileData,
+                      mimeType: res.mimeType,
+                    }
+                  : undefined,
+            };
+            if (res.msgCount != null && res.msgLimit != null) {
+              setSession((s) =>
+                s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s,
+              );
+            }
           }
         }
         const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));

@@ -153,7 +153,8 @@ type OraRichBlock =
   | { type: "heading"; text: string }
   | { type: "unordered-list"; items: string[] }
   | { type: "ordered-list"; items: string[] }
-  | { type: "table"; headers: string[]; rows: string[][] };
+  | { type: "table"; headers: string[]; rows: string[][] }
+  | { type: "code-block"; language?: string; code: string };
 
 function isTableSeparator(line: string): boolean {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
@@ -173,6 +174,7 @@ function isSpecialBlockStart(line: string, nextLine = ""): boolean {
     /^#{1,6}\s+\S/.test(line) ||
     /^\s*[-*]\s+\S/.test(line) ||
     /^\s*\d+[.)]\s+\S/.test(line) ||
+    line.trimStart().startsWith("```") ||
     (line.includes("|") && isTableSeparator(nextLine))
   );
 }
@@ -235,6 +237,24 @@ function parseOraBlocks(text: string): OraRichBlock[] {
       continue;
     }
 
+    // Code fence: ```lang\n...\n```
+    if (trimmed.startsWith("```")) {
+      const language = trimmed.slice(3).trim() || undefined;
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length) {
+        const codeLine = lines[index];
+        if (codeLine !== undefined && codeLine.trim() === "```") {
+          index += 1;
+          break;
+        }
+        codeLines.push(codeLine ?? "");
+        index += 1;
+      }
+      blocks.push({ type: "code-block", language, code: codeLines.join("\n") });
+      continue;
+    }
+
     const paragraphLines: string[] = [line];
     index += 1;
     while (
@@ -285,9 +305,32 @@ function renderInline(value: string, keyPrefix: string) {
 }
 
 /**
+ * Cleans up partial Markdown that the model is still streaming so the block
+ * parser doesn't produce visually broken output mid-stream.
+ *
+ *  - Odd number of ``` fence openers → close the unclosed fence.
+ *  - Trailing lone ** (unclosed bold) → strip the dangling marker.
+ */
+function sanitizeStreamingText(text: string): string {
+  const fenceCount = (text.match(/^```/gm) ?? []).length;
+  let safe = text;
+  if (fenceCount % 2 !== 0) {
+    // Unclosed code fence — append a closing ``` so the block parser can complete it.
+    safe = safe.trimEnd() + "\n```";
+  }
+  // Strip a trailing lone ** so it doesn't render as raw "**" during stream.
+  safe = safe.replace(/\*\*\s*$/, "");
+  return safe;
+}
+
+/**
  * Renders an Ora assistant reply with safe links and a small, chat-friendly
  * subset of Markdown. This keeps common model output such as headings, bold
- * labels, lists, and simple tables from showing as raw #, *, and | clutter.
+ * labels, lists, tables, and code blocks from showing as raw #, *, and | clutter.
+ *
+ * When `isStreaming` is true, `sanitizeStreamingText` is applied first so
+ * partially-written Markdown tokens (unclosed ``` fences, dangling **) do not
+ * produce broken rendering mid-stream.
  *
  * Accessibility:
  *  - `aria-live="polite"` during streaming so screen readers announce new
@@ -304,7 +347,8 @@ export function OraRichText({
   text: string;
   isStreaming?: boolean;
 }) {
-  const blocks = parseOraBlocks(text);
+  const displayText = isStreaming ? sanitizeStreamingText(text) : text;
+  const blocks = parseOraBlocks(displayText);
 
   return (
     <div className="space-y-2" aria-live={isStreaming ? "polite" : "off"} aria-atomic="false">
@@ -315,6 +359,29 @@ export function OraRichText({
               {renderInline(block.text, `heading-${i}`)}
               {isStreaming && i === blocks.length - 1 && <OraStreamCursor />}
             </p>
+          );
+        }
+
+        if (block.type === "code-block") {
+          return (
+            <div
+              key={i}
+              className="my-2 overflow-x-auto rounded-lg border border-border/60 bg-muted/50"
+            >
+              {block.language && (
+                <div className="border-b border-border/50 px-3 pt-2 pb-1.5 font-mono text-[10px] text-muted-foreground">
+                  {block.language}
+                </div>
+              )}
+              <pre className="overflow-x-auto px-3 py-2.5 text-xs font-mono whitespace-pre">
+                <code>{block.code}</code>
+              </pre>
+              {isStreaming && i === blocks.length - 1 && (
+                <div className="px-3 pb-2">
+                  <OraStreamCursor />
+                </div>
+              )}
+            </div>
           );
         }
 

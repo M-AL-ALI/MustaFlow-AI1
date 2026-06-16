@@ -34,6 +34,7 @@ import {
   Plus,
   MoreHorizontal,
   Ghost,
+  RotateCcw,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ORA_MEMORIES_QUERY_KEY, MemoryFullError } from "@/lib/ora-memories";
@@ -283,6 +284,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
     generateFile,
     editInlineImage,
     clearError,
+    retryLastMessage,
     uploadFile,
     clearAttachment,
     attachedFile,
@@ -1422,6 +1424,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       </div>
                     ))}
 
+                  {msg.role === "assistant" && msg.isStreamingFallback && !msg.isStreaming && (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/50 select-none">
+                      <Zap className="h-2.5 w-2.5" />
+                      <span>Non-streamed</span>
+                    </div>
+                  )}
+
                   {msg.role === "assistant" &&
                     Array.isArray(msg.sources) &&
                     msg.sources.length > 0 && <OraSourceCards sources={msg.sources} />}
@@ -1584,13 +1593,26 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           {error && (
             <div className="mx-4 mb-3 mt-3 rounded-xl border border-destructive/25 bg-destructive/8 px-3.5 py-2.5 text-xs text-destructive flex items-start justify-between gap-2">
               <span>{error}</span>
-              <button
-                type="button"
-                onClick={clearError}
-                className="shrink-0 opacity-60 hover:opacity-100"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {messages.at(-1)?.role === "assistant" && !!messages.at(-1)?.content && (
+                  <button
+                    type="button"
+                    onClick={() => void retryLastMessage()}
+                    className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity"
+                    title="Retry"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Retry</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={clearError}
+                  className="opacity-60 hover:opacity-100 transition-opacity"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           )}
 

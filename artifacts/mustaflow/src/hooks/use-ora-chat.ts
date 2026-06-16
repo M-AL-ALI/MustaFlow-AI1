@@ -104,6 +104,12 @@ export interface OraMessage {
   conversationSummary?: string;
   /** True while this assistant message is still being streamed token-by-token. */
   isStreaming?: boolean;
+  /**
+   * True when the response was retrieved via the non-streaming /chat fallback
+   * rather than real SSE token streaming (e.g. provider unavailable, or the
+   * server returned a JSON streamingFallback signal).
+   */
+  isStreamingFallback?: boolean;
 }
 
 export interface OraSession {
@@ -183,6 +189,12 @@ export interface UseOraChatReturn {
   temporary: boolean;
   /** Toggle temporary mode; always resets to a clean conversation. */
   setTemporary: (value: boolean) => void;
+  /**
+   * Resend the last user message, removing any partial/failed assistant reply
+   * that followed it. No-op when there is no user message or a request is
+   * already in flight.
+   */
+  retryLastMessage: () => Promise<void>;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -1449,6 +1461,7 @@ export function useOraChat(): UseOraChatReturn {
 
           let data: ChatResponseData;
           let usedStreaming = false;
+          let streamingWasReal = false;
 
           try {
             // Optimistically add a streaming placeholder that updates in real time.
@@ -1471,6 +1484,8 @@ export function useOraChat(): UseOraChatReturn {
             );
 
             data = donePayload as ChatResponseData;
+            streamingWasReal =
+              (donePayload as { isRealStreaming?: boolean }).isRealStreaming ?? false;
             usedStreaming = true;
           } catch (streamErr: unknown) {
             const se = streamErr as {
@@ -1545,7 +1560,11 @@ export function useOraChat(): UseOraChatReturn {
             setMessages((prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
-              const finalMsg: OraMessage = { ...buildAssistantMsg(data), isStreaming: false };
+              const finalMsg: OraMessage = {
+                ...buildAssistantMsg(data),
+                isStreaming: false,
+                ...(!streamingWasReal ? { isStreamingFallback: true } : {}),
+              };
               const next = [...prev.slice(0, -1), finalMsg];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);
@@ -2086,6 +2105,16 @@ export function useOraChat(): UseOraChatReturn {
     }
   }, []);
 
+  const retryLastMessage = useCallback(async () => {
+    if (isLoading) return;
+    const lastUserIdx = messages.findLastIndex((m) => m.role === "user");
+    if (lastUserIdx === -1) return;
+    const lastUserMsg = messages[lastUserIdx];
+    if (!lastUserMsg?.content.trim()) return;
+    setError(null);
+    await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx });
+  }, [messages, isLoading, sendMessage]);
+
   const oraStatus = deriveOraStatus(
     isLoading,
     uploadState,
@@ -2122,5 +2151,6 @@ export function useOraChat(): UseOraChatReturn {
     markDocumentMemorySaved,
     temporary,
     setTemporary,
+    retryLastMessage,
   };
 }

@@ -119,6 +119,96 @@ export function sendChat(req: ChatRequest): Promise<ChatResponse> {
   });
 }
 
+/**
+ * Attempts to stream a chat response via Server-Sent Events. Yields token
+ * deltas to `onToken` as they arrive, then returns the final done payload with
+ * the complete reply and usage counters. Returns `null` when streaming is
+ * unavailable: 503, JSON fallback signal, missing ReadableStream support, or
+ * any network error — the caller should fall back to `sendChat` in that case.
+ */
+export async function streamChatNative(
+  req: ChatRequest,
+  onToken: (delta: string) => void,
+  signal?: AbortSignal,
+): Promise<{ reply: string; msgCount?: number; msgLimit?: number } | null> {
+  if (typeof ReadableStream === "undefined") return null;
+
+  const headers = await authHeaders({ "Content-Type": "application/json" });
+  let res: Response;
+  try {
+    res = await fetch(url("/api/public-ai/chat/stream"), {
+      method: "POST",
+      body: JSON.stringify(req),
+      headers,
+      credentials: "include",
+      signal,
+    });
+  } catch {
+    return null;
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!res.ok || !contentType.includes("text/event-stream")) return null;
+  if (!res.body) return null;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let donePayload: { reply: string; msgCount?: number; msgLimit?: number } | null = null;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        let eventType: string | null = null;
+        let dataLine: string | null = null;
+
+        for (const line of part.split("\n")) {
+          if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+          else if (line.startsWith("data: ")) dataLine = line.slice(6).trim();
+        }
+        if (!dataLine) continue;
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(dataLine) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+
+        const type = eventType ?? (parsed.type as string | undefined);
+        if (type === "token") {
+          onToken((parsed as { text?: string }).text ?? "");
+        } else if (type === "done") {
+          const p = ((parsed as { payload?: unknown }).payload ?? parsed) as Record<
+            string,
+            unknown
+          >;
+          donePayload = {
+            reply: (p.reply as string | undefined) ?? "",
+            msgCount: p.msgCount as number | undefined,
+            msgLimit: p.msgLimit as number | undefined,
+          };
+        } else if (type === "error") {
+          // Server-side error mid-stream; treat as streaming unavailable.
+          return null;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return donePayload;
+}
+
 export async function uploadFile(file: {
   uri: string;
   name: string;

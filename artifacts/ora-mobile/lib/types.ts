@@ -31,6 +31,8 @@ export interface OraMessage {
   file?: OraGeneratedFile;
   pending?: boolean;
   error?: boolean;
+  /** True while this assistant message is being streamed token-by-token. */
+  isStreaming?: boolean;
 }
 
 export interface OraSession {
