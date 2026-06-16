@@ -25,10 +25,7 @@ const WORKSPACE = resolve(__dirname, "../../../../../../");
 
 // ── File collection helpers ──────────────────────────────────────────────────
 
-function collectFiles(
-  relDir: string,
-  exclude: string[] = [],
-): { path: string; src: string }[] {
+function collectFiles(relDir: string, exclude: string[] = []): { path: string; src: string }[] {
   const abs = resolve(WORKSPACE, relDir);
   if (!existsSync(abs)) return [];
   const results: { path: string; src: string }[] = [];
@@ -57,9 +54,7 @@ function readOne(relPath: string): { path: string; src: string } {
 // ── Scoped file sets ─────────────────────────────────────────────────────────
 
 /** Ora backend: lib/public-ai (excludes Builder-side handoff-store) */
-const ORA_LIB = collectFiles("artifacts/api-server/src/lib/public-ai", [
-  "handoff-store.ts",
-]);
+const ORA_LIB = collectFiles("artifacts/api-server/src/lib/public-ai", ["handoff-store.ts"]);
 
 /** Ora backend: routes/public-ai (excludes the permanently-disabled route and all tests —
  *  structural invariants for handoff.ts / orchestrator.ts / use-ora-chat.ts are
@@ -89,14 +84,12 @@ const ORA_HOOKS = [
 ];
 
 /** Ora frontend lib helpers */
-const ORA_LIB_FRONTEND = collectFiles("artifacts/mustaflow/src/lib", [
-  "__tests__",
-]).filter((f) => /\/ora-/.test(f.path));
+const ORA_LIB_FRONTEND = collectFiles("artifacts/mustaflow/src/lib", ["__tests__"]).filter((f) =>
+  /\/ora-/.test(f.path),
+);
 
 /** Ora frontend pages */
-const ORA_PAGES = collectFiles("artifacts/mustaflow/src/pages", [
-  "__tests__",
-]).filter(
+const ORA_PAGES = collectFiles("artifacts/mustaflow/src/pages", ["__tests__"]).filter(
   (f) => /\/ora[.-]/.test(f.path) || f.path.endsWith("/ora.tsx") || f.path.endsWith("/orax.tsx"),
 );
 
@@ -122,9 +115,7 @@ function findViolations(
     .filter((f) => {
       if (!ignoreCommentLines) return pattern.test(f.src);
       const lines = f.src.split("\n");
-      return lines.some(
-        (line) => pattern.test(line) && !/^\s*\/\//.test(line),
-      );
+      return lines.some((line) => pattern.test(line) && !/^\s*\/\//.test(line));
     })
     .map((f) => f.path);
 }
@@ -158,9 +149,7 @@ describe("Ora isolation — permanent rule: zero AI Builder relationship", () =>
   });
 
   it("'open in builder' must not appear as rendered/returned text in active Ora code (detection regex in build-intent.ts is allowed)", () => {
-    const withoutDetection = ALL_ORA.filter(
-      (f) => !f.path.includes("build-intent"),
-    );
+    const withoutDetection = ALL_ORA.filter((f) => !f.path.includes("build-intent"));
     const hits = findViolations(withoutDetection, /open in builder/i);
     expect(hits, `'open in builder' found in: ${hits.join(", ")}`).toHaveLength(0);
   });
@@ -178,18 +167,18 @@ describe("Ora isolation — permanent rule: zero AI Builder relationship", () =>
     expect(src, "handoff.ts no longer returns 410 — has it been re-enabled?").toMatch(
       /status\(410\)/,
     );
-    expect(src, "storeHandoff found in handoff.ts — token generation must never be reintroduced").not.toMatch(
-      /storeHandoff/,
-    );
-    expect(src, "ORA_HANDOFF_ENABLED found in handoff.ts — no kill-switch allowed; route is permanently disabled").not.toMatch(
-      /ORA_HANDOFF_ENABLED/,
-    );
+    expect(
+      src,
+      "storeHandoff found in handoff.ts — token generation must never be reintroduced",
+    ).not.toMatch(/storeHandoff/);
+    expect(
+      src,
+      "ORA_HANDOFF_ENABLED found in handoff.ts — no kill-switch allowed; route is permanently disabled",
+    ).not.toMatch(/ORA_HANDOFF_ENABLED/);
   });
 
   it("OraTool type union must not include builder_handoff", () => {
-    const { src } = readOne(
-      "artifacts/api-server/src/lib/public-ai/orchestrator.ts",
-    );
+    const { src } = readOne("artifacts/api-server/src/lib/public-ai/orchestrator.ts");
     expect(src, "orchestrator.ts OraTool union includes builder_handoff").not.toMatch(
       /"builder_handoff"/,
     );
