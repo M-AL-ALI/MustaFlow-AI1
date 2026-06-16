@@ -9,4 +9,6 @@ When the Playwright testing subagent is auth-blocked for the whole session (prog
 
 **Why:** validating the anonymous bubble proves the identical parser + per-token state + partial-render mechanism the signed-in user sees, so you do not need to defeat Clerk throttling to confirm streaming works.
 
-**How to apply:** if even the anonymous Playwright run is blocked (the whole testing tool can be poisoned for the session by one earlier Clerk failure), fall back to: (1) wire-level SSE checks through `https://$REPLIT_DEV_DOMAIN`, (2) an app_preview screenshot to confirm health, and (3) the dev-only `streamTokens` live counter ("streaming live · N tokens", `import.meta.env.DEV`, in ora-panel + ora-bubble) so the user can self-confirm incremental delivery and spot a fallback.
+**How to apply:** if even the anonymous Playwright run is blocked (the whole testing tool can be poisoned for the session by one earlier Clerk failure), fall back to: (1) wire-level SSE checks through `https://$REPLIT_DEV_DOMAIN` (or `localhost:80` via the shared proxy: POST `/api/public-ai/session` to get the `ora-session` cookie, then POST `/api/public-ai/chat/stream` and timestamp each `event: token`), and (2) an app_preview screenshot to confirm health.
+
+Note: a temporary dev-only "streaming live · N tokens" counter (`import.meta.env.DEV`, `OraMessage.streamTokens`) was used once to let the user self-confirm incremental delivery; it has since been removed at the user's request (users should never see debug labels). The `viaFallback` dev badge remains.
