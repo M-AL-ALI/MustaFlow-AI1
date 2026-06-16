@@ -349,9 +349,7 @@ export default function OraChatScreen() {
             };
             if (donePayload.msgCount != null && donePayload.msgLimit != null) {
               setSession((s) =>
-                s
-                  ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit }
-                  : s,
+                s ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit } : s,
               );
             }
           } catch (streamErr: unknown) {
@@ -418,7 +416,9 @@ export default function OraChatScreen() {
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === pendingId ? { ...m, pending: false, isStreaming: false, error: true, content: msg } : m,
+            m.id === pendingId
+              ? { ...m, pending: false, isStreaming: false, error: true, content: msg }
+              : m,
           ),
         );
       } finally {
