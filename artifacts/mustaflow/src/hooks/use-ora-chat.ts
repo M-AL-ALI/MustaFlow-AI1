@@ -104,6 +104,13 @@ export interface OraMessage {
   conversationSummary?: string;
   /** True while this assistant message is still being streamed token-by-token. */
   isStreaming?: boolean;
+  /**
+   * True when this assistant reply did NOT use real provider-level token
+   * streaming — either because the SSE stream endpoint fell back to the plain
+   * /chat API, or because the upstream AI provider does not support incremental
+   * token delivery. Useful for developer monitoring of real vs fallback ratios.
+   */
+  viaFallback?: boolean;
 }
 
 export interface OraSession {
@@ -1449,6 +1456,10 @@ export function useOraChat(): UseOraChatReturn {
 
           let data: ChatResponseData;
           let usedStreaming = false;
+          // Whether the AI provider delivered real incremental token streaming
+          // (true = real SSE tokens, false = non-streaming provider wrapped in SSE).
+          // Only meaningful when usedStreaming=true; irrelevant for /chat fallback.
+          let isRealStreamingPayload = true;
 
           try {
             // Optimistically add a streaming placeholder that updates in real time.
@@ -1470,6 +1481,7 @@ export function useOraChat(): UseOraChatReturn {
               streamAbort.signal,
             );
 
+            isRealStreamingPayload = donePayload.isRealStreaming ?? true;
             data = donePayload as ChatResponseData;
             usedStreaming = true;
           } catch (streamErr: unknown) {
@@ -1531,6 +1543,21 @@ export function useOraChat(): UseOraChatReturn {
 
           streamAbortRef.current = null;
 
+          // True when this reply bypassed real provider-level token streaming.
+          // Covers both the /chat fallback path and SSE providers that wrap a
+          // single non-streaming completion into the SSE envelope.
+          const viaFallback = !usedStreaming || !isRealStreamingPayload;
+
+          // Log the streaming path for every response so the team can monitor
+          // real vs fallback ratios in the browser console.
+          if (usedStreaming) {
+            console.debug(
+              `[Ora] streaming path: SSE — realProviderStreaming=${isRealStreamingPayload}`,
+            );
+          } else {
+            console.debug("[Ora] streaming path: non-streaming fallback (/chat)");
+          }
+
           // Persist the rolling summary and advance the "already summarized"
           // pointer by exactly what we processed this turn (overflowEnd), so a
           // large backlog drains over successive turns without skipping the
@@ -1545,7 +1572,11 @@ export function useOraChat(): UseOraChatReturn {
             setMessages((prev) => {
               const last = prev[prev.length - 1];
               if (!last || last.role !== "assistant") return prev;
-              const finalMsg: OraMessage = { ...buildAssistantMsg(data), isStreaming: false };
+              const finalMsg: OraMessage = {
+                ...buildAssistantMsg(data),
+                isStreaming: false,
+                ...(viaFallback ? { viaFallback: true } : {}),
+              };
               const next = [...prev.slice(0, -1), finalMsg];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);
@@ -1553,7 +1584,10 @@ export function useOraChat(): UseOraChatReturn {
             });
           } else {
             setMessages((prev) => {
-              const next = [...prev, buildAssistantMsg(data)];
+              const next = [
+                ...prev,
+                { ...buildAssistantMsg(data), ...(viaFallback ? { viaFallback: true } : {}) },
+              ];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);
               return next;
