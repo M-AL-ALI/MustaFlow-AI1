@@ -80,7 +80,7 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
 
   try {
     const response = await client.audio.speech.create({
-      model: process.env.ORA_TTS_MODEL ?? "gpt-4o-mini-tts",
+      model: process.env.ORA_TTS_MODEL ?? "gpt-5-mini-tts",
       voice,
       input: text,
       response_format: "mp3",

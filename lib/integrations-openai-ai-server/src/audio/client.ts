@@ -221,7 +221,7 @@ export async function textToSpeechStream(
   })();
 }
 
-/** Speech-to-Text using gpt-4o-mini-transcribe.
+/** Speech-to-Text using gpt-5-mini-transcribe.
  *  @param language  Optional ISO-639-1 language code (e.g. "ar", "en", "es").
  *                   Omit or pass undefined to let Whisper auto-detect.
  */
@@ -233,7 +233,7 @@ export async function speechToText(
   const file = await toFile(audioBuffer, `audio.${format}`);
   const response = await openai.audio.transcriptions.create({
     file,
-    model: "gpt-4o-mini-transcribe",
+    model: "gpt-5-mini-transcribe",
     ...(language ? { language } : {}),
   });
   return response.text;
@@ -247,7 +247,7 @@ export async function speechToTextStream(
   const file = await toFile(audioBuffer, `audio.${format}`);
   const stream = await openai.audio.transcriptions.create({
     file,
-    model: "gpt-4o-mini-transcribe",
+    model: "gpt-5-mini-transcribe",
     stream: true,
   });
 

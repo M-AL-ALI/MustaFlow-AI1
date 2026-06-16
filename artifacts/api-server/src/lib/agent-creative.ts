@@ -85,7 +85,7 @@ export async function generateAudioAsset(args: {
   try {
     const resp = await openai.audio.speech.create(
       {
-        model: "gpt-4o-mini-tts",
+        model: "gpt-5-mini-tts",
         voice,
         input: text,
         response_format: format,

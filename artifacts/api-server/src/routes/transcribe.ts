@@ -3,7 +3,7 @@
  *
  * POST /transcribe
  *   Accepts raw audio bytes in the request body (e.g. WebM/Opus from MediaRecorder).
- *   Forwards to OpenAI's gpt-4o-mini-transcribe via the Replit AI integrations proxy.
+ *   Forwards to OpenAI's gpt-5-mini-transcribe via the Replit AI integrations proxy.
  *   Returns { text } for the chat composer to drop into the user's draft.
  *
  * Limits:
