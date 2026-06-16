@@ -71,7 +71,11 @@ export function incrementMessageCount(session: OraSessionPayload): {
   token: string;
   payload: OraSessionPayload;
 } {
-  const updated: OraSessionPayload = { ...session, msgCount: session.msgCount + 1 };
+  // Destructure out streamingPreIncremented so a stale flag from a prior
+  // successful streaming turn is cleared in the new cookie. Without this,
+  // every subsequent non-streaming /chat call would carry the flag forever.
+  const { streamingPreIncremented: _, ...rest } = session;
+  const updated: OraSessionPayload = { ...rest, msgCount: session.msgCount + 1 };
   const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
   return { token, payload: updated };
 }

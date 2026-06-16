@@ -1540,8 +1540,14 @@ export function useOraChat(): UseOraChatReturn {
             }
 
             // Streaming unavailable (503, specialist-tool signal, or error
-            // before first token) — silently fall back to /chat.
-            data = await apiPost<ChatResponseData>("/api/public-ai/chat", body);
+            // before first token) — silently fall back to /chat. The
+            // isStreamingFallback flag tells /chat that the streaming route
+            // already pre-incremented the session counter so it should not
+            // double-charge the anonymous-session slot.
+            data = await apiPost<ChatResponseData>("/api/public-ai/chat", {
+              ...body,
+              isStreamingFallback: true,
+            });
           }
 
           streamAbortRef.current = null;

@@ -779,12 +779,17 @@ const router = Router();
  *
  * The streaming route pre-increments `msgCount` and sets `streamingPreIncremented: true`
  * before flushing SSE headers (the only window where Set-Cookie is possible). If a
- * pre-first-token failure causes the client to silently retry via /chat, this helper
- * detects the flag and clears it without double-incrementing, ensuring every
- * user turn costs exactly one anonymous-session slot regardless of streaming/fallback.
+ * pre-first-token failure causes the client to silently retry via /chat, the client
+ * sends `isStreamingFallback: true` in the request body. This helper honours the
+ * skip-increment ONLY when BOTH signals are present, preventing a stale
+ * `streamingPreIncremented` cookie from a prior *successful* streaming turn from
+ * causing the next independent turn to be uncharged.
  */
-function chargeSession(session: OraSessionPayload): { token: string; payload: OraSessionPayload } {
-  if (session.streamingPreIncremented) {
+function chargeSession(
+  session: OraSessionPayload,
+  isStreamingFallback: boolean,
+): { token: string; payload: OraSessionPayload } {
+  if (isStreamingFallback && session.streamingPreIncremented) {
     return acknowledgeStreamingIncrement(session);
   }
   return incrementMessageCount(session);
@@ -849,6 +854,16 @@ const bodySchema = z.object({
    * "past conversations" it pulls in. Null/omitted for a brand-new chat.
    */
   conversationId: z.number().int().positive().nullable().optional(),
+  /**
+   * Set to true when this /chat request is a silent retry after a streaming
+   * pre-first-token failure. The streaming route pre-increments the session
+   * counter before flushing SSE headers; when the stream fails before the
+   * first token the client retries here and this flag tells the server not to
+   * double-count the anonymous-session slot. Ignored for authenticated users
+   * (whose quota is tracked server-side and already consumed by the streaming
+   * endpoint before the error occurred).
+   */
+  isStreamingFallback: z.boolean().default(false),
 });
 
 /**
@@ -986,6 +1001,7 @@ router.post("/public-ai/chat", async (req, res) => {
     oraProjectId,
     temporary,
     conversationId,
+    isStreamingFallback,
   } = parsed.data;
 
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
@@ -1134,7 +1150,7 @@ router.post("/public-ai/chat", async (req, res) => {
         carriedDocs.length > 0,
         authed?.tier ?? null,
       );
-      const { token, payload } = chargeSession(session);
+      const { token, payload } = chargeSession(session, isStreamingFallback);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1208,7 +1224,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const { generateImage, isImageProviderConfigured } = imageProviderModule;
     if (!isImageProviderConfigured()) {
       await refundOraQuotaFor(authed, quotaKind);
-      const { token, payload } = chargeSession(session);
+      const { token, payload } = chargeSession(session, isStreamingFallback);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1280,7 +1296,7 @@ router.post("/public-ai/chat", async (req, res) => {
           );
         }
       }
-      const { token, payload } = chargeSession(session);
+      const { token, payload } = chargeSession(session, isStreamingFallback);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1353,7 +1369,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const { isWebSearchConfigured, runOraWebSearch } = webSearchModule;
     if (!isWebSearchConfigured()) {
       await refundOraQuotaFor(authed, quotaKind);
-      const { token, payload } = chargeSession(session);
+      const { token, payload } = chargeSession(session, isStreamingFallback);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1390,7 +1406,7 @@ router.post("/public-ai/chat", async (req, res) => {
         wantsVideos: decision.wantsVideos,
         subscriptionTier: oraPlanTier(authed),
       });
-      const { token, payload } = chargeSession(session);
+      const { token, payload } = chargeSession(session, isStreamingFallback);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1708,7 +1724,7 @@ router.post("/public-ai/chat", async (req, res) => {
   // The rolling-window MESSAGE quota was already reserved atomically at the top of the
   // handler (consumeOraQuota). Since the reply succeeded we keep the reservation
   // — no extra increment here, and no refund.
-  const { token, payload } = incrementMessageCount(session);
+  const { token, payload } = chargeSession(session, isStreamingFallback);
   setSessionCookie(res, token);
 
   // Ora is a standalone assistant. It NEVER proactively routes to any external
@@ -2186,7 +2202,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   }
 
   if (streamError || !streamedReply.trim()) {
-    await refundOraQuotaFor(authed, quotaKind);
+    // Only refund the authed quota when no tokens were delivered. If at least
+    // one token was already sent (stream_interrupted), the user received a
+    // partial reply and one turn has been consumed — no refund.
+    if (!firstTokenSent) {
+      await refundOraQuotaFor(authed, quotaKind);
+    }
     logger.error(
       { component: "ora-chat-stream", err: streamError },
       "Ora streaming failed — all candidates exhausted",

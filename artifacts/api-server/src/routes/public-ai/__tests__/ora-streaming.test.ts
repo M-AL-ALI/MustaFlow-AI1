@@ -79,7 +79,11 @@ vi.mock("../../../lib/public-ai/model-router", () => ({
   openAiModelForOraRoute: vi.fn().mockReturnValue("gpt-5-mini"),
   normalizeOraPlanTier: vi.fn().mockReturnValue("free"),
   selectOraModelRoute: vi.fn().mockReturnValue([{ provider: "openai", model: "gpt-5-mini" }]),
-  runCandidateChain: vi.fn().mockResolvedValue(""),
+  runCandidateChain: vi.fn().mockResolvedValue({
+    result: { choices: [{ message: { content: "Test reply" } }] },
+    usedFallback: false,
+    candidate: { provider: "openai", model: "gpt-5-mini" },
+  }),
   MODEL_DEFAULTS: {},
   isDeepSeekAvailable: vi.fn().mockReturnValue(false),
 }));
@@ -117,10 +121,11 @@ vi.mock("../../../lib/public-ai/pasted-reference", () => ({
   summarizePastedReferenceSignals: vi.fn().mockReturnValue(""),
 }));
 
-// The streaming route dynamically imports ai-provider-config via
-// `await import("../../lib/ai-provider-config")`. Vitest hoists vi.mock so this
-// dynamic import also gets the mock factory.
-vi.mock("../../../lib/ai-provider-config", () => ({
+// Both the streaming and non-streaming /chat routes dynamically import
+// `../../lib/ai-providers` (src/lib/ai-providers.ts) to get streamChatCompletion
+// and createChatCompletion. Mocking the same resolved path intercepts those
+// dynamic imports in both route handlers.
+vi.mock("../../../lib/ai-providers", () => ({
   streamChatCompletion: streamChatCompletionMock,
   createChatCompletion: createChatCompletionMock,
 }));
@@ -419,7 +424,7 @@ describe("POST /public-ai/chat/stream", () => {
     // Make the streaming provider throw immediately (no tokens emitted).
     streamChatCompletionMock.mockImplementationOnce(async function* () {
       throw new Error("provider unavailable");
-      yield ""; // unreachable — needed for TS to infer async-generator type
+      yield " Hello"; // unreachable — satisfies TS return-type inference
     });
     const app = await buildTestApp();
     const res = await request(app)
@@ -480,5 +485,98 @@ describe("POST /public-ai/chat/stream", () => {
     for (const token of forbidden) {
       expect(src, `chat.ts must not contain "${token}"`).not.toContain(token);
     }
+  });
+
+  // ── Quota accounting ──────────────────────────────────────────────────────
+
+  it("quota accounting: refundOraQuotaFor is gated on !firstTokenSent in source", async () => {
+    // Structural guard: the quota refund in the streaming error path must live
+    // inside a `!firstTokenSent` block so post-token interruptions never
+    // trigger a refund (the user received partial content → one turn consumed).
+    const fs = await import("fs");
+    const path = await import("path");
+    const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
+    const errorBlockStart = src.indexOf("if (streamError || !streamedReply.trim())");
+    expect(errorBlockStart).toBeGreaterThan(0);
+    const errorBlock = src.slice(errorBlockStart, errorBlockStart + 600);
+    // The !firstTokenSent guard must exist inside the error block…
+    expect(errorBlock).toContain("!firstTokenSent");
+    // …and it must appear BEFORE the refund call.
+    expect(errorBlock.indexOf("!firstTokenSent")).toBeLessThan(
+      errorBlock.indexOf("refundOraQuotaFor"),
+    );
+  });
+
+  it("SSE error after first token: error event has code 'stream_interrupted'", async () => {
+    process.env.ORA_STREAMING_ENABLED = "true";
+    // Yield one token, then throw — simulates a mid-stream provider cut.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    streamChatCompletionMock.mockImplementationOnce(async function* () {
+      yield " partial";
+      throw new Error("provider cut stream");
+    } as any);
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat/stream")
+      .set("Cookie", "ora-session=fake")
+      .send(VALID_BODY)
+      .buffer(true);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    const events = parseSseEvents(res.text);
+    const errorEvents = events["error"] ?? [];
+    expect(errorEvents.length).toBeGreaterThan(0);
+    const ev = errorEvents[0] as Record<string, unknown>;
+    // Post-first-token: code must be "stream_interrupted" (NOT "stream_failed")
+    expect(ev.code).toBe("stream_interrupted");
+  });
+
+  // ── chargeSession / isStreamingFallback ───────────────────────────────────
+
+  // The next two tests exercise the non-streaming /chat route to verify
+  // chargeSession correctly guards acknowledgeStreamingIncrement behind the
+  // explicit isStreamingFallback client signal — preventing a stale
+  // streamingPreIncremented cookie from silently undercharging an independent turn.
+
+  it("/chat without isStreamingFallback: uses incrementMessageCount even with stale streamingPreIncremented", async () => {
+    // Simulate the failure scenario: a successful streaming turn left a stale
+    // streamingPreIncremented: true cookie. The NEXT user message (a fresh
+    // turn, not a streaming retry) must still be charged normally.
+    validateSessionMock.mockReturnValue({
+      ...FAKE_SESSION,
+      streamingPreIncremented: true as const,
+      msgCount: 1,
+    });
+    createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", "ora-session=stale-flag")
+      .send(VALID_BODY); // no isStreamingFallback → defaults false
+    expect(res.status).toBe(200);
+    // incrementMessageCount must be called (normal charge)
+    expect(incrementMessageCountMock).toHaveBeenCalled();
+    // acknowledgeStreamingIncrement must NOT be called (stale flag ignored)
+    expect(acknowledgeStreamingIncrementMock).not.toHaveBeenCalled();
+  });
+
+  it("/chat with isStreamingFallback:true + streamingPreIncremented: acknowledges without double-charging", async () => {
+    // Simulate the intended scenario: streaming pre-incremented the session but
+    // failed before the first token; client retries via /chat with the flag.
+    validateSessionMock.mockReturnValue({
+      ...FAKE_SESSION,
+      streamingPreIncremented: true as const,
+      msgCount: 1,
+    });
+    createChatCompletionMock.mockResolvedValueOnce("A helpful reply");
+    const app = await buildTestApp();
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", "ora-session=pre-incremented")
+      .send({ ...VALID_BODY, isStreamingFallback: true });
+    expect(res.status).toBe(200);
+    // acknowledgeStreamingIncrement must be called (clear flag, no extra increment)
+    expect(acknowledgeStreamingIncrementMock).toHaveBeenCalled();
+    // incrementMessageCount must NOT be called (would be a double-charge)
+    expect(incrementMessageCountMock).not.toHaveBeenCalled();
   });
 }, 30000);
