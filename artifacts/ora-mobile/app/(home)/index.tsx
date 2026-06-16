@@ -188,6 +188,29 @@ export default function OraChatScreen() {
     }, [loadPreferences]),
   );
 
+  // Abort any in-flight SSE stream when the user navigates away from this
+  // screen. Drawer screens stay mounted between navigations so unmount alone
+  // is not enough — we must also cancel on blur to avoid dangling requests.
+  // We also clean up any pending/streaming placeholder so the bubble does not
+  // stay frozen when the user returns to the screen.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (streamAbortRef.current) {
+          streamAbortRef.current.abort();
+          streamAbortRef.current = null;
+          setMessages((prev) => {
+            const hasFrozen = prev.some((m) => m.pending || m.isStreaming);
+            if (!hasFrozen) return prev;
+            return prev.map((m) =>
+              m.pending || m.isStreaming ? { ...m, pending: false, isStreaming: false } : m,
+            );
+          });
+        }
+      };
+    }, []),
+  );
+
   useEffect(() => {
     return () => {
       if (talkRestartTimerRef.current) {
@@ -349,9 +372,7 @@ export default function OraChatScreen() {
             };
             if (donePayload.msgCount != null && donePayload.msgLimit != null) {
               setSession((s) =>
-                s
-                  ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit }
-                  : s,
+                s ? { ...s, msgCount: donePayload.msgCount, msgLimit: donePayload.msgLimit } : s,
               );
             }
           } catch (streamErr: unknown) {
@@ -418,7 +439,9 @@ export default function OraChatScreen() {
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === pendingId ? { ...m, pending: false, isStreaming: false, error: true, content: msg } : m,
+            m.id === pendingId
+              ? { ...m, pending: false, isStreaming: false, error: true, content: msg }
+              : m,
           ),
         );
       } finally {
