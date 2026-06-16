@@ -152,6 +152,9 @@ export default function OraChatScreen() {
   });
   const playerRef = useRef<AudioPlayer | null>(null);
   const talkRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Abort controller for any in-flight SSE stream. Aborted on unmount and on
+  // each new send so only one stream is ever active at a time.
+  const streamAbortRef = useRef<AbortController | null>(null);
   const startRecordingRef = useRef<() => Promise<void>>(async () => {});
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
@@ -185,6 +188,29 @@ export default function OraChatScreen() {
     }, [loadPreferences]),
   );
 
+  // Abort any in-flight SSE stream when the user navigates away from this
+  // screen. Drawer screens stay mounted between navigations so unmount alone
+  // is not enough — we must also cancel on blur to avoid dangling requests.
+  // We also clean up any pending/streaming placeholder so the bubble does not
+  // stay frozen when the user returns to the screen.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (streamAbortRef.current) {
+          streamAbortRef.current.abort();
+          streamAbortRef.current = null;
+          setMessages((prev) => {
+            const hasFrozen = prev.some((m) => m.pending || m.isStreaming);
+            if (!hasFrozen) return prev;
+            return prev.map((m) =>
+              m.pending || m.isStreaming ? { ...m, pending: false, isStreaming: false } : m,
+            );
+          });
+        }
+      };
+    }, []),
+  );
+
   useEffect(() => {
     return () => {
       if (talkRestartTimerRef.current) {
@@ -196,6 +222,10 @@ export default function OraChatScreen() {
       } catch {
         /* ignore */
       }
+      // Abort any in-flight SSE stream so navigation never leaves a dangling
+      // fetch that would try to update unmounted state.
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
     };
   }, []);
 
@@ -251,9 +281,15 @@ export default function OraChatScreen() {
     async (text: string, attch: Attachment | null) => {
       if ((!text && !attch) || sending) return;
 
+      // Abort any previous in-flight stream before starting a new one.
+      streamAbortRef.current?.abort();
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+
       const userMsg: OraMessage = { id: uid(), role: "user", content: text };
-      const pending: OraMessage = {
-        id: uid(),
+      const pendingId = uid();
+      const pendingMsg: OraMessage = {
+        id: pendingId,
         role: "assistant",
         content: "",
         pending: true,
@@ -263,14 +299,16 @@ export default function OraChatScreen() {
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const next = [...messages, userMsg, pending];
+      const next = [...messages, userMsg, pendingMsg];
       setMessages(next);
       setSending(true);
       scrollToEnd();
 
       try {
         let assistant: OraMessage;
+
         if (attch) {
+          // Attachment analysis — no streaming on these specialized endpoints.
           const prompt = text || "Please analyze this attachment.";
           let reply: string;
           if (attch.kind === "image") {
@@ -280,8 +318,9 @@ export default function OraChatScreen() {
           } else {
             reply = (await analyzeDocument(attch.ref, prompt, history)).reply;
           }
-          assistant = { id: pending.id, role: "assistant", content: reply };
+          assistant = { id: pendingId, role: "assistant", content: reply };
         } else {
+          // Plain chat — attempt SSE streaming first.
           const chatReq = {
             message: text,
             messages: history,
@@ -297,7 +336,7 @@ export default function OraChatScreen() {
             const content = streamedContent;
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === pending.id ? { ...m, content, isStreaming: true, pending: false } : m,
+                m.id === pendingId ? { ...m, content, isStreaming: true, pending: false } : m,
               ),
             );
           });
@@ -308,7 +347,7 @@ export default function OraChatScreen() {
             // fallback token.
             const res = await sendChat(chatReq);
             assistant = {
-              id: pending.id,
+              id: pendingId,
               role: "assistant",
               content: res.reply,
               sources: res.sources,
@@ -331,7 +370,7 @@ export default function OraChatScreen() {
           } else if (streamResult.ok) {
             // Streaming succeeded — apply final metadata from the done payload.
             assistant = {
-              id: pending.id,
+              id: pendingId,
               role: "assistant",
               content: streamResult.reply || streamedContent,
               isStreaming: false,
@@ -354,7 +393,7 @@ export default function OraChatScreen() {
                 : {}),
             });
             assistant = {
-              id: pending.id,
+              id: pendingId,
               role: "assistant",
               content: res.reply,
               sources: res.sources,
@@ -378,14 +417,15 @@ export default function OraChatScreen() {
             // Post-first-token interruption — partial content already rendered
             // via onToken callbacks. Finalize without retrying.
             assistant = {
-              id: pending.id,
+              id: pendingId,
               role: "assistant",
               content: streamedContent,
               isStreaming: false,
             };
           }
         }
-        const finalMsgs = next.map((m) => (m.id === pending.id ? assistant : m));
+
+        const finalMsgs = next.map((m) => (m.id === pendingId ? assistant : m));
         setMessages(finalMsgs);
         scrollToEnd();
         void persist(finalMsgs);
@@ -398,14 +438,20 @@ export default function OraChatScreen() {
           scheduleTalkRestart(700);
         }
       } catch (err) {
+        if (abortController.signal.aborted) return;
         const msg = err instanceof Error ? err.message : "Something went wrong. Try again.";
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === pending.id ? { ...m, pending: false, error: true, content: msg } : m,
+            m.id === pendingId
+              ? { ...m, pending: false, isStreaming: false, error: true, content: msg }
+              : m,
           ),
         );
       } finally {
         setSending(false);
+        if (streamAbortRef.current === abortController) {
+          streamAbortRef.current = null;
+        }
       }
     },
     [sending, messages, mode, scrollToEnd, persist, scheduleTalkRestart],
@@ -1365,7 +1411,7 @@ function MessageBubble({
           </>
         )}
       </View>
-      {!message.pending && !message.error && (
+      {!message.pending && !message.isStreaming && !message.error && (
         <View
           style={{
             flexDirection: "row",

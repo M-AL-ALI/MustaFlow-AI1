@@ -1296,6 +1296,14 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       )}
                     >
                       <OraRichText text={msg.content} isStreaming={msg.isStreaming} />
+                      {import.meta.env.DEV && msg.viaFallback && !msg.isStreaming && (
+                        <span
+                          title="This response used the non-streaming fallback path (realProviderStreaming=false or /chat fallback)"
+                          className="mt-1 inline-block select-none rounded px-1 py-px text-[10px] font-mono leading-none text-muted-foreground/50 border border-muted-foreground/20"
+                        >
+                          via fallback
+                        </span>
+                      )}
                     </div>
                   )}
 

@@ -1467,7 +1467,10 @@ export function useOraChat(): UseOraChatReturn {
 
           let data: ChatResponseData;
           let usedStreaming = false;
-          let streamingWasReal = false;
+          // Whether the AI provider delivered real incremental token streaming
+          // (true = real SSE tokens, false = non-streaming provider wrapped in SSE).
+          // Only meaningful when usedStreaming=true; irrelevant for /chat fallback.
+          let isRealStreamingPayload = true;
 
           try {
             // When the streaming feature flag is disabled, bypass /chat/stream
@@ -1498,9 +1501,8 @@ export function useOraChat(): UseOraChatReturn {
               streamAbort.signal,
             );
 
+            isRealStreamingPayload = donePayload.isRealStreaming ?? true;
             data = donePayload as ChatResponseData;
-            streamingWasReal =
-              (donePayload as { isRealStreaming?: boolean }).isRealStreaming ?? false;
             usedStreaming = true;
           } catch (streamErr: unknown) {
             const se = streamErr as {
@@ -1568,6 +1570,20 @@ export function useOraChat(): UseOraChatReturn {
 
           streamAbortRef.current = null;
 
+          // True when this reply bypassed real provider-level token streaming.
+          // Covers both the /chat fallback path and SSE providers that wrap a
+          // single non-streaming completion into the SSE envelope.
+          const viaFallback = !usedStreaming || !isRealStreamingPayload;
+
+          // Log the streaming path for every response so the team can monitor
+          // real vs fallback ratios in the browser console.
+          // eslint-disable-next-line no-console
+          console.debug(
+            usedStreaming
+              ? `[Ora] streaming path: SSE — realProviderStreaming=${isRealStreamingPayload}`
+              : "[Ora] streaming path: non-streaming fallback (/chat)",
+          );
+
           // Persist the rolling summary and advance the "already summarized"
           // pointer by exactly what we processed this turn (overflowEnd), so a
           // large backlog drains over successive turns without skipping the
@@ -1585,7 +1601,7 @@ export function useOraChat(): UseOraChatReturn {
               const finalMsg: OraMessage = {
                 ...buildAssistantMsg(data),
                 isStreaming: false,
-                ...(!streamingWasReal ? { isStreamingFallback: true } : {}),
+                ...(viaFallback ? { isStreamingFallback: true } : {}),
               };
               const next = [...prev.slice(0, -1), finalMsg];
               storeTranscript(next);
@@ -1594,7 +1610,13 @@ export function useOraChat(): UseOraChatReturn {
             });
           } else {
             setMessages((prev) => {
-              const next = [...prev, buildAssistantMsg(data)];
+              const next = [
+                ...prev,
+                {
+                  ...buildAssistantMsg(data),
+                  ...(viaFallback ? { isStreamingFallback: true } : {}),
+                },
+              ];
               storeTranscript(next);
               if (isSignedIn) saveToServer(next);
               return next;
