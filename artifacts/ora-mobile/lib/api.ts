@@ -151,6 +151,9 @@ export async function streamChatNative(
   onToken: (delta: string) => void,
   signal?: AbortSignal,
 ): Promise<StreamChatNativeResult> {
+  // When the streaming feature flag is disabled, return null immediately so
+  // the caller falls through to the regular sendChat path — no probe request.
+  if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "true") return null;
   if (typeof ReadableStream === "undefined") return null;
 
   const headers = await authHeaders({ "Content-Type": "application/json" });

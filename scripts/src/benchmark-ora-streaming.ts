@@ -288,9 +288,9 @@ async function main(): Promise<void> {
   console.log(`  Stuck-stream count      ${totalStuck}`);
   console.log(`${"─".repeat(56)}\n`);
 
-  // Exit non-zero if completion rate is below 80%
-  if (completionPct < 80) {
-    console.error(`  FAIL: completion rate ${completionPct}% is below 80% threshold.\n`);
+  // Exit non-zero if completion rate is below 90% (stretch target: 97%)
+  if (completionPct < 90) {
+    console.error(`  FAIL: completion rate ${completionPct}% is below 90% threshold.\n`);
     process.exit(1);
   }
 }

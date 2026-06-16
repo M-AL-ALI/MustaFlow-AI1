@@ -1470,6 +1470,15 @@ export function useOraChat(): UseOraChatReturn {
           let streamingWasReal = false;
 
           try {
+            // When the streaming feature flag is disabled, bypass /chat/stream
+            // entirely — no probe round-trip — and let the catch block route
+            // directly to /chat using the standard streamingFallback path.
+            if (import.meta.env.VITE_ORA_STREAMING_ENABLED !== "true") {
+              throw Object.assign(new Error("streaming_disabled"), {
+                streamingFallback: true,
+              });
+            }
+
             // Optimistically add a streaming placeholder that updates in real time.
             setMessages((prev) => [
               ...prev,

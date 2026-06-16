@@ -24,7 +24,7 @@ import type { Provider } from "../ai-provider-config";
 export type OraStreamEvent =
   | { type: "start"; conversationId?: string; messageId?: string }
   | { type: "token"; text: string }
-  | { type: "status"; label: string }
+  | { type: "status"; text: string }
   | { type: "done"; payload: OraStreamDonePayload }
   | { type: "error"; code: string; message: string; fallbackToken?: string };
 
