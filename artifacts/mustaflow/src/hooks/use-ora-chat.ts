@@ -1550,13 +1550,12 @@ export function useOraChat(): UseOraChatReturn {
 
           // Log the streaming path for every response so the team can monitor
           // real vs fallback ratios in the browser console.
-          if (usedStreaming) {
-            console.debug(
-              `[Ora] streaming path: SSE — realProviderStreaming=${isRealStreamingPayload}`,
-            );
-          } else {
-            console.debug("[Ora] streaming path: non-streaming fallback (/chat)");
-          }
+          // eslint-disable-next-line no-console
+          console.debug(
+            usedStreaming
+              ? `[Ora] streaming path: SSE — realProviderStreaming=${isRealStreamingPayload}`
+              : "[Ora] streaming path: non-streaming fallback (/chat)",
+          );
 
           // Persist the rolling summary and advance the "already summarized"
           // pointer by exactly what we processed this turn (overflowEnd), so a
