@@ -36,7 +36,7 @@ const verifyStreamFallbackTokenMock = vi.hoisted(() => vi.fn().mockReturnValue(f
 
 // streamChatCompletion mock: yields two token deltas then returns.
 const streamChatCompletionMock = vi.hoisted(() =>
-  vi.fn(async function* () {
+  vi.fn(async function* (): AsyncGenerator<string> {
     yield " Hello";
     yield " World";
   }),
@@ -71,8 +71,6 @@ vi.mock("../../../lib/public-ai/session", () => ({
   isOraSecretConfigured: isOraSecretConfiguredMock,
   createStreamFallbackToken: createStreamFallbackTokenMock,
   verifyStreamFallbackToken: verifyStreamFallbackTokenMock,
-  setSessionCookie: setSessionCookieMock,
-  isOraSecretConfigured: isOraSecretConfiguredMock,
   MSG_LIMIT_VALUE: 10,
 }));
 
