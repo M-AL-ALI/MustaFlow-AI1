@@ -22,6 +22,18 @@ args = "codegen-drift"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
+args = "cdn-versions"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "push-to-github"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "pull-from-github"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
 args = "lint"
 
 [[workflows.workflow.tasks]]
@@ -31,22 +43,6 @@ args = "format"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "quality-gate"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "cdn-versions"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "typecheck"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "push-to-github"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "pull-from-github"
 
 [[workflows.workflow]]
 name = "codegen-drift"
@@ -60,39 +56,6 @@ args = "pnpm --filter @workspace/api-spec run codegen && git diff --exit-code li
 isValidation = true
 
 [[workflows.workflow]]
-name = "lint"
-author = "agent"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run lint"
-
-[[workflows.workflow]]
-name = "format"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run format:check"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "quality-gate"
-author = "agent"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run lint && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck"
-
-[[workflows.workflow]]
 name = "cdn-versions"
 author = "agent"
 
@@ -102,17 +65,6 @@ args = "pnpm --filter @workspace/scripts run check-cdn-versions"
 
 [workflows.workflow.metadata]
 isValidation = true
-
-[[workflows.workflow]]
-name = "typecheck"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run typecheck"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "push-to-github"
@@ -135,6 +87,39 @@ args = "bash scripts/pull-from-github.sh"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "lint"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run lint"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "format"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run format:check"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "quality-gate"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run lint && pnpm run format:check && pnpm --filter @workspace/api-spec run codegen && git diff --exit-code lib/api-client-react/src/generated lib/api-zod/src/generated && pnpm run typecheck && pnpm --filter @workspace/api-server exec vitest run"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "PNPM_WORKSPACE"
