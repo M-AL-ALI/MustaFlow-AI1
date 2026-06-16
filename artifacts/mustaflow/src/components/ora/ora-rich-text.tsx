@@ -288,6 +288,14 @@ function renderInline(value: string, keyPrefix: string) {
  * Renders an Ora assistant reply with safe links and a small, chat-friendly
  * subset of Markdown. This keeps common model output such as headings, bold
  * labels, lists, and simple tables from showing as raw #, *, and | clutter.
+ *
+ * Accessibility:
+ *  - `aria-live="polite"` during streaming so screen readers announce new
+ *    content as it arrives (without interrupting the user).
+ *  - `aria-atomic="false"` — only new content is announced, not the whole
+ *    accumulated reply each time.
+ *  - After streaming completes (`isStreaming` becomes false) the region is
+ *    switched to `aria-live="off"` so no further announcements are made.
  */
 export function OraRichText({
   text,
@@ -299,7 +307,11 @@ export function OraRichText({
   const blocks = parseOraBlocks(text);
 
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      aria-live={isStreaming ? "polite" : "off"}
+      aria-atomic="false"
+    >
       {blocks.map((block, i) => {
         if (block.type === "heading") {
           return (
@@ -384,9 +396,12 @@ export function OraRichText({
 function OraStreamCursor() {
   return (
     <>
-      <style>{`@keyframes ora-cursor-blink{0%,100%{opacity:1}50%{opacity:0}}`}</style>
+      <style>{`
+        @keyframes ora-cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
+        @media(prefers-reduced-motion:reduce){.ora-stream-cursor{animation:none!important;opacity:1}}
+      `}</style>
       <span
-        className="ml-px inline-block h-[0.85em] w-[2px] translate-y-[0.05em] bg-current align-middle"
+        className="ora-stream-cursor ml-px inline-block h-[0.85em] w-[2px] translate-y-[0.05em] bg-current align-middle"
         style={{ animation: "ora-cursor-blink 0.9s step-end infinite" }}
         aria-hidden="true"
       />

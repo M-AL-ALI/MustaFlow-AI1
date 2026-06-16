@@ -2044,6 +2044,11 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         max_completion_tokens: 200,
       }).catch(() => null);
 
+  // Import stream helpers BEFORE flushHeaders so anySignal is available for
+  // the first-token timeout we create here (timeout must be set up before we
+  // start streaming, and cookies must be set before headers flush).
+  const { writeSSE, isRealProviderStreaming, anySignal } = await import("./stream-adapter");
+
   // Pre-increment session + set cookie BEFORE flushing SSE headers — once
   // headers are flushed no further Set-Cookie headers can be added.
   // On stream failure the session count may be off by 1; the DB-backed quota
@@ -2052,16 +2057,40 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   const { token: updatedToken, payload: updatedPayload } = incrementMessageCount(session);
   setSessionCookie(res, updatedToken);
 
+  // SSE headers:
+  //   Cache-Control: no-cache, no-transform — disables CDN/edge buffering and
+  //     prevents any proxy from re-encoding the byte stream.
+  //   X-Accel-Buffering: no — tells nginx not to buffer SSE frames.
+  //   Connection: keep-alive — required for long-running SSE responses.
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+
+  // Emit `start` immediately so the client knows the SSE connection is live
+  // before the first AI token arrives (avoids a perceived hang while the
+  // candidate chain warms up).
+  writeSSE(res, { type: "start" });
 
   // Abort the stream when the client closes the connection.
   const abortController = new AbortController();
   req.on("close", () => abortController.abort());
 
-  const { writeSSE, isRealProviderStreaming } = await import("./stream-adapter");
+  // 30-second guard: if no first token arrives within this window the provider
+  // is considered stuck. The timeout signal is combined with the client-
+  // disconnect signal so whichever fires first wins. Once the first token
+  // arrives the timer is cleared and only client-disconnect matters.
+  const firstTokenTimeoutController = new AbortController();
+  const FIRST_TOKEN_TIMEOUT_MS = 30_000;
+  const firstTokenTimer = setTimeout(
+    () => firstTokenTimeoutController.abort(),
+    FIRST_TOKEN_TIMEOUT_MS,
+  );
+  const combinedSignal = anySignal([
+    abortController.signal,
+    firstTokenTimeoutController.signal,
+  ]);
 
   // Streaming candidate chain: try each provider in order. Fall back to the
   // next only if the error occurs BEFORE the first token — once tokens are
@@ -2074,49 +2103,60 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   let streamModel = candidates[0]?.model ?? primaryModel;
   let streamError: Error | null = null;
 
-  candidateLoop: for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    usedFallback = i > 0;
-    streamProvider = candidate.provider;
-    streamModel = candidate.model;
+  try {
+    candidateLoop: for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      usedFallback = i > 0;
+      streamProvider = candidate.provider;
+      streamModel = candidate.model;
 
-    try {
-      const gen = streamChatCompletion({
-        provider: candidate.provider,
-        model: candidate.model,
-        messages: callMessages,
-        max_completion_tokens: maxTokens,
-        signal: abortController.signal,
-      });
-
-      for await (const delta of gen) {
-        if (abortController.signal.aborted) break candidateLoop;
-        firstTokenSent = true;
-        streamedReply += delta;
-        writeSSE(res, { type: "token", delta });
-      }
-
-      break candidateLoop;
-    } catch (candidateErr) {
-      if (firstTokenSent) {
-        streamError = candidateErr as Error;
-        break candidateLoop;
-      }
-      logger.warn(
-        {
-          component: "ora-chat-stream",
+      try {
+        const gen = streamChatCompletion({
           provider: candidate.provider,
           model: candidate.model,
-          attempt: i + 1,
-          ofCandidates: candidates.length,
-          err: candidateErr,
-        },
-        "Streaming candidate failed — trying next provider",
-      );
-      if (i === candidates.length - 1) {
-        streamError = candidateErr as Error;
+          messages: callMessages,
+          max_completion_tokens: maxTokens,
+          // Use the combined (client-disconnect + first-token timeout) signal
+          // until the first token arrives; after that the timeout is cancelled
+          // and only client-disconnect matters, but combinedSignal stays inert.
+          signal: combinedSignal,
+        });
+
+        for await (const delta of gen) {
+          if (combinedSignal.aborted) break candidateLoop;
+          if (!firstTokenSent) {
+            // Cancel the first-token timeout — we have a live stream.
+            clearTimeout(firstTokenTimer);
+          }
+          firstTokenSent = true;
+          streamedReply += delta;
+          writeSSE(res, { type: "token", delta });
+        }
+
+        break candidateLoop;
+      } catch (candidateErr) {
+        if (firstTokenSent) {
+          streamError = candidateErr as Error;
+          break candidateLoop;
+        }
+        logger.warn(
+          {
+            component: "ora-chat-stream",
+            provider: candidate.provider,
+            model: candidate.model,
+            attempt: i + 1,
+            ofCandidates: candidates.length,
+            err: candidateErr,
+          },
+          "Streaming candidate failed — trying next provider",
+        );
+        if (i === candidates.length - 1) {
+          streamError = candidateErr as Error;
+        }
       }
     }
+  } finally {
+    clearTimeout(firstTokenTimer);
   }
 
   const latencyMs = Date.now() - start;

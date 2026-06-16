@@ -508,6 +508,7 @@ interface StreamDonePayload {
 }
 
 type StreamEvent =
+  | { type: "start" }
   | { type: "token"; delta: string }
   | { type: "status"; label: string }
   | { type: "done"; payload: StreamDonePayload }
@@ -519,9 +520,15 @@ type StreamEvent =
  * Calls `onToken` for each incremental text delta. Resolves with the full
  * `done` payload on completion.
  *
- * Throws with `{ streamingFallback: true }` when the server signals that the
- * client should retry via /api/public-ai/chat (503 feature-disabled or a
- * specialist-tool JSON fallback).
+ * Error semantics:
+ * - `{ streamingFallback: true }` — feature disabled (503) or specialist-tool
+ *   JSON signal, OR SSE `error` event before the first token arrived.
+ *   Caller should silently retry via /api/public-ai/chat.
+ * - `{ partialContent: string }` — SSE `error` event arrived AFTER one or more
+ *   tokens were already emitted. The partial text has already been appended via
+ *   `onToken`; caller should preserve it rather than discarding the placeholder.
+ * - `AbortError` — caller aborted (navigation); clean up silently.
+ * - `{ status: number }` — HTTP-level error (401, 429, …); surface to the user.
  */
 async function consumeOraStream(
   base: string,
@@ -566,33 +573,66 @@ async function consumeOraStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let donePayload: StreamDonePayload | null = null;
+  // Track whether at least one token has been received. An SSE `error` before
+  // the first token triggers a silent /chat fallback; after the first token it
+  // means the stream was interrupted mid-reply (preserve partial content).
+  let firstTokenReceived = false;
+  // Accumulate tokens so we can attach partialContent to a mid-stream error.
+  let accumulated = "";
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
+    // SSE frames are separated by double newlines. Each frame may carry an
+    // `event: <type>` line (RFC 8895) followed by `data: <json>`. The type is
+    // also embedded in the JSON for backward compatibility with readers that
+    // only inspect the data line.
     const parts = buffer.split("\n\n");
     buffer = parts.pop() ?? "";
 
     for (const part of parts) {
+      let eventTypeLine: string | null = null;
+      let dataLine: string | null = null;
+
       for (const line of part.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw) continue;
-        let event: StreamEvent;
-        try {
-          event = JSON.parse(raw) as StreamEvent;
-        } catch {
-          continue;
+        if (line.startsWith("event: ")) {
+          eventTypeLine = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          dataLine = line.slice(6).trim();
         }
-        if (event.type === "token") {
-          onToken(event.delta);
-        } else if (event.type === "done") {
-          donePayload = event.payload;
-        } else if (event.type === "error") {
-          throw new Error(event.message);
+      }
+
+      if (!dataLine) continue;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(dataLine) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      // Resolve type: prefer the `event:` line; fall back to JSON-embedded type.
+      const eventType = eventTypeLine ?? (parsed.type as string | undefined);
+      if (!eventType) continue;
+
+      if (eventType === "start") {
+        // Connection confirmed — no action needed, just a liveness signal.
+      } else if (eventType === "token") {
+        const delta = (parsed as { delta: string }).delta;
+        firstTokenReceived = true;
+        accumulated += delta;
+        onToken(delta);
+      } else if (eventType === "done") {
+        donePayload = (parsed as { payload: StreamDonePayload }).payload;
+      } else if (eventType === "error") {
+        const message = (parsed as { message: string }).message ?? "Ora is temporarily unavailable.";
+        if (!firstTokenReceived) {
+          // No tokens yet — silently fall back to /chat (same as 503).
+          throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
         }
+        // Tokens were already sent; preserve the partial reply.
+        throw Object.assign(new Error(message), { partialContent: accumulated });
       }
     }
   }
@@ -1443,22 +1483,47 @@ export function useOraChat(): UseOraChatReturn {
           } catch (streamErr: unknown) {
             const se = streamErr as {
               streamingFallback?: boolean;
+              partialContent?: string;
               name?: string;
               status?: number;
             };
 
-            // Remove the optimistic placeholder if it's still there.
+            if (se.name === "AbortError") {
+              // Mid-stream navigation — abort cleanly, no error shown, and
+              // remove any empty streaming placeholder.
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant" && last.isStreaming && !last.content)
+                  return prev.slice(0, -1);
+                return prev;
+              });
+              streamAbortRef.current = null;
+              return;
+            }
+
+            if (se.partialContent !== undefined) {
+              // SSE `error` event received after one or more tokens were already
+              // emitted. Preserve the partial reply (mark it done) rather than
+              // silently discarding it. Do NOT re-throw — the outer catch would
+              // remove the user message too, leaving the thread with no trace.
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant" && last.isStreaming) {
+                  return [...prev.slice(0, -1), { ...last, isStreaming: false }];
+                }
+                return prev;
+              });
+              setError("Ora's response was cut off. The partial reply above may be incomplete.");
+              streamAbortRef.current = null;
+              return; // Do not fall through to the outer catch
+            }
+
+            // Remove the empty streaming placeholder before any fallback/rethrow.
             setMessages((prev) => {
               const last = prev[prev.length - 1];
               if (last?.role === "assistant" && last.isStreaming) return prev.slice(0, -1);
               return prev;
             });
-
-            if (se.name === "AbortError") {
-              // Mid-stream navigation — abort cleanly, no error shown.
-              streamAbortRef.current = null;
-              return;
-            }
 
             if (!se.streamingFallback) {
               // Real error (429, 401, network, etc.) — rethrow for the outer
@@ -1467,7 +1532,8 @@ export function useOraChat(): UseOraChatReturn {
               throw streamErr;
             }
 
-            // Streaming unavailable (503 or specialist-tool signal) — fall back.
+            // Streaming unavailable (503, specialist-tool signal, or error
+            // before first token) — silently fall back to /chat.
             data = await apiPost<ChatResponseData>("/api/public-ai/chat", body);
           }
 
