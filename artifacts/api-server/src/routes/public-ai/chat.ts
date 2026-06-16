@@ -1971,26 +1971,45 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
       : [];
 
-  const memory =
+  // Time-to-first-token optimization: the three prompt-context builders below
+  // are independent, so run them concurrently. Pre-stream latency becomes the
+  // max of the three (memory recall caps at ~1.5s) instead of their sum.
+  const [memory, crossConvContext, profileContext] = await Promise.all([
     authed && referenceSavedMemories && !temporary
-      ? await buildMemoryContext(authed.userId, oraProjectId, message, planTier)
-      : { text: "", used: [] };
-
-  const crossConvContext =
+      ? buildMemoryContext(authed.userId, oraProjectId, message, planTier)
+      : Promise.resolve({ text: "", used: [] }),
     authed && referenceChatHistory && !temporary
-      ? await buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
-      : "";
+      ? buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
+      : Promise.resolve(""),
+    authed ? buildProfileContext(authed.userId) : Promise.resolve(""),
+  ]);
 
-  const profileContext = authed ? await buildProfileContext(authed.userId) : "";
-
+  // Rolling conversation summary. The summary refresh is a separate AI call
+  // (timeout up to 5s, frequently the long pole) and is only needed to enrich
+  // the prompt with context that has scrolled out of the recent window plus the
+  // echoed value the client persists. To keep streaming perceptible we do NOT
+  // block the first token on it: this turn's prompt uses the client-provided
+  // prior summary, and the refresh runs concurrently with the AI stream. The
+  // updated value is awaited only just before the final done payload (by which
+  // point the ~5s stream has usually let it finish). The omitted context is the
+  // 1-2 messages that just overflowed the recent 20-turn window; they fold into
+  // the summary on the next turn.
   let conversationSummary = referenceChatHistory && !temporary ? (priorSummary ?? "").trim() : "";
+  let summaryPromise: Promise<string> | null = null;
   if (referenceChatHistory && !temporary && summarizeMessages.length > 0) {
-    const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
-    conversationSummary = await updateConversationSummary({
-      priorSummary: conversationSummary,
-      newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
-      subscriptionTier: planTier,
-    });
+    const priorForSummary = conversationSummary;
+    summaryPromise = (async () => {
+      const { updateConversationSummary } =
+        await import("../../lib/public-ai/conversation-summary");
+      return updateConversationSummary({
+        priorSummary: priorForSummary,
+        newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
+        subscriptionTier: planTier,
+      });
+    })();
+    // Fail safe to the prior summary so a rejected/timed-out refresh never
+    // surfaces as an unhandled rejection or breaks the done payload.
+    summaryPromise = summaryPromise.catch(() => priorForSummary);
   }
   const summaryContext = conversationSummary
     ? `\n\n## Earlier in this conversation\nThe following is a running summary of earlier parts of THIS conversation that have scrolled out of the recent message window. Treat these as established context and stay consistent with them, but defer to anything more recent:\n${conversationSummary}`
@@ -2268,6 +2287,14 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       : null;
 
   const usage = await oraUsageResponse(authed, updatedPayload.msgCount);
+
+  // The rolling-summary refresh was kicked off before streaming and ran
+  // concurrently with the AI stream. Resolve it now (already settled in the
+  // common case) so the echoed value the client persists is up to date. The
+  // promise is pre-caught, so this never rejects.
+  if (summaryPromise) {
+    conversationSummary = await summaryPromise;
+  }
 
   writeSSE(res, {
     type: "done",
