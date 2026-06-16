@@ -39,8 +39,7 @@ export type OraTool =
   | "image_editing"
   | "file_generation"
   | "memory_lookup"
-  | "memory_save_candidate"
-  | "builder_handoff";
+  | "memory_save_candidate";
 
 /** Minimum account level required to invoke a tool. */
 export type OraToolAccess = "anon" | "free" | "paid";
@@ -131,14 +130,6 @@ export const ORA_TOOL_REGISTRY: Record<OraTool, OraToolMeta> = {
     tool: "memory_save_candidate",
     description: "Detect a durable fact worth offering to save to memory.",
     minAccess: "free",
-    creditCost: 0,
-    status: "live",
-  },
-  builder_handoff: {
-    tool: "builder_handoff",
-    description:
-      "Explicit, user-initiated handoff to the AI Builder. NEVER selected automatically by the router.",
-    minAccess: "anon",
     creditCost: 0,
     status: "live",
   },
@@ -665,8 +656,7 @@ export interface OraRouteDecision {
  * Fast-path regex first (file/image), then fall back to the LLM classifier for
  * model selection + suggestion topic. Critically: a build/"make me an app"
  * request is NOT refused and NOT handed off — it routes to `answer` /
- * `deep_thinking` so Ora responds as a standalone assistant. `builder_handoff`
- * is only ever reached through an explicit, user-initiated action elsewhere.
+ * `deep_thinking` so Ora responds as a standalone assistant.
  */
 export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDecision> {
   const { message, mode } = input;

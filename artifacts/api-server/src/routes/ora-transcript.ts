@@ -50,7 +50,6 @@ const videoSchema = z.object({
 const messageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32000),
-  handoffCta: z.boolean().optional(),
   datasetResult: datasetResultSchema.optional(),
   messageKind: z.enum(["image-analysis", "document-analysis"]).optional(),
   suggestions: z.array(z.string()).optional(),

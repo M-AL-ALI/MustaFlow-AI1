@@ -263,7 +263,6 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     : { msgCount: payload.msgCount, msgLimit: MSG_LIMIT_VALUE, resetsAt: null };
   res.json({
     reply,
-    handoffCta: false,
     ...usage,
   });
 });

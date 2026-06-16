@@ -309,7 +309,6 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
 
   res.json({
     reply,
-    handoffCta: false,
     imageAnalysisCount: windowUsage ? windowUsage.messageCount : payload.imageAnalysisCount,
     imageAnalysisLimit: windowUsage ? windowUsage.messageLimit : IMAGE_ANALYSIS_LIMIT_VALUE,
     ...(windowUsage ? { resetsAt: windowUsage.resetsAt } : {}),

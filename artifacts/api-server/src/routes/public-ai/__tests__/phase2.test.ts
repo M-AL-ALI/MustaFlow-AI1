@@ -409,8 +409,6 @@ describe("Route-level: file-analysis endpoint", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.reply).toBe("This document discusses quarterly financials.");
-    // Ora is a standalone assistant — file analysis never hands off to the Builder.
-    expect(res.body.handoffCta).toBe(false);
     expect(res.body.msgCount).toBe(1);
     expect(res.headers["set-cookie"]).toBeDefined();
   });

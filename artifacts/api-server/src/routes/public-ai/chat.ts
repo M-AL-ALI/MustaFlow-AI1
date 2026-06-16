@@ -1692,9 +1692,8 @@ router.post("/public-ai/chat", async (req, res) => {
   const { token, payload } = incrementMessageCount(session);
   setSessionCookie(res, token);
 
-  // Ora is a standalone assistant. It NEVER proactively pushes the AI Builder —
-  // no topic- or message-count-based handoff. The Builder handoff stays an
-  // explicit, user-initiated action handled by a separate endpoint.
+  // Ora is a standalone assistant. It NEVER proactively routes to any external
+  // builder or handoff endpoint — no topic- or message-count-based redirects.
 
   // Surface a memory-save candidate when the user stated a durable fact. This is
   // a non-binding suggestion for signed-in users; the client decides whether to
