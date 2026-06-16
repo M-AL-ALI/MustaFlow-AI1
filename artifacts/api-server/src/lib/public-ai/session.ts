@@ -25,6 +25,13 @@ export interface OraSessionPayload {
   imageCount: number;
   imageAnalysisCount: number;
   createdAt: number;
+  /**
+   * Set to `true` by the streaming route when it pre-increments msgCount
+   * before flushing SSE headers (the only window where Set-Cookie is possible).
+   * Cleared (and msgCount left unchanged) by the non-streaming /chat route on
+   * a fallback retry, preventing an anonymous-session double-count.
+   */
+  streamingPreIncremented?: true;
 }
 
 export function createSession(): { token: string; payload: OraSessionPayload } {
@@ -53,6 +60,7 @@ export function validateSession(token: string): OraSessionPayload | null {
       imageCount: decoded.imageCount ?? 0,
       imageAnalysisCount: decoded.imageAnalysisCount ?? 0,
       createdAt: decoded.createdAt,
+      ...(decoded.streamingPreIncremented ? { streamingPreIncremented: true as const } : {}),
     };
   } catch {
     return null;
@@ -64,6 +72,40 @@ export function incrementMessageCount(session: OraSessionPayload): {
   payload: OraSessionPayload;
 } {
   const updated: OraSessionPayload = { ...session, msgCount: session.msgCount + 1 };
+  const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
+  return { token, payload: updated };
+}
+
+/**
+ * Used by the streaming route to pre-increment msgCount before `flushHeaders`
+ * (the only window where a `Set-Cookie` header can be attached).
+ * Sets `streamingPreIncremented: true` so the non-streaming /chat route knows
+ * not to double-count on a fallback retry.
+ */
+export function markSessionAsPreIncremented(session: OraSessionPayload): {
+  token: string;
+  payload: OraSessionPayload;
+} {
+  const updated: OraSessionPayload = {
+    ...session,
+    msgCount: session.msgCount + 1,
+    streamingPreIncremented: true,
+  };
+  const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
+  return { token, payload: updated };
+}
+
+/**
+ * Used by the non-streaming /chat route when it detects a `streamingPreIncremented`
+ * flag on the session. The streaming route already consumed one quota slot; this
+ * re-signs the JWT to clear the flag without incrementing msgCount further.
+ */
+export function acknowledgeStreamingIncrement(session: OraSessionPayload): {
+  token: string;
+  payload: OraSessionPayload;
+} {
+  const { streamingPreIncremented: _, ...rest } = session;
+  const updated: OraSessionPayload = rest;
   const token = jwt.sign(updated, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
   return { token, payload: updated };
 }

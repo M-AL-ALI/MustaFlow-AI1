@@ -4,8 +4,11 @@ import { logger } from "../../lib/logger";
 import {
   validateSession,
   incrementMessageCount,
+  markSessionAsPreIncremented,
+  acknowledgeStreamingIncrement,
   setSessionCookie,
   MSG_LIMIT_VALUE,
+  type OraSessionPayload,
 } from "../../lib/public-ai/session";
 import {
   scanUserInput,
@@ -771,6 +774,22 @@ Response shape for this turn:
 
 const router = Router();
 
+/**
+ * Charge one message slot against the session JWT.
+ *
+ * The streaming route pre-increments `msgCount` and sets `streamingPreIncremented: true`
+ * before flushing SSE headers (the only window where Set-Cookie is possible). If a
+ * pre-first-token failure causes the client to silently retry via /chat, this helper
+ * detects the flag and clears it without double-incrementing, ensuring every
+ * user turn costs exactly one anonymous-session slot regardless of streaming/fallback.
+ */
+function chargeSession(session: OraSessionPayload): { token: string; payload: OraSessionPayload } {
+  if (session.streamingPreIncremented) {
+    return acknowledgeStreamingIncrement(session);
+  }
+  return incrementMessageCount(session);
+}
+
 const messageItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
@@ -1115,7 +1134,7 @@ router.post("/public-ai/chat", async (req, res) => {
         carriedDocs.length > 0,
         authed?.tier ?? null,
       );
-      const { token, payload } = incrementMessageCount(session);
+      const { token, payload } = chargeSession(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1189,7 +1208,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const { generateImage, isImageProviderConfigured } = imageProviderModule;
     if (!isImageProviderConfigured()) {
       await refundOraQuotaFor(authed, quotaKind);
-      const { token, payload } = incrementMessageCount(session);
+      const { token, payload } = chargeSession(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1261,7 +1280,7 @@ router.post("/public-ai/chat", async (req, res) => {
           );
         }
       }
-      const { token, payload } = incrementMessageCount(session);
+      const { token, payload } = chargeSession(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1334,7 +1353,7 @@ router.post("/public-ai/chat", async (req, res) => {
     const { isWebSearchConfigured, runOraWebSearch } = webSearchModule;
     if (!isWebSearchConfigured()) {
       await refundOraQuotaFor(authed, quotaKind);
-      const { token, payload } = incrementMessageCount(session);
+      const { token, payload } = chargeSession(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1371,7 +1390,7 @@ router.post("/public-ai/chat", async (req, res) => {
         wantsVideos: decision.wantsVideos,
         subscriptionTier: oraPlanTier(authed),
       });
-      const { token, payload } = incrementMessageCount(session);
+      const { token, payload } = chargeSession(session);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
@@ -1740,8 +1759,10 @@ router.post("/public-ai/chat", async (req, res) => {
 // Conversational replies stream tokens using streamChatCompletion with the
 // same multi-provider candidate chain as the non-streaming route.
 router.post("/public-ai/chat/stream", async (req, res) => {
-  if (!process.env.ORA_STREAMING_ENABLED) {
-    res.status(503).json({ error: "Streaming is not enabled on this server." });
+  if (process.env.ORA_STREAMING_ENABLED !== "true") {
+    res
+      .status(503)
+      .json({ error: "Streaming is not enabled on this server.", streamingFallback: true });
     return;
   }
 
@@ -1939,12 +1960,9 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   const profileContext = authed ? await buildProfileContext(authed.userId) : "";
 
-  let conversationSummary =
-    referenceChatHistory && !temporary ? (priorSummary ?? "").trim() : "";
+  let conversationSummary = referenceChatHistory && !temporary ? (priorSummary ?? "").trim() : "";
   if (referenceChatHistory && !temporary && summarizeMessages.length > 0) {
-    const { updateConversationSummary } = await import(
-      "../../lib/public-ai/conversation-summary"
-    );
+    const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
     conversationSummary = await updateConversationSummary({
       priorSummary: conversationSummary,
       newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -2051,10 +2069,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   // Pre-increment session + set cookie BEFORE flushing SSE headers — once
   // headers are flushed no further Set-Cookie headers can be added.
-  // On stream failure the session count may be off by 1; the DB-backed quota
-  // (consumeOraQuota above) is the authoritative rate gate for signed-in users,
-  // so this minor inaccuracy is acceptable.
-  const { token: updatedToken, payload: updatedPayload } = incrementMessageCount(session);
+  // `markSessionAsPreIncremented` tags the JWT with `streamingPreIncremented: true`
+  // so the non-streaming /chat route (chargeSession helper) can detect a fallback
+  // retry and skip the increment, preventing an anonymous-session double-count.
+  const { token: updatedToken, payload: updatedPayload } = markSessionAsPreIncremented(session);
   setSessionCookie(res, updatedToken);
 
   // SSE headers:
@@ -2087,10 +2105,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     () => firstTokenTimeoutController.abort(),
     FIRST_TOKEN_TIMEOUT_MS,
   );
-  const combinedSignal = anySignal([
-    abortController.signal,
-    firstTokenTimeoutController.signal,
-  ]);
+  const combinedSignal = anySignal([abortController.signal, firstTokenTimeoutController.signal]);
 
   // Streaming candidate chain: try each provider in order. Fall back to the
   // next only if the error occurs BEFORE the first token — once tokens are

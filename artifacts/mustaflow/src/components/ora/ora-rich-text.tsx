@@ -307,11 +307,7 @@ export function OraRichText({
   const blocks = parseOraBlocks(text);
 
   return (
-    <div
-      className="space-y-2"
-      aria-live={isStreaming ? "polite" : "off"}
-      aria-atomic="false"
-    >
+    <div className="space-y-2" aria-live={isStreaming ? "polite" : "off"} aria-atomic="false">
       {blocks.map((block, i) => {
         if (block.type === "heading") {
           return (
@@ -328,9 +324,9 @@ export function OraRichText({
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
                   {renderInline(item, `ul-${i}-${itemIndex}`)}
-                  {isStreaming && i === blocks.length - 1 && itemIndex === block.items.length - 1 && (
-                    <OraStreamCursor />
-                  )}
+                  {isStreaming &&
+                    i === blocks.length - 1 &&
+                    itemIndex === block.items.length - 1 && <OraStreamCursor />}
                 </li>
               ))}
             </ul>
@@ -343,9 +339,9 @@ export function OraRichText({
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
                   {renderInline(item, `ol-${i}-${itemIndex}`)}
-                  {isStreaming && i === blocks.length - 1 && itemIndex === block.items.length - 1 && (
-                    <OraStreamCursor />
-                  )}
+                  {isStreaming &&
+                    i === blocks.length - 1 &&
+                    itemIndex === block.items.length - 1 && <OraStreamCursor />}
                 </li>
               ))}
             </ol>

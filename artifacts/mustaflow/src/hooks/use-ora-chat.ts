@@ -507,13 +507,6 @@ interface StreamDonePayload {
   isRealStreaming?: boolean;
 }
 
-type StreamEvent =
-  | { type: "start" }
-  | { type: "token"; delta: string }
-  | { type: "status"; label: string }
-  | { type: "done"; payload: StreamDonePayload }
-  | { type: "error"; message: string };
-
 /**
  * Consume the /api/public-ai/chat/stream SSE endpoint.
  *
@@ -626,7 +619,8 @@ async function consumeOraStream(
       } else if (eventType === "done") {
         donePayload = (parsed as { payload: StreamDonePayload }).payload;
       } else if (eventType === "error") {
-        const message = (parsed as { message: string }).message ?? "Ora is temporarily unavailable.";
+        const message =
+          (parsed as { message: string }).message ?? "Ora is temporarily unavailable.";
         if (!firstTokenReceived) {
           // No tokens yet — silently fall back to /chat (same as 503).
           throw Object.assign(new Error("streaming_unavailable"), { streamingFallback: true });
@@ -1432,9 +1426,7 @@ export function useOraChat(): UseOraChatReturn {
                   ...(d.memorySaveCandidateConfidence
                     ? { memorySaveCandidateConfidence: d.memorySaveCandidateConfidence }
                     : {}),
-                  ...(d.memorySaveCandidateSensitive
-                    ? { memorySaveCandidateSensitive: true }
-                    : {}),
+                  ...(d.memorySaveCandidateSensitive ? { memorySaveCandidateSensitive: true } : {}),
                 }
               : {}),
             ...(d.fileName && d.fileData && d.mimeType

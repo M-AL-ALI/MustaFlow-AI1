@@ -170,9 +170,7 @@ describe("POST /public-ai/chat/stream", () => {
   it("returns 401 when no ora-session cookie is present", async () => {
     process.env.ORA_STREAMING_ENABLED = "true";
     const app = await buildTestApp();
-    const res = await request(app)
-      .post("/public-ai/chat/stream")
-      .send(VALID_BODY);
+    const res = await request(app).post("/public-ai/chat/stream").send(VALID_BODY);
     expect(res.status).toBe(401);
   });
 
@@ -250,10 +248,7 @@ describe("POST /public-ai/chat/stream", () => {
     // that the Ora-isolation forbidden tokens are absent.
     const fs = await import("fs");
     const path = await import("path");
-    const src = fs.readFileSync(
-      path.resolve(__dirname, "../stream-adapter.ts"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve(__dirname, "../stream-adapter.ts"), "utf8");
     const forbidden = [
       "handoffCta",
       "builder_handoff",
