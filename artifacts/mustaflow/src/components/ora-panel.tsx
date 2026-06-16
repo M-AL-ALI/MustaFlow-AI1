@@ -610,6 +610,15 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                 ? "analyzing"
                 : "idle";
 
+  // True once the in-flight streaming reply has produced visible text. Used to
+  // hide the pending "thinking/replying" indicator so the dots aren't shown
+  // alongside the streaming bubble once text starts flowing.
+  const lastMessage = messages[messages.length - 1];
+  const isStreamingWithContent =
+    lastMessage?.role === "assistant" &&
+    lastMessage.isStreaming === true &&
+    lastMessage.content.trim().length > 0;
+
   // ─── Effects ──────────────────────────────────────────────────────────────
 
   const handleFeedScroll = useCallback(() => {
@@ -1232,6 +1241,13 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
           )}
         >
           {messages.map((msg, i) => {
+            // Skip the empty assistant placeholder created before the first
+            // token arrives — it would render as a blank bubble. The loading
+            // indicator below represents the pending state until streaming text
+            // appears, then this row renders normally once content exists.
+            if (msg.role === "assistant" && msg.isStreaming && !msg.content.trim()) {
+              return null;
+            }
             const isLastMessage = i === messages.length - 1;
             const showSuggestions =
               msg.role === "assistant" &&
@@ -1547,8 +1563,9 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
             );
           })}
 
-          {/* Loading state */}
-          {isLoading && (
+          {/* Loading state — only while the streaming reply has no visible text
+              yet; once tokens flow, the streaming bubble itself shows progress. */}
+          {isLoading && !isStreamingWithContent && (
             <div className="flex items-start gap-2.5">
               <DynamicAtom
                 state={atomState}

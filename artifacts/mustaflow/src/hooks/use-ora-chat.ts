@@ -426,12 +426,15 @@ function deriveOraStatus(
       if (isDatasetFileType(attachedFile.fileType, attachedFile.filename)) return "analyzing";
       return "reading";
     }
-    // Show "thinking" while the streaming placeholder is still empty (no
-    // content yet); transition to "replying" once the first token arrives.
-    const hasAssistantContent = messages.some(
-      (m) => m.role === "assistant" && m.content.length > 0,
-    );
-    return hasAssistantContent ? "replying" : "thinking";
+    // Show "thinking" while the current streaming placeholder is still empty
+    // (no content yet); transition to "replying" once the first token of THIS
+    // turn arrives. Check the trailing streaming message specifically — checking
+    // any assistant message would report "replying" over an empty new bubble in
+    // a multi-turn conversation where earlier replies already have content.
+    const last = messages[messages.length - 1];
+    const streamingHasContent =
+      last?.role === "assistant" && last.isStreaming === true && last.content.trim().length > 0;
+    return streamingHasContent ? "replying" : "thinking";
   }
   return "idle";
 }
