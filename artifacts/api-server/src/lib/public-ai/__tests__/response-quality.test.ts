@@ -184,4 +184,42 @@ What should I tell Replit?`,
     expect(passed.passed).toBe(true);
     expect(passed.score).toBe(100);
   });
+
+  it("flags generic filler openers in normal chat replies", () => {
+    const result = evaluateOraResponseQuality({
+      scenario: "general",
+      userMessage: "How should I onboard new cleaning clients?",
+      reply:
+        "Great question! Start by collecting the client's address, property size, and preferred schedule, then send a written quote within 24 hours.",
+    });
+
+    expect(result.issues.map((issue) => issue.code)).toContain("generic_opener");
+    expect(result.score).toBe(90);
+    expect(result.passed).toBe(true);
+  });
+
+  it("passes direct general replies that lead with substance", () => {
+    const result = evaluateOraResponseQuality({
+      scenario: "general",
+      userMessage: "How should I onboard new cleaning clients?",
+      reply:
+        "Collect the client's address, property size, and preferred schedule first, then send a written quote within 24 hours and confirm the first visit.",
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.score).toBe(100);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it("does not flag specific 'it depends on ...' answers as filler", () => {
+    const result = evaluateOraResponseQuality({
+      scenario: "general",
+      userMessage: "Should I incorporate as an LLC or stay a sole proprietor?",
+      reply:
+        "It depends on your liability exposure and tax goals: an LLC shields personal assets, while a sole proprietorship is simpler and cheaper to run.",
+    });
+
+    expect(result.issues.map((issue) => issue.code)).not.toContain("generic_opener");
+    expect(result.passed).toBe(true);
+  });
 });

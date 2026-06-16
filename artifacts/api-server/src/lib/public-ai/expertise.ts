@@ -7,10 +7,12 @@ export type OraExpertiseDomain =
   | "business_strategy"
   | "data_analysis"
   | "finance"
+  | "accounting"
   | "legal"
   | "health"
   | "writing"
   | "operations"
+  | "process_improvement"
   | "troubleshooting"
   | "general";
 
@@ -47,6 +49,16 @@ const DOMAIN_PATTERNS: Array<{ domain: OraExpertiseDomain; patterns: RegExp[] }>
     ],
   },
   {
+    // Business accounting (bookkeeping, financial statements, the close) — kept
+    // distinct from `finance` (investing/personal finance) and checked before it
+    // so accounting-specific language wins. Patterns deliberately avoid bare
+    // "credit"/"debit"/"tax" which collide with everyday/personal-finance usage.
+    domain: "accounting",
+    patterns: [
+      /\b(accounting|accountant|bookkeep(?:ing|er)|book\s*keeping|general ledger|ledger entr|journal entr(?:y|ies)|balance sheet|income statement|profit (?:and|&) loss|p&l|cash flow statement|trial balance|chart of accounts|double[\s-]?entry|accounts? payable|accounts? receivable|accrual|deferred revenue|depreciat(?:e|ion)|reconcil(?:e|iation|ing)|gaap|ifrs|close the books|month[\s-]?end close|financial statements?)\b/i,
+    ],
+  },
+  {
     domain: "finance",
     patterns: [
       /\b(invest(?:ment|ing|or|ors)?|stock(?:s| market| price)?|crypto(?:currency)?|personal tax|income tax|tax return|capital gains|loan|mortgage|401k|ira|pension|brokerage|portfolio|dividend|equity stake|personal finance)\b/i,
@@ -77,6 +89,16 @@ const DOMAIN_PATTERNS: Array<{ domain: OraExpertiseDomain; patterns: RegExp[] }>
     ],
   },
   {
+    // Lean/Six Sigma process improvement. Ordered before `operations` because
+    // both can match "process"; this domain only fires on improvement-specific
+    // language so generic ops questions still land in `operations`.
+    domain: "process_improvement",
+    patterns: [
+      /\b(process improvement|continuous improvement|lean (?:six sigma|manufacturing|process|principles|methodology|management|tools)|six sigma|6 sigma|kaizen|dmaic|value[\s-]?stream|takt time|standard work|waste reduction|reduce waste|\bmuda\b|just[\s-]?in[\s-]?time|process map(?:ping)?|bpmn|streamline (?:the |our |a )?(?:process|workflow|operation))\b/i,
+      /\b(cycle time|lead time|throughput|bottleneck)\b/i,
+    ],
+  },
+  {
     domain: "operations",
     patterns: [
       /\b(workflow|process|sop|operations?|automation|handoff|team|staff|schedule|inventory|fulfillment|support queue)\b/i,
@@ -96,9 +118,14 @@ const DOMAIN_PATTERNS: Array<{ domain: OraExpertiseDomain; patterns: RegExp[] }>
   },
 ];
 
+// Domains that carry regulatory/professional weight (health, legal, accounting,
+// finance) and must win over the broad classifier-topic mapping below. They are
+// the first entries of DOMAIN_PATTERNS and are checked before topic routing.
+const PRIORITY_DOMAIN_COUNT = 4;
+
 export function detectOraExpertiseDomain(message: string, topic: OraTopic): OraExpertiseDomain {
-  const regulated = DOMAIN_PATTERNS.slice(0, 3);
-  for (const candidate of regulated) {
+  const priority = DOMAIN_PATTERNS.slice(0, PRIORITY_DOMAIN_COUNT);
+  for (const candidate of priority) {
     if (candidate.patterns.some((pattern) => pattern.test(message))) return candidate.domain;
   }
 
@@ -107,7 +134,7 @@ export function detectOraExpertiseDomain(message: string, topic: OraTopic): OraE
   if (topic === "saas" || topic === "ecommerce" || topic === "pricing") return "business_strategy";
   if (topic === "onboarding" || topic === "product-features") return "product_strategy";
 
-  for (const candidate of DOMAIN_PATTERNS.slice(3)) {
+  for (const candidate of DOMAIN_PATTERNS.slice(PRIORITY_DOMAIN_COUNT)) {
     if (candidate.patterns.some((pattern) => pattern.test(message))) return candidate.domain;
   }
   return "general";
@@ -143,6 +170,7 @@ function tokenBudgetFor(input: {
     "software_engineering",
     "data_analysis",
     "finance",
+    "accounting",
     "legal",
     "health",
     "troubleshooting",
@@ -171,6 +199,8 @@ function domainGuidance(domain: OraExpertiseDomain): string {
       return "Act like a careful data analyst: separate observed facts from assumptions, call out data quality issues, explain the method, and avoid unsupported numeric precision.";
     case "finance":
       return "Treat this as general financial education, not personalized financial advice. State assumptions, compare options, discuss risks, and recommend a qualified professional for decisions with legal/tax/investment consequences.";
+    case "accounting":
+      return "Act like a senior accountant: apply correct accounting mechanics (accrual vs cash basis, debits and credits, the accounting equation, the core financial statements, reconciliations, and the period-end close). Show worked journal entries or calculations when they clarify, state which framework you assume (e.g. GAAP or IFRS) when it affects the answer, and treat this as general accounting information — recommend a licensed CPA for filings, audits, or tax positions with legal consequences.";
     case "legal":
       return "Treat this as general legal information, not legal advice. Explain concepts and risks plainly, avoid definitive jurisdiction-specific conclusions unless supplied, and recommend a qualified attorney for binding decisions.";
     case "health":
@@ -179,6 +209,8 @@ function domainGuidance(domain: OraExpertiseDomain): string {
       return "Act like a strong editor: preserve the user's intent, improve clarity and structure, match the requested tone, and explain major changes when useful.";
     case "operations":
       return "Act like an operations lead: map the workflow, identify bottlenecks, define handoffs, controls, metrics, and practical rollout steps.";
+    case "process_improvement":
+      return "Act like a Lean/Six Sigma process improvement lead: map the current-state workflow, locate the constraint or root cause, separate value-add steps from waste, define a measurable target (cycle time, throughput, defect/error rate), propose prioritized countermeasures, and include a rollout and control plan so the gains hold.";
     case "troubleshooting":
       return "Use a root-cause troubleshooting frame: symptoms, likely causes, checks to run, fixes in priority order, and how to verify the issue is resolved.";
     case "general":

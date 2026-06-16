@@ -40,6 +40,12 @@ export interface OraResponseQualityResult {
 const GENERIC_OPENERS = [
   /\b(i can help|i'd be happy to help|sure[,! ]|absolutely[,! ]|here are some suggestions)\b/i,
   /\b(as an ai|as a language model)\b/i,
+  /\b(great|good|excellent) question\b/i,
+  /\b(certainly|of course|no problem|happy to (?:help|assist))\b/i,
+  /\bthat'?s a (?:great|good|common) (?:question|one)\b/i,
+  /\blet'?s (?:dive in|get started|break (?:this|it) down)\b/i,
+  /\bthere are (?:many|several|a few|various|a number of|multiple) (?:ways|factors|options|approaches|things)\b/i,
+  /\bit (?:really )?depends\b(?!\s+(?:on|whether|upon))/i,
 ];
 
 const RAW_PROVIDER_ERROR_PATTERNS = [
@@ -212,6 +218,15 @@ export function evaluateOraResponseQuality(
   }
 
   addCleanFormattingIssues(reply, issues);
+
+  if (scenario === "general" && !startsWithDirectSubstance(reply)) {
+    addIssue(
+      issues,
+      "generic_opener",
+      "warning",
+      "Ora opened with generic filler instead of answering the question directly.",
+    );
+  }
 
   if (
     scenario === "pasted_report" ||

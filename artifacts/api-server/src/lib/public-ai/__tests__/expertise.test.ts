@@ -27,6 +27,30 @@ describe("detectOraExpertiseDomain", () => {
     );
     expect(detectOraExpertiseDomain("debug these medical symptoms", "technical")).toBe("health");
   });
+
+  it("detects accounting and prefers it over personal finance", () => {
+    expect(
+      detectOraExpertiseDomain("what journal entry records this on the balance sheet", "general"),
+    ).toBe("accounting");
+    expect(
+      detectOraExpertiseDomain("how do I handle accounts payable at month-end close", "general"),
+    ).toBe("accounting");
+    expect(
+      detectOraExpertiseDomain("under GAAP how should I report deferred revenue", "general"),
+    ).toBe("accounting");
+  });
+
+  it("detects process improvement and prefers it over generic operations", () => {
+    expect(detectOraExpertiseDomain("run a Six Sigma DMAIC on our intake", "general")).toBe(
+      "process_improvement",
+    );
+    expect(
+      detectOraExpertiseDomain("how do I reduce the bottleneck in our process", "general"),
+    ).toBe("process_improvement");
+    expect(detectOraExpertiseDomain("who owns this support queue handoff", "general")).toBe(
+      "operations",
+    );
+  });
 });
 
 describe("resolveOraAnswerDepth", () => {
@@ -94,6 +118,38 @@ describe("buildOraExpertiseProfile", () => {
     expect(legal.domain).toBe("legal");
     expect(legal.systemAddendum).toContain("general legal information");
     expect(legal.systemAddendum).toContain("not legal advice");
+  });
+
+  it("injects senior-accountant guidance and a CPA caveat for accounting topics", () => {
+    const accounting = buildOraExpertiseProfile({
+      message: "what journal entry records accrued payroll on the balance sheet",
+      topic: "general",
+      planTier: "core",
+      routeTier: "premium",
+      intent: "premium",
+      confidence: "high",
+    });
+
+    expect(accounting.domain).toBe("accounting");
+    expect(accounting.systemAddendum).toContain("senior accountant");
+    expect(accounting.systemAddendum).toContain("general accounting information");
+    expect(accounting.systemAddendum).toContain("licensed CPA");
+  });
+
+  it("injects Lean/Six Sigma guidance for process improvement topics", () => {
+    const process = buildOraExpertiseProfile({
+      message: "use DMAIC to reduce the bottleneck and cycle time in our intake process",
+      topic: "general",
+      planTier: "core",
+      routeTier: "premium",
+      intent: "premium",
+      confidence: "high",
+    });
+
+    expect(process.domain).toBe("process_improvement");
+    expect(process.systemAddendum).toContain("Lean/Six Sigma");
+    expect(process.systemAddendum).toContain("current-state");
+    expect(process.systemAddendum).toContain("control plan");
   });
 
   it("adds document-context budget for document-heavy expert answers", () => {

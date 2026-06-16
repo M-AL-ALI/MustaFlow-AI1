@@ -388,6 +388,26 @@ What should I tell Replit?`;
     ).toBe(false);
   });
 
+  it("injects accounting domain expertise and the answer-specificity directive without offering the AI Builder", async () => {
+    const accountingMessage =
+      "How should I record accrued payroll on the balance sheet under GAAP, and what month-end close journal entry do I post?";
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: accountingMessage, messages: [] });
+
+    expect(res.status).toBe(200);
+    const [mainCall] = mainCompletionCalls();
+    expect(mainCall).toBeDefined();
+    const systemPrompt = mainCall.messages?.[0]?.content ?? "";
+    expect(systemPrompt).toContain("Domain: accounting");
+    expect(systemPrompt).toContain("general accounting information");
+    expect(systemPrompt).toContain("licensed CPA");
+    expect(systemPrompt).toContain("Answer specificity");
+    expect(systemPrompt).not.toMatch(/MustaFlow Builder|Continue in Builder|ready to build/i);
+  });
+
   it("returns generated-file fields only when the file branch actually creates an artifact", async () => {
     const res = await request(app)
       .post("/public-ai/chat")
