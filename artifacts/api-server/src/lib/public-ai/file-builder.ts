@@ -13,7 +13,17 @@ import {
   convertInchesToTwip,
   PageNumber,
   Footer,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  ShadingType,
 } from "docx";
+import {
+  detectProfessionalDocType,
+  buildProfessionalDocSectionGuidance,
+  type ProfessionalDocType,
+} from "./professional-doc.js";
 import { PassThrough } from "stream";
 import { createChatCompletion } from "../ai-providers";
 import { logger } from "../logger";
@@ -57,6 +67,7 @@ export interface DocumentSection {
   heading?: string;
   content: string;
   bullets?: string[];
+  table?: { headers: string[]; rows: string[][] };
 }
 
 export interface DocumentData {
@@ -162,7 +173,13 @@ const SOURCE_DATA_DIRECTIVE =
   `- Do NOT invent, fabricate, guess, or pad with placeholder/sample data.\n` +
   `- Preserve every real row/record/value the user asked for; do not drop, summarize away, or truncate data unless explicitly told to.\n` +
   `- If the user asks for a subset (e.g. specific columns, a filter, a total), derive it from the real data only.\n` +
-  `- If the attached data is empty or does not contain what the user asked for, return your best structure from what IS present rather than making up values.`;
+  `- If the attached data is empty or does not contain what the user asked for, return your best structure from what IS present rather than making up values.\n\n` +
+  `FILE MODIFICATION RULES (when the user asks to edit, revise, rewrite, update, improve, or correct the uploaded content):\n` +
+  `- Preserve the original meaning, purpose, and structure of the document.\n` +
+  `- Make only the specific changes the user requested; leave the rest unchanged.\n` +
+  `- If you made an assumption where the source was ambiguous, note it briefly in the relevant section's content.\n` +
+  `- Do not remove sections the user did not ask to remove.\n` +
+  `- Do not invent new content beyond what the requested edit requires.`;
 
 function buildTabularSystemPrompt(
   format: "csv" | "xlsx",
@@ -262,11 +279,18 @@ function buildDocumentSystemPrompt(
     planTier: "free",
     hasSourceData,
   }),
+  docType?: ProfessionalDocType | null,
 ): string {
   const langNote =
     language && language !== "auto"
       ? `\nRespond in ${language}. All generated content must be in ${language}.`
       : "";
+
+  const profGuidance =
+    docType != null
+      ? `\n\nPROFESSIONAL DOCUMENT GUIDANCE:\n${buildProfessionalDocSectionGuidance(docType, hasSourceData)}`
+      : "";
+
   return (
     `You are a professional document writer. The user wants a well-structured ${format.toUpperCase()} document.\n` +
     `Return ONLY valid JSON — no prose, no markdown, no code fences.\n\n` +
@@ -278,7 +302,11 @@ function buildDocumentSystemPrompt(
     `    {\n` +
     `      "heading": "Section Heading",\n` +
     `      "content": "One or more paragraphs of text. Use \\n\\n between paragraphs.",\n` +
-    `      "bullets": ["Key point one", "Key point two", "Key point three"]\n` +
+    `      "bullets": ["Key point one", "Key point two"],\n` +
+    `      "table": {\n` +
+    `        "headers": ["Column A", "Column B", "Column C"],\n` +
+    `        "rows": [["Row 1 A", "Row 1 B", "Row 1 C"], ["Row 2 A", "Row 2 B", "Row 2 C"]]\n` +
+    `      }\n` +
     `    }\n` +
     `  ]\n` +
     `}\n\n` +
@@ -289,11 +317,13 @@ function buildDocumentSystemPrompt(
     (hasSourceData
       ? `2. Use as many sections as the source content needs.\n`
       : `2. Include at least ${quality.minSyntheticSections} sections with meaningful headings.\n`) +
-    `3. Each section needs either "content", "bullets", or both.\n` +
+    `3. Each section needs at least one of: "content", "bullets", or "table".\n` +
     `4. "bullets" is an array of concise bullet points (no leading dashes — just the text).\n` +
-    `5. Match the document type and purpose to what the user asked for exactly.\n` +
-    `6. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
-    `7. Only these keys are allowed: title, subtitle, sections (with heading, content, bullets).${langNote}` +
+    `5. "table" is optional — use it when structured data benefits from a table (action items, KPIs, comparisons). "headers" must be short (1-3 words each). Every row must have the same number of values as "headers".\n` +
+    `6. Match the document type and purpose to what the user asked for exactly.\n` +
+    `7. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
+    `8. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table). No other top-level keys.${langNote}` +
+    profGuidance +
     quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
   );
@@ -576,7 +606,7 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
   const DARK = "1E1B4B";
   const GRAY = "6B7280";
 
-  const children: Paragraph[] = [];
+  const children: (Paragraph | Table)[] = [];
 
   // Title
   children.push(
@@ -671,6 +701,50 @@ export async function buildDocx(data: DocumentData): Promise<Buffer> {
         );
       }
       children.push(new Paragraph({ children: [], spacing: { after: 100 } }));
+    }
+
+    // Optional table
+    if (section.table && section.table.headers.length > 0 && section.table.rows.length > 0) {
+      const HEADER_FILL = "E8E7F7";
+      const ROW_FILL_ODD = "F5F4FF";
+      const makeCellPara = (text: string, bold: boolean) =>
+        new Paragraph({
+          children: [new TextRun({ text, bold, size: 18, font: "Calibri", color: DARK })],
+          spacing: { before: 60, after: 60 },
+          indent: { left: convertInchesToTwip(0.05) },
+        });
+      const headerRow = new TableRow({
+        children: section.table.headers.map(
+          (h) =>
+            new TableCell({
+              children: [makeCellPara(h, true)],
+              shading: { type: ShadingType.SOLID, fill: HEADER_FILL },
+            }),
+        ),
+        tableHeader: true,
+      });
+      const dataRows = section.table.rows.map(
+        (row, ri) =>
+          new TableRow({
+            children: row.map(
+              (cell) =>
+                new TableCell({
+                  children: [makeCellPara(cell, false)],
+                  shading:
+                    ri % 2 === 0
+                      ? { type: ShadingType.SOLID, fill: ROW_FILL_ODD }
+                      : { type: ShadingType.CLEAR, fill: "FFFFFF" },
+                }),
+            ),
+          }),
+      );
+      children.push(
+        new Table({
+          rows: [headerRow, ...dataRows],
+          width: { size: 100, type: WidthType.PERCENTAGE },
+        }),
+      );
+      children.push(new Paragraph({ children: [], spacing: { after: 200 } }));
     }
   }
 
@@ -847,6 +921,48 @@ export async function buildPdf(data: DocumentData): Promise<Buffer> {
             .text(trimmed, MARGIN + 14, bulletY, { width: CONTENT_W - 14, lineGap: 2 });
           doc.moveDown(0.2);
         }
+        doc.moveDown(0.5);
+      }
+
+      // Optional table
+      if (section.table && section.table.headers.length > 0 && section.table.rows.length > 0) {
+        const { headers: tHeaders, rows: tRows } = section.table;
+        const cols = tHeaders.length;
+        const colW = CONTENT_W / cols;
+        const ROW_H = 18;
+
+        const renderPdfTableRow = (cells: string[], bold: boolean, shade: boolean) => {
+          if (doc.y > doc.page.height - MARGIN - ROW_H - 10) {
+            doc.addPage();
+            doc.y = MARGIN + 20;
+          }
+          const rowY = doc.y;
+          if (shade) {
+            doc.save().rect(MARGIN, rowY, CONTENT_W, ROW_H).fillColor("#E8E7F7").fill().restore();
+          } else if (!bold) {
+            doc.save().rect(MARGIN, rowY, CONTENT_W, ROW_H).fillColor("#F9FAFB").fill().restore();
+          }
+          for (let i = 0; i < cols; i++) {
+            const cell = cells[i] ?? "";
+            doc
+              .font(bold ? "Helvetica-Bold" : "Helvetica")
+              .fontSize(9)
+              .fillColor(bold ? "#1E1B4B" : "#374151")
+              .text(cell, MARGIN + colW * i + 3, rowY + 5, {
+                width: colW - 6,
+                lineBreak: false,
+                ellipsis: true,
+              });
+          }
+          doc.y = rowY + ROW_H;
+        };
+
+        if (doc.y > doc.page.height - MARGIN - ROW_H * 3) {
+          doc.addPage();
+          doc.y = MARGIN + 20;
+        }
+        renderPdfTableRow(tHeaders, true, true);
+        tRows.forEach((row, ri) => renderPdfTableRow(row, false, ri % 2 !== 0));
         doc.moveDown(0.5);
       }
 
@@ -1113,11 +1229,31 @@ export function normalizeDocumentFileData(parsed: Record<string, unknown>): Docu
     const bullets = normalizeBulletArray(section.bullets);
     const heading =
       cleanText(section.heading) || cleanText(section.title) || `Section ${index + 1}`;
-    if (!isMeaningfulText(content) && bullets.length === 0) return;
+
+    // Normalize optional table
+    let table: DocumentSection["table"];
+    const rawTable = section.table;
+    if (rawTable && typeof rawTable === "object" && !Array.isArray(rawTable)) {
+      const t = rawTable as Record<string, unknown>;
+      const tHeaders = Array.isArray(t.headers)
+        ? t.headers.map((h) => cleanText(h)).filter(Boolean)
+        : [];
+      const tRows = Array.isArray(t.rows)
+        ? t.rows
+            .filter(Array.isArray)
+            .map((row) => (row as unknown[]).map((cell) => cleanText(cell)))
+        : [];
+      if (tHeaders.length > 0 && tRows.length > 0) {
+        table = { headers: tHeaders, rows: tRows };
+      }
+    }
+
+    if (!isMeaningfulText(content) && bullets.length === 0 && !table) return;
     sections.push({
       heading: isMeaningfulText(heading) ? heading : undefined,
       content,
       bullets: bullets.length > 0 ? bullets : undefined,
+      table,
     });
   });
 
@@ -1262,11 +1398,13 @@ export async function generateFileFromPrompt(
   } else if (isPptx) {
     systemPrompt = buildPresentationSystemPrompt(language, hasSourceData, quality);
   } else {
+    const docType = detectProfessionalDocType(message);
     systemPrompt = buildDocumentSystemPrompt(
       format as "docx" | "pdf",
       language,
       hasSourceData,
       quality,
+      docType,
     );
   }
 
