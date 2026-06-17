@@ -1241,7 +1241,7 @@ function extractPipeTable(content: string):
   if (pipeLines.length < 2 || pipeLines.length < nonEmpty.length * 0.55) return undefined;
 
   // Strip separator rows like "|---|---|" or "| :--- | ---: |"
-  const dataLines = pipeLines.filter((l) => !/^[\s|:\-]+$/.test(l));
+  const dataLines = pipeLines.filter((l) => !/^[\s|:-]+$/.test(l));
   if (dataLines.length < 2) return undefined;
 
   const parseRow = (line: string): string[] => {
@@ -1260,7 +1260,7 @@ function extractPipeTable(content: string):
 
   // Collect any non-pipe lines as remainder prose
   const remainder = nonEmpty
-    .filter((l) => !l.includes("|") && !/^[\s|:\-]+$/.test(l))
+    .filter((l) => !l.includes("|") && !/^[\s|:-]+$/.test(l))
     .join("\n")
     .trim();
 
