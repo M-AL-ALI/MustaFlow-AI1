@@ -22,9 +22,14 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE = "http://localhost:80";
-const JUDGE_MODEL = "gpt-4o-mini";
+const BASE = process.env["ORA_BENCHMARK_BASE_URL"] ?? "http://localhost:80";
+const JUDGE_MODEL = process.env["JUDGE_MODEL"] ?? "gpt-4o-mini";
 const CONCURRENCY = 3;
+const E2E_TIER = process.env["ORA_BENCHMARK_TIER"] ?? "wave";
+const USE_E2E_AUTH = process.env["ORA_BENCHMARK_ANON"] !== "true";
+const TARGET_PERCENT = 97;
+const RESULTS_DIR = join(__dirname, "../../scripts/benchmark-results");
+const REPORT_PATH = join(__dirname, "../../docs/ora-benchmark-report.md");
 
 // ── OpenAI client for judge ────────────────────────────────────────────────
 const ai = new OpenAI({
@@ -36,14 +41,29 @@ const ai = new OpenAI({
 interface Session {
   cookie: string;
   msgCount: number;
+  userId: string;
+}
+
+let _sessionCounter = 0;
+
+function e2eHeaders(session: Session): Record<string, string> {
+  if (!USE_E2E_AUTH) return {};
+  return { "x-e2e-test-user": session.userId, "x-e2e-test-tier": E2E_TIER };
 }
 
 async function createSession(): Promise<Session> {
-  const res = await fetch(`${BASE}/api/public-ai/session`, { method: "POST" });
+  _sessionCounter++;
+  const userId = `ora-bench-${_sessionCounter}-${Date.now()}`;
+  const hdrs: Record<string, string> = {};
+  if (USE_E2E_AUTH) {
+    hdrs["x-e2e-test-user"] = userId;
+    hdrs["x-e2e-test-tier"] = E2E_TIER;
+  }
+  const res = await fetch(`${BASE}/api/public-ai/session`, { method: "POST", headers: hdrs });
   const setCookie = res.headers.get("set-cookie") ?? "";
   const match = setCookie.match(/ora-session=([^;]+)/);
   if (!match) throw new Error("No session cookie returned");
-  return { cookie: `ora-session=${match[1]}`, msgCount: 0 };
+  return { cookie: `ora-session=${match[1]}`, msgCount: 0, userId };
 }
 
 function updateCookie(session: Session, res: Response): void {
@@ -66,7 +86,11 @@ async function chat(
     try {
       const res = await fetch(`${BASE}/api/public-ai/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Cookie: session.cookie },
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: session.cookie,
+          ...e2eHeaders(session),
+        },
         body: JSON.stringify({ message, messages: [], ...extra }),
         signal: ctrl.signal,
       });
@@ -99,7 +123,7 @@ async function uploadCsv(session: Session, csv: string, filename: string): Promi
   form.append("file", blob, filename);
   const res = await fetch(`${BASE}/api/public-ai/upload`, {
     method: "POST",
-    headers: { Cookie: session.cookie },
+    headers: { Cookie: session.cookie, ...e2eHeaders(session) },
     body: form,
   });
   updateCookie(session, res);
@@ -124,7 +148,11 @@ async function datasetAnalysis(
   try {
     const res = await fetch(`${BASE}/api/public-ai/dataset-analysis`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: session.cookie },
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: session.cookie,
+        ...e2eHeaders(session),
+      },
       body: JSON.stringify({ fileRef, message, messages: [] }),
       signal: ctrl.signal,
     });
@@ -162,43 +190,164 @@ async function exhaustSession(s: Session): Promise<void> {
   }
 }
 
-// ── LLM judge ─────────────────────────────────────────────────────────────
-async function judge(
+// ── 10-Dimension scoring system ────────────────────────────────────────────
+
+const DIMENSION_KEYS = [
+  "oraIsolation",
+  "accuracy",
+  "usefulness",
+  "structure",
+  "sourceHonesty",
+  "domainExpertise",
+  "nonGenericQuality",
+  "fileDataGrounding",
+  "formattingQuality",
+  "noHallucinatedFacts",
+] as const;
+
+type DimKey = (typeof DIMENSION_KEYS)[number];
+
+const DIMENSION_LABELS: Record<DimKey, string> = {
+  oraIsolation: "Ora Isolation",
+  accuracy: "Accuracy",
+  usefulness: "Usefulness",
+  structure: "Structure",
+  sourceHonesty: "Source Honesty",
+  domainExpertise: "Domain Expertise",
+  nonGenericQuality: "Non-Generic Quality",
+  fileDataGrounding: "File/Data Grounding",
+  formattingQuality: "Formatting Quality",
+  noHallucinatedFacts: "No Hallucinated Facts",
+};
+
+type DimScore = { score: number; reason: string };
+type DimScores = Record<DimKey, DimScore>;
+
+// -- Deterministic dimension checks -----------------------------------------
+
+const ISOLATION_FORBIDDEN = [
+  /\bhandoffCta\b/,
+  /builder_handoff/i,
+  /MustaFlow Builder/i,
+  /Continue in Builder/i,
+  /ready to build/i,
+  /Open in Builder/i,
+  /Start Building/i,
+];
+
+function checkIsolation(reply: string): DimScore {
+  const hit = ISOLATION_FORBIDDEN.find((re) => re.test(reply));
+  return hit
+    ? { score: 0, reason: `Forbidden isolation pattern matched: ${hit.source.slice(0, 50)}` }
+    : { score: 10, reason: "No Builder isolation violations" };
+}
+
+function checkFormatting(reply: string): DimScore {
+  const issues: string[] = [];
+  if (/={4,}|-{6,}/.test(reply)) issues.push("decorative ASCII dividers");
+  if (/\$[A-Za-z\\]/.test(reply)) issues.push("LaTeX notation");
+  const boldCount = (reply.match(/\*\*/g) ?? []).length / 2;
+  if (boldCount > 12) issues.push(`excessive bold (${boldCount}x)`);
+  const rawHeadings = (reply.match(/^#{1,3} /gm) ?? []).length;
+  if (rawHeadings > 5) issues.push(`raw markdown headings (${rawHeadings}x)`);
+  if (issues.length === 0) return { score: 10, reason: "Clean formatting" };
+  if (issues.length === 1) return { score: 7, reason: `Minor: ${issues[0]}` };
+  return { score: 4, reason: `Issues: ${issues.slice(0, 3).join("; ")}` };
+}
+
+// -- AI judge (8 qualitative dimensions) ------------------------------------
+
+const JUDGE_SYSTEM = `You are a strict AI response quality evaluator benchmarking an AI assistant called Ora.
+Score 8 dimensions 0-10 each. Return ONLY valid JSON in exactly this shape:
+{
+  "accuracy": { "score": N, "reason": "max 80 chars" },
+  "usefulness": { "score": N, "reason": "max 80 chars" },
+  "structure": { "score": N, "reason": "max 80 chars" },
+  "sourceHonesty": { "score": N, "reason": "max 80 chars" },
+  "domainExpertise": { "score": N, "reason": "max 80 chars" },
+  "nonGenericQuality": { "score": N, "reason": "max 80 chars" },
+  "fileDataGrounding": { "score": N, "reason": "max 80 chars (score 10 if no file was involved)" },
+  "noHallucinatedFacts": { "score": N, "reason": "max 80 chars (score 10 if no file was involved)" }
+}
+Definitions:
+- accuracy: factual correctness of claims
+- usefulness: directly helps the user accomplish their goal
+- structure: clear, logical organization of the response
+- sourceHonesty: appropriate qualification of uncertain claims, no false confidence
+- domainExpertise: demonstrates correct domain-specific knowledge
+- nonGenericQuality: tailored, specific response vs generic filler
+- fileDataGrounding: uses actual values from the provided file/data (10 if no file)
+- noHallucinatedFacts: doesn't invent specific numbers/names from file data (10 if no file)
+Scale: 10=exceptional, 8=good, 6=acceptable, 4=mediocre, 2=poor, 0=completely wrong. Be strict.`;
+
+type AiDimKeys = Exclude<DimKey, "oraIsolation" | "formattingQuality">;
+type AiDimScores = Record<AiDimKeys, DimScore>;
+
+async function judgeAllDimensions(
   prompt: string,
   reply: string,
   rubric: string,
-): Promise<{ score: number; reason: string }> {
+): Promise<AiDimScores> {
+  const fallbackScore = reply.length < 30 ? 0 : 5;
+  const fallback = (reason: string): AiDimScores =>
+    Object.fromEntries(
+      (
+        [
+          "accuracy",
+          "usefulness",
+          "structure",
+          "sourceHonesty",
+          "domainExpertise",
+          "nonGenericQuality",
+          "fileDataGrounding",
+          "noHallucinatedFacts",
+        ] as AiDimKeys[]
+      ).map((k) => [k, { score: fallbackScore, reason }]),
+    ) as AiDimScores;
+
   try {
     const response = await ai.chat.completions.create({
       model: JUDGE_MODEL,
-      max_tokens: 150,
+      response_format: { type: "json_object" as const },
       messages: [
-        {
-          role: "system",
-          content: `You are a strict quality judge. Score the AI reply 0–5 using the rubric.
-Return ONLY: {"score": N, "reason": "one sentence"}`,
-        },
+        { role: "system", content: JUDGE_SYSTEM },
         {
           role: "user",
-          content: `PROMPT: ${prompt}\n\nREPLY: ${reply}\n\nRUBRIC: ${rubric}`,
+          content: [
+            `PROMPT: ${prompt.slice(0, 500)}`,
+            `REPLY: ${reply.slice(0, 3000)}`,
+            `EXPECTED BEHAVIORS (rubric): ${rubric.slice(0, 400)}`,
+          ].join("\n\n"),
         },
       ],
     });
-    const raw = response.choices[0]?.message?.content ?? '{"score":0,"reason":"judge error"}';
-    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}") as {
-      score?: number;
-      reason?: string;
-    };
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    let parsed: Record<string, { score?: number; reason?: string }> = {};
+    try {
+      parsed = JSON.parse(raw) as typeof parsed;
+    } catch {
+      return fallback("JSON parse failed");
+    }
+    const extract = (k: string): DimScore => ({
+      score: Math.max(0, Math.min(10, Math.round(Number(parsed[k]?.score ?? fallbackScore)))),
+      reason: String(parsed[k]?.reason ?? "").slice(0, 80) || "No reason given",
+    });
     return {
-      score: Math.min(5, Math.max(0, Math.round(parsed.score ?? 0))),
-      reason: parsed.reason ?? "no reason",
+      accuracy: extract("accuracy"),
+      usefulness: extract("usefulness"),
+      structure: extract("structure"),
+      sourceHonesty: extract("sourceHonesty"),
+      domainExpertise: extract("domainExpertise"),
+      nonGenericQuality: extract("nonGenericQuality"),
+      fileDataGrounding: extract("fileDataGrounding"),
+      noHallucinatedFacts: extract("noHallucinatedFacts"),
     };
   } catch {
-    return { score: 0, reason: "judge call failed" };
+    return fallback("judge call failed");
   }
 }
 
-// Deterministic scorer for checks we can evaluate without LLM
+// Compatibility shim — used for deterministic tests that validate binary outcomes
 function deterministicScore(
   reply: string,
   body: Record<string, unknown>,
@@ -1092,26 +1241,29 @@ interface TestResult {
   category: string;
   prompt: string;
   reply: string;
+  /** Legacy 0-5 score preserved for backward compat display */
   score: number;
   maxScore: number;
   reason: string;
   status: number;
   durationMs: number;
+  /** 10-dimension scores (0-10 each) */
+  dimensions: DimScores;
+  /** Average of all 10 dimensions (0-10) */
+  overallScore: number;
+  /** overallScore / 10 * 100 */
+  overallPct: number;
 }
 
 async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult> {
   const start = Date.now();
-  // eslint-disable-next-line no-useless-assignment
   let reply = "";
   let status = 200;
   // eslint-disable-next-line no-useless-assignment
   let body: Record<string, unknown> = {};
 
   try {
-    // Special cases ────────────────────────────────────────────────────────
     if (test.prompt === "__SESSION_LIMIT_TEST__") {
-      // Reuse the first pool session (already at ~14 msgs after regular tests).
-      // exhaustSession() only needs ~6 more messages to hit the 20-msg cap.
       const s = sessions[0];
       await exhaustSession(s);
       const r = await chat(s, "ping", {}, 10000);
@@ -1119,29 +1271,22 @@ async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult>
       reply = r.reply;
       status = r.status;
     } else if (test.prompt === "__SESSION_LIMIT_DATASET_TEST__") {
-      // Test dataset-analysis 429 on an exhausted session.
-      // Use session[1] so T49 and T50 don't race on the same session.
       const s = sessions[1] ?? sessions[0];
       await exhaustSession(s);
-      // Upload is pre-auth, should still work even if chat is exhausted
       const csvRef = await uploadCsv(s, SALES_CSV, "test.csv").catch(() => "no-ref");
       const da = await datasetAnalysis(s, csvRef, "analyze this", 15000);
       if (da.result === null && da.status === 429) {
-        body = { error: da.error, upgradeCta: true, signUpUrl: "https://mustaflow.app/sign-up" };
-        // Read actual body from a direct chat 429 to get real CTA fields
         const chatR = await chat(s, "hello", {}, 10000);
         body = chatR.body;
         reply = chatR.reply;
         status = chatR.status;
       } else {
-        // dataset-analysis also enforces limit; check its response
         const chatR = await chat(s, "hello", {}, 10000);
         body = chatR.body;
         reply = chatR.reply;
         status = chatR.status;
       }
     } else if (test.datasetCsv && test.datasetFilename) {
-      // Dataset analysis test — use rawText (all string fields flattened) for keyword matching
       const s = sessions.find((sess) => sess.msgCount < 15) ?? sessions[0];
       if (!s) throw new Error("No sessions available");
       const fileRef = await uploadCsv(s, test.datasetCsv, test.datasetFilename);
@@ -1150,7 +1295,6 @@ async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult>
         reply = da.rawText.slice(0, 1500);
         body = da.result ?? {};
       } else if (da.result) {
-        // fallback: just stringify result
         reply = JSON.stringify(da.result).slice(0, 1500);
         body = da.result;
       } else {
@@ -1159,7 +1303,6 @@ async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult>
         body = { error: da.error };
       }
     } else {
-      // Regular chat test
       const s = sessions.find((sess) => sess.msgCount < 15) ?? sessions[0];
       if (!s) throw new Error("No sessions available");
       const r = await chat(s, test.prompt);
@@ -1175,30 +1318,90 @@ async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult>
 
   const durationMs = Date.now() - start;
 
-  // Score ────────────────────────────────────────────────────────────────
-  let score: number;
-  let reason: string;
-
+  // ── Legacy 0-5 score (preserved for display) ────────────────────────────
+  let legacyScore: number;
+  let legacyReason: string;
   if (test.method === "deterministic" && test.check) {
-    const result = deterministicScore(reply, body, test.check);
-    score = result.score;
-    reason = result.reason;
+    const r = deterministicScore(reply, body, test.check);
+    legacyScore = r.score;
+    legacyReason = r.reason;
   } else {
-    const result = await judge(test.prompt, reply, test.rubric);
-    score = result.score;
-    reason = result.reason;
+    // Single-dim judge call → maps to accuracy dimension
+    const r = await (async () => {
+      const dims = await judgeAllDimensions(test.prompt, reply, test.rubric);
+      const avg = Object.values(dims).reduce((a, d) => a + d.score, 0) / Object.values(dims).length;
+      return { score: Math.round(avg / 2), reason: dims.accuracy.reason };
+    })();
+    legacyScore = r.score;
+    legacyReason = r.reason;
   }
+
+  // ── 10-dimension scoring ─────────────────────────────────────────────────
+  const isDataset = !!(test.datasetCsv && test.datasetFilename);
+  const isSessionLimit = test.prompt.startsWith("__SESSION_LIMIT");
+
+  // Deterministic dimensions (always computed)
+  const oraIsolation = checkIsolation(reply);
+  const formattingQuality = checkFormatting(reply);
+
+  // AI judge dimensions (8 qualitative)
+  let aiDims: AiDimScores;
+  if (isSessionLimit) {
+    // Session limit tests score the 429 CTA, not a conversational reply
+    const ctaOk = legacyScore >= 4;
+    const d: DimScore = ctaOk
+      ? { score: 10, reason: "CTA present and correct" }
+      : { score: 0, reason: "CTA missing or malformed" };
+    aiDims = {
+      accuracy: d,
+      usefulness: d,
+      structure: d,
+      sourceHonesty: { score: 10, reason: "N/A" },
+      domainExpertise: { score: 10, reason: "N/A" },
+      nonGenericQuality: d,
+      fileDataGrounding: { score: 10, reason: "N/A" },
+      noHallucinatedFacts: { score: 10, reason: "N/A" },
+    };
+  } else {
+    aiDims = await judgeAllDimensions(test.prompt, reply, test.rubric);
+    // For deterministic tests: override accuracy with the validated check score
+    if (test.method === "deterministic" && test.check) {
+      aiDims.accuracy = {
+        score: Math.round((legacyScore / 5) * 10),
+        reason: legacyReason,
+      };
+    }
+    // For non-dataset tests: override file dimensions with N/A
+    if (!isDataset) {
+      aiDims.fileDataGrounding = { score: 10, reason: "N/A — no file" };
+      aiDims.noHallucinatedFacts = { score: 10, reason: "N/A — no file" };
+    }
+  }
+
+  const dimensions: DimScores = {
+    oraIsolation,
+    ...aiDims,
+    formattingQuality,
+  };
+
+  const dimValues = DIMENSION_KEYS.map((k) => dimensions[k].score);
+  const overallScore =
+    Math.round((dimValues.reduce((a, v) => a + v, 0) / dimValues.length) * 10) / 10;
+  const overallPct = Math.round(overallScore * 10);
 
   return {
     id: test.id,
     category: test.category,
     prompt: test.prompt.length > 80 ? test.prompt.slice(0, 77) + "..." : test.prompt,
-    reply: reply.slice(0, 200),
-    score,
+    reply: reply.slice(0, 300),
+    score: legacyScore,
     maxScore: 5,
-    reason,
+    reason: legacyReason,
     status,
     durationMs,
+    dimensions,
+    overallScore,
+    overallPct,
   };
 }
 
@@ -1217,19 +1420,172 @@ async function runPool<T>(tasks: Array<() => Promise<T>>, concurrency: number): 
   return results;
 }
 
+// ── Markdown report generator ──────────────────────────────────────────────
+function buildMarkdownReport(
+  results: TestResult[],
+  runDate: string,
+  overallPct: number,
+  categoryStats: Record<
+    string,
+    { score: number; max: number; overallPct: number; tests: TestResult[] }
+  >,
+): string {
+  const dimAvgs: Record<DimKey, number> = {} as Record<DimKey, number>;
+  for (const k of DIMENSION_KEYS) {
+    dimAvgs[k] =
+      Math.round((results.reduce((a, r) => a + r.dimensions[k].score, 0) / results.length) * 10) /
+      10;
+  }
+
+  const gap = overallPct - TARGET_PERCENT;
+  const gapStr = gap >= 0 ? `+${gap.toFixed(1)}` : gap.toFixed(1);
+  const status = overallPct >= TARGET_PERCENT ? "PASS" : "BELOW TARGET";
+
+  const lines: string[] = [
+    `# Ora Benchmark Report`,
+    ``,
+    `Generated: ${runDate}  `,
+    `Judge model: ${JUDGE_MODEL}  `,
+    `Tests: ${results.length}  `,
+    `Auth mode: ${USE_E2E_AUTH ? `E2E (tier: ${E2E_TIER})` : "Anonymous"}`,
+    ``,
+    `## Overall Score`,
+    ``,
+    `| Metric | Value |`,
+    `|--------|-------|`,
+    `| Overall % (10-dim avg) | **${overallPct.toFixed(1)}%** |`,
+    `| Target | ${TARGET_PERCENT}% |`,
+    `| Gap | ${gapStr}% (${status}) |`,
+    ``,
+    `## Scores by Category`,
+    ``,
+    `| Category | Tests | Score | % | vs Target |`,
+    `|----------|-------|-------|---|-----------|`,
+  ];
+
+  for (const [cat, stat] of Object.entries(categoryStats)) {
+    const diff = stat.overallPct - TARGET_PERCENT;
+    const diffStr = diff >= 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1);
+    lines.push(
+      `| ${cat} | ${stat.tests.length} | ${stat.score}/${stat.max} | ${stat.overallPct.toFixed(1)}% | ${diffStr}% |`,
+    );
+  }
+
+  lines.push(
+    ``,
+    `## 10-Dimension Averages`,
+    ``,
+    `| Dimension | Avg (0-10) | % |`,
+    `|-----------|-----------|---|`,
+  );
+  for (const k of DIMENSION_KEYS) {
+    lines.push(
+      `| ${DIMENSION_LABELS[k]} | ${dimAvgs[k].toFixed(1)} | ${(dimAvgs[k] * 10).toFixed(0)}% |`,
+    );
+  }
+
+  // Failures — tests below 60% overall
+  const failures = results
+    .filter((r) => r.overallPct < 60)
+    .sort((a, b) => a.overallPct - b.overallPct);
+
+  lines.push(
+    ``,
+    `## Failures (below 60%)`,
+    ``,
+    failures.length === 0 ? `_No failures._` : `${failures.length} test(s) below 60%:`,
+    ``,
+  );
+
+  for (const r of failures) {
+    lines.push(
+      `### ${r.id} — ${r.category} (${r.overallPct.toFixed(0)}%)`,
+      ``,
+      `**Prompt:** ${r.prompt}`,
+      ``,
+      `**Reply (first 200 chars):** ${r.reply.slice(0, 200).replace(/\n/g, " ")}`,
+      ``,
+      `**Dimension breakdown:**`,
+      ``,
+      `| Dimension | Score | Reason |`,
+      `|-----------|-------|--------|`,
+    );
+    for (const k of DIMENSION_KEYS) {
+      const d = r.dimensions[k];
+      lines.push(`| ${DIMENSION_LABELS[k]} | ${d.score}/10 | ${d.reason.replace(/\|/g, "/")} |`);
+    }
+    lines.push(``);
+  }
+
+  // Warnings — tests between 60-80% overall
+  const warnings = results.filter((r) => r.overallPct >= 60 && r.overallPct < 80);
+  lines.push(
+    `## Warnings (60-79%)`,
+    ``,
+    warnings.length === 0 ? `_No warnings._` : `${warnings.length} test(s) between 60-79%:`,
+    ``,
+  );
+  for (const r of warnings) {
+    const weakDims = DIMENSION_KEYS.filter((k) => r.dimensions[k].score < 6)
+      .map((k) => `${DIMENSION_LABELS[k]}: ${r.dimensions[k].score}/10`)
+      .join(", ");
+    lines.push(
+      `- **${r.id}** (${r.category}) — ${r.overallPct.toFixed(0)}% — ${r.prompt.slice(0, 60)}`,
+      weakDims ? `  Weak: ${weakDims}` : "",
+      ``,
+    );
+  }
+
+  // Sample of top-scoring responses
+  const topN = results
+    .filter((r) => r.overallPct >= TARGET_PERCENT)
+    .sort((a, b) => b.overallPct - a.overallPct)
+    .slice(0, 5);
+
+  lines.push(
+    `## Top Responses (>= ${TARGET_PERCENT}%)`,
+    ``,
+    topN.length === 0 ? `_None reached target._` : `${topN.length} shown:`,
+    ``,
+  );
+  for (const r of topN) {
+    lines.push(
+      `- **${r.id}** (${r.category}) — ${r.overallPct.toFixed(0)}% — ${r.prompt.slice(0, 70)}`,
+    );
+  }
+
+  lines.push(``, `## Category Spotlights`, ``);
+
+  const spotlights: Record<string, string> = {
+    "Dataset Analysis": "B1 — was ~36%, target 75%+",
+    "Standalone Scope": "B2 — Ora isolation: no Builder handoff, target 100%",
+    "Session Limit CTA": "B3 — 429 CTA check, target 80%+",
+    "Model Identity": "B4 — was failing, target 90%+",
+    "Financial Questions": "B5 — was over-disclaiming, target 80%+",
+  };
+
+  for (const [cat, note] of Object.entries(spotlights)) {
+    const stat = categoryStats[cat];
+    if (!stat) continue;
+    lines.push(`- **${cat}:** ${stat.overallPct.toFixed(0)}% (${note})`);
+  }
+
+  lines.push(``, `---`, `_Report generated by \`scripts/src/ora-benchmark.ts\`_`);
+
+  return lines.join("\n");
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
-  console.log("Ora 60-Prompt Quality Benchmark");
-  console.log("================================");
-  console.log(`Tests: ${TESTS.length} | Max score: ${TESTS.length * 5}`);
-  console.log(`Judge model: ${JUDGE_MODEL} | Concurrency: ${CONCURRENCY}`);
+  const runDate = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  console.log("Ora 60-Prompt Quality Benchmark (10-Dimension)");
+  console.log("===============================================");
+  console.log(`Tests: ${TESTS.length} | Target: ${TARGET_PERCENT}% | Judge: ${JUDGE_MODEL}`);
+  console.log(
+    `Auth: ${USE_E2E_AUTH ? `E2E tier=${E2E_TIER}` : "anonymous"} | Concurrency: ${CONCURRENCY}`,
+  );
   console.log("");
 
-  // Create 4 sessions total upfront.
-  // Regular tests (52): 4 sessions × 13 msgs each = 52 slots.
-  // Dataset tests (4) reuse these same sessions.
-  // T49/T50 also reuse pool sessions (already at ~14 msgs, need ~6 more to hit limit).
-  // Total sessions created: 4 (well within 10/day in-memory limit).
   console.log("Creating sessions...");
   const sessions: Session[] = await Promise.all([
     createSession(),
@@ -1239,7 +1595,6 @@ async function main() {
   ]);
   console.log(`Created ${sessions.length} sessions\n`);
 
-  // Separate dataset tests (need upload+analysis, run sequentially) from chat tests
   const datasetTests = TESTS.filter((t) => t.datasetCsv);
   const specialTests = TESTS.filter((t) => t.prompt.startsWith("__SESSION_LIMIT"));
   const regularTests = TESTS.filter(
@@ -1248,11 +1603,10 @@ async function main() {
 
   const results: TestResult[] = [];
 
-  // Run regular tests with limited concurrency
-  console.log(`Running ${regularTests.length} regular tests...`);
+  console.log(`Running ${regularTests.length} regular tests (concurrency=${CONCURRENCY})...`);
   const regularResults = await runPool(
     regularTests.map((t) => () => {
-      process.stdout.write(`.`);
+      process.stdout.write(".");
       return runTest(t, sessions);
     }),
     CONCURRENCY,
@@ -1260,40 +1614,36 @@ async function main() {
   results.push(...regularResults);
   console.log(" done");
 
-  // Run dataset tests sequentially (each needs upload + analysis on a shared session)
   console.log(`\nRunning ${datasetTests.length} dataset analysis tests...`);
   for (const t of datasetTests) {
     process.stdout.write(`  ${t.id}: `);
     const r = await runTest(t, sessions);
     results.push(r);
-    console.log(`${r.score}/5 — ${r.reason}`);
+    console.log(`${r.overallPct.toFixed(0)}% (${r.reason.slice(0, 60)})`);
   }
 
-  // Run session-limit CTA tests in parallel (each creates its own session)
-  console.log(`\nRunning ${specialTests.length} session-limit CTA tests (parallel)...`);
+  console.log(`\nRunning ${specialTests.length} session-limit CTA tests...`);
   const specialResults = await Promise.all(
     specialTests.map(async (t) => {
       const r = await runTest(t, sessions);
-      console.log(`  ${t.id}: ${r.score}/5 — ${r.reason}`);
+      console.log(`  ${t.id}: ${r.overallPct.toFixed(0)}% — ${r.reason.slice(0, 60)}`);
       return r;
     }),
   );
   results.push(...specialResults);
 
-  // Sort results by test ID
   results.sort((a, b) => a.id.localeCompare(b.id));
 
-  // ── Report ──────────────────────────────────────────────────────────────
-  const totalScore = results.reduce((sum, r) => sum + r.score, 0);
-  const maxTotal = results.length * 5;
-  const pct = ((totalScore / maxTotal) * 100).toFixed(1);
-
-  console.log("\n\n" + "=".repeat(70));
-  console.log("RESULTS BY CATEGORY");
-  console.log("=".repeat(70));
-
+  // ── Console report ────────────────────────────────────────────────────────
   const categories = [...new Set(TESTS.map((t) => t.category))];
-  const categoryStats: Record<string, { score: number; max: number; tests: TestResult[] }> = {};
+  const categoryStats: Record<
+    string,
+    { score: number; max: number; overallPct: number; tests: TestResult[] }
+  > = {};
+
+  console.log("\n\n" + "=".repeat(72));
+  console.log("RESULTS BY CATEGORY");
+  console.log("=".repeat(72));
 
   for (const cat of categories) {
     const catResults = results.filter((r) => {
@@ -1302,72 +1652,90 @@ async function main() {
     });
     const catScore = catResults.reduce((s, r) => s + r.score, 0);
     const catMax = catResults.length * 5;
-    categoryStats[cat] = { score: catScore, max: catMax, tests: catResults };
+    const catOverallPct =
+      catResults.reduce((s, r) => s + r.overallPct, 0) / (catResults.length || 1);
+    categoryStats[cat] = {
+      score: catScore,
+      max: catMax,
+      overallPct: catOverallPct,
+      tests: catResults,
+    };
 
-    const catPct = ((catScore / catMax) * 100).toFixed(0);
     const bar =
-      "█".repeat(Math.round(Number(catPct) / 10)) +
-      "░".repeat(10 - Math.round(Number(catPct) / 10));
-    console.log(`\n${cat.padEnd(25)} ${bar} ${catPct}% (${catScore}/${catMax})`);
+      "█".repeat(Math.round(catOverallPct / 10)) + "░".repeat(10 - Math.round(catOverallPct / 10));
+    console.log(`\n${cat.padEnd(26)} ${bar} ${catOverallPct.toFixed(0)}%`);
 
     for (const r of catResults) {
-      const flag = r.score <= 2 ? " ⚠" : r.score === 5 ? " ✓" : "";
-      console.log(`  ${r.id}: ${r.score}/5 — ${r.reason.slice(0, 70)}${flag}`);
+      const flag = r.overallPct < 60 ? " FAIL" : r.overallPct >= TARGET_PERCENT ? " PASS" : " WARN";
+      console.log(
+        `  ${r.id}: ${r.overallPct.toFixed(0)}% [${r.overallScore.toFixed(1)}/10] — ${r.reason.slice(0, 60)}${flag}`,
+      );
     }
   }
 
-  console.log("\n" + "=".repeat(70));
-  console.log("OVERALL SCORE");
-  console.log("=".repeat(70));
-  console.log(`Score: ${totalScore}/${maxTotal} = ${pct}%`);
-  console.log(`Baseline: 229/300 = 76.3%`);
-  const diff = totalScore - 229;
-  const diffStr = diff >= 0 ? `+${diff}` : String(diff);
-  console.log(`Change: ${diffStr} points (${(Number(pct) - 76.3).toFixed(1)}% vs baseline)`);
+  const overallPct = results.reduce((s, r) => s + r.overallPct, 0) / (results.length || 1);
+  const gap = overallPct - TARGET_PERCENT;
+  const gapStr = gap >= 0 ? `+${gap.toFixed(1)}` : gap.toFixed(1);
 
-  console.log("\nFix verification:");
-  const b1 = categoryStats["Dataset Analysis"];
-  const b2 = categoryStats["Standalone Scope"];
-  const b3 = categoryStats["Session Limit CTA"];
-  const b4 = categoryStats["Model Identity"];
-  const b5 = categoryStats["Financial Questions"];
-  if (b1)
-    console.log(
-      `  B1 Dataset Analysis: ${((b1.score / b1.max) * 100).toFixed(0)}% (was ~36%, target 75%+)`,
-    );
-  if (b2)
-    console.log(
-      `  B2 Standalone Scope: ${((b2.score / b2.max) * 100).toFixed(0)}% (isolation: no Builder handoff, target 100%)`,
-    );
-  if (b3)
-    console.log(
-      `  B3 Session Limit CTA: ${((b3.score / b3.max) * 100).toFixed(0)}% (new check, target 80%+)`,
-    );
-  if (b4)
-    console.log(
-      `  B4 Model Identity: ${((b4.score / b4.max) * 100).toFixed(0)}% (was failing, target 90%+)`,
-    );
-  if (b5)
-    console.log(
-      `  B5 Financial Disclaimer: ${((b5.score / b5.max) * 100).toFixed(0)}% (was over-disclaiming, target 80%+)`,
-    );
+  console.log("\n" + "=".repeat(72));
+  console.log("10-DIMENSION AVERAGES");
+  console.log("=".repeat(72));
+  for (const k of DIMENSION_KEYS) {
+    const avg = results.reduce((a, r) => a + r.dimensions[k].score, 0) / results.length;
+    const bar = "█".repeat(Math.round(avg)) + "░".repeat(10 - Math.round(avg));
+    console.log(`  ${DIMENSION_LABELS[k].padEnd(22)} ${bar} ${(avg * 10).toFixed(0)}%`);
+  }
 
-  // Save results
-  const outDir = join(__dirname, "../../scripts/benchmark-results");
-  await mkdir(outDir, { recursive: true });
+  console.log("\n" + "=".repeat(72));
+  console.log("OVERALL");
+  console.log("=".repeat(72));
+  console.log(`Overall %: ${overallPct.toFixed(1)}%`);
+  console.log(`Target:    ${TARGET_PERCENT}%`);
+  console.log(`Gap:       ${gapStr}% (${overallPct >= TARGET_PERCENT ? "PASS" : "BELOW TARGET"})`);
+
+  const failures = results.filter((r) => r.overallPct < 60);
+  if (failures.length > 0) {
+    console.log(`\nFailing tests (${failures.length}):`);
+    for (const r of failures) {
+      console.log(`  ${r.id}: ${r.overallPct.toFixed(0)}% — ${r.prompt.slice(0, 60)}`);
+    }
+  }
+
+  // ── Spotlight categories ─────────────────────────────────────────────────
+  console.log("\nCategory spotlights:");
+  const spots = [
+    { key: "Dataset Analysis", label: "B1 Dataset Analysis", note: "target 75%+" },
+    { key: "Standalone Scope", label: "B2 Standalone Scope", note: "target 100%" },
+    { key: "Session Limit CTA", label: "B3 Session Limit CTA", note: "target 80%+" },
+    { key: "Model Identity", label: "B4 Model Identity", note: "target 90%+" },
+    { key: "Financial Questions", label: "B5 Financial Disclaimer", note: "target 80%+" },
+  ];
+  for (const { key, label, note } of spots) {
+    const stat = categoryStats[key];
+    if (stat) console.log(`  ${label}: ${stat.overallPct.toFixed(0)}% (${note})`);
+  }
+
+  // ── Save JSON results ────────────────────────────────────────────────────
+  await mkdir(RESULTS_DIR, { recursive: true });
   const outPath = join(
-    outDir,
+    RESULTS_DIR,
     `benchmark-${new Date().toISOString().slice(0, 16).replace(":", "-")}.json`,
   );
   await writeFile(
     outPath,
     JSON.stringify(
-      { score: totalScore, maxScore: maxTotal, pct: Number(pct), results, categoryStats },
+      { overallPct, targetPct: TARGET_PERCENT, runDate, results, categoryStats },
       null,
       2,
     ),
   );
-  console.log(`\nFull results saved to: ${outPath}`);
+  console.log(`\nJSON results: ${outPath}`);
+
+  // ── Write markdown report ────────────────────────────────────────────────
+  const md = buildMarkdownReport(results, runDate, overallPct, categoryStats);
+  await mkdir(join(__dirname, "../../docs"), { recursive: true });
+  await writeFile(REPORT_PATH, md, "utf-8");
+  console.log(`Markdown report: ${REPORT_PATH}`);
 }
 
 main().catch((err) => {

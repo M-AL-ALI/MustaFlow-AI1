@@ -1,0 +1,60 @@
+Accepted. Ora Memory + Context Quality Upgrade is approved.
+
+Completed:
+
+* search branch now receives uploaded-file context
+* Ora can combine web search with uploaded file context
+* system prompts now explicitly tell Ora when files are already available
+* Ora should no longer ask the user to re-upload files that are already in context
+* expired files are handled gracefully
+* multi-file sessions now include a numbered file directory for disambiguation
+* single-file path remains unchanged
+* context tests added for:
+    * cross-session isolation
+    * text carryover
+    * dataset carryover
+    * multi-file directory
+    * expired file handling
+    * prompt-injection neutralization
+    * file-count pluralization
+    * search documentContext ordering
+* quality gate passed: 1348 tests, 0 failures
+
+This phase is complete.
+
+Next recommended phase:
+Ora Live Evaluation + Benchmark Upgrade.
+
+Goal:
+Now that Ora has premium streaming, stronger answers, file/dataset analysis, professional file output, and better context memory, we need a live benchmark that proves Ora is actually improving in real use.
+
+Next requirements:
+
+1. Build a benchmark suite for normal chat quality.
+2. Build a benchmark suite for uploaded file analysis.
+3. Build a benchmark suite for CSV/XLSX dataset analysis.
+4. Build a benchmark suite for professional document generation.
+5. Build a benchmark suite for context carryover and follow-up questions.
+6. Score Ora on:
+    * accuracy
+    * usefulness
+    * structure
+    * source honesty
+    * domain expertise
+    * non-generic response quality
+    * file/data grounding
+    * formatting quality
+    * no hallucinated file facts
+    * Ora isolation
+7. Produce a final percentage score showing how close Ora is to the 97% ChatGPT/DeepSeek-style target.
+8. Include live samples and failure examples.
+9. Do not rely only on unit tests. Run real prompts through the actual Ora routes.
+
+Acceptance:
+This phase is complete only when we have a real benchmark report showing Ora’s current quality score after all upgrades.
+
+Keep Ora fully isolated:
+No AI Builder.
+No Builder.
+No handoff.
+No shared flow.
