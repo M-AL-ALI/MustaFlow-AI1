@@ -319,10 +319,11 @@ function buildDocumentSystemPrompt(
       : `2. Include at least ${quality.minSyntheticSections} sections with meaningful headings.\n`) +
     `3. Each section needs at least one of: "content", "bullets", or "table".\n` +
     `4. "bullets" is an array of concise bullet points (no leading dashes — just the text).\n` +
-    `5. "table" is optional — use it when structured data benefits from a table (action items, KPIs, comparisons). "headers" must be short (1-3 words each). Every row must have the same number of values as "headers".\n` +
-    `6. Match the document type and purpose to what the user asked for exactly.\n` +
-    `7. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
-    `8. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table). No other top-level keys.${langNote}` +
+    `5. "table" — REQUIRED for action items, KPI summaries, comparisons, findings, audit results, data rows. Use it whenever data has columns and rows. "headers" must be short labels (1-4 words). Every row array must have the same length as "headers".\n` +
+    `6. CRITICAL: NEVER write a table as pipe-separated text like "Col A | Col B\\nRow 1 | Row 2" inside "content". That is WRONG. Always use the structured "table" field with "headers" and "rows" arrays.\n` +
+    `7. Match the document type and purpose to what the user asked for exactly.\n` +
+    `8. The subtitle field is optional — use it for date, version, author, or a tagline.\n` +
+    `9. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table). No other top-level keys.${langNote}` +
     profGuidance +
     quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
@@ -1216,6 +1217,56 @@ export function normalizePresentationFileData(parsed: Record<string, unknown>): 
   };
 }
 
+/**
+ * Fallback: detect when the AI embedded a pipe-delimited Markdown table inside
+ * the "content" string instead of using the structured "table" field.
+ *
+ * Triggers when ≥60% of non-empty content lines contain a pipe character AND
+ * at least 2 such lines exist.  Returns the parsed table plus any non-table
+ * remainder text, or undefined when no pipe table is detected.
+ */
+function extractPipeTable(content: string):
+  | {
+      table: DocumentSection["table"];
+      remainder: string;
+    }
+  | undefined {
+  if (!content.includes("|")) return undefined;
+
+  const lines = content.split(/\n/).map((l) => l.trim());
+  const nonEmpty = lines.filter((l) => l.length > 0);
+  if (nonEmpty.length < 2) return undefined;
+
+  const pipeLines = nonEmpty.filter((l) => l.includes("|"));
+  if (pipeLines.length < 2 || pipeLines.length < nonEmpty.length * 0.55) return undefined;
+
+  // Strip separator rows like "|---|---|" or "| :--- | ---: |"
+  const dataLines = pipeLines.filter((l) => !/^[\s|:\-]+$/.test(l));
+  if (dataLines.length < 2) return undefined;
+
+  const parseRow = (line: string): string[] => {
+    const stripped = line.replace(/^\||\|$/g, "").trim();
+    return stripped.split("|").map((c) => c.trim());
+  };
+
+  const headers = parseRow(dataLines[0]).filter(Boolean);
+  if (headers.length < 2) return undefined;
+
+  const rows = dataLines
+    .slice(1)
+    .map(parseRow)
+    .filter((r) => r.some((c) => c.length > 0));
+  if (rows.length === 0) return undefined;
+
+  // Collect any non-pipe lines as remainder prose
+  const remainder = nonEmpty
+    .filter((l) => !l.includes("|") && !/^[\s|:\-]+$/.test(l))
+    .join("\n")
+    .trim();
+
+  return { table: { headers, rows }, remainder };
+}
+
 export function normalizeDocumentFileData(parsed: Record<string, unknown>): DocumentData {
   const rawSections = Array.isArray(parsed.sections) ? parsed.sections : [];
   const sections: DocumentSection[] = [];
@@ -1225,12 +1276,12 @@ export function normalizeDocumentFileData(parsed: Record<string, unknown>): Docu
       rawSection && typeof rawSection === "object" && !Array.isArray(rawSection)
         ? (rawSection as Record<string, unknown>)
         : { content: rawSection };
-    const content = cleanText(section.content);
+    let content = cleanText(section.content);
     const bullets = normalizeBulletArray(section.bullets);
     const heading =
       cleanText(section.heading) || cleanText(section.title) || `Section ${index + 1}`;
 
-    // Normalize optional table
+    // Normalize optional table (structured field)
     let table: DocumentSection["table"];
     const rawTable = section.table;
     if (rawTable && typeof rawTable === "object" && !Array.isArray(rawTable)) {
@@ -1245,6 +1296,16 @@ export function normalizeDocumentFileData(parsed: Record<string, unknown>): Docu
         : [];
       if (tHeaders.length > 0 && tRows.length > 0) {
         table = { headers: tHeaders, rows: tRows };
+      }
+    }
+
+    // Fallback: if no structured table, try to rescue a pipe-delimited Markdown
+    // table that the model embedded in the "content" string.
+    if (!table && content) {
+      const rescued = extractPipeTable(content);
+      if (rescued) {
+        table = rescued.table;
+        content = rescued.remainder; // keep any surrounding prose
       }
     }
 

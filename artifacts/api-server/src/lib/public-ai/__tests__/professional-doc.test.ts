@@ -250,6 +250,94 @@ describe("normalizeDocumentFileData — table in sections", () => {
     expect(result.sections[0].table).toBeDefined();
   });
 
+  // ── pipe-table fallback ───────────────────────────────────────────────────
+  it("rescues a pipe-delimited table in the content field (no explicit table key)", () => {
+    const parsed = {
+      title: "KPI Report",
+      sections: [
+        {
+          heading: "Key Metrics",
+          content:
+            "Metric | Target | Actual | Status | Trend\n" +
+            "MAU | 470,000 | 487,000 | On Track | Up 18.4%\n" +
+            "Churn Rate | 3.5% | 4.2% | At Risk | Up 0.6 pts\n" +
+            "NPS | 44 | 41 | At Risk | Down 3 pts",
+        },
+      ],
+    };
+    const result = normalizeDocumentFileData(parsed);
+    expect(result.sections).toHaveLength(1);
+    const sec = result.sections[0];
+    expect(sec.table).toBeDefined();
+    expect(sec.table!.headers).toEqual(["Metric", "Target", "Actual", "Status", "Trend"]);
+    expect(sec.table!.rows).toHaveLength(3);
+    expect(sec.table!.rows[0][0]).toBe("MAU");
+    // prose content should be cleared (it was entirely a pipe table)
+    expect(sec.content).toBe("");
+  });
+
+  it("rescues a pipe table with leading/trailing pipe characters", () => {
+    const parsed = {
+      title: "Meeting Summary",
+      sections: [
+        {
+          heading: "Action Items",
+          content:
+            "| Action | Owner | Due Date | Status |\n" +
+            "| --- | --- | --- | --- |\n" +
+            "| Schedule follow-up | Jane | 2025-07-01 | Open |\n" +
+            "| Update roadmap | Bob | 2025-07-05 | In Progress |",
+        },
+      ],
+    };
+    const result = normalizeDocumentFileData(parsed);
+    const sec = result.sections[0];
+    expect(sec.table).toBeDefined();
+    expect(sec.table!.headers).toEqual(["Action", "Owner", "Due Date", "Status"]);
+    expect(sec.table!.rows).toHaveLength(2);
+    expect(sec.table!.rows[1][0]).toBe("Update roadmap");
+  });
+
+  it("preserves remainder prose alongside a pipe table", () => {
+    const parsed = {
+      title: "Report",
+      sections: [
+        {
+          heading: "Summary",
+          content:
+            "Overview of this quarter's results.\n" +
+            "Metric | Value\n" +
+            "Revenue | $1.2M\n" +
+            "Users | 48,000",
+        },
+      ],
+    };
+    const result = normalizeDocumentFileData(parsed);
+    const sec = result.sections[0];
+    expect(sec.table).toBeDefined();
+    expect(sec.table!.headers).toEqual(["Metric", "Value"]);
+    // Non-pipe prose line should be kept as content
+    expect(sec.content).toContain("Overview of this quarter");
+  });
+
+  it("does NOT rescue a single-pipe mention in plain prose", () => {
+    const parsed = {
+      title: "Doc",
+      sections: [
+        {
+          heading: "Notes",
+          content:
+            "Use format A | B for the output. " +
+            "This is a regular sentence with one pipe character.",
+        },
+      ],
+    };
+    const result = normalizeDocumentFileData(parsed);
+    const sec = result.sections[0];
+    // Only 1 pipe line → below the 55% threshold → no table rescue
+    expect(sec.table).toBeUndefined();
+  });
+
   it("ignores a non-object table field gracefully", () => {
     const parsed = {
       title: "Doc",
