@@ -765,6 +765,26 @@ const IMAGE_GENERATE_CTA =
 const SEARCH_SIGNIN_CTA =
   "Live web search is available for signed-in MustaFlow users. Sign up at mustaflow.app and I'll search the web for you, then answer with up-to-date information and cited sources.";
 
+/**
+ * Build an explicit file-availability hint injected into the system prompt.
+ *
+ * When carriedDocs is non-empty the model has the file(s) in context and must
+ * NOT ask the user to re-upload or repeat the information. When documentRefs
+ * were sent but all expired or belong to a different session (carriedDocs is
+ * empty), we tell the model so it can explain gracefully instead of
+ * hallucinating content or silently ignoring the reference. Returns an empty
+ * string when no documentRefs were sent at all.
+ */
+export function buildFileContextAddendum(carriedDocs: string, documentRefs: string[]): string {
+  if (documentRefs.length === 0) return "";
+  if (carriedDocs.trim().length > 0) {
+    const fileCount = (carriedDocs.match(/^File: /gm) ?? []).length || 1;
+    const plural = fileCount === 1 ? "file" : "files";
+    return `\n\n## Uploaded ${plural} available this turn\nThe user has ${fileCount} uploaded ${plural} whose full contents appear in your context above. You have the data. Do NOT ask the user to re-upload, re-paste, or repeat any information from these ${plural}. Use the contents directly to answer their question or build the requested output.`;
+  }
+  return `\n\n## Uploaded file status\nThe user references an uploaded file, but the file session has expired and the contents are no longer available in your context. Tell them the file session expired and offer to continue if they re-upload.`;
+}
+
 const PASTED_REFERENCE_ANALYSIS_ADDENDUM = `\n\n## Current turn: pasted reference analysis
 The user's current message appears to include pasted output from tools such as Replit, Codex, GitHub, tests, or workflows. Treat the pasted text as evidence to analyze. Do not generate a downloadable file. Do not answer with generic capability suggestions.
 
@@ -1410,6 +1430,7 @@ router.post("/public-ai/chat", async (req, res) => {
         history,
         language,
         personalContext: searchPersonalContext || undefined,
+        documentContext: carriedDocs || undefined,
         wantsVideos: decision.wantsVideos,
         subscriptionTier: oraPlanTier(authed),
       });
@@ -1518,6 +1539,8 @@ router.post("/public-ai/chat", async (req, res) => {
     hasCrossConversationContext: crossConvContext.trim().length > 0,
   });
 
+  const fileContextAddendum = buildFileContextAddendum(carriedDocs, documentRefs);
+
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
@@ -1525,6 +1548,7 @@ router.post("/public-ai/chat", async (req, res) => {
       ? PASTED_REFERENCE_ANALYSIS_ADDENDUM + summarizePastedReferenceSignals(message)
       : "") +
     expertiseProfile.systemAddendum +
+    fileContextAddendum +
     profileContext +
     memoryStatusContext +
     memory.text +
@@ -2023,6 +2047,8 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     hasCrossConversationContext: crossConvContext.trim().length > 0,
   });
 
+  const fileContextAddendum = buildFileContextAddendum(carriedDocs, documentRefs);
+
   const systemPrompt =
     buildSystemPrompt(language, languageHint, !!authed) +
     (deepAllowed ? DEEP_SYSTEM_ADDENDUM : "") +
@@ -2030,6 +2056,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       ? PASTED_REFERENCE_ANALYSIS_ADDENDUM + summarizePastedReferenceSignals(message)
       : "") +
     expertiseProfile.systemAddendum +
+    fileContextAddendum +
     profileContext +
     memoryStatusContext +
     memory.text +

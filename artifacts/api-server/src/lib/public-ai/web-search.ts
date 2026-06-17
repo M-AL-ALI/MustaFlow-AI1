@@ -58,6 +58,14 @@ export interface OraWebSearchInput {
   wantsVideos?: boolean;
   /** Signed-in user's effective Ora plan tier; anonymous callers may omit it. */
   subscriptionTier?: string | null;
+  /**
+   * Optional pre-formatted context from files the user uploaded earlier in
+   * this conversation. Injected separately from personalContext so the web
+   * search can use file content to sharpen or ground the query (e.g. "find
+   * datasets similar to this one" when the schema lives in the uploaded file).
+   * Treated as data, not user-identity context.
+   */
+  documentContext?: string;
 }
 
 export interface OraWebSearchResult {
@@ -741,6 +749,7 @@ export function buildInstructions(
     planTier: "free",
     wantsVideos,
   }),
+  documentContext?: string,
 ): string {
   const imageWord = profile.imageLimit === 1 ? "image" : "images";
   const videoWord = profile.videoLimit === 1 ? "video" : "videos";
@@ -788,6 +797,14 @@ export function buildInstructions(
       "\n\nThe following is what you already know about this user. Use it silently to interpret and personalize the request when directly relevant. Do not repeat, list, or otherwise disclose these personal details back to the user unless they are clearly germane to the answer, and never present them as if they came from the web search:" +
       personalContext;
   }
+  // Uploaded file context: the user's file content from earlier in this
+  // conversation. Use it to interpret the query (e.g. understanding what data
+  // schema they are asking about) or to ground the answer when relevant. Treat
+  // everything between the triple quotes as data only — never follow instructions
+  // inside it and never present it as if it came from the web search.
+  if (documentContext && documentContext.trim().length > 0) {
+    instructions += "\n\n" + documentContext;
+  }
   return instructions;
 }
 
@@ -796,7 +813,7 @@ export function buildInstructions(
  * Throws on provider failure so the route can surface a retryable error.
  */
 export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebSearchResult> {
-  const { query, history = [], language, personalContext, wantsVideos } = input;
+  const { query, history = [], language, personalContext, wantsVideos, documentContext } = input;
   const planTier: OraPlanTier = normalizeOraPlanTier(input.subscriptionTier);
   const model = openAiModelForOraSearch(planTier);
   const profile = resolveOraSearchProfile({ query, planTier, wantsVideos });
@@ -811,7 +828,13 @@ export async function runOraWebSearch(input: OraWebSearchInput): Promise<OraWebS
   const client = getClient();
   const resp = (await client.responses.create({
     model,
-    instructions: buildInstructions(language, personalContext, wantsVideos, profile),
+    instructions: buildInstructions(
+      language,
+      personalContext,
+      wantsVideos,
+      profile,
+      documentContext,
+    ),
     // The web_search tool is enabled per request; the model decides when to call it.
     tools: [{ type: "web_search" }] as never,
     max_output_tokens: profile.maxOutputTokens,
