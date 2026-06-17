@@ -29,6 +29,7 @@ export const DATASET_SYSTEM_PROMPT = `You are Ora, an expert management consulta
 6. The "type" field must always be exactly "dataset-analysis".
 7. NEVER fabricate exact financial figures (revenue, cost, headcount) that are not present in or derivable from the data. Use ranges and confidence indicators instead.
 8. All narrative output must be executive-grade, action-oriented, measurable, and free of generic filler language.
+9. When the server reports data-quality signals (outliers in COLUMN STATISTICS or duplicate rows in DATA QUALITY), reflect them honestly: call out material outliers under "keyFindings" or "risksAndLimitations", flag duplicate rows as a data-integrity risk, and recommend de-duplication or verification under "recommendations" when the counts are non-trivial. Do not invent outliers or duplicates the server did not report.
 
 ## Output JSON schema
 {
@@ -184,6 +185,20 @@ export function buildDatasetContextBlock(
     let stat = `  ${header} [${p.type}]: nulls=${p.nullCount}/${summary.rowCount}, unique=${p.uniqueCount}`;
     if (p.type === "numeric") {
       stat += `, min=${formatNum(p.min)}, max=${formatNum(p.max)}, mean=${formatNum(p.mean)}, sum=${formatNum(p.sum)}, stddev=${formatNum(p.stddev)}`;
+      if (p.median !== undefined) {
+        stat += `, median=${formatNum(p.median)}, q1=${formatNum(p.q1)}, q3=${formatNum(p.q3)}, IQR=${formatNum(p.iqr)}`;
+      }
+      if (p.outlierCount !== undefined && p.outlierCount > 0) {
+        const samples =
+          p.sampleOutliers && p.sampleOutliers.length > 0
+            ? ` (e.g. ${p.sampleOutliers.map(formatNum).join(", ")})`
+            : "";
+        stat +=
+          `, IQR outliers=${p.outlierCount} [low ${p.lowOutlierCount ?? 0} below ${formatNum(p.lowerFence)}, ` +
+          `high ${p.highOutlierCount ?? 0} above ${formatNum(p.upperFence)}]${samples}`;
+      } else if (p.outlierCount === 0) {
+        stat += `, IQR outliers=0`;
+      }
     } else if (p.type === "string" && p.topCategories && p.topCategories.length > 0) {
       const top = p.topCategories
         .slice(0, 5)
@@ -196,6 +211,19 @@ export function buildDatasetContextBlock(
     lines.push(stat);
   }
   lines.push("");
+
+  const dup = summary.duplicateRows;
+  if (dup && dup.duplicateRowCount > 0) {
+    lines.push("[DATA QUALITY — computed server-side from all rows]");
+    lines.push(
+      `  Duplicate rows: ${dup.duplicateRowCount} redundant row(s) across ${dup.duplicateGroupCount} repeated record(s) ` +
+        `(rows are compared after trimming/whitespace/case normalization).`,
+    );
+    for (const s of dup.sampleDuplicates) {
+      lines.push(`    x${s.count}: ${s.preview}`);
+    }
+    lines.push("");
+  }
 
   if (summary.paretoSets.length > 0) {
     lines.push("[PARETO PRE-COMPUTATION — computed server-side from all rows]");

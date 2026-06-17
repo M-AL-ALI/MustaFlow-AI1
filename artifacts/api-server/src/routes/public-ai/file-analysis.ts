@@ -8,6 +8,10 @@ import {
 } from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import {
+  buildDocumentAnalysisFraming,
+  documentAnalysisMaxTokens,
+} from "../../lib/public-ai/document-prompt";
 import { logger } from "../../lib/logger";
 import type { Provider } from "../../lib/ai-provider-config";
 import {
@@ -38,8 +42,8 @@ const bodySchema = z.object({
  * The document text is NEVER injected into the system prompt — it is placed
  * in the user turn as clearly delimited untrusted reference material.
  */
-function buildSystemPrompt(language: string | undefined): string {
-  let prompt = ORA_SYSTEM_PROMPT;
+function buildSystemPrompt(language: string | undefined, analysisAddendum: string): string {
+  let prompt = ORA_SYSTEM_PROMPT + analysisAddendum;
   if (language && language !== "auto") {
     prompt += `\n\n## Language override\nThe user has selected "${language}" as their preferred language. Respond entirely in that language for this conversation, regardless of the language the user writes in.`;
   }
@@ -151,7 +155,13 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     refundReservedQuota = () => refundOraQuota(authed.userId, "message");
   }
 
-  const systemPrompt = buildSystemPrompt(language);
+  const planTier = normalizeOraPlanTier(authed?.tier ?? null);
+  const framing = buildDocumentAnalysisFraming({
+    message,
+    filename: fileEntry.filename,
+    extractedText: fileEntry.extractedText,
+  });
+  const systemPrompt = buildSystemPrompt(language, framing.addendum);
   const documentUserBlock = buildDocumentUserBlock(
     fileEntry.filename,
     fileEntry.extractedText,
@@ -168,7 +178,6 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     { role: "user" as const, content: documentUserBlock },
   ];
 
-  const planTier = normalizeOraPlanTier(authed?.tier ?? null);
   const openaiModel = openAiModelForOraFile("analysis", planTier);
   const { available, openCircuits } = getOraProviderRoutingSnapshot();
   const candidates: ModelCandidate[] = selectOraFileModelRoute({
@@ -180,7 +189,7 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     openCircuits,
     openaiModel,
   });
-  const maxTokens = 2000;
+  const maxTokens = documentAnalysisMaxTokens(framing.mode, planTier);
 
   const start = Date.now();
   let usedFallback = false;
@@ -236,6 +245,8 @@ router.post("/public-ai/file-analysis", async (req, res) => {
       candidates: candidates.map((c) => `${c.provider}:${c.model}`),
       fileType: fileEntry.mimeType,
       charCount: fileEntry.charCount,
+      analysisMode: framing.mode,
+      domain: framing.domain,
       latencyMs,
       usedFallback,
       maxTokens,

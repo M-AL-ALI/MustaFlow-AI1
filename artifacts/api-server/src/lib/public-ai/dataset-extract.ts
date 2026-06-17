@@ -16,8 +16,8 @@
  */
 
 import { sanitiseCell } from "./dataset-safety.js";
-import { computeColumnProfiles, computePareto } from "./dataset-stats.js";
-import type { ColumnProfile, ParetoSet } from "./dataset-stats.js";
+import { computeColumnProfiles, computePareto, computeDuplicateRowStats } from "./dataset-stats.js";
+import type { ColumnProfile, ParetoSet, DuplicateRowStats } from "./dataset-stats.js";
 
 export const MAX_DATASET_ROWS = 10_000;
 export const MAX_DATASET_COLS = 200;
@@ -32,6 +32,7 @@ export interface DatasetSummary {
   sampleRows: string[][];
   columnProfiles: ColumnProfile[];
   paretoSets: ParetoSet[];
+  duplicateRows?: DuplicateRowStats;
   sanitizedCellCount: number;
   hiddenSheetsSkipped: number;
   truncated: boolean;
@@ -146,6 +147,7 @@ async function extractCsv(buffer: Buffer): Promise<DatasetSummary> {
 
   const columnProfiles = computeColumnProfiles(headers, allRows);
   const paretoSets = computePareto(headers, allRows, columnProfiles);
+  const duplicateRows = computeDuplicateRowStats(headers, allRows);
   const sampleRows = reservoirSample(allRows, DATASET_SAMPLE_SIZE);
 
   return {
@@ -155,6 +157,7 @@ async function extractCsv(buffer: Buffer): Promise<DatasetSummary> {
     sampleRows,
     columnProfiles,
     paretoSets,
+    duplicateRows,
     sanitizedCellCount,
     hiddenSheetsSkipped: 0,
     truncated,
@@ -307,6 +310,7 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
 
   const columnProfiles = computeColumnProfiles(headers, allRows);
   const paretoSets = computePareto(headers, allRows, columnProfiles);
+  const duplicateRows = computeDuplicateRowStats(headers, allRows);
   const sampleRows = reservoirSample(allRows, DATASET_SAMPLE_SIZE);
 
   return {
@@ -316,6 +320,7 @@ async function extractXlsx(buffer: Buffer): Promise<DatasetSummary> {
     sampleRows,
     columnProfiles,
     paretoSets,
+    duplicateRows,
     sanitizedCellCount,
     hiddenSheetsSkipped,
     truncated,

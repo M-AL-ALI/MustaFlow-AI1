@@ -17,7 +17,11 @@ import cookieParser from "cookie-parser";
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { neutraliseFormula, sanitiseCell } from "../../../lib/public-ai/dataset-safety";
-import { computeColumnProfiles, computePareto } from "../../../lib/public-ai/dataset-stats";
+import {
+  computeColumnProfiles,
+  computePareto,
+  computeDuplicateRowStats,
+} from "../../../lib/public-ai/dataset-stats";
 import { extractDataset, DatasetExtractionError } from "../../../lib/public-ai/dataset-extract";
 import { validateFile } from "../../../lib/public-ai/file-validate";
 import { storeFile } from "../../../lib/public-ai/file-store";
@@ -227,6 +231,89 @@ describe("computePareto", () => {
     const profiles = computeColumnProfiles(headers, rows);
     const pareto = computePareto(headers, rows, profiles);
     expect(pareto).toEqual([]);
+  });
+});
+
+// ─── 5b. dataset-stats: IQR outlier detection ────────────────────────────────
+describe("computeColumnProfiles — IQR outliers", () => {
+  it("flags a clear high outlier using Tukey fences", () => {
+    // Tight cluster around 10 plus one extreme high value.
+    const headers = ["amount"];
+    const rows = [["10"], ["11"], ["12"], ["10"], ["11"], ["12"], ["10"], ["11"], ["1000"]];
+    const profile = computeColumnProfiles(headers, rows)[0]!;
+    expect(profile.type).toBe("numeric");
+    expect(profile.median).toBeDefined();
+    expect(profile.q1).toBeDefined();
+    expect(profile.q3).toBeDefined();
+    expect(profile.iqr).toBeDefined();
+    expect(profile.outlierCount).toBe(1);
+    expect(profile.highOutlierCount).toBe(1);
+    expect(profile.lowOutlierCount).toBe(0);
+    expect(profile.sampleOutliers).toContain(1000);
+  });
+
+  it("reports zero outliers for a uniform spread", () => {
+    const headers = ["n"];
+    const rows = [["1"], ["2"], ["3"], ["4"], ["5"], ["6"], ["7"], ["8"], ["9"], ["10"]];
+    const profile = computeColumnProfiles(headers, rows)[0]!;
+    expect(profile.outlierCount).toBe(0);
+  });
+
+  it("does not compute outlier stats below the minimum sample size", () => {
+    const headers = ["n"];
+    const rows = [["1"], ["2"], ["3"], ["100"]];
+    const profile = computeColumnProfiles(headers, rows)[0]!;
+    expect(profile.type).toBe("numeric");
+    expect(profile.outlierCount).toBeUndefined();
+    expect(profile.iqr).toBeUndefined();
+  });
+});
+
+// ─── 5c. dataset-stats: duplicate row detection ──────────────────────────────
+describe("computeDuplicateRowStats", () => {
+  it("counts redundant rows and repeated record groups", () => {
+    const headers = ["name", "amount"];
+    const rows = [
+      ["Alice", "100"],
+      ["Bob", "200"],
+      ["Alice", "100"],
+      ["Alice", "100"],
+      ["Carol", "300"],
+    ];
+    const stats = computeDuplicateRowStats(headers, rows);
+    // Three identical Alice rows => 2 redundant, one group.
+    expect(stats.duplicateRowCount).toBe(2);
+    expect(stats.duplicateGroupCount).toBe(1);
+    expect(stats.sampleDuplicates[0]!.count).toBe(3);
+    expect(stats.sampleDuplicates[0]!.preview).toContain("Alice");
+  });
+
+  it("normalizes whitespace and case before comparing", () => {
+    const headers = ["name"];
+    const rows = [["Alice"], ["  alice  "], ["ALICE"]];
+    const stats = computeDuplicateRowStats(headers, rows);
+    expect(stats.duplicateRowCount).toBe(2);
+    expect(stats.duplicateGroupCount).toBe(1);
+  });
+
+  it("ignores entirely empty rows", () => {
+    const headers = ["a", "b"];
+    const rows = [
+      ["", ""],
+      ["", ""],
+      ["x", "y"],
+    ];
+    const stats = computeDuplicateRowStats(headers, rows);
+    expect(stats.duplicateRowCount).toBe(0);
+    expect(stats.duplicateGroupCount).toBe(0);
+  });
+
+  it("returns zero for a dataset with no duplicates", () => {
+    const headers = ["id"];
+    const rows = [["1"], ["2"], ["3"]];
+    const stats = computeDuplicateRowStats(headers, rows);
+    expect(stats.duplicateRowCount).toBe(0);
+    expect(stats.sampleDuplicates).toEqual([]);
   });
 });
 

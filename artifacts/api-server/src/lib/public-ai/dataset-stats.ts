@@ -18,9 +18,53 @@ export interface ColumnProfile {
   mean?: number;
   sum?: number;
   stddev?: number;
+  // IQR-based distribution + outlier fields (numeric columns with >= 8 values).
+  q1?: number;
+  median?: number;
+  q3?: number;
+  iqr?: number;
+  lowerFence?: number;
+  upperFence?: number;
+  outlierCount?: number;
+  lowOutlierCount?: number;
+  highOutlierCount?: number;
+  sampleOutliers?: number[];
   topCategories?: Array<{ value: string; count: number }>;
   minDate?: string;
   maxDate?: string;
+}
+
+/**
+ * Dataset-level duplicate-row detection result. Rows are compared after
+ * normalizing each cell (trim + collapse internal whitespace + lowercase) so
+ * cosmetically-different copies of the same record still count as duplicates.
+ */
+export interface DuplicateRowStats {
+  // Redundant copies: sum over repeated rows of (occurrences - 1).
+  duplicateRowCount: number;
+  // Number of distinct rows that occur more than once.
+  duplicateGroupCount: number;
+  // Up to a few example duplicated rows, with their occurrence count.
+  sampleDuplicates: Array<{ count: number; preview: string }>;
+}
+
+// Minimum non-null numeric values before IQR/outlier stats are meaningful.
+const MIN_OUTLIER_SAMPLE = 8;
+
+const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
+
+/**
+ * Linear-interpolation quantile over an ascending-sorted numeric array.
+ */
+function quantileSorted(sorted: number[], q: number): number {
+  if (sorted.length === 0) return NaN;
+  if (sorted.length === 1) return sorted[0]!;
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  const lower = sorted[base]!;
+  const upper = sorted[base + 1] ?? lower;
+  return lower + rest * (upper - lower);
 }
 
 export interface ParetoEntry {
@@ -80,9 +124,36 @@ export function computeColumnProfiles(headers: string[], rows: string[][]): Colu
         const variance = nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length;
         profile.min = Math.min(...nums);
         profile.max = Math.max(...nums);
-        profile.mean = Math.round(mean * 1e6) / 1e6;
-        profile.sum = Math.round(sum * 1e6) / 1e6;
-        profile.stddev = Math.round(Math.sqrt(variance) * 1e6) / 1e6;
+        profile.mean = round6(mean);
+        profile.sum = round6(sum);
+        profile.stddev = round6(Math.sqrt(variance));
+
+        // IQR-based outlier detection (Tukey fences). Robust and assumes no
+        // particular distribution. Only meaningful with enough values.
+        if (nums.length >= MIN_OUTLIER_SAMPLE) {
+          const sorted = [...nums].sort((a, b) => a - b);
+          const q1 = quantileSorted(sorted, 0.25);
+          const median = quantileSorted(sorted, 0.5);
+          const q3 = quantileSorted(sorted, 0.75);
+          const iqr = q3 - q1;
+          const lowerFence = q1 - 1.5 * iqr;
+          const upperFence = q3 + 1.5 * iqr;
+          const low = sorted.filter((n) => n < lowerFence);
+          const high = sorted.filter((n) => n > upperFence);
+          // Most extreme few outliers (lowest lows + highest highs).
+          const sampleOutliers = [...low.slice(0, 3), ...high.slice(-3)].slice(0, 5).map(round6);
+
+          profile.q1 = round6(q1);
+          profile.median = round6(median);
+          profile.q3 = round6(q3);
+          profile.iqr = round6(iqr);
+          profile.lowerFence = round6(lowerFence);
+          profile.upperFence = round6(upperFence);
+          profile.lowOutlierCount = low.length;
+          profile.highOutlierCount = high.length;
+          profile.outlierCount = low.length + high.length;
+          if (sampleOutliers.length > 0) profile.sampleOutliers = sampleOutliers;
+        }
       }
     } else if (type === "string" && nonEmpty.length > 0) {
       const freqMap = new Map<string, number>();
@@ -155,4 +226,66 @@ export function computePareto(
   }
 
   return sets;
+}
+
+const DUP_PREVIEW_MAX_CHARS = 120;
+
+/**
+ * Normalize a single cell for duplicate comparison: trim, collapse internal
+ * whitespace runs, and lowercase. This makes "Acme  Inc" and "acme inc" equal.
+ */
+function normalizeCellForDup(cell: string): string {
+  return cell.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Detect fully-duplicated rows across the dataset. Two rows are duplicates when
+ * every cell matches after normalization. Rows that are entirely empty are
+ * ignored so blank padding rows are not reported as duplicates.
+ */
+export function computeDuplicateRowStats(headers: string[], rows: string[][]): DuplicateRowStats {
+  const colCount = headers.length;
+  const counts = new Map<string, { count: number; first: string[] }>();
+
+  for (const row of rows) {
+    const cells: string[] = [];
+    let allEmpty = true;
+    for (let ci = 0; ci < colCount; ci++) {
+      const norm = normalizeCellForDup(row[ci] ?? "");
+      if (norm !== "") allEmpty = false;
+      cells.push(norm);
+    }
+    if (allEmpty) continue;
+    const key = cells.join("\u0001");
+    const existing = counts.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      counts.set(key, { count: 1, first: row.slice(0, colCount) });
+    }
+  }
+
+  let duplicateRowCount = 0;
+  let duplicateGroupCount = 0;
+  const groups: Array<{ count: number; first: string[] }> = [];
+  for (const entry of counts.values()) {
+    if (entry.count > 1) {
+      duplicateGroupCount++;
+      duplicateRowCount += entry.count - 1;
+      groups.push(entry);
+    }
+  }
+
+  const sampleDuplicates = groups
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+    .map((g) => {
+      let preview = g.first.map((c) => c.trim()).join(" | ");
+      if (preview.length > DUP_PREVIEW_MAX_CHARS) {
+        preview = preview.slice(0, DUP_PREVIEW_MAX_CHARS - 3) + "...";
+      }
+      return { count: g.count, preview };
+    });
+
+  return { duplicateRowCount, duplicateGroupCount, sampleDuplicates };
 }

@@ -231,6 +231,18 @@ function depthGuidance(depth: OraAnswerDepth): string {
   }
 }
 
+/**
+ * Public accessor for the per-domain expert framing string.
+ *
+ * The file-analysis and dataset-analysis routes reuse this so uploaded files
+ * get the same domain expert framing that /chat already applies, without having
+ * to re-derive depth/token logic. Domain is normally detected from the user's
+ * message plus a sample of the uploaded content via {@link detectOraExpertiseDomain}.
+ */
+export function oraDomainExpertiseGuidance(domain: OraExpertiseDomain): string {
+  return domainGuidance(domain);
+}
+
 export function buildOraExpertiseProfile(input: OraExpertiseInput): OraExpertiseProfile {
   const domain = detectOraExpertiseDomain(input.message, input.topic);
   const depth = resolveOraAnswerDepth(input);

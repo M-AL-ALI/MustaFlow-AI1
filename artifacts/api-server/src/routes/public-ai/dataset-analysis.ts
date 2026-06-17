@@ -14,6 +14,10 @@ import {
 } from "../../lib/public-ai/dataset-prompt";
 import { DatasetAnalysisAiSchema } from "../../lib/public-ai/dataset-schema";
 import type { DatasetAnalysisAiOutput } from "../../lib/public-ai/dataset-schema";
+import {
+  detectOraExpertiseDomain,
+  oraDomainExpertiseGuidance,
+} from "../../lib/public-ai/expertise";
 import { logger } from "../../lib/logger";
 import type { Provider } from "../../lib/ai-providers";
 import {
@@ -189,7 +193,22 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
 
   const summary = fileEntry.datasetSummary;
 
+  // Detect the subject-matter domain from the question plus the dataset's
+  // filename and column headers (untrusted content is only regex-matched here,
+  // never injected into the system prompt) so the analysis is framed by a
+  // matching domain expert — the same expertise /chat already applies.
+  // Use the "general" topic fallback (not "technical") so header content drives
+  // the domain: a "technical" topic short-circuits to software_engineering
+  // before data/operations/business patterns are ever evaluated.
+  const domain = detectOraExpertiseDomain(
+    [message, fileEntry.filename, summary.headers.join(" ")].join("\n"),
+    "general",
+  );
+
   let systemPrompt = DATASET_SYSTEM_PROMPT;
+  if (domain !== "general") {
+    systemPrompt += `\n\n## Domain expertise\nApproach this dataset as a domain expert. ${oraDomainExpertiseGuidance(domain)} Continue to output ONLY the JSON object described above — no prose outside JSON.`;
+  }
   if (language && language !== "auto") {
     systemPrompt += `\n\n## Language override\nRespond in "${language}" for all text fields in the JSON output.`;
   }

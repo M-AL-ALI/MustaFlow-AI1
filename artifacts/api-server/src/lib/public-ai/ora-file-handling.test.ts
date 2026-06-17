@@ -88,6 +88,62 @@ describe("buildDatasetContextBlock — sheet awareness", () => {
     const block = buildDatasetContextBlock("book.xlsx", makeSummary(), "summarize");
     expect(block).not.toContain("Other visible sheets NOT analyzed");
   });
+
+  it("surfaces IQR outliers for a numeric column", () => {
+    const block = buildDatasetContextBlock(
+      "book.xlsx",
+      makeSummary({
+        columnProfiles: [
+          {
+            index: 1,
+            type: "numeric",
+            nullCount: 0,
+            uniqueCount: 5,
+            min: 10,
+            max: 1000,
+            mean: 200,
+            sum: 1000,
+            stddev: 400,
+            median: 12,
+            q1: 10,
+            q3: 14,
+            iqr: 4,
+            lowerFence: 4,
+            upperFence: 20,
+            lowOutlierCount: 0,
+            highOutlierCount: 1,
+            outlierCount: 1,
+            sampleOutliers: [1000],
+          },
+        ],
+      }),
+      "summarize",
+    );
+    expect(block).toContain("IQR outliers=1");
+    expect(block).toContain("median=12");
+  });
+
+  it("surfaces a DATA QUALITY block when duplicate rows are present", () => {
+    const block = buildDatasetContextBlock(
+      "book.xlsx",
+      makeSummary({
+        duplicateRows: {
+          duplicateRowCount: 2,
+          duplicateGroupCount: 1,
+          sampleDuplicates: [{ count: 3, preview: "Alice | 100" }],
+        },
+      }),
+      "summarize",
+    );
+    expect(block).toContain("[DATA QUALITY");
+    expect(block).toContain("Duplicate rows: 2");
+    expect(block).toContain("Alice | 100");
+  });
+
+  it("omits the DATA QUALITY block when there are no duplicate rows", () => {
+    const block = buildDatasetContextBlock("book.xlsx", makeSummary(), "summarize");
+    expect(block).not.toContain("[DATA QUALITY");
+  });
 });
 
 describe("buildCarriedDocumentContext — datasets are carried", () => {

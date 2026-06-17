@@ -51,6 +51,31 @@ describe("detectOraExpertiseDomain", () => {
       "operations",
     );
   });
+
+  it("maps dataset headers to a content domain under the general fallback (not software_engineering)", () => {
+    // The dataset-analysis route passes topic "general" so filename/headers drive
+    // the domain. A "technical" topic would short-circuit to software_engineering
+    // before these patterns are evaluated. (A ".csv" filename itself matches the
+    // data_analysis pattern, a sensible default for a dataset.)
+    expect(
+      detectOraExpertiseDomain("summarize this\nsales.csv\nregion revenue kpi", "general"),
+    ).toBe("data_analysis");
+    expect(
+      detectOraExpertiseDomain(
+        "summarize this\nstaffing.xlsx\nworkflow inventory schedule",
+        "general",
+      ),
+    ).toBe("operations");
+    expect(
+      detectOraExpertiseDomain("summarize this\nfunnel.xlsx\nmarket competitor pricing", "general"),
+    ).toBe("business_strategy");
+    expect(
+      detectOraExpertiseDomain(
+        "here is the file\nnotes.xlsx\nfirst_name last_name color",
+        "general",
+      ),
+    ).toBe("general");
+  });
 });
 
 describe("resolveOraAnswerDepth", () => {
