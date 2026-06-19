@@ -17,7 +17,7 @@
  *  - DURABLE_QUEUE_ENABLED=false disables pg-boss entirely for local dev.
  */
 
-import { PgBoss, type Job } from "pg-boss";
+import { PgBoss, type Job, type ConstructorOptions as PgBossConstructorOptions } from "pg-boss";
 import { logger } from "./logger";
 import { jobQueueDepth, jobsTotal } from "./metrics";
 
@@ -73,7 +73,26 @@ export async function startDurableQueue(
   if (_ready || boss) return;
 
   try {
-    boss = new PgBoss(connectionString);
+    // Pass pool options through to pg-boss's internal pg.Pool so that
+    // managed-Postgres idle-connection drops (Neon / PgBouncer NAT timeouts)
+    // are detected proactively via TCP keepalive rather than only when the
+    // dead socket is next used (which surfaces as "Connection terminated
+    // unexpectedly" in prod logs).
+    //
+    // pg-boss v12 forwards the entire config object to new pg.Pool(config) in
+    // its internal Db class. The TypeScript types for ConstructorOptions only
+    // declare the pg-boss-specific subset (max, connectionTimeoutMillis), so
+    // keepAlive and idleTimeoutMillis must be merged in via a cast — they are
+    // valid pg.Pool options that reach the pool at runtime.
+    const pgBossOpts: PgBossConstructorOptions = {
+      connectionString,
+      max: 5,
+      connectionTimeoutMillis: 10_000,
+    };
+    // Assign undeclared-but-forwarded pg.Pool options without TS type error.
+    (pgBossOpts as Record<string, unknown>)["keepAlive"] = true;
+    (pgBossOpts as Record<string, unknown>)["idleTimeoutMillis"] = 30_000;
+    boss = new PgBoss(pgBossOpts);
 
     boss.on("error", (err: Error) => {
       logger.error({ err }, "pg-boss internal error");
@@ -284,7 +303,11 @@ export async function getQueueStats(recentLimit = 5): Promise<{
 
   // Import pg pool for raw pgboss schema queries (pg-boss doesn't expose failed listing).
   const { Pool } = await import("pg");
-  const tmpPool = new Pool({ connectionString, max: 2 });
+  const tmpPool = new Pool({ connectionString, max: 2, connectionTimeoutMillis: 10_000 });
+  // Suppress unhandled 'error' events on idle clients — the pool is ended
+  // immediately after the queries below, so any dropped idle client between
+  // creation and first use must not crash the process.
+  tmpPool.on("error", () => undefined);
 
   async function safeStats(q: string): Promise<QueueDetail | null> {
     try {

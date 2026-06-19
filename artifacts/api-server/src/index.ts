@@ -257,11 +257,41 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// Task #859 — Run all outstanding schema migrations before accepting traffic.
+// Safety: the E2E test-auth bypass (x-e2e-test-user / x-e2e-test-tier) is
+// double-gated and inert in production, but a deployment that leaves
+// E2E_TEST_ENABLED=true would honor impersonation headers in any non-prod
+// NODE_ENV. Emit a loud, structured marker at boot so accidental enablement
+// is immediately visible in logs.
+if (process.env.E2E_TEST_ENABLED === "true") {
+  const inProd = process.env.NODE_ENV === "production";
+  logger.warn(
+    { nodeEnv: process.env.NODE_ENV ?? "(unset)", e2eAuthActive: !inProd },
+    inProd
+      ? "E2E_TEST_ENABLED=true but NODE_ENV=production — test auth bypass is IGNORED"
+      : "E2E_TEST_ENABLED=true — test auth bypass is ACTIVE (x-e2e-test-user honored). Never set this in a deployed/shared environment.",
+  );
+}
+
+// Bind the port BEFORE running migrations so the reverse proxy can forward
+// traffic immediately and external uptime monitors never see a
+// connection-refused gap. /api/healthz responds without touching the DB, so
+// the platform startup health check passes right away. Application routes that
+// need the DB will 500 gracefully if somehow reached before migrations finish,
+// which is far better than the proxy returning an unroutable 502/500 for the
+// entire migration window (observed as ~12 s of outage on the Jun 18 deploy).
+server.listen(port, (err?: Error) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  }
+  logger.info({ port }, "Server listening (startup migrations running in background)");
+});
+
+// Task #859 — Run all outstanding schema migrations after binding the port.
 // Each step is idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS) so this
 // is safe on every boot and is a no-op when the schema is already current.
 // Task #1194 — After migrations, run the container subsystem self-check to
-// verify Fly.io exec connectivity before the server starts accepting requests.
+// verify Fly.io exec connectivity.
 void runStartupMigrations()
   .catch((err) => {
     // Non-fatal: log and continue — a partial schema is better than no server.
@@ -270,32 +300,10 @@ void runStartupMigrations()
   .then(() =>
     runContainerSelfCheck().catch((err: unknown) => {
       // Non-fatal: log and continue — a degraded container subsystem is better
-      // than no server. The health endpoint will reflect the error status.
+      // than a stopped server. The health endpoint will reflect the error status.
       logger.warn({ err }, "container subsystem: self-check threw unexpectedly");
     }),
   )
   .finally(() => {
-    // Safety: the E2E test-auth bypass (x-e2e-test-user / x-e2e-test-tier) is
-    // double-gated and inert in production, but a deployment that leaves
-    // E2E_TEST_ENABLED=true would honor impersonation headers in any non-prod
-    // NODE_ENV. Emit a loud, structured marker at boot so accidental enablement
-    // is immediately visible in logs.
-    if (process.env.E2E_TEST_ENABLED === "true") {
-      const inProd = process.env.NODE_ENV === "production";
-      logger.warn(
-        { nodeEnv: process.env.NODE_ENV ?? "(unset)", e2eAuthActive: !inProd },
-        inProd
-          ? "E2E_TEST_ENABLED=true but NODE_ENV=production — test auth bypass is IGNORED"
-          : "E2E_TEST_ENABLED=true — test auth bypass is ACTIVE (x-e2e-test-user honored). Never set this in a deployed/shared environment.",
-      );
-    }
-
-    server.listen(port, (err?: Error) => {
-      if (err) {
-        logger.error({ err }, "Error listening on port");
-        process.exit(1);
-      }
-
-      logger.info({ port }, "Server listening");
-    });
+    logger.info({ port }, "Startup migrations and container self-check complete");
   });
