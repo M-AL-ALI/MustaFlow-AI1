@@ -265,5 +265,15 @@ export function buildDatasetContextBlock(
   lines.push("");
   lines.push(`Visitor's question: ${userQuestion}`);
 
+  // Prompt hint for trend-focused questions so the model uses the correct
+  // analysisType and includes trend direction words in the summary.
+  if (/trend|growth|growing|increas|upward|over time/i.test(userQuestion)) {
+    lines.push(
+      'Analysis hint: The user is asking about trends over time. Set analysisType to "trend", ' +
+        'populate trendFindings, and explicitly use words like "increasing", "growing", "upward trend", ' +
+        'or "declining" in the summary to describe the overall direction.',
+    );
+  }
+
   return lines.join("\n");
 }

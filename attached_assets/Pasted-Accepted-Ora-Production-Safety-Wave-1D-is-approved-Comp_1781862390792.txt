@@ -1,0 +1,78 @@
+Accepted. Ora Production Safety Wave 1D is approved.
+
+Completed:
+
+* added async route-facing spend-cap check
+* added DB-backed resync when usage reaches 80% of any cap
+* added periodic DB resync every 2 minutes
+* in-memory counters now raise to DB totals when DB is higher
+* global cap can block based on DB total even if local memory is stale
+* authenticated user cap can block based on DB total even if local memory is stale
+* anonymous IP cap can block based on DB total even if local memory is stale
+* low-usage fast path remains in-memory for performance
+* DB unavailable path falls back safely and logs degradation
+* E2E bypass still works
+* all costly routes now call the async spend-cap check
+* periodic sync is unref’ed so it does not hold the process open
+* test cleanup helper added
+* spend snapshot now exposes periodicSyncActive
+* 22 new Wave 1D tests added
+* quality gate passed: 1460 passed / 2 skipped
+* changes pushed to GitHub
+
+This closes the multi-instance spend-cap enforcement gap from Wave 1C.
+
+Production note:
+This is a strong hybrid model:
+
+* fast in-memory enforcement under normal usage
+* DB-backed verification near caps
+* periodic DB sync across instances
+* atomic DB increments preserved
+
+Next recommended phase:
+Ora Production Safety Wave 2A — Kill Switches + Privacy/Retention Audit.
+
+Goal:
+Before public launch, make sure Ora can be safely disabled or limited instantly, and verify privacy/file-retention behavior.
+
+Wave 2A requirements:
+
+1. Kill switches:
+    * disable all Ora public AI
+    * disable streaming
+    * disable file upload
+    * disable file analysis
+    * disable dataset analysis
+    * disable image analysis
+    * disable file generation
+    * disable TTS/transcribe
+    * disable web search
+2. User-friendly disabled responses:
+    * safe message
+    * structured response
+    * no provider/internal errors
+3. Privacy audit:
+    * no raw file text in logs
+    * no secrets in logs
+    * no provider stack traces to users
+    * no raw uploaded document text in structured logs
+    * no cross-session leakage
+4. Retention audit:
+    * uploaded temp files expire
+    * generated files have clear retention
+    * remembered document context has TTL or cleanup policy
+    * anonymous sessions have cleanup policy
+5. Tests:
+    * each kill switch blocks the correct route
+    * disabled responses are structured and safe
+    * logs do not contain raw uploaded content
+    * no AI Builder / Builder / handoff language
+    * quality gate passes
+6. Push all changes to GitHub after completion.
+
+Keep Ora fully isolated:
+No AI Builder.
+No Builder.
+No handoff.
+No shared flow.

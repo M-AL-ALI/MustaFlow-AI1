@@ -20,6 +20,7 @@
 import { isDeepSeekAvailable, MODEL_DEFAULTS, type Provider } from "../ai-provider-config";
 import { ALL_BREAKERS } from "../resilience";
 import type { OraIntent, OraConfidence, OraTopic } from "./classifier";
+import { logger } from "../logger";
 
 /** A single provider+model the caller can attempt. */
 export interface ModelCandidate {
@@ -662,6 +663,68 @@ export interface CandidateChainResult<T> {
 }
 
 /**
+ * Classifies a provider error into a stable enum value for structured logging
+ * and metric tagging. Never leaks this classification to user-facing responses.
+ */
+export type ProviderErrorKind =
+  | "rate_limit"
+  | "timeout"
+  | "unavailable"
+  | "invalid_key"
+  | "malformed_response"
+  | "safety_refusal"
+  | "circuit_open"
+  | "unknown";
+
+export function classifyProviderError(err: unknown): ProviderErrorKind {
+  if (!err || typeof err !== "object") return "unknown";
+  const e = err as Record<string, unknown>;
+
+  if (e.name === "CircuitOpenError") return "circuit_open";
+
+  const status = typeof e.status === "number" ? e.status : 0;
+  const code = typeof e.code === "string" ? e.code : "";
+  const name = typeof e.name === "string" ? e.name : "";
+  const message = typeof e.message === "string" ? e.message.toLowerCase() : "";
+
+  if (status === 429 || name === "RateLimitError") return "rate_limit";
+  if (
+    status === 401 ||
+    status === 403 ||
+    message.includes("invalid api key") ||
+    message.includes("unauthorized") ||
+    message.includes("incorrect api key")
+  )
+    return "invalid_key";
+  if (
+    code === "ETIMEDOUT" ||
+    name === "APIConnectionTimeoutError" ||
+    message.includes("timeout") ||
+    message.includes("timed out")
+  )
+    return "timeout";
+  if (
+    ["ECONNRESET", "ENOTFOUND", "ECONNREFUSED", "EPIPE"].includes(code) ||
+    (status >= 500 && status < 600)
+  )
+    return "unavailable";
+  if (
+    message.includes("safety") ||
+    message.includes("content_filter") ||
+    message.includes("refused")
+  )
+    return "safety_refusal";
+  if (
+    message.includes("parse") ||
+    message.includes("unexpected token") ||
+    message.includes("invalid json")
+  )
+    return "malformed_response";
+
+  return "unknown";
+}
+
+/**
  * Iterate the ordered candidate chain, attempting each provider+model in turn
  * until one succeeds. This is the runtime half of the smart router: the caller
  * supplies an `attempt` callback (which wraps `createChatCompletion` for a given
@@ -677,15 +740,57 @@ export async function runCandidateChain<T>(
   onError?: (candidate: ModelCandidate, index: number, err: unknown) => void,
 ): Promise<CandidateChainResult<T>> {
   let lastErr: unknown = null;
+  const startMs = Date.now();
+
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
     try {
       const result = await attempt(candidate, i);
+      const durationMs = Date.now() - startMs;
+      if (i > 0) {
+        logger.info(
+          {
+            event: "ora_provider_fallback_succeeded",
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackIndex: i,
+            totalCandidates: candidates.length,
+            durationMs,
+          },
+          "ora provider fallback succeeded",
+        );
+      }
       return { result, candidate, index: i, usedFallback: i > 0 };
     } catch (candidateErr) {
       lastErr = candidateErr;
+      const errorKind = classifyProviderError(candidateErr);
+      logger.warn(
+        {
+          event: "ora_provider_failed",
+          provider: candidate.provider,
+          model: candidate.model,
+          errorKind,
+          attemptIndex: i,
+          totalCandidates: candidates.length,
+          hasNextCandidate: i < candidates.length - 1,
+        },
+        `ora provider failed: ${candidate.provider} (${errorKind})`,
+      );
       onError?.(candidate, i, candidateErr);
     }
   }
+
+  const durationMs = Date.now() - startMs;
+  const lastErrorKind = classifyProviderError(lastErr);
+  logger.error(
+    {
+      event: "ora_all_providers_failed",
+      totalCandidates: candidates.length,
+      lastErrorKind,
+      durationMs,
+    },
+    "ora all providers failed",
+  );
+
   throw lastErr ?? new Error("All Ora model candidates failed");
 }

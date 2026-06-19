@@ -12,12 +12,19 @@ import { Router } from "express";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraVoiceTranscribeLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 
 const router = Router();
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB
 
 router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res) => {
+  if (isKillSwitchActive("transcribe")) {
+    req.resume();
+    res.status(503).json(killSwitchBody("transcribe"));
+    return;
+  }
+
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
     res.status(401).json({ error: "No active session. Please start a session first." });
@@ -28,6 +35,30 @@ router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res)
   if (!session) {
     res.status(401).json({ error: "Session expired. Please start a new session." });
     return;
+  }
+
+  // ── Daily spend cap (global + per-user + per-IP anonymous) ─────────────
+  // Check before reading the audio body to fail fast without consuming up to 10 MB.
+  {
+    const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
+    const authed = await resolveAuthedOraUser(req);
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "transcribe",
+      authed?.userId ?? null,
+      authed?.tier ?? "anonymous",
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
   }
 
   const formatRaw = (req.query.format as string | undefined)?.toLowerCase() ?? "webm";

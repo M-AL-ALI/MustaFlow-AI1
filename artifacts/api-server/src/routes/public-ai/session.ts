@@ -1,7 +1,9 @@
 import { Router } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { createHash } from "crypto";
 import {
   createSession,
+  createExhaustedSession,
   validateSession,
   setSessionCookie,
   MSG_LIMIT_VALUE,
@@ -10,9 +12,19 @@ import {
   IMAGE_ANALYSIS_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
 import { oraSessionLimiter } from "../../lib/rateLimit";
+import { isE2ETestAuthEnabled } from "../../lib/auth";
 import { logger } from "../../lib/logger";
 
 const router = Router();
+
+/** Skip the session-creation rate limiter for E2E benchmark runs. */
+function sessionRateLimiter(req: Request, res: Response, next: NextFunction): void {
+  if (isE2ETestAuthEnabled() && req.headers["x-e2e-test-user"]) {
+    next();
+    return;
+  }
+  oraSessionLimiter(req, res, next);
+}
 
 /**
  * Returns a one-way 8-hex-char fingerprint of an IP for logging.
@@ -22,7 +34,7 @@ function hashIp(ip: string): string {
   return createHash("sha256").update(ip).digest("hex").slice(0, 8);
 }
 
-router.post("/public-ai/session", oraSessionLimiter, async (req, res) => {
+router.post("/public-ai/session", sessionRateLimiter, async (req, res) => {
   const ip =
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
     req.socket.remoteAddress ??
@@ -30,7 +42,8 @@ router.post("/public-ai/session", oraSessionLimiter, async (req, res) => {
 
   logger.info({ component: "ora-session", ipHash: hashIp(ip) }, "New Ora session created");
 
-  const { token, payload } = createSession();
+  const useExhausted = isE2ETestAuthEnabled() && req.headers["x-e2e-exhaust"] === "true";
+  const { token, payload } = useExhausted ? createExhaustedSession() : createSession();
   setSessionCookie(res, token);
 
   // Signed-in users are metered by per-user rolling windows per tier; surface

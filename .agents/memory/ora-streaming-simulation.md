@@ -1,37 +1,44 @@
 ---
 name: Ora streaming simulation
-description: How to simulate token-by-token streaming when the Replit AI integrations proxy returns the full response as a single SSE chunk.
+description: How Ora simulates word-by-word streaming when the AI proxy buffers the full response
 ---
 
-## The rule
+## Rule 1 — Accumulate all chunks server-side before simulating
+Always accumulate ALL provider chunks before passing to `simulateChunkStream`. Never use a per-chunk size threshold.
 
-The Replit AI integrations proxy buffers the complete AI response and emits it as **one SSE chunk**, regardless of `stream: true`. To give users a ChatGPT-style progressive delivery, split large chunks in the stream adapter itself.
+**Why:** The Gemini AI integration proxy returns real small streaming tokens (each < 25 chars). A per-chunk threshold like `if (delta.length > 25)` causes small chunks to bypass simulation entirely and arrive at the browser in rapid succession.
 
-## Implementation (stream-adapter.ts)
+**How to apply:**
+- In `streamOraMessage` (stream-adapter.ts): accumulate all deltas from `gen` into `accumulated`, then call `simulateChunkStream(accumulated, signal)` on the full string.
+- Use a nested try-catch during accumulation: if provider throws WITH partial content → simulate partial text + emit `stream_interrupted`; if provider throws with NO content → rethrow to outer catch for provider retry.
+- `simulateChunkStream` splits on whitespace, groups into 2-word batches with 50ms delays.
+- `SIMULATE_WORDS_PER_GROUP = 2`, `SIMULATE_DELAY_MS = 50`.
 
-- `SIMULATE_THRESHOLD_CHARS = 25` — chunks shorter than this are small enough to emit as-is.
-- `simulateChunkStream(text, signal)` — async generator that splits text at whitespace boundaries into groups of 4 words, yielding each group with a 30 ms delay between them.
-- Inside `streamOraMessage`: for each `delta` from `streamChatCompletion`, if `delta.length > SIMULATE_THRESHOLD_CHARS` route through `simulateChunkStream`; otherwise yield directly.
+## Rule 2 — Yield to the browser paint loop between tokens (frontend)
+After each `onToken(text)` call in `consumeOraStream`, `await` a `setTimeout(resolve, 0)` to yield back to the browser's rendering cycle.
 
-## TCP flush (prevent Nagle batching)
+**Why:** The Replit dev proxy (and likely any production CDN/nginx) buffers ALL SSE frames and delivers them in one TCP chunk. `reader.read()` returns all bytes at once; the for-loop fires every `onToken` synchronously in the same JS task. `flushSync` commits DOM changes but the browser only paints at the end of a JS task — so without the setTimeout yield, the complete response appears at once even though tokens are emitted one by one. `flushSync` alone is NOT sufficient.
 
-Two locations must be set to ensure each SSE frame is flushed immediately:
+**How to apply:**
+```ts
+// Inside consumeOraStream, for-loop over SSE parts:
+} else if (eventType === "token") {
+    const text = (parsed as { text: string }).text;
+    firstTokenReceived = true;
+    accumulated += text;
+    onToken(text);
+    // Yield to browser paint loop between tokens
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+```
 
-1. **`chat.ts`** — after `res.flushHeaders()`:
-   ```ts
-   const sock = res.socket as import("net").Socket | null;
-   if (sock?.setNoDelay) sock.setNoDelay(true);
-   ```
+**Also keep `flushSync` in the `onToken` callback** in `use-ora-chat.ts`:
+```ts
+(delta) => {
+  flushSync(() => {
+    setMessages((prev) => { /* append delta */ });
+  });
+}
+```
 
-2. **`writeSSE()`** — after `r.flush?.()`:
-   ```ts
-   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-   const sock = (res.socket ?? (res as any)._socket) as { uncork?: () => void } | null;
-   if (sock?.uncork) sock.uncork();
-   ```
-
-**Why:** Without `setNoDelay`, the OS Nagle timer can hold small SSE frames (~200 ms). The Replit dev proxy also adds ~1.5 s per SSE frame line in dev; production CDN proxy handles SSE normally.
-
-## Test behaviour
-
-Streaming tests mock `streamChatCompletion` to yield `"Hello"` and `" World"` (both <25 chars), so `simulateChunkStream` is a no-op in tests — no test changes needed for the simulation path.
+`flushSync` ensures the DOM is committed; `setTimeout(0)` ensures the browser can paint before the next token is processed. Both layers are needed.

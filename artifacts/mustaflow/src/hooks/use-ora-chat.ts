@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { flushSync } from "react-dom";
 import { useUser } from "@clerk/react";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
@@ -636,6 +637,14 @@ async function consumeOraStream(
         firstTokenReceived = true;
         accumulated += text;
         onToken(text);
+        // Yield to the browser paint loop so each token renders visibly before
+        // the next one is processed. flushSync commits the DOM change but does
+        // NOT force a browser repaint — all flushSync calls inside the same JS
+        // task still only produce one visible frame at the end. The Replit dev
+        // proxy batches all SSE frames into a single TCP delivery, so without
+        // this yield every token lands in the same task and the user sees the
+        // complete response appear at once instead of word-by-word.
+        await new Promise<void>((resolve) => setTimeout(resolve, 55));
       } else if (eventType === "done") {
         donePayload = (parsed as { payload: StreamDonePayload }).payload;
       } else if (eventType === "error") {
@@ -1491,16 +1500,24 @@ export function useOraChat(): UseOraChatReturn {
               BASE,
               body,
               (delta) => {
-                setMessages((prev) => {
-                  const last = prev[prev.length - 1];
-                  if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
-                  return [
-                    ...prev.slice(0, -1),
-                    {
-                      ...last,
-                      content: last.content + delta,
-                    },
-                  ];
+                // flushSync forces React to commit this update synchronously,
+                // bypassing automatic batching. Without it, when the Replit dev
+                // proxy delivers all SSE frames in one TCP chunk, every onToken
+                // call lands in the same event-loop turn and React 18 batches
+                // them all into a single render — the entire response appears at
+                // once instead of word-by-word.
+                flushSync(() => {
+                  setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (!last || last.role !== "assistant" || !last.isStreaming) return prev;
+                    return [
+                      ...prev.slice(0, -1),
+                      {
+                        ...last,
+                        content: last.content + delta,
+                      },
+                    ];
+                  });
                 });
               },
               streamAbort.signal,

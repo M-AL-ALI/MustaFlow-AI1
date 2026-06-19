@@ -1,0 +1,61 @@
+Accepted. Ora Live Evaluation + Benchmark Upgrade is approved.
+
+Benchmark infrastructure is complete and the real benchmark was successfully run.
+
+Final benchmark result:
+
+* Overall Ora score: 95.0%
+* Target: 97%
+* Gap remaining: -2.0%
+
+This means Ora is very close, but the 97% target is not achieved yet.
+
+Confirmed strong areas:
+
+* Core Q&A / reasoning / math: 100%
+* Writing / language: 98–100%
+* Business strategy / product planning: 97–98%
+* App concept planning: 97%
+* Code / technical: 96%
+* Deep reasoning: 96%
+* Financial questions: 96%
+
+Remaining repair areas:
+
+1. Session Limit CTA — 78%
+    Anonymous session 429 response is missing the expected structured upgrade CTA fields.
+2. Model Identity — 87%
+    Ora occasionally mentions underlying providers like OpenAI/Anthropic. Ora should identify as “Ora by MustaFlow” and should not expose provider names unless explicitly required for system/debug/admin context.
+3. Standalone Scope — 95%
+    One test still mentioned AI Builder. Ora must stay fully standalone:
+    * no AI Builder
+    * no Builder
+    * no handoff
+    * no Builder CTA
+    * no shared flow
+4. Dataset Analysis — 92%
+    Dataset quality is improved, but still below the 97% target. Review the weakest dataset benchmark cases and improve grounding, KPIs, data quality notes, and recommendations.
+
+Next phase:
+Ora 97% Benchmark Repair Slice.
+
+Goal:
+Fix only the benchmark gaps needed to move from 95.0% to 97%+.
+
+Required work:
+
+1. Fix anonymous session-limit 429 response so it includes the correct structured upgrade CTA fields expected by the benchmark.
+2. Strengthen Ora identity rules so Ora never casually names the underlying provider and consistently presents as Ora by MustaFlow.
+3. Strengthen standalone-scope guardrails so no AI Builder/Builder/handoff language appears in any normal Ora response.
+4. Review the weakest dataset benchmark failures and improve only the missing pieces.
+5. Re-run the benchmark after fixes.
+6. Report:
+    * new overall score
+    * score by category
+    * remaining failed/warning tests
+    * whether 97% target was achieved
+
+Acceptance:
+This repair slice is complete only when the benchmark score reaches 97% or higher, with Ora isolation still passing.
+
+Do not start a broad new feature phase yet. Focus only on the remaining 2% gap.

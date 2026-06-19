@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraVoiceTtsLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 
 const router = Router();
 
@@ -50,6 +51,11 @@ const ttsSchema = z.object({
 });
 
 router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
+  if (isKillSwitchActive("tts")) {
+    res.status(503).json(killSwitchBody("tts"));
+    return;
+  }
+
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
     res.status(401).json({ error: "No active session. Please start a session first." });
@@ -76,6 +82,29 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
     logger.warn({ component: "ora-tts" }, "OPENAI_API_KEY missing — Ora voice TTS unavailable");
     res.status(503).json({ error: "Voice replies are not configured." });
     return;
+  }
+
+  // ── Daily spend cap (global + per-user + per-IP anonymous) ─────────────
+  {
+    const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
+    const authed = await resolveAuthedOraUser(req);
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "tts_voice",
+      authed?.userId ?? null,
+      authed?.tier ?? "anonymous",
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
   }
 
   try {

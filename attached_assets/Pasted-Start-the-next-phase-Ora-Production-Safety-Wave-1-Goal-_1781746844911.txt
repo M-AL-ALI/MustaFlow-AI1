@@ -1,0 +1,131 @@
+Start the next phase: Ora Production Safety Wave 1.
+
+Goal:
+Make Ora safe enough for real public users by preventing abuse, controlling cost, and making provider failures degrade gracefully.
+
+Do this as an audit-first implementation:
+Before editing, map what already exists for:
+
+* anonymous session limits
+* authenticated user limits
+* upload limits
+* file-analysis limits
+* dataset-analysis limits
+* image-analysis limits
+* voice/TTS limits
+* web-search limits
+* provider fallback logic
+* daily spend tracking
+* per-tier usage tracking
+* error logging
+
+Then implement only the gaps.
+
+Wave 1 scope:
+
+1. Rate limits and abuse protection
+    Ora must prevent abuse from:
+
+* repeated anonymous sessions
+* too many chat messages
+* too many uploads
+* too many dataset analyses
+* too many image analyses
+* too many file generations
+* too many TTS/voice requests
+* concurrent request bursts
+* same IP creating many sessions
+
+Requirements:
+
+* Anonymous users should have strict limits.
+* Authenticated users should have tier-based limits.
+* E2E/test bypass must not affect production.
+* Limit responses must be user-friendly and structured.
+* Limit responses should include upgrade CTA fields where appropriate.
+* No route should bypass limits accidentally.
+
+2. Daily spend caps
+    Add or verify daily spend controls:
+
+* global daily Ora spend cap
+* per-user daily cap
+* per-IP anonymous daily cap
+* per-feature budget tracking if possible
+* hard stop when cap is reached
+* clear user-facing response when cap is reached
+* safe admin/test bypass only for E2E
+
+If exact provider cost is not available, use estimated units:
+
+* chat message unit
+* file analysis unit
+* dataset analysis unit
+* image analysis unit
+* voice/TTS unit
+* file generation unit
+* web search unit
+
+3. Provider fallback reliability
+    If one provider fails, Ora should:
+
+* try the next provider when safe
+* avoid retry loops
+* classify errors:
+    * 429/rate limit
+    * timeout
+    * provider unavailable
+    * invalid API key
+    * malformed response
+    * safety refusal
+* show a graceful response if all providers fail
+* log provider failures for later diagnosis
+* never expose raw provider stack traces to users
+* never expose underlying provider identity in normal user responses
+
+4. Observability
+    Add or verify logs/metrics for:
+
+* limit hit
+* spend cap hit
+* provider fallback used
+* provider failed
+* route name
+* user tier
+* anonymous/authenticated
+* request duration
+* final outcome
+
+5. Tests
+    Add tests for:
+
+* anonymous chat limit
+* authenticated tier limit
+* session creation limit
+* upload limit
+* dataset-analysis limit
+* file-generation limit
+* spend cap reached
+* provider fallback on 429
+* provider fallback on timeout
+* all providers fail gracefully
+* E2E bypass does not affect production
+* no provider stack trace leaks
+* no AI Builder / Builder / handoff language
+
+Acceptance:
+This phase is complete only when:
+
+* abuse limits are enforced across Ora routes
+* spend caps exist and block safely
+* provider fallback works under simulated failures
+* structured user-friendly limit responses exist
+* tests pass
+* Ora isolation still passes
+* quality gate passes
+
+Keep Ora fully isolated:
+No AI Builder.
+No Builder.
+No handoff.
+No shared flow.

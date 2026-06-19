@@ -134,15 +134,16 @@ export interface StreamOraParams {
 }
 
 /**
- * Minimum character length of a provider chunk before we split it into
- * simulated word-group tokens. The Replit AI integrations proxy buffers the
- * full AI response and returns it as a single chunk regardless of the
- * `stream: true` flag sent to the provider. Chunks below this threshold are
- * small enough to emit as-is (they already feel incremental); larger chunks
- * are split into word groups with short delays so the user sees progressive
- * text delivery even though the underlying proxy is non-streaming.
+ * Always accumulate all provider chunks before simulating. This guarantees
+ * word-by-word streaming regardless of whether the AI proxy delivers one large
+ * chunk or many small real tokens — both cases are handled identically by
+ * running the full accumulated text through simulateChunkStream.
+ *
+ * The old per-chunk threshold approach broke when the Gemini integration proxy
+ * started returning real streaming tokens (each < 25 chars): those small chunks
+ * bypassed simulateChunkStream entirely, fired in rapid succession, and the
+ * Replit dev proxy or React 18 automatic batching delivered them all at once.
  */
-const SIMULATE_THRESHOLD_CHARS = 25;
 
 /**
  * Number of words to group into each simulated token emission. 2 words per
@@ -165,9 +166,8 @@ const SIMULATE_WORDS_PER_GROUP = 2;
 const SIMULATE_DELAY_MS = 50;
 
 /**
- * Split a large provider chunk into word-group sub-tokens with short delays
- * between emissions, simulating token-by-token streaming when the underlying
- * AI proxy returned the full response as a single chunk.
+ * Split the full accumulated provider response into word-group sub-tokens with
+ * short delays between emissions, producing a word-by-word streaming effect.
  *
  * Splitting is done at whitespace boundaries so words are never broken.
  * Each yielded string includes trailing whitespace from the original so the
@@ -248,21 +248,44 @@ export async function* streamOraMessage(
         disableThinking: true,
       });
 
-      for await (const delta of gen) {
-        if (signal.aborted) return; // client disconnected mid-stream
-
-        // When the AI proxy returns a large chunk in one piece, split it into
-        // word groups with delays so the frontend sees progressive tokens.
-        if (delta.length > SIMULATE_THRESHOLD_CHARS) {
-          for await (const piece of simulateChunkStream(delta, signal)) {
-            if (signal.aborted) return;
-            firstTokenSent = true;
-            yield { type: "token", text: piece };
-          }
-        } else {
-          firstTokenSent = true;
-          yield { type: "token", text: delta };
+      // Accumulate the full provider response before simulating. A nested
+      // try-catch lets us distinguish two mid-stream failure cases:
+      //   • throw with no content  → rethrow so the outer catch retries the
+      //                              next candidate (no tokens sent yet).
+      //   • throw with partial text → simulate what we received so the user
+      //                              sees the partial reply, then emit an
+      //                              interrupted error rather than a blank one.
+      let accumulated = "";
+      let providerMidStreamErr: Error | null = null;
+      try {
+        for await (const delta of gen) {
+          if (signal.aborted) return;
+          accumulated += delta;
         }
+      } catch (err) {
+        providerMidStreamErr = err as Error;
+      }
+
+      // Nothing received at all — propagate so the outer catch can try the
+      // next candidate (or surface stream_failed if no candidates remain).
+      if (providerMidStreamErr && !accumulated) {
+        throw providerMidStreamErr;
+      }
+
+      // Simulate word-by-word streaming over the full (or partial) text.
+      // simulateChunkStream yields 2-word groups with 50 ms delays so the
+      // frontend sees progressive text regardless of proxy buffering.
+      for await (const piece of simulateChunkStream(accumulated, signal)) {
+        if (signal.aborted) return;
+        firstTokenSent = true;
+        yield { type: "token", text: piece };
+      }
+
+      // Partial content received and simulated — report as interrupted so the
+      // client shows the partial reply + an error notice rather than silence.
+      if (providerMidStreamErr) {
+        yield { type: "error", firstTokenSent: true, err: providerMidStreamErr };
+        return;
       }
 
       yield { type: "done" };

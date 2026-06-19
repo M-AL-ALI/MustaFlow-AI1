@@ -8,6 +8,7 @@ import {
 } from "../../lib/public-ai/session";
 import { getFile } from "../../lib/public-ai/file-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import {
   buildDocumentAnalysisFraming,
   documentAnalysisMaxTokens,
@@ -92,6 +93,11 @@ router.post("/public-ai/file-analysis", async (req, res) => {
 
   const { fileRef, message, messages, language } = parsed.data;
 
+  if (isKillSwitchActive("file_analysis")) {
+    res.status(503).json(killSwitchBody("file_analysis"));
+    return;
+  }
+
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
     res.status(401).json({ error: "No active session. Please start a session first." });
@@ -118,6 +124,27 @@ router.post("/public-ai/file-analysis", async (req, res) => {
       msgLimit: MSG_LIMIT_VALUE,
     });
     return;
+  }
+
+  // ── Daily spend cap (global + per-IP anonymous) ─────────────────────────
+  {
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "file_analysis",
+      authed?.userId ?? null,
+      authed?.tier ?? "anonymous",
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
   }
 
   if (!scanUserInput(message)) {

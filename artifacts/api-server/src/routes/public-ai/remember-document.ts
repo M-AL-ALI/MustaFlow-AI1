@@ -62,6 +62,27 @@ router.post("/public-ai/remember-document", async (req, res) => {
     return;
   }
 
+  // ── Daily spend cap (global + per-user) ────────────────────────────────
+  {
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "remember_document",
+      authed.userId,
+      authed.tier,
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
+  }
+
   const fileEntry = getFile(fileRef, session.sessionId);
   if (!fileEntry) {
     res.status(404).json({

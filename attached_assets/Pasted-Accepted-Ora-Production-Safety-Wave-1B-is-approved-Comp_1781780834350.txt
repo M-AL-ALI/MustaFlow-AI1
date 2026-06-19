@@ -1,0 +1,163 @@
+Accepted. Ora Production Safety Wave 1B is approved.
+
+Completed:
+
+* global daily Ora unit cap
+* authenticated per-user daily cap
+* anonymous per-IP daily cap
+* feature unit costs
+* structured spend-cap 429 responses
+* cap-hit structured logging
+* E2E/test bypass
+* daily unit cap coverage for:
+    * /public-ai/chat
+    * /public-ai/chat/stream
+    * /public-ai/file-analysis
+    * /public-ai/dataset-analysis
+    * /public-ai/image-analysis
+    * /public-ai/generate-file
+    * /public-ai/tts
+    * /public-ai/transcribe
+    * /public-ai/remember-document
+* 40 spend-cap tests
+* final quality gate passed: 1421 passed / 2 skipped
+* changes pushed to GitHub
+
+Important production note:
+The current spend caps are implemented with in-memory counters. That is good for application-level protection, but it is not enough for full production safety because counters reset when the API server restarts and do not sync across multiple API instances.
+
+Move to the next phase:
+
+Ora Production Safety Wave 1C — Durable Spend Ledger + Monitoring
+
+Goal:
+Make Ora cost controls durable, restart-safe, multi-instance-safe, and observable for production.
+
+Requirements:
+
+1. Durable spend ledger
+    Replace or back the in-memory spend counters with a durable store:
+
+* preferred: database table if already available
+* acceptable: Redis/KV if already used in the project
+* fallback: keep memory only behind a clear non-production mode
+
+The durable ledger must track:
+
+* date / usage window
+* feature kind
+* units charged
+* user ID when authenticated
+* anonymous IP hash when anonymous
+* tier
+* route
+* created timestamp
+
+2. Restart-safe caps
+    Spend caps must survive:
+
+* API server restart
+* deployment restart
+* worker crash
+* multiple concurrent requests
+
+After restart, global/user/IP counters should continue from the durable ledger, not reset to zero.
+
+3. Multi-instance safety
+    If there are multiple API instances, caps must still work correctly.
+    Use atomic DB/Redis operations where possible to avoid race conditions.
+4. Cap types to preserve
+    Keep all current cap types:
+
+* global daily unit cap
+* authenticated per-user daily unit cap
+* anonymous per-IP daily unit cap
+* feature unit costs
+
+5. Feature coverage remains complete
+    Keep daily cap coverage for:
+
+* chat
+* streaming chat
+* file analysis
+* dataset analysis
+* image analysis
+* file generation
+* TTS
+* transcribe
+* remember document
+
+Also confirm whether web search has separate provider cost. If web search is only inside /chat, confirm chat spend cap is enough. If web search has a separate paid route later, add a feature unit for it.
+
+6. Admin/observability
+    Add or verify structured logs/metrics for:
+
+* daily units used globally
+* daily units by feature
+* daily units by user
+* daily units by anonymous IP hash
+* spend cap blocks
+* route name
+* tier
+* authenticated vs anonymous
+* reset time
+
+7. Alerts
+    Add threshold logging or alert hooks at:
+
+* 50% of global daily cap
+* 80%
+* 95%
+* 100%
+
+If no alert system exists yet, add structured warning logs first and document where a future alert integration should attach.
+
+8. User-facing response
+    Keep the structured cap response:
+
+* limitType: "daily_spend_cap"
+* upgradeAvailable
+* resetAt
+* retryAfter
+* safe user-facing message
+
+Do not expose internal spend numbers, provider errors, stack traces, or secrets to users.
+
+9. Tests
+    Add tests for:
+
+* durable global cap survives simulated restart
+* durable per-user cap survives simulated restart
+* durable anonymous IP cap survives simulated restart
+* separate users do not share user caps
+* anonymous IP cap does not affect authenticated user cap
+* concurrent requests cannot bypass cap
+* feature unit tracking persists
+* cap response shape remains structured
+* E2E bypass does not affect production behavior
+* no AI Builder / Builder / handoff language appears
+
+10. Production mode safety
+    If durable storage is unavailable in production, do not silently rely on memory without logging.
+    Log a clear warning:
+    ora_spend_ledger_degraded
+
+For development/test, in-memory fallback is acceptable.
+
+Acceptance:
+Wave 1C is complete only when:
+
+* spend caps are durable
+* caps survive restart
+* caps are safe across multiple instances or documented as single-instance only
+* all current feature coverage remains
+* tests pass
+* quality gate passes
+* Ora isolation still passes
+* changes are pushed to GitHub
+
+Keep Ora fully isolated:
+No AI Builder.
+No Builder.
+No handoff.
+No shared flow.

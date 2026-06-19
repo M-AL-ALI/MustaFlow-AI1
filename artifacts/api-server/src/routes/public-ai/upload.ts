@@ -22,6 +22,7 @@ import {
 } from "../../lib/public-ai/file-store";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 
 const router = Router();
 
@@ -49,6 +50,16 @@ const upload = multer({
 
 router.post(
   "/public-ai/upload",
+  // ── Kill switch (before auth + multer for fast, body-safe rejection) ────
+  (req, res, next) => {
+    if (isKillSwitchActive("file_upload")) {
+      req.resume();
+      res.status(503).json(killSwitchBody("file_upload"));
+      res.once("finish", () => req.socket?.end());
+      return;
+    }
+    next();
+  },
   // Auth guard is FIRST — before the rate limiter and multer — so that
   // unauthenticated requests get a fast 401 without any response headers
   // being touched.

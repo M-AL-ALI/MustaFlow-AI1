@@ -45,6 +45,7 @@ import { generateEmbedding, cosineSimilarity, buildEmbeddingInput } from "../../
 import { eq, and, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import type { SubscriptionTier } from "@workspace/db";
 import type { OraQuotaKind } from "../../lib/public-ai/ora-usage";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 
 // Authenticated Ora users are metered by per-user ROLLING-WINDOW quotas per
 // subscription tier (TIER_ORA_MESSAGE_LIMIT / TIER_ORA_IMAGE_LIMIT) — NOT by the
@@ -1060,6 +1061,27 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
+  // ── Daily spend cap (global + per-IP anonymous) ─────────────────────────
+  {
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "chat",
+      authed?.userId ?? null,
+      authed?.tier ?? "anonymous",
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
+  }
+
   if (!scanUserInput(message)) {
     res
       .status(400)
@@ -1381,6 +1403,11 @@ router.post("/public-ai/chat", async (req, res) => {
   // ── Web search tool (live, grounded, cited) ─────────────────────────────────
   // Anonymous visitors are caught by checkToolAccess above (search_signin_required).
   if (decision.tool === "search") {
+    if (isKillSwitchActive("web_search")) {
+      await refundOraQuotaFor(authed, quotaKind);
+      res.status(503).json(killSwitchBody("web_search"));
+      return;
+    }
     let webSearchModule: typeof import("../../lib/public-ai/web-search");
     try {
       webSearchModule = await import("../../lib/public-ai/web-search");
@@ -1806,6 +1833,10 @@ router.post("/public-ai/chat", async (req, res) => {
 // Conversational replies stream tokens using streamChatCompletion with the
 // same multi-provider candidate chain as the non-streaming route.
 router.post("/public-ai/chat/stream", async (req, res) => {
+  if (isKillSwitchActive("streaming")) {
+    res.status(503).json(killSwitchBody("streaming"));
+    return;
+  }
   if (process.env.ORA_STREAMING_ENABLED !== "true") {
     res
       .status(503)
@@ -1867,6 +1898,28 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     });
     return;
   }
+
+  // ── Daily spend cap (global + per-IP anonymous) ─────────────────────────
+  {
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "streaming_chat",
+      authed?.userId ?? null,
+      authed?.tier ?? "anonymous",
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
+  }
+
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
     res.status(429).json({

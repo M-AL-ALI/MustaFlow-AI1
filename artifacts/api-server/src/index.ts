@@ -16,6 +16,7 @@ import { resumeStuckProvisioningOnBoot } from "./lib/provisioning";
 import { resumeContainerLogTailersOnBoot } from "./lib/container-logs";
 import { startContainerLogRetentionScheduler } from "./lib/container-log-retention";
 import { startOraTranscriptRetentionScheduler } from "./lib/ora-transcript-retention";
+import { startOraAssetsRetentionScheduler } from "./lib/ora-assets-retention";
 import { handleLivePreviewUpgrade, matchPreviewPath } from "./lib/livePreviewProxy";
 import {
   validatePreviewWebSocketUpgrade,
@@ -23,6 +24,8 @@ import {
 } from "./middlewares/previewSubdomainGateway";
 import { runStartupMigrations } from "./lib/startup-migrations";
 import { isOraSecretConfigured } from "./lib/public-ai/session";
+import { initSpendLedger } from "./lib/public-ai/ora-spend-cap";
+import { pool } from "@workspace/db";
 import { auditImageProviderConfig } from "./lib/image-provider";
 
 const execFileAsync = promisify(execFile);
@@ -97,6 +100,12 @@ void resumeContainerLogTailersOnBoot();
 // and by per-project row count (default 10k).
 startContainerLogRetentionScheduler();
 startOraTranscriptRetentionScheduler();
+startOraAssetsRetentionScheduler();
+
+// Wave 1C — Seed the Ora spend ledger from DB so daily caps survive restarts.
+// Runs after other boot tasks; degrades gracefully if the DB is temporarily
+// unavailable (logs ora_spend_ledger_degraded and falls back to in-memory).
+void initSpendLedger(pool);
 
 // Create an HTTP server so we can attach WebSocket upgrade handlers alongside Express.
 const server = createServer(app);

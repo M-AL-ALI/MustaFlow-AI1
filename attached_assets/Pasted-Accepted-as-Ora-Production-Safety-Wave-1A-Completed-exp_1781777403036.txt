@@ -1,0 +1,92 @@
+Accepted as Ora Production Safety Wave 1A.
+
+Completed:
+
+* expensive routes are now protected:
+    * /file-analysis
+    * /dataset-analysis
+    * /generate-file
+* these routes now use concurrency gating and per-IP caps
+* all Ora 429 responses now include structured fields:
+    * limitType
+    * upgradeAvailable
+    * resetAt
+    * retryAfter
+* provider failures are now classified into stable categories:
+    * rate_limit
+    * timeout
+    * unavailable
+    * invalid_key
+    * malformed_response
+    * safety_refusal
+    * circuit_open
+    * unknown
+* provider fallback now has structured logs:
+    * ora_provider_failed
+    * ora_provider_fallback_succeeded
+    * ora_all_providers_failed
+* quota DB fail-open now logs ora_quota_fail_open
+* 33 new production safety tests added
+* quality gate passed: 1348 passed / 2 skipped
+* lint/typecheck/Ora isolation clean
+
+Important:
+Do not mark the full Production Safety Wave 1 complete yet.
+
+The original Wave 1 scope also required daily spend caps. The current summary does not confirm that these are implemented:
+
+* global daily Ora spend cap
+* per-user daily cap
+* per-IP anonymous daily cap
+* per-feature unit budget
+* hard stop when spend cap is reached
+* user-friendly spend-cap response
+* tests proving spend-cap enforcement
+
+Next step:
+Move to Ora Production Safety Wave 1B — Daily Spend Caps + Cost Controls.
+
+Goal:
+Prevent Ora from creating uncontrolled provider costs in production.
+
+Requirements:
+
+1. Add global daily Ora unit/spend cap.
+2. Add per-user daily unit/spend cap.
+3. Add per-IP anonymous daily unit/spend cap.
+4. Track units by feature:
+
+* chat
+* streaming chat
+* file analysis
+* dataset analysis
+* image analysis
+* TTS/voice
+* file generation
+* web search
+
+5. Hard-block requests when cap is reached.
+6. Return structured user-friendly cap response:
+
+* limitType: "daily_spend_cap"
+* upgradeAvailable
+* resetAt
+* retryAfter
+* safe user message
+
+7. Log every spend-cap block with route, tier, anonymous/authenticated, and units.
+8. E2E/test bypass must not affect production.
+9. Add tests for:
+
+* global cap reached
+* user cap reached
+* anonymous IP cap reached
+* feature-unit tracking
+* DB outage fail-open logging
+* no raw provider errors
+* no AI Builder / Builder / handoff language
+
+Acceptance:
+Production Safety Wave 1 is fully complete only after daily spend caps exist, enforce hard stops, and pass tests.
+
+push to GitHub all after completion

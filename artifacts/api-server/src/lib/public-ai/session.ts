@@ -48,6 +48,21 @@ export function createSession(): { token: string; payload: OraSessionPayload } {
   return { token, payload };
 }
 
+/** E2E-only: creates a session already at the message limit so T49/T50 can test
+ *  the upgrade CTA without burning 20 sequential chat calls to exhaust it. */
+export function createExhaustedSession(): { token: string; payload: OraSessionPayload } {
+  const payload: OraSessionPayload = {
+    sessionId: crypto.randomUUID(),
+    msgCount: MSG_LIMIT,
+    fileCount: 0,
+    imageCount: 0,
+    imageAnalysisCount: 0,
+    createdAt: Date.now(),
+  };
+  const token = jwt.sign(payload, getSecret(), { expiresIn: SESSION_EXPIRY_SECONDS });
+  return { token, payload };
+}
+
 export function validateSession(token: string): OraSessionPayload | null {
   try {
     const decoded = jwt.verify(token, getSecret()) as OraSessionPayload & {

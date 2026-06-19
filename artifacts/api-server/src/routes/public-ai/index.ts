@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { isOraSecretConfigured } from "../../lib/public-ai/session";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import sessionRouter from "./session";
 import chatRouter from "./chat";
 import uploadRouter from "./upload";
@@ -19,6 +20,11 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   if (process.env.PUBLIC_AI_ENABLED === "false") {
     req.resume();
     res.status(503).json({ error: "Ora is currently unavailable" });
+    return;
+  }
+  if (isKillSwitchActive("all")) {
+    req.resume();
+    res.status(503).json(killSwitchBody("all"));
     return;
   }
   if (!isOraSecretConfigured()) {

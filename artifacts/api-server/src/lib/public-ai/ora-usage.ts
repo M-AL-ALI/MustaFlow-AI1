@@ -14,6 +14,7 @@
  * module — keeping Ora fully decoupled from the Builder's billing.
  */
 import { eq, sql } from "drizzle-orm";
+import { logger } from "../logger";
 import {
   db,
   oraUsageWindowsTable,
@@ -211,8 +212,14 @@ export async function consumeOraQuota(
       kind,
       resetsAt: snap.resetsAt,
     };
-  } catch {
-    // Usage table unavailable — fail open rather than blocking Ora.
+  } catch (err) {
+    // Usage table unavailable — fail open rather than blocking Ora, but always
+    // log so the on-call team can detect DB degradation before it becomes an
+    // outage. Silent fail-open would mask DB connection issues for hours.
+    logger.warn(
+      { event: "ora_quota_fail_open", userId, tier, kind, err },
+      "ora quota DB unavailable — failing open (usage not metered this request)",
+    );
     return { allowed: true, used: 0, limit, kind, resetsAt: null };
   }
 }

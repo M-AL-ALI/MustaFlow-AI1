@@ -112,6 +112,9 @@ import {
   generalLimiter,
   oraLimiter,
   oraHandoffLimiter,
+  oraFileAnalysisLimiter,
+  oraDatasetAnalysisLimiter,
+  oraGenerateFileLimiter,
 } from "../lib/rateLimit";
 
 const router: IRouter = Router();
@@ -147,6 +150,11 @@ router.use(brainstormRouter);
 // ── Ora public AI (public, rate-limited, no auth) ─────────────────────────────
 router.post("/public-ai/chat", oraLimiter);
 router.post("/public-ai/chat/stream", oraLimiter);
+// Expensive analysis/generation routes get both an IP fixed-window limiter and
+// the shared oraLimiter concurrency semaphore (same gate as /chat).
+router.post("/public-ai/file-analysis", oraFileAnalysisLimiter, oraLimiter);
+router.post("/public-ai/dataset-analysis", oraDatasetAnalysisLimiter, oraLimiter);
+router.post("/public-ai/generate-file", oraGenerateFileLimiter, oraLimiter);
 router.use(publicAiRouter);
 
 // ── Help Center + Ora Support Mode ────────────────────────────────────────────

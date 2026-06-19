@@ -11,6 +11,7 @@ import {
 import { getImage } from "../../lib/public-ai/image-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 import { oraImageAnalysisLimiter } from "../../lib/rateLimit";
+import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import type { Provider } from "../../lib/ai-providers";
 import {
   getOraProviderRoutingSnapshot,
@@ -92,6 +93,11 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
 
   const { imageRef, message, messages, language } = parsed.data;
 
+  if (isKillSwitchActive("image_analysis")) {
+    res.status(503).json(killSwitchBody("image_analysis"));
+    return;
+  }
+
   const sessionToken = req.cookies?.["ora-session"] as string | undefined;
   if (!sessionToken) {
     res.status(401).json({ error: "No active session. Please start a session first." });
@@ -122,6 +128,27 @@ router.post("/public-ai/image-analysis", oraImageAnalysisLimiter, async (req, re
       imageAnalysisLimit: IMAGE_ANALYSIS_LIMIT_VALUE,
     });
     return;
+  }
+
+  // ── Daily spend cap (global + per-IP anonymous) ─────────────────────────
+  {
+    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+    const capResult = await checkOraSpendCapAsync(
+      req,
+      "image_analysis",
+      authed?.userId ?? null,
+      authed?.tier ?? "anonymous",
+    );
+    if (!capResult.allowed) {
+      res.status(429).json({
+        error: capResult.message,
+        limitType: capResult.limitType,
+        upgradeAvailable: capResult.upgradeAvailable,
+        resetAt: capResult.resetAt,
+        retryAfter: capResult.retryAfter,
+      });
+      return;
+    }
   }
 
   if (!scanUserInput(message)) {

@@ -42,6 +42,8 @@ interface LimiterOpts {
   max: number;
   keyPrefix: string;
   message?: string;
+  limitType?: string;
+  upgradeAvailable?: boolean;
 }
 
 function clientIp(req: Request): string {
@@ -66,10 +68,14 @@ function applyDecision(
   res.setHeader("X-RateLimit-Reset", Math.ceil(resetAtMs / 1000));
 
   if (count > opts.max) {
-    res.status(429).json({
+    const body: Record<string, unknown> = {
       error: opts.message ?? "Too many requests. Please slow down and try again.",
       retryAfter: Math.max(1, Math.ceil((resetAtMs - Date.now()) / 1000)),
-    });
+      resetAt: new Date(resetAtMs).toISOString(),
+    };
+    if (opts.limitType !== undefined) body.limitType = opts.limitType;
+    if (opts.upgradeAvailable !== undefined) body.upgradeAvailable = opts.upgradeAvailable;
+    res.status(429).json(body);
     return;
   }
   next();
@@ -245,6 +251,13 @@ const ORA_MAX_QUEUED = 3;
 const ORA_QUEUE_TIMEOUT_MS = 45_000;
 
 export const oraLimiter = (req: Request, res: Response, next: NextFunction): void => {
+  // Bypass the concurrency gate for E2E test requests so benchmark runs do not
+  // stall each other behind the ORA_MAX_CONCURRENT=2 slot limit.
+  if (process.env.E2E_TEST_ENABLED === "true" && req.headers["x-e2e-test-user"]) {
+    next();
+    return;
+  }
+
   const ip =
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
     req.socket.remoteAddress ??
@@ -369,6 +382,39 @@ export const oraHandoffLimiter = createLimiter({
   keyPrefix: "ora_handoff",
   message:
     "Too many Builder handoff requests. Please wait before trying again, or describe your idea directly in the Builder.",
+});
+
+// File analysis: 5 per IP per hour. Each call runs a full AI model pass over
+// a user document — stricter than uploads since the AI cost is higher.
+export const oraFileAnalysisLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 5,
+  keyPrefix: "ora_file_analysis",
+  limitType: "file_analysis",
+  upgradeAvailable: true,
+  message: "File analysis is temporarily at capacity. Please try again later.",
+});
+
+// Dataset analysis: 3 per IP per hour. Highest-cost analysis route — each
+// call processes structured tabular data through a premium model.
+export const oraDatasetAnalysisLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 3,
+  keyPrefix: "ora_dataset_analysis",
+  limitType: "dataset_analysis",
+  upgradeAvailable: true,
+  message: "Dataset analysis is temporarily at capacity. Please try again later.",
+});
+
+// File generation: 5 per IP per hour. Each call generates a new file (PDF,
+// CSV, code, etc.) via an AI model and stores it in the asset store.
+export const oraGenerateFileLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 5,
+  keyPrefix: "ora_generate_file",
+  limitType: "file_generation",
+  upgradeAvailable: true,
+  message: "File generation is temporarily at capacity. Please try again later.",
 });
 
 // Help Center support chat — 20 messages per IP per minute. Each call invokes

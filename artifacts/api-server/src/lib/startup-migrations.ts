@@ -3804,6 +3804,33 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-spend-ledger ─────────────────────────────────────────────────
+  {
+    name: "migrate-ora-spend-ledger",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ora_spend_ledger (
+          id          SERIAL PRIMARY KEY,
+          date_key    DATE NOT NULL,
+          ledger_key  TEXT NOT NULL,
+          units       INTEGER NOT NULL DEFAULT 0,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS ora_spend_ledger_date_key_unique
+          ON ora_spend_ledger (date_key, ledger_key)
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS ora_spend_ledger_date_idx
+          ON ora_spend_ledger (date_key)
+      `);
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

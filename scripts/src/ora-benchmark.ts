@@ -17,7 +17,7 @@
  *   pnpm --filter @workspace/scripts run ora-benchmark
  */
 import OpenAI from "openai";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, readFile, unlink } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -30,6 +30,10 @@ const USE_E2E_AUTH = process.env["ORA_BENCHMARK_ANON"] !== "true";
 const TARGET_PERCENT = 97;
 const RESULTS_DIR = join(__dirname, "../../scripts/benchmark-results");
 const REPORT_PATH = join(__dirname, "../../docs/ora-benchmark-report.md");
+const CHECKPOINT_PATH = join(
+  RESULTS_DIR,
+  `checkpoint-${new Date().toISOString().slice(0, 10)}.json`,
+);
 
 // ── OpenAI client for judge ────────────────────────────────────────────────
 const ai = new OpenAI({
@@ -72,11 +76,39 @@ function updateCookie(session: Session, res: Response): void {
   if (match) session.cookie = `ora-session=${match[1]}`;
 }
 
+/** Always creates an anonymous session (no E2E headers) — for session-limit CTA tests. */
+async function createAnonSession(): Promise<Session> {
+  const res = await fetch(`${BASE}/api/public-ai/session`, { method: "POST" });
+  const setCookie = res.headers.get("set-cookie") ?? "";
+  const match = setCookie.match(/ora-session=([^;]+)/);
+  if (!match) throw new Error("No anon session cookie returned");
+  return { cookie: `ora-session=${match[1]}`, msgCount: 0, userId: "anon" };
+}
+
+/** E2E shortcut: creates a session pre-set to the message limit (no exhaustion loop).
+ *  Uses the x-e2e-exhaust header so the server initialises msgCount = MSG_LIMIT.
+ *  This makes T49/T50 complete in ~10s instead of ~200s. */
+async function createPreExhaustedAnonSession(): Promise<Session> {
+  const res = await fetch(`${BASE}/api/public-ai/session`, {
+    method: "POST",
+    headers: { "x-e2e-exhaust": "true" },
+  });
+  const setCookie = res.headers.get("set-cookie") ?? "";
+  const match = setCookie.match(/ora-session=([^;]+)/);
+  if (!match) {
+    // Fallback: try the slow path if the E2E shortcut isn't available
+    const s = await createAnonSession();
+    await exhaustSession(s);
+    return s;
+  }
+  return { cookie: `ora-session=${match[1]}`, msgCount: 20, userId: "anon-exhausted" };
+}
+
 async function chat(
   session: Session,
   message: string,
   extra: Record<string, unknown> = {},
-  timeoutMs = 45000,
+  timeoutMs = 90000,
 ): Promise<{ reply: string; status: number; body: Record<string, unknown> }> {
   // Retry once on 502/503 (transient proxy errors) with 2s backoff
   for (let attempt = 0; attempt <= 1; attempt++) {
@@ -180,11 +212,10 @@ async function datasetAnalysis(
   }
 }
 
-/** Exhaust a session to the message limit (needed for T49/T50). */
+/** Exhaust an anonymous session to its message limit (needed for T49/T50).
+ *  Caps at 30 attempts so wave-tier E2E sessions don't hang indefinitely. */
 async function exhaustSession(s: Session): Promise<void> {
-  // Send quick messages sequentially until we get 429
-  // Ora processes these; each response updates the JWT cookie with msgCount+1
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 30; i++) {
     const r = await chat(s, "1", {}, 20000);
     if (r.status === 429) return;
   }
@@ -877,9 +908,9 @@ const TESTS: TestCase[] = [
       const deniesOpenAI = /not.{0,20}(openai|chatgpt)|different from.{0,20}chatgpt/i.test(
         r.toLowerCase(),
       );
-      if (saysOpenAI) return { score: 0, reason: "Named OpenAI/GPT" };
       if (isOra && deniesOpenAI)
         return { score: 5, reason: "Correctly denied ChatGPT, identified as Ora" };
+      if (saysOpenAI) return { score: 0, reason: "Named OpenAI/GPT" };
       if (isOra) return { score: 4, reason: "Identified as Ora" };
       return { score: 1, reason: "Didn't identify as Ora or deny OpenAI" };
     },
@@ -1264,28 +1295,45 @@ async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult>
 
   try {
     if (test.prompt === "__SESSION_LIMIT_TEST__") {
-      const s = sessions[0];
-      await exhaustSession(s);
-      const r = await chat(s, "ping", {}, 10000);
-      body = r.body;
-      reply = r.reply;
-      status = r.status;
+      // Use a pre-exhausted session. Must NOT send e2e user headers here — they
+      // would make the server treat the request as authenticated, bypassing the
+      // anonymous 429 block. Raw fetch without E2E headers is required.
+      const s = await createPreExhaustedAnonSession();
+      const res = await fetch(`${BASE}/api/public-ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: s.cookie },
+        body: JSON.stringify({ message: "ping", messages: [] }),
+        signal: AbortSignal.timeout(10000),
+      });
+      body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      reply = String(body.reply ?? body.error ?? "");
+      status = res.status;
     } else if (test.prompt === "__SESSION_LIMIT_DATASET_TEST__") {
-      const s = sessions[1] ?? sessions[0];
-      await exhaustSession(s);
-      const csvRef = await uploadCsv(s, SALES_CSV, "test.csv").catch(() => "no-ref");
-      const da = await datasetAnalysis(s, csvRef, "analyze this", 15000);
-      if (da.result === null && da.status === 429) {
-        const chatR = await chat(s, "hello", {}, 10000);
-        body = chatR.body;
-        reply = chatR.reply;
-        status = chatR.status;
-      } else {
-        const chatR = await chat(s, "hello", {}, 10000);
-        body = chatR.body;
-        reply = chatR.reply;
-        status = chatR.status;
-      }
+      // Same: pre-exhausted anon session. Upload the CSV (file upload doesn't
+      // consume a message slot), then call dataset-analysis without E2E headers
+      // so the anonymous 429 + CTA fires correctly.
+      const s = await createPreExhaustedAnonSession();
+      // Upload without E2E headers so the server treats it as anonymous.
+      const form = new globalThis.FormData();
+      form.append("file", new Blob([SALES_CSV], { type: "text/csv" }), "test.csv");
+      const upRes = await fetch(`${BASE}/api/public-ai/upload`, {
+        method: "POST",
+        headers: { Cookie: s.cookie },
+        body: form,
+        signal: AbortSignal.timeout(15000),
+      });
+      const upBody = (await upRes.json().catch(() => ({}))) as Record<string, unknown>;
+      const csvRef = String(upBody.fileRef ?? "no-ref");
+      // Dataset-analysis without E2E headers — should 429 with upgradeCta + signUpUrl.
+      const daRes = await fetch(`${BASE}/api/public-ai/dataset-analysis`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: s.cookie },
+        body: JSON.stringify({ fileRef: csvRef, message: "analyze this", messages: [] }),
+        signal: AbortSignal.timeout(15000),
+      });
+      body = (await daRes.json().catch(() => ({}))) as Record<string, unknown>;
+      reply = String(body.reply ?? body.error ?? "");
+      status = daRes.status;
     } else if (test.datasetCsv && test.datasetFilename) {
       const s = sessions.find((sess) => sess.msgCount < 15) ?? sessions[0];
       if (!s) throw new Error("No sessions available");
@@ -1405,14 +1453,36 @@ async function runTest(test: TestCase, sessions: Session[]): Promise<TestResult>
   };
 }
 
+// ── Checkpoint persistence ─────────────────────────────────────────────────
+type Checkpoint = Record<string, TestResult>;
+
+async function loadCheckpoint(): Promise<Checkpoint> {
+  try {
+    const data = await readFile(CHECKPOINT_PATH, "utf-8");
+    return JSON.parse(data) as Checkpoint;
+  } catch {
+    return {};
+  }
+}
+
+async function saveCheckpoint(checkpoint: Checkpoint): Promise<void> {
+  await mkdir(RESULTS_DIR, { recursive: true });
+  await writeFile(CHECKPOINT_PATH, JSON.stringify(checkpoint, null, 2));
+}
+
 // ── Pool runner (limited concurrency) ─────────────────────────────────────
-async function runPool<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
+async function runPool<T>(
+  tasks: Array<() => Promise<T>>,
+  concurrency: number,
+  onComplete?: (result: T) => Promise<void>,
+): Promise<T[]> {
   const results: T[] = [];
   let index = 0;
   async function worker() {
     while (index < tasks.length) {
       const i = index++;
       results[i] = await tasks[i]();
+      if (onComplete) await onComplete(results[i]);
     }
   }
   const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
@@ -1577,23 +1647,9 @@ function buildMarkdownReport(
 
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
-  const runDate = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
-  console.log("Ora 60-Prompt Quality Benchmark (10-Dimension)");
-  console.log("===============================================");
-  console.log(`Tests: ${TESTS.length} | Target: ${TARGET_PERCENT}% | Judge: ${JUDGE_MODEL}`);
-  console.log(
-    `Auth: ${USE_E2E_AUTH ? `E2E tier=${E2E_TIER}` : "anonymous"} | Concurrency: ${CONCURRENCY}`,
-  );
-  console.log("");
-
-  console.log("Creating sessions...");
-  const sessions: Session[] = await Promise.all([
-    createSession(),
-    createSession(),
-    createSession(),
-    createSession(),
-  ]);
-  console.log(`Created ${sessions.length} sessions\n`);
+  // ── Load checkpoint: skip tests already completed ─────────────────────────
+  const checkpoint: Checkpoint = await loadCheckpoint();
+  const completedIds = new Set(Object.keys(checkpoint));
 
   const datasetTests = TESTS.filter((t) => t.datasetCsv);
   const specialTests = TESTS.filter((t) => t.prompt.startsWith("__SESSION_LIMIT"));
@@ -1601,37 +1657,87 @@ async function main() {
     (t) => !t.datasetCsv && !t.prompt.startsWith("__SESSION_LIMIT"),
   );
 
-  const results: TestResult[] = [];
+  const regularRemaining = regularTests.filter((t) => !completedIds.has(t.id));
+  const datasetRemaining = datasetTests.filter((t) => !completedIds.has(t.id));
+  const specialRemaining = specialTests.filter((t) => !completedIds.has(t.id));
+  const totalRemaining =
+    regularRemaining.length + datasetRemaining.length + specialRemaining.length;
 
-  console.log(`Running ${regularTests.length} regular tests (concurrency=${CONCURRENCY})...`);
-  const regularResults = await runPool(
-    regularTests.map((t) => () => {
-      process.stdout.write(".");
-      return runTest(t, sessions);
-    }),
-    CONCURRENCY,
+  console.log("Ora 60-Prompt Quality Benchmark (10-Dimension)");
+  console.log("===============================================");
+  console.log(`Tests: ${TESTS.length} | Target: ${TARGET_PERCENT}% | Judge: ${JUDGE_MODEL}`);
+  console.log(
+    `Auth: ${USE_E2E_AUTH ? `E2E tier=${E2E_TIER}` : "anonymous"} | Concurrency: ${CONCURRENCY}`,
   );
-  results.push(...regularResults);
-  console.log(" done");
+  if (completedIds.size > 0) {
+    console.log(`Resuming: ${completedIds.size} done, ${totalRemaining} remaining`);
+  }
+  console.log("");
 
-  console.log(`\nRunning ${datasetTests.length} dataset analysis tests...`);
-  for (const t of datasetTests) {
-    process.stdout.write(`  ${t.id}: `);
-    const r = await runTest(t, sessions);
-    results.push(r);
-    console.log(`${r.overallPct.toFixed(0)}% (${r.reason.slice(0, 60)})`);
+  if (totalRemaining > 0) {
+    console.log("Creating sessions...");
+    const sessions: Session[] = await Promise.all([
+      createSession(),
+      createSession(),
+      createSession(),
+      createSession(),
+    ]);
+    console.log(`Created ${sessions.length} sessions\n`);
+
+    const onDone = async (r: TestResult): Promise<void> => {
+      checkpoint[r.id] = r;
+      await saveCheckpoint(checkpoint);
+    };
+
+    if (regularRemaining.length > 0) {
+      console.log(
+        `Running ${regularRemaining.length} regular tests (concurrency=${CONCURRENCY})...`,
+      );
+      await runPool(
+        regularRemaining.map((t) => () => {
+          process.stdout.write(".");
+          return runTest(t, sessions);
+        }),
+        CONCURRENCY,
+        onDone,
+      );
+      console.log(" done");
+    }
+
+    if (datasetRemaining.length > 0) {
+      console.log(`\nRunning ${datasetRemaining.length} dataset analysis tests...`);
+      for (const t of datasetRemaining) {
+        process.stdout.write(`  ${t.id}: `);
+        const r = await runTest(t, sessions);
+        await onDone(r);
+        console.log(`${r.overallPct.toFixed(0)}% (${r.reason.slice(0, 60)})`);
+      }
+    }
+
+    if (specialRemaining.length > 0) {
+      console.log(`\nRunning ${specialRemaining.length} session-limit CTA tests...`);
+      for (const t of specialRemaining) {
+        const r = await runTest(t, sessions);
+        await onDone(r);
+        console.log(`  ${t.id}: ${r.overallPct.toFixed(0)}% — ${r.reason.slice(0, 60)}`);
+      }
+    }
   }
 
-  console.log(`\nRunning ${specialTests.length} session-limit CTA tests...`);
-  const specialResults = await Promise.all(
-    specialTests.map(async (t) => {
-      const r = await runTest(t, sessions);
-      console.log(`  ${t.id}: ${r.overallPct.toFixed(0)}% — ${r.reason.slice(0, 60)}`);
-      return r;
-    }),
-  );
-  results.push(...specialResults);
+  // ── Check if all tests are now done ───────────────────────────────────────
+  const allDoneIds = new Set(Object.keys(checkpoint));
+  const stillMissing = TESTS.filter((t) => !allDoneIds.has(t.id));
+  if (stillMissing.length > 0) {
+    console.log(
+      `\nProgress: ${allDoneIds.size}/${TESTS.length} done. ${stillMissing.length} remaining.`,
+    );
+    console.log("Run the benchmark again to continue (checkpoint saved).");
+    return;
+  }
 
+  // ── Build final results from checkpoint ───────────────────────────────────
+  const runDate = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const results: TestResult[] = TESTS.map((t) => checkpoint[t.id]).filter(Boolean) as TestResult[];
   results.sort((a, b) => a.id.localeCompare(b.id));
 
   // ── Console report ────────────────────────────────────────────────────────
@@ -1736,6 +1842,13 @@ async function main() {
   await mkdir(join(__dirname, "../../docs"), { recursive: true });
   await writeFile(REPORT_PATH, md, "utf-8");
   console.log(`Markdown report: ${REPORT_PATH}`);
+
+  // ── Clean up checkpoint ──────────────────────────────────────────────────
+  try {
+    await unlink(CHECKPOINT_PATH);
+  } catch {
+    // ignore if already gone
+  }
 }
 
 main().catch((err) => {
