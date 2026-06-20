@@ -14,6 +14,7 @@ import {
   type AudioRecorder,
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
 import {
   ArrowUp,
@@ -582,43 +583,100 @@ export default function OraChatScreen() {
     }
   }, []);
 
-  const handleAttach = useCallback(async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: [
-          "image/*",
-          "application/pdf",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "text/csv",
-          "text/plain",
-        ],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled || !result.assets?.[0]) return;
-      const file = result.assets[0];
+  const doUpload = useCallback(
+    async (file: { uri: string; name: string; type: string }, isImage: boolean) => {
       setUploading(true);
-      const isImage = (file.mimeType ?? "").startsWith("image/");
-      const res = await uploadFile({
-        uri: file.uri,
-        name: file.name,
-        type: file.mimeType ?? "application/octet-stream",
-      });
-      const ref = res.imageRef ?? res.fileRef;
-      if (!ref) throw new Error("Upload failed");
-      setAttachment({
-        ref,
-        kind: attachmentKind(res.fileType, isImage || res.kind === "image"),
-        filename: res.filename ?? file.name,
-        fileType: res.fileType,
-      });
-    } catch {
-      /* surfaced by absence of chip */
-    } finally {
-      setUploading(false);
+      try {
+        const res = await uploadFile({ uri: file.uri, name: file.name, type: file.type });
+        const ref = res.imageRef ?? res.fileRef;
+        if (!ref) throw new Error("Upload failed");
+        setAttachment({
+          ref,
+          kind: attachmentKind(res.fileType, isImage || res.kind === "image"),
+          filename: res.filename ?? file.name,
+          fileType: res.fileType,
+        });
+      } finally {
+        setUploading(false);
+      }
+    },
+    [],
+  );
+
+  const handleCameraCapture = useCallback(async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Camera access is required to take photos.");
+      return;
     }
-  }, []);
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    await doUpload(
+      {
+        uri: asset.uri,
+        name: asset.fileName ?? `photo_${Date.now()}.jpg`,
+        type: asset.mimeType ?? "image/jpeg",
+      },
+      true,
+    );
+  }, [doUpload]);
+
+  const handleGalleryPick = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Photo library access is required to choose photos.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    await doUpload(
+      {
+        uri: asset.uri,
+        name: asset.fileName ?? `image_${Date.now()}.jpg`,
+        type: asset.mimeType ?? "image/jpeg",
+      },
+      true,
+    );
+  }, [doUpload]);
+
+  const handleAttach = useCallback(() => {
+    Alert.alert("Attach", "Choose a source", [
+      { text: "Take Photo", onPress: () => void handleCameraCapture() },
+      { text: "Photo Library", onPress: () => void handleGalleryPick() },
+      {
+        text: "Browse Files",
+        onPress: () =>
+          void (async () => {
+            try {
+              const picked = await DocumentPicker.getDocumentAsync({
+                type: [
+                  "image/*",
+                  "application/pdf",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  "text/csv",
+                  "text/plain",
+                ],
+                copyToCacheDirectory: true,
+              });
+              if (picked.canceled || !picked.assets?.[0]) return;
+              const file = picked.assets[0];
+              const isImage = (file.mimeType ?? "").startsWith("image/");
+              await doUpload(
+                { uri: file.uri, name: file.name, type: file.mimeType ?? "application/octet-stream" },
+                isImage,
+              );
+            } catch {
+              /* surfaced by absence of chip */
+            }
+          })(),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [handleCameraCapture, handleGalleryPick, doUpload]);
 
   const newChat = useCallback(() => {
     setMessages([]);
