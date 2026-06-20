@@ -15,7 +15,10 @@ function withGoogleModularHeaders(config) {
       if (contents.includes("use_modular_headers!")) return config;
       // Insert use_modular_headers! on its own line before `install! 'cocoapods'`
       if (contents.includes("install! 'cocoapods'")) {
-        contents = contents.replace("install! 'cocoapods'", "use_modular_headers!\n\ninstall! 'cocoapods'");
+        contents = contents.replace(
+          "install! 'cocoapods'",
+          "use_modular_headers!\n\ninstall! 'cocoapods'",
+        );
       } else {
         // Fallback: insert before target block
         contents = contents.replace(/^(target '[^']+' do)$/m, "use_modular_headers!\n\n$1");
