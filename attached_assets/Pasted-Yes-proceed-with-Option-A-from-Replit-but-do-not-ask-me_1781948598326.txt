@@ -1,0 +1,134 @@
+Yes, proceed with Option A from Replit, but do not ask me to paste the Expo token into chat or code.
+
+I will add EXPO_TOKEN as a secure Replit Secret.
+
+After EXPO_TOKEN is added, continue with Phase 3: EAS project linking + environment setup + first preview builds.
+
+Important security rules
+
+1. Never print the full EXPO_TOKEN.
+2. Never commit EXPO_TOKEN.
+3. Never add EXPO_TOKEN to .env.example, app.json, eas.json, or source code.
+4. Only read it from the secure Replit Secrets environment.
+5. If the token is missing, stop and tell me exactly where to add it.
+
+Step 1 — Verify EAS login
+
+After I add the Replit secret, run:
+
+cd artifacts/ora-mobile
+pnpm dlx eas-cli@latest whoami
+
+If it shows the Expo account, continue.
+
+If not, stop and report the exact error.
+
+Step 2 — Link the EAS project
+
+Run:
+
+cd artifacts/ora-mobile
+pnpm dlx eas-cli@latest init
+
+Expected result:
+
+* EAS project is created or linked
+* extra.eas.projectId is written to app.json or app config
+* app name remains MustaFlow
+* slug remains ora-mobile
+* icon remains existing MustaFlow icon
+
+After linking, verify:
+
+pnpm dlx eas-cli@latest project:info
+
+Step 3 — Create EAS environment variables
+
+Create/check these variables for each environment.
+
+development
+
+pnpm dlx eas-cli@latest env:create --environment development --name EXPO_PUBLIC_DOMAIN --value "<DEV_REPLIT_DOMAIN_WITHOUT_HTTPS_OR_TRAILING_SLASH>"
+pnpm dlx eas-cli@latest env:create --environment development --name EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value "<CLERK_PK_TEST_KEY>"
+
+preview
+
+pnpm dlx eas-cli@latest env:create --environment preview --name EXPO_PUBLIC_DOMAIN --value "mustaflow.com"
+pnpm dlx eas-cli@latest env:create --environment preview --name EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value "<CLERK_PK_LIVE_KEY>"
+
+production
+
+pnpm dlx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_DOMAIN --value "mustaflow.com"
+pnpm dlx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value "<CLERK_PK_LIVE_KEY>"
+
+If you do not have the Clerk key values available in the environment, stop and tell me exactly which values are missing. Do not invent them.
+
+Step 4 — List EAS environment variables
+
+Run:
+
+pnpm dlx eas-cli@latest env:list --environment development
+pnpm dlx eas-cli@latest env:list --environment preview
+pnpm dlx eas-cli@latest env:list --environment production
+
+Report variable names only. Do not print secret values.
+
+Step 5 — Re-run checks
+
+Run:
+
+pnpm run typecheck
+npx expo config --type public
+pnpm dlx expo-doctor@latest
+
+Confirm:
+
+* App name is still MustaFlow
+* Icon is still the MustaFlow icon
+* Splash is still the MustaFlow splash/logo
+* iOS bundle ID exists
+* Android package exists
+* microphone/camera/photo permissions exist
+* no private AI keys are exposed
+* typecheck passes
+* expo-doctor passes or report exact warnings
+
+Step 6 — First preview builds only
+
+Do not run production builds yet.
+
+Run Android preview first:
+
+pnpm dlx eas-cli@latest build --profile preview --platform android
+
+If Android preview succeeds, run iOS preview:
+
+pnpm dlx eas-cli@latest build --profile preview --platform ios
+
+If EAS asks about credentials, let EAS manage credentials if that is the safest default.
+
+If Apple Developer credentials are required and unavailable, stop and report exactly what is missing.
+
+Step 7 — Final report
+
+Give me:
+
+EAS Phase 3 Report
+
+* EXPO_TOKEN detected: yes/no
+* EAS account: detected account name only
+* EAS project linked: pass/fail
+* EAS project ID added: pass/fail
+* development env vars: pass/fail
+* preview env vars: pass/fail
+* production env vars: pass/fail
+* typecheck: pass/fail
+* expo config: pass/fail
+* expo-doctor: pass/fail
+* Android preview build: pass/fail/link
+* iOS preview build: pass/fail/link
+* credentials issue: yes/no
+* remaining blockers:
+* next recommended step:
+
+Reminder: native app name must stay MustaFlow, app icon must stay the existing MustaFlow logo, and Ora remains the assistant inside the app.
