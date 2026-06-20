@@ -26,12 +26,7 @@ for var in EXPO_ASC_KEY_P8 EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID EXPO_APPLE_TEAM_ID
 done
 [ "$MISSING" -eq 1 ] && exit 1
 
-echo "All required secrets present."
-echo "  Key ID:      $EXPO_ASC_KEY_ID"
-echo "  Issuer ID:   $EXPO_ASC_ISSUER_ID"
-echo "  Team ID:     $EXPO_APPLE_TEAM_ID"
-echo "  Team type:   $EXPO_APPLE_TEAM_TYPE"
-echo "  .p8 length:  $(echo -n "$EXPO_ASC_KEY_P8" | wc -c) bytes"
+echo "All required Apple secrets are present."
 
 # ── 2. Write .p8 to a temp file; erase on exit ────────────────────────────────
 P8_FILE=$(mktemp /tmp/AuthKey_XXXXXX.p8)
@@ -39,7 +34,6 @@ trap 'rm -f "$P8_FILE"' EXIT INT TERM
 
 printf '%s' "$EXPO_ASC_KEY_P8" > "$P8_FILE"
 chmod 600 "$P8_FILE"
-echo "Wrote .p8 to $P8_FILE"
 
 # ── 3. Export the env vars EAS CLI reads for non-interactive Apple auth ────────
 export EXPO_ASC_API_KEY_PATH="$P8_FILE"
@@ -56,10 +50,11 @@ cd "$SCRIPT_DIR/.."
 echo ""
 echo "Starting EAS TestFlight build (profile: testflight, platform: ios) ..."
 EAS_NO_VCS=1 EXPO_TOKEN="$Expo_Token" \
-  timeout 120 pnpm dlx eas-cli@latest build \
+  pnpm dlx eas-cli@latest build \
     --profile testflight \
     --platform ios \
     --non-interactive \
+    --no-wait \
     2>&1
 
 echo "Done."
