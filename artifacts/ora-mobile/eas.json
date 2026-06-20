@@ -25,6 +25,18 @@
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true"
       }
     },
+    "testflight": {
+      "autoIncrement": true,
+      "distribution": "store",
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
+      },
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "ios": {
