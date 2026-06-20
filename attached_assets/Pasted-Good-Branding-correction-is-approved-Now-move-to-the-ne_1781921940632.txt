@@ -1,0 +1,73 @@
+Good. Branding correction is approved.
+
+Now move to the next step: Ora Mobile / MustaFlow Mobile native build verification.
+
+Do not add new product features yet. First prove the mobile app can actually run as a real iOS and Android app.
+
+Please do the following:
+
+1. Verify the production environment setup:
+    * EXPO_PUBLIC_DOMAIN
+    * EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
+    * EXPO_PUBLIC_ORA_STREAMING_ENABLED
+    * Any other required mobile env vars
+2. Confirm whether these values are configured for:
+    * local Expo development
+    * EAS development build
+    * EAS preview build
+    * EAS production build
+3. Run/verify the mobile app locally:
+    * iOS simulator
+    * Android emulator
+    * physical device if available
+4. Test these flows on mobile:
+    * sign in
+    * open Ora chat
+    * send message
+    * receive Ora response
+    * streaming response if enabled
+    * upload file
+    * upload photo from gallery
+    * take photo from camera
+    * voice input
+    * TTS voice output
+    * Talk Mode
+    * conversation save/load
+    * memory screen
+    * library screen
+    * Orax screen
+5. Check native permissions:
+    * microphone
+    * camera
+    * photo library
+    * file picker
+    * save generated image to photo library
+6. Confirm the app still uses:
+    * App name: MustaFlow
+    * App logo: existing MustaFlow logo
+    * Assistant inside app: Ora by MustaFlow
+7. Report any failures with exact error messages, file names, and likely fix.
+8. After verification, give me a final checklist:
+
+Native Verification Report
+
+* iOS simulator: pass/fail
+* Android emulator: pass/fail
+* API connection: pass/fail
+* Clerk auth: pass/fail
+* Ora chat: pass/fail
+* Streaming: pass/fail
+* File upload: pass/fail
+* Camera: pass/fail
+* Gallery: pass/fail
+* Voice input: pass/fail
+* TTS output: pass/fail
+* Talk Mode: pass/fail
+* Conversation history: pass/fail
+* Memory: pass/fail
+* Library: pass/fail
+* Orax: pass/fail
+* Typecheck: pass/fail
+* Build config: pass/fail
+
+Only after this verification should we move to App Store / Play Store preparation.
