@@ -38,6 +38,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "./plugins/withNativeFixes",
       [
         "expo-router",
         {

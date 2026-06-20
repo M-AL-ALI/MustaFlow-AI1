@@ -1,4 +1,5 @@
 - [EAS Phase 3 setup](eas-phase3-setup.md) — EAS_NO_VCS=1 required (git guard); Expo secret is `Expo_Token` not EXPO_TOKEN; iOS needs deploymentTarget:"16.0" for SDK 54+RN 0.81.
+- [EAS iOS AppCheckCore modular headers fix](expo-eas-podfile-modular-headers.md) — insert `use_modular_headers!` before `install! 'cocoapods'` via withDangerousMod; @expo/config-plugins must be a direct devDep (pnpm isolation).
 - [Ora spend ledger design](ora-spend-ledger-design.md) — Wave 1C durable spend caps: initSpendLedger(pool) at startup, _setLedgerPool for tests, fire-and-forget upserts, alert thresholds 50/80/95/100%.
 - [Ora benchmark E2E rate-limiter bypass](ora-benchmark-e2e-ratelimit.md) — oraLimiter (ORA_MAX_CONCURRENT=2) must be bypassed for E2E requests or concurrent benchmark tests instantly 429; also createExhaustedSession() shortcut for T49/T50 vs 200s exhaustion loop.
 - [Ora benchmark prompt constraints](ora-benchmark-prompt-constraints.md) — "raw Markdown headings" (not just "Markdown headings") required by ora-chat-response-qa.test.ts; "ready to build" must be split in prompt source to avoid isolation test false-positive.

@@ -1,5 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
-import { setAuthTokenGetter } from "@workspace/api-client-react";
+import { setAuthTokenGetter } from "@/lib/auth-client";
 import { DrawerContentScrollView, DrawerContentComponentProps } from "@react-navigation/drawer";
 import { Redirect, useRouter } from "expo-router";
 import { Drawer } from "expo-router/drawer";

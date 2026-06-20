@@ -1,4 +1,4 @@
-import { getAuthToken } from "@workspace/api-client-react";
+import { getAuthToken } from "./auth-client";
 
 import type {
   AnalysisResponse,
