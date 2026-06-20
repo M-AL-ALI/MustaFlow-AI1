@@ -10,6 +10,7 @@
       "ios": {
         "simulator": true
       },
+      "environment": "development",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true"
       }
@@ -19,6 +20,7 @@
       "ios": {
         "simulator": true
       },
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true"
       }
@@ -28,6 +30,7 @@
       "ios": {
         "resourceClass": "m-medium"
       },
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true"
       }

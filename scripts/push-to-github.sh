@@ -33,7 +33,7 @@ ARG="${1:-}"
 # IMPORTANT: remove .git/index.lock BEFORE git add or the add silently fails.
 rm -f .git/index.lock .git/refs/heads/main.lock 2>/dev/null || true
 git add \
-  artifacts/ora-mobile/package.json \
+  artifacts/ora-mobile/eas.json \
   scripts/push-to-github.sh \
   2>/dev/null || true
 
