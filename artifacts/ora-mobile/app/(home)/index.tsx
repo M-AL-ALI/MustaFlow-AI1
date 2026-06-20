@@ -628,7 +628,10 @@ export default function OraChatScreen() {
       Alert.alert("Permission needed", "Photo library access is required to choose photos.");
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+    });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     await doUpload(
@@ -666,7 +669,11 @@ export default function OraChatScreen() {
               const file = picked.assets[0];
               const isImage = (file.mimeType ?? "").startsWith("image/");
               await doUpload(
-                { uri: file.uri, name: file.name, type: file.mimeType ?? "application/octet-stream" },
+                {
+                  uri: file.uri,
+                  name: file.name,
+                  type: file.mimeType ?? "application/octet-stream",
+                },
                 isImage,
               );
             } catch {
