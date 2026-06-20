@@ -17,6 +17,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.mustaflow.app",
       "buildNumber": "1",
+      "deploymentTarget": "16.0",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
