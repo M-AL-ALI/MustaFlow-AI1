@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Ora by MustaFlow",
+    "name": "MustaFlow",
     "slug": "ora-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -40,22 +40,22 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow Ora to use your microphone so you can talk to Ora by voice."
+          "microphonePermission": "Allow MustaFlow to use your microphone so you can talk to Ora by voice."
         }
       ],
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Allow Ora to access your camera to capture photos.",
+          "cameraPermission": "Allow MustaFlow to access your camera to capture photos.",
           "microphonePermission": false,
-          "photosPermission": "Allow Ora to access your photo library to share images."
+          "photosPermission": "Allow MustaFlow to access your photo library to share images."
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "Allow Ora to save generated images to your photo library.",
-          "savePhotosPermission": "Allow Ora to save generated images to your photo library.",
+          "photosPermission": "Allow MustaFlow to save generated images to your photo library.",
+          "savePhotosPermission": "Allow MustaFlow to save generated images to your photo library.",
           "isAccessMediaLocationEnabled": false
         }
       ]
