@@ -1,0 +1,27 @@
+# EAS Build archive excludes (NO_VCS mode).
+# IMPORTANT: when this file exists, eas-cli uses it INSTEAD of .gitignore,
+# so every heavy/non-build path must be listed explicitly here.
+# Keep all source + package manifests + lockfile; drop heavy/non-build inputs
+# so "Compressing project files" does not walk node_modules / .cache / .git.
+node_modules
+**/node_modules
+.cache
+**/.cache
+.git
+.local
+.agents
+.expo
+**/.expo
+**/dist
+**/build
+**/.turbo
+**/*.tsbuildinfo
+scripts/eval-results
+scripts/benchmark-results
+# Non-source monorepo dirs not needed to build the mobile app (shrinks upload, avoids OOM).
+attached_assets
+screenshots
+docs
+blueprints
+*.log
+.DS_Store
