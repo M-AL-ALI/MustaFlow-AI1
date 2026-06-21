@@ -10,6 +10,7 @@ import {
   Moon,
   User as UserIcon,
   Volume2,
+  Wifi,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { ScrollView, Switch, Text, View } from "react-native";
@@ -18,7 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button, Card, Pill } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { getOraUsage, getPreferences, getSubscription, updatePreferences } from "@/lib/api";
+import { API_BASE, getOraUsage, getPreferences, getSubscription, updatePreferences } from "@/lib/api";
 import type { BillingSubscription, OraUsage } from "@/lib/types";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
@@ -91,6 +92,36 @@ function SectionCard({
   );
 }
 
+function DiagRow({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: c.muted,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+      }}
+    >
+      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{label}</Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          color: warn ? "#f87171" : c.foreground,
+          fontSize: 13,
+          fontFamily: "Inter_500Medium",
+          maxWidth: "60%",
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function UsageRow({ label, used, limit }: { label: string; used: number; limit: number }) {
   const c = useColors();
   const unlimited = limit <= 0;
@@ -156,6 +187,22 @@ export default function SettingsScreen() {
       await updatePreferences({ autoReadReplies: value });
     } catch {
       setAutoReadReplies(!value);
+    }
+  }, []);
+
+  const [diagResult, setDiagResult] = useState<string | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+
+  const testBackend = useCallback(async () => {
+    setDiagLoading(true);
+    setDiagResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/healthz`);
+      setDiagResult(res.ok ? `OK (${res.status})` : `HTTP ${res.status}`);
+    } catch (err) {
+      setDiagResult(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setDiagLoading(false);
     }
   }, []);
 
@@ -328,6 +375,40 @@ export default function SettingsScreen() {
             <Text style={{ color: c.foreground, fontSize: 14 }}>Ora</Text>
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{APP_VERSION_LABEL}</Text>
           </View>
+        </SectionCard>
+
+        <SectionCard icon={Wifi} title="Diagnostics" description="API connectivity and build config.">
+          <View style={{ gap: 6 }}>
+            <DiagRow label="API URL" value={API_BASE} />
+            <DiagRow
+              label="Streaming"
+              value={process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED === "true" ? "on" : "off"}
+            />
+            <DiagRow
+              label="Clerk key"
+              value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
+              warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
+            />
+            <DiagRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
+            <DiagRow label="Build" value={APP_VERSION_LABEL} />
+          </View>
+          <Button
+            label={diagLoading ? "Testing…" : "Test Ora backend"}
+            onPress={testBackend}
+            full
+          />
+          {diagResult !== null && (
+            <Text
+              style={{
+                color: diagResult.startsWith("OK") ? "#4ade80" : "#f87171",
+                fontSize: 13,
+                textAlign: "center",
+                marginTop: 4,
+              }}
+            >
+              {diagResult}
+            </Text>
+          )}
         </SectionCard>
       </ScrollView>
     </View>

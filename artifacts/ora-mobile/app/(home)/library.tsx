@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Card, EmptyState, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { getAssets } from "@/lib/api";
+import { API_BASE, getAssets } from "@/lib/api";
 import { saveAsset } from "@/lib/files";
 import type { OraAsset } from "@/lib/types";
 
@@ -135,7 +135,7 @@ function AssetCard({ asset }: { asset: OraAsset }) {
           >
             <Image
               source={{
-                uri: `${process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : ""}/api/ora/assets/${asset.id}/download`,
+                uri: `${API_BASE}/api/ora/assets/${asset.id}/download`,
               }}
               style={{ width: 48, height: 48 }}
               contentFit="cover"

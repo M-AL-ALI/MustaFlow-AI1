@@ -31,8 +31,8 @@ import type {
  * getAuthToken() (registered in (home)/_layout.tsx). Pre-auth Ora endpoints
  * (`public-ai/*`) work even when the token is null.
  */
-const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN;
-export const API_BASE = DOMAIN ? `https://${DOMAIN}` : "";
+const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN || "mustaflow.com";
+export const API_BASE = `https://${DOMAIN}`;
 
 export class ApiRequestError extends Error {
   status: number;
