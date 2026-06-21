@@ -104,3 +104,4 @@
 - [runCandidateChain mock must return full CandidateChainResult](vitest-runCandidateChain-mock-shape.md) — returning "" causes chain.result.choices[0] TypeError; always mock with full { result: { choices:[{message:{content}}] }, usedFallback, candidate } shape.
 - [detectOraExpertiseDomain topic short-circuit](expertise-domain-topic-shortcircuit.md) — topic "technical"/"mobile" forces software_engineering before content/header patterns; pass "general" for upload/dataset domain framing. ".csv" filename → data_analysis; xlsx is header-driven.
 - [Ora response-quality runtime lever](ora-response-quality-runtime-lever.md) — runtime answer quality = ORA_SYSTEM_PROMPT + expertise systemAddendum; evaluateOraResponseQuality is TEST-ONLY, never wire it into a regen loop.
+- [EAS iOS non-interactive credential setup](eas-ios-noninteractive-creds.md) — full GraphQL flow required before `--non-interactive` builds; env vars alone are insufficient.
