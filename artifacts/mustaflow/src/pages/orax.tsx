@@ -2224,663 +2224,685 @@ export default function OraxPage() {
                   </div>
                 </div>
 
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-primary" />
-                    <div className="text-sm font-semibold">Workflow controls</div>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Approval-gated file reads, draft patches, sandbox validation, controlled checks,
-                    and PR creation stay secondary to the task thread. ORAX still cannot edit,
-                    execute arbitrary commands, push, open PRs, or deploy without explicit approval.
+                <details className="rounded-md border border-border bg-muted/20 p-3">
+                  <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 text-sm font-semibold">
+                    <span className="inline-flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-primary" />
+                      Advanced workflow controls
+                    </span>
+                    <span className="rounded-full border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground">
+                      approval-gated details
+                    </span>
+                  </summary>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    The task thread is the primary workspace. Use these controls when you need the
+                    full approval details for file reads, draft patches, sandbox validation,
+                    controlled checks, or PR creation. ORAX still cannot edit, execute arbitrary
+                    commands, push, open PRs, or deploy without explicit approval.
                   </p>
-                </div>
 
-                <textarea
-                  value={approvalPaths}
-                  onChange={(event) => setApprovalPaths(event.target.value)}
-                  placeholder="src/main.ts&#10;package.json&#10;README.md"
-                  className="min-h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-                <input
-                  value={approvalReason}
-                  onChange={(event) => setApprovalReason(event.target.value)}
-                  placeholder="Reason for reading these files"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-                <button
-                  onClick={() => void requestFileReadApproval()}
-                  disabled={requestingApproval || !approvalPaths.trim()}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {requestingApproval ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="h-4 w-4" />
-                  )}
-                  Request approval
-                </button>
+                  <div className="mt-4 space-y-4">
+                    <textarea
+                      value={approvalPaths}
+                      onChange={(event) => setApprovalPaths(event.target.value)}
+                      placeholder="src/main.ts&#10;package.json&#10;README.md"
+                      className="min-h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <input
+                      value={approvalReason}
+                      onChange={(event) => setApprovalReason(event.target.value)}
+                      placeholder="Reason for reading these files"
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <button
+                      onClick={() => void requestFileReadApproval()}
+                      disabled={requestingApproval || !approvalPaths.trim()}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {requestingApproval ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="h-4 w-4" />
+                      )}
+                      Request approval
+                    </button>
 
-                <textarea
-                  value={draftInstructions}
-                  onChange={(event) => setDraftInstructions(event.target.value)}
-                  placeholder="Optional draft patch instructions. Example: keep the fix small and avoid changing public API."
-                  className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
+                    <textarea
+                      value={draftInstructions}
+                      onChange={(event) => setDraftInstructions(event.target.value)}
+                      placeholder="Optional draft patch instructions. Example: keep the fix small and avoid changing public API."
+                      className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
 
-                <div className="space-y-2">
-                  {approvals.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No approval requests for this task yet.
-                    </p>
-                  ) : (
-                    approvals.map((approval) => (
-                      <article
-                        key={approval.id}
-                        className="rounded-md border border-border bg-muted/20 px-3 py-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-medium">
-                              {approval.action} - {approval.status}
+                    <div className="space-y-2">
+                      {approvals.length === 0 ? (
+                        <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                          No approval requests for this task yet.
+                        </p>
+                      ) : (
+                        approvals.map((approval) => (
+                          <article
+                            key={approval.id}
+                            className="rounded-md border border-border bg-muted/20 px-3 py-3"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium">
+                                  {approval.action} - {approval.status}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {approval.action === "read_files"
+                                    ? (approval.request.paths ?? []).join(", ")
+                                    : `Draft artifact #${approval.request.artifactId ?? "unknown"}`}
+                                </div>
+                                {approval.request.scope ? (
+                                  <div className="mt-2 text-xs text-muted-foreground">
+                                    {approval.request.scope}
+                                  </div>
+                                ) : null}
+                                {approval.riskSummary ? (
+                                  <div className="mt-2 text-xs text-muted-foreground">
+                                    {approval.riskSummary}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {approval.status === "pending" ? (
+                                  <>
+                                    <button
+                                      onClick={() => void decideApproval(approval.id, "approved")}
+                                      disabled={decidingApprovalId === approval.id}
+                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                    >
+                                      <Check className="h-3.5 w-3.5" />
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() => void decideApproval(approval.id, "denied")}
+                                      disabled={decidingApprovalId === approval.id}
+                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                      Deny
+                                    </button>
+                                  </>
+                                ) : null}
+                                {approval.action === "read_files" &&
+                                approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void readApprovedFiles(approval.id)}
+                                    disabled={readingApprovalId === approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {readingApprovalId === approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <FileSearch className="h-3.5 w-3.5" />
+                                    )}
+                                    Read files
+                                  </button>
+                                ) : null}
+                                {approval.action === "read_files" &&
+                                ["approved", "completed"].includes(approval.status) ? (
+                                  <button
+                                    onClick={() => void generateDraftPatch(approval.id)}
+                                    disabled={generatingArtifactApprovalId === approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                                  >
+                                    {generatingArtifactApprovalId === approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Code2 className="h-3.5 w-3.5" />
+                                    )}
+                                    Generate draft patch
+                                  </button>
+                                ) : null}
+                                {approval.action === "sandbox_run" &&
+                                approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void runSandboxValidation(approval.id)}
+                                    disabled={runningSandboxApprovalId === approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {runningSandboxApprovalId === approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Play className="h-3.5 w-3.5" />
+                                    )}
+                                    Run sandbox
+                                  </button>
+                                ) : null}
+                                {approval.action === "safe_check" &&
+                                approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void runControlledChecks(approval.id)}
+                                    disabled={runningCommandApprovalId === approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {runningCommandApprovalId === approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Terminal className="h-3.5 w-3.5" />
+                                    )}
+                                    Run checks
+                                  </button>
+                                ) : null}
+                                {approval.action === "github_pr" &&
+                                approval.status === "approved" ? (
+                                  <button
+                                    onClick={() => void createGithubPr(approval.id)}
+                                    disabled={creatingPrApprovalId === approval.id}
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                  >
+                                    {creatingPrApprovalId === approval.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <GitPullRequest className="h-3.5 w-3.5" />
+                                    )}
+                                    Create PR
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {approval.action === "read_files"
-                                ? (approval.request.paths ?? []).join(", ")
-                                : `Draft artifact #${approval.request.artifactId ?? "unknown"}`}
-                            </div>
-                            {approval.request.scope ? (
+                            {approval.result?.files?.length ? (
                               <div className="mt-2 text-xs text-muted-foreground">
-                                {approval.request.scope}
+                                Read {approval.result.files.length} file(s),{" "}
+                                {formatBytes(approval.result.totalBytes ?? 0)}
                               </div>
                             ) : null}
-                            {approval.riskSummary ? (
-                              <div className="mt-2 text-xs text-muted-foreground">
-                                {approval.riskSummary}
-                              </div>
+                            {approval.action === "github_pr" && approval.result?.pullRequestUrl ? (
+                              <a
+                                href={approval.result.pullRequestUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
+                              >
+                                Open created pull request
+                              </a>
                             ) : null}
+                            {approval.action === "github_pr" && approval.result?.error ? (
+                              <FailureNotice failure={approval.result.error} />
+                            ) : null}
+                          </article>
+                        ))
+                      )}
+                    </div>
+
+                    {readResult ? (
+                      <div className="rounded-md border border-border bg-muted/20 p-3">
+                        <div className="text-sm font-semibold">
+                          Approved file read result - {readResult.branch}
+                        </div>
+                        {readResult.skipped.length ? (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Skipped:{" "}
+                            {readResult.skipped
+                              .map((item) => `${item.path} (${item.reason})`)
+                              .join(", ")}
                           </div>
-                          <div className="flex flex-wrap gap-2">
-                            {approval.status === "pending" ? (
-                              <>
-                                <button
-                                  onClick={() => void decideApproval(approval.id, "approved")}
-                                  disabled={decidingApprovalId === approval.id}
-                                  className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() => void decideApproval(approval.id, "denied")}
-                                  disabled={decidingApprovalId === approval.id}
-                                  className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                  Deny
-                                </button>
-                              </>
-                            ) : null}
-                            {approval.action === "read_files" && approval.status === "approved" ? (
+                        ) : null}
+                        <div className="mt-3 space-y-3">
+                          {readResult.files.map((file) => (
+                            <div
+                              key={file.path}
+                              className="rounded-md border border-border bg-card"
+                            >
+                              <div className="border-b border-border px-3 py-2 text-xs font-medium">
+                                {file.path} - {formatBytes(file.size)}
+                              </div>
+                              <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 py-2 text-xs text-muted-foreground">
+                                {file.content}
+                              </pre>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold">Draft patch preview</div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Generated artifacts are review-only. ORAX still cannot apply files, run
+                            terminal commands, push branches, open PRs, or deploy.
+                          </p>
+                        </div>
+                        {loadingArtifacts ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : null}
+                      </div>
+
+                      {latestDraftPatch ? (
+                        <div className="mt-3 space-y-3">
+                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                            <Metric label="Status" value={latestDraftPatch.status} />
+                            <Metric
+                              label="Branch"
+                              value={latestDraftPatch.payload.branch ?? "unknown"}
+                            />
+                            <Metric
+                              label="Model"
+                              value={latestDraftPatch.payload.model ?? "unknown"}
+                            />
+                            <Metric
+                              label="Generated"
+                              value={new Date(latestDraftPatch.createdAt).toLocaleString()}
+                            />
+                          </div>
+                          {latestDraftPatch.summary ? (
+                            <p className="text-sm text-foreground">{latestDraftPatch.summary}</p>
+                          ) : null}
+                          {latestDraftPatch.payload.explanation ? (
+                            <p className="text-sm text-muted-foreground">
+                              {latestDraftPatch.payload.explanation}
+                            </p>
+                          ) : null}
+                          {latestDraftPatch.payload.filesRead?.length ? (
+                            <div className="text-xs text-muted-foreground">
+                              Files used:{" "}
+                              {latestDraftPatch.payload.filesRead
+                                .map((file) => `${file.path} (${formatBytes(file.size)})`)
+                                .join(", ")}
+                            </div>
+                          ) : null}
+                          {latestDraftPatch.payload.skipped?.length ? (
+                            <div className="text-xs text-muted-foreground">
+                              Skipped:{" "}
+                              {latestDraftPatch.payload.skipped
+                                .map((item) => `${item.path} (${item.reason})`)
+                                .join(", ")}
+                            </div>
+                          ) : null}
+                          {latestDraftPatch.payload.risks?.length ? (
+                            <div>
+                              <div className="text-xs font-medium uppercase text-muted-foreground">
+                                Risks
+                              </div>
+                              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                                {latestDraftPatch.payload.risks.map((risk) => (
+                                  <li key={risk}>{risk}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {latestDraftPatch.payload.tests?.length ? (
+                            <div>
+                              <div className="text-xs font-medium uppercase text-muted-foreground">
+                                Suggested checks
+                              </div>
+                              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                                {latestDraftPatch.payload.tests.map((test) => (
+                                  <li key={test}>{test}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {latestDraftPatch.payload.unifiedDiff?.trim() ? (
+                            <pre className="max-h-96 overflow-auto rounded-md border border-border bg-background px-3 py-3 text-xs text-muted-foreground">
+                              {latestDraftPatch.payload.unifiedDiff}
+                            </pre>
+                          ) : (
+                            <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                              No diff was generated. Approve more relevant files, then generate a
+                              new draft patch.
+                            </p>
+                          )}
+                          {latestDraftPatch.payload.unifiedDiff?.trim() ? (
+                            <button
+                              onClick={() => void requestSandboxApproval(latestDraftPatch.id)}
+                              disabled={requestingSandboxApprovalArtifactId === latestDraftPatch.id}
+                              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                            >
+                              {requestingSandboxApprovalArtifactId === latestDraftPatch.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                              )}
+                              Request sandbox approval
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                          No draft patch yet. Generate one from an approved file-read request.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-semibold">Sandbox validation</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Sandbox validation applies the draft patch to approved file contents only.
+                        It does not modify the repository, run unrestricted terminal commands, push,
+                        open PRs, or deploy.
+                      </p>
+
+                      {latestSandboxResult ? (
+                        <div className="mt-3 space-y-3">
+                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                            <Metric label="Status" value={latestSandboxResult.status} />
+                            <Metric
+                              label="Applied"
+                              value={latestSandboxResult.payload.applied ? "yes" : "no"}
+                            />
+                            <Metric
+                              label="Changed files"
+                              value={String(latestSandboxResult.payload.changedFiles?.length ?? 0)}
+                            />
+                            <Metric
+                              label="Validated"
+                              value={new Date(latestSandboxResult.createdAt).toLocaleString()}
+                            />
+                          </div>
+
+                          {latestSandboxResult.payload.changedFiles?.length ? (
+                            <div>
+                              <div className="text-xs font-medium uppercase text-muted-foreground">
+                                Changed files
+                              </div>
+                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                {latestSandboxResult.payload.changedFiles.map((file) => (
+                                  <li key={file.path}>
+                                    {file.path}: +{file.additions} / -{file.deletions},{" "}
+                                    {formatBytes(file.beforeBytes)} to{" "}
+                                    {formatBytes(file.afterBytes)}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+
+                          {latestSandboxResult.payload.checks?.length ? (
+                            <div>
+                              <div className="text-xs font-medium uppercase text-muted-foreground">
+                                Sandbox checks
+                              </div>
+                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                {latestSandboxResult.payload.checks.map((check) => (
+                                  <li key={`${check.name}-${check.status}`}>
+                                    {check.status}: {check.name} - {check.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+
+                          {latestSandboxResult.payload.testPreview?.length ? (
+                            <div>
+                              <div className="text-xs font-medium uppercase text-muted-foreground">
+                                Suggested tests
+                              </div>
+                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                {latestSandboxResult.payload.testPreview.map((check) => (
+                                  <li key={check.name}>
+                                    {check.status}: {check.name} - {check.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+
+                          {latestSandboxResult.payload.errors?.length ? (
+                            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                              {latestSandboxResult.payload.errors.join(" ")}
+                            </div>
+                          ) : null}
+
+                          {latestSandboxResult.payload.applied ? (
+                            <div className="space-y-3">
+                              <div>
+                                <div className="text-xs font-medium uppercase text-muted-foreground">
+                                  Checks to request
+                                </div>
+                                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                                  {ORAX_COMMAND_OPTIONS.map((option) => (
+                                    <label
+                                      key={option.id}
+                                      className="flex min-h-16 cursor-pointer items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs hover:bg-muted/50"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedCommandIds.includes(option.id)}
+                                        onChange={() => toggleCommandId(option.id)}
+                                        className="mt-0.5 h-4 w-4 rounded border-border"
+                                      />
+                                      <span>
+                                        <span className="block font-medium text-foreground">
+                                          {option.label}
+                                        </span>
+                                        <span className="mt-0.5 block text-muted-foreground">
+                                          {option.description}
+                                        </span>
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
                               <button
-                                onClick={() => void readApprovedFiles(approval.id)}
-                                disabled={readingApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                onClick={() => void requestCommandApproval(latestSandboxResult.id)}
+                                disabled={
+                                  requestingCommandApprovalArtifactId === latestSandboxResult.id ||
+                                  selectedCommandIds.length === 0
+                                }
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
                               >
-                                {readingApprovalId === approval.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <FileSearch className="h-3.5 w-3.5" />
-                                )}
-                                Read files
-                              </button>
-                            ) : null}
-                            {approval.action === "read_files" &&
-                            ["approved", "completed"].includes(approval.status) ? (
-                              <button
-                                onClick={() => void generateDraftPatch(approval.id)}
-                                disabled={generatingArtifactApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                              >
-                                {generatingArtifactApprovalId === approval.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Code2 className="h-3.5 w-3.5" />
-                                )}
-                                Generate draft patch
-                              </button>
-                            ) : null}
-                            {approval.action === "sandbox_run" && approval.status === "approved" ? (
-                              <button
-                                onClick={() => void runSandboxValidation(approval.id)}
-                                disabled={runningSandboxApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                              >
-                                {runningSandboxApprovalId === approval.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Play className="h-3.5 w-3.5" />
-                                )}
-                                Run sandbox
-                              </button>
-                            ) : null}
-                            {approval.action === "safe_check" && approval.status === "approved" ? (
-                              <button
-                                onClick={() => void runControlledChecks(approval.id)}
-                                disabled={runningCommandApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                              >
-                                {runningCommandApprovalId === approval.id ? (
+                                {requestingCommandApprovalArtifactId === latestSandboxResult.id ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 ) : (
                                   <Terminal className="h-3.5 w-3.5" />
                                 )}
-                                Run checks
+                                Request selected checks
                               </button>
-                            ) : null}
-                            {approval.action === "github_pr" && approval.status === "approved" ? (
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                          No sandbox validation yet. Request approval from a draft patch, approve
+                          it, then run the sandbox.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-semibold">Controlled checks</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Controlled checks run fixed ORAX validators and selected pnpm scripts in a
+                        temporary workspace. They do not accept arbitrary shell text, deployment
+                        commands, or default-branch writes.
+                      </p>
+
+                      {latestCommandResult ? (
+                        <div className="mt-3 space-y-3">
+                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                            <Metric label="Status" value={latestCommandResult.status} />
+                            <Metric
+                              label="Passed"
+                              value={latestCommandResult.payload.passed ? "yes" : "no"}
+                            />
+                            <Metric
+                              label="Commands"
+                              value={String(latestCommandResult.payload.commands?.length ?? 0)}
+                            />
+                            <Metric
+                              label="Executed"
+                              value={new Date(latestCommandResult.createdAt).toLocaleString()}
+                            />
+                          </div>
+
+                          {latestCommandResult.summary ? (
+                            <p className="text-sm text-foreground">{latestCommandResult.summary}</p>
+                          ) : null}
+
+                          <div className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+                            Command summary: {commandPassedCount} passed, {commandFailureCount}{" "}
+                            failed.
+                          </div>
+
+                          {latestCommandResult.payload.commands?.length ? (
+                            <div className="space-y-2">
+                              {latestCommandResult.payload.commands.map((command) => (
+                                <div
+                                  key={`${command.id}-${command.status}`}
+                                  className="rounded-md border border-border bg-card px-3 py-2"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                    <span className="font-medium text-foreground">
+                                      {command.label || command.id}
+                                    </span>
+                                    <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
+                                      {command.status}
+                                      {typeof command.exitCode === "number"
+                                        ? ` / exit ${command.exitCode}`
+                                        : ""}
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {command.message}
+                                  </p>
+                                  {command.stdout ? (
+                                    <pre className="mt-2 max-h-32 overflow-auto rounded bg-background px-2 py-2 text-[11px] text-muted-foreground">
+                                      {command.stdout}
+                                    </pre>
+                                  ) : null}
+                                  {command.stderr ? (
+                                    <pre className="mt-2 max-h-32 overflow-auto rounded border border-destructive/30 bg-destructive/10 px-2 py-2 text-[11px] text-destructive">
+                                      {command.stderr}
+                                    </pre>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          {latestCommandResult.payload.passed === false ? (
+                            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                              GitHub PR approval is blocked until every selected check passes.
+                              Review the failed command output, update the draft patch, then rerun
+                              the approval-gated checks.
+                            </div>
+                          ) : null}
+
+                          {readyForPrApproval ? (
+                            <div className="space-y-3 rounded-md border border-border bg-background px-3 py-3">
+                              <div>
+                                <div className="text-xs font-medium uppercase text-muted-foreground">
+                                  PR approval review
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  This creates a new branch and pull request only. It does not push
+                                  to the default branch or deploy.
+                                </p>
+                              </div>
+                              <ArtifactTrace artifact={latestCommandResult} />
+                              <label className="block text-xs">
+                                <span className="font-medium text-foreground">
+                                  Type CREATE PR to enable approval
+                                </span>
+                                <input
+                                  value={prConfirmationText}
+                                  onChange={(event) => setPrConfirmationText(event.target.value)}
+                                  className="mt-1 h-9 w-full rounded-md border border-border bg-card px-3 text-sm outline-none focus:border-primary"
+                                  placeholder="CREATE PR"
+                                />
+                              </label>
                               <button
-                                onClick={() => void createGithubPr(approval.id)}
-                                disabled={creatingPrApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                                onClick={() => void requestGithubPrApproval(latestCommandResult.id)}
+                                disabled={
+                                  requestingPrApprovalArtifactId === latestCommandResult.id ||
+                                  prConfirmationText.trim() !== "CREATE PR"
+                                }
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
                               >
-                                {creatingPrApprovalId === approval.id ? (
+                                {requestingPrApprovalArtifactId === latestCommandResult.id ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 ) : (
                                   <GitPullRequest className="h-3.5 w-3.5" />
                                 )}
-                                Create PR
+                                Request GitHub PR approval
                               </button>
-                            ) : null}
-                          </div>
+                            </div>
+                          ) : null}
                         </div>
-                        {approval.result?.files?.length ? (
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            Read {approval.result.files.length} file(s),{" "}
-                            {formatBytes(approval.result.totalBytes ?? 0)}
-                          </div>
-                        ) : null}
-                        {approval.action === "github_pr" && approval.result?.pullRequestUrl ? (
-                          <a
-                            href={approval.result.pullRequestUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
-                          >
-                            Open created pull request
-                          </a>
-                        ) : null}
-                        {approval.action === "github_pr" && approval.result?.error ? (
-                          <FailureNotice failure={approval.result.error} />
-                        ) : null}
-                      </article>
-                    ))
-                  )}
-                </div>
-
-                {readResult ? (
-                  <div className="rounded-md border border-border bg-muted/20 p-3">
-                    <div className="text-sm font-semibold">
-                      Approved file read result - {readResult.branch}
-                    </div>
-                    {readResult.skipped.length ? (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        Skipped:{" "}
-                        {readResult.skipped
-                          .map((item) => `${item.path} (${item.reason})`)
-                          .join(", ")}
-                      </div>
-                    ) : null}
-                    <div className="mt-3 space-y-3">
-                      {readResult.files.map((file) => (
-                        <div key={file.path} className="rounded-md border border-border bg-card">
-                          <div className="border-b border-border px-3 py-2 text-xs font-medium">
-                            {file.path} - {formatBytes(file.size)}
-                          </div>
-                          <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 py-2 text-xs text-muted-foreground">
-                            {file.content}
-                          </pre>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">Draft patch preview</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Generated artifacts are review-only. ORAX still cannot apply files, run
-                        terminal commands, push branches, open PRs, or deploy.
-                      </p>
-                    </div>
-                    {loadingArtifacts ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    ) : null}
-                  </div>
-
-                  {latestDraftPatch ? (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                        <Metric label="Status" value={latestDraftPatch.status} />
-                        <Metric
-                          label="Branch"
-                          value={latestDraftPatch.payload.branch ?? "unknown"}
-                        />
-                        <Metric label="Model" value={latestDraftPatch.payload.model ?? "unknown"} />
-                        <Metric
-                          label="Generated"
-                          value={new Date(latestDraftPatch.createdAt).toLocaleString()}
-                        />
-                      </div>
-                      {latestDraftPatch.summary ? (
-                        <p className="text-sm text-foreground">{latestDraftPatch.summary}</p>
-                      ) : null}
-                      {latestDraftPatch.payload.explanation ? (
-                        <p className="text-sm text-muted-foreground">
-                          {latestDraftPatch.payload.explanation}
-                        </p>
-                      ) : null}
-                      {latestDraftPatch.payload.filesRead?.length ? (
-                        <div className="text-xs text-muted-foreground">
-                          Files used:{" "}
-                          {latestDraftPatch.payload.filesRead
-                            .map((file) => `${file.path} (${formatBytes(file.size)})`)
-                            .join(", ")}
-                        </div>
-                      ) : null}
-                      {latestDraftPatch.payload.skipped?.length ? (
-                        <div className="text-xs text-muted-foreground">
-                          Skipped:{" "}
-                          {latestDraftPatch.payload.skipped
-                            .map((item) => `${item.path} (${item.reason})`)
-                            .join(", ")}
-                        </div>
-                      ) : null}
-                      {latestDraftPatch.payload.risks?.length ? (
-                        <div>
-                          <div className="text-xs font-medium uppercase text-muted-foreground">
-                            Risks
-                          </div>
-                          <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                            {latestDraftPatch.payload.risks.map((risk) => (
-                              <li key={risk}>{risk}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-                      {latestDraftPatch.payload.tests?.length ? (
-                        <div>
-                          <div className="text-xs font-medium uppercase text-muted-foreground">
-                            Suggested checks
-                          </div>
-                          <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                            {latestDraftPatch.payload.tests.map((test) => (
-                              <li key={test}>{test}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-                      {latestDraftPatch.payload.unifiedDiff?.trim() ? (
-                        <pre className="max-h-96 overflow-auto rounded-md border border-border bg-background px-3 py-3 text-xs text-muted-foreground">
-                          {latestDraftPatch.payload.unifiedDiff}
-                        </pre>
                       ) : (
-                        <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          No diff was generated. Approve more relevant files, then generate a new
-                          draft patch.
+                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                          No controlled checks yet. Request approval from a passed sandbox result,
+                          approve it, then run the checks.
                         </p>
                       )}
-                      {latestDraftPatch.payload.unifiedDiff?.trim() ? (
-                        <button
-                          onClick={() => void requestSandboxApproval(latestDraftPatch.id)}
-                          disabled={requestingSandboxApprovalArtifactId === latestDraftPatch.id}
-                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                        >
-                          {requestingSandboxApprovalArtifactId === latestDraftPatch.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <ShieldCheck className="h-3.5 w-3.5" />
-                          )}
-                          Request sandbox approval
-                        </button>
-                      ) : null}
                     </div>
-                  ) : (
-                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No draft patch yet. Generate one from an approved file-read request.
-                    </p>
-                  )}
-                </div>
 
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="text-sm font-semibold">Sandbox validation</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Sandbox validation applies the draft patch to approved file contents only. It
-                    does not modify the repository, run unrestricted terminal commands, push, open
-                    PRs, or deploy.
-                  </p>
+                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                      <div className="text-sm font-semibold">GitHub pull request</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        ORAX can create a new branch and pull request only after controlled checks
+                        pass and you explicitly approve the GitHub action. It never pushes directly
+                        to the default branch.
+                      </p>
 
-                  {latestSandboxResult ? (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                        <Metric label="Status" value={latestSandboxResult.status} />
-                        <Metric
-                          label="Applied"
-                          value={latestSandboxResult.payload.applied ? "yes" : "no"}
-                        />
-                        <Metric
-                          label="Changed files"
-                          value={String(latestSandboxResult.payload.changedFiles?.length ?? 0)}
-                        />
-                        <Metric
-                          label="Validated"
-                          value={new Date(latestSandboxResult.createdAt).toLocaleString()}
-                        />
-                      </div>
-
-                      {latestSandboxResult.payload.changedFiles?.length ? (
-                        <div>
-                          <div className="text-xs font-medium uppercase text-muted-foreground">
-                            Changed files
-                          </div>
-                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                            {latestSandboxResult.payload.changedFiles.map((file) => (
-                              <li key={file.path}>
-                                {file.path}: +{file.additions} / -{file.deletions},{" "}
-                                {formatBytes(file.beforeBytes)} to {formatBytes(file.afterBytes)}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-
-                      {latestSandboxResult.payload.checks?.length ? (
-                        <div>
-                          <div className="text-xs font-medium uppercase text-muted-foreground">
-                            Sandbox checks
-                          </div>
-                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                            {latestSandboxResult.payload.checks.map((check) => (
-                              <li key={`${check.name}-${check.status}`}>
-                                {check.status}: {check.name} - {check.message}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-
-                      {latestSandboxResult.payload.testPreview?.length ? (
-                        <div>
-                          <div className="text-xs font-medium uppercase text-muted-foreground">
-                            Suggested tests
-                          </div>
-                          <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                            {latestSandboxResult.payload.testPreview.map((check) => (
-                              <li key={check.name}>
-                                {check.status}: {check.name} - {check.message}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-
-                      {latestSandboxResult.payload.errors?.length ? (
-                        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                          {latestSandboxResult.payload.errors.join(" ")}
-                        </div>
-                      ) : null}
-
-                      {latestSandboxResult.payload.applied ? (
-                        <div className="space-y-3">
-                          <div>
-                            <div className="text-xs font-medium uppercase text-muted-foreground">
-                              Checks to request
-                            </div>
-                            <div className="mt-2 grid gap-2 md:grid-cols-2">
-                              {ORAX_COMMAND_OPTIONS.map((option) => (
-                                <label
-                                  key={option.id}
-                                  className="flex min-h-16 cursor-pointer items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs hover:bg-muted/50"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedCommandIds.includes(option.id)}
-                                    onChange={() => toggleCommandId(option.id)}
-                                    className="mt-0.5 h-4 w-4 rounded border-border"
-                                  />
-                                  <span>
-                                    <span className="block font-medium text-foreground">
-                                      {option.label}
-                                    </span>
-                                    <span className="mt-0.5 block text-muted-foreground">
-                                      {option.description}
-                                    </span>
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => void requestCommandApproval(latestSandboxResult.id)}
-                            disabled={
-                              requestingCommandApprovalArtifactId === latestSandboxResult.id ||
-                              selectedCommandIds.length === 0
-                            }
-                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                          >
-                            {requestingCommandApprovalArtifactId === latestSandboxResult.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Terminal className="h-3.5 w-3.5" />
-                            )}
-                            Request selected checks
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No sandbox validation yet. Request approval from a draft patch, approve it,
-                      then run the sandbox.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="text-sm font-semibold">Controlled checks</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Controlled checks run fixed ORAX validators and selected pnpm scripts in a
-                    temporary workspace. They do not accept arbitrary shell text, deployment
-                    commands, or default-branch writes.
-                  </p>
-
-                  {latestCommandResult ? (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                        <Metric label="Status" value={latestCommandResult.status} />
-                        <Metric
-                          label="Passed"
-                          value={latestCommandResult.payload.passed ? "yes" : "no"}
-                        />
-                        <Metric
-                          label="Commands"
-                          value={String(latestCommandResult.payload.commands?.length ?? 0)}
-                        />
-                        <Metric
-                          label="Executed"
-                          value={new Date(latestCommandResult.createdAt).toLocaleString()}
-                        />
-                      </div>
-
-                      {latestCommandResult.summary ? (
-                        <p className="text-sm text-foreground">{latestCommandResult.summary}</p>
-                      ) : null}
-
-                      <div className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-                        Command summary: {commandPassedCount} passed, {commandFailureCount} failed.
-                      </div>
-
-                      {latestCommandResult.payload.commands?.length ? (
-                        <div className="space-y-2">
-                          {latestCommandResult.payload.commands.map((command) => (
-                            <div
-                              key={`${command.id}-${command.status}`}
-                              className="rounded-md border border-border bg-card px-3 py-2"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                                <span className="font-medium text-foreground">
-                                  {command.label || command.id}
-                                </span>
-                                <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
-                                  {command.status}
-                                  {typeof command.exitCode === "number"
-                                    ? ` / exit ${command.exitCode}`
-                                    : ""}
-                                </span>
-                              </div>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {command.message}
-                              </p>
-                              {command.stdout ? (
-                                <pre className="mt-2 max-h-32 overflow-auto rounded bg-background px-2 py-2 text-[11px] text-muted-foreground">
-                                  {command.stdout}
-                                </pre>
-                              ) : null}
-                              {command.stderr ? (
-                                <pre className="mt-2 max-h-32 overflow-auto rounded border border-destructive/30 bg-destructive/10 px-2 py-2 text-[11px] text-destructive">
-                                  {command.stderr}
-                                </pre>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {latestCommandResult.payload.passed === false ? (
-                        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                          GitHub PR approval is blocked until every selected check passes. Review
-                          the failed command output, update the draft patch, then rerun the
-                          approval-gated checks.
-                        </div>
-                      ) : null}
-
-                      {readyForPrApproval ? (
-                        <div className="space-y-3 rounded-md border border-border bg-background px-3 py-3">
-                          <div>
-                            <div className="text-xs font-medium uppercase text-muted-foreground">
-                              PR approval review
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              This creates a new branch and pull request only. It does not push to
-                              the default branch or deploy.
-                            </p>
-                          </div>
-                          <ArtifactTrace artifact={latestCommandResult} />
-                          <label className="block text-xs">
-                            <span className="font-medium text-foreground">
-                              Type CREATE PR to enable approval
-                            </span>
-                            <input
-                              value={prConfirmationText}
-                              onChange={(event) => setPrConfirmationText(event.target.value)}
-                              className="mt-1 h-9 w-full rounded-md border border-border bg-card px-3 text-sm outline-none focus:border-primary"
-                              placeholder="CREATE PR"
+                      {latestGithubPrResult ? (
+                        <div className="mt-3 space-y-3">
+                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                            <Metric label="Status" value={latestGithubPrResult.status} />
+                            <Metric
+                              label="Branch"
+                              value={latestGithubPrResult.payload.branchName ?? "unknown"}
                             />
-                          </label>
-                          <button
-                            onClick={() => void requestGithubPrApproval(latestCommandResult.id)}
-                            disabled={
-                              requestingPrApprovalArtifactId === latestCommandResult.id ||
-                              prConfirmationText.trim() !== "CREATE PR"
-                            }
-                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                          >
-                            {requestingPrApprovalArtifactId === latestCommandResult.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
+                            <Metric
+                              label="Base"
+                              value={latestGithubPrResult.payload.baseBranch ?? "unknown"}
+                            />
+                            <Metric
+                              label="PR"
+                              value={
+                                latestGithubPrResult.payload.pullRequestNumber
+                                  ? `#${latestGithubPrResult.payload.pullRequestNumber}`
+                                  : "unknown"
+                              }
+                            />
+                          </div>
+                          {latestGithubPrResult.summary ? (
+                            <p className="text-sm text-foreground">
+                              {latestGithubPrResult.summary}
+                            </p>
+                          ) : null}
+                          {latestGithubPrResult.status === "failed" &&
+                          latestGithubPrResult.payload.error ? (
+                            <FailureNotice failure={latestGithubPrResult.payload.error} />
+                          ) : null}
+                          {latestGithubPrResult.payload.pullRequestUrl ? (
+                            <a
+                              href={latestGithubPrResult.payload.pullRequestUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-muted"
+                            >
                               <GitPullRequest className="h-3.5 w-3.5" />
-                            )}
-                            Request GitHub PR approval
-                          </button>
+                              Open pull request
+                            </a>
+                          ) : null}
+                          {latestGithubPrResult.payload.filesChanged?.length ? (
+                            <div className="text-xs text-muted-foreground">
+                              Files in PR: {latestGithubPrResult.payload.filesChanged.join(", ")}
+                            </div>
+                          ) : null}
+                          <ArtifactTrace artifact={latestGithubPrResult} />
+                          {latestGithubPrResult.payload.commitSha ? (
+                            <div className="text-xs text-muted-foreground">
+                              Commit: {latestGithubPrResult.payload.commitSha}
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
+                      ) : (
+                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                          No GitHub pull request yet. Run controlled checks, request GitHub PR
+                          approval, approve it, then create the PR.
+                        </p>
+                      )}
                     </div>
-                  ) : (
-                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No controlled checks yet. Request approval from a passed sandbox result,
-                      approve it, then run the checks.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="text-sm font-semibold">GitHub pull request</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    ORAX can create a new branch and pull request only after controlled checks pass
-                    and you explicitly approve the GitHub action. It never pushes directly to the
-                    default branch.
-                  </p>
-
-                  {latestGithubPrResult ? (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                        <Metric label="Status" value={latestGithubPrResult.status} />
-                        <Metric
-                          label="Branch"
-                          value={latestGithubPrResult.payload.branchName ?? "unknown"}
-                        />
-                        <Metric
-                          label="Base"
-                          value={latestGithubPrResult.payload.baseBranch ?? "unknown"}
-                        />
-                        <Metric
-                          label="PR"
-                          value={
-                            latestGithubPrResult.payload.pullRequestNumber
-                              ? `#${latestGithubPrResult.payload.pullRequestNumber}`
-                              : "unknown"
-                          }
-                        />
-                      </div>
-                      {latestGithubPrResult.summary ? (
-                        <p className="text-sm text-foreground">{latestGithubPrResult.summary}</p>
-                      ) : null}
-                      {latestGithubPrResult.status === "failed" &&
-                      latestGithubPrResult.payload.error ? (
-                        <FailureNotice failure={latestGithubPrResult.payload.error} />
-                      ) : null}
-                      {latestGithubPrResult.payload.pullRequestUrl ? (
-                        <a
-                          href={latestGithubPrResult.payload.pullRequestUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-muted"
-                        >
-                          <GitPullRequest className="h-3.5 w-3.5" />
-                          Open pull request
-                        </a>
-                      ) : null}
-                      {latestGithubPrResult.payload.filesChanged?.length ? (
-                        <div className="text-xs text-muted-foreground">
-                          Files in PR: {latestGithubPrResult.payload.filesChanged.join(", ")}
-                        </div>
-                      ) : null}
-                      <ArtifactTrace artifact={latestGithubPrResult} />
-                      {latestGithubPrResult.payload.commitSha ? (
-                        <div className="text-xs text-muted-foreground">
-                          Commit: {latestGithubPrResult.payload.commitSha}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No GitHub pull request yet. Run controlled checks, request GitHub PR approval,
-                      approve it, then create the PR.
-                    </p>
-                  )}
-                </div>
+                  </div>
+                </details>
               </div>
             ) : (
               <p className="mt-4 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">

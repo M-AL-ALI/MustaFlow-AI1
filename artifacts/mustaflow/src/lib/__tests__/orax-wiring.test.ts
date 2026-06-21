@@ -64,6 +64,9 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Thread status");
     expect(oraxPage).toContain("Pending approval");
     expect(oraxPage).toContain("Workflow controls");
+    expect(oraxPage).toContain("Advanced workflow controls");
+    expect(oraxPage).toContain("The task thread is the primary workspace");
+    expect(oraxPage).toContain("approval-gated details");
     expect(oraxPage).toContain("Task conversation");
     expect(oraxPage).toContain("latestAssistantSuggestions");
     expect(oraxPage).toContain("primaryThreadSuggestion");
