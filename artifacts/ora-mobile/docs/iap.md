@@ -1,7 +1,7 @@
 # In-App Purchases (iOS)
 
 This document describes how paid Ora plans are intended to work inside the
-MustaFlow AI mobile app. No purchase code ships in the app yet; this is the
+Ora mobile app. No purchase code ships in the app yet; this is the
 agreed approach so a future implementation stays consistent with the server.
 
 ## Why IAP is required

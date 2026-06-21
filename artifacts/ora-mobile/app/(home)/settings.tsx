@@ -172,7 +172,7 @@ export default function SettingsScreen() {
         <SectionCard
           icon={Moon}
           title="Appearance"
-          description="MustaFlow is designed for a focused dark experience."
+          description="Ora is designed for a focused dark experience."
         >
           <View
             style={{
@@ -295,7 +295,7 @@ export default function SettingsScreen() {
                 fontSize: 15,
               }}
             >
-              {user?.fullName || user?.username || "MustaFlow user"}
+              {user?.fullName || user?.username || "Ora user"}
             </Text>
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
               {user?.primaryEmailAddress?.emailAddress ?? ""}
@@ -325,7 +325,7 @@ export default function SettingsScreen() {
               paddingVertical: 12,
             }}
           >
-            <Text style={{ color: c.foreground, fontSize: 14 }}>MustaFlow AI</Text>
+            <Text style={{ color: c.foreground, fontSize: 14 }}>Ora</Text>
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{APP_VERSION_LABEL}</Text>
           </View>
         </SectionCard>

@@ -1,5 +1,5 @@
 /**
- * Shared types for the MustaFlow mobile client. These mirror the response
+ * Shared types for the Ora mobile client. These mirror the response
  * shapes of the EXISTING production API (artifacts/api-server) — they are not a
  * new contract. Keep field names in sync with the web Ora experience.
  */

@@ -4,7 +4,7 @@ import { Text, View } from "react-native";
 
 const logo = require("@/assets/logo.png");
 
-/** MustaFlow wordmark. Uses the brand logo asset with a text fallback. */
+/** Ora wordmark. Uses the brand logo asset with a text fallback. */
 export function Logo({
   size = 28,
   showWordmark = true,
@@ -31,7 +31,7 @@ export function Logo({
             letterSpacing: -0.4,
           }}
         >
-          MustaFlow
+          Ora
         </Text>
       )}
     </View>

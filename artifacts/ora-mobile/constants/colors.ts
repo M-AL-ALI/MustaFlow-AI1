@@ -1,5 +1,5 @@
 /**
- * Semantic design tokens for the MustaFlow mobile app.
+ * Semantic design tokens for the Ora mobile app.
  *
  * Mirrors the web artifact's dark palette (artifacts/mustaflow/src/index.css
  * `.dark` block) converted from HSL to hex, so both surfaces share a cohesive
