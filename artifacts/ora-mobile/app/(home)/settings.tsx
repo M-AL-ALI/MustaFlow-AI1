@@ -1,15 +1,46 @@
 import { useAuth, useUser } from "@clerk/expo";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { CreditCard, LogOut, Mic, Moon, User as UserIcon, Volume2 } from "lucide-react-native";
+import {
+  Activity,
+  CreditCard,
+  Info,
+  LogOut,
+  Mic,
+  Moon,
+  User as UserIcon,
+  Volume2,
+} from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button, Card, Pill } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { getPreferences, getSubscription, updatePreferences } from "@/lib/api";
-import type { BillingSubscription } from "@/lib/types";
+import { getOraUsage, getPreferences, getSubscription, updatePreferences } from "@/lib/api";
+import type { BillingSubscription, OraUsage } from "@/lib/types";
+
+const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
+const APP_BUILD =
+  Constants.expoConfig?.ios?.buildNumber ??
+  (Constants.expoConfig?.android?.versionCode != null
+    ? String(Constants.expoConfig.android.versionCode)
+    : null);
+const APP_VERSION_LABEL = APP_BUILD
+  ? `Version ${APP_VERSION} (${APP_BUILD})`
+  : `Version ${APP_VERSION}`;
+
+function formatReset(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "soon";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 const VOICE_LANGS: { code: string; label: string }[] = [
   { code: "en", label: "English" },
@@ -60,6 +91,29 @@ function SectionCard({
   );
 }
 
+function UsageRow({ label, used, limit }: { label: string; used: number; limit: number }) {
+  const c = useColors();
+  const unlimited = limit <= 0;
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: c.muted,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+      }}
+    >
+      <Text style={{ color: c.foreground, fontSize: 14 }}>{label}</Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+        {unlimited ? `${used} used` : `${used} / ${limit}`}
+      </Text>
+    </View>
+  );
+}
+
 export default function SettingsScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -70,6 +124,7 @@ export default function SettingsScreen() {
   const [voiceLang, setVoiceLangState] = useState("en");
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
+  const [usage, setUsage] = useState<OraUsage | null>(null);
 
   useEffect(() => {
     getPreferences()
@@ -80,6 +135,9 @@ export default function SettingsScreen() {
       .catch(() => {});
     getSubscription()
       .then(setSubscription)
+      .catch(() => {});
+    getOraUsage()
+      .then(setUsage)
       .catch(() => {});
   }, []);
 
@@ -207,6 +265,24 @@ export default function SettingsScreen() {
         </SectionCard>
 
         <SectionCard
+          icon={Activity}
+          title="Usage"
+          description="Your Ora activity in the current window."
+        >
+          {usage ? (
+            <View style={{ gap: 8 }}>
+              <UsageRow label="Messages" used={usage.messageCount} limit={usage.messageLimit} />
+              <UsageRow label="Images" used={usage.imageCount} limit={usage.imageLimit} />
+              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                {`Resets ${formatReset(usage.resetsAt)} · ${usage.windowHours}h window`}
+              </Text>
+            </View>
+          ) : (
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Usage unavailable.</Text>
+          )}
+        </SectionCard>
+
+        <SectionCard
           icon={UserIcon}
           title="Account"
           description="Your profile and sign-in details."
@@ -235,6 +311,23 @@ export default function SettingsScreen() {
             }}
             full
           />
+        </SectionCard>
+
+        <SectionCard icon={Info} title="About" description="App version and build.">
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: c.foreground, fontSize: 14 }}>MustaFlow AI</Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{APP_VERSION_LABEL}</Text>
+          </View>
         </SectionCard>
       </ScrollView>
     </View>

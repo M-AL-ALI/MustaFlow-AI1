@@ -3,93 +3,12 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, oraTranscriptsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { oraMessageSchema as messageSchema } from "@workspace/ora-contracts";
 
 const router = Router();
 
-const generatedFileSchema = z
-  .object({
-    fileName: z.string(),
-    fileData: z.string().optional(),
-    mimeType: z.string(),
-    format: z.string(),
-  })
-  .transform(({ fileData: _fileData, ...rest }) => rest);
-
-const datasetResultSchema = z
-  .object({
-    summary: z.string().optional(),
-    columnCount: z.number().optional(),
-    rowCount: z.number().optional(),
-    truncated: z.boolean().optional(),
-  })
-  .catchall(z.unknown())
-  .transform(({ summary, columnCount, rowCount, truncated }) => ({
-    summary,
-    columnCount,
-    rowCount,
-    truncated,
-  }));
-
-const sourceSchema = z.object({
-  title: z.string().max(500),
-  url: z.string().max(2000),
-});
-
-const imageSchema = z.object({
-  url: z.string().max(2000),
-  title: z.string().max(500).optional(),
-  source: z.string().max(2000).optional(),
-});
-
-const videoSchema = z.object({
-  url: z.string().max(2000),
-  title: z.string().max(500).optional(),
-  thumbnailUrl: z.string().max(2000).optional(),
-});
-
-const messageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string().max(32000),
-  datasetResult: datasetResultSchema.optional(),
-  messageKind: z.enum(["image-analysis", "document-analysis"]).optional(),
-  suggestions: z.array(z.string()).optional(),
-  generatedFile: generatedFileSchema.optional(),
-  hadAttachment: z.boolean().optional(),
-  // Mirror ora-conversations.ts: persist the upload's display metadata so the
-  // attachment chip survives reload (never the file bytes).
-  attachment: z
-    .object({
-      filename: z.string().max(300),
-      fileType: z.string().max(120),
-      isImage: z.boolean().optional(),
-      isDataset: z.boolean().optional(),
-    })
-    .optional(),
-  editedFrom: z.boolean().optional(),
-  // Mirror the conversation schema so the anonymous/legacy transcript store
-  // restores citations, inline images, and memory chips faithfully too.
-  sources: z.array(sourceSchema).max(20).optional(),
-  // Web-found media (real images shown inline, video link cards) — persisted so
-  // they survive reload, mirroring ora-conversations.ts.
-  images: z.array(imageSchema).max(8).optional(),
-  videos: z.array(videoSchema).max(6).optional(),
-  imageUrl: z.string().max(4000).optional(),
-  imageId: z.number().int().optional(),
-  editInstruction: z.string().max(2000).optional(),
-  memorySaveCandidate: z.string().max(400).optional(),
-  memorySaveCandidateConfidence: z.enum(["high", "low"]).optional(),
-  memorySaveCandidateSensitive: z.boolean().optional(),
-  memorySaved: z.boolean().optional(),
-  // Mirror ora-conversations.ts: titles of earlier memories this save replaced,
-  // persisted so the inline "Updated your memory" note survives reload.
-  memorySupersededTitles: z.array(z.string().max(200)).max(20).optional(),
-  // Mirror ora-conversations.ts: persist which saved memories shaped a reply so
-  // the "based on your saved memories" indicator survives reload.
-  memoriesUsed: z
-    .array(z.object({ id: z.number().int(), title: z.string().max(200) }))
-    .max(30)
-    .optional(),
-});
+/* The canonical Ora message schema is shared via @workspace/ora-contracts so the
+ * transcript store stays byte-for-byte in sync with ora-conversations.ts. */
 
 const saveBodySchema = z.object({
   messages: z.array(messageSchema).max(100),

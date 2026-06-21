@@ -4,31 +4,46 @@
  * new contract. Keep field names in sync with the web Ora experience.
  */
 
-export type OraMode = "instant" | "deep";
-export type OraTier = "free" | "core" | "wave";
+// Canonical Ora wire types live in @workspace/ora-contracts (single source of
+// truth, shared with the API server). Imported type-only so the zod runtime is
+// never bundled by Metro.
+export type {
+  OraMode,
+  OraRole,
+  OraTier,
+  OraMessageKind,
+  FileFormat,
+  OraSource,
+  OraImage,
+  OraVideo,
+  OraMemoryUsed,
+  OraAttachmentMeta,
+  OraDatasetResult,
+  GeneratedFile,
+  OraMessageData,
+} from "@workspace/ora-contracts";
 
-export type OraRole = "user" | "assistant";
+import type {
+  OraImage,
+  OraMemoryUsed,
+  OraMessageData,
+  OraMode,
+  OraRole,
+  OraSource,
+  OraTier,
+  OraVideo,
+} from "@workspace/ora-contracts";
 
-export interface OraSource {
-  title: string;
-  url: string;
-}
-
-export interface OraGeneratedFile {
-  fileName: string;
-  fileData: string; // base64
-  mimeType: string;
-}
-
-export interface OraMessage {
+/**
+ * A chat message in the mobile thread. Extends the shared persisted message
+ * model (`OraMessageData`, identical to the web wire shape — sources, images,
+ * videos, suggestions, generatedFile, attachment, datasetResult, messageKind,
+ * inline image lineage, and the memory fields) with the ephemeral client-only
+ * fields the UI needs while a turn is in flight.
+ */
+export interface OraMessage extends OraMessageData {
   id: string;
-  role: OraRole;
-  content: string;
   createdAt?: string;
-  sources?: OraSource[];
-  imageUrl?: string;
-  imageId?: number;
-  file?: OraGeneratedFile;
   pending?: boolean;
   error?: boolean;
   /** True while this assistant message is still being streamed token-by-token. */
@@ -47,33 +62,15 @@ export interface OraMessage {
  */
 export interface StreamDonePayload {
   reply: string;
-  sources?: OraSource[];
-  fileName?: string;
-  fileData?: string;
-  mimeType?: string;
-  imageUrl?: string;
-  imageId?: number;
-  msgCount: number;
-  msgLimit: number;
-  imageCount?: number;
-  imageLimit?: number;
-  resetsAt?: string | null;
-  windowHours?: number;
-  isRealStreaming?: boolean;
-}
-
-/**
- * Payload carried by the SSE `done` event from /api/public-ai/chat/stream.
- * Mirrors the shape the backend stream-adapter emits.
- */
-export interface StreamDonePayload {
-  reply: string;
-  sources?: OraSource[];
-  fileName?: string;
-  fileData?: string;
-  mimeType?: string;
-  imageUrl?: string;
-  imageId?: number;
+  suggestions?: string[];
+  videos?: OraVideo[];
+  memorySaveCandidate?: string;
+  memorySaveCandidateConfidence?: "high" | "low";
+  memorySaveCandidateSensitive?: boolean;
+  memoriesUsed?: OraMemoryUsed[];
+  /** Updated rolling summary echoed so the client can advance its pointer. */
+  conversationSummary?: string;
+  mode?: OraMode;
   msgCount: number;
   msgLimit: number;
   imageCount?: number;
@@ -115,6 +112,13 @@ export interface ChatRequest {
   referenceSavedMemories: boolean;
   referenceChatHistory: boolean;
   /**
+   * When true, the server treats this turn as a temporary chat: it skips saved-
+   * memory recall, conversation summaries, and any persistence. The client must
+   * also force `referenceSavedMemories`/`referenceChatHistory` off and avoid
+   * calling the conversation persistence endpoints for the thread.
+   */
+  temporary?: boolean;
+  /**
    * Server-signed token from a `stream_failed` SSE error event. Present only
    * on the non-streaming /chat fallback after a streaming pre-increment that
    * failed before the first token. Absent means no pre-increment occurred and
@@ -126,6 +130,9 @@ export interface ChatRequest {
 export interface ChatResponse {
   reply: string;
   sources?: OraSource[];
+  images?: OraImage[];
+  videos?: OraVideo[];
+  suggestions?: string[];
   fileName?: string;
   fileData?: string;
   mimeType?: string;
@@ -134,11 +141,15 @@ export interface ChatResponse {
   memorySaveCandidate?: string;
   memorySaveCandidateConfidence?: "high" | "low";
   memorySaveCandidateSensitive?: boolean;
+  memoriesUsed?: OraMemoryUsed[];
+  conversationSummary?: string;
+  mode?: OraMode;
   msgCount?: number;
   msgLimit?: number;
   imageCount?: number;
   imageLimit?: number;
   resetsAt?: string | null;
+  windowHours?: number;
 }
 
 export interface UploadResponse {
@@ -169,6 +180,32 @@ export interface AnalysisResponse {
   msgLimit?: number;
   imageCount?: number;
   imageLimit?: number;
+  imageAnalysisCount?: number;
+  imageAnalysisLimit?: number;
+  resetsAt?: string | null;
+}
+
+/**
+ * Raw dataset-analysis result. The /dataset-analysis endpoint returns a
+ * structured `result` object (the AI output plus a dataset profile), NOT a
+ * plain `reply` like the image/file analysis endpoints.
+ */
+export interface DatasetAnalysisResult {
+  summary?: string;
+  datasetProfile?: {
+    rowCount?: number;
+    colCount?: number;
+    truncated?: boolean;
+    sheetName?: string;
+  };
+  truncated?: boolean;
+  [key: string]: unknown;
+}
+
+export interface DatasetAnalysisResponse {
+  result: DatasetAnalysisResult;
+  msgCount?: number;
+  msgLimit?: number;
 }
 
 export interface OraProfile {
@@ -208,6 +245,14 @@ export interface OraConversationDetail {
   title: string;
   projectId: number | null;
   messages: OraMessage[];
+}
+
+export interface OraProjectSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface OraAsset {

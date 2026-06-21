@@ -704,3 +704,22 @@ Enabled end-to-end subscription checkout in dev against the Stripe **test** conn
 3. On completion, Stripe fires `checkout.session.completed` to the webhook; the user's subscription flips to the purchased tier with `status=active` (Core → 1500 monthly credits / 3 concurrent builds; Wave → 4000 / 10). Verify via Billing page or `GET /api/billing/subscription`.
 
 Verified end-to-end for both tiers via real test subscriptions + delivered webhook events; test Stripe objects were canceled/deleted and the test-user DB row reset afterward.
+
+## Task #1459 — Ora Mobile parity rebuild (artifacts/ora-mobile)
+
+Rebuilt the Expo (SDK 54) Ora mobile app into a ChatGPT-style native mirror of the website Ora, on shared contracts, with zero backend duplication and Ora isolation preserved (never mentions/routes to the AI Builder). Parity means matching the website, not exceeding it. Mobile only passes flags (mode/temporary/reference) + projectId and consumes the existing `/api/ora` + `/api/public-ai` endpoints.
+
+### Work by phase
+
+- **T001 — Shared contracts:** created `lib/ora-contracts` (`@workspace/ora-contracts`): zod schemas (source of truth) + inferred TS types for the full Ora message contract, seeded from the verified server zod. Server `ora-conversations.ts` imports the canonical `messageSchema` from the lib (behavior-preserving); mobile `lib/types.ts` re-exports types from the lib; deduped `StreamDonePayload`.
+- **T002 — Full message model + rich rendering:** mobile `OraMessage` carries images/videos/suggestions/messageKind/datasetResult/attachment/memory fields; `components/ora/MessageExtras.tsx` renders source cards, media, suggestions, attachment chips, image lineage, and memory indicators with web parity. Hardening: SSRF-safe URL filter `lib/safe-url.ts` (`isSafeHttpUrl` with numeric-IPv4 canonicalization) applied at every untrusted URL sink; memory-save persistence round-trips via PUT messages.
+- **T003 — ChatGPT-style shell + actions + temporary chat:** composer Plus menu (camera/library/files + Instant/Deep Thinking tool rows); long-press per-message actions (copy/share/edit/read-aloud/save-as-file/regenerate); temporary-chat toggle that persists nothing and skips memory/history reference, with mid-send capture so a toggle cannot flip persistence of an in-flight turn.
+- **T004 — Projects + conversation scoping:** projects CRUD against `/api/ora/projects`; single `activeProjectId` scope model (no route tri-state); `ChatsDrawer` with Projects (expand split from select-scope) + Recent sections; vanished-active-project cleanup gated on a loaded-once ref.
+- **T005 — Upload/security, billing/usage, IAP doc, observability, a11y, branding:** upload limits + failure handling, native plan/usage surface, build/version metadata, accessibility labels/safe-area/offline handling, brand tokens.
+- **T006 — Move-to-project UX, tests, gates, review:**
+  - Implemented the deferred move-conversation-to-project flow, mirroring the website sidebar's per-conversation "Move to" menu: `lib/api.ts` `moveConversation(id, projectId)` → `PATCH /api/ora/conversations/:id { projectId }`; a `MoveConversationSheet` bottom sheet listing other projects + "Recent (no project)" when scoped; `handleMoveConversation` follows scope when the open chat is moved and refreshes lists. Server ownership validation remains authoritative (no new backend logic).
+  - Stood up a minimal node-env Vitest harness for `ora-mobile` scoped to `lib/**/*.test.ts` (no React Native imports) and added `lib/__tests__/safe-url.test.ts` (12 tests) covering the SSRF guard: schemes, localhost/private ranges, obfuscated numeric IPv4 (decimal/hex/octal/short/overflow), IPv6 loopback/ULA/link-local, `::ffff` mapped, userinfo `@` tricks, and trailing dots. Added a `test` script (`vitest run`).
+
+### Verification
+
+All gates green: `pnpm run typecheck` (incl. ora-mobile), `pnpm run format:check`, `pnpm run lint` (only pre-existing api-server warnings, 0 errors), `ora-mobile` safe-url Vitest 12/12, and the full api-server Vitest suite (1522 passed, 2 skipped) confirming no T001 server-import regression. Architect review: PASS, no blockers — confirmed true parity, no Ora-isolation or backend-duplication violations, and adequate security coverage.

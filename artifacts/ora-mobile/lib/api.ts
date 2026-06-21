@@ -5,14 +5,18 @@ import type {
   BillingSubscription,
   ChatRequest,
   ChatResponse,
+  DatasetAnalysisResponse,
   OraAssetsResponse,
   OraConversationDetail,
   OraConversationSummary,
   OraMemory,
+  OraMemoryUsed,
   OraMessage,
   OraProfile,
+  OraProjectSummary,
   OraSession,
   OraUsage,
+  OraVideo,
   OraxCapabilities,
   OraxRepository,
   OraxTask,
@@ -41,6 +45,18 @@ export class ApiRequestError extends Error {
   }
 }
 
+/**
+ * Raised when a request fails before any HTTP response arrives — React Native
+ * throws a TypeError ("Network request failed") when the device is offline or
+ * DNS fails. Callers can surface `message` directly to the user.
+ */
+export class NetworkError extends Error {
+  constructor(message = "You appear to be offline. Check your connection and try again.") {
+    super(message);
+    this.name = "NetworkError";
+  }
+}
+
 async function authHeaders(extra?: Record<string, string>): Promise<Headers> {
   const headers = new Headers(extra);
   const token = await getAuthToken();
@@ -52,6 +68,21 @@ async function authHeaders(extra?: Record<string, string>): Promise<Headers> {
 
 function url(path: string): string {
   return path.startsWith("http") ? path : `${API_BASE}${path}`;
+}
+
+/**
+ * fetch() that converts a pre-response network failure into a typed, friendly
+ * NetworkError. HTTP errors still resolve to a normal Response so callers can
+ * handle them via parseError(). Streaming uses its own fallback and does not
+ * go through here.
+ */
+async function fetchOrThrow(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    if (err instanceof NetworkError) throw err;
+    throw new NetworkError();
+  }
 }
 
 async function parseError(res: Response): Promise<never> {
@@ -81,7 +112,7 @@ async function parseError(res: Response): Promise<never> {
 
 async function jsonRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = await authHeaders(init.body ? { "Content-Type": "application/json" } : undefined);
-  const res = await fetch(url(path), {
+  const res = await fetchOrThrow(url(path), {
     ...init,
     headers: mergeHeaders(headers, init.headers),
     credentials: "include",
@@ -143,7 +174,20 @@ export function sendChat(req: ChatRequest): Promise<ChatResponse> {
  */
 export type StreamChatNativeResult =
   | null
-  | { ok: true; reply: string; msgCount?: number; msgLimit?: number; isRealStreaming?: boolean }
+  | {
+      ok: true;
+      reply: string;
+      msgCount?: number;
+      msgLimit?: number;
+      isRealStreaming?: boolean;
+      suggestions?: string[];
+      videos?: OraVideo[];
+      memorySaveCandidate?: string;
+      memorySaveCandidateConfidence?: "high" | "low";
+      memorySaveCandidateSensitive?: boolean;
+      memoriesUsed?: OraMemoryUsed[];
+      conversationSummary?: string;
+    }
   | { ok: false; firstToken: false; fallbackToken?: string }
   | { ok: false; firstToken: true; reply: string };
 
@@ -248,6 +292,13 @@ export async function streamChatNative(
     msgCount: donePayload.msgCount,
     msgLimit: donePayload.msgLimit,
     isRealStreaming: donePayload.isRealStreaming,
+    suggestions: donePayload.suggestions,
+    videos: donePayload.videos,
+    memorySaveCandidate: donePayload.memorySaveCandidate,
+    memorySaveCandidateConfidence: donePayload.memorySaveCandidateConfidence,
+    memorySaveCandidateSensitive: donePayload.memorySaveCandidateSensitive,
+    memoriesUsed: donePayload.memoriesUsed,
+    conversationSummary: donePayload.conversationSummary,
   };
 }
 
@@ -264,7 +315,7 @@ export async function uploadFile(file: {
     type: file.type,
   } as unknown as Blob);
   const headers = await authHeaders();
-  const res = await fetch(url("/api/public-ai/upload"), {
+  const res = await fetchOrThrow(url("/api/public-ai/upload"), {
     method: "POST",
     body: form,
     headers,
@@ -291,8 +342,8 @@ export function analyzeDataset(
   message: string,
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   language?: string,
-): Promise<AnalysisResponse> {
-  return jsonRequest<AnalysisResponse>("/api/public-ai/dataset-analysis", {
+): Promise<DatasetAnalysisResponse> {
+  return jsonRequest<DatasetAnalysisResponse>("/api/public-ai/dataset-analysis", {
     method: "POST",
     body: JSON.stringify({ fileRef, message, messages, language }),
   });
@@ -316,7 +367,7 @@ export async function transcribeAudio(uri: string, format: string, lang?: string
   const params = new URLSearchParams({ format });
   if (lang) params.set("lang", lang);
   const headers = await authHeaders({ "Content-Type": "application/octet-stream" });
-  const res = await fetch(url(`/api/public-ai/transcribe?${params.toString()}`), {
+  const res = await fetchOrThrow(url(`/api/public-ai/transcribe?${params.toString()}`), {
     method: "POST",
     body: bytes,
     headers,
@@ -334,7 +385,7 @@ export async function synthesizeSpeech(
   language?: string,
 ): Promise<string> {
   const headers = await authHeaders({ "Content-Type": "application/json" });
-  const res = await fetch(url("/api/public-ai/tts"), {
+  const res = await fetchOrThrow(url("/api/public-ai/tts"), {
     method: "POST",
     body: JSON.stringify({ text, voice, language }),
     headers,
@@ -385,6 +436,29 @@ export function createMemory(title: string, content: string): Promise<unknown> {
   });
 }
 
+/** Derive a short memory title from a fact (mirrors the web deriveTitle). */
+function deriveMemoryTitle(fact: string): string {
+  const firstLine = fact.split(/[.\n]/)[0]?.trim() || fact.trim();
+  return firstLine.length > 60 ? `${firstLine.slice(0, 57).trimEnd()}…` : firstLine;
+}
+
+/**
+ * Persist an Ora-detected memory candidate through the Ora endpoint
+ * (origin="ora") — never POST /api/knowledge, which would misfile the save into
+ * the AI Builder Knowledge Vault. Returns the titles of any earlier memories
+ * this save superseded so the chat can name exactly what changed. Throws on a
+ * non-2xx response so callers leave the candidate unsaved.
+ */
+export async function saveOraMemory(fact: string): Promise<string[]> {
+  const content = fact.trim();
+  if (!content) throw new Error("Cannot save an empty memory");
+  const data = await jsonRequest<{ superseded?: { title: string }[] }>("/api/ora/memories", {
+    method: "POST",
+    body: JSON.stringify({ title: deriveMemoryTitle(content), content }),
+  });
+  return (data.superseded ?? []).map((s) => s.title).filter((t) => t.trim().length > 0);
+}
+
 export function updateMemory(
   id: number,
   patch: Partial<Pick<OraMemory, "title" | "content" | "enabled">>,
@@ -432,6 +506,50 @@ export function saveConversationMessages(id: number, messages: OraMessage[]): Pr
 
 export function deleteConversation(id: number): Promise<unknown> {
   return jsonRequest(`/api/ora/conversations/${id}`, { method: "DELETE" });
+}
+
+// Move a conversation to a project (`projectId`) or back to standalone (`null`),
+// mirroring the website's per-conversation "Move to" menu. The server validates
+// project ownership. Backend: PATCH /api/ora/conversations/:id { projectId }.
+export function moveConversation(id: number, projectId: number | null): Promise<unknown> {
+  return jsonRequest(`/api/ora/conversations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ projectId }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Ora projects (auth required). Conversations scope to a project via
+// `projectId`; null = standalone ("Recent"). Deleting a project detaches its
+// conversations (they become standalone) — handled entirely server-side.
+// ---------------------------------------------------------------------------
+
+export async function listProjects(): Promise<OraProjectSummary[]> {
+  const data = await jsonRequest<{ projects: OraProjectSummary[] }>("/api/ora/projects");
+  return data.projects ?? [];
+}
+
+export async function createProject(
+  name: string,
+  description?: string,
+): Promise<OraProjectSummary> {
+  const data = await jsonRequest<{ project: OraProjectSummary }>("/api/ora/projects", {
+    method: "POST",
+    body: JSON.stringify(description ? { name, description } : { name }),
+  });
+  return data.project;
+}
+
+export async function renameProject(id: number, name: string): Promise<OraProjectSummary> {
+  const data = await jsonRequest<{ project: OraProjectSummary }>(`/api/ora/projects/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  return data.project;
+}
+
+export function deleteProject(id: number): Promise<unknown> {
+  return jsonRequest(`/api/ora/projects/${id}`, { method: "DELETE" });
 }
 
 export function getAssets(): Promise<OraAssetsResponse> {

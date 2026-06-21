@@ -76,6 +76,12 @@ describe("Ora conversation message persistence round-trip", () => {
           format: "csv",
         },
       },
+      {
+        role: "assistant",
+        content: "Updated your preference.",
+        memorySaved: true,
+        memorySupersededTitles: ["Prefers dark mode", "Lives in Portland"],
+      },
     ];
 
     const saved = await request(app)
@@ -86,7 +92,7 @@ describe("Ora conversation message persistence round-trip", () => {
     const fetched = await request(app).get(`/ora/conversations/${convId}`);
     expect(fetched.status).toBe(200);
     const stored = fetched.body.conversation.messages as Array<Record<string, unknown>>;
-    expect(stored).toHaveLength(5);
+    expect(stored).toHaveLength(6);
 
     // Web-search source cards survive.
     expect(stored[1].sources).toEqual([
@@ -111,5 +117,11 @@ describe("Ora conversation message persistence round-trip", () => {
     expect(gf.mimeType).toBe("text/csv");
     expect(gf.format).toBe("csv");
     expect(gf.fileData).toBeUndefined();
+
+    // A saved memory keeps its saved flag and the titles it superseded so the
+    // inline chip renders the right state after a reload (this is the exact
+    // round-trip the mobile saveOraMemory + persist path depends on).
+    expect(stored[5].memorySaved).toBe(true);
+    expect(stored[5].memorySupersededTitles).toEqual(["Prefers dark mode", "Lives in Portland"]);
   });
 });

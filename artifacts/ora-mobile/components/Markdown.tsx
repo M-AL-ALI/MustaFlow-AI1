@@ -6,11 +6,7 @@ import { Text } from "react-native";
 import MarkdownDisplay, { type ASTNode } from "react-native-markdown-display";
 
 import { useColors } from "@/hooks/useColors";
-
-/** Only public http(s) links may be opened or copied. */
-function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
+import { isSafeHttpUrl } from "@/lib/safe-url";
 
 /**
  * Auto-link bare URLs and unwrap backtick-wrapped URLs so plain URLs in an Ora
@@ -24,7 +20,7 @@ function isHttpUrl(url: string): boolean {
  */
 function linkifyMarkdown(src: string): string {
   // 1. Unwrap inline-code-wrapped URLs.
-  let out = src.replace(/`(https?:\/\/[^\s`]+)`/gi, "$1");
+  const out = src.replace(/`(https?:\/\/[^\s`]+)`/gi, "$1");
 
   // 2. Auto-link bare URLs in the gaps between protected spans.
   const protect = /(\[[^\]]*\]\([^)]*\))|(<https?:\/\/[^>]+>)|(```[\s\S]*?```)|(`[^`]*`)/g;
@@ -132,7 +128,7 @@ export function Markdown({ children }: { children: string }) {
   const rules = {
     link: (node: ASTNode, children: React.ReactNode) => {
       const href = (node.attributes?.href as string) ?? "";
-      const safe = isHttpUrl(href);
+      const safe = isSafeHttpUrl(href);
       return (
         <Text key={node.key}>
           <Text
@@ -161,7 +157,7 @@ export function Markdown({ children }: { children: string }) {
       style={styles as never}
       rules={rules}
       onLinkPress={(url: string) => {
-        if (isHttpUrl(url)) {
+        if (isSafeHttpUrl(url)) {
           void WebBrowser.openBrowserAsync(url);
         }
         return false;

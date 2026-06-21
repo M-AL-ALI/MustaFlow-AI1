@@ -18,6 +18,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { logError } from "@/lib/log";
 
 // Point the generated API client at the existing production API server.
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -68,7 +69,9 @@ export default function RootLayout() {
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache} proxyUrl={proxyUrl}>
       <ClerkLoaded>
         <SafeAreaProvider>
-          <ErrorBoundary>
+          <ErrorBoundary
+            onError={(error) => logError("error-boundary", "Unhandled render error", error)}
+          >
             <QueryClientProvider client={queryClient}>
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <KeyboardProvider>

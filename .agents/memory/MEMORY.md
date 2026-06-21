@@ -10,6 +10,8 @@
 - [Ora streaming per-word fade-in](ora-streaming-word-fade.md) — FadeText word spans keyed by INDEX (never content) + one-shot CSS mount anim, animate only the last streaming block; preserves no-jitter invariant.
 - [Prettier function signature collapsing](prettier-function-sig-collapse.md) — Prettier (printWidth:100) collapses multi-line TS function signatures to one line if they fit; writing multi-line when single-line fits fails format:check. Use prettier --write to auto-fix, then read the diff to understand what changed.
 - [Ora chat/upload API contract](ora-api-contract.md) — chat requires `message` (required, current turn) + `messages` (history); response field is `reply` not `content`; file/image-analysis require a UUID ref from /upload first, not inline data; session-create is rate-limited 10/day.
+- [Ora shared contracts lib](ora-contracts-shared-lib.md) — Ora wire schema/types live in @workspace/ora-contracts; mobile imports TYPE-ONLY (Metro can't bundle workspace src).
+- [RN SSRF URL guard](rn-url-ssrf-guard.md) — porting a web URL host guard to RN needs manual numeric-IPv4 canonicalization or obfuscated forms bypass it; gate all URL sinks.
 - [Ora isolation rule](ora-isolation-rule.md) — permanent: Ora has zero AI Builder relationship; enforced by ora-isolation.test.ts (11 tests); never reintroduce handoffCta/builder_handoff/MustaFlow Builder.
 - [Anthropic max_tokens truncation](anthropic-max-tokens.md) — callAnthropic defaults cap haiku at 8192 and sonnet/opus at 16000; exceeding model limits causes 400s that trip the circuit breaker.
 - [Anthropic assistant prefill rejection](anthropic-assistant-prefill.md) — Anthropic rejects calls where conversationHistory ends with role:"assistant"; need a bridge user message.
@@ -107,3 +109,4 @@
 - [detectOraExpertiseDomain topic short-circuit](expertise-domain-topic-shortcircuit.md) — topic "technical"/"mobile" forces software_engineering before content/header patterns; pass "general" for upload/dataset domain framing. ".csv" filename → data_analysis; xlsx is header-driven.
 - [Ora response-quality runtime lever](ora-response-quality-runtime-lever.md) — runtime answer quality = ORA_SYSTEM_PROMPT + expertise systemAddendum; evaluateOraResponseQuality is TEST-ONLY, never wire it into a regen loop.
 - [EAS iOS non-interactive credential setup](eas-ios-noninteractive-creds.md) — full GraphQL flow required before `--non-interactive` builds; env vars alone are insufficient.
+- [Main-agent pnpm install husky guard](main-agent-pnpm-husky-guard.md) — `pnpm add`/`install` runs `prepare:husky` → git-config write trips the destructive-git guard (can leave a stale `.git/config.lock` you can't rm); run with `HUSKY=0` to skip.

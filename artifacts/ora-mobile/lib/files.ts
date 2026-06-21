@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 import { Linking, Platform } from "react-native";
 
 import { API_BASE } from "./api";
-import type { OraAsset, OraGeneratedFile } from "./types";
+import type { GeneratedFile, OraAsset } from "./types";
 
 export type SaveOutcome = "image-saved" | "shared" | "opened";
 
@@ -13,6 +13,29 @@ export class FileSaveError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FileSaveError";
+  }
+}
+
+/**
+ * Mirrors the server's multer upload cap (10 MB). This is a client-side UX
+ * precheck only; `/api/public-ai/upload` remains the authoritative limit and
+ * still returns 413 if a larger file slips through.
+ */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Best-effort byte size for a local file URI. Prefers a picker-provided size
+ * (DocumentPicker `size` / ImagePicker `fileSize`) and falls back to a
+ * filesystem stat, which is needed for camera captures where the picker omits
+ * it. Returns null when the size genuinely cannot be determined.
+ */
+export async function getLocalFileSize(uri: string, known?: number | null): Promise<number | null> {
+  if (typeof known === "number" && known > 0) return known;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists ? info.size : null;
+  } catch {
+    return null;
   }
 }
 
@@ -53,7 +76,15 @@ async function shareFile(fileUri: string, mimeType?: string): Promise<void> {
  * Images are saved to the photo library; documents open the native share sheet.
  * On web, the bytes are opened in a new tab as a data URI.
  */
-export async function saveGeneratedFile(file: OraGeneratedFile): Promise<SaveOutcome> {
+export async function saveGeneratedFile(file: GeneratedFile): Promise<SaveOutcome> {
+  // Persisted/reloaded messages drop the base64 bytes (only metadata survives),
+  // so a download from history is impossible — guide the user to regenerate.
+  if (!file.fileData) {
+    throw new FileSaveError(
+      "These file contents are no longer available. Regenerate it to download.",
+    );
+  }
+
   if (Platform.OS === "web") {
     await Linking.openURL(`data:${file.mimeType};base64,${file.fileData}`);
     return "opened";
@@ -69,6 +100,29 @@ export async function saveGeneratedFile(file: OraGeneratedFile): Promise<SaveOut
     return "image-saved";
   }
   await shareFile(fileUri, file.mimeType);
+  return "shared";
+}
+
+/**
+ * Save an arbitrary text reply (e.g. an assistant message) as a file. The bytes
+ * are written as UTF-8 and handed to the native share sheet so the user can save
+ * to Files, Notes, etc. On web the text is opened in a new tab as a data URI.
+ */
+export async function saveTextAsFile(
+  text: string,
+  fileName: string,
+  mimeType = "text/markdown",
+): Promise<SaveOutcome> {
+  if (Platform.OS === "web") {
+    await Linking.openURL(`data:${mimeType};charset=utf-8,${encodeURIComponent(text)}`);
+    return "opened";
+  }
+
+  const fileUri = cacheUri(fileName);
+  await FileSystem.writeAsStringAsync(fileUri, text, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
+  await shareFile(fileUri, mimeType);
   return "shared";
 }
 

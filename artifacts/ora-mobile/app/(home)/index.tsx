@@ -18,19 +18,32 @@ import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
 import {
   ArrowUp,
+  Camera,
+  Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   FileText,
+  Folder,
+  FolderInput,
+  FolderOpen,
+  FolderPlus,
   Gauge,
+  Ghost,
   History,
   Image as ImageIcon,
+  Images,
+  MessageSquare,
   Mic,
-  Paperclip,
+  Pencil,
   PhoneCall,
   Plus,
+  RefreshCw,
   Share2,
   Sparkles,
   Square,
+  Trash2,
   Volume2,
   VolumeX,
   X,
@@ -46,6 +59,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   Text,
   TextInput,
   View,
@@ -53,21 +67,38 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Markdown } from "@/components/Markdown";
+import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { EmptyState, Pill } from "@/components/ui";
+import { EmptyState } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { saveGeneratedFile, saveImageFromUrl } from "@/lib/files";
+import {
+  getLocalFileSize,
+  MAX_UPLOAD_BYTES,
+  saveGeneratedFile,
+  saveImageFromUrl,
+  saveTextAsFile,
+} from "@/lib/files";
+import { logError } from "@/lib/log";
+import { isSafeHttpUrl } from "@/lib/safe-url";
 import {
   analyzeDataset,
   analyzeDocument,
   analyzeImage,
+  ApiRequestError,
   createConversation,
+  createProject,
   deleteConversation,
+  deleteProject,
   getConversation,
   getOraSession,
   getPreferences,
   listConversations,
+  listProjects,
+  moveConversation,
+  NetworkError,
+  renameProject,
   saveConversationMessages,
+  saveOraMemory,
   sendChat,
   streamChatNative,
   synthesizeSpeech,
@@ -76,9 +107,14 @@ import {
 } from "@/lib/api";
 import type {
   Attachment,
+  ChatRequest,
+  ChatResponse,
+  FileFormat,
+  GeneratedFile,
   OraConversationSummary,
   OraMessage,
   OraMode,
+  OraProjectSummary,
   OraSession,
 } from "@/lib/types";
 
@@ -119,6 +155,52 @@ function isImageFile(mimeType?: string): boolean {
   return !!mimeType && mimeType.toLowerCase().startsWith("image/");
 }
 
+/**
+ * Classify a generated file into one of the supported document formats so the
+ * download card can show the right affordance. Server replies omit the format,
+ * so we infer it from the filename extension first, then the MIME type.
+ */
+function detectFileFormat(fileName: string, mimeType: string): FileFormat {
+  const ext = fileName.toLowerCase().split(".").pop() ?? "";
+  if (ext === "csv" || ext === "xlsx" || ext === "docx" || ext === "pdf" || ext === "pptx") {
+    return ext;
+  }
+  const mt = mimeType.toLowerCase();
+  if (mt.includes("csv")) return "csv";
+  if (mt.includes("spreadsheet") || mt.includes("excel")) return "xlsx";
+  if (mt.includes("wordprocessing") || mt.includes("msword")) return "docx";
+  if (mt.includes("presentation") || mt.includes("powerpoint")) return "pptx";
+  return "pdf";
+}
+
+/** Build a downloadable generated-file payload only when bytes are present. */
+function buildGeneratedFile(res: ChatResponse): GeneratedFile | undefined {
+  if (!res.fileName || !res.fileData || !res.mimeType) return undefined;
+  return {
+    fileName: res.fileName,
+    fileData: res.fileData,
+    mimeType: res.mimeType,
+    format: detectFileFormat(res.fileName, res.mimeType),
+  };
+}
+
+/** Map the rich metadata from a (non-streamed) /chat reply onto a message. */
+function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
+  return {
+    sources: res.sources,
+    images: res.images,
+    videos: res.videos,
+    suggestions: res.suggestions,
+    imageUrl: res.imageUrl,
+    imageId: res.imageId,
+    memorySaveCandidate: res.memorySaveCandidate,
+    memorySaveCandidateConfidence: res.memorySaveCandidateConfidence,
+    memorySaveCandidateSensitive: res.memorySaveCandidateSensitive,
+    memoriesUsed: res.memoriesUsed,
+    generatedFile: buildGeneratedFile(res),
+  };
+}
+
 export default function OraChatScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -135,6 +217,25 @@ export default function OraChatScreen() {
   const [showConversations, setShowConversations] = useState(false);
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  const [projects, setProjects] = useState<OraProjectSummary[]>([]);
+  // The project new chats are filed under. null = standalone ("Recent"). This
+  // single state is the source of truth for scope; new conversations created by
+  // persist() inherit it via activeProjectIdRef. No route-derived tri-state.
+  const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
+  const activeProjectIdRef = useRef<number | null>(null);
+  activeProjectIdRef.current = activeProjectId;
+  // True once the project list has loaded at least once, so the "active project
+  // vanished" cleanup effect below does not fire during the initial empty state.
+  const projectsLoadedRef = useRef(false);
+  // Project create/rename editor. editingProject=null means "create new".
+  const [projectEditorOpen, setProjectEditorOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<OraProjectSummary | null>(null);
+  const [moveTarget, setMoveTarget] = useState<OraConversationSummary | null>(null);
+  const [temporary, setTemporary] = useState(false);
+  const temporaryRef = useRef(false);
+  temporaryRef.current = temporary;
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [actionsMessage, setActionsMessage] = useState<OraMessage | null>(null);
 
   const [voiceLang, setVoiceLang] = useState("en");
   const [autoReadReplies, setAutoReadReplies] = useState(false);
@@ -178,7 +279,29 @@ export default function OraChatScreen() {
       .then(setSession)
       .catch(() => setSession(null));
     loadPreferences();
+    // Preload projects so the active-scope banner can resolve a project's name
+    // even before the chats drawer is opened.
+    listProjects()
+      .then((p) => {
+        projectsLoadedRef.current = true;
+        setProjects(p);
+      })
+      .catch(() => {});
   }, [loadPreferences]);
+
+  // Drop back to standalone if the active project no longer exists (deleted here
+  // or externally) once the project list has actually loaded, so a new chat never
+  // POSTs a dangling projectId that the server would reject (and persist() would
+  // then silently drop).
+  useEffect(() => {
+    if (
+      projectsLoadedRef.current &&
+      activeProjectId != null &&
+      !projects.some((p) => p.id === activeProjectId)
+    ) {
+      setActiveProjectId(null);
+    }
+  }, [projects, activeProjectId]);
 
   // Re-read preferences whenever the chat screen regains focus so changes made
   // in Settings (e.g. "Read replies aloud", voice language) apply immediately
@@ -261,12 +384,17 @@ export default function OraChatScreen() {
   }, []);
 
   const persist = useCallback(
-    async (msgs: OraMessage[]) => {
+    async (msgs: OraMessage[], temporaryOverride?: boolean) => {
+      // Temporary chats are never written to the conversation store. A turn
+      // passes its captured temporary state so a mid-flight toggle can't flip
+      // whether an already-started send gets persisted.
+      if ((temporaryOverride ?? temporaryRef.current) === true) return;
       try {
         let convId = conversationId;
         if (!convId) {
           const title = msgs.find((m) => m.role === "user")?.content.slice(0, 60) || "New chat";
-          const created = await createConversation(title, null);
+          // Scope new chats to the active project (null = standalone/"Recent").
+          const created = await createConversation(title, activeProjectIdRef.current);
           convId = created.conversation.id;
           setConversationId(convId);
         }
@@ -279,15 +407,34 @@ export default function OraChatScreen() {
   );
 
   const sendMessage = useCallback(
-    async (text: string, attch: Attachment | null) => {
+    async (text: string, attch: Attachment | null, opts?: { truncateTo?: number }) => {
       if ((!text && !attch) || sending) return;
+
+      // Capture this turn's temporary state so a toggle mid-send can't change
+      // whether the resulting transcript is persisted.
+      const turnIsTemporary = temporary;
 
       // Abort any previous in-flight stream before starting a new one.
       streamAbortRef.current?.abort();
       const abortController = new AbortController();
       streamAbortRef.current = abortController;
 
-      const userMsg: OraMessage = { id: uid(), role: "user", content: text };
+      const userMsg: OraMessage = {
+        id: uid(),
+        role: "user",
+        content: text,
+        ...(attch
+          ? {
+              hadAttachment: true,
+              attachment: {
+                filename: attch.filename,
+                fileType: attch.fileType,
+                isImage: attch.kind === "image",
+                isDataset: attch.kind === "dataset",
+              },
+            }
+          : {}),
+      };
       const pendingId = uid();
       const pendingMsg: OraMessage = {
         id: pendingId,
@@ -295,12 +442,15 @@ export default function OraChatScreen() {
         content: "",
         pending: true,
       };
-      const history = messages
+      // For regenerate, truncate to just before the retried message so history
+      // excludes the stale assistant turn and the re-sent user message.
+      const base = opts?.truncateTo !== undefined ? messages.slice(0, opts.truncateTo) : messages;
+      const history = base
         .filter((m) => !m.pending && !m.error)
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const next = [...messages, userMsg, pendingMsg];
+      const next = [...base, userMsg, pendingMsg];
       setMessages(next);
       setSending(true);
       scrollToEnd();
@@ -311,23 +461,52 @@ export default function OraChatScreen() {
         if (attch) {
           // Attachment analysis — no streaming on these specialized endpoints.
           const prompt = text || "Please analyze this attachment.";
-          let reply: string;
           if (attch.kind === "image") {
-            reply = (await analyzeImage(attch.ref, prompt, history)).reply;
+            const res = await analyzeImage(attch.ref, prompt, history);
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: res.reply,
+              messageKind: "image-analysis",
+            };
           } else if (attch.kind === "dataset") {
-            reply = (await analyzeDataset(attch.ref, prompt, history)).reply;
+            const { result } = await analyzeDataset(attch.ref, prompt, history);
+            const profile = result.datasetProfile;
+            const summary =
+              typeof result.summary === "string" && result.summary.trim()
+                ? result.summary
+                : "Here is what I found in your dataset.";
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: summary,
+              datasetResult: {
+                summary,
+                rowCount: profile?.rowCount,
+                columnCount: profile?.colCount,
+                truncated: result.truncated ?? profile?.truncated,
+              },
+            };
           } else {
-            reply = (await analyzeDocument(attch.ref, prompt, history)).reply;
+            const res = await analyzeDocument(attch.ref, prompt, history);
+            assistant = {
+              id: pendingId,
+              role: "assistant",
+              content: res.reply,
+              messageKind: "document-analysis",
+            };
           }
-          assistant = { id: pendingId, role: "assistant", content: reply };
         } else {
           // Plain chat — attempt SSE streaming first.
-          const chatReq = {
+          // Temporary chats force both reference flags off and flag the turn as
+          // temporary so the server skips memory recall, summaries, and saves.
+          const chatReq: ChatRequest = {
             message: text,
             messages: history,
             mode,
-            referenceSavedMemories: true as const,
-            referenceChatHistory: true as const,
+            referenceSavedMemories: !temporary,
+            referenceChatHistory: !temporary,
+            temporary,
           };
 
           // Try streaming first; fall back to regular sendChat when unavailable.
@@ -353,19 +532,8 @@ export default function OraChatScreen() {
               id: pendingId,
               role: "assistant",
               content: res.reply,
-              sources: res.sources,
-              imageUrl: res.imageUrl,
-              imageId: res.imageId,
               viaFallback: true,
-              ...(res.fileName && res.fileData && res.mimeType
-                ? {
-                    file: {
-                      fileName: res.fileName,
-                      fileData: res.fileData,
-                      mimeType: res.mimeType,
-                    },
-                  }
-                : {}),
+              ...buildChatExtras(res),
             };
             if (res.msgCount != null && res.msgLimit != null) {
               setSession((s) =>
@@ -374,11 +542,19 @@ export default function OraChatScreen() {
             }
           } else if (streamResult.ok) {
             // Streaming succeeded — apply final metadata from the done payload.
+            // The conversational stream carries suggestions/videos/memory only
+            // (never sources/images/files — those come from the /chat path).
             assistant = {
               id: pendingId,
               role: "assistant",
               content: streamResult.reply || streamedContent,
               isStreaming: false,
+              suggestions: streamResult.suggestions,
+              videos: streamResult.videos,
+              memorySaveCandidate: streamResult.memorySaveCandidate,
+              memorySaveCandidateConfidence: streamResult.memorySaveCandidateConfidence,
+              memorySaveCandidateSensitive: streamResult.memorySaveCandidateSensitive,
+              memoriesUsed: streamResult.memoriesUsed,
               ...(streamResult.isRealStreaming === false ? { viaFallback: true } : {}),
             };
             if (streamResult.msgCount != null && streamResult.msgLimit != null) {
@@ -402,14 +578,8 @@ export default function OraChatScreen() {
               id: pendingId,
               role: "assistant",
               content: res.reply,
-              sources: res.sources,
-              imageUrl: res.imageUrl,
-              imageId: res.imageId,
               viaFallback: true,
-              file:
-                res.fileName && res.fileData && res.mimeType
-                  ? { fileName: res.fileName, fileData: res.fileData, mimeType: res.mimeType }
-                  : undefined,
+              ...buildChatExtras(res),
             };
             if (res.msgCount != null && res.msgLimit != null) {
               setSession((s) =>
@@ -431,7 +601,7 @@ export default function OraChatScreen() {
         const finalMsgs = next.map((m) => (m.id === pendingId ? assistant : m));
         setMessages(finalMsgs);
         scrollToEnd();
-        void persist(finalMsgs);
+        void persist(finalMsgs, turnIsTemporary);
         // Auto-speak in Talk mode or when the user has enabled auto-read
         const shouldSpeakInTalkMode = talkModeRef.current && !talkModeMutedRef.current;
         const shouldSpeakForPreference = !talkModeRef.current && autoReadRef.current;
@@ -457,7 +627,7 @@ export default function OraChatScreen() {
         }
       }
     },
-    [sending, messages, mode, scrollToEnd, persist, scheduleTalkRestart],
+    [sending, messages, mode, temporary, scrollToEnd, persist, scheduleTalkRestart],
   );
 
   const handleSend = useCallback(async () => {
@@ -468,6 +638,95 @@ export default function OraChatScreen() {
     setAttachment(null);
     await sendMessage(text, attch);
   }, [input, attachment, sending, sendMessage]);
+
+  // Tapping a follow-up suggestion chip sends it as the next message.
+  const handleSuggestion = useCallback(
+    (text: string) => {
+      const clean = text.trim();
+      if (!clean || sending) return;
+      void sendMessage(clean, null);
+    },
+    [sending, sendMessage],
+  );
+
+  // Persist a memory-save candidate, then mark the message as saved in place.
+  // Mobile has no dedicated save-candidate endpoint, so saveOraMemory derives a
+  // short title (mirroring the web) and writes through the Ora memories API,
+  // returning the titles of any earlier memories this fact superseded so the
+  // chip can name exactly what changed. The updated transcript is persisted
+  // immediately so the saved/superseded state survives a reload.
+  const handleSaveMemory = useCallback(
+    async (message: OraMessage) => {
+      // Never write memory from a temporary chat.
+      if (temporaryRef.current) return;
+      const fact = message.memorySaveCandidate?.trim();
+      if (!fact) return;
+      const supersededTitles = await saveOraMemory(fact);
+      const next = messages.map((m) =>
+        m.id === message.id
+          ? {
+              ...m,
+              memorySaved: true,
+              memorySaveCandidate: undefined,
+              memorySupersededTitles: supersededTitles,
+            }
+          : m,
+      );
+      setMessages(next);
+      void persist(next);
+    },
+    [messages, persist],
+  );
+
+  // Regenerate the assistant reply for the user turn that produced `message`.
+  const handleRegenerate = useCallback(
+    (message: OraMessage) => {
+      if (sending) return;
+      const idx = messages.findIndex((m) => m.id === message.id);
+      if (idx < 0) return;
+      let userIdx = -1;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          userIdx = i;
+          break;
+        }
+      }
+      if (userIdx < 0) return;
+      // Regenerate replays the user turn as plain text; it cannot reconstruct an
+      // attachment, so skip turns whose source message carried one.
+      const sourceUser = messages[userIdx];
+      if (sourceUser.attachment || sourceUser.hadAttachment || !sourceUser.content.trim()) return;
+      void sendMessage(sourceUser.content, null, { truncateTo: userIdx });
+    },
+    [messages, sending, sendMessage],
+  );
+
+  // Repopulate the composer with a user message for quick editing/resending.
+  const handleEditMessage = useCallback((message: OraMessage) => {
+    setInput(message.content);
+  }, []);
+
+  // Share a message's text via the native share sheet.
+  const handleShareMessage = useCallback(async (message: OraMessage) => {
+    const content = message.content.trim();
+    if (!content) return;
+    try {
+      await Share.share({ message: content });
+    } catch {
+      /* dismissed or unavailable */
+    }
+  }, []);
+
+  // Save a message's text as a Markdown file via the native share sheet.
+  const handleSaveMessageFile = useCallback(async (message: OraMessage) => {
+    const content = message.content.trim();
+    if (!content) return;
+    try {
+      await saveTextAsFile(content, "ora-reply.md", "text/markdown");
+    } catch (err) {
+      Alert.alert("Couldn't save", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
 
   const startRecording = useCallback(async () => {
     if (recording || transcribing) return;
@@ -584,9 +843,21 @@ export default function OraChatScreen() {
   }, []);
 
   const doUpload = useCallback(
-    async (file: { uri: string; name: string; type: string }, isImage: boolean) => {
+    async (
+      file: { uri: string; name: string; type: string; size?: number | null },
+      isImage: boolean,
+    ) => {
       setUploading(true);
       try {
+        const size = await getLocalFileSize(file.uri, file.size);
+        if (size !== null && size > MAX_UPLOAD_BYTES) {
+          setAttachment(null);
+          Alert.alert(
+            "File too large",
+            "Files must be 10 MB or smaller. Please choose a smaller file.",
+          );
+          return;
+        }
         const res = await uploadFile({ uri: file.uri, name: file.name, type: file.type });
         const ref = res.imageRef ?? res.fileRef;
         if (!ref) throw new Error("Upload failed");
@@ -596,6 +867,14 @@ export default function OraChatScreen() {
           filename: res.filename ?? file.name,
           fileType: res.fileType,
         });
+      } catch (err) {
+        setAttachment(null);
+        logError("upload", "File upload failed", err, { isImage });
+        const message =
+          err instanceof ApiRequestError || err instanceof NetworkError
+            ? err.message
+            : "Could not upload that file. Please try again.";
+        Alert.alert("Upload failed", message);
       } finally {
         setUploading(false);
       }
@@ -604,86 +883,94 @@ export default function OraChatScreen() {
   );
 
   const handleCameraCapture = useCallback(async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Camera access is required to take photos.");
-      return;
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Camera access is required to take photos.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      await doUpload(
+        {
+          uri: asset.uri,
+          name: asset.fileName ?? `photo_${Date.now()}.jpg`,
+          type: asset.mimeType ?? "image/jpeg",
+          size: asset.fileSize ?? null,
+        },
+        true,
+      );
+    } catch (err) {
+      logError("upload", "Camera capture failed", err);
+      Alert.alert("Camera unavailable", "Could not open the camera. Please try again.");
     }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    await doUpload(
-      {
-        uri: asset.uri,
-        name: asset.fileName ?? `photo_${Date.now()}.jpg`,
-        type: asset.mimeType ?? "image/jpeg",
-      },
-      true,
-    );
   }, [doUpload]);
 
   const handleGalleryPick = useCallback(async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Photo library access is required to choose photos.");
-      return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Photo library access is required to choose photos.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      await doUpload(
+        {
+          uri: asset.uri,
+          name: asset.fileName ?? `image_${Date.now()}.jpg`,
+          type: asset.mimeType ?? "image/jpeg",
+          size: asset.fileSize ?? null,
+        },
+        true,
+      );
+    } catch (err) {
+      logError("upload", "Gallery pick failed", err);
+      Alert.alert(
+        "Photo library unavailable",
+        "Could not open your photo library. Please try again.",
+      );
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    await doUpload(
-      {
-        uri: asset.uri,
-        name: asset.fileName ?? `image_${Date.now()}.jpg`,
-        type: asset.mimeType ?? "image/jpeg",
-      },
-      true,
-    );
   }, [doUpload]);
 
-  const handleAttach = useCallback(() => {
-    Alert.alert("Attach", "Choose a source", [
-      { text: "Take Photo", onPress: () => void handleCameraCapture() },
-      { text: "Photo Library", onPress: () => void handleGalleryPick() },
+  const handleBrowseFiles = useCallback(async () => {
+    let picked: DocumentPicker.DocumentPickerResult;
+    try {
+      picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "image/*",
+          "application/pdf",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "text/csv",
+          "text/plain",
+        ],
+        copyToCacheDirectory: true,
+      });
+    } catch (err) {
+      logError("upload", "Document picker failed", err);
+      Alert.alert("Upload failed", "Could not open the file picker. Please try again.");
+      return;
+    }
+    if (picked.canceled || !picked.assets?.[0]) return;
+    const file = picked.assets[0];
+    const isImage = (file.mimeType ?? "").startsWith("image/");
+    await doUpload(
       {
-        text: "Browse Files",
-        onPress: () =>
-          void (async () => {
-            try {
-              const picked = await DocumentPicker.getDocumentAsync({
-                type: [
-                  "image/*",
-                  "application/pdf",
-                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                  "text/csv",
-                  "text/plain",
-                ],
-                copyToCacheDirectory: true,
-              });
-              if (picked.canceled || !picked.assets?.[0]) return;
-              const file = picked.assets[0];
-              const isImage = (file.mimeType ?? "").startsWith("image/");
-              await doUpload(
-                {
-                  uri: file.uri,
-                  name: file.name,
-                  type: file.mimeType ?? "application/octet-stream",
-                },
-                isImage,
-              );
-            } catch {
-              /* surfaced by absence of chip */
-            }
-          })(),
+        uri: file.uri,
+        name: file.name,
+        type: file.mimeType ?? "application/octet-stream",
+        size: file.size ?? null,
       },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }, [handleCameraCapture, handleGalleryPick, doUpload]);
+      isImage,
+    );
+  }, [doUpload]);
 
   const newChat = useCallback(() => {
     setMessages([]);
@@ -691,6 +978,18 @@ export default function OraChatScreen() {
     setAttachment(null);
     setInput("");
   }, []);
+
+  // Toggle temporary mode. Either direction starts a clean conversation so
+  // temporary and saved turns never mix in one thread (mirrors the website).
+  const toggleTemporary = useCallback(() => {
+    // Block toggling during an in-flight send to avoid clearing a live thread.
+    if (sending) return;
+    setTemporary((prev) => !prev);
+    setMessages([]);
+    setConversationId(null);
+    setAttachment(null);
+    setInput("");
+  }, [sending]);
 
   const toggleTalkMode = useCallback(() => {
     const next = !talkMode;
@@ -752,21 +1051,39 @@ export default function OraChatScreen() {
   const openConversations = useCallback(async () => {
     setShowConversations(true);
     setLoadingConversations(true);
-    try {
-      setConversations(await listConversations());
-    } catch {
-      setConversations([]);
-    } finally {
-      setLoadingConversations(false);
+    // Load conversations and projects independently so one failing endpoint
+    // does not blank the other list.
+    const [convs, projs] = await Promise.allSettled([listConversations(), listProjects()]);
+    setConversations(convs.status === "fulfilled" ? convs.value : []);
+    if (projs.status === "fulfilled") {
+      projectsLoadedRef.current = true;
+      setProjects(projs.value);
+    }
+    setLoadingConversations(false);
+  }, []);
+
+  // Refresh just the project + conversation lists (after create/rename/delete)
+  // without reopening or toggling the loading state.
+  const refreshChatLists = useCallback(async () => {
+    const [convs, projs] = await Promise.allSettled([listConversations(), listProjects()]);
+    if (convs.status === "fulfilled") setConversations(convs.value);
+    if (projs.status === "fulfilled") {
+      projectsLoadedRef.current = true;
+      setProjects(projs.value);
     }
   }, []);
 
   const loadConversation = useCallback(
     async (id: number) => {
       setShowConversations(false);
+      // Opening a saved conversation always exits temporary mode.
+      setTemporary(false);
       try {
         const detail = await getConversation(id);
         setConversationId(id);
+        // Follow the loaded chat's scope so a subsequent "new chat" stays in the
+        // same project (mirrors the website's route-as-source-of-truth).
+        setActiveProjectId(detail.projectId ?? null);
         setMessages(
           (detail.messages ?? []).map((m) => ({
             ...m,
@@ -794,9 +1111,114 @@ export default function OraChatScreen() {
     [conversationId, newChat],
   );
 
+  // Start a fresh chat scoped to a project (id) or standalone (null). Closes the
+  // drawer so the user lands on the composer with the new scope active.
+  const startChatInScope = useCallback(
+    (projectId: number | null) => {
+      setActiveProjectId(projectId);
+      setTemporary(false);
+      newChat();
+      setShowConversations(false);
+    },
+    [newChat],
+  );
+
+  // Select a project as the active scope without starting a chat or closing the
+  // drawer, so the user can then browse its chats or start a new one. Mirrors
+  // "entering" a project on the website (route becomes source of truth there).
+  const selectProjectScope = useCallback((projectId: number) => {
+    setActiveProjectId(projectId);
+  }, []);
+
+  const openCreateProject = useCallback(() => {
+    setEditingProject(null);
+    setProjectEditorOpen(true);
+  }, []);
+
+  const openRenameProject = useCallback((project: OraProjectSummary) => {
+    setEditingProject(project);
+    setProjectEditorOpen(true);
+  }, []);
+
+  // Save the project editor: rename when editing an existing project, otherwise
+  // create a new one and immediately make it the active scope for a new chat.
+  const handleSaveProject = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        if (editingProject) {
+          await renameProject(editingProject.id, trimmed);
+          await refreshChatLists();
+        } else {
+          const created = await createProject(trimmed);
+          await refreshChatLists();
+          startChatInScope(created.id);
+        }
+      } catch {
+        Alert.alert("Couldn't save project", "Please try again.");
+      } finally {
+        setProjectEditorOpen(false);
+        setEditingProject(null);
+      }
+    },
+    [editingProject, refreshChatLists, startChatInScope],
+  );
+
+  // Delete a project. The server detaches its conversations (they become
+  // standalone), so we only reset local scope and refresh the lists.
+  const handleDeleteProject = useCallback(
+    (project: OraProjectSummary) => {
+      Alert.alert(
+        "Delete project?",
+        `"${project.name}" will be removed. Its chats are kept and moved to Recent.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                try {
+                  await deleteProject(project.id);
+                  if (activeProjectIdRef.current === project.id) setActiveProjectId(null);
+                  await refreshChatLists();
+                } catch {
+                  Alert.alert("Couldn't delete project", "Please try again.");
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [refreshChatLists],
+  );
+
+  // Move a conversation to a project or back to standalone ("Recent"), mirroring
+  // the website's per-conversation "Move to" menu. If the active chat is moved,
+  // follow its new scope so a subsequent "new chat" stays consistent.
+  const handleMoveConversation = useCallback(
+    async (conversationToMoveId: number, projectId: number | null) => {
+      setMoveTarget(null);
+      try {
+        await moveConversation(conversationToMoveId, projectId);
+        if (conversationToMoveId === conversationId) setActiveProjectId(projectId);
+        await refreshChatLists();
+      } catch {
+        Alert.alert("Couldn't move chat", "Please try again.");
+      }
+    },
+    [conversationId, refreshChatLists],
+  );
+
   const usageText = session
     ? `${session.msgCount}/${session.msgLimit} messages${session.tier ? ` · ${session.tier}` : ""}`
     : "Loading…";
+
+  const activeProjectName = activeProjectId
+    ? (projects.find((p) => p.id === activeProjectId)?.name ?? "Project")
+    : null;
 
   const talkStatusTitle = sending
     ? "Ora is thinking"
@@ -820,6 +1242,27 @@ export default function OraChatScreen() {
             ? "Speak naturally - Ora answers when you pause"
             : "Tap the mic or wait for Ora to listen";
 
+  // The most recent settled assistant message is the only one eligible for the
+  // Regenerate action (mirrors ChatGPT, which only regenerates the last reply).
+  let lastAssistantId: string | null = null;
+  let lastAssistantRegenerable = false;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "assistant" && !m.pending && !m.isStreaming && !m.error) {
+      lastAssistantId = m.id;
+      // Regenerate replays the preceding user turn as plain text, so only allow
+      // it when that turn was text-only (no attachment to reconstruct).
+      for (let j = i - 1; j >= 0; j--) {
+        if (messages[j].role === "user") {
+          lastAssistantRegenerable =
+            !messages[j].attachment && !messages[j].hadAttachment && !!messages[j].content.trim();
+          break;
+        }
+      }
+      break;
+    }
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader
@@ -827,6 +1270,15 @@ export default function OraChatScreen() {
         subtitle={usageText}
         right={
           <View style={{ flexDirection: "row", gap: 4 }}>
+            <Pressable
+              onPress={toggleTemporary}
+              hitSlop={8}
+              disabled={sending}
+              style={{ padding: 6, opacity: sending ? 0.4 : 1 }}
+              accessibilityLabel={temporary ? "Turn off temporary chat" : "Start temporary chat"}
+            >
+              <Ghost size={22} color={temporary ? c.accentForeground : c.foreground} />
+            </Pressable>
             <Pressable
               onPress={toggleTalkMode}
               hitSlop={8}
@@ -844,6 +1296,49 @@ export default function OraChatScreen() {
           </View>
         }
       />
+
+      {temporary && (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            backgroundColor: c.muted,
+            borderBottomWidth: 1,
+            borderBottomColor: c.border,
+          }}
+        >
+          <Ghost size={14} color={c.mutedForeground} />
+          <Text style={{ color: c.mutedForeground, fontSize: 12, flex: 1 }}>
+            Temporary chat — saved memories and history are off, and nothing here is saved.
+          </Text>
+        </View>
+      )}
+
+      {!temporary && activeProjectName && (
+        <Pressable
+          onPress={openConversations}
+          accessibilityRole="button"
+          accessibilityLabel={`Project ${activeProjectName}. Open chats`}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            backgroundColor: c.muted,
+            borderBottomWidth: 1,
+            borderBottomColor: c.border,
+          }}
+        >
+          <Folder size={14} color={c.mutedForeground} />
+          <Text style={{ color: c.mutedForeground, fontSize: 12, flex: 1 }} numberOfLines={1}>
+            New chats save to {activeProjectName}
+          </Text>
+        </Pressable>
+      )}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -874,6 +1369,9 @@ export default function OraChatScreen() {
               message={item}
               speaking={speakingId === item.id}
               onSpeak={() => speak(item)}
+              onSuggestion={handleSuggestion}
+              onSaveMemory={temporary ? undefined : handleSaveMemory}
+              onLongPress={() => setActionsMessage(item)}
             />
           )}
         />
@@ -890,20 +1388,32 @@ export default function OraChatScreen() {
             gap: 10,
           }}
         >
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <Pill
-              label="Instant"
-              icon={Zap}
-              active={mode === "instant"}
-              onPress={() => setMode("instant")}
-            />
-            <Pill
-              label="Deep"
-              icon={Gauge}
-              active={mode === "deep"}
-              onPress={() => setMode("deep")}
-            />
-          </View>
+          {mode === "deep" && (
+            <View style={{ flexDirection: "row" }}>
+              <Pressable
+                onPress={() => setMode("instant")}
+                accessibilityLabel="Turn off Deep Thinking"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  alignSelf: "flex-start",
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                  borderRadius: 999,
+                  backgroundColor: c.secondary,
+                  borderWidth: 1,
+                  borderColor: c.border,
+                }}
+              >
+                <Gauge size={14} color={c.accentForeground} />
+                <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 13 }}>
+                  Deep Thinking
+                </Text>
+                <X size={13} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+          )}
 
           {talkMode && (
             <View
@@ -1043,8 +1553,9 @@ export default function OraChatScreen() {
           <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
             {!recording && (
               <Pressable
-                onPress={handleAttach}
+                onPress={() => setShowPlusMenu(true)}
                 disabled={uploading}
+                accessibilityLabel="Add attachment or choose tools"
                 style={{
                   width: 44,
                   height: 44,
@@ -1057,13 +1568,15 @@ export default function OraChatScreen() {
                 {uploading ? (
                   <ActivityIndicator size="small" color={c.mutedForeground} />
                 ) : (
-                  <Paperclip size={20} color={c.mutedForeground} />
+                  <Plus size={22} color={c.mutedForeground} />
                 )}
               </Pressable>
             )}
             <Pressable
               onPress={recording ? stopRecording : startRecording}
               disabled={transcribing}
+              accessibilityRole="button"
+              accessibilityLabel={recording ? "Stop recording" : "Record a voice message"}
               style={{
                 width: 44,
                 height: 44,
@@ -1114,6 +1627,8 @@ export default function OraChatScreen() {
                 <Pressable
                   onPress={handleSend}
                   disabled={sending || (!input.trim() && !attachment)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send message"
                   style={{
                     width: 44,
                     height: 44,
@@ -1139,14 +1654,96 @@ export default function OraChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      <ConversationsModal
+      <ChatsDrawer
         visible={showConversations}
         loading={loadingConversations}
         conversations={conversations}
+        projects={projects}
         activeId={conversationId}
+        activeProjectId={activeProjectId}
         onClose={() => setShowConversations(false)}
         onSelect={loadConversation}
         onDelete={removeConversation}
+        onNewChatInScope={startChatInScope}
+        onSelectProject={selectProjectScope}
+        onCreateProject={openCreateProject}
+        onRenameProject={openRenameProject}
+        onDeleteProject={handleDeleteProject}
+        onMoveConversation={(conv) => setMoveTarget(conv)}
+      />
+
+      <MoveConversationSheet
+        conversation={moveTarget}
+        projects={projects}
+        onClose={() => setMoveTarget(null)}
+        onMove={handleMoveConversation}
+      />
+
+      <ProjectEditorModal
+        visible={projectEditorOpen}
+        project={editingProject}
+        onClose={() => {
+          setProjectEditorOpen(false);
+          setEditingProject(null);
+        }}
+        onSave={handleSaveProject}
+      />
+
+      <PlusMenu
+        visible={showPlusMenu}
+        mode={mode}
+        onClose={() => setShowPlusMenu(false)}
+        onTakePhoto={() => {
+          setShowPlusMenu(false);
+          void handleCameraCapture();
+        }}
+        onPickPhoto={() => {
+          setShowPlusMenu(false);
+          void handleGalleryPick();
+        }}
+        onBrowseFiles={() => {
+          setShowPlusMenu(false);
+          void handleBrowseFiles();
+        }}
+        onSelectMode={(m) => {
+          setMode(m);
+          setShowPlusMenu(false);
+        }}
+      />
+
+      <MessageActionsSheet
+        message={actionsMessage}
+        canRegenerate={
+          !!actionsMessage &&
+          actionsMessage.id === lastAssistantId &&
+          lastAssistantRegenerable &&
+          !sending
+        }
+        onClose={() => setActionsMessage(null)}
+        onCopy={(m) => {
+          void Clipboard.setStringAsync(m.content);
+          setActionsMessage(null);
+        }}
+        onShare={(m) => {
+          setActionsMessage(null);
+          void handleShareMessage(m);
+        }}
+        onSaveFile={(m) => {
+          setActionsMessage(null);
+          void handleSaveMessageFile(m);
+        }}
+        onRegenerate={(m) => {
+          setActionsMessage(null);
+          handleRegenerate(m);
+        }}
+        onReadAloud={(m) => {
+          setActionsMessage(null);
+          void speak(m);
+        }}
+        onEdit={(m) => {
+          setActionsMessage(null);
+          handleEditMessage(m);
+        }}
       />
     </View>
   );
@@ -1280,23 +1877,38 @@ function MessageBubble({
   message,
   speaking,
   onSpeak,
+  onSuggestion,
+  onSaveMemory,
+  onLongPress,
 }: {
   message: OraMessage;
   speaking: boolean;
   onSpeak: () => void;
+  onSuggestion: (text: string) => void;
+  onSaveMemory?: (message: OraMessage) => Promise<void>;
+  onLongPress: () => void;
 }) {
   const c = useColors();
   const isUser = message.role === "user";
+  // Web-search citations are untrusted — only render/open safe public links.
+  const safeSources = (message.sources ?? []).filter((s) => isSafeHttpUrl(s.url));
   const [savingFile, setSavingFile] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
 
   const copy = () => Clipboard.setStringAsync(message.content);
 
+  // Long-press anywhere on a settled bubble opens the per-message actions sheet.
+  const triggerLongPress = () => {
+    if (message.pending) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onLongPress();
+  };
+
   const handleSaveFile = useCallback(async () => {
-    if (!message.file || savingFile) return;
+    if (!message.generatedFile || savingFile) return;
     setSavingFile(true);
     try {
-      const outcome = await saveGeneratedFile(message.file);
+      const outcome = await saveGeneratedFile(message.generatedFile);
       if (outcome === "image-saved") {
         Alert.alert("Saved", "Image saved to your photo library.");
       }
@@ -1308,7 +1920,7 @@ function MessageBubble({
     } finally {
       setSavingFile(false);
     }
-  }, [message.file, savingFile]);
+  }, [message.generatedFile, savingFile]);
 
   const handleSaveImage = useCallback(async () => {
     if (!message.imageUrl || savingImage) return;
@@ -1331,7 +1943,9 @@ function MessageBubble({
   if (isUser) {
     return (
       <View style={{ alignItems: "flex-end" }}>
-        <View
+        <Pressable
+          onLongPress={triggerLongPress}
+          delayLongPress={300}
           style={{
             backgroundColor: c.primary,
             borderRadius: 18,
@@ -1341,24 +1955,29 @@ function MessageBubble({
             maxWidth: "86%",
           }}
         >
-          <Text
-            style={{
-              color: c.primaryForeground,
-              fontFamily: "Inter_400Regular",
-              fontSize: 15,
-              lineHeight: 21,
-            }}
-          >
-            {message.content}
-          </Text>
-        </View>
+          <OraAttachmentChip attachment={message.attachment} />
+          {!!message.content && (
+            <Text
+              style={{
+                color: c.primaryForeground,
+                fontFamily: "Inter_400Regular",
+                fontSize: 15,
+                lineHeight: 21,
+              }}
+            >
+              {message.content}
+            </Text>
+          )}
+        </Pressable>
       </View>
     );
   }
 
   return (
     <View style={{ alignItems: "flex-start", maxWidth: "92%" }}>
-      <View
+      <Pressable
+        onLongPress={triggerLongPress}
+        delayLongPress={300}
         style={{
           backgroundColor: c.card,
           borderWidth: 1,
@@ -1417,7 +2036,7 @@ function MessageBubble({
               </View>
             )}
 
-            {message.file && (
+            {message.generatedFile && (
               <Pressable
                 onPress={handleSaveFile}
                 disabled={savingFile}
@@ -1433,11 +2052,11 @@ function MessageBubble({
               >
                 <FileText size={18} color={c.accentForeground} />
                 <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
-                  {message.file.fileName}
+                  {message.generatedFile.fileName}
                 </Text>
                 {savingFile ? (
                   <ActivityIndicator size="small" color={c.mutedForeground} />
-                ) : isImageFile(message.file.mimeType) ? (
+                ) : isImageFile(message.generatedFile.mimeType) ? (
                   <Download size={16} color={c.accentForeground} />
                 ) : (
                   <Share2 size={16} color={c.accentForeground} />
@@ -1445,7 +2064,7 @@ function MessageBubble({
               </Pressable>
             )}
 
-            {message.sources && message.sources.length > 0 && (
+            {safeSources.length > 0 && (
               <View style={{ marginTop: 10, gap: 6 }}>
                 <Text
                   style={{
@@ -1456,7 +2075,7 @@ function MessageBubble({
                 >
                   Sources
                 </Text>
-                {message.sources.map((s, i) => (
+                {safeSources.map((s, i) => (
                   <Pressable
                     key={`${s.url}-${i}`}
                     onPress={() => WebBrowser.openBrowserAsync(s.url)}
@@ -1475,9 +2094,15 @@ function MessageBubble({
                 ))}
               </View>
             )}
+
+            <OraAssistantExtras
+              message={message}
+              onSuggestion={onSuggestion}
+              onSaveMemory={onSaveMemory}
+            />
           </>
         )}
-      </View>
+      </Pressable>
       {!message.pending && !message.isStreaming && !message.error && (
         <View
           style={{
@@ -1519,25 +2144,130 @@ function MessageBubble({
   );
 }
 
-function ConversationsModal({
+function ConversationRow({
+  conv,
+  active,
+  indented,
+  onSelect,
+  onDelete,
+  onMove,
+}: {
+  conv: OraConversationSummary;
+  active: boolean;
+  indented?: boolean;
+  onSelect: (id: number) => void;
+  onDelete: (id: number) => void;
+  onMove: (conversation: OraConversationSummary) => void;
+}) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        marginLeft: indented ? 16 : 0,
+        borderRadius: c.radius,
+        backgroundColor: active ? c.accent : "transparent",
+      }}
+    >
+      <MessageSquare size={16} color={c.mutedForeground} />
+      <Pressable
+        style={{ flex: 1 }}
+        onPress={() => onSelect(conv.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Open chat ${conv.title || "Untitled"}`}
+      >
+        <Text
+          numberOfLines={1}
+          style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 15 }}
+        >
+          {conv.title || "Untitled"}
+        </Text>
+        {conv.preview ? (
+          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 13, marginTop: 2 }}>
+            {conv.preview}
+          </Text>
+        ) : null}
+      </Pressable>
+      <Pressable
+        onPress={() => onMove(conv)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={`Move chat ${conv.title || "Untitled"}`}
+      >
+        <FolderInput size={16} color={c.mutedForeground} />
+      </Pressable>
+      <Pressable
+        onPress={() => onDelete(conv.id)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={`Delete chat ${conv.title || "Untitled"}`}
+      >
+        <Trash2 size={16} color={c.mutedForeground} />
+      </Pressable>
+    </View>
+  );
+}
+
+function ChatsDrawer({
   visible,
   loading,
   conversations,
+  projects,
   activeId,
+  activeProjectId,
   onClose,
   onSelect,
   onDelete,
+  onNewChatInScope,
+  onSelectProject,
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject,
+  onMoveConversation,
 }: {
   visible: boolean;
   loading: boolean;
   conversations: OraConversationSummary[];
+  projects: OraProjectSummary[];
   activeId: number | null;
+  activeProjectId: number | null;
   onClose: () => void;
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
+  onNewChatInScope: (projectId: number | null) => void;
+  onSelectProject: (projectId: number) => void;
+  onCreateProject: () => void;
+  onRenameProject: (project: OraProjectSummary) => void;
+  onDeleteProject: (project: OraProjectSummary) => void;
+  onMoveConversation: (conversation: OraConversationSummary) => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  // Always expand the active project when it changes (mirrors the website, which
+  // keeps the current project open). The user can still manually collapse it.
+  useEffect(() => {
+    if (activeProjectId != null) {
+      setExpanded((prev) => ({ ...prev, [activeProjectId]: true }));
+    }
+  }, [activeProjectId]);
+
+  // Standalone chats (no project) live under "Recent"; the rest nest under
+  // their project. Server returns projectId per conversation.
+  const standalone = conversations.filter((cv) => cv.projectId == null);
+
+  const labelStyle = {
+    color: c.mutedForeground,
+    fontFamily: "Inter_600SemiBold" as const,
+    fontSize: 12,
+    letterSpacing: 0.6,
+    textTransform: "uppercase" as const,
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -1550,7 +2280,7 @@ function ConversationsModal({
             borderTopRightRadius: 20,
             paddingTop: 8,
             paddingBottom: insets.bottom + 12,
-            maxHeight: "75%",
+            maxHeight: "80%",
           }}
         >
           <View
@@ -1572,72 +2302,640 @@ function ConversationsModal({
               paddingBottom: 12,
             }}
           >
-            <Text
-              style={{
-                color: c.foreground,
-                fontFamily: "Inter_700Bold",
-                fontSize: 18,
-              }}
-            >
-              Conversations
+            <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}>
+              Chats
             </Text>
-            <Pressable onPress={onClose} hitSlop={8}>
+            <Pressable
+              onPress={onClose}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close chats"
+            >
               <X size={22} color={c.mutedForeground} />
             </Pressable>
           </View>
 
           {loading ? (
             <ActivityIndicator color={c.primary} style={{ marginVertical: 32 }} />
-          ) : conversations.length === 0 ? (
-            <EmptyState icon={History} title="No conversations yet" />
           ) : (
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 12 }}>
-              {conversations.map((conv) => (
-                <View
-                  key={conv.id}
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  paddingHorizontal: 12,
+                  paddingTop: 4,
+                  paddingBottom: 8,
+                }}
+              >
+                <Text style={labelStyle}>Projects</Text>
+                <Pressable
+                  onPress={onCreateProject}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="New project"
+                >
+                  <FolderPlus size={18} color={c.mutedForeground} />
+                </Pressable>
+              </View>
+
+              {projects.length === 0 ? (
+                <Text
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                    paddingVertical: 12,
+                    color: c.mutedForeground,
+                    fontSize: 13,
                     paddingHorizontal: 12,
-                    borderRadius: c.radius,
-                    backgroundColor: conv.id === activeId ? c.accent : "transparent",
+                    paddingBottom: 8,
                   }}
                 >
-                  <Pressable style={{ flex: 1 }} onPress={() => onSelect(conv.id)}>
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        color: c.foreground,
-                        fontFamily: "Inter_500Medium",
-                        fontSize: 15,
-                      }}
-                    >
-                      {conv.title || "Untitled"}
-                    </Text>
-                    {conv.preview ? (
-                      <Text
-                        numberOfLines={1}
+                  No projects yet
+                </Text>
+              ) : (
+                projects.map((p) => {
+                  const isOpen = expanded[p.id] ?? p.id === activeProjectId;
+                  const convs = conversations.filter((cv) => cv.projectId === p.id);
+                  return (
+                    <View key={p.id} style={{ marginBottom: 2 }}>
+                      <View
                         style={{
-                          color: c.mutedForeground,
-                          fontSize: 13,
-                          marginTop: 2,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          borderRadius: c.radius,
+                          backgroundColor: p.id === activeProjectId ? c.accent : "transparent",
                         }}
                       >
-                        {conv.preview}
-                      </Text>
-                    ) : null}
-                  </Pressable>
-                  <Pressable onPress={() => onDelete(conv.id)} hitSlop={8}>
-                    <X size={18} color={c.mutedForeground} />
-                  </Pressable>
-                </View>
-              ))}
+                        <Pressable
+                          onPress={() => setExpanded((prev) => ({ ...prev, [p.id]: !isOpen }))}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${isOpen ? "Collapse" : "Expand"} project ${p.name}`}
+                        >
+                          {isOpen ? (
+                            <ChevronDown size={16} color={c.mutedForeground} />
+                          ) : (
+                            <ChevronRight size={16} color={c.mutedForeground} />
+                          )}
+                        </Pressable>
+                        <Pressable
+                          style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}
+                          onPress={() => onSelectProject(p.id)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: p.id === activeProjectId }}
+                          accessibilityLabel={`Select project ${p.name}`}
+                        >
+                          {isOpen ? (
+                            <FolderOpen size={16} color={c.foreground} />
+                          ) : (
+                            <Folder size={16} color={c.foreground} />
+                          )}
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              color: c.foreground,
+                              fontFamily: "Inter_600SemiBold",
+                              fontSize: 15,
+                              flex: 1,
+                            }}
+                          >
+                            {p.name}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => onNewChatInScope(p.id)}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={`New chat in ${p.name}`}
+                        >
+                          <Plus size={16} color={c.mutedForeground} />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => onRenameProject(p)}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Rename ${p.name}`}
+                        >
+                          <Pencil size={15} color={c.mutedForeground} />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => onDeleteProject(p)}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete ${p.name}`}
+                        >
+                          <Trash2 size={15} color={c.mutedForeground} />
+                        </Pressable>
+                      </View>
+                      {isOpen &&
+                        (convs.length === 0 ? (
+                          <Text
+                            style={{
+                              color: c.mutedForeground,
+                              fontSize: 13,
+                              paddingVertical: 8,
+                              paddingHorizontal: 12,
+                              marginLeft: 16,
+                            }}
+                          >
+                            No chats yet
+                          </Text>
+                        ) : (
+                          convs.map((conv) => (
+                            <ConversationRow
+                              key={conv.id}
+                              conv={conv}
+                              active={conv.id === activeId}
+                              indented
+                              onSelect={onSelect}
+                              onDelete={onDelete}
+                              onMove={onMoveConversation}
+                            />
+                          ))
+                        ))}
+                    </View>
+                  );
+                })
+              )}
+
+              <View style={{ height: 12 }} />
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  paddingHorizontal: 12,
+                  paddingBottom: 8,
+                }}
+              >
+                <Text style={labelStyle}>Recent</Text>
+                <Pressable
+                  onPress={() => onNewChatInScope(null)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="New standalone chat"
+                >
+                  <Plus size={18} color={c.mutedForeground} />
+                </Pressable>
+              </View>
+              {standalone.length === 0 ? (
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 13,
+                    paddingHorizontal: 12,
+                    paddingBottom: 8,
+                  }}
+                >
+                  No conversations yet
+                </Text>
+              ) : (
+                standalone.map((conv) => (
+                  <ConversationRow
+                    key={conv.id}
+                    conv={conv}
+                    active={conv.id === activeId}
+                    onSelect={onSelect}
+                    onDelete={onDelete}
+                    onMove={onMoveConversation}
+                  />
+                ))
+              )}
             </ScrollView>
           )}
         </View>
       </View>
     </Modal>
+  );
+}
+
+function ProjectEditorModal({
+  visible,
+  project,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  project: OraProjectSummary | null;
+  onClose: () => void;
+  onSave: (name: string) => void;
+}) {
+  const c = useColors();
+  const [name, setName] = useState("");
+
+  useEffect(() => {
+    if (visible) setName(project?.name ?? "");
+  }, [visible, project]);
+
+  const canSave = name.trim().length > 0;
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.6)",
+            justifyContent: "center",
+            padding: 24,
+          }}
+          onPress={onClose}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{ backgroundColor: c.card, borderRadius: 16, padding: 20, gap: 14 }}
+          >
+            <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 17 }}>
+              {project ? "Rename project" : "New project"}
+            </Text>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="Project name"
+              placeholderTextColor={c.mutedForeground}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                if (canSave) onSave(name);
+              }}
+              style={{
+                color: c.foreground,
+                fontSize: 16,
+                fontFamily: "Inter_400Regular",
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: c.radius,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                backgroundColor: c.background,
+              }}
+            />
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
+              <Pressable
+                onPress={onClose}
+                style={{ paddingVertical: 10, paddingHorizontal: 16 }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              >
+                <Text style={{ color: c.mutedForeground, fontFamily: "Inter_600SemiBold" }}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (canSave) onSave(name);
+                }}
+                disabled={!canSave}
+                style={{
+                  paddingVertical: 10,
+                  paddingHorizontal: 16,
+                  borderRadius: c.radius,
+                  backgroundColor: canSave ? c.primary : c.muted,
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Save project"
+              >
+                <Text
+                  style={{
+                    color: canSave ? c.primaryForeground : c.mutedForeground,
+                    fontFamily: "Inter_600SemiBold",
+                  }}
+                >
+                  Save
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function PlusMenu({
+  visible,
+  mode,
+  onClose,
+  onTakePhoto,
+  onPickPhoto,
+  onBrowseFiles,
+  onSelectMode,
+}: {
+  visible: boolean;
+  mode: OraMode;
+  onClose: () => void;
+  onTakePhoto: () => void;
+  onPickPhoto: () => void;
+  onBrowseFiles: () => void;
+  onSelectMode: (mode: OraMode) => void;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View
+          style={{
+            backgroundColor: c.card,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            paddingTop: 8,
+            paddingBottom: insets.bottom + 12,
+          }}
+        >
+          <View
+            style={{
+              alignSelf: "center",
+              width: 40,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: c.border,
+              marginBottom: 8,
+            }}
+          />
+          <SheetSectionLabel label="Attach" />
+          <ActionRow icon={Camera} label="Take photo" onPress={onTakePhoto} />
+          <ActionRow icon={Images} label="Photo library" onPress={onPickPhoto} />
+          <ActionRow icon={FolderOpen} label="Browse files" onPress={onBrowseFiles} />
+
+          <SheetSectionLabel label="Tools" />
+          <ToolRow
+            icon={Zap}
+            label="Instant"
+            active={mode === "instant"}
+            onPress={() => onSelectMode("instant")}
+          />
+          <ToolRow
+            icon={Gauge}
+            label="Deep Thinking"
+            active={mode === "deep"}
+            onPress={() => onSelectMode("deep")}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function MessageActionsSheet({
+  message,
+  canRegenerate,
+  onClose,
+  onCopy,
+  onShare,
+  onSaveFile,
+  onRegenerate,
+  onReadAloud,
+  onEdit,
+}: {
+  message: OraMessage | null;
+  canRegenerate: boolean;
+  onClose: () => void;
+  onCopy: (message: OraMessage) => void;
+  onShare: (message: OraMessage) => void;
+  onSaveFile: (message: OraMessage) => void;
+  onRegenerate: (message: OraMessage) => void;
+  onReadAloud: (message: OraMessage) => void;
+  onEdit: (message: OraMessage) => void;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+
+  const isAssistant = message?.role === "assistant";
+  const isUser = message?.role === "user";
+  const hasContent = !!message?.content.trim();
+
+  return (
+    <Modal visible={!!message} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View
+          style={{
+            backgroundColor: c.card,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            paddingTop: 8,
+            paddingBottom: insets.bottom + 12,
+          }}
+        >
+          <View
+            style={{
+              alignSelf: "center",
+              width: 40,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: c.border,
+              marginBottom: 8,
+            }}
+          />
+          {message && (
+            <>
+              <ActionRow icon={Copy} label="Copy" onPress={() => onCopy(message)} />
+              {hasContent && (
+                <ActionRow icon={Share2} label="Share" onPress={() => onShare(message)} />
+              )}
+              {isUser && <ActionRow icon={Pencil} label="Edit" onPress={() => onEdit(message)} />}
+              {isAssistant && hasContent && (
+                <ActionRow icon={Volume2} label="Read aloud" onPress={() => onReadAloud(message)} />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={Download}
+                  label="Save as file"
+                  onPress={() => onSaveFile(message)}
+                />
+              )}
+              {isAssistant && canRegenerate && (
+                <ActionRow
+                  icon={RefreshCw}
+                  label="Regenerate"
+                  onPress={() => onRegenerate(message)}
+                />
+              )}
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Bottom-sheet mirror of the website's per-conversation "Move to" menu. Lists
+// every project except the conversation's current one, plus "Recent" when the
+// conversation is currently scoped to a project. The server validates ownership.
+function MoveConversationSheet({
+  conversation,
+  projects,
+  onClose,
+  onMove,
+}: {
+  conversation: OraConversationSummary | null;
+  projects: OraProjectSummary[];
+  onClose: () => void;
+  onMove: (conversationId: number, projectId: number | null) => void;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+
+  const targets = conversation ? projects.filter((p) => p.id !== conversation.projectId) : [];
+  const canMoveToRecent = conversation?.projectId != null;
+  const isEmpty = targets.length === 0 && !canMoveToRecent;
+
+  return (
+    <Modal visible={!!conversation} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View
+          style={{
+            backgroundColor: c.card,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            paddingTop: 8,
+            paddingBottom: insets.bottom + 12,
+            maxHeight: "70%",
+          }}
+        >
+          <View
+            style={{
+              alignSelf: "center",
+              width: 40,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: c.border,
+              marginBottom: 8,
+            }}
+          />
+          <SheetSectionLabel label="Move to" />
+          {conversation && (
+            <ScrollView>
+              {canMoveToRecent && (
+                <ActionRow
+                  icon={MessageSquare}
+                  label="Recent (no project)"
+                  onPress={() => onMove(conversation.id, null)}
+                />
+              )}
+              {targets.map((p) => (
+                <ActionRow
+                  key={p.id}
+                  icon={Folder}
+                  label={p.name}
+                  onPress={() => onMove(conversation.id, p.id)}
+                />
+              ))}
+              {isEmpty && (
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 14,
+                    paddingHorizontal: 20,
+                    paddingVertical: 16,
+                  }}
+                >
+                  No other projects yet. Create a project first.
+                </Text>
+              )}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ActionRow({
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+  label: string;
+  onPress: () => void;
+}) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={label}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+      }}
+    >
+      <Icon size={20} color={c.foreground} />
+      <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 15 }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ToolRow({
+  icon: Icon,
+  label,
+  active,
+  onPress,
+}: {
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={label}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+      }}
+    >
+      <Icon size={20} color={active ? c.accentForeground : c.foreground} />
+      <Text
+        style={{
+          flex: 1,
+          color: active ? c.accentForeground : c.foreground,
+          fontFamily: "Inter_500Medium",
+          fontSize: 15,
+        }}
+      >
+        {label}
+      </Text>
+      {active && <Check size={18} color={c.accentForeground} />}
+    </Pressable>
+  );
+}
+
+function SheetSectionLabel({ label }: { label: string }) {
+  const c = useColors();
+  return (
+    <Text
+      style={{
+        color: c.mutedForeground,
+        fontFamily: "Inter_600SemiBold",
+        fontSize: 12,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 4,
+      }}
+    >
+      {label}
+    </Text>
   );
 }
