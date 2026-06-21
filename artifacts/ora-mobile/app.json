@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Ora",
-    "slug": "ora-mobile",
+    "slug": "mustaflow-ai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.mustaflow.app",
-      "buildNumber": "8",
+      "buildNumber": "9",
       "deploymentTarget": "16.0",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
