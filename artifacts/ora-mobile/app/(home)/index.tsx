@@ -35,6 +35,7 @@ import {
   History,
   Image as ImageIcon,
   Images,
+  Lock,
   MessageSquare,
   Mic,
   Pencil,
@@ -1344,6 +1345,15 @@ export default function OraChatScreen() {
       })()
     : "Loading…";
 
+  // Mirrors website: deepAllowed = tier === "core" || tier === "wave"
+  // Free / anonymous users are gated to Instant mode only.
+  const deepAllowed = session?.tier === "core" || session?.tier === "wave";
+
+  // Reset to Instant if tier drops and Deep is active (e.g. plan downgrade)
+  useEffect(() => {
+    if (!deepAllowed && mode === "deep") setMode("instant");
+  }, [deepAllowed, mode]);
+
   const activeProjectName = activeProjectId
     ? (projects.find((p) => p.id === activeProjectId)?.name ?? "Project")
     : null;
@@ -1937,6 +1947,7 @@ export default function OraChatScreen() {
         visible={showPlusMenu}
         mode={mode}
         language={language}
+        deepAllowed={deepAllowed}
         onClose={() => setShowPlusMenu(false)}
         onTakePhoto={() => {
           setShowPlusMenu(false);
@@ -2892,6 +2903,7 @@ function PlusMenu({
   visible,
   mode,
   language,
+  deepAllowed,
   onClose,
   onTakePhoto,
   onPickPhoto,
@@ -2902,6 +2914,7 @@ function PlusMenu({
   visible: boolean;
   mode: OraMode;
   language: string;
+  deepAllowed: boolean;
   onClose: () => void;
   onTakePhoto: () => void;
   onPickPhoto: () => void;
@@ -2948,10 +2961,23 @@ function PlusMenu({
             onPress={() => onSelectMode("instant")}
           />
           <ToolRow
-            icon={Gauge}
+            icon={deepAllowed ? Gauge : Lock}
             label="Deep Thinking"
-            active={mode === "deep"}
-            onPress={() => onSelectMode("deep")}
+            sublabel={deepAllowed ? "Step-by-step" : "Upgrade"}
+            active={mode === "deep" && deepAllowed}
+            disabled={!deepAllowed}
+            onPress={() => {
+              if (deepAllowed) {
+                onSelectMode("deep");
+              } else {
+                onClose();
+                Alert.alert(
+                  "Deep Thinking",
+                  "Deep Thinking is available with Core Pack or Deep Wave. Upgrade in Settings.",
+                  [{ text: "OK" }],
+                );
+              }
+            }}
           />
 
           <SheetSectionLabel label="Reply language" />
@@ -3172,38 +3198,49 @@ function ActionRow({
 function ToolRow({
   icon: Icon,
   label,
+  sublabel,
   active,
+  disabled,
   onPress,
 }: {
   icon: React.ComponentType<{ size?: number; color?: string }>;
   label: string;
+  sublabel?: string;
   active: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const c = useColors();
+  const iconColor = disabled ? c.mutedForeground : active ? c.accentForeground : c.foreground;
+  const labelColor = disabled ? c.mutedForeground : active ? c.accentForeground : c.foreground;
   return (
     <Pressable
       onPress={onPress}
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
       style={{
         flexDirection: "row",
         alignItems: "center",
         gap: 14,
         paddingVertical: 14,
         paddingHorizontal: 20,
+        opacity: disabled ? 0.6 : 1,
       }}
     >
-      <Icon size={20} color={active ? c.accentForeground : c.foreground} />
+      <Icon size={20} color={iconColor} />
       <Text
         style={{
           flex: 1,
-          color: active ? c.accentForeground : c.foreground,
+          color: labelColor,
           fontFamily: "Inter_500Medium",
           fontSize: 15,
         }}
       >
         {label}
       </Text>
+      {sublabel && !active && (
+        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{sublabel}</Text>
+      )}
       {active && <Check size={18} color={c.accentForeground} />}
     </Pressable>
   );
