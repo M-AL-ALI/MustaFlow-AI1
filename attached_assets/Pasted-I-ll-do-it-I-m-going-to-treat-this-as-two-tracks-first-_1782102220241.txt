@@ -1,0 +1,797 @@
+I’ll do it. I’m going to treat this as two tracks: first make Diagnostics prove the real Ora chat path (session + chat, not just health), then run a source-of-truth parity audit against the website Ora implementation and fix the highest-confidence gaps without touching AI Builder.
+
+
+
+
+I’m starting by checking which checkout is actually current and what branch it’s on, because the earlier hotfix existed in a local branch while Replit says it applied similar changes to main. I need ground truth before editing.
+
+
+
+
+Ran 5 commands
+
+
+The local branch already has my earlier backend wiring patch, but Diagnostics currently tests only session reachability. I’m checking GitHub main directly too, because Replit’s build #11 may have a slightly different Diagnostics implementation.
+
+
+
+
+Ran Get-Content -Path C:\Users\mus_1\.codex\plugins\cache\openai-curated-remote\github\0.1.5\skills\github\SKILL.md
+
+
+
+
+
+
+
+Using the GitHub skill briefly for repository orientation: I’m verifying what is actually on main before deciding whether to patch locally, via GitHub, or both.
+
+
+
+
+Fetched file
+
+
+
+
+
+GitHub main confirms exactly what I suspected: Diagnostics currently calls only /api/healthz. That is not enough. I’m patching main so the button exercises the same Ora endpoints the chat uses: /api/public-ai/session and /api/public-ai/chat with a tiny smoke message.
+
+
+
+
+Used GitHub integration
+
+
+I have the relevant GitHub main files now. Main has the domain pin and Clerk guard, but Diagnostics only hits /api/healthz. I’m updating just settings.tsx on main so the QA button proves the actual Ora chat path.
+
+
+
+
+Ran $tmp = Join-Path $env:TEMP 'ora-settings-main.tsx'
+@'
+import { useAuth, useUser } from "@clerk/expo";
+import Constants from "expo-constants";
+import { useRouter } from "expo-router";
+import {
+  Activity,
+  CreditCard,
+  Info,
+  LogOut,
+  Mic,
+  Moon,
+  User as UserIcon,
+  Volume2,
+  Wifi,
+} from "lucide-react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { ScrollView, Switch, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { ScreenHeader } from "@/components/ScreenHeader";
+import { Button, Card, Pill } from "@/components/ui";
+import { useColors } from "@/hooks/useColors";
+import {
+  API_BASE,
+  getOraSession,
+  getOraUsage,
+  getPreferences,
+  getSubscription,
+  sendChat,
+  updatePreferences,
+} from "@/lib/api";
+import type { BillingSubscription, OraUsage } from "@/lib/types";
+
+const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
+const APP_BUILD =
+  Constants.expoConfig?.ios?.buildNumber ??
+  (Constants.expoConfig?.android?.versionCode != null
+    ? String(Constants.expoConfig.android.versionCode)
+    : null);
+const APP_VERSION_LABEL = APP_BUILD
+  ? `Version ${APP_VERSION} (${APP_BUILD})`
+  : `Version ${APP_VERSION}`;
+
+function formatReset(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "soon";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+const VOICE_LANGS: { code: string; label: string }[] = [
+  { code: "en", label: "English" },
+  { code: "es", label: "Español" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "pt", label: "Português" },
+  { code: "hi", label: "हिन्दी" },
+  { code: "zh", label: "中文" },
+  { code: "ja", label: "日本語" },
+];
+
+function SectionCard({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: typeof UserIcon;
+  title: string;
+  description?: string;
+  children?: React.ReactNode;
+}) {
+  const c = useColors();
+  return (
+    <Card style={{ gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Icon size={20} color={c.accentForeground} />
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              color: c.foreground,
+              fontFamily: "Inter_600SemiBold",
+              fontSize: 16,
+            }}
+          >
+            {title}
+          </Text>
+          {description && (
+            <Text style={{ color: c.mutedForeground, fontSize: 13, marginTop: 2 }}>
+              {description}
+            </Text>
+          )}
+        </View>
+      </View>
+      {children}
+    </Card>
+  );
+}
+
+function DiagRow({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: c.muted,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+      }}
+    >
+      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{label}</Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          color: warn ? "#f87171" : c.foreground,
+          fontSize: 13,
+          fontFamily: "Inter_500Medium",
+          maxWidth: "60%",
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function UsageRow({ label, used, limit }: { label: string; used: number; limit: number }) {
+  const c = useColors();
+  const unlimited = limit <= 0;
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: c.muted,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+      }}
+    >
+      <Text style={{ color: c.foreground, fontSize: 14 }}>{label}</Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+        {unlimited ? `${used} used` : `${used} / ${limit}`}
+      </Text>
+    </View>
+  );
+}
+
+export default function SettingsScreen() {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { signOut } = useAuth();
+  const { user } = useUser();
+
+  const [voiceLang, setVoiceLangState] = useState("en");
+  const [autoReadReplies, setAutoReadReplies] = useState(false);
+  const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
+  const [usage, setUsage] = useState<OraUsage | null>(null);
+
+  useEffect(() => {
+    getPreferences()
+      .then((p) => {
+        if (p.voiceLang) setVoiceLangState(p.voiceLang);
+        setAutoReadReplies(!!p.autoReadReplies);
+      })
+      .catch(() => {});
+    getSubscription()
+      .then(setSubscription)
+      .catch(() => {});
+    getOraUsage()
+      .then(setUsage)
+      .catch(() => {});
+  }, []);
+
+  const changeVoiceLang = useCallback(async (code: string) => {
+    setVoiceLangState(code);
+    try {
+      await updatePreferences({ voiceLang: code });
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggleAutoRead = useCallback(async (value: boolean) => {
+    setAutoReadReplies(value);
+    try {
+      await updatePreferences({ autoReadReplies: value });
+    } catch {
+      setAutoReadReplies(!value);
+    }
+  }, []);
+
+  const [diagResult, setDiagResult] = useState<string | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+
+  const testBackend = useCallback(async () => {
+    setDiagLoading(true);
+    setDiagResult(null);
+    try {
+      const session = await getOraSession();
+      const chat = await sendChat({
+        message: "hi",
+        messages: [],
+        language: "en",
+        mode: "instant",
+        referenceSavedMemories: false,
+        referenceChatHistory: false,
+        temporary: true,
+      });
+      const reply = chat.reply?.trim();
+      setDiagResult(
+        reply
+          ? `OK session ${session.msgCount}/${session.msgLimit}; chat replied`
+          : `Session OK ${session.msgCount}/${session.msgLimit}; chat returned empty reply`,
+      );
+    } catch (err) {
+      setDiagResult(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setDiagLoading(false);
+    }
+  }, []);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: c.background }}>
+      <ScreenHeader title="Settings" subtitle="Preferences & account" />
+      <ScrollView
+        contentContainerStyle={{
+          padding: 16,
+          gap: 12,
+          paddingBottom: insets.bottom + 24,
+        }}
+      >
+        <SectionCard
+          icon={Moon}
+          title="Appearance"
+          description="Ora is designed for a focused dark experience."
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Moon size={16} color={c.accentForeground} />
+            <Text style={{ color: c.foreground, fontSize: 14 }}>Dark mode (always on)</Text>
+          </View>
+        </SectionCard>
+
+        <SectionCard
+          icon={Mic}
+          title="Voice input"
+          description="Language used when you dictate messages to Ora."
+        >
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {VOICE_LANGS.map((l) => (
+              <Pill
+                key={l.code}
+                label={l.label}
+                active={voiceLang === l.code}
+                onPress={() => changeVoiceLang(l.code)}
+              />
+            ))}
+          </View>
+        </SectionCard>
+
+        <SectionCard
+          icon={Volume2}
+          title="Read replies aloud"
+          description="Ora speaks each new reply automatically in your voice-input language."
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: c.foreground, fontSize: 14, flex: 1 }}>
+              Auto-play spoken replies
+            </Text>
+            <Switch
+              value={autoReadReplies}
+              onValueChange={toggleAutoRead}
+              trackColor={{ false: c.border, true: c.primary }}
+              thumbColor={c.primaryForeground}
+            />
+          </View>
+        </SectionCard>
+
+        <SectionCard icon={CreditCard} title="Plan" description="Your current Ora subscription.">
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Text
+              style={{
+                color: c.foreground,
+                fontFamily: "Inter_600SemiBold",
+                fontSize: 15,
+                textTransform: "capitalize",
+              }}
+            >
+              {subscription?.tier ?? "Free"}
+            </Text>
+            {subscription?.status && (
+              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{subscription.status}</Text>
+            )}
+          </View>
+        </SectionCard>
+
+        <SectionCard
+          icon={Activity}
+          title="Usage"
+          description="Your Ora activity in the current window."
+        >
+          {usage ? (
+            <View style={{ gap: 8 }}>
+              <UsageRow label="Messages" used={usage.messageCount} limit={usage.messageLimit} />
+              <UsageRow label="Images" used={usage.imageCount} limit={usage.imageLimit} />
+              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                {`Resets ${formatReset(usage.resetsAt)} · ${usage.windowHours}h window`}
+              </Text>
+            </View>
+          ) : (
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Usage unavailable.</Text>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          icon={UserIcon}
+          title="Account"
+          description="Your profile and sign-in details."
+        >
+          <View style={{ gap: 4 }}>
+            <Text
+              style={{
+                color: c.foreground,
+                fontFamily: "Inter_500Medium",
+                fontSize: 15,
+              }}
+            >
+              {user?.fullName || user?.username || "Ora user"}
+            </Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+              {user?.primaryEmailAddress?.emailAddress ?? ""}
+            </Text>
+          </View>
+          <Button
+            label="Sign out"
+            variant="destructive"
+            icon={LogOut}
+            onPress={async () => {
+              await signOut();
+              router.replace("/sign-in");
+            }}
+            full
+          />
+        </SectionCard>
+
+        <SectionCard icon={Info} title="About" description="App version and build.">
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: c.foreground, fontSize: 14 }}>Ora</Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{APP_VERSION_LABEL}</Text>
+          </View>
+        </SectionCard>
+
+        <SectionCard icon={Wifi} title="Diagnostics" description="Ora session + chat path check.">
+          <View style={{ gap: 6 }}>
+            <DiagRow label="API URL" value={API_BASE} />
+            <DiagRow
+              label="Streaming"
+              value={process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED === "true" ? "on" : "off"}
+            />
+            <DiagRow
+              label="Clerk key"
+              value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
+              warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
+            />
+            <DiagRow label="Slug" value={Constants.expoConfig?.slug ?? "-"} />
+            <DiagRow label="Build" value={APP_VERSION_LABEL} />
+          </View>
+          <Button
+            label={diagLoading ? "Testing Ora chat..." : "Test Ora chat"}
+            onPress={testBackend}
+            full
+          />
+          {diagResult !== null && (
+            <Text
+              style={{
+                color: diagResult.startsWith("OK") ? "#4ade80" : "#f87171",
+                fontSize: 13,
+                textAlign: "center",
+                marginTop: 4,
+              }}
+            >
+              {diagResult}
+            </Text>
+          )}
+        </SectionCard>
+      </ScrollView>
+    </View>
+  );
+}
+'@ | Set-Content -Path $tmp -Encoding utf8
+node .\node_modules\.pnpm\prettier@3.8.3\node_modules\prettier\bin\prettier.cjs --write $tmp
+Get-Content -Path $tmp -Raw
+
+
+
+
+
+
+
+I generated the updated Settings file locally and formatted it. Now I’m writing that one-file fix directly to GitHub main so the next TestFlight build can prove the real Ora chat path.
+
+
+
+
+Update file
+
+
+
+
+
+GitHub’s app can read main but is not allowed to write to this repo (403 Resource not accessible by integration). I’m switching to the publish workflow locally: patch the checkout, commit it, and then I’ll try to push if credentials allow it.
+
+
+
+
+Ran Get-Content -Path C:\Users\mus_1\.codex\plugins\cache\openai-curated-remote\github\0.1.5\skills\yeet\SKILL.md
+
+
+
+
+
+
+
+I’m preparing the local patch now. Because the branch already contains the earlier web-shell parity fixes, I’ll keep the scope to Ora mobile files and validate before any push attempt.
+
+
+
+
+Ran 5 commands
+
+
+gh is not installed, so I can’t use the GitHub CLI publish flow from this machine. The connector also cannot write. I can still keep the local patch/validation complete and give you the exact commit/patch for Replit to apply, but I’ll first check whether the local file actually changed.
+
+
+
+
+Ran 4 commands
+
+
+The local file changed, and I noticed PowerShell added a UTF-8 BOM at the top. I’m removing that before running checks so we don’t introduce noisy encoding churn.
+
+
+
+
+Ran $path = 'artifacts\ora-mobile\app\(home)\settings.tsx'
+$content = Get-Content -LiteralPath $path -Raw
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText((Resolve-Path -LiteralPath $path), $content, $utf8NoBom)
+
+
+
+
+
+
+
+Now I’m validating the local patch: mobile typecheck, formatting, and lint for the touched file.
+
+
+
+
+Ran 4 commands
+
+
+Typecheck and lint passed; Prettier wants to reflow the copied file. I’m formatting that single file and rechecking.
+
+
+
+
+Ran node .\node_modules\.pnpm\prettier@3.8.3\node_modules\prettier\bin\prettier.cjs --write 'artifacts/ora-mobile/app/(home)/settings.tsx'; pnpm --filter @workspace/ora-mobile typecheck; & .\node_modules\.bin\eslint.ps1 'artifacts/ora-mobile/app/(home)/settings.tsx' for 5s
+
+
+
+
+
+
+
+The Diagnostics patch is validated locally. I’m committing it now, then I’ll try a normal git push; if credentials/network block it, I’ll give you the exact commit and patch status.
+
+
+
+
+Ran 3 commands
+
+
+The diff is exactly the Diagnostics change: it now calls getOraSession() and sendChat({ message: "hi", ... temporary: true }) instead of a generic health endpoint. I’m committing that locally.
+
+
+
+
+Ran git add "artifacts/ora-mobile/app/(home)/settings.tsx"; git commit -m "Make Ora mobile diagnostics test chat path"
+
+
+
+
+
+
+
+The local commit is 24750f2. Since the GitHub app can’t write and gh is unavailable, I’m trying a direct git push of this branch now.
+
+
+
+
+Ran git push -u origin codex/ora-mobile-branding for 2s
+
+
+
+
+
+
+
+The branch pushed successfully. Before opening a PR, I’m comparing it against main so I can make sure the PR doesn’t accidentally revert any of Replit’s build #11 changes.
+
+
+
+
+Compared commits in M-AL-ALI/MustaFlow-AI1
+
+
+
+
+
+The pushed branch is behind main by four commits, so opening it as-is could be messy. I’m rebasing it onto current main before creating a PR; that way we keep the new diagnostics/parity work without clobbering the build #11 changes.
+
+
+
+
+Ran git fetch origin main; git rebase origin/main for 1s
+
+
+
+
+
+
+
+The rebase hit exactly the expected conflict: branding/app identity in app.json, because main already has the build #11 EAS identity changes. I’m resolving it by keeping the main/TestFlight-safe identity while preserving visible Ora branding.
+
+
+
+
+Ran 4 commands
+
+
+
+Context automatically compacted
+
+
+
+I’m going to finish the rebase cleanly instead of letting this branch drag old TestFlight identity values back over main. I’ll preserve the working main build settings, keep the visible Ora branding, and carry only the real mobile fixes forward.
+
+
+
+
+Ran git status --short; git status
+
+
+
+
+
+
+
+The first conflict is just the old branding commit trying to reintroduce the unsafe Expo slug/build number. Since main already has the correct visible Ora branding, I’m going to skip that redundant commit and keep the current main app identity untouched.
+
+
+
+
+Ran 2 commands
+
+
+That skip worked as intended: the redundant branding commit is gone. The next commit is broader, and the conflicts are exactly where main already has the emergency TestFlight fixes, so I’m going file by file to avoid overwriting build #11’s working configuration.
+
+
+
+
+Ran git status --short; git diff --name-only --diff-filter=U
+
+
+
+
+
+
+
+I’m taking main’s side for the conflicted backend/config files because those are the pieces that fixed the TestFlight “no reply” problem: domain pinning, Clerk guard, EAS env, and API fallback. The unique parity UI changes that applied cleanly can stay, and the newer Diagnostics chat-path fix will come in the next commit.
+
+
+
+
+Ran git checkout --ours -- artifacts/ora-mobile/app/(home)/library.tsx artifacts/ora-mobile/app/(home)/settings.tsx artifacts/ora-mobile/app/_layout.tsx artifacts/ora-mobile/eas.json artifacts/ora-mobile/lib/api.ts; git add artifacts/ora-mobile/app/(home)/library.tsx artifacts/ora-mobile/app/(home)/settings.tsx artifacts/ora-mobile/app/_layout.tsx artifacts/ora-mobile/eas.json artifacts/ora-mobile/lib/api.ts; git status --short
+
+
+
+
+
+
+
+PowerShell treated (home) as syntax instead of a path segment. Nothing was resolved yet; I’m rerunning it with literal quoted paths.
+
+
+
+
+Ran git checkout --ours -- 'artifacts/ora-mobile/app/(home)/library.tsx' 'artifacts/ora-mobile/app/(home)/settings.tsx' 'artifacts/ora-mobile/app/_layout.tsx' 'artifacts/ora-mobile/eas.json' 'artifacts/ora-mobile/lib/api.ts'; git add 'artifacts/ora-mobile/app/(home)/library.tsx' 'artifacts/ora-mobile/app/(home)/settings.tsx' 'artifacts/ora-mobile/app/_layout.tsx' 'artifacts/ora-mobile/eas.json' 'artifacts/ora-mobile/lib/api.ts'; git status --short
+
+
+
+
+
+
+
+The conflicts are resolved now. I’m checking the remaining staged diff before continuing the rebase so we know exactly what that broad commit is still carrying.
+
+
+
+
+Ran git diff --cached --stat; git diff --cached -- 'artifacts/ora-mobile/lib/files.ts' | Select-Object -First 120; git diff --cached -- 'artifacts/ora-mobile/app/(home)/index.tsx' | Select-Object -First 220
+
+
+
+
+
+
+
+The staged part now contains only the visual parity shell changes plus a small URL helper cleanup, not the conflicted backend configuration. I’m continuing the rebase and will handle the final diagnostics commit next.
+
+
+
+
+Ran $env:GIT_EDITOR='true'; git rebase --continue
+
+
+
+
+
+
+
+Worked for 7m 45s
+
+
+
+
+Git on Windows didn’t have a true executable for the no-op editor. I’m rerunning with a Windows no-op editor so it can reuse the existing commit message and continue.
+
+
+
+
+Ran git -c core.editor="cmd.exe /c exit 0" rebase --continue for 2h 2m 53s
+
+
+
+
+
+
+
+Steered conversation
+
+
+
+
+
+You've hit your usage limit. Upgrade your plan or add credits to continue, or try again at 9:59 PM.
+
+
+
+
+
+
+where you stopped ?
+
+
+
+
+8:15 PM
+
+
+
+
+
+
+Worked for 5m 3s
+
+
+
+Not stuck now. I recovered the rebase, cleaned the conflict markers, validated, and pushed the branch.
+Branch pushed:
+codex/ora-mobile-branding
+Compare / PR link:
+Open GitHub compare
+What changed on top of current main:
+Kept TestFlight-safe config from main: slug: mustaflow-ai, build 11, EAS domain, Clerk guard, API fallback.
+Added the Ora-style mobile chat shell changes.
+Upgraded Settings Diagnostics to test real Ora path: getOraSession() + temporary sendChat("hi"), not /api/healthz.
+Did not add Builder routing or Builder references.
+Validation passed:
+Mobile typecheck
+Prettier
+ESLint on changed files
+Mobile tests: 12/12
+One blocker: GitHub app cannot create the PR because it returned 403 Resource not accessible by integration, and gh is not installed locally. The branch is pushed, so use the compare link above to create the PR, then merge it and submit the next TestFlight build.
