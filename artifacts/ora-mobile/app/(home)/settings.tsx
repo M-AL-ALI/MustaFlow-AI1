@@ -1,17 +1,22 @@
 import { useAuth, useUser } from "@clerk/expo";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import {
   Activity,
   CheckCircle2,
   Circle,
   CreditCard,
+  Crown,
+  ExternalLink,
   Info,
   Loader,
   LogOut,
   Mic,
   Monitor,
   Moon,
+  Plus,
+  ShieldAlert,
   Sun,
   User as UserIcon,
   Volume2,
@@ -19,7 +24,7 @@ import {
   XCircle,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -28,12 +33,16 @@ import { type ThemeOverride, useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
 import {
   API_BASE,
+  getPaymentMethod,
   getOraUsage,
   getPreferences,
   getSubscription,
+  openBillingPortal,
+  startOraSubscriptionCheckout,
+  startPaymentMethodSetup,
   updatePreferences,
 } from "@/lib/api";
-import type { BillingSubscription, OraUsage } from "@/lib/types";
+import type { BillingSubscription, OraUsage, PaymentMethodInfo } from "@/lib/types";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
 const APP_BUILD =
@@ -57,6 +66,28 @@ function formatReset(iso: string): string {
     minute: "2-digit",
   });
 }
+
+function planLabel(tier?: string | null): string {
+  if (tier === "core") return "Core Pack";
+  if (tier === "wave") return "Deep Wave";
+  return "Free";
+}
+
+function renewalLabel(subscription: BillingSubscription | null): string {
+  const raw = subscription?.currentPeriodEnd;
+  if (!raw) return "Rolling usage window";
+  const formatted = formatReset(raw);
+  if (subscription?.cancelAtPeriodEnd) return `Access ends ${formatted}`;
+  return `Renews ${formatted}`;
+}
+
+function cardLabel(pm: PaymentMethodInfo | null): string {
+  if (!pm?.hasPaymentMethod) return "No payment method on file";
+  const brand = pm.brand ? pm.brand[0]?.toUpperCase() + pm.brand.slice(1) : "Card";
+  return `${brand} ending in ${pm.last4 ?? "----"}`;
+}
+
+const BILLING_RETURN_URL = `${API_BASE}/ora/settings`;
 
 const VOICE_LANGS: { code: string; label: string }[] = [
   { code: "en", label: "English" },
@@ -311,6 +342,8 @@ export default function SettingsScreen() {
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodInfo | null>(null);
+  const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | "addpm" | null>(null);
 
   useEffect(() => {
     getPreferences()
@@ -325,6 +358,9 @@ export default function SettingsScreen() {
         .catch(() => {});
       getOraUsage()
         .then(setUsage)
+        .catch(() => {});
+      getPaymentMethod()
+        .then(setPaymentMethod)
         .catch(() => {});
     }
   }, [isSignedIn]);
@@ -346,6 +382,57 @@ export default function SettingsScreen() {
       setAutoReadReplies(!value);
     }
   }, []);
+
+  const openHostedBillingUrl = useCallback(async (remoteUrl?: string, fallback?: string) => {
+    if (!remoteUrl) {
+      Alert.alert("Billing unavailable", fallback ?? "Please try again.");
+      return;
+    }
+    await WebBrowser.openBrowserAsync(remoteUrl);
+  }, []);
+
+  const startCheckout = useCallback(
+    async (tier: "core" | "wave") => {
+      setPlanAction(tier);
+      try {
+        const res = await startOraSubscriptionCheckout({
+          tier,
+          successUrl: BILLING_RETURN_URL,
+          cancelUrl: BILLING_RETURN_URL,
+        });
+        await openHostedBillingUrl(res.checkoutUrl, res.message ?? res.error);
+      } catch (err) {
+        Alert.alert("Could not open checkout", err instanceof Error ? err.message : "Try again.");
+      } finally {
+        setPlanAction(null);
+      }
+    },
+    [openHostedBillingUrl],
+  );
+
+  const openPortal = useCallback(async () => {
+    setPlanAction("portal");
+    try {
+      const res = await openBillingPortal({ returnUrl: BILLING_RETURN_URL });
+      await openHostedBillingUrl(res.url, res.error);
+    } catch (err) {
+      Alert.alert("Could not open billing", err instanceof Error ? err.message : "Try again.");
+    } finally {
+      setPlanAction(null);
+    }
+  }, [openHostedBillingUrl]);
+
+  const addPaymentMethod = useCallback(async () => {
+    setPlanAction("addpm");
+    try {
+      const res = await startPaymentMethodSetup({ returnUrl: BILLING_RETURN_URL });
+      await openHostedBillingUrl(res.url, res.error);
+    } catch (err) {
+      Alert.alert("Could not open card setup", err instanceof Error ? err.message : "Try again.");
+    } finally {
+      setPlanAction(null);
+    }
+  }, [openHostedBillingUrl]);
 
   /* ── Diagnostics ───────────────────────────────────────────────────────── */
 
@@ -555,6 +642,10 @@ export default function SettingsScreen() {
 
   const allOk = diagSteps.length > 0 && diagSteps.every((s) => s.status === "ok");
   const anyFail = diagSteps.some((s) => s.status === "fail");
+  const currentTier = subscription?.tier ?? "free";
+  const isPaid = currentTier === "core" || currentTier === "wave";
+  const canUpgradeToCore = currentTier !== "core" && currentTier !== "wave";
+  const canUpgradeToWave = currentTier !== "wave";
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -673,35 +764,146 @@ export default function SettingsScreen() {
             {/* Plan */}
             <SectionCard
               icon={CreditCard}
-              title="Plan"
-              description="Your current Ora subscription."
+              title="Plan & billing"
+              description="Ora plan, renewal, upgrades, and payment method. These actions use the same hosted billing flows as the website."
             >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  backgroundColor: c.muted,
-                  borderRadius: c.radius,
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
-                }}
-              >
-                <Text
+              <View style={{ gap: 10 }}>
+                <View
                   style={{
-                    color: c.foreground,
-                    fontFamily: "Inter_600SemiBold",
-                    fontSize: 15,
-                    textTransform: "capitalize",
+                    backgroundColor: c.muted,
+                    borderRadius: c.radius,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    gap: 5,
                   }}
                 >
-                  {subscription?.tier ?? "Free"}
-                </Text>
-                {subscription?.status && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: c.foreground,
+                        fontFamily: "Inter_700Bold",
+                        fontSize: 17,
+                      }}
+                    >
+                      {planLabel(currentTier)}
+                    </Text>
+                    {subscription?.status && (
+                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                        {subscription.status}
+                      </Text>
+                    )}
+                  </View>
                   <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                    {subscription.status}
+                    {renewalLabel(subscription)}
                   </Text>
-                )}
+                </View>
+
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {canUpgradeToCore && (
+                    <Button
+                      label="Upgrade to Core Pack"
+                      icon={Crown}
+                      variant="secondary"
+                      loading={planAction === "core"}
+                      disabled={planAction !== null}
+                      onPress={() => void startCheckout("core")}
+                    />
+                  )}
+                  {canUpgradeToWave && (
+                    <Button
+                      label="Upgrade to Deep Wave"
+                      icon={Crown}
+                      variant="secondary"
+                      loading={planAction === "wave"}
+                      disabled={planAction !== null}
+                      onPress={() => void startCheckout("wave")}
+                    />
+                  )}
+                  {isPaid && (
+                    <Button
+                      label="Manage Ora plan"
+                      icon={ExternalLink}
+                      loading={planAction === "portal"}
+                      disabled={planAction !== null}
+                      onPress={() => void openPortal()}
+                    />
+                  )}
+                </View>
+
+                <View
+                  style={{
+                    backgroundColor: c.muted,
+                    borderRadius: c.radius,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    gap: 8,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <CreditCard size={17} color={c.accentForeground} />
+                    <Text
+                      style={{
+                        color: c.foreground,
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 14,
+                      }}
+                    >
+                      {cardLabel(paymentMethod)}
+                    </Text>
+                  </View>
+                  {paymentMethod?.status === "expired" && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <ShieldAlert size={15} color={c.destructive} />
+                      <Text style={{ color: c.destructive, fontSize: 12, flex: 1 }}>
+                        This payment method is expired. Update it to keep your plan active.
+                      </Text>
+                    </View>
+                  )}
+                  {paymentMethod?.hasPaymentMethod &&
+                  paymentMethod.expMonth &&
+                  paymentMethod.expYear ? (
+                    <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                      Expires {String(paymentMethod.expMonth).padStart(2, "0")}/
+                      {paymentMethod.expYear}
+                    </Text>
+                  ) : null}
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    <Button
+                      label={
+                        paymentMethod?.hasPaymentMethod
+                          ? "Change payment method"
+                          : "Add payment method"
+                      }
+                      icon={paymentMethod?.hasPaymentMethod ? CreditCard : Plus}
+                      variant="secondary"
+                      loading={planAction === "addpm"}
+                      disabled={planAction !== null}
+                      onPress={() => void addPaymentMethod()}
+                    />
+                    {paymentMethod?.hasPaymentMethod && (
+                      <Button
+                        label="Manage billing"
+                        icon={ExternalLink}
+                        variant="ghost"
+                        loading={planAction === "portal"}
+                        disabled={planAction !== null}
+                        onPress={() => void openPortal()}
+                      />
+                    )}
+                  </View>
+                </View>
+
+                <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
+                  Public App Store release still needs a final IAP/store-compliance decision.
+                  Internal testing can use the same hosted website billing flows for parity review.
+                </Text>
               </View>
             </SectionCard>
 

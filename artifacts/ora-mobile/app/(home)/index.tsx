@@ -25,6 +25,8 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FileJson,
+  FileSpreadsheet,
   FileText,
   Folder,
   FolderInput,
@@ -147,6 +149,59 @@ function cleanForTts(text: string): string {
     .trim();
 }
 
+function messageTitle(message: OraMessage): string {
+  if (message.messageKind === "image-analysis") return "Ora Image Analysis";
+  if (message.messageKind === "document-analysis") return "Ora Document Analysis";
+  if (message.datasetResult) return "Ora Dataset Report";
+  return message.role === "assistant" ? "Ora Response" : "Ora Message";
+}
+
+function messageMarkdown(message: OraMessage): string {
+  const lines = [`# ${messageTitle(message)}`, "", message.content.trim()];
+  if (message.sources?.length) {
+    lines.push("", "## Sources");
+    message.sources.forEach((source, index) => {
+      lines.push(`${index + 1}. ${source.title ?? source.url ?? "Source"}`);
+      if (source.url) lines.push(`   ${source.url}`);
+    });
+  }
+  if (message.datasetResult) {
+    lines.push(
+      "",
+      "## Dataset JSON",
+      "```json",
+      JSON.stringify(message.datasetResult, null, 2),
+      "```",
+    );
+  }
+  return lines.join("\n");
+}
+
+function conversationMarkdown(messages: OraMessage[]): string {
+  return [
+    "# Ora Conversation",
+    "",
+    ...messages.map((m) => `## ${m.role === "user" ? "User" : "Ora"}\n\n${m.content.trim()}`),
+  ].join("\n\n");
+}
+
+function datasetActionPlanCsv(message: OraMessage): string | null {
+  const rows = (message.datasetResult as { actionPlan?: unknown[] } | undefined)?.actionPlan;
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const keys = Array.from(
+    rows.reduce<Set<string>>((set, row) => {
+      if (row && typeof row === "object") Object.keys(row).forEach((k) => set.add(k));
+      return set;
+    }, new Set<string>()),
+  );
+  if (keys.length === 0) return null;
+  const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  return [
+    keys.join(","),
+    ...rows.map((row) => keys.map((k) => escape((row as Record<string, unknown>)[k])).join(",")),
+  ].join("\n");
+}
+
 const DATASET_TYPES = ["csv", "xlsx", "xls"];
 
 function formatReset(resetsAt: string | null | undefined): string {
@@ -192,16 +247,51 @@ function tierLabel(tier: string | null | undefined): string {
   return "Free";
 }
 
-function OraLogoTitle() {
+function OraLogoTitle({ accentColor }: { accentColor: string }) {
   const c = useColors();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <Image
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        source={require("../../assets/logo.png")}
-        style={{ width: 26, height: 26, borderRadius: 6 }}
-        contentFit="contain"
-      />
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          alignItems: "center",
+          justifyContent: "center",
+          borderWidth: 1,
+          borderColor: accentColor,
+          backgroundColor: `${accentColor}18`,
+        }}
+      >
+        <View
+          style={{
+            position: "absolute",
+            width: 26,
+            height: 10,
+            borderRadius: 999,
+            borderWidth: 1,
+            borderColor: `${accentColor}99`,
+            transform: [{ rotate: "28deg" }],
+          }}
+        />
+        <View
+          style={{
+            position: "absolute",
+            width: 26,
+            height: 10,
+            borderRadius: 999,
+            borderWidth: 1,
+            borderColor: `${accentColor}99`,
+            transform: [{ rotate: "-28deg" }],
+          }}
+        />
+        <Image
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          source={require("../../assets/logo.png")}
+          style={{ width: 20, height: 20, borderRadius: 5 }}
+          contentFit="contain"
+        />
+      </View>
       <Text
         numberOfLines={1}
         style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
@@ -806,6 +896,47 @@ export default function OraChatScreen() {
       await saveTextAsFile(content, "ora-reply.md", "text/markdown");
     } catch (err) {
       Alert.alert("Couldn't save", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
+
+  const handleExportMessageMarkdown = useCallback(async (message: OraMessage) => {
+    try {
+      await saveTextAsFile(messageMarkdown(message), "ora-response.md", "text/markdown");
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
+
+  const handleExportConversationMarkdown = useCallback(async () => {
+    try {
+      await saveTextAsFile(conversationMarkdown(messages), "ora-conversation.md", "text/markdown");
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, [messages]);
+
+  const handleExportJson = useCallback(async (message: OraMessage) => {
+    try {
+      await saveTextAsFile(
+        JSON.stringify(message.datasetResult ?? message, null, 2),
+        message.datasetResult ? "ora-dataset.json" : "ora-message.json",
+        "application/json",
+      );
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
+
+  const handleExportActionPlanCsv = useCallback(async (message: OraMessage) => {
+    const csv = datasetActionPlanCsv(message);
+    if (!csv) {
+      Alert.alert("No action plan", "This response does not include an action-plan table.");
+      return;
+    }
+    try {
+      await saveTextAsFile(csv, "ora-action-plan.csv", "text/csv");
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
     }
   }, []);
 
@@ -1422,7 +1553,7 @@ export default function OraChatScreen() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader
         title="Ora"
-        titleNode={<OraLogoTitle />}
+        titleNode={<OraLogoTitle accentColor={tierAccent} />}
         subtitle={usageText}
         right={
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -2006,6 +2137,22 @@ export default function OraChatScreen() {
         onSaveFile={(m) => {
           setActionsMessage(null);
           void handleSaveMessageFile(m);
+        }}
+        onExportMarkdown={(m) => {
+          setActionsMessage(null);
+          void handleExportMessageMarkdown(m);
+        }}
+        onExportConversation={() => {
+          setActionsMessage(null);
+          void handleExportConversationMarkdown();
+        }}
+        onExportJson={(m) => {
+          setActionsMessage(null);
+          void handleExportJson(m);
+        }}
+        onExportCsv={(m) => {
+          setActionsMessage(null);
+          void handleExportActionPlanCsv(m);
         }}
         onRegenerate={(m) => {
           setActionsMessage(null);
@@ -3029,6 +3176,10 @@ function MessageActionsSheet({
   onCopy,
   onShare,
   onSaveFile,
+  onExportMarkdown,
+  onExportConversation,
+  onExportJson,
+  onExportCsv,
   onRegenerate,
   onReadAloud,
   onEdit,
@@ -3039,6 +3190,10 @@ function MessageActionsSheet({
   onCopy: (message: OraMessage) => void;
   onShare: (message: OraMessage) => void;
   onSaveFile: (message: OraMessage) => void;
+  onExportMarkdown: (message: OraMessage) => void;
+  onExportConversation: () => void;
+  onExportJson: (message: OraMessage) => void;
+  onExportCsv: (message: OraMessage) => void;
   onRegenerate: (message: OraMessage) => void;
   onReadAloud: (message: OraMessage) => void;
   onEdit: (message: OraMessage) => void;
@@ -3049,6 +3204,8 @@ function MessageActionsSheet({
   const isAssistant = message?.role === "assistant";
   const isUser = message?.role === "user";
   const hasContent = !!message?.content.trim();
+  const hasDataset = !!message?.datasetResult;
+  const hasActionPlan = !!message && !!datasetActionPlanCsv(message);
 
   return (
     <Modal visible={!!message} animationType="slide" transparent onRequestClose={onClose}>
@@ -3088,6 +3245,34 @@ function MessageActionsSheet({
                   icon={Download}
                   label="Save as file"
                   onPress={() => onSaveFile(message)}
+                />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={FileText}
+                  label="Export Markdown"
+                  onPress={() => onExportMarkdown(message)}
+                />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={FileText}
+                  label="Export conversation Markdown"
+                  onPress={() => onExportConversation()}
+                />
+              )}
+              {(hasDataset || isAssistant) && (
+                <ActionRow
+                  icon={FileJson}
+                  label={hasDataset ? "Export dataset JSON" : "Export message JSON"}
+                  onPress={() => onExportJson(message)}
+                />
+              )}
+              {hasActionPlan && (
+                <ActionRow
+                  icon={FileSpreadsheet}
+                  label="Export action-plan CSV"
+                  onPress={() => onExportCsv(message)}
                 />
               )}
               {isAssistant && canRegenerate && (

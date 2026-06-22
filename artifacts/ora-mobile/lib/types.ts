@@ -284,6 +284,8 @@ export interface OraxRepository {
   connectionStatus: "metadata_only" | "read_only";
   repositoryUrl?: string;
   defaultBranch?: string;
+  scanStatus?: string;
+  lastScanAt?: string | null;
 }
 
 export interface OraxTask {
@@ -295,6 +297,52 @@ export interface OraxTask {
   status: string;
   result?: unknown;
   createdAt?: string;
+}
+
+export interface OraxScan {
+  id: number;
+  repositoryId: number;
+  status: string;
+  branch?: string | null;
+  summary?: unknown;
+  error?: string | null;
+  createdAt?: string;
+  completedAt?: string | null;
+}
+
+export interface OraxTaskMessage {
+  id: number;
+  taskId: number;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  event?: string | null;
+  approvalId?: number | null;
+  artifactId?: number | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt?: string;
+}
+
+export interface OraxTaskApproval {
+  id: number;
+  taskId: number;
+  action: string;
+  status: string;
+  request?: unknown;
+  result?: unknown;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface OraxTaskArtifact {
+  id: number;
+  taskId: number;
+  type: string;
+  status: string;
+  title?: string | null;
+  summary?: string | null;
+  content?: unknown;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UserPreferences {
@@ -310,4 +358,61 @@ export interface BillingSubscription {
   tier: OraTier;
   status: "active" | "canceled";
   currentPeriodEnd: string;
+  cancelAtPeriodEnd?: boolean;
+}
+
+export interface PaymentMethodInfo {
+  hasPaymentMethod: boolean;
+  brand?: string | null;
+  last4?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
+  status?: "active" | "expired" | string | null;
+}
+
+export interface HelpArticle {
+  id: number;
+  slug?: string;
+  title: string;
+  body: string;
+  category: string;
+  tags?: string[];
+  isFaq?: boolean;
+  updatedAt?: string;
+}
+
+export interface SupportMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface SupportConversationSummary {
+  id: number;
+  title: string;
+  preview?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string;
+}
+
+export interface SupportTicketSummary {
+  id: number;
+  subject: string;
+  category: string | null;
+  status: string;
+  projectId: number | null;
+  attachmentCount: number;
+  emailStatus: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportTicketDetail extends SupportTicketSummary {
+  transcript: SupportMessage[];
+  attachments: Array<{
+    fileName: string;
+    mimeType: string;
+    size: number;
+    url: string;
+  }>;
 }

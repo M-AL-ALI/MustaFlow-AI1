@@ -6,6 +6,7 @@ import type {
   ChatRequest,
   ChatResponse,
   DatasetAnalysisResponse,
+  HelpArticle,
   OraAssetsResponse,
   OraConversationDetail,
   OraConversationSummary,
@@ -19,8 +20,16 @@ import type {
   OraVideo,
   OraxCapabilities,
   OraxRepository,
+  OraxScan,
   OraxTask,
+  OraxTaskApproval,
+  OraxTaskArtifact,
+  OraxTaskMessage,
+  PaymentMethodInfo,
   StreamDonePayload,
+  SupportMessage,
+  SupportTicketDetail,
+  SupportTicketSummary,
   UploadResponse,
   UserPreferences,
 } from "./types";
@@ -640,6 +649,48 @@ export async function listTasks(): Promise<OraxTask[]> {
   return data.tasks ?? [];
 }
 
+export async function listRepositoryScans(repositoryId: number): Promise<OraxScan[]> {
+  const data = await jsonRequest<{ scans: OraxScan[] }>(
+    `/api/orax/repositories/${repositoryId}/scans`,
+  );
+  return data.scans ?? [];
+}
+
+export function scanRepository(
+  repositoryId: number,
+): Promise<{ repository: OraxRepository; scan: OraxScan }> {
+  return jsonRequest(`/api/orax/repositories/${repositoryId}/scan`, { method: "POST" });
+}
+
+export async function listTaskMessages(taskId: number): Promise<OraxTaskMessage[]> {
+  const data = await jsonRequest<{ messages: OraxTaskMessage[] }>(
+    `/api/orax/tasks/${taskId}/messages`,
+  );
+  return data.messages ?? [];
+}
+
+export async function sendTaskMessage(taskId: number, content: string): Promise<OraxTaskMessage[]> {
+  const data = await jsonRequest<{ messages: OraxTaskMessage[] }>(
+    `/api/orax/tasks/${taskId}/messages`,
+    { method: "POST", body: JSON.stringify({ content }) },
+  );
+  return data.messages ?? [];
+}
+
+export async function listTaskApprovals(taskId: number): Promise<OraxTaskApproval[]> {
+  const data = await jsonRequest<{ approvals: OraxTaskApproval[] }>(
+    `/api/orax/tasks/${taskId}/approvals`,
+  );
+  return data.approvals ?? [];
+}
+
+export async function listTaskArtifacts(taskId: number): Promise<OraxTaskArtifact[]> {
+  const data = await jsonRequest<{ artifacts: OraxTaskArtifact[] }>(
+    `/api/orax/tasks/${taskId}/artifacts`,
+  );
+  return data.artifacts ?? [];
+}
+
 export function createTask(input: {
   repositoryId: number;
   kind: "analyze" | "coding";
@@ -672,4 +723,84 @@ export async function getSubscription(): Promise<BillingSubscription | null> {
     "/api/billing/subscription",
   );
   return data.subscription ?? null;
+}
+
+export function getPaymentMethod(): Promise<PaymentMethodInfo> {
+  return jsonRequest<PaymentMethodInfo>("/api/billing/payment-method");
+}
+
+export function startOraSubscriptionCheckout(input: {
+  tier: "core" | "wave";
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<{ checkoutUrl?: string; setupRequired?: boolean; error?: string; message?: string }> {
+  return jsonRequest("/api/billing/subscription/checkout", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function openBillingPortal(input: {
+  returnUrl: string;
+}): Promise<{ url?: string; setupRequired?: boolean; error?: string }> {
+  return jsonRequest("/api/billing/portal", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function startPaymentMethodSetup(input: {
+  returnUrl: string;
+}): Promise<{ url?: string; setupRequired?: boolean; error?: string }> {
+  return jsonRequest("/api/billing/payment-method/setup", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Help Center + Ora Support Mode
+// ---------------------------------------------------------------------------
+
+export async function listHelpArticles(
+  query?: string,
+): Promise<{ articles: HelpArticle[]; faqs: HelpArticle[] }> {
+  const params = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  const data = await jsonRequest<{ articles?: HelpArticle[]; faqs?: HelpArticle[] }>(
+    `/help/articles${params}`,
+  );
+  return { articles: data.articles ?? [], faqs: data.faqs ?? [] };
+}
+
+export async function sendSupportChat(input: {
+  message: string;
+  messages: SupportMessage[];
+  category?: string;
+  language?: string;
+}): Promise<{ reply: string; canEscalate?: boolean }> {
+  return jsonRequest("/help/support/chat", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function escalateSupport(input: {
+  subject: string;
+  category?: string;
+  transcript: SupportMessage[];
+  deviceInfo?: Record<string, unknown> | null;
+}): Promise<{ ticketId: number; emailStatus?: string; supportEmailUsed?: string }> {
+  return jsonRequest("/help/support/escalate", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listSupportTickets(): Promise<SupportTicketSummary[]> {
+  const data = await jsonRequest<{ tickets?: SupportTicketSummary[] }>("/help/support/tickets");
+  return data.tickets ?? [];
+}
+
+export function getSupportTicket(id: number): Promise<SupportTicketDetail> {
+  return jsonRequest<SupportTicketDetail>(`/help/support/tickets/${id}`);
 }
