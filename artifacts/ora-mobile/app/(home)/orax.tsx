@@ -205,7 +205,10 @@ export default function OraxScreen() {
       setConnectingGithubRepoId(repoId);
       try {
         const res = await connectGithubToken(repoId, token);
-        Alert.alert("GitHub connected", res.message ?? "Token saved successfully.");
+        Alert.alert(
+          "GitHub connected",
+          `Connected to ${res.repository.owner}/${res.repository.name}.`,
+        );
         setGithubTokenByRepo((prev) => ({ ...prev, [repoId]: "" }));
         setRepos(await listRepositories());
       } catch (err) {
@@ -219,8 +222,7 @@ export default function OraxScreen() {
 
   const handleApprovalDecision = useCallback(
     async (approvalId: number, decision: "approved" | "denied") => {
-      const key = `decision-${approvalId}`;
-      setActionBusy(key);
+      setActionBusy(`decision-${approvalId}`);
       try {
         await patchApproval(approvalId, decision);
         if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
@@ -237,21 +239,42 @@ export default function OraxScreen() {
     setActionBusy(`read-${approvalId}`);
     try {
       const res = await readApprovedFiles(approvalId);
-      const summary = res.files.map((f) => `${f.path} (${f.content.length} chars)`).join("\n");
-      Alert.alert("Files read", summary || "No files returned.");
+      const summary =
+        res.files.length > 0
+          ? `${res.files.length} file(s) on branch "${res.branch}"${res.skipped.length ? `\nSkipped: ${res.skipped.join(", ")}` : ""}`
+          : "No files could be read.";
+      Alert.alert("Files read", summary);
+      if (selectedTask) {
+        const [appr, arts] = await Promise.allSettled([
+          listTaskApprovals(selectedTask.id),
+          listTaskArtifacts(selectedTask.id),
+        ]);
+        if (appr.status === "fulfilled") setTaskApprovals(appr.value);
+        if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
+      }
     } catch (err) {
       Alert.alert("Read failed", err instanceof Error ? err.message : "Please try again.");
     } finally {
       setActionBusy(null);
     }
-  }, []);
+  }, [selectedTask]);
 
   const handleDraftPatch = useCallback(
     async (taskId: number) => {
+      const readApproval = taskApprovals.find(
+        (a) => a.action === "read_files" && (a.status === "approved" || a.status === "completed"),
+      );
+      if (!readApproval) {
+        Alert.alert(
+          "No approved file read",
+          "An approved file-read request is required before generating a draft patch.",
+        );
+        return;
+      }
       setActionBusy(`patch-${taskId}`);
       try {
-        const res = await generateDraftPatch(taskId);
-        Alert.alert("Draft patch ready", res.summary ?? `${res.patch.length} chars`);
+        const res = await generateDraftPatch(taskId, readApproval.id);
+        Alert.alert("Draft patch ready", res.artifact.summary ?? "Artifact created.");
         if (selectedTask) {
           const [appr, arts] = await Promise.allSettled([
             listTaskApprovals(selectedTask.id),
@@ -266,16 +289,54 @@ export default function OraxScreen() {
         setActionBusy(null);
       }
     },
-    [selectedTask],
+    [selectedTask, taskApprovals],
   );
 
   const handleRequestApproval = useCallback(
     async (kind: "sandbox" | "commands" | "pr", taskId: number) => {
+      let artifactId: number;
+      if (kind === "sandbox") {
+        const art = taskArtifacts.find((a) => a.type === "draft_patch");
+        if (!art) {
+          Alert.alert("No draft patch", "Generate a draft patch before requesting sandbox validation.");
+          return;
+        }
+        artifactId = art.id;
+      } else if (kind === "commands") {
+        const art = taskArtifacts.find(
+          (a) => a.type === "sandbox_result" && a.status === "completed",
+        );
+        if (!art) {
+          Alert.alert("No sandbox result", "A passed sandbox validation is required first.");
+          return;
+        }
+        artifactId = art.id;
+      } else {
+        const art = taskArtifacts.find(
+          (a) => a.type === "command_result" && a.status === "completed",
+        );
+        if (!art) {
+          Alert.alert("No command result", "Passed controlled checks are required first.");
+          return;
+        }
+        artifactId = art.id;
+        const confirmed = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            "Create GitHub PR",
+            "ORAX will create a branch and open a pull request. No direct push or deploy will occur.",
+            [
+              { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+              { text: "Request PR approval", onPress: () => resolve(true) },
+            ],
+          );
+        });
+        if (!confirmed) return;
+      }
       setActionBusy(`req-${kind}-${taskId}`);
       try {
-        if (kind === "sandbox") await requestSandboxApproval(taskId);
-        else if (kind === "commands") await requestCommandApproval(taskId);
-        else await requestGithubPrApproval(taskId);
+        if (kind === "sandbox") await requestSandboxApproval(taskId, artifactId);
+        else if (kind === "commands") await requestCommandApproval(taskId, artifactId);
+        else await requestGithubPrApproval(taskId, artifactId);
         setTaskApprovals(await listTaskApprovals(taskId));
         Alert.alert("Approval requested", "The approval request has been queued.");
       } catch (err) {
@@ -284,7 +345,7 @@ export default function OraxScreen() {
         setActionBusy(null);
       }
     },
-    [],
+    [taskArtifacts],
   );
 
   const handleRunSandbox = useCallback(
@@ -292,11 +353,16 @@ export default function OraxScreen() {
       setActionBusy(`sandbox-${approvalId}`);
       try {
         const res = await runSandbox(approvalId);
-        Alert.alert(
-          res.ok ? "Sandbox passed" : "Sandbox failed",
-          res.output ?? res.error ?? "Done.",
-        );
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        const passed = res.artifact.status === "completed";
+        Alert.alert(passed ? "Sandbox passed" : "Sandbox failed", res.artifact.summary ?? "Done.");
+        if (selectedTask) {
+          const [appr, arts] = await Promise.allSettled([
+            listTaskApprovals(selectedTask.id),
+            listTaskArtifacts(selectedTask.id),
+          ]);
+          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
+          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
+        }
       } catch (err) {
         Alert.alert("Sandbox failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
@@ -311,13 +377,18 @@ export default function OraxScreen() {
       setActionBusy(`commands-${approvalId}`);
       try {
         const res = await runCommands(approvalId);
-        Alert.alert(
-          res.ok ? "Commands passed" : "Commands failed",
-          res.output ?? res.error ?? "Done.",
-        );
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        const passed = res.artifact.status === "completed";
+        Alert.alert(passed ? "Checks passed" : "Checks failed", res.artifact.summary ?? "Done.");
+        if (selectedTask) {
+          const [appr, arts] = await Promise.allSettled([
+            listTaskApprovals(selectedTask.id),
+            listTaskArtifacts(selectedTask.id),
+          ]);
+          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
+          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
+        }
       } catch (err) {
-        Alert.alert("Commands failed", err instanceof Error ? err.message : "Please try again.");
+        Alert.alert("Checks failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
         setActionBusy(null);
       }
@@ -330,8 +401,15 @@ export default function OraxScreen() {
       setActionBusy(`pr-${approvalId}`);
       try {
         const res = await createGithubPR(approvalId);
-        Alert.alert("PR created", `Pull request #${res.prNumber}\n${res.prUrl}`);
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        Alert.alert("PR created", res.artifact.summary ?? "Pull request created.");
+        if (selectedTask) {
+          const [appr, arts] = await Promise.allSettled([
+            listTaskApprovals(selectedTask.id),
+            listTaskArtifacts(selectedTask.id),
+          ]);
+          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
+          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
+        }
       } catch (err) {
         Alert.alert("PR creation failed", err instanceof Error ? err.message : "Please try again.");
       } finally {

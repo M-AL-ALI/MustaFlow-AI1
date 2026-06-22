@@ -424,41 +424,33 @@ export interface SupportTicketDetail extends SupportTicketSummary {
 export type OraxApprovalDecision = "approved" | "denied";
 
 export interface OraxGithubConnectResult {
-  ok: boolean;
-  message?: string;
+  repository: OraxRepository;
 }
 
 export interface OraxReadFilesResult {
-  files: Array<{ path: string; content: string }>;
+  approval: OraxTaskApproval;
+  branch: string;
+  files: Array<{ path: string; sha: string; size: number; truncated: boolean }>;
+  skipped: string[];
 }
 
 export interface OraxDraftPatchResult {
-  patch: string;
-  summary?: string;
-  filesChanged?: string[];
+  artifact: OraxTaskArtifact;
 }
 
-export interface OraxSandboxResult {
-  ok: boolean;
-  output?: string;
-  error?: string;
+export interface OraxApprovalWithArtifact {
+  approval: OraxTaskApproval;
+  artifact: OraxTaskArtifact;
+  reused?: boolean;
 }
 
-export interface OraxCommandResult {
-  ok: boolean;
-  output?: string;
-  error?: string;
-}
-
-export interface OraxPRResult {
-  prUrl: string;
-  prNumber: number;
-  branch?: string;
-}
+export type OraxSandboxResult = OraxApprovalWithArtifact;
+export type OraxCommandResult = OraxApprovalWithArtifact;
+export type OraxPRResult = OraxApprovalWithArtifact;
 
 export interface SupportAttachment {
   fileName: string;
   mimeType: string;
   size: number;
-  data: string;
+  dataBase64: string;
 }

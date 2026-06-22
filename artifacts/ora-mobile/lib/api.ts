@@ -19,14 +19,12 @@ import type {
   OraUsage,
   OraVideo,
   OraxApprovalDecision,
+  OraxApprovalWithArtifact,
   OraxCapabilities,
-  OraxCommandResult,
   OraxDraftPatchResult,
   OraxGithubConnectResult,
-  OraxPRResult,
   OraxReadFilesResult,
   OraxRepository,
-  OraxSandboxResult,
   OraxScan,
   OraxTask,
   OraxTaskApproval,
@@ -837,7 +835,7 @@ export function connectGithubToken(
 export function patchApproval(
   approvalId: number,
   decision: OraxApprovalDecision,
-): Promise<OraxTaskApproval> {
+): Promise<{ approval: OraxTaskApproval }> {
   return jsonRequest(`/api/orax/approvals/${approvalId}`, {
     method: "PATCH",
     body: JSON.stringify({ decision }),
@@ -848,30 +846,69 @@ export function readApprovedFiles(approvalId: number): Promise<OraxReadFilesResu
   return jsonRequest(`/api/orax/approvals/${approvalId}/read-files`, { method: "POST" });
 }
 
-export function generateDraftPatch(taskId: number): Promise<OraxDraftPatchResult> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/draft-patch`, { method: "POST" });
+export function generateDraftPatch(
+  taskId: number,
+  approvalId: number,
+  instructions?: string,
+): Promise<OraxDraftPatchResult> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/draft-patch`, {
+    method: "POST",
+    body: JSON.stringify({ approvalId, ...(instructions ? { instructions } : {}) }),
+  });
 }
 
-export function requestSandboxApproval(taskId: number): Promise<OraxTaskApproval> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/sandbox-approvals`, { method: "POST" });
+export function requestSandboxApproval(
+  taskId: number,
+  artifactId: number,
+  reason?: string,
+): Promise<{ approval: OraxTaskApproval }> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/sandbox-approvals`, {
+    method: "POST",
+    body: JSON.stringify({ artifactId, ...(reason ? { reason } : {}) }),
+  });
 }
 
-export function requestCommandApproval(taskId: number): Promise<OraxTaskApproval> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/command-approvals`, { method: "POST" });
+export function requestCommandApproval(
+  taskId: number,
+  artifactId: number,
+  commands?: string[],
+  reason?: string,
+): Promise<{ approval: OraxTaskApproval }> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/command-approvals`, {
+    method: "POST",
+    body: JSON.stringify({
+      artifactId,
+      ...(commands?.length ? { commands } : {}),
+      ...(reason ? { reason } : {}),
+    }),
+  });
 }
 
-export function requestGithubPrApproval(taskId: number): Promise<OraxTaskApproval> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/github-pr-approvals`, { method: "POST" });
+export function requestGithubPrApproval(
+  taskId: number,
+  artifactId: number,
+  opts?: { title?: string; body?: string; reason?: string },
+): Promise<{ approval: OraxTaskApproval }> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/github-pr-approvals`, {
+    method: "POST",
+    body: JSON.stringify({
+      artifactId,
+      confirmationText: "CREATE PR",
+      ...(opts?.title ? { title: opts.title } : {}),
+      ...(opts?.body ? { body: opts.body } : {}),
+      ...(opts?.reason ? { reason: opts.reason } : {}),
+    }),
+  });
 }
 
-export function runSandbox(approvalId: number): Promise<OraxSandboxResult> {
+export function runSandbox(approvalId: number): Promise<OraxApprovalWithArtifact> {
   return jsonRequest(`/api/orax/approvals/${approvalId}/run-sandbox`, { method: "POST" });
 }
 
-export function runCommands(approvalId: number): Promise<OraxCommandResult> {
+export function runCommands(approvalId: number): Promise<OraxApprovalWithArtifact> {
   return jsonRequest(`/api/orax/approvals/${approvalId}/run-commands`, { method: "POST" });
 }
 
-export function createGithubPR(approvalId: number): Promise<OraxPRResult> {
+export function createGithubPR(approvalId: number): Promise<OraxApprovalWithArtifact> {
   return jsonRequest(`/api/orax/approvals/${approvalId}/create-github-pr`, { method: "POST" });
 }

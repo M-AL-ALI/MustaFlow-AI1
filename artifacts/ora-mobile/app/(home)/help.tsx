@@ -172,6 +172,17 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
     });
     if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
+    const mime = (asset.mimeType ?? "").toLowerCase();
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const BLOCKED = /\.(exe|sh|bat|cmd|msi|dll|so|dmg|pkg|deb|rpm|ps1|vbs|js|jar)$/i;
+    if (BLOCKED.test(asset.name)) {
+      Alert.alert("Type not allowed", "Executable file types cannot be attached.");
+      return;
+    }
+    if ((asset.size ?? 0) > MAX_BYTES) {
+      Alert.alert("File too large", "Each attachment must be under 5 MB.");
+      return;
+    }
     try {
       const base64 = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -180,9 +191,9 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
         ...prev,
         {
           fileName: asset.name,
-          mimeType: asset.mimeType ?? "application/octet-stream",
+          mimeType: mime || "application/octet-stream",
           size: asset.size ?? 0,
-          data: base64,
+          dataBase64: base64,
         },
       ]);
     } catch {
