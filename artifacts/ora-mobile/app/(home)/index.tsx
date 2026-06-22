@@ -473,6 +473,8 @@ export default function OraChatScreen() {
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const inputRef = useRef<TextInput>(null);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [talkMode, setTalkMode] = useState(false);
   const [talkModeMuted, setTalkModeMuted] = useState(false);
@@ -1160,6 +1162,7 @@ export default function OraChatScreen() {
         } else {
           // Normal dictation: fill the input so the user can review/edit before sending
           setInput((prev) => (prev.trim() ? `${prev.trim()} ${clean}` : clean));
+          inputRef.current?.focus();
         }
       }
     } catch {
@@ -1871,32 +1874,6 @@ export default function OraChatScreen() {
             gap: 10,
           }}
         >
-          {mode === "deep" && (
-            <View style={{ flexDirection: "row" }}>
-              <Pressable
-                onPress={() => setMode("instant")}
-                accessibilityLabel="Turn off Deep Thinking"
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  alignSelf: "flex-start",
-                  paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 999,
-                  backgroundColor: c.secondary,
-                  borderWidth: 1,
-                  borderColor: c.border,
-                }}
-              >
-                <Gauge size={14} color={tierAccent} />
-                <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 13 }}>
-                  Deep Thinking
-                </Text>
-                <X size={13} color={c.mutedForeground} />
-              </Pressable>
-            </View>
-          )}
 
           {editingImageId !== null && (
             <View
@@ -1952,114 +1929,6 @@ export default function OraChatScreen() {
             </View>
           )}
 
-          {talkMode && (
-            <View
-              style={{
-                backgroundColor: c.card,
-                borderWidth: 1,
-                borderColor: c.border,
-                borderRadius: c.radius,
-                padding: 12,
-                gap: 10,
-              }}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <View
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 17,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: speakingId ? c.primary : c.secondary,
-                  }}
-                >
-                  <PhoneCall
-                    size={18}
-                    color={speakingId ? c.primaryForeground : c.mutedForeground}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={{
-                      color: c.foreground,
-                      fontFamily: "Inter_600SemiBold",
-                      fontSize: 14,
-                    }}
-                  >
-                    {talkStatusTitle}
-                  </Text>
-                  <Text style={{ color: c.mutedForeground, fontSize: 12, marginTop: 2 }}>
-                    {talkStatusSubtitle}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                {speakingId && (
-                  <Pressable
-                    onPress={interruptTalkMode}
-                    style={{
-                      flex: 1,
-                      minHeight: 38,
-                      borderRadius: c.radius,
-                      borderWidth: 1,
-                      borderColor: c.border,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexDirection: "row",
-                      gap: 6,
-                    }}
-                  >
-                    <Square size={14} color={c.foreground} fill={c.foreground} />
-                    <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
-                      Interrupt
-                    </Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  onPress={toggleTalkModeMute}
-                  style={{
-                    flex: 1,
-                    minHeight: 38,
-                    borderRadius: c.radius,
-                    borderWidth: 1,
-                    borderColor: c.border,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexDirection: "row",
-                    gap: 6,
-                  }}
-                >
-                  {talkModeMuted ? (
-                    <VolumeX size={14} color={c.foreground} />
-                  ) : (
-                    <Volume2 size={14} color={c.foreground} />
-                  )}
-                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
-                    {talkModeMuted ? "Unmute" : "Mute"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={toggleTalkMode}
-                  style={{
-                    flex: 1,
-                    minHeight: 38,
-                    borderRadius: c.radius,
-                    backgroundColor: c.secondary,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexDirection: "row",
-                    gap: 6,
-                  }}
-                >
-                  <X size={14} color={c.mutedForeground} />
-                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>End</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-
           {attachment && (
             <View
               style={{
@@ -2087,91 +1956,280 @@ export default function OraChatScreen() {
             </View>
           )}
 
-          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
-            {!recording && (
-              <Pressable
-                onPress={() => setShowPlusMenu(true)}
-                disabled={uploading}
-                accessibilityLabel="Add attachment or choose tools"
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: c.radius,
-                  backgroundColor: c.secondary,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {uploading ? (
-                  <ActivityIndicator size="small" color={c.mutedForeground} />
-                ) : (
-                  <Plus size={22} color={c.mutedForeground} />
-                )}
-              </Pressable>
-            )}
-            <Pressable
-              onPress={recording ? stopRecording : startRecording}
-              disabled={transcribing}
-              accessibilityRole="button"
-              accessibilityLabel={recording ? "Stop recording" : "Record a voice message"}
+          {talkMode ? (
+            /* ── Talk to Ora panel ── replaces composer while voice mode is active */
+            <View
               style={{
-                width: 44,
-                height: 44,
-                borderRadius: c.radius,
-                backgroundColor: recording ? c.destructive : c.secondary,
-                alignItems: "center",
-                justifyContent: "center",
+                borderWidth: 1.5,
+                borderColor: tierAccent + "66",
+                borderRadius: 20,
+                backgroundColor: tierAccent + "0d",
+                padding: 14,
+                gap: 12,
               }}
             >
-              {transcribing ? (
-                <ActivityIndicator size="small" color={c.mutedForeground} />
-              ) : recording ? (
-                <Square size={18} color={c.primaryForeground} fill={c.primaryForeground} />
-              ) : (
-                <Mic size={20} color={c.mutedForeground} />
+              {/* Status row */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <View
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 21,
+                    backgroundColor: tierAccent + "20",
+                    borderWidth: 1.5,
+                    borderColor: tierAccent + "55",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <PhoneCall size={20} color={tierAccent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      color: c.foreground,
+                      fontFamily: "Inter_600SemiBold",
+                      fontSize: 15,
+                    }}
+                  >
+                    {talkStatusTitle}
+                  </Text>
+                  <Text style={{ color: c.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                    {talkStatusSubtitle}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Waveform shown inside Talk panel while recording */}
+              {recording && (
+                <RecordingIndicator
+                  recorder={recorder}
+                  accentColor={tierAccent}
+                  autoStopOnSilence={true}
+                  onAutoStop={autoStopTalkRecording}
+                />
               )}
-            </Pressable>
-            {recording ? (
-              <RecordingIndicator
-                recorder={recorder}
-                autoStopOnSilence={talkMode}
-                onAutoStop={autoStopTalkRecording}
-              />
-            ) : (
-              <>
+
+              {/* Controls */}
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {speakingId && (
+                  <Pressable
+                    onPress={interruptTalkMode}
+                    style={{
+                      flex: 1,
+                      minHeight: 40,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexDirection: "row",
+                      gap: 6,
+                    }}
+                  >
+                    <Square size={14} color={c.foreground} fill={c.foreground} />
+                    <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
+                      Interrupt
+                    </Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={toggleTalkModeMute}
+                  style={{
+                    flex: 1,
+                    minHeight: 40,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: talkModeMuted ? tierAccent + "55" : c.border,
+                    backgroundColor: talkModeMuted ? tierAccent + "15" : "transparent",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "row",
+                    gap: 6,
+                  }}
+                >
+                  {talkModeMuted ? (
+                    <VolumeX size={14} color={tierAccent} />
+                  ) : (
+                    <Volume2 size={14} color={c.foreground} />
+                  )}
+                  <Text
+                    style={{
+                      color: talkModeMuted ? tierAccent : c.foreground,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    {talkModeMuted ? "Unmute" : "Mute"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={toggleTalkMode}
+                  style={{
+                    flex: 1,
+                    minHeight: 40,
+                    borderRadius: 12,
+                    backgroundColor: c.secondary,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "row",
+                    gap: 6,
+                  }}
+                >
+                  <X size={14} color={c.mutedForeground} />
+                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>End</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            /* ── Unified rounded composer bar — mirrors website Ora panel layout ── */
+            <View
+              style={{
+                borderWidth: 1.5,
+                borderColor: composerFocused ? tierAccent + "99" : c.border,
+                borderRadius: 20,
+                backgroundColor: c.card,
+              }}
+            >
+              {/* Input area: TextInput when idle, waveform when recording */}
+              {recording ? (
+                <RecordingIndicator
+                  recorder={recorder}
+                  accentColor={tierAccent}
+                  autoStopOnSilence={false}
+                  onAutoStop={autoStopTalkRecording}
+                />
+              ) : (
                 <TextInput
+                  ref={inputRef}
                   value={input}
                   onChangeText={setInput}
                   placeholder="Message Ora…"
                   placeholderTextColor={c.mutedForeground}
                   multiline
+                  onFocus={() => setComposerFocused(true)}
+                  onBlur={() => setComposerFocused(false)}
                   style={{
-                    flex: 1,
-                    maxHeight: 120,
-                    minHeight: 44,
-                    backgroundColor: c.card,
-                    borderWidth: 1,
-                    borderColor: c.border,
-                    borderRadius: 20,
                     paddingHorizontal: 14,
                     paddingTop: 12,
-                    paddingBottom: 12,
+                    paddingBottom: 4,
+                    maxHeight: 120,
+                    minHeight: 48,
                     color: c.foreground,
                     fontFamily: "Inter_400Regular",
                     fontSize: 15,
                   }}
                 />
+              )}
+
+              {/* Control row: Mode | Plus | Mic → spacer → Send */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: 8,
+                  paddingBottom: 8,
+                  paddingTop: 2,
+                  gap: 2,
+                }}
+              >
+                {/* Mode pill */}
+                <Pressable
+                  onPress={() => {
+                    if (!deepAllowed) {
+                      Alert.alert(
+                        "Deep Thinking",
+                        "Deep Thinking is available with Core Pack or Deep Wave. Upgrade in Settings.",
+                        [{ text: "OK" }],
+                      );
+                      return;
+                    }
+                    setMode(mode === "deep" ? "instant" : "deep");
+                  }}
+                  accessibilityLabel={
+                    mode === "deep" ? "Switch to Instant mode" : "Switch to Deep Thinking mode"
+                  }
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingVertical: 5,
+                    paddingHorizontal: 10,
+                    borderRadius: 999,
+                    backgroundColor: mode === "deep" ? tierAccent + "18" : "transparent",
+                    borderWidth: 1,
+                    borderColor: mode === "deep" ? tierAccent + "55" : "transparent",
+                  }}
+                >
+                  {mode === "deep" ? (
+                    <Gauge size={13} color={tierAccent} />
+                  ) : (
+                    <Zap size={13} color={c.mutedForeground} />
+                  )}
+                  <Text
+                    style={{
+                      color: mode === "deep" ? tierAccent : c.mutedForeground,
+                      fontFamily: "Inter_500Medium",
+                      fontSize: 12,
+                    }}
+                  >
+                    {mode === "deep" ? "Deep" : "Instant"}
+                  </Text>
+                </Pressable>
+
+                {/* Plus — hidden while recording */}
+                {!recording && (
+                  <Pressable
+                    onPress={() => setShowPlusMenu(true)}
+                    disabled={uploading}
+                    accessibilityLabel="Add attachment or choose tools"
+                    style={{ padding: 6, opacity: uploading ? 0.5 : 1 }}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color={c.mutedForeground} />
+                    ) : (
+                      <Plus size={20} color={c.mutedForeground} />
+                    )}
+                  </Pressable>
+                )}
+
+                {/* Mic */}
+                <Pressable
+                  onPress={recording ? stopRecording : startRecording}
+                  disabled={transcribing}
+                  accessibilityRole="button"
+                  accessibilityLabel={recording ? "Stop recording" : "Record a voice message"}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    backgroundColor: recording ? tierAccent + "20" : "transparent",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {transcribing ? (
+                    <ActivityIndicator size="small" color={c.mutedForeground} />
+                  ) : recording ? (
+                    <Square size={14} color={tierAccent} fill={tierAccent} />
+                  ) : (
+                    <Mic size={20} color={c.mutedForeground} />
+                  )}
+                </Pressable>
+
+                <View style={{ flex: 1 }} />
+
+                {/* Send */}
                 <Pressable
                   onPress={handleSend}
                   disabled={sending || (!input.trim() && !attachment)}
                   accessibilityRole="button"
                   accessibilityLabel="Send message"
                   style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: c.radius,
+                    width: 34,
+                    height: 34,
+                    borderRadius: 17,
                     backgroundColor:
-                      sending || (!input.trim() && !attachment) ? c.secondary : c.primary,
+                      sending || (!input.trim() && !attachment) ? c.secondary : tierAccent,
                     alignItems: "center",
                     justifyContent: "center",
                   }}
@@ -2180,14 +2238,14 @@ export default function OraChatScreen() {
                     <ActivityIndicator size="small" color={c.primaryForeground} />
                   ) : (
                     <ArrowUp
-                      size={20}
-                      color={!input.trim() && !attachment ? c.mutedForeground : c.primaryForeground}
+                      size={18}
+                      color={!input.trim() && !attachment ? c.mutedForeground : "#ffffff"}
                     />
                   )}
                 </Pressable>
-              </>
-            )}
-          </View>
+              </View>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -2339,10 +2397,12 @@ function formatElapsed(ms: number): string {
 
 function RecordingIndicator({
   recorder,
+  accentColor,
   autoStopOnSilence = false,
   onAutoStop,
 }: {
   recorder: AudioRecorder;
+  accentColor: string;
   autoStopOnSilence?: boolean;
   onAutoStop?: () => void;
 }) {
@@ -2396,16 +2456,12 @@ function RecordingIndicator({
   return (
     <View
       style={{
-        flex: 1,
-        minHeight: 44,
         flexDirection: "row",
         alignItems: "center",
         gap: 10,
-        backgroundColor: c.card,
-        borderWidth: 1,
-        borderColor: c.border,
-        borderRadius: c.radius,
         paddingHorizontal: 14,
+        paddingVertical: 10,
+        minHeight: 48,
       }}
     >
       <View
@@ -2424,8 +2480,8 @@ function RecordingIndicator({
               flex: 1,
               height: Math.max(3, level * 26),
               borderRadius: 2,
-              backgroundColor: c.destructive,
-              opacity: 0.55 + level * 0.45,
+              backgroundColor: accentColor,
+              opacity: 0.3 + level * 0.7,
             }}
           />
         ))}

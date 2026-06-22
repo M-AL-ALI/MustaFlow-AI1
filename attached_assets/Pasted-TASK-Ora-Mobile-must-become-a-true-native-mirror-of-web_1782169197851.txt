@@ -1,0 +1,262 @@
+TASK: Ora Mobile must become a true native mirror of website Ora before any new TestFlight build.
+
+Hard rule:
+Do NOT submit TestFlight until this task is complete, reviewed, and approved.
+Do NOT trust previous summaries. Verify everything from source code.
+Do NOT add AI Builder features, Builder handoff, Builder CTAs, or Builder routes.
+Ora Mobile must use website Ora as the source of truth.
+
+Primary source of truth:
+- Website Ora implementation:
+  - artifacts/mustaflow/src/components/ora-panel.tsx
+  - artifacts/mustaflow/src/components/ora/ora-voice-mode-button.tsx
+  - artifacts/mustaflow/src/components/ora/ora-voice-button.tsx
+  - Website Ora settings, memory, library, projects, billing, ORAX, help/support files
+- Mobile implementation:
+  - artifacts/ora-mobile/app/(home)/index.tsx
+  - artifacts/ora-mobile/app/(home)/settings.tsx
+  - artifacts/ora-mobile/app/(home)/memory.tsx
+  - artifacts/ora-mobile/app/(home)/library.tsx
+  - artifacts/ora-mobile/app/(home)/orax.tsx
+  - artifacts/ora-mobile/app/(home)/help.tsx
+  - artifacts/ora-mobile/lib/api.ts
+  - artifacts/ora-mobile/lib/types.ts
+
+Goal:
+Ora Mobile should look, feel, and function like website Ora, adapted only where native mobile requires it. It must not feel like a separate product, a generic ChatGPT clone, or a different Ora model.
+
+PHASE 1 — Mandatory discovery before coding
+
+Create a verified parity table from source code:
+
+Website Ora feature | Website source file/function | Mobile status | Gap | Fix required | Priority
+
+Do this by reading the actual website Ora files. Do not assume a feature belongs to Ora just because it exists somewhere in MustaFlow. Some features may belong to AI Builder and must NOT be copied into Ora Mobile.
+
+Explicitly verify:
+1. Main chat layout
+2. Composer/chat box shape
+3. Plus/tools menu
+4. Mic dictation
+5. Talk to Ora / Voice Conversation Mode
+6. TTS/read-aloud
+7. Plan/tier badge and plan accent colors
+8. Light/dark theme tokens
+9. Language selector
+10. Temporary chat
+11. Memory/reference toggles
+12. Projects and conversation history
+13. File/image upload
+14. Image generation and image editing
+15. Library/assets
+16. Memory Center
+17. ORAX
+18. Help/support
+19. Billing/plan/usage
+20. Anonymous mode
+21. No AI Builder isolation
+
+PHASE 2 — Rebuild mobile chat composer to match website Ora
+
+Current problem:
+Mobile composer still uses separate plus button, mic button, input pill, and send button. Website Ora uses one unified rounded composer bar.
+
+Required fix:
+Rebuild the mobile composer so it mirrors website Ora:
+
+- One unified rounded composer container.
+- Plus/tools button inside the same composer bar.
+- Mode indicator/tools inside same visual system.
+- Mic/dictation button inside the composer bar.
+- Text input inside same composer bar.
+- Send button inside same composer bar.
+- Focus border/ring must use Ora tier accent color, same as website.
+- Composer must support multiline input and grow up to the same practical height.
+- It must work in light mode and dark mode.
+- It must respect safe area, keyboard avoidance, and mobile touch targets.
+- It must not look like separate floating controls.
+
+Use website Ora composer layout from ora-panel.tsx as source of truth, then translate to React Native.
+
+PHASE 3 — Mic dictation parity
+
+Website behavior:
+Normal mic dictation records user speech, transcribes it, places transcript in the composer, and lets the user review/send manually.
+
+Required mobile behavior:
+- Mic button starts/stops recording.
+- Show live recording/transcribing state similar to website OraVoiceLiveArea.
+- On normal dictation, do NOT auto-send.
+- Insert transcript into composer input.
+- User can edit before sending.
+- Show permission errors clearly.
+- Show transcription errors clearly.
+- Must work in light and dark mode.
+- Active mic state must use Ora tier accent color.
+- Must include accessibility labels.
+
+PHASE 4 — Talk to Ora parity
+
+Website behavior:
+Talk to Ora / Voice Conversation Mode is a separate live voice mode:
+- User speaks.
+- Ora transcribes.
+- Transcript is sent automatically.
+- Ora replies.
+- Ora reads the reply aloud.
+- Listening restarts automatically.
+- User can mute, interrupt, or end.
+
+Required mobile behavior:
+- Header Talk to Ora button must visually match website voice mode button as closely as native allows.
+- Active Talk to Ora panel must mirror website OraVoiceConvPanel:
+  - branded Ora look
+  - rounded panel
+  - tier accent border/background
+  - listening/speaking/thinking states
+  - mute/unmute
+  - interrupt
+  - end
+  - auto-listening status
+- Normal mic dictation and Talk to Ora must remain separate modes.
+- Talk mode should auto-send transcript.
+- Talk mode should auto-read Ora reply.
+- Interrupt must stop TTS immediately.
+- Mute must stop auto-read but keep conversation mode active.
+- End must stop recording/TTS/timers and exit mode cleanly.
+- Must work in light/dark mode.
+- Must be tested on real device.
+
+PHASE 5 — Plan, routing, and entitlement parity
+
+Mobile must never implement its own AI model/provider routing.
+
+Required:
+- Mobile only sends mode/language/temporary/reference flags to backend.
+- Backend decides OpenAI/Gemini/DeepSeek/etc.
+- Deep Thinking must be gated exactly like website Ora.
+- Plan tier badge must use website labels:
+  - Free
+  - Core Pack
+  - Deep Wave
+- Plan accent colors must match website Ora:
+  - Free purple
+  - Core blue
+  - Wave amber
+- Active controls must use the current plan accent:
+  - plan badge
+  - mode selector
+  - temporary chat active state
+  - Talk to Ora active state
+  - mic active state
+  - language selected state
+  - composer focus ring
+- Quotas, usage, billing state, and entitlements must come from the same backend contracts as website Ora.
+
+PHASE 6 — Re-audit remaining feature gaps
+
+Verify and fix only features that truly belong to website Ora.
+
+Known areas to re-check from source:
+
+1. Image Studio / image editing
+   - If website Ora has a standalone Image Studio surface, mobile needs a native equivalent.
+   - If image generation/editing only belongs to Ora chat, keep it inside chat.
+   - Do NOT copy AI Builder image tools unless they are truly Ora.
+
+2. Knowledge Vault / project knowledge
+   - Verify whether this is part of website Ora or another product area.
+   - If it is website Ora, mobile needs project-scoped knowledge/assets parity.
+   - If it is Builder-only, do not add it.
+
+3. Conversation search
+   - If website Ora sidebar has search, mobile drawer needs search.
+   - Search should include recent conversations and project-scoped conversations.
+
+4. Help/support
+   - Verify native Help Center matches website Ora support behavior.
+   - Articles, support chat, tickets, attachments, ticket detail must match real backend contracts.
+
+5. ORAX
+   - Verify all ORAX mobile actions match backend route shapes.
+   - Approvals, artifacts, repo scan, task thread, sandbox, commands, GitHub PR flow must be correct.
+   - No fake UI actions.
+
+6. Billing
+   - Verify plan display, checkout, billing portal, payment method setup.
+   - For TestFlight/internal beta, hosted billing links may be acceptable.
+   - Before public App Store release, decide Apple IAP / Google Play Billing compliance.
+
+7. Anonymous mode
+   - Website allows anonymous Ora chat.
+   - Mobile anonymous mode must allow chat only.
+   - Anonymous must not write memory, history, projects, ORAX, or library assets.
+   - Gated screens should show sign-in wall.
+
+PHASE 7 — Ora isolation requirements
+
+Run an explicit isolation scan.
+
+Mobile must have:
+- No /api/builder routes
+- No /api/public-ai/handoff routes
+- No Builder CTA
+- No “Continue in Builder”
+- No Builder handoff
+- No mobile-side provider/model routing
+- No copied AI Builder UI unless verified as website Ora
+
+Acceptable only if harmless:
+- Shared type names that mention builder only as a user preference enum, with no UI/API path.
+
+PHASE 8 — Testing required before approval
+
+Do not submit TestFlight until all pass:
+
+Automated:
+- ora-mobile typecheck
+- full workspace typecheck
+- prettier
+- lint
+- vitest/unit tests
+- Ora isolation scan
+- safe URL / SSRF tests
+- anonymous guard tests if available
+- chat request shape test if available
+
+Device QA:
+1. Anonymous user opens Ora chat without sign-in.
+2. Anonymous sends “hi” and Ora replies.
+3. Anonymous cannot access Memory, Library, ORAX, Projects persistence.
+4. Signed-in user sends “hi” and Ora replies.
+5. Streaming visibly works.
+6. Composer visually matches website Ora.
+7. Mic dictation records, transcribes, and inserts text without auto-sending.
+8. Talk to Ora auto-listens, auto-sends, reads reply aloud, and restarts listening.
+9. Interrupt stops TTS.
+10. Mute disables read-aloud.
+11. End exits Talk mode.
+12. Light mode matches website Ora.
+13. Dark mode matches website Ora.
+14. Plan accent colors match tier.
+15. Deep Thinking is locked for Free and enabled for Core/Wave.
+16. Language selector changes reply language.
+17. File upload works.
+18. Image upload works.
+19. Image generation works.
+20. Image editing works if part of website Ora.
+21. Memory save/recall works for signed-in users.
+22. Conversation history and projects work for signed-in users.
+23. No AI Builder UI or route appears anywhere.
+
+Definition of done:
+Ora Mobile is approved only when:
+- The chat composer visually mirrors website Ora.
+- Mic dictation mirrors website behavior.
+- Talk to Ora mirrors website Voice Conversation Mode.
+- All verified website Ora features exist in mobile or have a documented native-equivalent adaptation.
+- All non-Ora / AI Builder features are excluded.
+- All tests pass.
+- Real-device QA passes.
+- A final parity table is delivered with evidence file paths.
+- No TestFlight is submitted before approval.
