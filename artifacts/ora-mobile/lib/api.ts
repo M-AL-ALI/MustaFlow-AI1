@@ -81,7 +81,10 @@ async function fetchOrThrow(input: string, init?: RequestInit): Promise<Response
     return await fetch(input, init);
   } catch (err) {
     if (err instanceof NetworkError) throw err;
-    throw new NetworkError();
+    // Preserve the original platform-level message (e.g. "Network request failed",
+    // "SSL certificate issue") so callers and diagnostics can surface it.
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new NetworkError(`You appear to be offline or the server is unreachable. (${detail})`);
   }
 }
 
