@@ -15,7 +15,7 @@ import {
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useNavigation } from "expo-router";
 import {
   ArrowUp,
   Camera,
@@ -34,6 +34,7 @@ import {
   History,
   Image as ImageIcon,
   Images,
+  Menu,
   MessageSquare,
   Mic,
   Pencil,
@@ -67,9 +68,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Markdown } from "@/components/Markdown";
+import { Logo } from "@/components/Logo";
 import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
-import { ScreenHeader } from "@/components/ScreenHeader";
-import { EmptyState } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
   getLocalFileSize,
@@ -116,6 +116,7 @@ import type {
   OraMode,
   OraProjectSummary,
   OraSession,
+  OraTier,
 } from "@/lib/types";
 
 function uid() {
@@ -144,6 +145,15 @@ function cleanForTts(text: string): string {
 }
 
 const DATASET_TYPES = ["csv", "xlsx", "xls"];
+
+const EXAMPLE_CHIPS = [
+  "Plan an app idea",
+  "Find the root cause of a problem",
+  "Can MustaFlow build X?",
+  "Help me think through a strategy",
+  "What can I build with MustaFlow?",
+  "Analyze a business idea",
+];
 
 function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] {
   if (isImage) return "image";
@@ -201,9 +211,37 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
   };
 }
 
+function oraTierLabel(tier?: OraTier): string {
+  if (tier === "core") return "Core Pack";
+  if (tier === "wave") return "Deep Wave";
+  if (tier === "anonymous") return "Free · No sign-in";
+  return "Free";
+}
+
+function OraTierPill({ tier }: { tier?: OraTier }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: c.primary,
+        backgroundColor: `${c.primary}18`,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+      }}
+    >
+      <Text style={{ color: c.primary, fontFamily: "Inter_600SemiBold", fontSize: 10 }}>
+        {oraTierLabel(tier)}
+      </Text>
+    </View>
+  );
+}
+
 export default function OraChatScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const listRef = useRef<FlatList<OraMessage>>(null);
 
   const [session, setSession] = useState<OraSession | null>(null);
@@ -1213,8 +1251,8 @@ export default function OraChatScreen() {
   );
 
   const usageText = session
-    ? `${session.msgCount}/${session.msgLimit} messages${session.tier ? ` · ${session.tier}` : ""}`
-    : "Loading…";
+    ? `${session.msgCount}/${session.msgLimit} messages`
+    : "Loading Ora usage...";
 
   const activeProjectName = activeProjectId
     ? (projects.find((p) => p.id === activeProjectId)?.name ?? "Project")
@@ -1265,37 +1303,88 @@ export default function OraChatScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader
-        title="Ora"
-        subtitle={usageText}
-        right={
-          <View style={{ flexDirection: "row", gap: 4 }}>
-            <Pressable
-              onPress={toggleTemporary}
-              hitSlop={8}
-              disabled={sending}
-              style={{ padding: 6, opacity: sending ? 0.4 : 1 }}
-              accessibilityLabel={temporary ? "Turn off temporary chat" : "Start temporary chat"}
-            >
-              <Ghost size={22} color={temporary ? c.accentForeground : c.foreground} />
-            </Pressable>
-            <Pressable
-              onPress={toggleTalkMode}
-              hitSlop={8}
-              style={{ padding: 6 }}
-              accessibilityLabel={talkMode ? "Exit Talk to Ora" : "Talk to Ora"}
-            >
-              <PhoneCall size={22} color={talkMode ? c.accentForeground : c.foreground} />
-            </Pressable>
-            <Pressable onPress={openConversations} hitSlop={8} style={{ padding: 6 }}>
-              <History size={22} color={c.foreground} />
-            </Pressable>
-            <Pressable onPress={newChat} hitSlop={8} style={{ padding: 6 }}>
-              <Plus size={22} color={c.foreground} />
-            </Pressable>
+      <View
+        style={{
+          paddingTop: insets.top + 8,
+          paddingBottom: 12,
+          paddingHorizontal: 14,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          borderBottomWidth: 1,
+          borderBottomColor: c.border,
+          backgroundColor: c.background,
+        }}
+      >
+        <Pressable
+          onPress={() => (navigation as unknown as { openDrawer: () => void }).openDrawer()}
+          hitSlop={10}
+          style={{ padding: 4 }}
+          accessibilityLabel="Open navigation"
+        >
+          <Menu size={24} color={c.foreground} />
+        </Pressable>
+        <View style={{ flex: 1, gap: 3 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Logo size={28} />
+            <OraTierPill tier={session?.tier} />
+            {temporary && (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: c.accentForeground,
+                  backgroundColor: `${c.accentForeground}14`,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                }}
+              >
+                <Ghost size={11} color={c.accentForeground} />
+                <Text
+                  style={{
+                    color: c.accentForeground,
+                    fontFamily: "Inter_600SemiBold",
+                    fontSize: 10,
+                  }}
+                >
+                  Temporary
+                </Text>
+              </View>
+            )}
           </View>
-        }
-      />
+          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
+            {usageText}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          <Pressable
+            onPress={toggleTemporary}
+            hitSlop={8}
+            disabled={sending}
+            style={{ padding: 6, opacity: sending ? 0.4 : 1 }}
+            accessibilityLabel={temporary ? "Turn off temporary chat" : "Start temporary chat"}
+          >
+            <Ghost size={22} color={temporary ? c.accentForeground : c.foreground} />
+          </Pressable>
+          <Pressable
+            onPress={toggleTalkMode}
+            hitSlop={8}
+            style={{ padding: 6 }}
+            accessibilityLabel={talkMode ? "Exit Talk to Ora" : "Talk to Ora"}
+          >
+            <PhoneCall size={22} color={talkMode ? c.accentForeground : c.foreground} />
+          </Pressable>
+          <Pressable onPress={openConversations} hitSlop={8} style={{ padding: 6 }}>
+            <History size={22} color={c.foreground} />
+          </Pressable>
+          <Pressable onPress={newChat} hitSlop={8} style={{ padding: 6 }}>
+            <Plus size={22} color={c.foreground} />
+          </Pressable>
+        </View>
+      </View>
 
       {temporary && (
         <View
@@ -1356,12 +1445,67 @@ export default function OraChatScreen() {
           }}
           onContentSizeChange={scrollToEnd}
           ListEmptyComponent={
-            <View style={{ flex: 1, justifyContent: "center" }}>
-              <EmptyState
-                icon={Sparkles}
-                title="Ask Ora anything"
-                subtitle="Brainstorm ideas, analyze files and images, search the web, or generate documents — all in one conversation."
-              />
+            <View
+              style={{
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingHorizontal: 8,
+                paddingVertical: 48,
+              }}
+            >
+              <Sparkles size={30} color={c.accentForeground} />
+              <Text
+                style={{
+                  color: c.foreground,
+                  fontFamily: "Inter_700Bold",
+                  fontSize: 26,
+                  marginTop: 18,
+                  textAlign: "center",
+                }}
+              >
+                Hi, I'm Ora
+              </Text>
+              <Text
+                style={{
+                  color: c.mutedForeground,
+                  fontSize: 14,
+                  lineHeight: 20,
+                  marginTop: 10,
+                  maxWidth: 320,
+                  textAlign: "center",
+                }}
+              >
+                Ask anything, think things through, or get work done - planning, strategy, files,
+                images, and more, all in one chat.
+              </Text>
+              <View
+                style={{
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  justifyContent: "center",
+                  gap: 8,
+                  marginTop: 24,
+                }}
+              >
+                {EXAMPLE_CHIPS.map((chip) => (
+                  <Pressable
+                    key={chip}
+                    onPress={() => handleSuggestion(chip)}
+                    disabled={sending}
+                    style={({ pressed }) => ({
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      backgroundColor: pressed ? c.muted : "transparent",
+                      paddingHorizontal: 13,
+                      paddingVertical: 8,
+                    })}
+                  >
+                    <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{chip}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           }
           renderItem={({ item }) => (
@@ -1550,7 +1694,18 @@ export default function OraChatScreen() {
             </View>
           )}
 
-          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "flex-end",
+              gap: 8,
+              backgroundColor: c.card,
+              borderWidth: 1,
+              borderColor: c.border,
+              borderRadius: c.radius,
+              padding: 6,
+            }}
+          >
             {!recording && (
               <Pressable
                 onPress={() => setShowPlusMenu(true)}
@@ -1612,11 +1767,10 @@ export default function OraChatScreen() {
                     flex: 1,
                     maxHeight: 120,
                     minHeight: 44,
-                    backgroundColor: c.card,
-                    borderWidth: 1,
-                    borderColor: c.border,
+                    backgroundColor: "transparent",
+                    borderWidth: 0,
                     borderRadius: c.radius,
-                    paddingHorizontal: 14,
+                    paddingHorizontal: 8,
                     paddingTop: 12,
                     paddingBottom: 12,
                     color: c.foreground,
