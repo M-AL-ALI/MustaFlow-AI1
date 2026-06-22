@@ -70,16 +70,24 @@ export default function RootLayout() {
 
   if (!publishableKey) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: "#0a0a0a", alignItems: "center", justifyContent: "center", padding: 32 }}>
+      <SafeAreaView
+        style={{
+          flex: 1,
+          backgroundColor: "#0a0a0a",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 32,
+        }}
+      >
         <View style={{ gap: 12, alignItems: "center" }}>
-          <Text style={{ color: "#ff4d4d", fontSize: 17, fontWeight: "700" }}>Configuration Error</Text>
+          <Text style={{ color: "#ff4d4d", fontSize: 17, fontWeight: "700" }}>
+            Configuration Error
+          </Text>
           <Text style={{ color: "#888", fontSize: 14, textAlign: "center", lineHeight: 20 }}>
             EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is missing.{"\n\n"}
             This build was not configured correctly. Please install a new build from TestFlight.
           </Text>
-          <Text style={{ color: "#555", fontSize: 12, marginTop: 8 }}>
-            API: {domain}
-          </Text>
+          <Text style={{ color: "#555", fontSize: 12, marginTop: 8 }}>API: {domain}</Text>
         </View>
       </SafeAreaView>
     );

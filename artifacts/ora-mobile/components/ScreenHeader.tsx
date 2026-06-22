@@ -8,12 +8,14 @@ import { useColors } from "@/hooks/useColors";
 
 export function ScreenHeader({
   title,
+  titleNode,
   subtitle,
   right,
   rightIcon: RightIcon,
   onRightPress,
 }: {
   title: string;
+  titleNode?: React.ReactNode;
   subtitle?: string;
   right?: React.ReactNode;
   rightIcon?: LucideIcon;
@@ -45,16 +47,18 @@ export function ScreenHeader({
         <Menu size={24} color={c.foreground} />
       </Pressable>
       <View style={{ flex: 1 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            color: c.foreground,
-            fontFamily: "Inter_700Bold",
-            fontSize: 18,
-          }}
-        >
-          {title}
-        </Text>
+        {titleNode ?? (
+          <Text
+            numberOfLines={1}
+            style={{
+              color: c.foreground,
+              fontFamily: "Inter_700Bold",
+              fontSize: 18,
+            }}
+          >
+            {title}
+          </Text>
+        )}
         {subtitle && (
           <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
             {subtitle}

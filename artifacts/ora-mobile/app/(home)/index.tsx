@@ -154,6 +154,26 @@ const EXAMPLE_CHIPS = [
   "Research a topic for me",
 ];
 
+function OraLogoTitle() {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <Image
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        source={require("../../assets/logo.png")}
+        style={{ width: 26, height: 26, borderRadius: 6 }}
+        contentFit="contain"
+      />
+      <Text
+        numberOfLines={1}
+        style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
+      >
+        Ora
+      </Text>
+    </View>
+  );
+}
+
 function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] {
   if (isImage) return "image";
   if (DATASET_TYPES.includes(fileType.toLowerCase())) return "dataset";
@@ -1276,6 +1296,7 @@ export default function OraChatScreen() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader
         title="Ora"
+        titleNode={<OraLogoTitle />}
         subtitle={usageText}
         right={
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -1298,11 +1319,7 @@ export default function OraChatScreen() {
                     fontFamily: "Inter_500Medium",
                   }}
                 >
-                  {session.tier === "core"
-                    ? "Core"
-                    : session.tier === "wave"
-                      ? "Wave"
-                      : "Free"}
+                  {session.tier === "core" ? "Core" : session.tier === "wave" ? "Wave" : "Free"}
                 </Text>
               </View>
             )}
