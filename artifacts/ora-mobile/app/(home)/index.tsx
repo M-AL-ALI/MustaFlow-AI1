@@ -31,6 +31,7 @@ import {
   FolderPlus,
   Gauge,
   Ghost,
+  Globe,
   History,
   Image as ImageIcon,
   Images,
@@ -166,6 +167,29 @@ const EXAMPLE_CHIPS = [
   "Research a topic for me",
 ];
 
+// Matches website Ora LANGUAGES constant in ora-panel.tsx
+const LANGUAGES = [
+  { value: "auto", label: "Auto" },
+  { value: "en", label: "English" },
+  { value: "ar", label: "Arabic" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+];
+
+// Matches website oraAccentColor / oraTierLabel from ora-panel.tsx
+// Colors: hsl→hex computed from website CSS tokens
+function tierAccentColor(tier: string | null | undefined): string {
+  if (tier === "core") return "#3D83F5"; // hsl(217 90% 60%) — Core Pack blue
+  if (tier === "wave") return "#F0A742"; // hsl(35 85% 60%)  — Deep Wave amber
+  return "#995AF2"; // hsl(265 85% 65%) — Free / default purple
+}
+
+function tierLabel(tier: string | null | undefined): string {
+  if (tier === "core") return "Core Pack";
+  if (tier === "wave") return "Deep Wave";
+  return "Free";
+}
+
 function OraLogoTitle() {
   const c = useColors();
   return (
@@ -283,6 +307,10 @@ export default function OraChatScreen() {
   const [actionsMessage, setActionsMessage] = useState<OraMessage | null>(null);
 
   const [voiceLang, setVoiceLang] = useState("en");
+  // Per-session Ora reply language — matches website LANGUAGES (auto/en/ar/es/fr).
+  // Separate from voiceLang (which controls STT/TTS locale). Sent in every chat
+  // request so the server applies a language override system prompt when non-auto.
+  const [language, setLanguage] = useState("auto");
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -549,6 +577,7 @@ export default function OraChatScreen() {
             message: text,
             messages: history,
             mode,
+            language: language !== "auto" ? language : undefined,
             referenceSavedMemories: !temporary,
             referenceChatHistory: !temporary,
             temporary,
@@ -1377,19 +1406,19 @@ export default function OraChatScreen() {
                   paddingVertical: 3,
                   borderRadius: 999,
                   borderWidth: 1,
-                  borderColor: c.border,
-                  backgroundColor: c.muted,
+                  borderColor: tierAccentColor(session.tier),
+                  backgroundColor: tierAccentColor(session.tier) + "20",
                   marginRight: 2,
                 }}
               >
                 <Text
                   style={{
-                    color: c.mutedForeground,
+                    color: tierAccentColor(session.tier),
                     fontSize: 10,
                     fontFamily: "Inter_500Medium",
                   }}
                 >
-                  {session.tier === "core" ? "Core" : session.tier === "wave" ? "Wave" : "Free"}
+                  {tierLabel(session.tier)}
                 </Text>
               </View>
             )}
@@ -1907,6 +1936,7 @@ export default function OraChatScreen() {
       <PlusMenu
         visible={showPlusMenu}
         mode={mode}
+        language={language}
         onClose={() => setShowPlusMenu(false)}
         onTakePhoto={() => {
           setShowPlusMenu(false);
@@ -1924,6 +1954,7 @@ export default function OraChatScreen() {
           setMode(m);
           setShowPlusMenu(false);
         }}
+        onSelectLanguage={(lang) => setLanguage(lang)}
       />
 
       <MessageActionsSheet
@@ -2860,19 +2891,23 @@ function ProjectEditorModal({
 function PlusMenu({
   visible,
   mode,
+  language,
   onClose,
   onTakePhoto,
   onPickPhoto,
   onBrowseFiles,
   onSelectMode,
+  onSelectLanguage,
 }: {
   visible: boolean;
   mode: OraMode;
+  language: string;
   onClose: () => void;
   onTakePhoto: () => void;
   onPickPhoto: () => void;
   onBrowseFiles: () => void;
   onSelectMode: (mode: OraMode) => void;
+  onSelectLanguage: (lang: string) => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -2918,6 +2953,20 @@ function PlusMenu({
             active={mode === "deep"}
             onPress={() => onSelectMode("deep")}
           />
+
+          <SheetSectionLabel label="Reply language" />
+          {LANGUAGES.map((l) => (
+            <ToolRow
+              key={l.value}
+              icon={Globe}
+              label={l.label}
+              active={language === l.value}
+              onPress={() => {
+                onSelectLanguage(l.value);
+                onClose();
+              }}
+            />
+          ))}
         </View>
       </View>
     </Modal>

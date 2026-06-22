@@ -111,3 +111,5 @@
 - [Ora response-quality runtime lever](ora-response-quality-runtime-lever.md) — runtime answer quality = ORA_SYSTEM_PROMPT + expertise systemAddendum; evaluateOraResponseQuality is TEST-ONLY, never wire it into a regen loop.
 - [EAS iOS non-interactive credential setup](eas-ios-noninteractive-creds.md) — full GraphQL flow required before `--non-interactive` builds; env vars alone are insufficient.
 - [Main-agent pnpm install husky guard](main-agent-pnpm-husky-guard.md) — `pnpm add`/`install` runs `prepare:husky` → git-config write trips the destructive-git guard (can leave a stale `.git/config.lock` you can't rm); run with `HUSKY=0` to skip.
+- [Ora mobile tier badge colors](ora-mobile-tier-badge.md) — tierAccentColor() maps core→#3D83F5 / wave→#F0A742 / free→#995AF2; bg = accent+"20" (8-char RGBA hex).
+- [Ora mobile language selector](ora-mobile-language-selector.md) — language state (auto/en/ar/es/fr) is separate from voiceLang; sent as chatReq.language only when non-auto; picker lives in PlusMenu "Reply language" section.

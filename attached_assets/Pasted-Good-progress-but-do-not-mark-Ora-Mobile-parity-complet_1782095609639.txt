@@ -1,0 +1,109 @@
+Good progress, but do not mark Ora Mobile parity complete yet.
+
+There are still required parity gaps and verification requirements.
+
+Finish these before calling the rebuild done:
+
+1. Plan tier badge + plan color theme
+
+The mobile plan tier UI must mirror the website Ora plan logic exactly, including the plan-based color/theme feature that already exists on the website.
+
+Website Ora is the source of truth.
+
+Please verify and implement:
+
+- Identify the exact website Ora plan tiers:
+  - Free
+  - Core Pack
+  - Deep Wave
+  - any anonymous/signed-out state if used
+
+- Identify the exact website plan color/theme mapping for each tier.
+
+- Identify the exact website entitlement/usage/billing contract.
+
+Mobile plan badge must:
+- show the same plan label as website Ora
+- use the same color/theme treatment by plan as the website
+- render correctly in both light and dark mode
+- update from the real Ora session/usage/billing state, not hardcoded labels
+
+Mobile plan logic must mirror website Ora exactly:
+- message limits
+- image limits
+- model/mode access
+- Deep/Instant availability
+- billing state
+- usage reset window
+- entitlements / feature flags
+
+Mobile must not create separate plan logic. It must consume the same backend contract or shared types used by website Ora.
+
+Routing safety:
+- Mobile must not decide model/provider routing locally.
+- Mobile sends mode/language/request fields only.
+- Website backend remains the single source of truth for OpenAI/Gemini/DeepSeek/etc routing.
+
+Required verification table:
+Website plan tier | Website color/theme | Mobile label | Mobile color/theme | Backend field used | Status
+
+Also provide screenshots of the plan badge in light and dark mode for each available plan state if possible.
+
+2. Per-session language selector
+
+Add the per-session language selector in the chat toolbar/composer.
+
+Requirements:
+- Must match website Ora behavior, not just Settings → Voice input.
+- Website has reply language control such as Auto / EN / AR / ES / FR.
+- Mobile should pass the same language value into the Ora chat request path.
+- Must persist or scope language the same way the website does.
+- Must work in both light and dark mode.
+
+3. Proof before claiming parity
+
+Before saying “everything else matches,” provide proof:
+
+Screenshots side-by-side:
+- website Ora light mode vs mobile light mode
+- website Ora dark mode vs mobile dark mode
+- empty chat
+- active chat with response
+- project/history drawer
+- file/image upload
+- image edit
+- library/assets
+- settings/usage/billing
+- diagnostics result
+
+Confirm the TestFlight build number that includes:
+- step-by-step diagnostics
+- light/dark/system theme
+- image edit
+- library delete
+- reset countdown
+- plan badge
+- plan color theme
+- language selector
+
+Run diagnostics on real device over both WiFi and cellular.
+
+Expected:
+- transport check passes
+- /api/public-ai/session passes
+- /api/public-ai/chat temporary “hi” returns a reply
+- stream check either passes or cleanly falls back to non-stream chat
+
+Acceptance criteria:
+Ora Mobile is not done until:
+- main chat can send “hi” and receive an Ora reply on TestFlight
+- mobile UI matches the website Ora product in both light and dark mode
+- plan badge and plan theme match website behavior
+- language selector matches website behavior
+- mobile uses the same Ora backend contracts/logic as website
+
+Also reconfirm:
+- no AI Builder routes
+- no Builder handoff
+- mobile uses only Ora/public-ai endpoints
+- model/plan/routing logic remains shared with the website backend
