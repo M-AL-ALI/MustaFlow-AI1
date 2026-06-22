@@ -89,6 +89,7 @@ import {
   createProject,
   deleteConversation,
   deleteProject,
+  editImage,
   getConversation,
   getOraSession,
   getPreferences,
@@ -144,6 +145,17 @@ function cleanForTts(text: string): string {
 }
 
 const DATASET_TYPES = ["csv", "xlsx", "xls"];
+
+function formatReset(resetsAt: string | null | undefined): string {
+  if (!resetsAt) return "";
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (ms <= 0) return "";
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  if (h > 0) return `resets in ${h}h`;
+  if (m > 0) return `resets in ${m}m`;
+  return "resetting soon";
+}
 
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
@@ -261,6 +273,10 @@ export default function OraChatScreen() {
   const [editingProject, setEditingProject] = useState<OraProjectSummary | null>(null);
   const [moveTarget, setMoveTarget] = useState<OraConversationSummary | null>(null);
   const [temporary, setTemporary] = useState(false);
+  // Inline image editing state — mirrors web ora-panel
+  const [editingImageId, setEditingImageId] = useState<number | null>(null);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editingImage, setEditingImage] = useState(false);
   const temporaryRef = useRef(false);
   temporaryRef.current = temporary;
   const [showPlusMenu, setShowPlusMenu] = useState(false);
@@ -757,6 +773,57 @@ export default function OraChatScreen() {
     }
   }, []);
 
+  // Submit an image-edit instruction via the /images/:id/edit polling flow.
+  const handleEditImage = useCallback(async () => {
+    const id = editingImageId;
+    const instr = editInstruction.trim();
+    if (!id || !instr || editingImage || sending) return;
+    setEditingImage(true);
+    setEditInstruction("");
+    setEditingImageId(null);
+
+    const userMsg: OraMessage = {
+      id: `${Date.now()}-edit-user`,
+      role: "user",
+      content: `Edit image: ${instr}`,
+    };
+    const loadingMsg: OraMessage = {
+      id: `${Date.now()}-edit-loading`,
+      role: "assistant",
+      content: "",
+      pending: true,
+    };
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+
+    try {
+      const { displayUrl, newImageId } = await editImage(id, instr);
+      setMessages((prev) => [
+        ...prev.slice(0, -1),
+        {
+          id: `${Date.now()}-edit-result`,
+          role: "assistant" as const,
+          content: "Here's the edited image. Tap Edit to refine it further.",
+          imageUrl: displayUrl,
+          imageId: newImageId,
+          editInstruction: instr,
+        } satisfies OraMessage,
+      ]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Image edit failed.";
+      setMessages((prev) => [
+        ...prev.slice(0, -1),
+        {
+          id: `${Date.now()}-edit-err`,
+          role: "assistant",
+          content: msg,
+          error: true,
+        },
+      ]);
+    } finally {
+      setEditingImage(false);
+    }
+  }, [editingImageId, editInstruction, editingImage, sending]);
+
   const startRecording = useCallback(async () => {
     if (recording || transcribing) return;
     try {
@@ -1242,7 +1309,10 @@ export default function OraChatScreen() {
   );
 
   const usageText = session
-    ? `${session.msgCount}/${session.msgLimit} messages${session.tier ? ` · ${session.tier}` : ""}`
+    ? (() => {
+        const reset = formatReset(session.resetsAt);
+        return `${session.msgCount}/${session.msgLimit} messages${reset ? ` · ${reset}` : ""}`;
+      })()
     : "Loading…";
 
   const activeProjectName = activeProjectId
@@ -1459,6 +1529,10 @@ export default function OraChatScreen() {
               onSuggestion={handleSuggestion}
               onSaveMemory={temporary ? undefined : handleSaveMemory}
               onLongPress={() => setActionsMessage(item)}
+              onEditImage={(id) => {
+                setEditingImageId(id);
+                setEditInstruction("");
+              }}
             />
           )}
         />
@@ -1498,6 +1572,60 @@ export default function OraChatScreen() {
                   Deep Thinking
                 </Text>
                 <X size={13} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+          )}
+
+          {editingImageId !== null && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                backgroundColor: c.card,
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+              }}
+            >
+              <Pencil size={14} color={c.accentForeground} />
+              <TextInput
+                value={editInstruction}
+                onChangeText={setEditInstruction}
+                placeholder="Describe your edit…"
+                placeholderTextColor={c.mutedForeground}
+                style={{
+                  flex: 1,
+                  color: c.foreground,
+                  fontSize: 14,
+                  fontFamily: "Inter_400Regular",
+                }}
+                returnKeyType="send"
+                onSubmitEditing={handleEditImage}
+                autoFocus
+              />
+              {editingImage ? (
+                <ActivityIndicator size="small" color={c.accentForeground} />
+              ) : (
+                <Pressable
+                  onPress={handleEditImage}
+                  disabled={!editInstruction.trim()}
+                  hitSlop={8}
+                  style={{ opacity: editInstruction.trim() ? 1 : 0.4 }}
+                >
+                  <ArrowUp size={18} color={c.accentForeground} />
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => {
+                  setEditingImageId(null);
+                  setEditInstruction("");
+                }}
+                hitSlop={8}
+              >
+                <X size={16} color={c.mutedForeground} />
               </Pressable>
             </View>
           )}
@@ -1967,6 +2095,7 @@ function MessageBubble({
   onSuggestion,
   onSaveMemory,
   onLongPress,
+  onEditImage,
 }: {
   message: OraMessage;
   speaking: boolean;
@@ -1974,6 +2103,7 @@ function MessageBubble({
   onSuggestion: (text: string) => void;
   onSaveMemory?: (message: OraMessage) => Promise<void>;
   onLongPress: () => void;
+  onEditImage?: (imageId: number) => void;
 }) {
   const c = useColors();
   const isUser = message.role === "user";
@@ -2096,6 +2226,7 @@ function MessageBubble({
                   contentFit="cover"
                   transition={200}
                 />
+                {/* Save button — top-right */}
                 <Pressable
                   onPress={handleSaveImage}
                   disabled={savingImage}
@@ -2120,6 +2251,28 @@ function MessageBubble({
                   )}
                   <Text style={{ color: "#fff", fontSize: 12 }}>Save</Text>
                 </Pressable>
+                {/* Edit button — top-left (only for editable images with an id) */}
+                {!!message.imageId && onEditImage && (
+                  <Pressable
+                    onPress={() => onEditImage(message.imageId!)}
+                    hitSlop={8}
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      left: 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      paddingVertical: 6,
+                      paddingHorizontal: 10,
+                      borderRadius: 999,
+                      backgroundColor: "rgba(0,0,0,0.55)",
+                    }}
+                  >
+                    <Pencil size={14} color="#fff" />
+                    <Text style={{ color: "#fff", fontSize: 12 }}>Edit</Text>
+                  </Pressable>
+                )}
               </View>
             )}
 

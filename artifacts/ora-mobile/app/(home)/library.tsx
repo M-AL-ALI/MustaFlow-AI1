@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { Download, FileText, FolderOpen, HardDrive, Share2 } from "lucide-react-native";
+import { Download, FileText, FolderOpen, HardDrive, Share2, Trash2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Card, EmptyState, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { API_BASE, getAssets } from "@/lib/api";
+import { API_BASE, deleteAsset, getAssets } from "@/lib/api";
 import { saveAsset } from "@/lib/files";
 import type { OraAsset } from "@/lib/types";
 
@@ -87,7 +87,13 @@ export default function LibraryScreen() {
               subtitle="Generated documents and images from your Ora chats will appear here."
             />
           ) : (
-            assets.map((a) => <AssetCard key={a.id} asset={a} />)
+            assets.map((a) => (
+              <AssetCard
+                key={a.id}
+                asset={a}
+                onDelete={() => setAssets((prev) => prev.filter((x) => x.id !== a.id))}
+              />
+            ))
           )}
         </ScrollView>
       )}
@@ -95,9 +101,10 @@ export default function LibraryScreen() {
   );
 }
 
-function AssetCard({ asset }: { asset: OraAsset }) {
+function AssetCard({ asset, onDelete }: { asset: OraAsset; onDelete?: () => void }) {
   const c = useColors();
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const isImage = asset.kind === "image";
 
   const handleSave = useCallback(async () => {
@@ -118,60 +125,85 @@ function AssetCard({ asset }: { asset: OraAsset }) {
     }
   }, [asset, saving]);
 
+  const handleDelete = useCallback(() => {
+    Alert.alert("Delete asset?", "This will permanently remove it from your library.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setDeleting(true);
+          try {
+            await deleteAsset(asset.id);
+            onDelete?.();
+          } catch (err) {
+            Alert.alert("Error", err instanceof Error ? err.message : "Could not delete.");
+          } finally {
+            setDeleting(false);
+          }
+        },
+      },
+    ]);
+  }, [asset.id, onDelete]);
+
   return (
-    <Pressable onPress={handleSave} disabled={saving}>
-      <Card style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        {isImage ? (
-          <View
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 10,
-              backgroundColor: c.muted,
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-            }}
-          >
-            <Image
-              source={{
-                uri: `${API_BASE}/api/ora/assets/${asset.id}/download`,
-              }}
-              style={{ width: 48, height: 48 }}
-              contentFit="cover"
-              transition={150}
-            />
-          </View>
-        ) : (
-          <View
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 10,
-              backgroundColor: c.muted,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <FileText size={22} color={c.accentForeground} />
-          </View>
-        )}
-        <View style={{ flex: 1 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              color: c.foreground,
-              fontFamily: "Inter_500Medium",
-              fontSize: 14,
-            }}
-          >
-            {asset.fileName}
-          </Text>
-          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-            {asset.format?.toUpperCase()} · {formatBytes(asset.sizeBytes)}
-          </Text>
-        </View>
+    <Card style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      {isImage ? (
         <View
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 10,
+            backgroundColor: c.muted,
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+          }}
+        >
+          <Image
+            source={{
+              uri: `${API_BASE}/api/ora/assets/${asset.id}/download`,
+            }}
+            style={{ width: 48, height: 48 }}
+            contentFit="cover"
+            transition={150}
+          />
+        </View>
+      ) : (
+        <View
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 10,
+            backgroundColor: c.muted,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <FileText size={22} color={c.accentForeground} />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            color: c.foreground,
+            fontFamily: "Inter_500Medium",
+            fontSize: 14,
+          }}
+        >
+          {asset.fileName}
+        </Text>
+        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+          {asset.format?.toUpperCase()} · {formatBytes(asset.sizeBytes)}
+        </Text>
+      </View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Pressable
+          onPress={handleSave}
+          disabled={saving || deleting}
+          hitSlop={8}
+          accessibilityLabel={isImage ? "Save image" : "Share file"}
           style={{
             width: 36,
             height: 36,
@@ -188,8 +220,28 @@ function AssetCard({ asset }: { asset: OraAsset }) {
           ) : (
             <Share2 size={16} color={c.accentForeground} />
           )}
-        </View>
-      </Card>
-    </Pressable>
+        </Pressable>
+        <Pressable
+          onPress={handleDelete}
+          disabled={saving || deleting}
+          hitSlop={8}
+          accessibilityLabel="Delete asset"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: c.muted,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {deleting ? (
+            <ActivityIndicator size="small" color={c.mutedForeground} />
+          ) : (
+            <Trash2 size={16} color="#ef4444" />
+          )}
+        </Pressable>
+      </View>
+    </Card>
   );
 }

@@ -20,8 +20,9 @@ Default git-archive mode tries to write `.git/index.lock` (to stash the dirty tr
 
 ## Running a multi-minute eas-cli process in the sandbox
 - Foreground bash is killed at 120s OR false-flagged "waiting on user input" on the ora spinner. Don't run eas build in foreground.
-- Plain `nohup ... &` children die when the bash tool returns (group kill; nohup ignores SIGHUP not SIGTERM). Use `setsid bash -c '...' < /dev/null &` to detach into a new session — this survives across tool calls.
-- Log file stays frozen at "- Compressing project files" even while working: non-TTY ora spinner updates via `\r` (not written to file). Don't treat a frozen log as a hang — check process aliveness + the staged tar.gz size instead.
+- Plain `nohup ... &` children die when the bash tool returns (group kill; nohup ignores SIGHUP not SIGTERM). Use `setsid bash /tmp/script.sh &` where the script opens its own log with `exec >> /tmp/build.log 2>&1` as the FIRST line.
+- **Critical:** The launch AND the first log-read (`sleep N && cat log`) must be in the SAME bash tool call, or the log stays empty — the setsid child doesn't reliably write until the parent shell is still alive. Pattern: `setsid bash /tmp/script.sh & sleep 30 && cat /tmp/build.log`. In a subsequent tool call the log may still be frozen at the last TTY-output line (this is normal; the process IS still running).
+- Log file stays frozen at "- Compressing project files" or "- Computing project fingerprint" even while working: non-TTY ora spinner updates via `\r` (not written to file). Don't treat a frozen log as a hang — check process aliveness + the staged tar.gz size instead.
 - Poll status authoritatively via GraphQL (lightweight), not the log:
   `curl -s -X POST https://api.expo.dev/graphql -H "Authorization: Bearer $Expo_Token" -H "Content-Type: application/json" -d '{"query":"query($appId:String!){app{byId(appId:$appId){builds(limit:3,filter:{platform:IOS}){id status appBuildVersion createdAt}}}}","variables":{"appId":"<projectId>"}}'`
 - Auth env: secret is `Expo_Token` (export as `EXPO_TOKEN`). `EXPO_APPLE_TEAM_TYPE=INDIVIDUAL`.

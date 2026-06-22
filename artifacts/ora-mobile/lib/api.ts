@@ -556,6 +556,59 @@ export function getAssets(): Promise<OraAssetsResponse> {
   return jsonRequest<OraAssetsResponse>("/api/ora/assets");
 }
 
+export function deleteAsset(id: string | number): Promise<unknown> {
+  return jsonRequest(`/api/ora/assets/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Enqueue an image edit job, poll until complete, then fetch the result bytes
+ * through the authenticated /file route (avoids private R2 endpoint issues).
+ * Returns a data URL suitable for <Image source={{ uri }} />.
+ */
+export async function editImage(
+  imageId: number,
+  instruction: string,
+): Promise<{ displayUrl: string; newImageId: number }> {
+  const { jobId, imageId: newImageId } = await jsonRequest<{ jobId: string; imageId: number }>(
+    `/api/images/${imageId}/edit`,
+    { method: "POST", body: JSON.stringify({ instruction, quality: "standard", origin: "ora" }) },
+  );
+
+  let completed = false;
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const s = await jsonRequest<{ status: string; error?: string | null }>(
+        `/api/images/status/${jobId}`,
+      );
+      if (s.status === "completed") {
+        completed = true;
+        break;
+      }
+      if (s.status === "failed") throw new Error(s.error ?? "Image edit failed.");
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg === "Image edit failed.") throw err;
+      // transient poll error — continue
+    }
+  }
+  if (!completed) throw new Error("Image edit timed out. Please try again.");
+
+  const res = await fetchOrThrow(url(`/api/images/${newImageId}/file`));
+  if (!res.ok) throw new Error("Could not load the edited image.");
+  const blob = await res.blob();
+  if (blob.size === 0) throw new Error("The edited image was empty. Please try again.");
+
+  const displayUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read the edited image."));
+    reader.readAsDataURL(blob);
+  });
+
+  return { displayUrl, newImageId };
+}
+
 // ---------------------------------------------------------------------------
 // Orax (auth required)
 // ---------------------------------------------------------------------------
