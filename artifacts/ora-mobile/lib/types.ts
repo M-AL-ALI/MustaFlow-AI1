@@ -416,3 +416,49 @@ export interface SupportTicketDetail extends SupportTicketSummary {
     url: string;
   }>;
 }
+
+// ---------------------------------------------------------------------------
+// ORAX action result types
+// ---------------------------------------------------------------------------
+
+export type OraxApprovalDecision = "approved" | "denied";
+
+export interface OraxGithubConnectResult {
+  ok: boolean;
+  message?: string;
+}
+
+export interface OraxReadFilesResult {
+  files: Array<{ path: string; content: string }>;
+}
+
+export interface OraxDraftPatchResult {
+  patch: string;
+  summary?: string;
+  filesChanged?: string[];
+}
+
+export interface OraxSandboxResult {
+  ok: boolean;
+  output?: string;
+  error?: string;
+}
+
+export interface OraxCommandResult {
+  ok: boolean;
+  output?: string;
+  error?: string;
+}
+
+export interface OraxPRResult {
+  prUrl: string;
+  prNumber: number;
+  branch?: string;
+}
+
+export interface SupportAttachment {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  data: string;
+}

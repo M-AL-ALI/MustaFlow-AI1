@@ -18,8 +18,15 @@ import type {
   OraSession,
   OraUsage,
   OraVideo,
+  OraxApprovalDecision,
   OraxCapabilities,
+  OraxCommandResult,
+  OraxDraftPatchResult,
+  OraxGithubConnectResult,
+  OraxPRResult,
+  OraxReadFilesResult,
   OraxRepository,
+  OraxSandboxResult,
   OraxScan,
   OraxTask,
   OraxTaskApproval,
@@ -27,6 +34,7 @@ import type {
   OraxTaskMessage,
   PaymentMethodInfo,
   StreamDonePayload,
+  SupportAttachment,
   SupportMessage,
   SupportTicketDetail,
   SupportTicketSummary,
@@ -795,6 +803,7 @@ export async function escalateSupport(input: {
   category?: string;
   transcript: SupportMessage[];
   deviceInfo?: Record<string, unknown> | null;
+  attachments?: SupportAttachment[];
 }): Promise<{ ticketId: number; emailStatus?: string; supportEmailUsed?: string }> {
   return jsonRequest("/help/support/escalate", {
     method: "POST",
@@ -809,4 +818,60 @@ export async function listSupportTickets(): Promise<SupportTicketSummary[]> {
 
 export function getSupportTicket(id: number): Promise<SupportTicketDetail> {
   return jsonRequest<SupportTicketDetail>(`/help/support/tickets/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// ORAX extended actions (auth required)
+// ---------------------------------------------------------------------------
+
+export function connectGithubToken(
+  repositoryId: number,
+  token: string,
+): Promise<OraxGithubConnectResult> {
+  return jsonRequest(`/api/orax/repositories/${repositoryId}/github/connect`, {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function patchApproval(
+  approvalId: number,
+  decision: OraxApprovalDecision,
+): Promise<OraxTaskApproval> {
+  return jsonRequest(`/api/orax/approvals/${approvalId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ decision }),
+  });
+}
+
+export function readApprovedFiles(approvalId: number): Promise<OraxReadFilesResult> {
+  return jsonRequest(`/api/orax/approvals/${approvalId}/read-files`, { method: "POST" });
+}
+
+export function generateDraftPatch(taskId: number): Promise<OraxDraftPatchResult> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/draft-patch`, { method: "POST" });
+}
+
+export function requestSandboxApproval(taskId: number): Promise<OraxTaskApproval> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/sandbox-approvals`, { method: "POST" });
+}
+
+export function requestCommandApproval(taskId: number): Promise<OraxTaskApproval> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/command-approvals`, { method: "POST" });
+}
+
+export function requestGithubPrApproval(taskId: number): Promise<OraxTaskApproval> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/github-pr-approvals`, { method: "POST" });
+}
+
+export function runSandbox(approvalId: number): Promise<OraxSandboxResult> {
+  return jsonRequest(`/api/orax/approvals/${approvalId}/run-sandbox`, { method: "POST" });
+}
+
+export function runCommands(approvalId: number): Promise<OraxCommandResult> {
+  return jsonRequest(`/api/orax/approvals/${approvalId}/run-commands`, { method: "POST" });
+}
+
+export function createGithubPR(approvalId: number): Promise<OraxPRResult> {
+  return jsonRequest(`/api/orax/approvals/${approvalId}/create-github-pr`, { method: "POST" });
 }

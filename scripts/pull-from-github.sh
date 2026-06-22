@@ -20,15 +20,15 @@ rm -f .git/index.lock .git/HEAD.lock
 
 # If a merge is already in progress (conflict was manually resolved), complete it first.
 if [ -f .git/MERGE_HEAD ]; then
-  echo "Completing in-progress merge (conflict resolved) …"
+  echo "Completing in-progress merge (conflict resolved) ..."
   git add -A
   git "${GIT_ID[@]}" commit --no-edit
 fi
 
-echo "Fetching from GitHub MustaFlow-AI1 (forced ref update) …"
+echo "Fetching from GitHub MustaFlow-AI1 (forced ref update) ..."
 git -c credential.helper="$CRED_HELPER" fetch "$REMOTE_URL" "+$BRANCH:refs/remotes/github/$BRANCH"
 
-echo "Merging github/$BRANCH into local $BRANCH …"
+echo "Merging github/$BRANCH into local $BRANCH ..."
 git "${GIT_ID[@]}" merge --no-edit "refs/remotes/github/$BRANCH"
 
 echo "Local HEAD is now: $(git rev-parse --short HEAD)"

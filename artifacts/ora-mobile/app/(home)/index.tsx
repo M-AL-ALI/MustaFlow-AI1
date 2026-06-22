@@ -25,9 +25,11 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FileDown,
   FileJson,
   FileSpreadsheet,
   FileText,
+  Presentation,
   Folder,
   FolderInput,
   FolderOpen,
@@ -183,6 +185,70 @@ function conversationMarkdown(messages: OraMessage[]): string {
     "",
     ...messages.map((m) => `## ${m.role === "user" ? "User" : "Ora"}\n\n${m.content.trim()}`),
   ].join("\n\n");
+}
+
+function reportRtf(messages: OraMessage[], title: string): string {
+  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}");
+  const body = messages
+    .filter((m) => m.content.trim())
+    .map(
+      (m) =>
+        `{\\b ${esc(m.role === "assistant" ? "Ora" : "You")}:}  ` +
+        `${esc(m.content.trim()).replace(/\n/g, "\\line ")}\\par\\par `,
+    )
+    .join("");
+  return (
+    `{\\rtf1\\ansi\\deff0\n{\\fonttbl{\\f0\\fswiss Arial;}}\n` +
+    `\\f0\\fs24\\b ${esc(title)}\\b0\\par\\par\n${body}}`
+  );
+}
+
+function reportCsv(messages: OraMessage[]): string {
+  const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const rows = messages
+    .filter((m) => m.content.trim())
+    .map((m) => [q(m.role === "assistant" ? "Ora" : "You"), q(m.content.trim())].join(","))
+    .join("\n");
+  return `"Role","Content"\n${rows}`;
+}
+
+function reportPresentationHtml(messages: OraMessage[], title: string): string {
+  const slides = messages
+    .filter((m) => m.role === "assistant" && m.content.trim())
+    .map(
+      (m, i) =>
+        `<section><h2>Slide ${i + 1}</h2>` +
+        `<p>${m.content.trim().replace(/\n/g, "<br>")}</p></section>`,
+    )
+    .join("");
+  return (
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>` +
+    `<style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:20px}` +
+    `section{border-bottom:2px solid #ddd;padding:32px 0;margin-bottom:16px}` +
+    `h2{color:#4B6BFB}p{font-size:16px;line-height:1.6}` +
+    `@media print{section{page-break-after:always}}</style></head>` +
+    `<body><h1>${title}</h1>${slides}</body></html>`
+  );
+}
+
+function reportPdfHtml(messages: OraMessage[], title: string): string {
+  const rows = messages
+    .filter((m) => m.content.trim())
+    .map(
+      (m) =>
+        `<div class="${m.role === "assistant" ? "ora" : "user"}">` +
+        `<strong>${m.role === "assistant" ? "Ora" : "You"}</strong>` +
+        `<p>${m.content.trim().replace(/\n/g, "<br>")}</p></div>`,
+    )
+    .join("");
+  return (
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>` +
+    `<style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px}` +
+    `.ora{background:#f0f4ff;padding:12px;border-radius:8px;margin-bottom:12px}` +
+    `.user{background:#fff;border:1px solid #e0e0e0;padding:12px;border-radius:8px;margin-bottom:12px}` +
+    `p{margin:8px 0 0}@media print{body{margin:0}}</style></head>` +
+    `<body><h1>${title}</h1>${rows}</body></html>`
+  );
 }
 
 function datasetActionPlanCsv(message: OraMessage): string | null {
@@ -939,6 +1005,75 @@ export default function OraChatScreen() {
       Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
     }
   }, []);
+
+  const handleExportWord = useCallback(
+    async (message: OraMessage) => {
+      const title = messageTitle(message);
+      try {
+        await saveTextAsFile(
+          reportRtf(
+            messages.filter((m) => m.content.trim()),
+            title,
+          ),
+          "ora-report.rtf",
+          "application/rtf",
+        );
+      } catch (err) {
+        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+      }
+    },
+    [messages],
+  );
+
+  const handleExportExcel = useCallback(
+    async (message: OraMessage) => {
+      const src = message.datasetResult ? [message] : messages.filter((m) => m.content.trim());
+      try {
+        await saveTextAsFile(reportCsv(src), "ora-data.csv", "text/csv");
+      } catch (err) {
+        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+      }
+    },
+    [messages],
+  );
+
+  const handleExportPresentation = useCallback(
+    async (message: OraMessage) => {
+      const title = messageTitle(message);
+      try {
+        await saveTextAsFile(
+          reportPresentationHtml(
+            messages.filter((m) => m.content.trim()),
+            title,
+          ),
+          "ora-presentation.html",
+          "text/html",
+        );
+      } catch (err) {
+        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+      }
+    },
+    [messages],
+  );
+
+  const handleExportPdf = useCallback(
+    async (message: OraMessage) => {
+      const title = messageTitle(message);
+      try {
+        await saveTextAsFile(
+          reportPdfHtml(
+            messages.filter((m) => m.content.trim()),
+            title,
+          ),
+          "ora-report.html",
+          "text/html",
+        );
+      } catch (err) {
+        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+      }
+    },
+    [messages],
+  );
 
   // Submit an image-edit instruction via the /images/:id/edit polling flow.
   const handleEditImage = useCallback(async () => {
@@ -2166,6 +2301,22 @@ export default function OraChatScreen() {
           setActionsMessage(null);
           handleEditMessage(m);
         }}
+        onExportWord={(m) => {
+          setActionsMessage(null);
+          void handleExportWord(m);
+        }}
+        onExportExcel={(m) => {
+          setActionsMessage(null);
+          void handleExportExcel(m);
+        }}
+        onExportPresentation={(m) => {
+          setActionsMessage(null);
+          void handleExportPresentation(m);
+        }}
+        onExportPdf={(m) => {
+          setActionsMessage(null);
+          void handleExportPdf(m);
+        }}
       />
     </View>
   );
@@ -3183,6 +3334,10 @@ function MessageActionsSheet({
   onRegenerate,
   onReadAloud,
   onEdit,
+  onExportWord,
+  onExportExcel,
+  onExportPresentation,
+  onExportPdf,
 }: {
   message: OraMessage | null;
   canRegenerate: boolean;
@@ -3197,6 +3352,10 @@ function MessageActionsSheet({
   onRegenerate: (message: OraMessage) => void;
   onReadAloud: (message: OraMessage) => void;
   onEdit: (message: OraMessage) => void;
+  onExportWord: (message: OraMessage) => void;
+  onExportExcel: (message: OraMessage) => void;
+  onExportPresentation: (message: OraMessage) => void;
+  onExportPdf: (message: OraMessage) => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -3273,6 +3432,34 @@ function MessageActionsSheet({
                   icon={FileSpreadsheet}
                   label="Export action-plan CSV"
                   onPress={() => onExportCsv(message)}
+                />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={FileText}
+                  label="Word Report"
+                  onPress={() => onExportWord(message)}
+                />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={FileSpreadsheet}
+                  label="Excel Workbook"
+                  onPress={() => onExportExcel(message)}
+                />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={Presentation}
+                  label="Presentation"
+                  onPress={() => onExportPresentation(message)}
+                />
+              )}
+              {isAssistant && hasContent && (
+                <ActionRow
+                  icon={FileDown}
+                  label="PDF Report"
+                  onPress={() => onExportPdf(message)}
                 />
               )}
               {isAssistant && canRegenerate && (

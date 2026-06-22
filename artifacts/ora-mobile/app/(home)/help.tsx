@@ -1,15 +1,20 @@
 import { useAuth } from "@clerk/expo";
 import Constants from "expo-constants";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   BookOpen,
   ChevronDown,
+  Link,
   LifeBuoy,
   MessageCircle,
+  Paperclip,
   Search,
   Send,
   Ticket,
+  X,
 } from "lucide-react-native";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -27,6 +32,7 @@ import {
 } from "@/lib/api";
 import type {
   HelpArticle,
+  SupportAttachment,
   SupportMessage,
   SupportTicketDetail,
   SupportTicketSummary,
@@ -151,8 +157,38 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
   const [category, setCategory] = useState("general");
   const [sending, setSending] = useState(false);
   const [escalating, setEscalating] = useState(false);
+  const [attachments, setAttachments] = useState<SupportAttachment[]>([]);
 
   const canEscalate = messages.length > 0;
+
+  const handlePickAttachment = useCallback(async () => {
+    if (attachments.length >= 5) {
+      Alert.alert("Limit reached", "You can attach up to 5 files.");
+      return;
+    }
+    const result = await DocumentPicker.getDocumentAsync({
+      multiple: false,
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    try {
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      setAttachments((prev) => [
+        ...prev,
+        {
+          fileName: asset.name,
+          mimeType: asset.mimeType ?? "application/octet-stream",
+          size: asset.size ?? 0,
+          data: base64,
+        },
+      ]);
+    } catch {
+      Alert.alert("Could not attach file", "Failed to read the selected file.");
+    }
+  }, [attachments.length]);
 
   async function handleSend() {
     const text = input.trim();
@@ -187,6 +223,7 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
           buildNumber: Constants.expoConfig?.ios?.buildNumber ?? null,
           runtime: "ora-mobile",
         },
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
       Alert.alert("Ticket created", `Support ticket #${res.ticketId} was created.`);
       onTicketCreated(res.ticketId);
@@ -334,15 +371,51 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
         </Pressable>
       </View>
 
-      <Button
-        label="Escalate to support ticket"
-        icon={Ticket}
-        variant="secondary"
-        disabled={!canEscalate}
-        loading={escalating}
-        onPress={handleEscalate}
-        full
-      />
+      {attachments.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {attachments.map((a, i) => (
+            <View
+              key={i}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                backgroundColor: c.muted,
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                maxWidth: 180,
+              }}
+            >
+              <Text style={{ color: c.foreground, fontSize: 12, flex: 1 }} numberOfLines={1}>
+                {a.fileName}
+              </Text>
+              <Pressable onPress={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}>
+                <X size={12} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Button
+          label={`Attach (${attachments.length}/5)`}
+          icon={Paperclip}
+          variant="ghost"
+          disabled={attachments.length >= 5}
+          onPress={() => void handlePickAttachment()}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label="Escalate to ticket"
+          icon={Ticket}
+          variant="secondary"
+          disabled={!canEscalate}
+          loading={escalating}
+          onPress={handleEscalate}
+          style={{ flex: 1 }}
+        />
+      </View>
     </View>
   );
 }
@@ -430,6 +503,34 @@ function TicketsList({
                 <Text style={{ color: c.mutedForeground, lineHeight: 20 }}>{m.content}</Text>
               </View>
             ))
+          )}
+          {selected.attachments.length > 0 && (
+            <>
+              <Text
+                style={{
+                  color: c.foreground,
+                  fontFamily: "Inter_600SemiBold",
+                  fontSize: 13,
+                  marginTop: 4,
+                }}
+              >
+                Attachments ({selected.attachments.length})
+              </Text>
+              {selected.attachments.map((a, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Link size={14} color={c.mutedForeground} />
+                  <Text
+                    style={{ color: c.mutedForeground, fontSize: 13, flex: 1 }}
+                    numberOfLines={1}
+                  >
+                    {a.fileName}
+                  </Text>
+                  <Text style={{ color: c.mutedForeground, fontSize: 11 }}>
+                    ({Math.round(a.size / 1024)} KB)
+                  </Text>
+                </View>
+              ))}
+            </>
           )}
         </Card>
       )}

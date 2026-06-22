@@ -1,13 +1,18 @@
 import { useAuth } from "@clerk/expo";
 import {
+  Check,
   CheckCircle2,
   FileText,
   GitBranch,
+  GitPullRequest,
+  Key,
   Lock,
   MessageCircle,
+  Play,
   Plus,
   Sparkles,
   TerminalSquare,
+  X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -27,13 +32,23 @@ import { Button, Card, EmptyState, Loading, Pill, TextField } from "@/components
 import { useColors } from "@/hooks/useColors";
 import {
   addRepository,
+  connectGithubToken,
+  createGithubPR,
   createTask,
+  generateDraftPatch,
   getOraxCapabilities,
   listTaskApprovals,
   listTaskArtifacts,
   listTaskMessages,
   listRepositories,
   listTasks,
+  patchApproval,
+  readApprovedFiles,
+  requestCommandApproval,
+  requestGithubPrApproval,
+  requestSandboxApproval,
+  runCommands,
+  runSandbox,
   scanRepository,
   sendTaskMessage,
 } from "@/lib/api";
@@ -74,6 +89,10 @@ export default function OraxScreen() {
   const [taskChatInput, setTaskChatInput] = useState("");
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [sendingTaskMessage, setSendingTaskMessage] = useState(false);
+
+  const [githubTokenByRepo, setGithubTokenByRepo] = useState<Record<number, string>>({});
+  const [connectingGithubRepoId, setConnectingGithubRepoId] = useState<number | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -178,6 +197,149 @@ export default function OraxScreen() {
       setSendingTaskMessage(false);
     }
   }, [selectedTask, sendingTaskMessage, taskChatInput]);
+
+  const handleConnectGithub = useCallback(
+    async (repoId: number) => {
+      const token = (githubTokenByRepo[repoId] ?? "").trim();
+      if (!token) return;
+      setConnectingGithubRepoId(repoId);
+      try {
+        const res = await connectGithubToken(repoId, token);
+        Alert.alert("GitHub connected", res.message ?? "Token saved successfully.");
+        setGithubTokenByRepo((prev) => ({ ...prev, [repoId]: "" }));
+        setRepos(await listRepositories());
+      } catch (err) {
+        Alert.alert("Connect failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setConnectingGithubRepoId(null);
+      }
+    },
+    [githubTokenByRepo],
+  );
+
+  const handleApprovalDecision = useCallback(
+    async (approvalId: number, decision: "approved" | "denied") => {
+      const key = `decision-${approvalId}`;
+      setActionBusy(key);
+      try {
+        await patchApproval(approvalId, decision);
+        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+      } catch (err) {
+        Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [selectedTask],
+  );
+
+  const handleReadFiles = useCallback(async (approvalId: number) => {
+    setActionBusy(`read-${approvalId}`);
+    try {
+      const res = await readApprovedFiles(approvalId);
+      const summary = res.files.map((f) => `${f.path} (${f.content.length} chars)`).join("\n");
+      Alert.alert("Files read", summary || "No files returned.");
+    } catch (err) {
+      Alert.alert("Read failed", err instanceof Error ? err.message : "Please try again.");
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
+
+  const handleDraftPatch = useCallback(
+    async (taskId: number) => {
+      setActionBusy(`patch-${taskId}`);
+      try {
+        const res = await generateDraftPatch(taskId);
+        Alert.alert("Draft patch ready", res.summary ?? `${res.patch.length} chars`);
+        if (selectedTask) {
+          const [appr, arts] = await Promise.allSettled([
+            listTaskApprovals(selectedTask.id),
+            listTaskArtifacts(selectedTask.id),
+          ]);
+          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
+          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
+        }
+      } catch (err) {
+        Alert.alert("Patch failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [selectedTask],
+  );
+
+  const handleRequestApproval = useCallback(
+    async (kind: "sandbox" | "commands" | "pr", taskId: number) => {
+      setActionBusy(`req-${kind}-${taskId}`);
+      try {
+        if (kind === "sandbox") await requestSandboxApproval(taskId);
+        else if (kind === "commands") await requestCommandApproval(taskId);
+        else await requestGithubPrApproval(taskId);
+        setTaskApprovals(await listTaskApprovals(taskId));
+        Alert.alert("Approval requested", "The approval request has been queued.");
+      } catch (err) {
+        Alert.alert("Request failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [],
+  );
+
+  const handleRunSandbox = useCallback(
+    async (approvalId: number) => {
+      setActionBusy(`sandbox-${approvalId}`);
+      try {
+        const res = await runSandbox(approvalId);
+        Alert.alert(
+          res.ok ? "Sandbox passed" : "Sandbox failed",
+          res.output ?? res.error ?? "Done.",
+        );
+        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+      } catch (err) {
+        Alert.alert("Sandbox failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [selectedTask],
+  );
+
+  const handleRunCommands = useCallback(
+    async (approvalId: number) => {
+      setActionBusy(`commands-${approvalId}`);
+      try {
+        const res = await runCommands(approvalId);
+        Alert.alert(
+          res.ok ? "Commands passed" : "Commands failed",
+          res.output ?? res.error ?? "Done.",
+        );
+        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+      } catch (err) {
+        Alert.alert("Commands failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [selectedTask],
+  );
+
+  const handleCreatePR = useCallback(
+    async (approvalId: number) => {
+      setActionBusy(`pr-${approvalId}`);
+      try {
+        const res = await createGithubPR(approvalId);
+        Alert.alert("PR created", `Pull request #${res.prNumber}\n${res.prUrl}`);
+        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+      } catch (err) {
+        Alert.alert("PR creation failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [selectedTask],
+  );
 
   if (!isSignedIn) {
     return (
@@ -294,6 +456,43 @@ export default function OraxScreen() {
                         }}
                         style={{ marginTop: 6 }}
                       />
+                      <View
+                        style={{
+                          borderTopWidth: 1,
+                          borderTopColor: c.border,
+                          marginTop: 8,
+                          paddingTop: 10,
+                          gap: 8,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: c.mutedForeground,
+                            fontSize: 12,
+                            fontFamily: "Inter_600SemiBold",
+                          }}
+                        >
+                          GitHub token (private repos)
+                        </Text>
+                        <TextField
+                          label=""
+                          placeholder="github_pat_..."
+                          autoCapitalize="none"
+                          secureTextEntry
+                          value={githubTokenByRepo[r.id] ?? ""}
+                          onChangeText={(v) =>
+                            setGithubTokenByRepo((prev) => ({ ...prev, [r.id]: v }))
+                          }
+                        />
+                        <Button
+                          label="Connect GitHub token"
+                          icon={Key}
+                          variant="secondary"
+                          disabled={!(githubTokenByRepo[r.id] ?? "").trim()}
+                          loading={connectingGithubRepoId === r.id}
+                          onPress={() => void handleConnectGithub(r.id)}
+                        />
+                      </View>
                     </Card>
                   ))
                 )}
@@ -509,20 +708,131 @@ export default function OraxScreen() {
                             <View
                               key={a.id}
                               style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: 8,
                                 backgroundColor: c.muted,
                                 borderRadius: 10,
                                 padding: 10,
+                                gap: 8,
                               }}
                             >
-                              <Text style={{ color: c.foreground, flex: 1 }}>{a.action}</Text>
-                              <Text style={{ color: c.accentForeground }}>{a.status}</Text>
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  gap: 8,
+                                }}
+                              >
+                                <Text style={{ color: c.foreground, flex: 1, fontSize: 13 }}>
+                                  {a.action.replace(/_/g, " ")}
+                                </Text>
+                                <Text style={{ color: c.accentForeground, fontSize: 12 }}>
+                                  {a.status}
+                                </Text>
+                              </View>
+                              {a.status === "pending" && (
+                                <View style={{ flexDirection: "row", gap: 8 }}>
+                                  <Button
+                                    label="Approve"
+                                    icon={Check}
+                                    variant="secondary"
+                                    loading={actionBusy === `decision-${a.id}`}
+                                    onPress={() => void handleApprovalDecision(a.id, "approved")}
+                                    style={{ flex: 1 }}
+                                  />
+                                  <Button
+                                    label="Deny"
+                                    icon={X}
+                                    variant="ghost"
+                                    loading={actionBusy === `decision-${a.id}`}
+                                    onPress={() => void handleApprovalDecision(a.id, "denied")}
+                                    style={{ flex: 1 }}
+                                  />
+                                </View>
+                              )}
+                              {a.status === "approved" && /read.?file/i.test(a.action) && (
+                                <Button
+                                  label="Read files"
+                                  icon={FileText}
+                                  variant="secondary"
+                                  loading={actionBusy === `read-${a.id}`}
+                                  onPress={() => void handleReadFiles(a.id)}
+                                />
+                              )}
+                              {a.status === "approved" && /sandbox/i.test(a.action) && (
+                                <Button
+                                  label="Run sandbox"
+                                  icon={Play}
+                                  variant="secondary"
+                                  loading={actionBusy === `sandbox-${a.id}`}
+                                  onPress={() => void handleRunSandbox(a.id)}
+                                />
+                              )}
+                              {a.status === "approved" && /command/i.test(a.action) && (
+                                <Button
+                                  label="Run commands"
+                                  icon={Play}
+                                  variant="secondary"
+                                  loading={actionBusy === `commands-${a.id}`}
+                                  onPress={() => void handleRunCommands(a.id)}
+                                />
+                              )}
+                              {a.status === "approved" &&
+                                /github.?pr|pull.?request/i.test(a.action) && (
+                                  <Button
+                                    label="Create GitHub PR"
+                                    icon={GitPullRequest}
+                                    variant="secondary"
+                                    loading={actionBusy === `pr-${a.id}`}
+                                    onPress={() => void handleCreatePR(a.id)}
+                                  />
+                                )}
                             </View>
                           ))
                         )}
+
+                        <Text
+                          style={{
+                            color: c.foreground,
+                            fontFamily: "Inter_600SemiBold",
+                            fontSize: 14,
+                          }}
+                        >
+                          Request actions
+                        </Text>
+                        <View style={{ gap: 8 }}>
+                          <Button
+                            label="Generate draft patch"
+                            icon={FileText}
+                            variant="secondary"
+                            loading={actionBusy === `patch-${selectedTask.id}`}
+                            onPress={() => void handleDraftPatch(selectedTask.id)}
+                            full
+                          />
+                          <Button
+                            label="Request sandbox validation"
+                            icon={Play}
+                            variant="secondary"
+                            loading={actionBusy === `req-sandbox-${selectedTask.id}`}
+                            onPress={() => void handleRequestApproval("sandbox", selectedTask.id)}
+                            full
+                          />
+                          <Button
+                            label="Request controlled checks"
+                            icon={TerminalSquare}
+                            variant="secondary"
+                            loading={actionBusy === `req-commands-${selectedTask.id}`}
+                            onPress={() => void handleRequestApproval("commands", selectedTask.id)}
+                            full
+                          />
+                          <Button
+                            label="Request GitHub PR approval"
+                            icon={GitPullRequest}
+                            variant="secondary"
+                            loading={actionBusy === `req-pr-${selectedTask.id}`}
+                            onPress={() => void handleRequestApproval("pr", selectedTask.id)}
+                            full
+                          />
+                        </View>
 
                         <Text
                           style={{
