@@ -145,6 +145,15 @@ function cleanForTts(text: string): string {
 
 const DATASET_TYPES = ["csv", "xlsx", "xls"];
 
+const EXAMPLE_CHIPS = [
+  "Plan an app idea",
+  "Find the root cause of a problem",
+  "Help me think through a strategy",
+  "Analyze a business idea",
+  "What can you help me with?",
+  "Research a topic for me",
+];
+
 function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] {
   if (isImage) return "image";
   if (DATASET_TYPES.includes(fileType.toLowerCase())) return "dataset";
@@ -1269,7 +1278,34 @@ export default function OraChatScreen() {
         title="Ora"
         subtitle={usageText}
         right={
-          <View style={{ flexDirection: "row", gap: 4 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            {session?.tier && (
+              <View
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: c.border,
+                  backgroundColor: c.muted,
+                  marginRight: 2,
+                }}
+              >
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 10,
+                    fontFamily: "Inter_500Medium",
+                  }}
+                >
+                  {session.tier === "core"
+                    ? "Core"
+                    : session.tier === "wave"
+                      ? "Wave"
+                      : "Free"}
+                </Text>
+              </View>
+            )}
             <Pressable
               onPress={toggleTemporary}
               hitSlop={8}
@@ -1356,12 +1392,46 @@ export default function OraChatScreen() {
           }}
           onContentSizeChange={scrollToEnd}
           ListEmptyComponent={
-            <View style={{ flex: 1, justifyContent: "center" }}>
+            <View style={{ flex: 1, justifyContent: "center", gap: 20 }}>
               <EmptyState
                 icon={Sparkles}
                 title="Ask Ora anything"
                 subtitle="Brainstorm ideas, analyze files and images, search the web, or generate documents — all in one conversation."
               />
+              <View
+                style={{
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  justifyContent: "center",
+                  paddingHorizontal: 8,
+                }}
+              >
+                {EXAMPLE_CHIPS.map((chip) => (
+                  <Pressable
+                    key={chip}
+                    onPress={() => setInput(chip)}
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 8,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      backgroundColor: c.card,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: c.foreground,
+                        fontSize: 13,
+                        fontFamily: "Inter_400Regular",
+                      }}
+                    >
+                      {chip}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           }
           renderItem={({ item }) => (
@@ -1615,7 +1685,7 @@ export default function OraChatScreen() {
                     backgroundColor: c.card,
                     borderWidth: 1,
                     borderColor: c.border,
-                    borderRadius: c.radius,
+                    borderRadius: 20,
                     paddingHorizontal: 14,
                     paddingTop: 12,
                     paddingBottom: 12,
