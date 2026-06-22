@@ -444,6 +444,7 @@ export default function HelpScreen() {
   const signedIn = !!isSignedIn;
   const [tab, setTab] = useState<HelpTab>("articles");
   const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [articles, setArticles] = useState<HelpArticle[]>([]);
   const [faqs, setFaqs] = useState<HelpArticle[]>([]);
   const [articlesLoading, setArticlesLoading] = useState(true);
@@ -455,7 +456,7 @@ export default function HelpScreen() {
   useEffect(() => {
     const handle = setTimeout(() => {
       setArticlesLoading(true);
-      listHelpArticles(query)
+      listHelpArticles(query, activeCategory ?? undefined)
         .then((data) => {
           setArticles(data.articles);
           setFaqs(data.faqs);
@@ -467,7 +468,7 @@ export default function HelpScreen() {
         .finally(() => setArticlesLoading(false));
     }, 250);
     return () => clearTimeout(handle);
-  }, [query]);
+  }, [query, activeCategory]);
 
   async function refreshTickets(selectId?: number) {
     if (!signedIn) return;
@@ -584,19 +585,52 @@ export default function HelpScreen() {
             {categories.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    onPress={() => setActiveCategory(null)}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: activeCategory == null ? c.accentForeground : c.border,
+                      backgroundColor: activeCategory == null ? `${c.accentForeground}22` : c.card,
+                      borderRadius: 999,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: activeCategory == null ? c.accentForeground : c.mutedForeground,
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 12,
+                      }}
+                    >
+                      All
+                    </Text>
+                  </Pressable>
                   {categories.map((category) => (
-                    <View
+                    <Pressable
                       key={category}
+                      onPress={() => setActiveCategory(category)}
                       style={{
                         borderWidth: 1,
-                        borderColor: c.border,
+                        borderColor: activeCategory === category ? c.accentForeground : c.border,
+                        backgroundColor:
+                          activeCategory === category ? `${c.accentForeground}22` : c.card,
                         borderRadius: 999,
                         paddingHorizontal: 10,
                         paddingVertical: 6,
                       }}
                     >
-                      <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{category}</Text>
-                    </View>
+                      <Text
+                        style={{
+                          color:
+                            activeCategory === category ? c.accentForeground : c.mutedForeground,
+                          fontFamily: "Inter_600SemiBold",
+                          fontSize: 12,
+                        }}
+                      >
+                        {category}
+                      </Text>
+                    </Pressable>
                   ))}
                 </View>
               </ScrollView>

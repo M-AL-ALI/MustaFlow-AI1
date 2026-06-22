@@ -719,10 +719,12 @@ export function updatePreferences(patch: Partial<UserPreferences>): Promise<User
 }
 
 export async function getSubscription(): Promise<BillingSubscription | null> {
-  const data = await jsonRequest<{ subscription: BillingSubscription }>(
+  const data = await jsonRequest<{ subscription?: BillingSubscription } | BillingSubscription>(
     "/api/billing/subscription",
   );
-  return data.subscription ?? null;
+  return (
+    (data as { subscription?: BillingSubscription }).subscription ?? (data as BillingSubscription)
+  );
 }
 
 export function getPaymentMethod(): Promise<PaymentMethodInfo> {
@@ -764,10 +766,14 @@ export function startPaymentMethodSetup(input: {
 
 export async function listHelpArticles(
   query?: string,
+  category?: string,
 ): Promise<{ articles: HelpArticle[]; faqs: HelpArticle[] }> {
-  const params = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  const params = new URLSearchParams();
+  if (query?.trim()) params.set("q", query.trim());
+  if (category?.trim()) params.set("category", category.trim());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   const data = await jsonRequest<{ articles?: HelpArticle[]; faqs?: HelpArticle[] }>(
-    `/help/articles${params}`,
+    `/help/articles${suffix}`,
   );
   return { articles: data.articles ?? [], faqs: data.faqs ?? [] };
 }

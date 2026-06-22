@@ -354,7 +354,7 @@ export interface UserPreferences {
 }
 
 export interface BillingSubscription {
-  userId: string;
+  userId?: string;
   tier: OraTier;
   status: "active" | "canceled";
   currentPeriodEnd: string;
