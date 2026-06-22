@@ -4,7 +4,7 @@ import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import { Linking, Platform } from "react-native";
 
-import { API_BASE, apiUrl } from "./api";
+import { API_BASE } from "./api";
 import type { GeneratedFile, OraAsset } from "./types";
 
 export type SaveOutcome = "image-saved" | "shared" | "opened";
@@ -132,7 +132,7 @@ export async function saveTextAsFile(
  * the download URL is opened in a new tab.
  */
 export async function saveAsset(asset: OraAsset): Promise<SaveOutcome> {
-  const downloadUrl = apiUrl(`/api/ora/assets/${asset.id}/download`);
+  const downloadUrl = `${API_BASE}/api/ora/assets/${asset.id}/download`;
 
   if (Platform.OS === "web") {
     await Linking.openURL(downloadUrl);

@@ -19,7 +19,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button, Card, Pill } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
-import { API_BASE, getOraUsage, getPreferences, getSubscription, updatePreferences } from "@/lib/api";
+import {
+  API_BASE,
+  getOraSession,
+  getOraUsage,
+  getPreferences,
+  getSubscription,
+  sendChat,
+  updatePreferences,
+} from "@/lib/api";
 import type { BillingSubscription, OraUsage } from "@/lib/types";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
@@ -197,8 +205,22 @@ export default function SettingsScreen() {
     setDiagLoading(true);
     setDiagResult(null);
     try {
-      const res = await fetch(`${API_BASE}/api/healthz`);
-      setDiagResult(res.ok ? `OK (${res.status})` : `HTTP ${res.status}`);
+      const session = await getOraSession();
+      const chat = await sendChat({
+        message: "hi",
+        messages: [],
+        language: "en",
+        mode: "instant",
+        referenceSavedMemories: false,
+        referenceChatHistory: false,
+        temporary: true,
+      });
+      const reply = chat.reply?.trim();
+      setDiagResult(
+        reply
+          ? `OK session ${session.msgCount}/${session.msgLimit}; chat replied`
+          : `Session OK ${session.msgCount}/${session.msgLimit}; chat returned empty reply`,
+      );
     } catch (err) {
       setDiagResult(err instanceof Error ? err.message : "Network error");
     } finally {
@@ -377,7 +399,7 @@ export default function SettingsScreen() {
           </View>
         </SectionCard>
 
-        <SectionCard icon={Wifi} title="Diagnostics" description="API connectivity and build config.">
+        <SectionCard icon={Wifi} title="Diagnostics" description="Ora session + chat path check.">
           <View style={{ gap: 6 }}>
             <DiagRow label="API URL" value={API_BASE} />
             <DiagRow
@@ -389,11 +411,11 @@ export default function SettingsScreen() {
               value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
               warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
             />
-            <DiagRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
+            <DiagRow label="Slug" value={Constants.expoConfig?.slug ?? "-"} />
             <DiagRow label="Build" value={APP_VERSION_LABEL} />
           </View>
           <Button
-            label={diagLoading ? "Testing…" : "Test Ora backend"}
+            label={diagLoading ? "Testing Ora chat..." : "Test Ora chat"}
             onPress={testBackend}
             full
           />
