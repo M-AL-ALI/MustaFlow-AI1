@@ -1,9 +1,11 @@
+import { useAuth } from "@clerk/expo";
 import { CheckCircle2, GitBranch, Lock, Plus, Sparkles, TerminalSquare } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
+import { SignInWall } from "@/components/SignInWall";
 import { Button, Card, EmptyState, Loading, Pill, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -20,6 +22,7 @@ type Tab = "repos" | "tasks" | "capabilities";
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const { isSignedIn } = useAuth();
   const [tab, setTab] = useState<Tab>("repos");
 
   const [caps, setCaps] = useState<OraxCapabilities | null>(null);
@@ -49,8 +52,9 @@ export default function OraxScreen() {
   }, []);
 
   useEffect(() => {
+    if (!isSignedIn) return;
     void reload();
-  }, [reload]);
+  }, [reload, isSignedIn]);
 
   const submitRepo = useCallback(async () => {
     if (!repoUrl.trim()) return;
@@ -84,6 +88,18 @@ export default function OraxScreen() {
       setCreatingTask(false);
     }
   }, [taskRepoId, taskPrompt, taskKind]);
+
+  if (!isSignedIn) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.background }}>
+        <ScreenHeader title="Orax" subtitle="Connect repositories & run agentic tasks" />
+        <SignInWall
+          title="Sign in for Orax"
+          description="Orax connects to your repositories and runs agentic coding tasks with your account."
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>

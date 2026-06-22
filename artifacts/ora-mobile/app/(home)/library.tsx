@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/expo";
 import { Image } from "expo-image";
 import { Download, FileText, FolderOpen, HardDrive, Share2, Trash2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
@@ -5,6 +6,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "rea
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
+import { SignInWall } from "@/components/SignInWall";
 import { Card, EmptyState, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import { API_BASE, deleteAsset, getAssets } from "@/lib/api";
@@ -21,6 +23,7 @@ function formatBytes(bytes: number): string {
 export default function LibraryScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const { isSignedIn } = useAuth();
   const [assets, setAssets] = useState<OraAsset[]>([]);
   const [storage, setStorage] = useState<{ usedBytes: number; capBytes: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,8 +41,21 @@ export default function LibraryScreen() {
   }, []);
 
   useEffect(() => {
+    if (!isSignedIn) return;
     void reload();
-  }, [reload]);
+  }, [reload, isSignedIn]);
+
+  if (!isSignedIn) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.background }}>
+        <ScreenHeader title="Library" subtitle="Files & images Ora created" />
+        <SignInWall
+          title="Sign in for Library"
+          description="Your generated files and images are stored with your account."
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>

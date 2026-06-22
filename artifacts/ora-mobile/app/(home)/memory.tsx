@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/expo";
 import { Bookmark, Plus, Trash2, User } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -13,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
+import { SignInWall } from "@/components/SignInWall";
 import { Button, Card, EmptyState, Loading, Pill, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -40,7 +42,20 @@ const PROFILE_FIELDS: { key: keyof OraProfile; label: string; multiline?: boolea
 
 export default function MemoryScreen() {
   const c = useColors();
+  const { isSignedIn } = useAuth();
   const [tab, setTab] = useState<Tab>("profile");
+
+  if (!isSignedIn) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.background }}>
+        <ScreenHeader title="Memory" subtitle="What Ora knows about you" />
+        <SignInWall
+          title="Sign in for Memory"
+          description="Your profile and saved memories are stored with your account."
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>

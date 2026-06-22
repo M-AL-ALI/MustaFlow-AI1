@@ -1,12 +1,13 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { setAuthTokenGetter } from "@/lib/auth-client";
 import { DrawerContentScrollView, DrawerContentComponentProps } from "@react-navigation/drawer";
-import { Redirect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { Drawer } from "expo-router/drawer";
 import {
   BookOpen,
   Brain,
   HelpCircle,
+  LogIn,
   LogOut,
   type LucideIcon,
   MessageSquare,
@@ -20,7 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Logo } from "@/components/Logo";
 import { useColors } from "@/hooks/useColors";
 
-const NAV: { name: string; label: string; icon: LucideIcon }[] = [
+const NAV_SIGNED_IN: { name: string; label: string; icon: LucideIcon }[] = [
   { name: "index", label: "Ora", icon: MessageSquare },
   { name: "orax", label: "Orax", icon: TerminalSquare },
   { name: "memory", label: "Memory", icon: Brain },
@@ -29,14 +30,21 @@ const NAV: { name: string; label: string; icon: LucideIcon }[] = [
   { name: "help", label: "Help", icon: HelpCircle },
 ];
 
+const NAV_ANONYMOUS: { name: string; label: string; icon: LucideIcon }[] = [
+  { name: "index", label: "Ora", icon: MessageSquare },
+  { name: "settings", label: "Settings", icon: Settings },
+  { name: "help", label: "Help", icon: HelpCircle },
+];
+
 function CustomDrawer(props: DrawerContentComponentProps) {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
+  const { signOut, isSignedIn } = useAuth();
   const { user } = useUser();
   const router = useRouter();
 
   const activeRoute = props.state.routeNames[props.state.index];
+  const navItems = isSignedIn ? NAV_SIGNED_IN : NAV_ANONYMOUS;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.sidebar }}>
@@ -46,7 +54,7 @@ function CustomDrawer(props: DrawerContentComponentProps) {
         </View>
 
         <View style={{ paddingHorizontal: 10, gap: 4 }}>
-          {NAV.map((item) => {
+          {navItems.map((item) => {
             const active = item.name === activeRoute;
             const Icon = item.icon;
             return (
@@ -88,44 +96,80 @@ function CustomDrawer(props: DrawerContentComponentProps) {
           gap: 12,
         }}
       >
-        <View style={{ gap: 2 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              color: c.foreground,
-              fontFamily: "Inter_600SemiBold",
-              fontSize: 14,
-            }}
-          >
-            {user?.fullName || user?.username || "Signed in"}
-          </Text>
-          <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
-            {user?.primaryEmailAddress?.emailAddress ?? ""}
-          </Text>
-        </View>
-        <Pressable
-          onPress={async () => {
-            await signOut();
-            router.replace("/sign-in");
-          }}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingVertical: 10,
-          }}
-        >
-          <LogOut size={18} color={c.destructive} />
-          <Text
-            style={{
-              color: c.destructive,
-              fontFamily: "Inter_500Medium",
-              fontSize: 14,
-            }}
-          >
-            Sign out
-          </Text>
-        </Pressable>
+        {isSignedIn ? (
+          <>
+            <View style={{ gap: 2 }}>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: c.foreground,
+                  fontFamily: "Inter_600SemiBold",
+                  fontSize: 14,
+                }}
+              >
+                {user?.fullName || user?.username || "Signed in"}
+              </Text>
+              <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
+                {user?.primaryEmailAddress?.emailAddress ?? ""}
+              </Text>
+            </View>
+            <Pressable
+              onPress={async () => {
+                await signOut();
+                router.replace("/sign-in");
+              }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingVertical: 10,
+              }}
+            >
+              <LogOut size={18} color={c.destructive} />
+              <Text
+                style={{
+                  color: c.destructive,
+                  fontFamily: "Inter_500Medium",
+                  fontSize: 14,
+                }}
+              >
+                Sign out
+              </Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Text
+              style={{
+                color: c.mutedForeground,
+                fontSize: 13,
+                lineHeight: 18,
+              }}
+            >
+              Sign in to unlock Memory, Library, and Orax.
+            </Text>
+            <Pressable
+              onPress={() => router.push("/sign-in")}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingVertical: 10,
+              }}
+            >
+              <LogIn size={18} color={c.accentForeground} />
+              <Text
+                style={{
+                  color: c.accentForeground,
+                  fontFamily: "Inter_600SemiBold",
+                  fontSize: 14,
+                }}
+              >
+                Sign in
+              </Text>
+            </Pressable>
+          </>
+        )}
       </View>
     </View>
   );
@@ -133,9 +177,8 @@ function CustomDrawer(props: DrawerContentComponentProps) {
 
 export default function HomeLayout() {
   const c = useColors();
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, getToken } = useAuth();
 
-  // Route every API call's bearer token through Clerk's getToken().
   useEffect(() => {
     setAuthTokenGetter(async () => {
       try {
@@ -160,8 +203,6 @@ export default function HomeLayout() {
       </View>
     );
   }
-
-  if (!isSignedIn) return <Redirect href="/sign-in" />;
 
   return (
     <Drawer

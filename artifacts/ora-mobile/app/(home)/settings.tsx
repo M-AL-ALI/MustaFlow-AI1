@@ -303,7 +303,7 @@ export default function SettingsScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signOut, getToken } = useAuth();
+  const { signOut, getToken, isSignedIn } = useAuth();
   const { user } = useUser();
   const { themeOverride, setThemeOverride } = useTheme();
 
@@ -319,13 +319,15 @@ export default function SettingsScreen() {
         setAutoReadReplies(!!p.autoReadReplies);
       })
       .catch(() => {});
-    getSubscription()
-      .then(setSubscription)
-      .catch(() => {});
-    getOraUsage()
-      .then(setUsage)
-      .catch(() => {});
-  }, []);
+    if (isSignedIn) {
+      getSubscription()
+        .then(setSubscription)
+        .catch(() => {});
+      getOraUsage()
+        .then(setUsage)
+        .catch(() => {});
+    }
+  }, [isSignedIn]);
 
   const changeVoiceLang = useCallback(async (code: string) => {
     setVoiceLangState(code);
@@ -656,79 +658,99 @@ export default function SettingsScreen() {
           </View>
         </SectionCard>
 
-        {/* Plan */}
-        <SectionCard icon={CreditCard} title="Plan" description="Your current Ora subscription.">
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              backgroundColor: c.muted,
-              borderRadius: c.radius,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-            }}
+        {/* Plan + Usage + Account — require sign-in */}
+        {!isSignedIn && (
+          <SectionCard
+            icon={CreditCard}
+            title="Account & Plan"
+            description="Sign in to view your subscription, usage, and account details."
           >
-            <Text
-              style={{
-                color: c.foreground,
-                fontFamily: "Inter_600SemiBold",
-                fontSize: 15,
-                textTransform: "capitalize",
-              }}
+            <Button label="Sign in" onPress={() => router.push("/sign-in")} full />
+          </SectionCard>
+        )}
+        {isSignedIn && (
+          <>
+            {/* Plan */}
+            <SectionCard
+              icon={CreditCard}
+              title="Plan"
+              description="Your current Ora subscription."
             >
-              {subscription?.tier ?? "Free"}
-            </Text>
-            {subscription?.status && (
-              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{subscription.status}</Text>
-            )}
-          </View>
-        </SectionCard>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  backgroundColor: c.muted,
+                  borderRadius: c.radius,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                }}
+              >
+                <Text
+                  style={{
+                    color: c.foreground,
+                    fontFamily: "Inter_600SemiBold",
+                    fontSize: 15,
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {subscription?.tier ?? "Free"}
+                </Text>
+                {subscription?.status && (
+                  <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                    {subscription.status}
+                  </Text>
+                )}
+              </View>
+            </SectionCard>
 
-        {/* Usage */}
-        <SectionCard
-          icon={Activity}
-          title="Usage"
-          description="Your Ora activity in the current window."
-        >
-          {usage ? (
-            <View style={{ gap: 8 }}>
-              <UsageRow label="Messages" used={usage.messageCount} limit={usage.messageLimit} />
-              <UsageRow label="Images" used={usage.imageCount} limit={usage.imageLimit} />
-              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                {`Resets ${formatReset(usage.resetsAt)} · ${usage.windowHours}h window`}
-              </Text>
-            </View>
-          ) : (
-            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Usage unavailable.</Text>
-          )}
-        </SectionCard>
+            {/* Usage */}
+            <SectionCard
+              icon={Activity}
+              title="Usage"
+              description="Your Ora activity in the current window."
+            >
+              {usage ? (
+                <View style={{ gap: 8 }}>
+                  <UsageRow label="Messages" used={usage.messageCount} limit={usage.messageLimit} />
+                  <UsageRow label="Images" used={usage.imageCount} limit={usage.imageLimit} />
+                  <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                    {`Resets ${formatReset(usage.resetsAt)} · ${usage.windowHours}h window`}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Usage unavailable.</Text>
+              )}
+            </SectionCard>
 
-        {/* Account */}
-        <SectionCard
-          icon={UserIcon}
-          title="Account"
-          description="Your profile and sign-in details."
-        >
-          <View style={{ gap: 4 }}>
-            <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 15 }}>
-              {user?.fullName || user?.username || "Ora user"}
-            </Text>
-            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-              {user?.primaryEmailAddress?.emailAddress ?? ""}
-            </Text>
-          </View>
-          <Button
-            label="Sign out"
-            variant="destructive"
-            icon={LogOut}
-            onPress={async () => {
-              await signOut();
-              router.replace("/sign-in");
-            }}
-            full
-          />
-        </SectionCard>
+            {/* Account */}
+            <SectionCard
+              icon={UserIcon}
+              title="Account"
+              description="Your profile and sign-in details."
+            >
+              <View style={{ gap: 4 }}>
+                <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 15 }}>
+                  {user?.fullName || user?.username || "Ora user"}
+                </Text>
+                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                  {user?.primaryEmailAddress?.emailAddress ?? ""}
+                </Text>
+              </View>
+              <Button
+                label="Sign out"
+                variant="destructive"
+                icon={LogOut}
+                onPress={async () => {
+                  await signOut();
+                  router.replace("/sign-in");
+                }}
+                full
+              />
+            </SectionCard>
+          </>
+        )}
 
         {/* About */}
         <SectionCard icon={Info} title="About" description="App version and build.">

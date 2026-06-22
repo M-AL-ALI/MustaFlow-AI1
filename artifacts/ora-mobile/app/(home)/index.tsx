@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/expo";
 import { Image } from "expo-image";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
@@ -268,6 +269,7 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
 }
 
 export default function OraChatScreen() {
+  const { isSignedIn } = useAuth();
   const c = useColors();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<OraMessage>>(null);
@@ -354,14 +356,16 @@ export default function OraChatScreen() {
       .catch(() => setSession(null));
     loadPreferences();
     // Preload projects so the active-scope banner can resolve a project's name
-    // even before the chats drawer is opened.
-    listProjects()
-      .then((p) => {
-        projectsLoadedRef.current = true;
-        setProjects(p);
-      })
-      .catch(() => {});
-  }, [loadPreferences]);
+    // even before the chats drawer is opened. Skip for anonymous users.
+    if (isSignedIn) {
+      listProjects()
+        .then((p) => {
+          projectsLoadedRef.current = true;
+          setProjects(p);
+        })
+        .catch(() => {});
+    }
+  }, [loadPreferences, isSignedIn]);
 
   // Drop back to standalone if the active project no longer exists (deleted here
   // or externally) once the project list has actually loaded, so a new chat never
@@ -459,6 +463,8 @@ export default function OraChatScreen() {
 
   const persist = useCallback(
     async (msgs: OraMessage[], temporaryOverride?: boolean) => {
+      // Anonymous sessions are never persisted — no account to attach to.
+      if (!isSignedIn) return;
       // Temporary chats are never written to the conversation store. A turn
       // passes its captured temporary state so a mid-flight toggle can't flip
       // whether an already-started send gets persisted.
@@ -477,7 +483,7 @@ export default function OraChatScreen() {
         /* persistence is best-effort */
       }
     },
-    [conversationId],
+    [conversationId, isSignedIn],
   );
 
   const sendMessage = useCallback(
@@ -579,8 +585,8 @@ export default function OraChatScreen() {
             messages: history,
             mode,
             language: language !== "auto" ? language : undefined,
-            referenceSavedMemories: !temporary,
-            referenceChatHistory: !temporary,
+            referenceSavedMemories: !!isSignedIn && !temporary,
+            referenceChatHistory: !!isSignedIn && !temporary,
             temporary,
           };
 
@@ -702,7 +708,7 @@ export default function OraChatScreen() {
         }
       }
     },
-    [sending, messages, mode, temporary, scrollToEnd, persist, scheduleTalkRestart],
+    [sending, messages, mode, temporary, scrollToEnd, persist, scheduleTalkRestart, isSignedIn],
   );
 
   const handleSend = useCallback(async () => {
@@ -732,8 +738,8 @@ export default function OraChatScreen() {
   // immediately so the saved/superseded state survives a reload.
   const handleSaveMemory = useCallback(
     async (message: OraMessage) => {
-      // Never write memory from a temporary chat.
-      if (temporaryRef.current) return;
+      // Never write memory from an anonymous or temporary chat.
+      if (!isSignedIn || temporaryRef.current) return;
       const fact = message.memorySaveCandidate?.trim();
       if (!fact) return;
       const supersededTitles = await saveOraMemory(fact);
@@ -750,7 +756,7 @@ export default function OraChatScreen() {
       setMessages(next);
       void persist(next);
     },
-    [messages, persist],
+    [messages, persist, isSignedIn],
   );
 
   // Regenerate the assistant reply for the user turn that produced `message`.
@@ -1175,6 +1181,12 @@ export default function OraChatScreen() {
   }, [interruptTalkMode, speakingId, talkModeMuted]);
 
   const openConversations = useCallback(async () => {
+    if (!isSignedIn) {
+      Alert.alert("Sign in required", "Sign in to save conversations and access your history.", [
+        { text: "OK" },
+      ]);
+      return;
+    }
     setShowConversations(true);
     setLoadingConversations(true);
     // Load conversations and projects independently so one failing endpoint
@@ -1186,7 +1198,7 @@ export default function OraChatScreen() {
       setProjects(projs.value);
     }
     setLoadingConversations(false);
-  }, []);
+  }, [isSignedIn]);
 
   // Refresh just the project + conversation lists (after create/rename/delete)
   // without reopening or toggling the loading state.
