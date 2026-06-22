@@ -1349,6 +1349,11 @@ export default function OraChatScreen() {
   // Free / anonymous users are gated to Instant mode only.
   const deepAllowed = session?.tier === "core" || session?.tier === "wave";
 
+  // Tier-specific accent color — mirrors website's --ora-accent-hsl CSS var on the panel root.
+  // Used for Ora-specific active states (mode indicator, language selector, temp/talk toggles).
+  // Falls back to the theme's fixed accent when session has not loaded yet.
+  const tierAccent = session?.tier ? tierAccentColor(session.tier) : c.accentForeground;
+
   // Reset to Instant if tier drops and Deep is active (e.g. plan downgrade)
   useEffect(() => {
     if (!deepAllowed && mode === "deep") setMode("instant");
@@ -1439,7 +1444,7 @@ export default function OraChatScreen() {
               style={{ padding: 6, opacity: sending ? 0.4 : 1 }}
               accessibilityLabel={temporary ? "Turn off temporary chat" : "Start temporary chat"}
             >
-              <Ghost size={22} color={temporary ? c.accentForeground : c.foreground} />
+              <Ghost size={22} color={temporary ? tierAccent : c.foreground} />
             </Pressable>
             <Pressable
               onPress={toggleTalkMode}
@@ -1447,7 +1452,7 @@ export default function OraChatScreen() {
               style={{ padding: 6 }}
               accessibilityLabel={talkMode ? "Exit Talk to Ora" : "Talk to Ora"}
             >
-              <PhoneCall size={22} color={talkMode ? c.accentForeground : c.foreground} />
+              <PhoneCall size={22} color={talkMode ? tierAccent : c.foreground} />
             </Pressable>
             <Pressable onPress={openConversations} hitSlop={8} style={{ padding: 6 }}>
               <History size={22} color={c.foreground} />
@@ -1606,7 +1611,7 @@ export default function OraChatScreen() {
                   borderColor: c.border,
                 }}
               >
-                <Gauge size={14} color={c.accentForeground} />
+                <Gauge size={14} color={tierAccent} />
                 <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 13 }}>
                   Deep Thinking
                 </Text>
@@ -1948,6 +1953,7 @@ export default function OraChatScreen() {
         mode={mode}
         language={language}
         deepAllowed={deepAllowed}
+        accentColor={tierAccent}
         onClose={() => setShowPlusMenu(false)}
         onTakePhoto={() => {
           setShowPlusMenu(false);
@@ -2904,6 +2910,7 @@ function PlusMenu({
   mode,
   language,
   deepAllowed,
+  accentColor,
   onClose,
   onTakePhoto,
   onPickPhoto,
@@ -2915,6 +2922,7 @@ function PlusMenu({
   mode: OraMode;
   language: string;
   deepAllowed: boolean;
+  accentColor: string;
   onClose: () => void;
   onTakePhoto: () => void;
   onPickPhoto: () => void;
@@ -2958,6 +2966,7 @@ function PlusMenu({
             icon={Zap}
             label="Instant"
             active={mode === "instant"}
+            accentColor={accentColor}
             onPress={() => onSelectMode("instant")}
           />
           <ToolRow
@@ -2966,6 +2975,7 @@ function PlusMenu({
             sublabel={deepAllowed ? "Step-by-step" : "Upgrade"}
             active={mode === "deep" && deepAllowed}
             disabled={!deepAllowed}
+            accentColor={accentColor}
             onPress={() => {
               if (deepAllowed) {
                 onSelectMode("deep");
@@ -2987,6 +2997,7 @@ function PlusMenu({
               icon={Globe}
               label={l.label}
               active={language === l.value}
+              accentColor={accentColor}
               onPress={() => {
                 onSelectLanguage(l.value);
                 onClose();
@@ -3201,6 +3212,7 @@ function ToolRow({
   sublabel,
   active,
   disabled,
+  accentColor,
   onPress,
 }: {
   icon: React.ComponentType<{ size?: number; color?: string }>;
@@ -3208,11 +3220,13 @@ function ToolRow({
   sublabel?: string;
   active: boolean;
   disabled?: boolean;
+  accentColor?: string;
   onPress: () => void;
 }) {
   const c = useColors();
-  const iconColor = disabled ? c.mutedForeground : active ? c.accentForeground : c.foreground;
-  const labelColor = disabled ? c.mutedForeground : active ? c.accentForeground : c.foreground;
+  const accent = accentColor ?? c.accentForeground;
+  const iconColor = disabled ? c.mutedForeground : active ? accent : c.foreground;
+  const labelColor = disabled ? c.mutedForeground : active ? accent : c.foreground;
   return (
     <Pressable
       onPress={onPress}
@@ -3241,7 +3255,7 @@ function ToolRow({
       {sublabel && !active && (
         <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{sublabel}</Text>
       )}
-      {active && <Check size={18} color={c.accentForeground} />}
+      {active && <Check size={18} color={accent} />}
     </Pressable>
   );
 }
