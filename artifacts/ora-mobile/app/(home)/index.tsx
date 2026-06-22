@@ -18,6 +18,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
 import {
+  AlertCircle,
   ArrowUp,
   Camera,
   Check,
@@ -473,6 +474,7 @@ export default function OraChatScreen() {
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -1130,9 +1132,23 @@ export default function OraChatScreen() {
 
   const startRecording = useCallback(async () => {
     if (recording || transcribing) return;
+    setVoiceError(null);
     try {
       const perm = await AudioModule.requestRecordingPermissionsAsync();
-      if (!perm.granted) return;
+      if (!perm.granted) {
+        const msg =
+          "Ora needs microphone access to record voice input. Enable microphone permission in your device Settings to use voice.";
+        setVoiceError(msg);
+        Alert.alert("Microphone access needed", msg, [{ text: "OK" }]);
+        // A denied permission can't be retried automatically — leave Talk mode
+        // so the user lands back on the composer instead of a stalled panel.
+        if (talkModeRef.current) {
+          cancelTalkRestart();
+          setTalkMode(false);
+          talkModeRef.current = false;
+        }
+        return;
+      }
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
@@ -1140,22 +1156,46 @@ export default function OraChatScreen() {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {
       setRecording(false);
+      const msg = "Couldn't start recording. Please check your microphone and try again.";
+      setVoiceError(msg);
+      Alert.alert("Recording failed", msg, [{ text: "OK" }]);
+      // Recording hardware is unavailable — exit Talk mode to avoid a retry loop.
+      if (talkModeRef.current) {
+        cancelTalkRestart();
+        setTalkMode(false);
+        talkModeRef.current = false;
+      }
     }
-  }, [recording, transcribing, recorder]);
+  }, [recording, transcribing, recorder, cancelTalkRestart]);
 
   const stopRecording = useCallback(async () => {
     if (!recording) return;
     setRecording(false);
     setTranscribing(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Talk mode keeps the conversation going (resume listening) and shows the
+    // error inline in the panel; normal dictation surfaces a blocking Alert.
+    // Both set the shared voiceError banner so no failure path stays silent.
+    const reportTranscribeFailure = (msg: string) => {
+      setVoiceError(msg);
+      if (talkModeRef.current) {
+        scheduleTalkRestart(700);
+      } else {
+        Alert.alert("Transcription failed", msg, [{ text: "OK" }]);
+      }
+    };
     try {
       await recorder.stop();
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
       const uri = recorder.uri;
-      if (!uri) return;
+      if (!uri) {
+        reportTranscribeFailure("Couldn't capture any audio. Please try again.");
+        return;
+      }
       const text = await transcribeAudio(uri, "m4a", voiceLang);
       const clean = text.trim();
       if (clean) {
+        setVoiceError(null);
         if (talkModeRef.current) {
           // Talk mode: auto-send without putting in input field for editing
           void sendMessageRef.current(clean, null);
@@ -1164,13 +1204,16 @@ export default function OraChatScreen() {
           setInput((prev) => (prev.trim() ? `${prev.trim()} ${clean}` : clean));
           inputRef.current?.focus();
         }
+      } else {
+        // Empty transcript means nothing was understood — treat as a failure.
+        reportTranscribeFailure("Couldn't transcribe your audio. Please try again.");
       }
     } catch {
-      /* surfaced by absence of inserted text */
+      reportTranscribeFailure("Couldn't transcribe your audio. Please try again.");
     } finally {
       setTranscribing(false);
     }
-  }, [recording, recorder, voiceLang]);
+  }, [recording, recorder, voiceLang, scheduleTalkRestart]);
 
   const speak = useCallback(
     async (message: OraMessage) => {
@@ -1951,6 +1994,44 @@ export default function OraChatScreen() {
               </Text>
               <Pressable onPress={() => setAttachment(null)} hitSlop={8}>
                 <X size={14} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+          )}
+
+          {/* Voice error banner — shown above the composer in both normal and
+              Talk modes so mic/transcription failures are never silent. */}
+          {voiceError && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 8,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: c.destructive + "55",
+                backgroundColor: c.destructive + "15",
+              }}
+            >
+              <AlertCircle size={15} color={c.destructive} />
+              <Text
+                style={{
+                  flex: 1,
+                  color: c.destructive,
+                  fontSize: 12,
+                  fontFamily: "Inter_500Medium",
+                }}
+              >
+                {voiceError}
+              </Text>
+              <Pressable
+                onPress={() => setVoiceError(null)}
+                accessibilityLabel="Dismiss voice error"
+                hitSlop={8}
+              >
+                <X size={14} color={c.destructive} />
               </Pressable>
             </View>
           )}
