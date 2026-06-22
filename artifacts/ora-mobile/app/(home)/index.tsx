@@ -1874,7 +1874,6 @@ export default function OraChatScreen() {
             gap: 10,
           }}
         >
-
           {editingImageId !== null && (
             <View
               style={{
