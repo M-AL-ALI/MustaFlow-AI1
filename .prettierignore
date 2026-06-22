@@ -4,6 +4,7 @@ node_modules/
 lib/api-client-react/src/generated/
 lib/api-zod/src/generated/
 artifacts/mustaflow/src/components/ui/
+artifacts/mockup-sandbox/src/components/ui/
 artifacts/mockup-sandbox/src/.generated/
 pnpm-lock.yaml
 .config/

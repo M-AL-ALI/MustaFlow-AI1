@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REMOTE_URL="https://github.com/M-AL-ALI/MustaFlow-AI1.git"
-BRANCH="main"
+BRANCH="${PULL_BRANCH:-main}"
 
 if [ -z "${GITHUB_PAT:-}" ]; then
   echo "ERROR: GITHUB_PAT env var is not set" >&2
