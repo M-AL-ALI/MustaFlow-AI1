@@ -63,6 +63,21 @@ import type {
 
 type Tab = "repos" | "tasks" | "capabilities";
 
+const DEFAULT_ORAX_COMMAND_IDS = ["patch-static-checks", "json-syntax", "node-syntax"];
+
+function artifactPayload(artifact: OraxTaskArtifact): Record<string, unknown> {
+  return artifact.payload && typeof artifact.payload === "object" ? artifact.payload : {};
+}
+
+function artifactFlag(artifact: OraxTaskArtifact, key: string): boolean {
+  return artifactPayload(artifact)[key] === true;
+}
+
+function artifactText(artifact: OraxTaskArtifact, key: string): string | null {
+  const value = artifactPayload(artifact)[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -157,24 +172,31 @@ export default function OraxScreen() {
     }
   }, []);
 
-  const loadTaskDetail = useCallback(async (task: OraxTask) => {
-    setSelectedTask(task);
-    setTaskDetailLoading(true);
-    try {
-      const [messagesRes, approvalsRes, artifactsRes] = await Promise.allSettled([
-        listTaskMessages(task.id),
-        listTaskApprovals(task.id),
-        listTaskArtifacts(task.id),
-      ]);
-      setTaskMessages(messagesRes.status === "fulfilled" ? messagesRes.value : []);
-      setTaskApprovals(approvalsRes.status === "fulfilled" ? approvalsRes.value : []);
-      setTaskArtifacts(artifactsRes.status === "fulfilled" ? artifactsRes.value : []);
-    } catch {
-      /* individual promises are handled above */
-    } finally {
-      setTaskDetailLoading(false);
-    }
+  const refreshTaskDetail = useCallback(async (taskId: number) => {
+    const [messagesRes, approvalsRes, artifactsRes] = await Promise.allSettled([
+      listTaskMessages(taskId),
+      listTaskApprovals(taskId),
+      listTaskArtifacts(taskId),
+    ]);
+    setTaskMessages(messagesRes.status === "fulfilled" ? messagesRes.value : []);
+    setTaskApprovals(approvalsRes.status === "fulfilled" ? approvalsRes.value : []);
+    setTaskArtifacts(artifactsRes.status === "fulfilled" ? artifactsRes.value : []);
   }, []);
+
+  const loadTaskDetail = useCallback(
+    async (task: OraxTask) => {
+      setSelectedTask(task);
+      setTaskDetailLoading(true);
+      try {
+        await refreshTaskDetail(task.id);
+      } catch {
+        /* individual promises are handled above */
+      } finally {
+        setTaskDetailLoading(false);
+      }
+    },
+    [refreshTaskDetail],
+  );
 
   const submitTaskMessage = useCallback(async () => {
     const task = selectedTask;
@@ -185,18 +207,13 @@ export default function OraxScreen() {
     try {
       const newMessages = await sendTaskMessage(task.id, text);
       setTaskMessages((prev) => [...prev, ...newMessages]);
-      const [approvals, artifacts] = await Promise.allSettled([
-        listTaskApprovals(task.id),
-        listTaskArtifacts(task.id),
-      ]);
-      if (approvals.status === "fulfilled") setTaskApprovals(approvals.value);
-      if (artifacts.status === "fulfilled") setTaskArtifacts(artifacts.value);
+      await refreshTaskDetail(task.id);
     } catch (err) {
       Alert.alert("Could not send ORAX message", err instanceof Error ? err.message : "Try again.");
     } finally {
       setSendingTaskMessage(false);
     }
-  }, [selectedTask, sendingTaskMessage, taskChatInput]);
+  }, [refreshTaskDetail, selectedTask, sendingTaskMessage, taskChatInput]);
 
   const handleConnectGithub = useCallback(
     async (repoId: number) => {
@@ -205,7 +222,10 @@ export default function OraxScreen() {
       setConnectingGithubRepoId(repoId);
       try {
         const res = await connectGithubToken(repoId, token);
-        Alert.alert("GitHub connected", res.message ?? "Token saved successfully.");
+        Alert.alert(
+          "GitHub connected",
+          `${res.repository.owner}/${res.repository.name} is ready for private repository scans.`,
+        );
         setGithubTokenByRepo((prev) => ({ ...prev, [repoId]: "" }));
         setRepos(await listRepositories());
       } catch (err) {
@@ -223,60 +243,74 @@ export default function OraxScreen() {
       setActionBusy(key);
       try {
         await patchApproval(approvalId, decision);
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        if (selectedTask) await refreshTaskDetail(selectedTask.id);
       } catch (err) {
         Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
         setActionBusy(null);
       }
     },
-    [selectedTask],
+    [refreshTaskDetail, selectedTask],
   );
 
-  const handleReadFiles = useCallback(async (approvalId: number) => {
-    setActionBusy(`read-${approvalId}`);
-    try {
-      const res = await readApprovedFiles(approvalId);
-      const summary = res.files.map((f) => `${f.path} (${f.content.length} chars)`).join("\n");
-      Alert.alert("Files read", summary || "No files returned.");
-    } catch (err) {
-      Alert.alert("Read failed", err instanceof Error ? err.message : "Please try again.");
-    } finally {
-      setActionBusy(null);
-    }
-  }, []);
+  const handleReadFiles = useCallback(
+    async (approvalId: number) => {
+      setActionBusy(`read-${approvalId}`);
+      try {
+        const res = await readApprovedFiles(approvalId);
+        const summary = res.files.map((f) => `${f.path} (${f.content.length} chars)`).join("\n");
+        Alert.alert("Files read", summary || "No files returned.");
+        if (selectedTask) await refreshTaskDetail(selectedTask.id);
+      } catch (err) {
+        Alert.alert("Read failed", err instanceof Error ? err.message : "Please try again.");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [refreshTaskDetail, selectedTask],
+  );
 
   const handleDraftPatch = useCallback(
-    async (taskId: number) => {
-      setActionBusy(`patch-${taskId}`);
+    async (taskId: number, approvalId: number) => {
+      setActionBusy(`patch-${approvalId}`);
       try {
-        const res = await generateDraftPatch(taskId);
-        Alert.alert("Draft patch ready", res.summary ?? `${res.patch.length} chars`);
-        if (selectedTask) {
-          const [appr, arts] = await Promise.allSettled([
-            listTaskApprovals(selectedTask.id),
-            listTaskArtifacts(selectedTask.id),
-          ]);
-          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
-          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
-        }
+        const res = await generateDraftPatch(taskId, { approvalId });
+        Alert.alert("Draft patch ready", res.artifact.summary ?? "Draft patch artifact created.");
+        await refreshTaskDetail(taskId);
       } catch (err) {
         Alert.alert("Patch failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
         setActionBusy(null);
       }
     },
-    [selectedTask],
+    [refreshTaskDetail],
   );
 
   const handleRequestApproval = useCallback(
-    async (kind: "sandbox" | "commands" | "pr", taskId: number) => {
-      setActionBusy(`req-${kind}-${taskId}`);
+    async (kind: "sandbox" | "commands" | "pr", task: OraxTask, artifact: OraxTaskArtifact) => {
+      setActionBusy(`req-${kind}-${artifact.id}`);
       try {
-        if (kind === "sandbox") await requestSandboxApproval(taskId);
-        else if (kind === "commands") await requestCommandApproval(taskId);
-        else await requestGithubPrApproval(taskId);
-        setTaskApprovals(await listTaskApprovals(taskId));
+        if (kind === "sandbox") {
+          await requestSandboxApproval(task.id, {
+            artifactId: artifact.id,
+            reason: "Validate the draft patch in an isolated sandbox before any GitHub action.",
+          });
+        } else if (kind === "commands") {
+          await requestCommandApproval(task.id, {
+            artifactId: artifact.id,
+            commands: DEFAULT_ORAX_COMMAND_IDS,
+            reason:
+              "Run approval-gated ORAX checks in a temporary workspace before any GitHub pull request approval.",
+          });
+        } else {
+          await requestGithubPrApproval(task.id, {
+            artifactId: artifact.id,
+            title: `ORAX: ${task.title || "Mobile task"}`,
+            confirmationText: "CREATE PR",
+            reason: "Create a GitHub branch and pull request from the sandbox-passed patch.",
+          });
+        }
+        await refreshTaskDetail(task.id);
         Alert.alert("Approval requested", "The approval request has been queued.");
       } catch (err) {
         Alert.alert("Request failed", err instanceof Error ? err.message : "Please try again.");
@@ -284,7 +318,7 @@ export default function OraxScreen() {
         setActionBusy(null);
       }
     },
-    [],
+    [refreshTaskDetail],
   );
 
   const handleRunSandbox = useCallback(
@@ -292,18 +326,19 @@ export default function OraxScreen() {
       setActionBusy(`sandbox-${approvalId}`);
       try {
         const res = await runSandbox(approvalId);
+        const applied = artifactFlag(res.artifact, "applied");
         Alert.alert(
-          res.ok ? "Sandbox passed" : "Sandbox failed",
-          res.output ?? res.error ?? "Done.",
+          applied ? "Sandbox passed" : "Sandbox result recorded",
+          res.artifact.summary ?? "Sandbox artifact created.",
         );
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        if (selectedTask) await refreshTaskDetail(selectedTask.id);
       } catch (err) {
         Alert.alert("Sandbox failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
         setActionBusy(null);
       }
     },
-    [selectedTask],
+    [refreshTaskDetail, selectedTask],
   );
 
   const handleRunCommands = useCallback(
@@ -311,18 +346,19 @@ export default function OraxScreen() {
       setActionBusy(`commands-${approvalId}`);
       try {
         const res = await runCommands(approvalId);
+        const passed = artifactFlag(res.artifact, "passed");
         Alert.alert(
-          res.ok ? "Commands passed" : "Commands failed",
-          res.output ?? res.error ?? "Done.",
+          passed ? "Commands passed" : "Command result recorded",
+          res.artifact.summary ?? "Controlled-check artifact created.",
         );
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        if (selectedTask) await refreshTaskDetail(selectedTask.id);
       } catch (err) {
         Alert.alert("Commands failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
         setActionBusy(null);
       }
     },
-    [selectedTask],
+    [refreshTaskDetail, selectedTask],
   );
 
   const handleCreatePR = useCallback(
@@ -330,15 +366,22 @@ export default function OraxScreen() {
       setActionBusy(`pr-${approvalId}`);
       try {
         const res = await createGithubPR(approvalId);
-        Alert.alert("PR created", `Pull request #${res.prNumber}\n${res.prUrl}`);
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
+        const url = artifactText(res.artifact, "pullRequestUrl");
+        const number = artifactPayload(res.artifact).pullRequestNumber;
+        Alert.alert(
+          res.reused ? "PR reused" : "PR created",
+          url
+            ? `Pull request ${typeof number === "number" ? `#${number}` : ""}\n${url}`
+            : "GitHub PR artifact recorded.",
+        );
+        if (selectedTask) await refreshTaskDetail(selectedTask.id);
       } catch (err) {
         Alert.alert("PR creation failed", err instanceof Error ? err.message : "Please try again.");
       } finally {
         setActionBusy(null);
       }
     },
-    [selectedTask],
+    [refreshTaskDetail, selectedTask],
   );
 
   if (!isSignedIn) {
@@ -758,6 +801,16 @@ export default function OraxScreen() {
                                   onPress={() => void handleReadFiles(a.id)}
                                 />
                               )}
+                              {["approved", "completed"].includes(a.status) &&
+                                /read.?file/i.test(a.action) && (
+                                  <Button
+                                    label="Generate draft patch"
+                                    icon={FileText}
+                                    variant="secondary"
+                                    loading={actionBusy === `patch-${a.id}`}
+                                    onPress={() => void handleDraftPatch(selectedTask.id, a.id)}
+                                  />
+                                )}
                               {a.status === "approved" && /sandbox/i.test(a.action) && (
                                 <Button
                                   label="Run sandbox"
@@ -789,50 +842,6 @@ export default function OraxScreen() {
                             </View>
                           ))
                         )}
-
-                        <Text
-                          style={{
-                            color: c.foreground,
-                            fontFamily: "Inter_600SemiBold",
-                            fontSize: 14,
-                          }}
-                        >
-                          Request actions
-                        </Text>
-                        <View style={{ gap: 8 }}>
-                          <Button
-                            label="Generate draft patch"
-                            icon={FileText}
-                            variant="secondary"
-                            loading={actionBusy === `patch-${selectedTask.id}`}
-                            onPress={() => void handleDraftPatch(selectedTask.id)}
-                            full
-                          />
-                          <Button
-                            label="Request sandbox validation"
-                            icon={Play}
-                            variant="secondary"
-                            loading={actionBusy === `req-sandbox-${selectedTask.id}`}
-                            onPress={() => void handleRequestApproval("sandbox", selectedTask.id)}
-                            full
-                          />
-                          <Button
-                            label="Request controlled checks"
-                            icon={TerminalSquare}
-                            variant="secondary"
-                            loading={actionBusy === `req-commands-${selectedTask.id}`}
-                            onPress={() => void handleRequestApproval("commands", selectedTask.id)}
-                            full
-                          />
-                          <Button
-                            label="Request GitHub PR approval"
-                            icon={GitPullRequest}
-                            variant="secondary"
-                            loading={actionBusy === `req-pr-${selectedTask.id}`}
-                            onPress={() => void handleRequestApproval("pr", selectedTask.id)}
-                            full
-                          />
-                        </View>
 
                         <Text
                           style={{
@@ -878,6 +887,43 @@ export default function OraxScreen() {
                                   {a.summary}
                                 </Text>
                               ) : null}
+                              {a.type === "draft_patch" && !!artifactText(a, "unifiedDiff") && (
+                                <Button
+                                  label="Request sandbox approval"
+                                  icon={Play}
+                                  variant="secondary"
+                                  loading={actionBusy === `req-sandbox-${a.id}`}
+                                  onPress={() =>
+                                    void handleRequestApproval("sandbox", selectedTask, a)
+                                  }
+                                />
+                              )}
+                              {a.type === "sandbox_result" && artifactFlag(a, "applied") && (
+                                <Button
+                                  label="Request controlled checks"
+                                  icon={TerminalSquare}
+                                  variant="secondary"
+                                  loading={actionBusy === `req-commands-${a.id}`}
+                                  onPress={() =>
+                                    void handleRequestApproval("commands", selectedTask, a)
+                                  }
+                                />
+                              )}
+                              {a.type === "command_result" && artifactFlag(a, "passed") && (
+                                <Button
+                                  label="Request GitHub PR approval"
+                                  icon={GitPullRequest}
+                                  variant="secondary"
+                                  loading={actionBusy === `req-pr-${a.id}`}
+                                  onPress={() => void handleRequestApproval("pr", selectedTask, a)}
+                                />
+                              )}
+                              {a.type === "github_pr_result" &&
+                                artifactText(a, "pullRequestUrl") && (
+                                  <Text style={{ color: c.accentForeground, fontSize: 12 }}>
+                                    {artifactText(a, "pullRequestUrl")}
+                                  </Text>
+                                )}
                             </View>
                           ))
                         )}

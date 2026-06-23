@@ -3437,28 +3437,28 @@ function MessageActionsSheet({
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={FileText}
-                  label="Word Report"
+                  label="Word-compatible RTF"
                   onPress={() => onExportWord(message)}
                 />
               )}
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={FileSpreadsheet}
-                  label="Excel Workbook"
+                  label="Excel-compatible CSV"
                   onPress={() => onExportExcel(message)}
                 />
               )}
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={Presentation}
-                  label="Presentation"
+                  label="Presentation HTML"
                   onPress={() => onExportPresentation(message)}
                 />
               )}
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={FileDown}
-                  label="PDF Report"
+                  label="Printable HTML report"
                   onPress={() => onExportPdf(message)}
                 />
               )}

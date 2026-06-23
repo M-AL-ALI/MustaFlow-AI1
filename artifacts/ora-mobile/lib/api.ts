@@ -837,7 +837,7 @@ export function connectGithubToken(
 export function patchApproval(
   approvalId: number,
   decision: OraxApprovalDecision,
-): Promise<OraxTaskApproval> {
+): Promise<{ approval: OraxTaskApproval }> {
   return jsonRequest(`/api/orax/approvals/${approvalId}`, {
     method: "PATCH",
     body: JSON.stringify({ decision }),
@@ -848,20 +848,50 @@ export function readApprovedFiles(approvalId: number): Promise<OraxReadFilesResu
   return jsonRequest(`/api/orax/approvals/${approvalId}/read-files`, { method: "POST" });
 }
 
-export function generateDraftPatch(taskId: number): Promise<OraxDraftPatchResult> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/draft-patch`, { method: "POST" });
+export function generateDraftPatch(
+  taskId: number,
+  input: { approvalId: number; instructions?: string },
+): Promise<OraxDraftPatchResult> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/draft-patch`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
-export function requestSandboxApproval(taskId: number): Promise<OraxTaskApproval> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/sandbox-approvals`, { method: "POST" });
+export function requestSandboxApproval(
+  taskId: number,
+  input: { artifactId: number; reason?: string },
+): Promise<{ approval: OraxTaskApproval }> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/sandbox-approvals`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
-export function requestCommandApproval(taskId: number): Promise<OraxTaskApproval> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/command-approvals`, { method: "POST" });
+export function requestCommandApproval(
+  taskId: number,
+  input: { artifactId: number; commands: string[]; reason?: string },
+): Promise<{ approval: OraxTaskApproval }> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/command-approvals`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
-export function requestGithubPrApproval(taskId: number): Promise<OraxTaskApproval> {
-  return jsonRequest(`/api/orax/tasks/${taskId}/github-pr-approvals`, { method: "POST" });
+export function requestGithubPrApproval(
+  taskId: number,
+  input: {
+    artifactId: number;
+    title?: string;
+    body?: string;
+    confirmationText: "CREATE PR";
+    reason?: string;
+  },
+): Promise<{ approval: OraxTaskApproval }> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/github-pr-approvals`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export function runSandbox(approvalId: number): Promise<OraxSandboxResult> {
