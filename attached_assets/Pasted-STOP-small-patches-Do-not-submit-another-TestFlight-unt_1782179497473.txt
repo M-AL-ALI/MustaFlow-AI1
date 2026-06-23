@@ -1,0 +1,234 @@
+STOP small patches. Do not submit another TestFlight until this is fixed.
+
+The current TestFlight is not acceptable.
+
+Real device result:
+1. Ora Mobile does NOT look like website Ora.
+   The theme, background, layout, icons, logos, spacing, presentation, and overall experience are different.
+   This is not acceptable. Ora Mobile must be the same Ora product as the website, translated to native mobile.
+
+2. Ora Mobile chat is not working.
+   Real TestFlight response:
+   “You appear to be offline or the server is unreachable. (Network request failed)”
+
+This is now a P0 blocker.
+
+Goal:
+Website Ora = Ora Mobile.
+Same logic, same features, same layout language, same colors, same theme, same logo treatment, same plan behavior, same routing, same presentation.
+Do not make it “similar.” Make it a native mobile mirror of website Ora.
+
+Hard rules:
+- Website Ora is the source of truth.
+- Do not trust old summaries.
+- Verify from source.
+- Do not copy AI Builder features.
+- No AI Builder UI.
+- No Builder handoff.
+- No Builder routes.
+- No mobile-only AI routing.
+- Mobile must use the same Ora backend logic as website Ora.
+
+Source of truth:
+- artifacts/mustaflow/src/components/ora-panel.tsx
+- artifacts/mustaflow/src/components/ora/ora-voice-mode-button.tsx
+- artifacts/mustaflow/src/components/ora/ora-voice-button.tsx
+- Website Ora memory/settings/library/projects/billing/help/ORAX files
+- Existing website theme tokens, logo assets, icons, backgrounds, spacing, typography, and accent-color logic
+
+PHASE 1 — Fix the backend connectivity first
+
+Diagnose and fix:
+“You appear to be offline or the server is unreachable. (Network request failed)”
+
+Required checks:
+1. Confirm EAS/TestFlight build has correct API env:
+   - EXPO_PUBLIC_DOMAIN
+   - API_BASE
+   - streaming flag
+   - Clerk publishable key/proxy if needed
+2. Confirm API URL displayed in Settings diagnostics is correct.
+3. Confirm iPhone can reach:
+   - GET /api/healthz
+   - POST /api/public-ai/session
+   - POST /api/public-ai/chat
+   - POST /api/public-ai/chat/stream
+4. Confirm HTTPS/TLS works from iOS.
+5. Confirm no ATS/iOS transport issue.
+6. Confirm backend is not rejecting native mobile requests.
+7. Confirm auth token handling works signed-in and anonymous.
+8. Confirm anonymous session cookies/session id are handled correctly on native.
+9. Confirm the error message shows the real underlying failure, not a generic “offline” message.
+
+Do not continue visual work until chat works from TestFlight.
+
+Acceptance:
+- On real iPhone TestFlight, anonymous user sends “hi” and Ora replies.
+- Signed-in user sends “hi” and Ora replies.
+- Diagnostics transport/session/chat/stream all pass.
+- If any step fails, show exact endpoint, status, body/error.
+
+PHASE 2 — Full visual parity rebuild
+
+Do a side-by-side audit:
+Website Ora screen | Mobile screen | Difference | Fix
+
+Use actual screenshots:
+- Website Ora desktop
+- Website Ora mobile/responsive if available
+- Current TestFlight Ora Mobile
+
+Compare and fix:
+1. Logo
+   - Same Ora logo treatment
+   - Same wordmark behavior
+   - Same header identity
+   - No wrong MustaFlow/mobile-only branding in visible UI
+
+2. Background
+   - Same dark theme background
+   - Same light theme background
+   - Same gradients/surfaces if website uses them
+   - Same card/surface contrast
+
+3. Colors
+   - Same website Ora tokens
+   - Same text colors
+   - Same borders
+   - Same muted states
+   - Same hover/pressed/active equivalents
+   - Same plan accent colors:
+     - Free purple
+     - Core Pack blue
+     - Deep Wave amber
+
+4. Layout
+   - Main chat screen must mirror website Ora panel structure.
+   - Header must mirror website Ora header.
+   - Composer must mirror website Ora composer.
+   - Message bubbles/cards must mirror website Ora.
+   - Sources/media cards must mirror website Ora.
+   - Empty state must mirror website Ora.
+   - Drawer/history/projects must mirror website Ora structure in native form.
+
+5. Icons
+   - Use the same icon meanings as website Ora.
+   - Do not invent different icons unless native platform requires it.
+   - Plus/tools, mic, Talk to Ora, temporary chat, mode, language, memory, files, image, sources, settings must match website meaning and style.
+
+6. Typography and spacing
+   - Match website font, sizes, weights, spacing, density, radii.
+   - Do not use generic mobile styling.
+   - Do not use random cards or extra panels that website Ora does not have.
+
+PHASE 3 — Composer, mic, and Talk to Ora parity
+
+Website source:
+- ora-panel.tsx
+- ora-voice-mode-button.tsx
+- ora-voice-button.tsx
+
+Required:
+1. Composer must be one unified rounded Ora bar.
+2. Plus/tools, mode, mic, input, send must live in the same composer system.
+3. Focus state must use Ora tier accent.
+4. Mic dictation:
+   - records
+   - transcribes
+   - inserts transcript into composer
+   - does NOT auto-send
+   - shows errors clearly
+5. Talk to Ora:
+   - separate voice conversation mode
+   - auto-listens
+   - auto-transcribes
+   - auto-sends
+   - reads Ora reply aloud
+   - restarts listening
+   - supports interrupt, mute, end
+   - panel must visually match website Ora voice panel
+
+PHASE 4 — Full feature parity audit
+
+Verify and implement every website Ora feature that belongs to Ora:
+
+- Ora chat
+- streaming
+- model/mode routing through backend
+- Instant / Deep Thinking
+- plan gating
+- language selector
+- temporary chat
+- memory reference toggle
+- chat history reference toggle
+- projects
+- conversations/history
+- rename/delete/move conversation
+- memory center
+- library/assets
+- file upload + analysis
+- image upload + analysis
+- image generation
+- image editing if website Ora supports it
+- generated files/documents
+- sources/media cards
+- message actions
+- export/download
+- voice input
+- read aloud
+- Talk to Ora
+- settings
+- billing/plan/usage
+- help/support if website Ora has it
+- ORAX if website Ora has it
+- anonymous mode exactly like website Ora
+
+For each feature, provide:
+Website source file | Mobile source file | Status | Screenshot/video proof | Notes
+
+PHASE 5 — Keep Ora separated from AI Builder
+
+Run isolation scan and report results.
+
+Must be absent:
+- /api/builder/*
+- /api/public-ai/handoff/*
+- Builder handoff
+- Builder CTA
+- Continue in Builder
+- AI Builder screens
+- mobile-side model provider routing
+
+If a feature is AI Builder-only, do NOT add it to Ora Mobile.
+
+PHASE 6 — Acceptance criteria before TestFlight
+
+Do not submit another TestFlight until all are true:
+
+1. Real iPhone can send “hi” and get an Ora reply.
+2. Settings diagnostics pass transport/session/chat/stream.
+3. Mobile screenshots match website Ora visually.
+4. Composer matches website Ora.
+5. Mic dictation works.
+6. Talk to Ora works.
+7. Light and dark mode match website Ora.
+8. Plan colors and entitlements match website Ora.
+9. Anonymous and signed-in behavior match website Ora.
+10. No Builder routes/UI exist.
+11. Automated gates pass:
+    - ora-mobile typecheck
+    - full workspace typecheck
+    - prettier
+    - lint
+    - unit tests
+    - Ora isolation tests
+12. Real-device QA checklist passes:
+    artifacts/ora-mobile/docs/qa/testflight-preflight.md
+
+Deliverables required:
+- Root-cause report for Network request failed.
+- Fix for Network request failed.
+- Side-by-side visual parity report with screenshots.
+- Full feature parity table.
+- List of any remaining differences and why.
+- Confirmation no TestFlight was submitted before approval.

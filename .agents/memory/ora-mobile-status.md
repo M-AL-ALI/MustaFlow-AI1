@@ -42,6 +42,16 @@ Located in `artifacts/ora-mobile`. Full Clerk auth (sign-in required, no anonymo
 5. App icon: `./assets/images/icon.png` — needs Ora-branded icon for store submission
 6. Privacy policy URL required for App Store submission
 
+## Visual + feature parity pass (complete)
+
+Source-verified against `ora-panel.tsx`. Fonts (Inter), dark color tokens, and plan
+accents already matched (no change needed). Applied: native `OraAtom` (RN svg mirror
+of web DOM-only DynamicAtom) used in empty state + assistant avatar; empty state now
+"Hi, I'm Ora" + website subtitle + the exact 6 example chips (tap sends); user bubble
+muted bg + foreground text; assistant restructured bubble-less (atom avatar + content)
+to match web; sensitive-memory warning note added to the save chip. Architect review
+PASS. See `ora-mobile-web-parity.md` for the durable decisions.
+
 ## API compatibility
 
 All mobile API calls hit the real Ora backend. No backend changes needed. CORS is origin:true + credentials:true which accepts bearer tokens from mobile.

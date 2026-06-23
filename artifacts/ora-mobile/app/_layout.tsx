@@ -23,7 +23,7 @@ import { logError } from "@/lib/log";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text, View } from "react-native";
 
-const domain = process.env.EXPO_PUBLIC_DOMAIN || "mustaflow.com";
+const domain = process.env.EXPO_PUBLIC_DOMAIN || "www.mustaflow.com";
 setBaseUrl(`https://${domain}`);
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";

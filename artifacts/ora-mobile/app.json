@@ -42,7 +42,7 @@
       [
         "expo-router",
         {
-          "origin": "https://mustaflow.com"
+          "origin": "https://www.mustaflow.com"
         }
       ],
       "expo-font",

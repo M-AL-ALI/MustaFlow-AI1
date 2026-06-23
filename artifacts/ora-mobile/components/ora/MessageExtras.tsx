@@ -370,6 +370,11 @@ function OraMemorySaveCandidate({
         </Text>
       </View>
       <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{message.memorySaveCandidate}</Text>
+      {message.memorySaveCandidateSensitive === true && (
+        <Text style={{ color: c.mutedForeground, fontSize: 11, fontStyle: "italic" }}>
+          This looks like sensitive info. It won&apos;t be saved unless you confirm.
+        </Text>
+      )}
       <Pressable
         onPress={save}
         disabled={saving}
