@@ -48,6 +48,7 @@ import {
   PhoneCall,
   Plus,
   RefreshCw,
+  Send,
   Share2,
   Square,
   Trash2,
@@ -1855,13 +1856,13 @@ export default function OraChatScreen() {
                 paddingHorizontal: 24,
               }}
             >
-              <OraAtom size={56} accentColor={tierAccent} style={{ marginBottom: 18 }} />
+              <OraAtom size={52} accentColor={tierAccent} animated style={{ marginBottom: 20 }} />
               <Text
                 style={{
                   color: c.foreground,
                   fontFamily: "Inter_700Bold",
-                  fontSize: 26,
-                  letterSpacing: -0.3,
+                  fontSize: 24,
+                  letterSpacing: -0.6,
                   textAlign: "center",
                 }}
               >
@@ -1872,10 +1873,10 @@ export default function OraChatScreen() {
                   color: c.mutedForeground,
                   fontFamily: "Inter_400Regular",
                   fontSize: 14,
-                  lineHeight: 20,
+                  lineHeight: 23,
                   textAlign: "center",
                   marginTop: 10,
-                  maxWidth: 320,
+                  maxWidth: 448,
                 }}
               >
                 Ask anything, think things through, or get work done — planning, strategy, files,
@@ -1887,7 +1888,7 @@ export default function OraChatScreen() {
                   flexWrap: "wrap",
                   gap: 8,
                   justifyContent: "center",
-                  marginTop: 26,
+                  marginTop: 28,
                 }}
               >
                 {EXAMPLE_CHIPS.map((chip) => (
@@ -1901,14 +1902,14 @@ export default function OraChatScreen() {
                       paddingVertical: 8,
                       borderRadius: 999,
                       borderWidth: 1,
-                      borderColor: c.border,
+                      borderColor: c.border + "99",
                       backgroundColor: "transparent",
                     }}
                   >
                     <Text
                       style={{
                         color: c.mutedForeground,
-                        fontSize: 13,
+                        fontSize: 12,
                         fontFamily: "Inter_400Regular",
                       }}
                     >
@@ -2214,7 +2215,7 @@ export default function OraChatScreen() {
                   ref={inputRef}
                   value={input}
                   onChangeText={setInput}
-                  placeholder="Message Ora…"
+                  placeholder="Ask Ora anything…"
                   placeholderTextColor={c.mutedForeground}
                   multiline
                   onFocus={() => setComposerFocused(true)}
@@ -2348,7 +2349,7 @@ export default function OraChatScreen() {
                   {sending ? (
                     <ActivityIndicator size="small" color={c.primaryForeground} />
                   ) : (
-                    <ArrowUp
+                    <Send
                       size={18}
                       color={!input.trim() && !attachment ? c.mutedForeground : "#ffffff"}
                     />

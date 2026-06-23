@@ -56,10 +56,27 @@ screenshot-driven loop is now MANDATORY per screen, in order:
 **Screen priority order:** main-chat empty state → chat w/ messages → composer+keyboard
 → plus/tools menu → mic dictation → Talk to Ora → conversation/projects drawer → settings.
 
-## The static atom is UNDER REVIEW, do not pre-dismiss animating it
+## OraAtom is now animated natively (Screen 1)
 
-Prior note called native atom animation "wasted effort." That predates the on-device
-rejection. The web `DynamicAtom` is **alive** (orbiting electrons, breathing glow/core,
-outer box-shadow halo); `OraAtom` is a frozen snapshot — a likely "feels different"
-gap on a live device. Confirm against screenshots before deciding; if needed, animate
-natively with react-native-reanimated (orbit + pulse), do NOT import DynamicAtom.
+`OraAtom` gained a live treatment behind an `animated` prop: layered Animated.Views
+(react-native-reanimated) — breathing radial halo/glow, two faint tilted rings, three
+orbiting electrons (two cw + one ccw), pulsing highlighted core. Hooks run
+unconditionally; the `if (!animated)` static branch comes AFTER all hooks so existing
+call sites keep the exact old snapshot (no other-screen change). Do NOT import the web
+`DynamicAtom` (DOM/CSS-only, crashes RN). Only the empty-state hero passes `animated`.
+
+## The "is this TestFlight or the website?" tell — check the Safari bar
+
+The user repeatedly sends WEBSITE screenshots believing they are the TestFlight app.
+The tell: a Safari browser bar showing **"mustaflow.com"** + back/refresh at the bottom
+means it is the WEBSITE in mobile Safari, NOT the native app. The native app has no URL
+bar. Always check before treating an image as the native "before".
+
+## Theme is the #1 suspect for "doesn't visually match"
+
+`context/ThemeContext.tsx` defaults `themeOverride` to **"dark"** (NOT "system"), so a
+fresh install opens dark regardless of the phone. The user's website runs in **light**
+mode. So a light website vs a dark app = a total background/foreground mismatch before
+any pixel-tuning matters. Changing the default needs user consent (replit.md rule:
+dark default, light opt-in). `constants/colors.ts` has full light+dark palettes with
+identical keys, so `useColors` swaps cleanly once the theme decision is made.
