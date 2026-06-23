@@ -5,7 +5,7 @@ description: Why EAS_NO_VCS=1 is required for main-agent EAS builds and how .eas
 
 # EAS iOS builds from the main-agent sandbox (pnpm monorepo)
 
-Three independent blockers stack up; all must be solved together or `eas build` silently never queues.
+Four independent blockers stack up; all must be solved together or `eas build` silently never queues.
 
 ## 1. Must use `EAS_NO_VCS=1`
 Default git-archive mode tries to write `.git/index.lock` (to stash the dirty tree after it bumps `buildNumber`). The main-agent bash sandbox blocks ALL git writes — even `rm .git/index.lock`. So git mode always fails. `EAS_NO_VCS=1` bypasses git entirely. Git mode is unfixable here because autoIncrement always re-dirties the tree.
@@ -17,6 +17,10 @@ Default git-archive mode tries to write `.git/index.lock` (to stash the dirty tr
 ## 3. Large upload silently OOM-kills the detached process
 **Why:** With 4 dev-server workflows already running, an ~83M tar upload buffer OOM-kills the eas-cli process mid-upload — NO error in the log, process just vanishes, nothing queues. Shrinking the archive to ~7M tar (exclude `attached_assets` etc.) fixes it.
 **How to apply:** Keep the upload tarball small (single-digit MB). Success looks like `- Uploading to EAS Build (0 / 6.9 MB)` then `See logs: https://expo.dev/.../builds/<id>` in the log.
+
+## 4. "Computing project fingerprint" OOM-kills — set `EAS_SKIP_AUTO_FINGERPRINT=1`
+**Why:** After a successful upload, eas-cli runs a local "Computing project fingerprint" step that walks/hashes the whole monorepo's native deps. In this sandbox (4 dev workflows running) it OOM-kills silently after several minutes — no error line, process vanishes, build NEVER queues (GraphQL shows no new build). The CLI itself prints the escape hatch: "To skip this step, set the environment variable: EAS_SKIP_AUTO_FINGERPRINT=1".
+**How to apply:** Always launch with `EAS_NO_VCS=1 EAS_SKIP_AUTO_FINGERPRINT=1` together. Success then shows `✔ Uploaded to EAS` → `Skipping project fingerprint` → `See logs: https://.../builds/<id>` → `EAS EXIT 0` within ~40s. Fingerprint is only used for build caching; skipping is safe.
 
 ## Running a multi-minute eas-cli process in the sandbox
 - Foreground bash is killed at 120s OR false-flagged "waiting on user input" on the ora spinner. Don't run eas build in foreground.
