@@ -41,3 +41,25 @@ renders citation sources directly in the assistant message (filtered by
 
 Usage/quota shows as the screen-header subtitle text rather than web's progress bars.
 This is a deliberate mobile compaction, not a defect.
+
+## Process mandate (after TestFlight build 20 was REJECTED on-device)
+
+User chose **Option A** (native rebuild, screen by screen) over a WebView shell. Strict
+screenshot-driven loop is now MANDATORY per screen, in order:
+1. Website Ora screenshot (user's signed-in browser; `/ora` is auth-gated so I CANNOT
+   capture it — ask the user, or build a source-accurate reference and have them verify).
+2. TestFlight screenshot from the user's iPhone ("before"). I cannot capture native;
+   the Expo web preview renders blank (Clerk-expo web error + auth gate).
+3. Difference list. 4. Native fix. 5. Before/after. 6. User approval before next screen.
+**Banned (user enforced):** never claim parity "from code", never call a result a
+"native equivalent", never submit a TestFlight build until the user has reviewed.
+**Screen priority order:** main-chat empty state → chat w/ messages → composer+keyboard
+→ plus/tools menu → mic dictation → Talk to Ora → conversation/projects drawer → settings.
+
+## The static atom is UNDER REVIEW, do not pre-dismiss animating it
+
+Prior note called native atom animation "wasted effort." That predates the on-device
+rejection. The web `DynamicAtom` is **alive** (orbiting electrons, breathing glow/core,
+outer box-shadow halo); `OraAtom` is a frozen snapshot — a likely "feels different"
+gap on a live device. Confirm against screenshots before deciding; if needed, animate
+natively with react-native-reanimated (orbit + pulse), do NOT import DynamicAtom.
