@@ -103,3 +103,18 @@ ora-mobile typecheck · full workspace typecheck · prettier · lint · unit tes
 1. TTS / read-aloud depends on the backend direct `OPENAI_API_KEY`.
 2. Talk-mode transcription error banner may clear quickly (~700ms); persist it
    until the next successful transcription if testers miss it.
+
+## Submission troubleshooting
+
+- **`EAS_UPLOAD_TO_ASC_VERSION_DUPLICATE` ("Build number N ... already been
+  used")** means a previous submit already uploaded that build number to Apple
+  (Apple burns the number the instant it receives the binary, even if the submit
+  later reports failure). The fix is **not** a resubmit and **not** a credential
+  change — it is a **fresh build with a new build number**, then submit that.
+  `autoIncrement: true` in `eas.json` bumps `app.json` `ios.buildNumber`
+  automatically on the next build.
+- The real submission error lives in EAS GraphQL
+  `submissions{byId{jobRun{errors{errorCode message}}}}`; the top-level
+  `logFiles`/`error` are usually empty. A clean submit ends `FINISHED` with
+  `jobRun.errors: []`, and the build then appears under ASC `processingState`
+  `VALID`.
