@@ -72,11 +72,16 @@ The tell: a Safari browser bar showing **"mustaflow.com"** + back/refresh at the
 means it is the WEBSITE in mobile Safari, NOT the native app. The native app has no URL
 bar. Always check before treating an image as the native "before".
 
-## Theme is the #1 suspect for "doesn't visually match"
+## Theme follows the phone by default (decided this session)
 
-`context/ThemeContext.tsx` defaults `themeOverride` to **"dark"** (NOT "system"), so a
-fresh install opens dark regardless of the phone. The user's website runs in **light**
-mode. So a light website vs a dark app = a total background/foreground mismatch before
-any pixel-tuning matters. Changing the default needs user consent (replit.md rule:
-dark default, light opt-in). `constants/colors.ts` has full light+dark palettes with
-identical keys, so `useColors` swaps cleanly once the theme decision is made.
+`context/ThemeContext.tsx` now defaults `themeOverride` to **"system"** (both the
+createContext default and the useState initial), and `app.json` `userInterfaceStyle`
+is **"automatic"** — REQUIRED, or iOS forces dark and `useColorScheme()` always returns
+dark, defeating system-follow. Settings still offers System/Light/Dark override
+(AsyncStorage-persisted; wins after it resolves). This was the #1 cause of "doesn't
+match": the website runs light, the app used to open dark regardless.
+**Why:** user explicitly chose follow-system over the old dark-only default.
+**Open item (own screen):** splash `backgroundColor` is still `#0a0a0a` (dark), so a
+light phone flashes a dark splash before the light UI — needs light/dark splash config.
+`constants/colors.ts` has full light+dark palettes with identical keys, so `useColors`
+swaps cleanly.

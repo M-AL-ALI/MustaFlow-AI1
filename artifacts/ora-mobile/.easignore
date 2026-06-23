@@ -1,5 +1,27 @@
+# .easignore replaces .gitignore for the EAS upload archive (EAS_NO_VCS=1
+# archives the whole monorepo root), so all heavy/irrelevant dirs must be
+# re-declared here or the upload OOMs.
+
+# Dependencies & native build output (regenerated on EAS)
 node_modules/
 ios/
 android/
 .expo/
 .cache/
+
+# Agent / tooling / VCS state (huge, not needed to build the app)
+.local/
+.git/
+.config/
+.agents/
+.github/
+.husky/
+
+# Repo assets & docs unrelated to the mobile build
+attached_assets/
+screenshots/
+test-results/
+e2e/
+docs/
+blueprints/
+skills/

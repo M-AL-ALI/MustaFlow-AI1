@@ -13,14 +13,14 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  themeOverride: "dark",
+  themeOverride: "system",
   setThemeOverride: async () => {},
   effectiveScheme: "dark",
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [themeOverride, setThemeOverrideState] = useState<ThemeOverride>("dark");
+  const [themeOverride, setThemeOverrideState] = useState<ThemeOverride>("system");
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
