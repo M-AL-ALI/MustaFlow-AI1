@@ -327,8 +327,8 @@ export interface OraxTaskApproval {
   taskId: number;
   action: string;
   status: string;
-  request?: unknown;
-  result?: unknown;
+  request?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -336,10 +336,12 @@ export interface OraxTaskApproval {
 export interface OraxTaskArtifact {
   id: number;
   taskId: number;
+  approvalId?: number | null;
   type: string;
   status: string;
   title?: string | null;
   summary?: string | null;
+  payload?: Record<string, unknown> | null;
   content?: unknown;
   createdAt?: string;
   updatedAt?: string;
@@ -430,8 +432,8 @@ export interface OraxGithubConnectResult {
 export interface OraxReadFilesResult {
   approval: OraxTaskApproval;
   branch: string;
-  files: Array<{ path: string; sha: string; size: number; truncated: boolean }>;
-  skipped: string[];
+  files: Array<{ path: string; content: string; sha: string; size: number; truncated: boolean }>;
+  skipped: Array<{ path: string; reason: string }>;
 }
 
 export interface OraxDraftPatchResult {

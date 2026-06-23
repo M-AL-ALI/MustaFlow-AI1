@@ -41,6 +41,18 @@ import type {
 type HelpTab = "articles" | "support" | "tickets";
 
 const SUPPORT_CATEGORIES = ["general", "account", "billing", "bug", "mobile", "ora", "orax"];
+const MAX_SUPPORT_ATTACHMENTS = 5;
+const MAX_SUPPORT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const ALLOWED_SUPPORT_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+]);
+const BLOCKED_SUPPORT_EXTENSIONS =
+  /\.(exe|sh|bat|cmd|com|msi|app|dll|scr|ps1|js|mjs|cjs|jar|py|rb|php|pl|vbs|wsf|apk|deb|rpm|bin|elf)$/i;
 
 function SectionTitle({ icon: Icon, title }: { icon: typeof BookOpen; title: string }) {
   const c = useColors();
@@ -162,37 +174,45 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
   const canEscalate = messages.length > 0;
 
   const handlePickAttachment = useCallback(async () => {
-    if (attachments.length >= 5) {
-      Alert.alert("Limit reached", "You can attach up to 5 files.");
+    if (attachments.length >= MAX_SUPPORT_ATTACHMENTS) {
+      Alert.alert("Limit reached", `You can attach up to ${MAX_SUPPORT_ATTACHMENTS} files.`);
       return;
     }
     const result = await DocumentPicker.getDocumentAsync({
       multiple: false,
       copyToCacheDirectory: true,
+      type: ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"],
     });
     if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
     const mime = (asset.mimeType ?? "").toLowerCase();
-    const MAX_BYTES = 5 * 1024 * 1024;
-    const BLOCKED = /\.(exe|sh|bat|cmd|msi|dll|so|dmg|pkg|deb|rpm|ps1|vbs|js|jar)$/i;
-    if (BLOCKED.test(asset.name)) {
+    if (BLOCKED_SUPPORT_EXTENSIONS.test(asset.name)) {
       Alert.alert("Type not allowed", "Executable file types cannot be attached.");
       return;
     }
-    if ((asset.size ?? 0) > MAX_BYTES) {
-      Alert.alert("File too large", "Each attachment must be under 5 MB.");
+    if (!ALLOWED_SUPPORT_MIME.has(mime)) {
+      Alert.alert("Unsupported file", "Attach PNG, JPEG, GIF, WebP, or PDF files only.");
+      return;
+    }
+    if (typeof asset.size === "number" && asset.size > MAX_SUPPORT_ATTACHMENT_BYTES) {
+      Alert.alert("File too large", "Support attachments must be 5 MB or smaller.");
       return;
     }
     try {
       const base64 = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
+      const decodedBytes = Math.floor((base64.length * 3) / 4);
+      if (decodedBytes > MAX_SUPPORT_ATTACHMENT_BYTES) {
+        Alert.alert("File too large", "Support attachments must be 5 MB or smaller.");
+        return;
+      }
       setAttachments((prev) => [
         ...prev,
         {
           fileName: asset.name,
           mimeType: mime || "application/octet-stream",
-          size: asset.size ?? 0,
+          size: asset.size ?? decodedBytes,
           dataBase64: base64,
         },
       ]);
