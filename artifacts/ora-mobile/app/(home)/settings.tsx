@@ -123,6 +123,20 @@ interface DiagStep {
   bodySnippet?: string;
 }
 
+type DiagTokenStatus = "unchecked" | "present" | "missing" | "error";
+
+interface DiagPlanSync {
+  tokenStatus: DiagTokenStatus;
+  sessionTier: string | null;
+  sessionIsPaid: boolean | null;
+}
+
+const INITIAL_PLAN_SYNC: DiagPlanSync = {
+  tokenStatus: "unchecked",
+  sessionTier: null,
+  sessionIsPaid: null,
+};
+
 function initSteps(): DiagStep[] {
   const base = API_BASE;
   const steps: DiagStep[] = [
@@ -438,6 +452,7 @@ export default function SettingsScreen() {
 
   const [diagSteps, setDiagSteps] = useState<DiagStep[]>([]);
   const [diagLoading, setDiagLoading] = useState(false);
+  const [diagPlanSync, setDiagPlanSync] = useState<DiagPlanSync>(INITIAL_PLAN_SYNC);
   const diagRunningRef = useRef(false);
 
   const updateStep = useCallback((id: string, patch: Partial<DiagStep>) => {
@@ -451,13 +466,19 @@ export default function SettingsScreen() {
 
     const steps = initSteps();
     setDiagSteps(steps);
+    setDiagPlanSync(INITIAL_PLAN_SYNC);
 
     let authHeaders: HeadersInit = {};
     try {
       const token = await getToken();
-      if (token) authHeaders = { Authorization: `Bearer ${token}` };
+      if (token) {
+        authHeaders = { Authorization: `Bearer ${token}` };
+        setDiagPlanSync((prev) => ({ ...prev, tokenStatus: "present" }));
+      } else {
+        setDiagPlanSync((prev) => ({ ...prev, tokenStatus: "missing" }));
+      }
     } catch {
-      /* no token */
+      setDiagPlanSync((prev) => ({ ...prev, tokenStatus: "error" }));
     }
 
     const jsonHeaders: HeadersInit = {
@@ -519,8 +540,11 @@ export default function SettingsScreen() {
           /* ignore */
         }
         const detail = parsed
-          ? `msgs ${String(parsed.msgCount ?? "?")}/${String(parsed.msgLimit ?? "?")}, tier: ${String(parsed.tier ?? "?")}`
+          ? `msgs ${String(parsed.msgCount ?? "?")}/${String(parsed.msgLimit ?? "?")}, tier: ${String(parsed.tier ?? "free/anonymous")}`
           : "OK";
+        const sessionTier = typeof parsed?.tier === "string" ? parsed.tier : null;
+        const sessionIsPaid = parsed?.isPaid === true;
+        setDiagPlanSync((prev) => ({ ...prev, sessionTier, sessionIsPaid }));
         updateStep("session", { status: "ok", httpStatus: r.status, detail });
       } else {
         updateStep("session", { status: "fail", httpStatus: r.status, bodySnippet: body });
@@ -646,6 +670,42 @@ export default function SettingsScreen() {
   const isPaid = currentTier === "core" || currentTier === "wave";
   const canUpgradeToCore = currentTier !== "core" && currentTier !== "wave";
   const canUpgradeToWave = currentTier !== "wave";
+  const signedInEmail =
+    user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? "unknown";
+  const sessionTierForCompare = diagPlanSync.sessionTier ?? "free";
+  const billingTier = subscription?.tier ?? null;
+  const billingTierIsPaid = billingTier === "core" || billingTier === "wave";
+  const signedInMissingToken =
+    !!isSignedIn &&
+    (diagPlanSync.tokenStatus === "missing" || diagPlanSync.tokenStatus === "error");
+  const planTierMismatch =
+    !!isSignedIn &&
+    diagPlanSync.tokenStatus !== "unchecked" &&
+    !!billingTier &&
+    sessionTierForCompare !== billingTier;
+  const planSyncWarn = signedInMissingToken || (billingTierIsPaid && planTierMismatch);
+  const planSyncMessage = signedInMissingToken
+    ? "Signed in locally, but diagnostics could not get a Clerk token. Ora chat will resolve as anonymous/free until auth is fixed."
+    : billingTierIsPaid && planTierMismatch
+      ? `Plan mismatch: billing says ${planLabel(billingTier)} but chat session says ${planLabel(sessionTierForCompare)}. The chat request is not resolving the same paid user.`
+      : null;
+  const tokenStatusLabel =
+    diagPlanSync.tokenStatus === "unchecked"
+      ? "not checked"
+      : diagPlanSync.tokenStatus === "present"
+        ? "present"
+        : diagPlanSync.tokenStatus === "missing"
+          ? "missing"
+          : "error";
+  const billingTierLabel = !isSignedIn
+    ? "anonymous"
+    : billingTier
+      ? `${planLabel(billingTier)} (${subscription?.status ?? "unknown"})`
+      : "unknown";
+  const chatTierLabel =
+    diagPlanSync.tokenStatus === "unchecked"
+      ? "not checked"
+      : `${planLabel(sessionTierForCompare)}${diagPlanSync.sessionIsPaid ? " (paid)" : ""}`;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -981,6 +1041,15 @@ export default function SettingsScreen() {
           <View style={{ gap: 6 }}>
             <InfoRow label="API URL" value={API_BASE} />
             <InfoRow label="Streaming" value={STREAMING_ENABLED ? "on" : "off"} />
+            <InfoRow label="Signed in" value={isSignedIn ? "yes" : "no"} warn={!isSignedIn} />
+            <InfoRow label="Email" value={isSignedIn ? signedInEmail : "anonymous"} />
+            <InfoRow label="Clerk token" value={tokenStatusLabel} warn={signedInMissingToken} />
+            <InfoRow
+              label="Billing tier"
+              value={billingTierLabel}
+              warn={!!isSignedIn && !billingTier}
+            />
+            <InfoRow label="Chat tier" value={chatTierLabel} warn={planSyncWarn} />
             <InfoRow
               label="Clerk key"
               value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
@@ -989,6 +1058,19 @@ export default function SettingsScreen() {
             <InfoRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
             <InfoRow label="Build" value={APP_VERSION_LABEL} />
           </View>
+
+          {planSyncMessage ? (
+            <Text
+              style={{
+                color: "#f87171",
+                fontSize: 12,
+                lineHeight: 18,
+                marginTop: 2,
+              }}
+            >
+              {planSyncMessage}
+            </Text>
+          ) : null}
 
           <Button
             label={diagLoading ? "Running diagnostics…" : "Run diagnostics"}

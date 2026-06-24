@@ -35,7 +35,7 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true",
-        "EXPO_PUBLIC_DOMAIN": "mustaflow.com"
+        "EXPO_PUBLIC_DOMAIN": "www.mustaflow.com"
       }
     },
     "production": {
@@ -46,7 +46,7 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true",
-        "EXPO_PUBLIC_DOMAIN": "mustaflow.com"
+        "EXPO_PUBLIC_DOMAIN": "www.mustaflow.com"
       }
     }
   },
