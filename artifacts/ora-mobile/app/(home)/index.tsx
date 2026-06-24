@@ -1676,8 +1676,9 @@ export default function OraChatScreen() {
 
   // Tier-specific accent color — mirrors website's --ora-accent-hsl CSS var on the panel root.
   // Used for Ora-specific active states (mode indicator, language selector, temp/talk toggles).
-  // Falls back to the theme's fixed accent when session has not loaded yet.
-  const tierAccent = session?.tier ? tierAccentColor(session.tier) : c.accentForeground;
+  // When the session/tier has not loaded, fall back to the FREE accent (purple) to match the
+  // website's free-tier accent and OraAtom's default — never the theme's teal accentForeground.
+  const tierAccent = tierAccentColor(session?.tier);
 
   // Reset to Instant if tier drops and Deep is active (e.g. plan downgrade)
   useEffect(() => {
