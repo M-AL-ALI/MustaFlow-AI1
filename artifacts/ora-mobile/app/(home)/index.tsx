@@ -79,6 +79,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Markdown } from "@/components/Markdown";
 import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
+import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
 import { OraThemeToggle } from "@/components/ora/OraThemeToggle";
 import { OraVoiceOrb } from "@/components/ora/OraVoiceOrb";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -1708,6 +1709,7 @@ export default function OraChatScreen() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader
         title="Ora"
+        leftNode={<OraMenuLogo />}
         titleNode={
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
             <OraAtom size={28} accentColor={tierAccent} animated />

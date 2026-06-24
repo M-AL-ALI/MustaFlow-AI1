@@ -13,6 +13,7 @@ export function ScreenHeader({
   right,
   rightIcon: RightIcon,
   onRightPress,
+  leftNode,
 }: {
   title: string;
   titleNode?: React.ReactNode;
@@ -20,6 +21,12 @@ export function ScreenHeader({
   right?: React.ReactNode;
   rightIcon?: LucideIcon;
   onRightPress?: () => void;
+  /**
+   * Custom content for the drawer-open button (left of the title). When omitted
+   * the default hamburger icon is used. The Ora screen passes the MustaFlow
+   * logo chip here to match the website's logo-button menu toggle.
+   */
+  leftNode?: React.ReactNode;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -43,8 +50,10 @@ export function ScreenHeader({
         onPress={() => (navigation as unknown as { openDrawer: () => void }).openDrawer()}
         hitSlop={10}
         style={{ padding: 4 }}
+        accessibilityRole="button"
+        accessibilityLabel="Open Ora menu"
       >
-        <Menu size={24} color={c.foreground} />
+        {leftNode ?? <Menu size={24} color={c.foreground} />}
       </Pressable>
       <View style={{ flex: 1 }}>
         {titleNode ?? (
