@@ -676,7 +676,8 @@ export default function SettingsScreen() {
   const billingTier = subscription?.tier ?? null;
   const billingTierIsPaid = billingTier === "core" || billingTier === "wave";
   const signedInMissingToken =
-    !!isSignedIn && (diagPlanSync.tokenStatus === "missing" || diagPlanSync.tokenStatus === "error");
+    !!isSignedIn &&
+    (diagPlanSync.tokenStatus === "missing" || diagPlanSync.tokenStatus === "error");
   const planTierMismatch =
     !!isSignedIn &&
     diagPlanSync.tokenStatus !== "unchecked" &&
