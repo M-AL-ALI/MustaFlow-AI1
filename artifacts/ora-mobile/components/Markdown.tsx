@@ -56,7 +56,7 @@ export function Markdown({ children }: { children: string }) {
       color: c.foreground,
       fontFamily: "Inter_400Regular",
       fontSize: 15,
-      lineHeight: 22,
+      lineHeight: 24,
     },
     heading1: {
       color: c.foreground,

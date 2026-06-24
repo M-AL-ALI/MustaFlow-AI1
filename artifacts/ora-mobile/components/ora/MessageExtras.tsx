@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
+  Globe,
   Image as ImageIcon,
   Play,
   Sheet,
@@ -27,7 +28,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { saveImageFromUrl } from "@/lib/files";
 import { isSafeHttpUrl } from "@/lib/safe-url";
-import type { OraAttachmentMeta, OraImage, OraMessage, OraVideo } from "@/lib/types";
+import type { OraAttachmentMeta, OraImage, OraMessage, OraSource, OraVideo } from "@/lib/types";
 
 type Colors = ReturnType<typeof useColors>;
 
@@ -51,6 +52,7 @@ export function OraAssistantExtras({
   const c = useColors();
   return (
     <>
+      <OraSourceCards sources={message.sources} c={c} />
       <OraImageGrid images={message.images} c={c} />
       <OraVideoCards videos={message.videos} c={c} />
       <OraDatasetCard result={message.datasetResult} c={c} />
@@ -59,6 +61,90 @@ export function OraAssistantExtras({
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
       <OraSuggestions suggestions={message.suggestions} onPress={onSuggestion} c={c} />
     </>
+  );
+}
+
+function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function OraSourceCards({ sources, c }: { sources?: OraSource[]; c: Colors }) {
+  const safeSources = (sources ?? []).filter((source) => isSafeHttpUrl(source.url));
+  if (!safeSources.length) return null;
+  return (
+    <View style={{ marginTop: 10, gap: 6 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Globe size={12} color={c.mutedForeground} />
+        <Text
+          style={{
+            color: c.mutedForeground,
+            fontFamily: "Inter_500Medium",
+            fontSize: 10,
+            letterSpacing: 0.5,
+            textTransform: "uppercase",
+            opacity: 0.6,
+          }}
+        >
+          Sources
+        </Text>
+      </View>
+      <View style={{ gap: 6 }}>
+        {safeSources.map((source, index) => (
+          <Pressable
+            key={`${source.url}-${index}`}
+            onPress={() => WebBrowser.openBrowserAsync(source.url)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: c.border + "99",
+              backgroundColor: c.muted + "4D",
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+            }}
+          >
+            <View
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "rgba(153,90,242,0.12)",
+              }}
+            >
+              <Globe size={14} color="#995AF2" />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: c.foreground,
+                  fontFamily: "Inter_500Medium",
+                  fontSize: 12,
+                  opacity: 0.9,
+                }}
+              >
+                {source.title || source.url}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{ color: c.mutedForeground, fontSize: 10, opacity: 0.7 }}
+              >
+                {sourceHostname(source.url)}
+              </Text>
+            </View>
+            <ExternalLink size={14} color={c.mutedForeground} opacity={0.55} />
+          </Pressable>
+        ))}
+      </View>
+    </View>
   );
 }
 

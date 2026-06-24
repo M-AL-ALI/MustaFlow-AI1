@@ -3,7 +3,6 @@ import { Image } from "expo-image";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
-import * as WebBrowser from "expo-web-browser";
 import {
   AudioModule,
   RecordingPresets,
@@ -75,6 +74,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Markdown } from "@/components/Markdown";
 import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
+import { OraAtom } from "@/components/ora/OraAtom";
+import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { EmptyState } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
@@ -86,7 +87,6 @@ import {
   saveTextAsFile,
 } from "@/lib/files";
 import { logError } from "@/lib/log";
-import { isSafeHttpUrl } from "@/lib/safe-url";
 import {
   analyzeDataset,
   analyzeDocument,
@@ -864,7 +864,17 @@ export default function OraChatScreen() {
         }
       }
     },
-    [sending, messages, mode, temporary, scrollToEnd, persist, scheduleTalkRestart, isSignedIn],
+    [
+      sending,
+      messages,
+      mode,
+      language,
+      temporary,
+      scrollToEnd,
+      persist,
+      scheduleTalkRestart,
+      isSignedIn,
+    ],
   );
 
   const handleSend = useCallback(async () => {
@@ -1684,6 +1694,14 @@ export default function OraChatScreen() {
     }
   }
 
+  const visibleMessages = messages.filter(
+    (m) => !(m.role === "assistant" && (m.pending || m.isStreaming) && !m.content.trim()),
+  );
+  const isStreamingWithContent = messages.some(
+    (m) => m.role === "assistant" && m.isStreaming && !!m.content.trim(),
+  );
+  const showThinkingRow = sending && !isStreamingWithContent;
+
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader
@@ -1792,11 +1810,13 @@ export default function OraChatScreen() {
       >
         <FlatList
           ref={listRef}
-          data={messages}
+          data={visibleMessages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{
-            padding: 16,
-            gap: 14,
+            paddingHorizontal: 16,
+            paddingTop: 24,
+            paddingBottom: 32,
+            gap: 24,
             flexGrow: 1,
           }}
           onContentSizeChange={scrollToEnd}
@@ -1846,6 +1866,7 @@ export default function OraChatScreen() {
           renderItem={({ item }) => (
             <MessageBubble
               message={item}
+              accentColor={tierAccent}
               speaking={speakingId === item.id}
               onSpeak={() => speak(item)}
               onSuggestion={handleSuggestion}
@@ -1857,6 +1878,7 @@ export default function OraChatScreen() {
               }}
             />
           )}
+          ListFooterComponent={showThinkingRow ? <OraThinkingRow accentColor={tierAccent} /> : null}
         />
 
         {/* Composer */}
@@ -2448,6 +2470,7 @@ function RecordingIndicator({
 
 function MessageBubble({
   message,
+  accentColor,
   speaking,
   onSpeak,
   onSuggestion,
@@ -2456,6 +2479,7 @@ function MessageBubble({
   onEditImage,
 }: {
   message: OraMessage;
+  accentColor: string;
   speaking: boolean;
   onSpeak: () => void;
   onSuggestion: (text: string) => void;
@@ -2466,7 +2490,6 @@ function MessageBubble({
   const c = useColors();
   const isUser = message.role === "user";
   // Web-search citations are untrusted — only render/open safe public links.
-  const safeSources = (message.sources ?? []).filter((s) => isSafeHttpUrl(s.url));
   const [savingFile, setSavingFile] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
 
@@ -2522,22 +2545,22 @@ function MessageBubble({
           onLongPress={triggerLongPress}
           delayLongPress={300}
           style={{
-            backgroundColor: c.primary,
-            borderRadius: 18,
-            borderBottomRightRadius: 4,
+            backgroundColor: c.muted + "99",
+            borderRadius: 16,
+            borderTopRightRadius: 4,
             paddingHorizontal: 14,
             paddingVertical: 10,
-            maxWidth: "86%",
+            maxWidth: "85%",
           }}
         >
           <OraAttachmentChip attachment={message.attachment} />
           {!!message.content && (
             <Text
               style={{
-                color: c.primaryForeground,
+                color: c.foreground,
                 fontFamily: "Inter_400Regular",
                 fontSize: 15,
-                lineHeight: 21,
+                lineHeight: 24,
               }}
             >
               {message.content}
@@ -2549,75 +2572,52 @@ function MessageBubble({
   }
 
   return (
-    <View style={{ alignItems: "flex-start", maxWidth: "92%" }}>
-      <Pressable
-        onLongPress={triggerLongPress}
-        delayLongPress={300}
-        style={{
-          backgroundColor: c.card,
-          borderWidth: 1,
-          borderColor: c.cardBorder,
-          borderRadius: 18,
-          borderBottomLeftRadius: 4,
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          width: "100%",
-        }}
-      >
-        {message.pending ? (
-          <ActivityIndicator size="small" color={c.mutedForeground} />
-        ) : message.error ? (
-          <Text style={{ color: c.destructive, fontSize: 14 }}>{message.content}</Text>
-        ) : (
-          <>
-            <Markdown>{message.content}</Markdown>
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, maxWidth: "100%" }}>
+      <View style={{ marginTop: 2 }}>
+        <OraAtom size={24} accentColor={accentColor} animated />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Pressable
+          onLongPress={triggerLongPress}
+          delayLongPress={300}
+          style={{
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          {message.pending ? (
+            <ActivityIndicator size="small" color={c.mutedForeground} />
+          ) : message.error ? (
+            <Text style={{ color: c.destructive, fontSize: 14 }}>{message.content}</Text>
+          ) : (
+            <>
+              {!!message.content && (
+                <View style={{ opacity: 0.9 }}>
+                  <Markdown>{message.content}</Markdown>
+                </View>
+              )}
 
-            {message.imageUrl && (
-              <View style={{ marginTop: 10 }}>
-                <Image
-                  source={{ uri: message.imageUrl }}
-                  style={{
-                    width: "100%",
-                    aspectRatio: 1,
-                    borderRadius: 12,
-                  }}
-                  contentFit="cover"
-                  transition={200}
-                />
-                {/* Save button — top-right */}
-                <Pressable
-                  onPress={handleSaveImage}
-                  disabled={savingImage}
-                  hitSlop={8}
-                  style={{
-                    position: "absolute",
-                    top: 8,
-                    right: 8,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    paddingVertical: 6,
-                    paddingHorizontal: 10,
-                    borderRadius: 999,
-                    backgroundColor: "rgba(0,0,0,0.55)",
-                  }}
-                >
-                  {savingImage ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Download size={14} color="#fff" />
-                  )}
-                  <Text style={{ color: "#fff", fontSize: 12 }}>Save</Text>
-                </Pressable>
-                {/* Edit button — top-left (only for editable images with an id) */}
-                {!!message.imageId && onEditImage && (
+              {message.imageUrl && (
+                <View style={{ marginTop: 10 }}>
+                  <Image
+                    source={{ uri: message.imageUrl }}
+                    style={{
+                      width: "100%",
+                      aspectRatio: 1,
+                      borderRadius: 12,
+                    }}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                  {/* Save button — top-right */}
                   <Pressable
-                    onPress={() => onEditImage(message.imageId!)}
+                    onPress={handleSaveImage}
+                    disabled={savingImage}
                     hitSlop={8}
                     style={{
                       position: "absolute",
                       top: 8,
-                      left: 8,
+                      right: 8,
                       flexDirection: "row",
                       alignItems: "center",
                       gap: 6,
@@ -2627,117 +2627,112 @@ function MessageBubble({
                       backgroundColor: "rgba(0,0,0,0.55)",
                     }}
                   >
-                    <Pencil size={14} color="#fff" />
-                    <Text style={{ color: "#fff", fontSize: 12 }}>Edit</Text>
+                    {savingImage ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Download size={14} color="#fff" />
+                    )}
+                    <Text style={{ color: "#fff", fontSize: 12 }}>Save</Text>
                   </Pressable>
-                )}
-              </View>
-            )}
-
-            {message.generatedFile && (
-              <Pressable
-                onPress={handleSaveFile}
-                disabled={savingFile}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 8,
-                  marginTop: 10,
-                  padding: 10,
-                  borderRadius: 10,
-                  backgroundColor: c.muted,
-                }}
-              >
-                <FileText size={18} color={c.accentForeground} />
-                <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
-                  {message.generatedFile.fileName}
-                </Text>
-                {savingFile ? (
-                  <ActivityIndicator size="small" color={c.mutedForeground} />
-                ) : isImageFile(message.generatedFile.mimeType) ? (
-                  <Download size={16} color={c.accentForeground} />
-                ) : (
-                  <Share2 size={16} color={c.accentForeground} />
-                )}
-              </Pressable>
-            )}
-
-            {safeSources.length > 0 && (
-              <View style={{ marginTop: 10, gap: 6 }}>
-                <Text
-                  style={{
-                    color: c.mutedForeground,
-                    fontFamily: "Inter_600SemiBold",
-                    fontSize: 12,
-                  }}
-                >
-                  Sources
-                </Text>
-                {safeSources.map((s, i) => (
-                  <Pressable
-                    key={`${s.url}-${i}`}
-                    onPress={() => WebBrowser.openBrowserAsync(s.url)}
-                  >
-                    <Text
-                      numberOfLines={1}
+                  {/* Edit button — top-left (only for editable images with an id) */}
+                  {!!message.imageId && onEditImage && (
+                    <Pressable
+                      onPress={() => onEditImage(message.imageId!)}
+                      hitSlop={8}
                       style={{
-                        color: c.accentForeground,
-                        fontSize: 13,
-                        textDecorationLine: "underline",
+                        position: "absolute",
+                        top: 8,
+                        left: 8,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        paddingVertical: 6,
+                        paddingHorizontal: 10,
+                        borderRadius: 999,
+                        backgroundColor: "rgba(0,0,0,0.55)",
                       }}
                     >
-                      {s.title || s.url}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
+                      <Pencil size={14} color="#fff" />
+                      <Text style={{ color: "#fff", fontSize: 12 }}>Edit</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
 
-            <OraAssistantExtras
-              message={message}
-              onSuggestion={onSuggestion}
-              onSaveMemory={onSaveMemory}
-            />
-          </>
-        )}
-      </Pressable>
-      {!message.pending && !message.isStreaming && !message.error && (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 16,
-            marginTop: 6,
-            marginLeft: 4,
-          }}
-        >
-          <Pressable
-            onPress={copy}
-            hitSlop={8}
-            style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              {message.generatedFile && (
+                <Pressable
+                  onPress={handleSaveFile}
+                  disabled={savingFile}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 10,
+                    backgroundColor: c.muted,
+                  }}
+                >
+                  <FileText size={18} color={c.accentForeground} />
+                  <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 13, flex: 1 }}>
+                    {message.generatedFile.fileName}
+                  </Text>
+                  {savingFile ? (
+                    <ActivityIndicator size="small" color={c.mutedForeground} />
+                  ) : isImageFile(message.generatedFile.mimeType) ? (
+                    <Download size={16} color={c.accentForeground} />
+                  ) : (
+                    <Share2 size={16} color={c.accentForeground} />
+                  )}
+                </Pressable>
+              )}
+
+              <OraAssistantExtras
+                message={message}
+                onSuggestion={onSuggestion}
+                onSaveMemory={onSaveMemory}
+              />
+            </>
+          )}
+        </Pressable>
+        {!message.pending && !message.isStreaming && !message.error && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 16,
+              marginTop: 6,
+              marginLeft: 4,
+            }}
           >
-            <Copy size={13} color={c.mutedForeground} />
-            <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Copy</Text>
-          </Pressable>
-          {!!message.content && (
             <Pressable
-              onPress={onSpeak}
+              onPress={copy}
               hitSlop={8}
               style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
             >
-              <Volume2 size={13} color={speaking ? c.accentForeground : c.mutedForeground} />
-              <Text
-                style={{
-                  color: speaking ? c.accentForeground : c.mutedForeground,
-                  fontSize: 12,
-                }}
-              >
-                {speaking ? "Stop" : "Listen"}
-              </Text>
+              <Copy size={13} color={c.mutedForeground} />
+              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Copy</Text>
             </Pressable>
-          )}
-        </View>
-      )}
+            {!!message.content && (
+              <Pressable
+                onPress={onSpeak}
+                hitSlop={8}
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Volume2 size={13} color={speaking ? c.accentForeground : c.mutedForeground} />
+                <Text
+                  style={{
+                    color: speaking ? c.accentForeground : c.mutedForeground,
+                    fontSize: 12,
+                  }}
+                >
+                  {speaking ? "Stop" : "Listen"}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
     </View>
   );
 }
