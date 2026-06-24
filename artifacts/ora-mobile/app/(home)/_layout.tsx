@@ -1,6 +1,7 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { setAuthTokenGetter } from "@/lib/auth-client";
 import { DrawerContentScrollView, DrawerContentComponentProps } from "@react-navigation/drawer";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Drawer } from "expo-router/drawer";
 import {
@@ -18,8 +19,9 @@ import React, { useEffect } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Logo } from "@/components/Logo";
 import { useColors } from "@/hooks/useColors";
+
+const mustaflowLogo = require("@/assets/mustaflow-logo.png");
 
 const NAV_SIGNED_IN: { name: string; label: string; icon: LucideIcon }[] = [
   { name: "index", label: "Ora", icon: MessageSquare },
@@ -50,7 +52,38 @@ function CustomDrawer(props: DrawerContentComponentProps) {
     <View style={{ flex: 1, backgroundColor: c.sidebar }}>
       <DrawerContentScrollView {...props} contentContainerStyle={{ paddingTop: insets.top + 8 }}>
         <View style={{ paddingHorizontal: 16, paddingBottom: 18 }}>
-          <Logo size={30} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View
+              style={{
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: c.sidebarBorder,
+                backgroundColor: c.sidebarAccent,
+                padding: 8,
+                shadowColor: "#000",
+                shadowOpacity: 0.12,
+                shadowRadius: 4,
+                shadowOffset: { width: 0, height: 2 },
+                elevation: 2,
+              }}
+            >
+              <Image
+                source={mustaflowLogo}
+                style={{ width: 26, height: 32 }}
+                contentFit="contain"
+                transition={150}
+              />
+            </View>
+            <Text
+              style={{
+                color: c.foreground,
+                fontFamily: "Inter_700Bold",
+                fontSize: 16,
+              }}
+            >
+              Ora
+            </Text>
+          </View>
         </View>
 
         <View style={{ paddingHorizontal: 10, gap: 4 }}>
