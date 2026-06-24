@@ -93,6 +93,33 @@ desyncs spacing, opacity, and bubble shape from the real site.
 **How to apply:** RN has no `/60` opacity util — append 8-digit hex alpha (`c.muted + "99"`
 for 60%, `c.foreground + "E6"` for 90%), matching the existing tier-badge convention.
 
+## Loading state is a SEPARATE row, not a placeholder bubble (Screen 2)
+
+Website never renders a blank assistant bubble while waiting for the first token.
+ora-panel.tsx skips empty streaming assistant rows in the map AND renders a separate
+indicator (`isLoading && !isStreamingWithContent`): atom `size=24` + three pulsing
+dots (`h-1.5 w-1.5`, accent at 50% alpha = hex `+"80"`, staggered 0/200/400ms) +
+status label `text-[11px] text-muted-foreground` ("Thinking…"/STATUS_LABELS).
+**Mobile mirror:** `components/ora/OraThinkingRow.tsx` (reanimated dots) rendered via
+FlatList `ListFooterComponent`, gated on `sending && !streamingWithContent`; the
+FlatList `data` is filtered to drop pending/empty-streaming assistant messages.
+**Why:** mobile previously rendered the pending message as a row with a bare
+`ActivityIndicator`; in a flex:1 column (default alignItems:stretch) the spinner
+stretches full-width so its glyph appears CENTERED — looked nothing like the site.
+**How to apply:** never reintroduce an in-row pending spinner; the loading affordance
+lives in the footer row only.
+
+## Atom color is tier-driven, not a fixed brand color (Screen 2)
+
+Website `oraAccentHsl(tier)`: core=`217 90% 60%` (blue), wave=`35 85% 60%` (amber),
+free/anon/null=`265 85% 65%` (purple). Mobile `tierAccentColor` already mirrors these
+(core `#3D83F5`, wave `#F0A742`, free `#995AF2`). A blue website atom means that
+account is on **Core**; a purple mobile atom means the mobile session resolved
+free/null (`session?.tier`). This is account/session state, NOT a color-map bug — do
+not "fix" it by hardcoding blue.
+**How to apply:** if mobile must match a blue website screenshot, verify the SAME
+account is signed in and `session.tier` actually resolves to "core" on mobile.
+
 ## The "is this TestFlight or the website?" tell — check the Safari bar
 
 The user repeatedly sends WEBSITE screenshots believing they are the TestFlight app.

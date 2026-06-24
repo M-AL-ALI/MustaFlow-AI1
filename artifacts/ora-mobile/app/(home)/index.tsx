@@ -79,6 +79,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Markdown } from "@/components/Markdown";
 import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
+import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
 import { OraThemeToggle } from "@/components/ora/OraThemeToggle";
 import { OraVoiceOrb } from "@/components/ora/OraVoiceOrb";
@@ -1684,6 +1685,23 @@ export default function OraChatScreen() {
           ? "Listening…"
           : undefined;
 
+  // Loading-row parity with the website (ora-panel.tsx `isLoading &&
+  // !isStreamingWithContent`): never render a blank assistant bubble while
+  // waiting for the first token. Skip empty pending/streaming assistant rows and
+  // show a separate atom + pulsing-dots + "Thinking…" row instead.
+  const streamingWithContent = messages.some(
+    (m) => m.role === "assistant" && m.isStreaming && (m.content ?? "").trim().length > 0,
+  );
+  const visibleMessages = messages.filter(
+    (m) =>
+      !(
+        m.role === "assistant" &&
+        (m.pending || m.isStreaming) &&
+        (m.content ?? "").trim().length === 0
+      ),
+  );
+  const showThinkingRow = sending && !streamingWithContent;
+
   // The most recent settled assistant message is the only one eligible for the
   // Regenerate action (mirrors ChatGPT, which only regenerates the last reply).
   let lastAssistantId: string | null = null;
@@ -1865,7 +1883,7 @@ export default function OraChatScreen() {
       >
         <FlatList
           ref={listRef}
-          data={messages}
+          data={visibleMessages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{
             paddingHorizontal: 16,
@@ -1875,6 +1893,9 @@ export default function OraChatScreen() {
             flexGrow: 1,
           }}
           onContentSizeChange={scrollToEnd}
+          ListFooterComponent={
+            showThinkingRow ? <OraThinkingRow accentColor={tierAccent} label="Thinking…" /> : null
+          }
           ListEmptyComponent={
             <View
               style={{

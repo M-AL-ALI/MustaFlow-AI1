@@ -1,0 +1,219 @@
+SCREEN 2 TASK: Chat message list must match website Ora exactly.
+
+Use website source, not current mobile UI:
+- artifacts/mustaflow/src/components/ora-panel.tsx
+- artifacts/mustaflow/src/components/ora/ora-rich-text.tsx
+- artifacts/mustaflow/src/components/ora/ora-source-cards.tsx
+- artifacts/mustaflow/src/components/ora/ora-media-cards.tsx
+- artifacts/mustaflow/src/components/ora/ora-memory-save-chip.tsx
+- artifacts/mustaflow/src/components/ora/ora-message-actions.tsx
+
+Website source of truth:
+ora-panel.tsx message feed around the full layout branch.
+
+Exact website message-list structure:
+
+1. Feed container
+- Full layout uses:
+  - max-w-3xl
+  - mx-auto
+  - w-full
+  - space-y-6
+  - pt-6
+  - pb-8
+  - px-4
+- Message gap should feel like 24px, not tight mobile chat spacing.
+- Feed should be clean and centered, not card-heavy.
+
+2. User message row
+- Row alignment:
+  - flex
+  - justify-end
+- User bubble:
+  - max-w-[85%]
+  - bg-muted/60
+  - rounded-2xl
+  - rounded-tr-sm
+  - px-3.5
+  - py-2.5
+  - text-foreground
+  - whitespace-pre-wrap
+  - break-words
+  - leading-relaxed
+  - full layout text size: 15px
+- Important:
+  - User bubble is subtle muted, not bright purple/blue.
+  - Tail/squared corner is TOP-RIGHT, not bottom-right.
+  - It should not look like iMessage.
+  - It should look like website Ora.
+
+3. Assistant message row
+- Row alignment:
+  - flex
+  - justify-start
+  - gap-2.5
+- Assistant avatar:
+  - DynamicAtom
+  - state="idle"
+  - size=24
+  - shrink-0
+  - mt-0.5
+  - accentColor=current Ora tier accent
+- Assistant content:
+  - no heavy bubble
+  - no card background
+  - no boxed assistant message
+  - transparent/bubble-less rich text beside the atom
+  - leading-relaxed
+  - whitespace-pre-wrap
+  - break-words
+  - full layout text size: 15px
+  - text-foreground/90
+- Uses OraRichText for markdown and streaming.
+
+4. Streaming behavior
+- If assistant message is streaming but has no content yet, website hides the blank assistant row.
+- Loading state is represented separately with atom/status.
+- Do not render empty blank assistant bubbles.
+
+5. Attachments inside user message
+If user message has attachment, show chip inside the user bubble:
+- mb-2
+- flex row
+- rounded-lg
+- border: tier accent / 0.35
+- background: tier accent / 0.07
+- px-2.5
+- py-1.5
+- text-xs
+- Icons:
+  - ImageIcon for images
+  - Table2 for datasets
+  - FileText for documents
+- Filename truncates.
+
+6. Assistant generated image
+- Under assistant text.
+- mt-2
+- max-w-sm
+- image rounded-xl
+- border border-border/60
+- If edited image, show GitBranch lineage text:
+  - “Edited from original — [instruction]”
+- If imageId exists and signed in, show Edit button with Wand2.
+
+7. Generated file card
+- mt-2
+- rounded-xl
+- border tier accent / 0.35
+- background tier accent / 0.06
+- hover/pressed background tier accent / 0.12
+- icon box 36px style
+- FileSpreadsheet icon
+- filename text-xs font-semibold
+- file format text 10px muted
+- Download icon on right.
+
+8. Source cards
+Website uses OraSourceCards:
+- Section title:
+  - Globe icon
+  - “Sources”
+  - uppercase
+  - text 10px
+  - muted foreground / 60
+- Source cards:
+  - rounded-lg
+  - border border-border/60
+  - bg-muted/30
+  - hover/pressed bg-muted/60
+  - compact vertical cards
+  - title 12px font-medium
+  - hostname 10px muted
+  - ExternalLink icon on right
+- Must filter unsafe/non-public URLs like website.
+
+9. Web image gallery
+Website uses OraImageGallery:
+- Section title:
+  - ImageIcon
+  - “Images”
+  - uppercase 10px muted
+- Grid thumbnails:
+  - rounded-lg
+  - border border-border/60
+  - bg-muted/30
+  - aspect-video
+  - image object-cover
+  - ExternalLink overlay.
+
+10. Video cards
+Website uses OraVideoCards:
+- Section title:
+  - Play icon
+  - “Videos”
+  - uppercase 10px muted
+- Cards:
+  - rounded-lg
+  - border border-border/60
+  - bg-muted/30
+  - thumbnail if available
+  - Play icon
+  - title 12px
+  - hostname/click-to-play 10px muted
+- Native can open video externally if iframe embed is not practical, but the card shape must match.
+
+11. Memory chips
+Website uses:
+- OraMemorySaveChip
+- OraMemoriesUsedChip
+- OraDocumentMemoryChip
+Required style:
+- rounded-xl
+- border tier accent / 0.3
+- bg tier accent / 0.05
+- small Brain/Check/ShieldAlert icons
+- 11–12px text
+- sensitive warning must show:
+  “This looks like sensitive info. It won’t be saved unless you confirm.”
+
+12. Message actions
+Website:
+- Desktop hover toolbar.
+- Mobile uses compact more menu.
+Mobile requirement:
+- Long press or visible compact action affordance is acceptable, but actions must match:
+  - Copy
+  - Edit user message
+  - Export assistant message
+  - Read aloud
+  - Regenerate latest assistant
+- Do not show random extra actions that website does not imply.
+
+13. Jump to latest
+Website has sticky bottom jump-to-latest button when user scrolls away.
+Mobile should have native equivalent if message list supports scroll-away state.
+
+Acceptance for Screen 2:
+- User bubble must be muted, top-right tail, 85% width, 15px text.
+- Assistant must be bubble-less with atom avatar size 24.
+- Message spacing must feel like website space-y-6.
+- Assistant extras must sit under the assistant text in same order as website:
+  1. generated image / file / dataset
+  2. sources
+  3. images
+  4. videos
+  5. memory save/used/document chips
+  6. suggestions/actions
+- No generic mobile chat card styling.
+- No bright user bubble.
+- No assistant card bubble.
+- No iMessage/ChatGPT clone look unless it matches website Ora source.
+
+Deliverables:
+1. Current mobile screenshot with user + assistant message.
+2. Website source references used.
+3. Code changes.
+4. New mobile screenshot.
+5. Difference list.
+6. Wait for approval before Screen 3.
