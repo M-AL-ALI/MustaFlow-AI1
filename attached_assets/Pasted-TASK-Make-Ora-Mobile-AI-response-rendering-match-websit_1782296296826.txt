@@ -1,0 +1,256 @@
+TASK: Make Ora Mobile AI response rendering match website Ora exactly
+
+Source of truth:
+- artifacts/mustaflow/src/components/ora-panel.tsx
+- artifacts/mustaflow/src/hooks/use-ora-chat.ts
+- artifacts/mustaflow/src/components/ora/dynamic-atom.tsx
+- artifacts/mustaflow/src/components/ora/ora-rich-text.tsx
+- artifacts/mustaflow/src/components/ora/ora-source-cards.tsx
+- artifacts/mustaflow/src/components/ora/ora-media-cards.tsx
+- artifacts/mustaflow/src/components/ora/ora-memory-save-chip.tsx
+- artifacts/mustaflow/src/components/ora/ora-message-actions.tsx
+
+Do not approximate. Copy website behavior.
+
+1. Assistant response row
+
+Website layout:
+- Assistant row is left-aligned.
+- Row uses gap 2.5.
+- Avatar is DynamicAtom size 24.
+- Avatar state is "idle" for completed assistant messages.
+- The atom is still animated while idle:
+  - orbiting electrons
+  - breathing glow
+  - tier-colored core
+  - fixed cyan third electron
+- Assistant reply text is NOT inside a card.
+- No bordered assistant bubble.
+- No assistant background panel.
+- Text is transparent / page background behind it.
+
+Mobile must:
+- Use an animated native OraAtom beside every assistant reply.
+- Do not render a card around assistant text.
+- Keep assistant content as flex:1 / minWidth:0.
+- Text style:
+  - 15px
+  - foreground at about 90% opacity
+  - relaxed line-height around 24
+  - whitespace-pre-wrap equivalent
+  - break words safely.
+
+2. User message row
+
+Website layout:
+- User row is right-aligned.
+- Bubble max width 85%.
+- Bubble background is bg-muted/60, not primary blue/purple.
+- Bubble radius rounded-2xl = 16px.
+- Top-right corner is flattened: rounded-tr-sm.
+- Padding px-3.5 py-2.5.
+- Text is foreground, 15px, relaxed line height.
+- Attachments render inside the user bubble as compact chips.
+
+Mobile must:
+- Never use bright primary color for user bubble.
+- Never flatten bottom-right corner.
+- Use muted 60% background and top-right tail.
+
+3. Message list spacing
+
+Website full layout:
+- max-w-3xl
+- mx-auto
+- w-full
+- space-y-6
+- pt-6
+- pb-8
+- px-4
+
+Mobile must:
+- Use equivalent horizontal padding 16.
+- Use top padding 24.
+- Use bottom padding 32.
+- Use 24px vertical gap between messages.
+- Do not use 14px gap.
+
+4. Loading / Thinking state
+
+Website behavior:
+- When user sends a message, website creates an assistant placeholder with:
+  - role assistant
+  - content ""
+  - isStreaming true
+- BUT the empty assistant placeholder is skipped in rendering.
+- Before first token arrives, website renders a separate loading row:
+  - DynamicAtom size 24
+  - atom state = atomState, usually "thinking"
+  - three pulsing accent dots
+  - small muted label: "Thinking…"
+
+Mobile must:
+- Do not show centered spinner.
+- Do not show blank assistant bubble.
+- Filter empty assistant streaming rows from FlatList.
+- Show a footer row with:
+  - animated OraAtom size 24
+  - 3 pulsing dots
+  - “Thinking…” label
+- Show this only while sending/loading and before streaming text exists.
+- Once first token arrives, remove Thinking row and show the streaming assistant text row.
+
+5. Streaming behavior — this is critical
+
+Website streaming source:
+- use-ora-chat.ts consumeOraStream()
+- POST /api/public-ai/chat/stream
+- SSE events:
+  - event: start
+  - event: token
+  - event: done
+  - event: error
+
+Website behavior:
+- On token event:
+  - read parsed.text
+  - append delta to the current assistant streaming message
+  - force React to commit immediately
+  - then wait about 55ms before processing the next token
+- This delay is intentional. It prevents all tokens from appearing at once when Replit/dev proxy batches SSE frames.
+- The visible result should feel word-by-word / phrase-by-phrase.
+
+Mobile must:
+- Append each SSE token to the existing assistant message.
+- Do not wait until done to show the reply.
+- Do not batch all tokens into one final response.
+- After appending a token, yield briefly so UI paints:
+  - use small delay around 40–60ms, matching website’s 55ms.
+- Keep isStreaming true until done event.
+- On done event, patch final metadata into the same assistant message.
+
+6. Streaming rich text behavior
+
+Website source:
+- ora-rich-text.tsx
+
+Website behavior:
+- Streaming text is sanitized before rendering:
+  - If code fence ``` is unclosed, temporarily close it.
+  - If bold marker ** is dangling, strip it.
+- This prevents broken Markdown during streaming.
+- New words fade in:
+  - newly mounted word spans get 260ms fade animation.
+  - old words do not re-animate.
+- A blinking cursor appears at the end of the last streaming block.
+- Screen reader behavior:
+  - aria-live polite during streaming
+  - off after streaming finishes
+
+Mobile must:
+- Sanitize partial markdown during streaming.
+- Avoid showing raw dangling ``` or **.
+- Add a subtle fade-in for newly appended words if possible.
+- Add an end cursor while streaming if feasible.
+- At minimum, streaming must visibly grow token-by-token and not flicker the whole message.
+
+7. Stream error / fallback behavior
+
+Website behavior:
+- If /chat/stream returns 503 or streamingFallback before tokens:
+  - silently fall back to /api/public-ai/chat
+  - pass streamFallbackToken if present
+  - do not double-charge quota.
+- If SSE error happens after tokens:
+  - keep partial content
+  - mark streaming false
+  - show error: “Ora's response was cut off. The partial reply above may be incomplete.”
+- If user navigates/aborts:
+  - abort stream
+  - remove empty streaming placeholder if it has no content
+  - do not show error.
+- If provider does not truly stream:
+  - mark viaFallback / Non-streamed only in dev monitoring.
+
+Mobile must mirror this behavior.
+
+8. Rich assistant extras order
+
+Website assistant response order:
+1. Main rich text
+2. Generated image if imageUrl
+3. Inline image edit controls if imageId
+4. Generated file card if generatedFile
+5. Non-streamed dev marker only in dev
+6. Source cards
+7. Web image gallery
+8. Video cards
+9. Memory save chip
+10. Memories used / document memory chips
+11. Message actions
+12. Suggestions
+
+Mobile must not duplicate sections.
+
+Sources must match website:
+- Label row:
+  - Globe icon
+  - uppercase “Sources”
+  - 10px muted label
+- Each source card:
+  - rounded-lg
+  - border border-border/60
+  - bg-muted/30
+  - left globe icon chip
+  - title, 12px medium, foreground/90
+  - hostname, 10px muted/70
+  - ExternalLink icon on right
+- Do not render sources as plain underlined text links.
+
+9. Message actions
+
+Website actions appear under settled assistant messages:
+- Copy
+- Edit when applicable
+- Export
+- Read aloud
+- Regenerate for latest assistant message only
+
+Mobile must:
+- Hide actions while pending/streaming/error.
+- Only allow regenerate on latest settled assistant reply.
+- Keep actions visually subtle, muted, below response.
+
+10. Atom color and tier
+
+Website accent mapping:
+- Free/default: #995AF2
+- Core Pack: #3D83F5
+- Deep Wave: #F0A742
+
+Important:
+- If website atom is blue but mobile is purple, verify account tier.
+- Do not hardcode blue.
+- Blue only appears when /api/public-ai/session returns tier:"core".
+- Anonymous/free is purple.
+
+11. Acceptance criteria
+
+Replit must test with screenshots:
+- Thinking state screenshot:
+  - atom + dots + Thinking…
+  - no centered spinner
+  - no blank assistant bubble
+- Streaming screenshot/video:
+  - text appears progressively token-by-token
+  - not all at once
+  - no markdown glitches while streaming
+- Completed reply screenshot:
+  - animated atom beside response
+  - no assistant card
+  - user bubble muted, right-aligned, top-right tail
+  - sources appear as cards if present
+  - extras match website order
+
+Do not move to next screen until this is visually approved.
+Do not submit TestFlight until approved.

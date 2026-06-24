@@ -40,24 +40,24 @@ type Colors = ReturnType<typeof useColors>;
  */
 export function OraAssistantExtras({
   message,
-  onSuggestion,
   onSaveMemory,
 }: {
   message: OraMessage;
-  onSuggestion: (text: string) => void;
   // Omitted in temporary chats so the save-to-memory prompt is hidden entirely.
   onSaveMemory?: (message: OraMessage) => Promise<void>;
 }) {
   const c = useColors();
+  // Order mirrors the website assistant response: web image gallery, video
+  // cards, memory-save chip, then memories-used chips. Follow-up suggestions
+  // are rendered separately by the caller AFTER the message-actions row.
   return (
     <>
       <OraImageGrid images={message.images} c={c} />
       <OraVideoCards videos={message.videos} c={c} />
       <OraDatasetCard result={message.datasetResult} c={c} />
       <OraImageLineage editInstruction={message.editInstruction} c={c} />
-      <OraMemoryIndicators message={message} c={c} />
       <OraMemorySaveCandidate message={message} onSave={onSaveMemory} c={c} />
-      <OraSuggestions suggestions={message.suggestions} onPress={onSuggestion} c={c} />
+      <OraMemoryIndicators message={message} c={c} />
     </>
   );
 }
@@ -408,15 +408,14 @@ function OraMemorySaveCandidate({
 
 /* ── Follow-up suggestion chips ──────────────────────────────────────────── */
 
-function OraSuggestions({
+export function OraSuggestions({
   suggestions,
   onPress,
-  c,
 }: {
   suggestions?: string[];
   onPress: (text: string) => void;
-  c: Colors;
 }) {
+  const c = useColors();
   const items = (suggestions ?? []).filter((s) => s.trim().length > 0);
   if (items.length === 0) return null;
   return (

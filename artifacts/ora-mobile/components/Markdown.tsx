@@ -1,8 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as WebBrowser from "expo-web-browser";
-import React from "react";
-import { Text } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, Text, View } from "react-native";
 import MarkdownDisplay, { type ASTNode } from "react-native-markdown-display";
 
 import { useColors } from "@/hooks/useColors";
@@ -47,8 +47,57 @@ function autolinkGap(text: string): string {
   });
 }
 
+/**
+ * Cleans up partial Markdown that the model is still streaming so the block
+ * parser doesn't produce visually broken output mid-stream (mirrors the web
+ * `sanitizeStreamingText`): close an unclosed ``` fence and strip a trailing
+ * dangling ** bold marker.
+ */
+function sanitizeStreamingText(text: string): string {
+  const fenceCount = (text.match(/^```/gm) ?? []).length;
+  let safe = text;
+  if (fenceCount % 2 !== 0) {
+    safe = safe.trimEnd() + "\n```";
+  }
+  safe = safe.replace(/\*\*\s*$/, "");
+  return safe;
+}
+
+/** Blinking end-of-stream cursor shown while a reply is still streaming. */
+function StreamCursor({ color }: { color: string }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0, duration: 450, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 450, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return (
+    <Animated.View
+      style={{
+        opacity,
+        width: 2,
+        height: 16,
+        borderRadius: 1,
+        marginTop: 2,
+        backgroundColor: color,
+      }}
+    />
+  );
+}
+
 /** Themed markdown renderer for Ora replies. */
-export function Markdown({ children }: { children: string }) {
+export function Markdown({
+  children,
+  isStreaming = false,
+}: {
+  children: string;
+  isStreaming?: boolean;
+}) {
   const c = useColors();
 
   const styles = {
@@ -152,18 +201,23 @@ export function Markdown({ children }: { children: string }) {
     },
   };
 
+  const displayText = isStreaming ? sanitizeStreamingText(children) : children;
+
   return (
-    <MarkdownDisplay
-      style={styles as never}
-      rules={rules}
-      onLinkPress={(url: string) => {
-        if (isSafeHttpUrl(url)) {
-          void WebBrowser.openBrowserAsync(url);
-        }
-        return false;
-      }}
-    >
-      {linkifyMarkdown(children)}
-    </MarkdownDisplay>
+    <View>
+      <MarkdownDisplay
+        style={styles as never}
+        rules={rules}
+        onLinkPress={(url: string) => {
+          if (isSafeHttpUrl(url)) {
+            void WebBrowser.openBrowserAsync(url);
+          }
+          return false;
+        }}
+      >
+        {linkifyMarkdown(displayText)}
+      </MarkdownDisplay>
+      {isStreaming && <StreamCursor color={c.foreground + "E6"} />}
+    </View>
   );
 }

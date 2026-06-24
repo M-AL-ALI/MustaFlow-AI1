@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  ExternalLink,
   FileDown,
   FileJson,
   FileSpreadsheet,
@@ -77,7 +78,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Markdown } from "@/components/Markdown";
-import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
+import {
+  OraAssistantExtras,
+  OraAttachmentChip,
+  OraSuggestions,
+} from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
 import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
@@ -315,6 +320,15 @@ function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] 
   if (isImage) return "image";
   if (DATASET_TYPES.includes(fileType.toLowerCase())) return "dataset";
   return "document";
+}
+
+/** Best-effort hostname for a source URL, used as the card's secondary label. */
+function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
 }
 
 function isImageFile(mimeType?: string): boolean {
@@ -773,12 +787,15 @@ export default function OraChatScreen() {
             }
           } else {
             // Post-first-token interruption — partial content already rendered
-            // via onToken callbacks. Finalize without retrying.
+            // via onToken callbacks. Keep what the user saw and flag it cut off
+            // so a "response was cut off" note renders beneath the partial reply
+            // (mirrors the web hook). Do not retry.
             assistant = {
               id: pendingId,
               role: "assistant",
               content: streamedContent,
               isStreaming: false,
+              streamCutOff: true,
             };
           }
         }
@@ -2811,7 +2828,13 @@ function MessageBubble({
             <Text style={{ color: c.destructive, fontSize: 14 }}>{message.content}</Text>
           ) : (
             <>
-              <Markdown>{message.content}</Markdown>
+              <Markdown isStreaming={message.isStreaming}>{message.content}</Markdown>
+
+              {message.streamCutOff && (
+                <Text style={{ color: c.destructive, fontSize: 12, marginTop: 8 }}>
+                  Ora&apos;s response was cut off. The partial reply above may be incomplete.
+                </Text>
+              )}
 
               {message.imageUrl && (
                 <View style={{ marginTop: 10 }}>
@@ -2904,41 +2927,83 @@ function MessageBubble({
               )}
 
               {safeSources.length > 0 && (
-                <View style={{ marginTop: 10, gap: 6 }}>
-                  <Text
+                <View style={{ marginTop: 10 }}>
+                  <View
                     style={{
-                      color: c.mutedForeground,
-                      fontFamily: "Inter_600SemiBold",
-                      fontSize: 12,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      marginBottom: 6,
                     }}
                   >
-                    Sources
-                  </Text>
-                  {safeSources.map((s, i) => (
-                    <Pressable
-                      key={`${s.url}-${i}`}
-                      onPress={() => WebBrowser.openBrowserAsync(s.url)}
+                    <Globe size={12} color={c.mutedForeground + "99"} />
+                    <Text
+                      style={{
+                        color: c.mutedForeground + "99",
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 10,
+                        letterSpacing: 0.5,
+                        textTransform: "uppercase",
+                      }}
                     >
-                      <Text
-                        numberOfLines={1}
+                      Sources
+                    </Text>
+                  </View>
+                  <View style={{ gap: 6 }}>
+                    {safeSources.map((s, i) => (
+                      <Pressable
+                        key={`${s.url}-${i}`}
+                        onPress={() => WebBrowser.openBrowserAsync(s.url)}
                         style={{
-                          color: c.accentForeground,
-                          fontSize: 13,
-                          textDecorationLine: "underline",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: c.border + "99",
+                          backgroundColor: c.muted + "4D",
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
                         }}
                       >
-                        {s.title || s.url}
-                      </Text>
-                    </Pressable>
-                  ))}
+                        <View
+                          style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: 6,
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: "#995AF21F",
+                          }}
+                        >
+                          <Globe size={14} color="#995AF2" />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              color: c.foreground + "E6",
+                              fontSize: 12,
+                              fontFamily: "Inter_600SemiBold",
+                            }}
+                          >
+                            {s.title || sourceHostname(s.url)}
+                          </Text>
+                          <Text
+                            numberOfLines={1}
+                            style={{ color: c.mutedForeground + "B3", fontSize: 10 }}
+                          >
+                            {sourceHostname(s.url)}
+                          </Text>
+                        </View>
+                        <ExternalLink size={14} color={c.mutedForeground + "80"} />
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               )}
 
-              <OraAssistantExtras
-                message={message}
-                onSuggestion={onSuggestion}
-                onSaveMemory={onSaveMemory}
-              />
+              <OraAssistantExtras message={message} onSaveMemory={onSaveMemory} />
             </>
           )}
         </Pressable>
@@ -2978,6 +3043,9 @@ function MessageBubble({
               </Pressable>
             )}
           </View>
+        )}
+        {!message.pending && !message.isStreaming && !message.error && (
+          <OraSuggestions suggestions={message.suggestions} onPress={onSuggestion} />
         )}
       </View>
     </View>

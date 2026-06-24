@@ -120,6 +120,25 @@ not "fix" it by hardcoding blue.
 **How to apply:** if mobile must match a blue website screenshot, verify the SAME
 account is signed in and `session.tier` actually resolves to "core" on mobile.
 
+## AI-response rendering parity (Screen 2 full reply)
+
+Progressive token streaming on mobile REQUIRES a client-side ~55ms yield after each
+SSE token (mirrors web `use-ora-chat.ts`): the dev proxy batches all SSE frames into
+one delivery, so without the yield the whole reply paints at once. This is a behavior
+contract, not a cosmetic delay — do not "optimize" it away.
+A post-first-token SSE interruption must KEEP the partial reply and show a destructive
+"Ora's response was cut off…" note beneath it (web `setError`), never blank it or turn
+the whole reply red.
+Streaming markdown must be sanitized before render while `isStreaming` (close an
+unclosed ``` fence, strip a trailing dangling `**`) or partial tokens render broken.
+Source citations render as CARDS (label row + per-source card): the globe chip color is
+a FIXED `hsl(265 85% 65%)` = `#995AF2`, NOT the tier accent (it coincidentally equals
+the free-tier accent). RN cursor is a separate blinking block below the text (inline
+end-of-block cursor isn't feasible with react-native-markdown-display) — acceptable.
+Assistant extras order mirrors web: web image gallery → video → memory-save chip →
+memories-used; follow-up suggestions render AFTER the message-actions row, not inside
+the extras block.
+
 ### Verified end-to-end tier path (don't re-investigate "purple = bug")
 
 The whole path was traced and is correct — there is NO mobile color/mapping bug:

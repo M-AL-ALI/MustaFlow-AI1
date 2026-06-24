@@ -49,6 +49,12 @@ export interface OraMessage extends OraMessageData {
   /** True while this assistant message is still being streamed token-by-token. */
   isStreaming?: boolean;
   /**
+   * True when an SSE stream was interrupted AFTER the first token. The partial
+   * reply is kept and a "response was cut off" note is shown beneath it
+   * (mirrors the web hook's partial-content error behavior).
+   */
+  streamCutOff?: boolean;
+  /**
    * True when this reply did NOT use real provider-level token streaming —
    * either the SSE stream fell back to /chat or the provider wrapped a single
    * completion in the SSE envelope. Useful for developer monitoring.

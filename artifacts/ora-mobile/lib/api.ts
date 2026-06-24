@@ -283,6 +283,9 @@ export async function streamChatNative(
           firstTokenReceived = true;
           accumulated += text;
           onToken(text);
+          // Yield ~55ms between tokens (mirrors web use-ora-chat.ts) so batched
+          // SSE frames render progressively, word-by-word, instead of all at once.
+          await new Promise<void>((resolve) => setTimeout(resolve, 55));
         } else if (type === "done") {
           donePayload = (parsed as { payload: StreamDonePayload }).payload;
         } else if (type === "error") {
