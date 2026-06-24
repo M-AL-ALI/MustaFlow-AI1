@@ -193,13 +193,10 @@ export function OraAtom({
       <Animated.View style={[layer, spinStyle]} pointerEvents="none">
         <Svg width={size} height={size}>
           <Circle cx={cx + orbitR} cy={cy} r={electronR} fill={accentColor} />
-          <Circle
-            cx={cx - orbitR}
-            cy={cy}
-            r={electronR * 0.7}
-            fill={accentColor}
-            fillOpacity={0.7}
-          />
+          {/* Small forward electron — fixed cyan tint, mirroring the website
+              DynamicAtom's third electron (hsl(200 75% 70%)) which is the same
+              regardless of plan accent. */}
+          <Circle cx={cx - orbitR} cy={cy} r={electronR * 0.7} fill="#79C6EC" fillOpacity={0.9} />
         </Svg>
       </Animated.View>
 

@@ -2798,7 +2798,7 @@ function MessageBubble({
 
   return (
     <View style={{ flexDirection: "row", gap: 10, maxWidth: "100%" }}>
-      <OraAtom size={24} accentColor={accentColor} style={{ marginTop: 2 }} />
+      <OraAtom size={24} accentColor={accentColor} animated style={{ marginTop: 2 }} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Pressable
           onLongPress={triggerLongPress}

@@ -45,7 +45,7 @@ export function OraThinkingRow({ accentColor, label }: { accentColor: string; la
 
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-      <OraAtom size={24} accentColor={accentColor} style={{ marginTop: 2 }} />
+      <OraAtom size={24} accentColor={accentColor} animated style={{ marginTop: 2 }} />
       <View style={{ gap: 4, paddingTop: 2 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <ThinkingDot accentColor={accentColor} delay={0} />
