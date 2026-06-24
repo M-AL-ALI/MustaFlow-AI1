@@ -65,6 +65,19 @@ unconditionally; the `if (!animated)` static branch comes AFTER all hooks so exi
 call sites keep the exact old snapshot (no other-screen change). Do NOT import the web
 `DynamicAtom` (DOM/CSS-only, crashes RN). Only the empty-state hero passes `animated`.
 
+## Header overflow menu is a bottom-sheet, not the web popover (Screen 1)
+
+Web Ora's header right-side controls live in a desktop popover; the native header puts
+the same actions in a bottom-sheet (`OraHeaderMenu`, mirrors PlusMenu/MessageActionsSheet
+idiom). **Why:** popovers are a desktop idiom; bottom-sheet is the iOS-native pattern and
+reuses existing sheet primitives (ActionRow/ToolRow/SheetSectionLabel). **How to apply:**
+two intentional contents deviations — New chat + Conversations live INSIDE the menu
+(mobile has no persistent sidebar), and "Reply language" moved OUT of PlusMenu into this
+menu so language lives with the other header settings. Header right side itself = voice
+orb (`OraVoiceOrb`) + contextual export (Download, only when messages>0) + overflow.
+Match web exactly on: language label "Auto Detect" (not "Auto"), close the sheet after
+toggling Voice responses, and disable New chat + Clear conversation while `sending`.
+
 ## The "is this TestFlight or the website?" tell — check the Safari bar
 
 The user repeatedly sends WEBSITE screenshots believing they are the TestFlight app.

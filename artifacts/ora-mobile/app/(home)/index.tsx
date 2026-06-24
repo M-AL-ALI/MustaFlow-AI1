@@ -16,10 +16,11 @@ import {
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   AlertCircle,
   ArrowUp,
+  Brain,
   Camera,
   Check,
   ChevronDown,
@@ -44,6 +45,7 @@ import {
   Lock,
   MessageSquare,
   Mic,
+  MoreHorizontal,
   Pencil,
   PhoneCall,
   Plus,
@@ -77,6 +79,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Markdown } from "@/components/Markdown";
 import { OraAssistantExtras, OraAttachmentChip } from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
+import { OraVoiceOrb } from "@/components/ora/OraVoiceOrb";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -112,6 +115,7 @@ import {
   streamChatNative,
   synthesizeSpeech,
   transcribeAudio,
+  updatePreferences,
   uploadFile,
 } from "@/lib/api";
 import type {
@@ -271,17 +275,6 @@ function datasetActionPlanCsv(message: OraMessage): string | null {
 
 const DATASET_TYPES = ["csv", "xlsx", "xls"];
 
-function formatReset(resetsAt: string | null | undefined): string {
-  if (!resetsAt) return "";
-  const ms = new Date(resetsAt).getTime() - Date.now();
-  if (ms <= 0) return "";
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.floor((ms % 3_600_000) / 60_000);
-  if (h > 0) return `resets in ${h}h`;
-  if (m > 0) return `resets in ${m}m`;
-  return "resetting soon";
-}
-
 // Mirrors website Ora EXAMPLE_CHIPS in ora-panel.tsx
 const EXAMPLE_CHIPS = [
   "Plan an app idea",
@@ -294,7 +287,7 @@ const EXAMPLE_CHIPS = [
 
 // Matches website Ora LANGUAGES constant in ora-panel.tsx
 const LANGUAGES = [
-  { value: "auto", label: "Auto" },
+  { value: "auto", label: "Auto Detect" },
   { value: "en", label: "English" },
   { value: "ar", label: "Arabic" },
   { value: "es", label: "Spanish" },
@@ -313,61 +306,6 @@ function tierLabel(tier: string | null | undefined): string {
   if (tier === "core") return "Core Pack";
   if (tier === "wave") return "Deep Wave";
   return "Free";
-}
-
-function OraLogoTitle({ accentColor }: { accentColor: string }) {
-  const c = useColors();
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <View
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 16,
-          alignItems: "center",
-          justifyContent: "center",
-          borderWidth: 1,
-          borderColor: accentColor,
-          backgroundColor: `${accentColor}18`,
-        }}
-      >
-        <View
-          style={{
-            position: "absolute",
-            width: 26,
-            height: 10,
-            borderRadius: 999,
-            borderWidth: 1,
-            borderColor: `${accentColor}99`,
-            transform: [{ rotate: "28deg" }],
-          }}
-        />
-        <View
-          style={{
-            position: "absolute",
-            width: 26,
-            height: 10,
-            borderRadius: 999,
-            borderWidth: 1,
-            borderColor: `${accentColor}99`,
-            transform: [{ rotate: "-28deg" }],
-          }}
-        />
-        <Image
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          source={require("../../assets/logo.png")}
-          style={{ width: 20, height: 20, borderRadius: 5 }}
-          contentFit="contain"
-        />
-      </View>
-      <Text
-        numberOfLines={1}
-        style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
-      >
-        Ora
-      </Text>
-    </View>
-  );
 }
 
 function attachmentKind(fileType: string, isImage: boolean): Attachment["kind"] {
@@ -465,6 +403,8 @@ export default function OraChatScreen() {
   const temporaryRef = useRef(false);
   temporaryRef.current = temporary;
   const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const router = useRouter();
   const [actionsMessage, setActionsMessage] = useState<OraMessage | null>(null);
 
   const [voiceLang, setVoiceLang] = useState("en");
@@ -869,7 +809,17 @@ export default function OraChatScreen() {
         }
       }
     },
-    [sending, messages, mode, temporary, scrollToEnd, persist, scheduleTalkRestart, isSignedIn],
+    [
+      sending,
+      messages,
+      mode,
+      temporary,
+      language,
+      scrollToEnd,
+      persist,
+      scheduleTalkRestart,
+      isSignedIn,
+    ],
   );
 
   const handleSend = useCallback(async () => {
@@ -1436,6 +1386,22 @@ export default function OraChatScreen() {
     setInput("");
   }, [sending]);
 
+  // Header overflow menu: flip the "Voice responses on" preference and persist
+  // it, mirroring the website auto-read toggle (settings.autoReadReplies).
+  const toggleVoiceResponses = useCallback(() => {
+    setAutoReadReplies((prev) => {
+      const next = !prev;
+      updatePreferences({ autoReadReplies: next }).catch(() => {});
+      return next;
+    });
+    setShowHeaderMenu(false);
+  }, []);
+
+  const openMemoryScreen = useCallback(() => {
+    setShowHeaderMenu(false);
+    router.push("/memory");
+  }, [router]);
+
   const toggleTalkMode = useCallback(() => {
     const next = !talkMode;
     setTalkMode(next);
@@ -1663,13 +1629,6 @@ export default function OraChatScreen() {
     [conversationId, refreshChatLists],
   );
 
-  const usageText = session
-    ? (() => {
-        const reset = formatReset(session.resetsAt);
-        return `${session.msgCount}/${session.msgLimit} messages${reset ? ` · ${reset}` : ""}`;
-      })()
-    : "Loading…";
-
   // Mirrors website: deepAllowed = tier === "core" || tier === "wave"
   // Free / anonymous users are gated to Instant mode only.
   const deepAllowed = session?.tier === "core" || session?.tier === "wave";
@@ -1711,6 +1670,18 @@ export default function OraChatScreen() {
             ? "Speak naturally - Ora answers when you pause"
             : "Tap the mic or wait for Ora to listen";
 
+  // Header subtitle mirrors the website's transient status line: it only shows
+  // while Ora is busy, and is blank otherwise (no usage counter in the header).
+  const headerStatus = sending
+    ? "Thinking…"
+    : speakingId
+      ? "Speaking…"
+      : transcribing
+        ? "Transcribing…"
+        : recording
+          ? "Listening…"
+          : undefined;
+
   // The most recent settled assistant message is the only one eligible for the
   // Regenerate action (mirrors ChatGPT, which only regenerates the last reply).
   let lastAssistantId: string | null = null;
@@ -1736,11 +1707,20 @@ export default function OraChatScreen() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader
         title="Ora"
-        titleNode={<OraLogoTitle accentColor={tierAccent} />}
-        subtitle={usageText}
-        right={
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            {session?.tier && (
+        titleNode={
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
+            <OraAtom size={28} accentColor={tierAccent} animated />
+            <Text
+              style={{
+                color: c.foreground,
+                fontFamily: "Inter_600SemiBold",
+                fontSize: 14,
+                letterSpacing: -0.2,
+              }}
+            >
+              Ora
+            </Text>
+            {isSignedIn && session?.tier ? (
               <View
                 style={{
                   paddingHorizontal: 8,
@@ -1749,7 +1729,6 @@ export default function OraChatScreen() {
                   borderWidth: 1,
                   borderColor: tierAccentColor(session.tier),
                   backgroundColor: tierAccentColor(session.tier) + "20",
-                  marginRight: 2,
                 }}
               >
                 <Text
@@ -1762,29 +1741,71 @@ export default function OraChatScreen() {
                   {tierLabel(session.tier)}
                 </Text>
               </View>
+            ) : !isSignedIn ? (
+              <View
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: c.border,
+                }}
+              >
+                <Text
+                  style={{ color: c.mutedForeground, fontSize: 10, fontFamily: "Inter_500Medium" }}
+                >
+                  Free · No sign-in required
+                </Text>
+              </View>
+            ) : null}
+            {temporary && (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 3,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: tierAccent,
+                  backgroundColor: tierAccent + "20",
+                }}
+              >
+                <Ghost size={11} color={tierAccent} />
+                <Text style={{ color: tierAccent, fontSize: 10, fontFamily: "Inter_500Medium" }}>
+                  Temporary
+                </Text>
+              </View>
+            )}
+          </View>
+        }
+        subtitle={headerStatus}
+        right={
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <OraVoiceOrb
+              active={talkMode}
+              listening={recording}
+              speaking={!!speakingId}
+              onPress={toggleTalkMode}
+            />
+            {messages.length > 0 && (
+              <Pressable
+                onPress={() => void handleExportConversationMarkdown()}
+                hitSlop={8}
+                style={{ padding: 4 }}
+                accessibilityLabel="Export conversation"
+              >
+                <Download size={20} color={c.foreground} />
+              </Pressable>
             )}
             <Pressable
-              onPress={toggleTemporary}
+              onPress={() => setShowHeaderMenu(true)}
               hitSlop={8}
-              disabled={sending}
-              style={{ padding: 6, opacity: sending ? 0.4 : 1 }}
-              accessibilityLabel={temporary ? "Turn off temporary chat" : "Start temporary chat"}
+              style={{ padding: 4 }}
+              accessibilityLabel="More options"
             >
-              <Ghost size={22} color={temporary ? tierAccent : c.foreground} />
-            </Pressable>
-            <Pressable
-              onPress={toggleTalkMode}
-              hitSlop={8}
-              style={{ padding: 6 }}
-              accessibilityLabel={talkMode ? "Exit Talk to Ora" : "Talk to Ora"}
-            >
-              <PhoneCall size={22} color={talkMode ? tierAccent : c.foreground} />
-            </Pressable>
-            <Pressable onPress={openConversations} hitSlop={8} style={{ padding: 6 }}>
-              <History size={22} color={c.foreground} />
-            </Pressable>
-            <Pressable onPress={newChat} hitSlop={8} style={{ padding: 6 }}>
-              <Plus size={22} color={c.foreground} />
+              <MoreHorizontal size={22} color={c.foreground} />
             </Pressable>
           </View>
         }
@@ -2400,7 +2421,6 @@ export default function OraChatScreen() {
       <PlusMenu
         visible={showPlusMenu}
         mode={mode}
-        language={language}
         deepAllowed={deepAllowed}
         accentColor={tierAccent}
         onClose={() => setShowPlusMenu(false)}
@@ -2420,7 +2440,37 @@ export default function OraChatScreen() {
           setMode(m);
           setShowPlusMenu(false);
         }}
+      />
+
+      <OraHeaderMenu
+        visible={showHeaderMenu}
+        accentColor={tierAccent}
+        isSignedIn={!!isSignedIn}
+        hasMessages={messages.length > 0}
+        temporary={temporary}
+        language={language}
+        autoReadReplies={autoReadReplies}
+        sending={sending}
+        onClose={() => setShowHeaderMenu(false)}
         onSelectLanguage={(lang) => setLanguage(lang)}
+        onToggleVoiceResponses={toggleVoiceResponses}
+        onNewChat={() => {
+          setShowHeaderMenu(false);
+          newChat();
+        }}
+        onOpenConversations={() => {
+          setShowHeaderMenu(false);
+          void openConversations();
+        }}
+        onOpenMemory={openMemoryScreen}
+        onToggleTemporary={() => {
+          setShowHeaderMenu(false);
+          toggleTemporary();
+        }}
+        onClearConversation={() => {
+          setShowHeaderMenu(false);
+          newChat();
+        }}
       />
 
       <MessageActionsSheet
@@ -3383,7 +3433,6 @@ function ProjectEditorModal({
 function PlusMenu({
   visible,
   mode,
-  language,
   deepAllowed,
   accentColor,
   onClose,
@@ -3391,11 +3440,9 @@ function PlusMenu({
   onPickPhoto,
   onBrowseFiles,
   onSelectMode,
-  onSelectLanguage,
 }: {
   visible: boolean;
   mode: OraMode;
-  language: string;
   deepAllowed: boolean;
   accentColor: string;
   onClose: () => void;
@@ -3403,7 +3450,6 @@ function PlusMenu({
   onPickPhoto: () => void;
   onBrowseFiles: () => void;
   onSelectMode: (mode: OraMode) => void;
-  onSelectLanguage: (lang: string) => void;
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -3464,21 +3510,142 @@ function PlusMenu({
               }
             }}
           />
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
-          <SheetSectionLabel label="Reply language" />
-          {LANGUAGES.map((l) => (
+function OraHeaderMenu({
+  visible,
+  accentColor,
+  isSignedIn,
+  hasMessages,
+  temporary,
+  language,
+  autoReadReplies,
+  sending,
+  onClose,
+  onSelectLanguage,
+  onToggleVoiceResponses,
+  onNewChat,
+  onOpenConversations,
+  onOpenMemory,
+  onToggleTemporary,
+  onClearConversation,
+}: {
+  visible: boolean;
+  accentColor: string;
+  isSignedIn: boolean;
+  hasMessages: boolean;
+  temporary: boolean;
+  language: string;
+  autoReadReplies: boolean;
+  sending: boolean;
+  onClose: () => void;
+  onSelectLanguage: (lang: string) => void;
+  onToggleVoiceResponses: () => void;
+  onNewChat: () => void;
+  onOpenConversations: () => void;
+  onOpenMemory: () => void;
+  onToggleTemporary: () => void;
+  onClearConversation: () => void;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View
+          style={{
+            backgroundColor: c.card,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            paddingTop: 8,
+            paddingBottom: insets.bottom + 12,
+          }}
+        >
+          <View
+            style={{
+              alignSelf: "center",
+              width: 40,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: c.border,
+              marginBottom: 8,
+            }}
+          />
+          <ScrollView bounces={false}>
+            <SheetSectionLabel label="Chat" />
+            <ActionRow icon={Plus} label="New chat" onPress={onNewChat} disabled={sending} />
+            <ActionRow icon={History} label="Conversations" onPress={onOpenConversations} />
+
+            <SheetSectionLabel label="Reply language" />
+            {LANGUAGES.map((l) => (
+              <ToolRow
+                key={l.value}
+                icon={Globe}
+                label={l.label}
+                active={language === l.value}
+                accentColor={accentColor}
+                onPress={() => {
+                  onSelectLanguage(l.value);
+                  onClose();
+                }}
+              />
+            ))}
+
+            <SheetSectionLabel label="Voice" />
             <ToolRow
-              key={l.value}
-              icon={Globe}
-              label={l.label}
-              active={language === l.value}
+              icon={autoReadReplies ? Volume2 : VolumeX}
+              label="Voice responses"
+              sublabel={autoReadReplies ? undefined : "Off"}
+              active={autoReadReplies}
               accentColor={accentColor}
-              onPress={() => {
-                onSelectLanguage(l.value);
-                onClose();
-              }}
+              onPress={onToggleVoiceResponses}
             />
-          ))}
+
+            {isSignedIn && (
+              <>
+                <SheetSectionLabel label="Memory" />
+                <ActionRow icon={Brain} label="Ora memory" onPress={onOpenMemory} />
+                <ToolRow
+                  icon={Ghost}
+                  label="Temporary chat"
+                  sublabel={temporary ? undefined : "Off"}
+                  active={temporary}
+                  accentColor={accentColor}
+                  onPress={onToggleTemporary}
+                />
+              </>
+            )}
+
+            {hasMessages && (
+              <>
+                <SheetSectionLabel label="Conversation" />
+                <Pressable
+                  onPress={onClearConversation}
+                  disabled={sending}
+                  accessibilityLabel="Clear conversation"
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 14,
+                    paddingVertical: 14,
+                    paddingHorizontal: 20,
+                    opacity: sending ? 0.4 : 1,
+                  }}
+                >
+                  <Trash2 size={20} color="#EF4444" />
+                  <Text style={{ color: "#EF4444", fontFamily: "Inter_500Medium", fontSize: 15 }}>
+                    Clear conversation
+                  </Text>
+                </Pressable>
+              </>
+            )}
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -3729,15 +3896,18 @@ function ActionRow({
   icon: Icon,
   label,
   onPress,
+  disabled,
 }: {
   icon: React.ComponentType<{ size?: number; color?: string }>;
   label: string;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   const c = useColors();
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityLabel={label}
       style={{
         flexDirection: "row",
@@ -3745,6 +3915,7 @@ function ActionRow({
         gap: 14,
         paddingVertical: 14,
         paddingHorizontal: 20,
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       <Icon size={20} color={c.foreground} />
