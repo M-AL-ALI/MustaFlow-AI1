@@ -19,6 +19,10 @@
 
 import { findClerkUserByEmail } from "./clerk-users";
 
+// Ora treats the allowlisted owner as Core when no explicit paid Ora
+// subscription row exists. Real Core/Wave subscriptions still take precedence.
+export const SUPERUSER_ORA_TIER = "core";
+
 // Case-insensitive email allowlist. Compared in lowercase.
 const SUPERUSER_EMAILS: ReadonlyArray<string> = ["mus_192@yahoo.com"].map((e) =>
   e.trim().toLowerCase(),

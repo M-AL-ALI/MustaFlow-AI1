@@ -44,7 +44,7 @@ import {
   stripePriceIdForPlan,
   resolveWorkspacePlan,
 } from "../lib/plans";
-import { isSuperuser } from "../lib/superusers";
+import { isSuperuser, SUPERUSER_ORA_TIER } from "../lib/superusers";
 import { logger } from "../lib/logger";
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
@@ -1109,13 +1109,22 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
     return;
   }
   const sub = await getOrCreateSubscription(userId);
+  const superuser = await isSuperuser(userId);
+  const effectiveTier =
+    sub.tier === "core" || sub.tier === "wave"
+      ? sub.tier
+      : superuser
+        ? SUPERUSER_ORA_TIER
+        : sub.tier;
   const tierMeta =
-    SUBSCRIPTION_TIERS_META.find((t) => t.id === sub.tier) ?? SUBSCRIPTION_TIERS_META[0];
+    SUBSCRIPTION_TIERS_META.find((t) => t.id === effectiveTier) ?? SUBSCRIPTION_TIERS_META[0];
   const configured = await stripeAvailable();
   const publishableKey = configured ? ((await getStripePublishableKey()) ?? "") : "";
   res.json({
-    tier: sub.tier,
+    tier: effectiveTier,
     status: sub.status,
+    sourceTier: sub.tier,
+    isSuperuser: superuser,
     currentPeriodEnd: sub.currentPeriodEnd,
     gracePeriodEnd: sub.gracePeriodEnd,
     cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
@@ -1131,7 +1140,7 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
       maxConcurrentBuilds: t.maxConcurrentBuilds,
       features: t.features,
       available: configured || t.id === "free",
-      current: sub.tier === t.id,
+      current: effectiveTier === t.id,
     })),
   });
 });

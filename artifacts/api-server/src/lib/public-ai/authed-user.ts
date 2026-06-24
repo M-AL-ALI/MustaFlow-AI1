@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import { getAuth } from "@clerk/express";
 import { eq } from "drizzle-orm";
+import { isSuperuser, SUPERUSER_ORA_TIER } from "../superusers";
 
 // Tiers permitted to use Deep Thinking + connectors. Free is Instant-only.
 export const PAID_TIERS = new Set(["core", "wave"]);
@@ -37,6 +38,9 @@ export async function resolveTierForUser(userId: string): Promise<AuthedOraUser>
     if (sub && ACTIVE_SUBSCRIPTION_STATUSES.has(sub.status)) tier = sub.tier ?? "free";
   } catch {
     // user_subscriptions may be unavailable in some envs — default to free.
+  }
+  if (!PAID_TIERS.has(tier) && (await isSuperuser(userId))) {
+    tier = SUPERUSER_ORA_TIER;
   }
   return { userId, tier, isPaid: PAID_TIERS.has(tier) };
 }
