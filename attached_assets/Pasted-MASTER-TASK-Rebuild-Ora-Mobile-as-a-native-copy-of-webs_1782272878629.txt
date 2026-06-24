@@ -1,0 +1,683 @@
+MASTER TASK: Rebuild Ora Mobile as a native copy of website Ora, using website Ora source as the only visual/logic source of truth.
+
+Do not use the current mobile UI as the source of truth.
+Do not claim parity from code only.
+Do not submit TestFlight until screenshots are approved.
+Work screen by screen, but use this whole website Ora specification as the global contract.
+
+Primary website source files:
+- artifacts/mustaflow/src/components/ora-panel.tsx
+- artifacts/mustaflow/src/components/ora/dynamic-atom.tsx
+- artifacts/mustaflow/src/components/ora/ora-voice-mode-button.tsx
+- artifacts/mustaflow/src/components/ora/ora-voice-button.tsx
+- artifacts/mustaflow/src/components/ora/ora-source-cards.tsx
+- artifacts/mustaflow/src/components/ora/ora-media-cards.tsx
+- artifacts/mustaflow/src/components/ora/ora-memory-save-chip.tsx
+- artifacts/mustaflow/src/components/ora/ora-message-actions.tsx
+- artifacts/mustaflow/src/components/layout/ora-sidebar.tsx
+- artifacts/mustaflow/src/pages/ora.tsx
+- artifacts/mustaflow/src/pages/ora-settings.tsx
+- artifacts/mustaflow/src/pages/ora-memory.tsx
+- artifacts/mustaflow/src/pages/ora-library.tsx
+- artifacts/mustaflow/src/pages/orax.tsx
+- artifacts/mustaflow/src/pages/help.tsx
+- artifacts/mustaflow/src/pages/billing.tsx
+- artifacts/mustaflow/src/hooks/use-ora-chat.ts
+
+Hard isolation:
+- No AI Builder UI.
+- No Builder CTA.
+- No Builder handoff.
+- No /api/builder/*.
+- No /api/public-ai/handoff/*.
+- No mobile-side model/provider routing.
+- Mobile must call Ora backend endpoints and let backend route OpenAI/Gemini/DeepSeek/Anthropic/etc.
+
+GLOBAL WEBSITE ORA VISUAL SYSTEM
+
+Theme:
+- Website uses CSS tokens from index.css.
+- Light:
+  - background: hsl(235 30% 98%)
+  - foreground: hsl(235 50% 10%)
+  - border: hsl(235 20% 90%)
+  - card: white
+  - muted: hsl(235 20% 94%)
+  - muted foreground: hsl(235 20% 40%)
+- Dark:
+  - background: hsl(235 45% 6%)
+  - foreground: white
+  - border: hsl(235 30% 16%)
+  - card: hsl(235 40% 8%)
+  - muted: hsl(235 30% 14%)
+  - muted foreground: hsl(235 20% 70%)
+- Website default is dark unless user/system says otherwise, but mobile should follow iPhone system by default with Settings override System / Light / Dark.
+
+Typography:
+- Website CSS declares Plus Jakarta Sans but only Inter is actually loaded in index.html.
+- Mobile should use Inter.
+- Chat text is calm, compact, not oversized.
+- Avoid generic mobile card-heavy styling.
+
+Plan accent colors:
+- Free: hsl(265 85% 65%) purple
+- Core Pack: hsl(217 90% 60%) blue
+- Deep Wave: hsl(35 85% 60%) amber
+- Accent applies to:
+  - atom
+  - “Ora” word in empty state
+  - tier badge
+  - focused composer border/ring
+  - active mode/language rows
+  - temporary active state
+  - generated file cards
+  - memory chips
+  - source/media accent icons where website uses Ora accent
+
+HEADER / TOP BAR
+
+Website Ora header:
+- Sticky on full /ora page.
+- Height is compact: px-4 py-3.
+- Border bottom: border-border/50.
+- Full layout uses bg-background/85 with backdrop blur.
+- Left side:
+  - DynamicAtom size 28.
+  - Text “Ora” at text-sm font-semibold tracking-tight.
+  - Tier badge next to title if signed in.
+  - If anonymous: small pill “Free · No sign-in required”.
+  - If temporary: small Ghost pill “Temporary”.
+  - If status not idle: small muted animated status text.
+- Right side:
+  - Talk with Ora button using OraVoiceModeButton.
+  - Export conversation button when messages exist.
+  - Overflow MoreHorizontal menu.
+
+Tier badge:
+- Text size 10px.
+- Rounded full.
+- px-1.5 py-0.5.
+- Border uses plan accent with opacity.
+- Background uses plan accent with very low opacity.
+- Labels exactly:
+  - Free
+  - Core Pack
+  - Deep Wave
+
+Overflow menu:
+- Popover min-width around 200px.
+- bg-popover, border, rounded-xl, shadow-xl.
+- Sections:
+  - Language
+  - voice responses / read aloud
+  - memory/reference toggles
+  - temporary chat
+  - clear conversation
+- Language options exactly:
+  - Auto Detect
+  - English
+  - Arabic
+  - Spanish
+  - French
+- Use Globe icon.
+- Selected language uses tier accent.
+
+MAIN EMPTY STATE
+
+Website full Ora empty state:
+- Centered in available space.
+- Container max width: max-w-3xl.
+- Text aligned center.
+- Atom:
+  - DynamicAtom state based on Ora status.
+  - Size 52.
+  - Centered.
+  - mb-5.
+  - Animated, not static.
+  - Outer glow/halo, pulsing core, orbiting electrons.
+  - Tinted by current plan accent.
+- Heading:
+  - “Hi, I’m Ora”
+  - text-2xl on mobile web, sm:text-3xl on wider screens.
+  - font-bold.
+  - tracking-tight.
+  - The word “Ora” uses tier accent.
+- Subtitle:
+  - text-sm.
+  - text-muted-foreground.
+  - mt-2.5.
+  - max-w-md.
+  - mx-auto.
+  - leading-relaxed.
+  - Exact copy:
+    “Ask anything, think things through, or get work done — planning, strategy, files, images, and more, all in one chat.”
+- Example chips:
+  - mt-7.
+  - flex wrap center.
+  - gap-2.
+  - text-xs.
+  - px-3.5 py-2.
+  - rounded-full.
+  - border border-border/60.
+  - muted text.
+  - hover/active border uses tier accent.
+  - Tapping chip sends the prompt.
+- Exact six chips:
+  - Plan an app idea
+  - Find the root cause of a problem
+  - Can MustaFlow build X?
+  - Help me think through a strategy
+  - What can I build with MustaFlow?
+  - Analyze a business idea
+
+MESSAGE LAYOUT
+
+Feed:
+- Full layout width max-w-3xl.
+- Centered.
+- Vertical spacing around space-y-6.
+- User rows justify-end.
+- Assistant rows justify-start with atom avatar.
+- Assistant has DynamicAtom size 24, mt-0.5, gap-2.5.
+
+User message:
+- Subtle, not bright.
+- bg-muted/60.
+- rounded-2xl.
+- rounded-tr-sm.
+- px-3.5 py-2.5.
+- text-foreground.
+- whitespace-pre-wrap.
+- break-words.
+- leading-relaxed.
+- Full layout text size 15px.
+- Attached file chip inside user bubble:
+  - rounded-lg
+  - border tier accent /0.35
+  - background tier accent /0.07
+  - icons:
+    - ImageIcon for images
+    - Table2 for datasets
+    - FileText for documents
+
+Assistant message:
+- No heavy card bubble.
+- Bubble-less rich text.
+- Assistant content sits beside atom avatar.
+- Text:
+  - leading-relaxed
+  - whitespace-pre-wrap
+  - break-words
+  - full layout text-[15px]
+  - text-foreground/90
+- Uses OraRichText for markdown/streaming.
+- During streaming, blank assistant placeholder is hidden until content arrives.
+
+Assistant extras:
+- DatasetResultCard for dataset analysis.
+- Generated image:
+  - rounded-xl
+  - border border-border/60
+  - max width around max-w-sm.
+  - Generated images can be edited if imageId exists.
+- Image edit UI:
+  - input placeholder “Describe the change, e.g. make the sky purple”
+  - Apply edit button uses Wand2.
+  - Cancel button.
+- Generated file card:
+  - rounded-xl
+  - border tier accent /0.35
+  - bg tier accent /0.06
+  - hover bg /0.12
+  - icon FileSpreadsheet in accent box.
+  - Download icon on right.
+- Sources:
+  - OraSourceCards under message.
+  - Header “Sources” with Globe icon.
+  - Compact vertical cards.
+- Images:
+  - OraImageGallery.
+  - Grid thumbnails.
+- Videos:
+  - OraVideoCards.
+  - Play icon, thumbnail, embed/play behavior.
+- Memory:
+  - OraMemorySaveChip.
+  - OraMemoriesUsedChip.
+  - OraDocumentMemoryChip.
+- Message actions:
+  - Desktop hover toolbar.
+  - Mobile more menu.
+  - Copy, edit user messages, export assistant, read aloud, regenerate latest assistant.
+
+COMPOSER
+
+Website composer is one unified bar, not separate floating buttons.
+
+Container:
+- rounded-xl.
+- border border-border/60.
+- bg-background/60.
+- px-2 py-1.5.
+- gap-2.
+- focus-within border: tier accent /0.4.
+- focus-within ring: tier accent /0.15.
+- transition-all.
+- On mobile web it wraps into two-tier composer:
+  - textarea full width on top
+  - action row below
+- On desktop it is one row.
+
+Inside composer:
+- Hidden file input accepts:
+  .pdf, .docx, .txt, .csv, .xlsx, .pptx, .png, .jpg, .jpeg, .webp
+- Compact mobile mode selector:
+  - button h-8.
+  - rounded-lg.
+  - bg-muted/40.
+  - px-2.5.
+  - text 11px.
+  - Icons:
+    - Zap for Instant
+    - Brain for Deep if allowed
+    - Lock for Deep if not allowed
+    - ChevronDown for menu.
+- Desktop mode toggle:
+  - hidden on mobile.
+  - rounded-lg bg-muted/40 p-0.5.
+  - buttons h-6 px-2 text 11px.
+  - Instant = Zap.
+  - Deep = Brain or Lock.
+  - Active mode has bg-background text-foreground shadow-sm.
+- Plus menu:
+  - Plus icon button h-7 w-7 rounded-lg.
+  - Active upload/file state uses tier accent background /0.12.
+  - Menu bottom popover min-w 200.
+  - Upload image or file.
+  - Generate file section with FileSpreadsheet.
+- Dictation button:
+  - OraDictationButton.
+  - Lives inside composer.
+  - This is speech-to-text only.
+  - Transcript lands in textarea.
+  - User sends manually.
+- Textarea:
+  - ref textareaRef.
+  - rows=1.
+  - bg transparent.
+  - py-1.5.
+  - text-sm.
+  - placeholder muted /60.
+  - max height 96px.
+  - disabled while loading.
+  - dir auto.
+- Placeholder logic:
+  - selected format: “Describe the [format label] you want…”
+  - attached image: “Ask about [filename]…”
+  - attached file: “Ask about [filename]…”
+  - normal: “Ask Ora anything…”
+- Send button:
+  - h-8 w-8 on mobile, h-7 w-7 desktop.
+  - rounded-lg.
+  - bg tier accent.
+  - white icon.
+  - disabled opacity 30%.
+  - Icon is Send, not ArrowUp.
+
+VOICE / MIC / TALK TO ORA
+
+Website has two separate voice systems.
+
+1. Normal dictation:
+- Component: OraDictationButton.
+- Lives in composer.
+- Button size md = h-7 w-7, icon h-4 w-4.
+- States:
+  - idle: Mic icon, muted text, hover foreground.
+  - listening: Square icon, red text, red ping ring.
+  - unsupported/denied: MicOff, muted/disabled.
+  - error: AlertCircle, amber.
+- Behavior:
+  - starts voice input.
+  - stops voice input.
+  - transcript lands in textarea.
+  - user presses Send manually.
+  - no auto-send.
+  - no auto-TTS.
+
+2. Talk with Ora / Voice Conversation Mode:
+- Header orb: OraVoiceModeButton.
+- Rounded-full orb, h-7 w-7.
+- Gradient from purple to blue.
+- Contains animated waveform bars, not plain mic.
+- Idle has subtle glow.
+- Listening has red ring/ping.
+- Speaking has speaking glow.
+- Unsupported/denied uses muted MicOff.
+- Error uses amber AlertCircle.
+- Behavior:
+  - tap starts live voice conversation mode.
+  - user speaks.
+  - transcript auto-sends.
+  - Ora replies.
+  - Ora reads aloud.
+  - listening restarts.
+  - user can interrupt, mute, end.
+- Voice conversation panel:
+  - replaces composer area while active.
+  - rounded-xl.
+  - border hsl(265 85% 65% / 0.3).
+  - bg hsl(265 85% 65% / 0.06).
+  - px-4 py-3.
+  - flex column gap-3.
+  - state row has waveform bars, label, sublabel, live dot/spinner.
+  - status text:
+    - “Ora is thinking…”
+    - “Ora is speaking…”
+    - “Listening…”
+    - “Transcribing…”
+    - “Microphone blocked”
+  - subtext:
+    - “Speak naturally — Ora will answer when you pause”
+    - “Processing your speech…”
+    - “Tap interrupt to speak”
+  - controls:
+    - mute/unmute
+    - interrupt
+    - end voice mode
+  - TTS unavailable notice:
+    - amber bordered row
+    - VolumeX icon
+    - text “Voice replies unavailable — Ora will reply in text only”
+
+SIDEBAR / CONVERSATIONS / PROJECTS
+
+Website /ora layout:
+- Full height: h-[100dvh].
+- bg-background.
+- flex column.
+- overflow hidden.
+- OraSidebar is always part of page.
+- ThemeToggle fixed top-3 right-3.
+- If active project, project header appears above chat.
+
+OraSidebar:
+- Contains nav items:
+  - ORAX, Code2 icon
+  - Memory, Brain icon
+  - Library, BookOpen icon
+  - Help Center, HelpCircle icon
+  - Report Issue, Bug icon
+  - My Support Tickets, LifeBuoy icon
+  - Settings, Settings icon
+- Must never link to AI Builder.
+- Usage widget:
+  - reads /api/public-ai/usage.
+  - shows message remaining, image remaining, reset countdown.
+  - MessageSquare, ImageIcon, Clock icons.
+  - Uses muted card styling or yellow warning if low.
+- Recent conversations:
+  - section label uppercase 10px.
+  - standalone conversations only.
+  - rows with MessageSquare icon.
+  - active row bg-primary/10 text-primary.
+  - hover bg-muted.
+  - rename Pencil, delete Trash2, move MoreHorizontal/FolderInput.
+- Projects:
+  - uppercase “Projects” label.
+  - plus button creates project.
+  - project row has ChevronDown/ChevronRight, Folder/FolderOpen.
+  - active project bg-primary/10 text-primary.
+  - nested conversations under border-left.
+  - project actions:
+    - new chat in project: MessageCirclePlus
+    - rename: Pencil
+    - delete: Trash2
+  - delete project moves conversations to Recent, does not delete them.
+- User section:
+  - bottom border top.
+  - avatar or initials.
+  - display name and email.
+  - menu:
+    - Ora settings
+    - Sign out
+
+PROJECT HEADER
+
+If a project is active:
+- border-b border-border.
+- bg-background/60.
+- px-4 py-3 pl-16.
+- centered max-w-3xl.
+- FolderOpen icon.
+- project name text-sm font-semibold.
+- optional description text-xs muted.
+- “New chat in this project” button:
+  - MessageCirclePlus icon.
+  - bg-primary.
+  - text-primary-foreground.
+  - rounded-md px-3 py-1.5 text-xs.
+
+SETTINGS
+
+Website Ora settings:
+- Uses OraSidebar + ThemeToggle.
+- Cards:
+  - Appearance
+  - Voice input
+  - Memory
+  - Chat / preferences
+  - Plan/usage/billing/account
+- Section card:
+  - border border-border.
+  - rounded-xl.
+  - bg-card.
+  - p-6.
+  - space-y-4.
+- Appearance:
+  - Dark / Light / System.
+  - icons Moon / Sun / Monitor.
+  - selected uses border-primary bg-primary/5 text-primary.
+- Voice input:
+  - Mic icon.
+  - select voice transcription language.
+  - Save button with Save icon.
+- Memory settings:
+  - reference saved memories.
+  - reference chat history.
+  - auto-save memories.
+  - ask before sensitive.
+- Billing/settings must reflect Ora plans, not Builder-only credit wallet.
+
+MEMORY CENTER
+
+Website Ora memory page:
+- Sidebar + ThemeToggle.
+- Tabs:
+  - Profile, User icon
+  - Saved Memories, Bookmark icon
+  - Preferences, SlidersHorizontal icon
+  - History, History icon
+  - Data Controls, ShieldAlert icon
+- Profile fields:
+  - preferred name
+  - preferred language
+  - occupation
+  - industry
+  - skill level
+  - goals
+  - preferred response style
+  - things to avoid
+- Inputs:
+  - rounded-md
+  - border border-border
+  - bg-background
+  - px-3 py-2
+  - text-sm
+  - focus ring.
+- Memory copy explicitly says memories are Ora-only and never shared with AI Builder.
+- Saved memories support create/edit/delete/restore/clear.
+
+LIBRARY
+
+Website Ora library:
+- Sidebar + ThemeToggle.
+- max-w-5xl.
+- Back to chat link with ArrowLeft.
+- Header row with Library icon.
+- Asset cards:
+  - file/image icons.
+  - image thumbnails loaded securely.
+  - open/download/delete actions.
+  - FileText, FileSpreadsheet, ImageIcon, Download, ExternalLink, Trash2.
+- Storage usage shown.
+- Pagination/load more.
+- Assets are Ora assets, not Builder project assets.
+
+HELP / SUPPORT
+
+Website help:
+- Public articles.
+- Search.
+- Category navigation.
+- FAQ accordion.
+- Article accordion.
+- Support chat isolated from normal Ora chat.
+- Escalate to ticket.
+- Attachments:
+  - max 5 files.
+  - 5 MB each.
+  - allowed image/pdf types.
+- Support chat/tickets must not touch Ora conversation history or Builder.
+
+ORAX
+
+Website ORAX:
+- Repos/tasks/capabilities style page.
+- Repository connection.
+- GitHub token support.
+- Scan repository.
+- Task thread.
+- Approvals.
+- Artifacts.
+- Sandbox/checks/commands/GitHub PR flow.
+- Must remain Ora/ORAX only; do not mix with AI Builder screens.
+
+BILLING / PLANS
+
+Website billing defines:
+Free:
+- 30 Ora messages every 5 hours.
+- 4 Ora images every 5 hours.
+- Unlimited file uploads to Ora.
+- Ora Instant replies.
+Core Pack:
+- 100 Ora messages every 3 hours.
+- 15 Ora images every 3 hours.
+- Unlimited file uploads to Ora.
+- Ora Instant + Deep Thinking.
+Deep Wave:
+- 280 Ora messages every 3 hours.
+- 30 Ora images every 3 hours.
+- Unlimited file uploads to Ora.
+- Ora Instant + Deep Thinking.
+
+Important:
+- Builder credits appear on the billing page, but Ora Mobile must not expose Builder product UI unless it is part of billing context only.
+- Ora Mobile plan state must use Ora session/subscription backend, not mobile-only logic.
+
+BACKEND / CHAT LOGIC
+
+Website hook:
+- use-ora-chat.ts is the source of truth.
+- Session:
+  - /api/public-ai/session.
+- Chat:
+  - /api/public-ai/chat.
+  - /api/public-ai/chat/stream.
+- Upload/analysis:
+  - image-analysis
+  - dataset-analysis
+  - file-analysis
+- Body fields:
+  - message
+  - messages
+  - mode: instant/deep
+  - referenceSavedMemories
+  - referenceChatHistory
+  - temporary
+  - conversationSummary
+  - summarizeMessages
+  - oraProjectId
+  - conversationId
+  - documentRefs
+  - language or languageHint
+- Temporary mode:
+  - no persisted history.
+  - no memory/history injection.
+  - clean slate when toggled.
+- Language:
+  - sessionStorage key ora_language.
+  - if not auto, sends language.
+  - otherwise sends languageHint.
+- Mode:
+  - sessionStorage key ora_mode.
+  - instant/deep only.
+- Rolling summary:
+  - keeps long conversations coherent.
+  - sends conversationSummary and summarizeMessages when history is on.
+- Project scoping:
+  - sends oraProjectId so backend injects project memories.
+- Conversation scoping:
+  - sends conversationId so backend excludes current conversation from recall.
+
+SERVER ROUTING
+
+Do not implement provider/model routing in mobile.
+Server routing lives in api-server public-ai model-router.
+Provider/model decisions include:
+- OpenAI
+- Anthropic
+- Gemini
+- DeepSeek
+- GPT image model for image generation/editing
+Mobile must only send mode/tier-relevant flags and display result.
+
+ACCEPTANCE PROCESS
+
+Replit must stop saying “done” from source alone.
+
+For each screen:
+1. Website source reference.
+2. Website screenshot or source-accurate mock if auth blocks screenshot.
+3. Current mobile screenshot from live dev build.
+4. Difference list.
+5. Fix.
+6. New mobile screenshot.
+7. User approval.
+8. Only then move to next screen.
+
+Screen order:
+1. Main empty chat.
+2. Chat with user + assistant messages.
+3. Composer focused + keyboard.
+4. Plus/tools menu.
+5. Mic dictation.
+6. Talk to Ora.
+7. Conversation/projects drawer.
+8. Settings.
+9. Memory Center.
+10. Library.
+11. Help/support.
+12. ORAX.
+13. Billing/plan/usage.
+14. Light/dark states.
+15. Free/Core/Wave states.
+
+Most important visual rule:
+Do not build a generic native chat UI.
+Build the website Ora panel translated into React Native.
+
+The user’s target is:
+Website Ora = Ora Mobile.
+Same identity, same structure, same styling language, same logic, same plan behavior, same backend routing, no Builder contamination.
