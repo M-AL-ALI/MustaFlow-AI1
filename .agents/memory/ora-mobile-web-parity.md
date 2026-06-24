@@ -120,6 +120,29 @@ not "fix" it by hardcoding blue.
 **How to apply:** if mobile must match a blue website screenshot, verify the SAME
 account is signed in and `session.tier` actually resolves to "core" on mobile.
 
+### Verified end-to-end tier path (don't re-investigate "purple = bug")
+
+The whole path was traced and is correct — there is NO mobile color/mapping bug:
+- Mobile `getOraSession()` (lib/api.ts) POSTs `/api/public-ai/session` through
+  `jsonRequest` → `authHeaders()` → `getAuthToken()`, which attaches
+  `Authorization: Bearer <Clerk token>` whenever signed in (+ `credentials:"include"`).
+- Backend `session.ts` calls `resolveAuthedOraUser(req)` → `getAuth(req)` (Clerk) →
+  `resolveTierForUser(userId)`, which reads `user_subscriptions` (active row required)
+  and returns `{userId, tier, isPaid}`. NOTE: the wire field is `tier`; internally
+  many OTHER public-ai routes read `authed.n`, but `resolveAuthedOraUser` itself
+  returns `tier`. The `/session` endpoint emits `tier` ONLY when `authed` is non-null.
+- Mobile reads `session.tier` (types.ts) → `tierAccentColor` → atom color.
+So: signed-in + active core sub → blue; signed-in free / no token (anonymous) → purple.
+A purple mobile atom therefore means the device's signed-in account is free/anon, not
+a code defect.
+
+**On-device diagnostic (the definitive check):** the in-app **Settings** screen
+(`app/(home)/settings.tsx`) fetches the same billing subscription as the website
+(`getSubscription()` → `subscription.tier`, ~L645) and shows the signed-in **email**,
+**Plan** (`planLabel`), usage, and a debug line `msgs X/Y, tier: Z` (~L522). Compare
+that to the website for the same account; they read the same `user_subscriptions`
+source so they must agree.
+
 ## The "is this TestFlight or the website?" tell — check the Safari bar
 
 The user repeatedly sends WEBSITE screenshots believing they are the TestFlight app.
