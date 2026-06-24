@@ -102,6 +102,37 @@ export function OraVoiceOrb({
     return () => loop.stop();
   }, [listening, ping]);
 
+  // Idle / speaking glow halo — mirrors the web orb's `ora-idle-glow` (subtle,
+  // when idle) and `ora-speaking-glow` (stronger, while speaking) pulsing
+  // box-shadow. Listening uses the red ping instead, so no purple glow there.
+  const glow = useRef(new Animated.Value(0)).current;
+  const glowActive = !isInert && !listening && (speaking || !active);
+  useEffect(() => {
+    if (!glowActive) {
+      glow.stopAnimation(() => glow.setValue(0));
+      return;
+    }
+    const dur = speaking ? 800 : 1750;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, {
+          toValue: 1,
+          duration: dur,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glow, {
+          toValue: 0,
+          duration: dur,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [glowActive, speaking, glow]);
+
   return (
     <Pressable
       onPress={() => {
@@ -141,6 +172,30 @@ export function OraVoiceOrb({
             backgroundColor: "rgba(248,113,113,0.35)",
             transform: [{ scale: ping.interpolate({ inputRange: [0, 1], outputRange: [1, 2] }) }],
             opacity: ping.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }),
+          }}
+        />
+      )}
+      {glowActive && (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            width: dim,
+            height: dim,
+            borderRadius: dim / 2,
+            backgroundColor: "rgba(144,76,240,0.5)",
+            transform: [
+              {
+                scale: glow.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, speaking ? 1.55 : 1.4],
+                }),
+              },
+            ],
+            opacity: glow.interpolate({
+              inputRange: [0, 1],
+              outputRange: [speaking ? 0.5 : 0.32, 0],
+            }),
           }}
         />
       )}
