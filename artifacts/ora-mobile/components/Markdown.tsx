@@ -53,10 +53,10 @@ export function Markdown({ children }: { children: string }) {
 
   const styles = {
     body: {
-      color: c.foreground,
+      color: c.foreground + "E6",
       fontFamily: "Inter_400Regular",
       fontSize: 15,
-      lineHeight: 22,
+      lineHeight: 24,
     },
     heading1: {
       color: c.foreground,

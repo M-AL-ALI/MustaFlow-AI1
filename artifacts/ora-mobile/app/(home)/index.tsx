@@ -1868,8 +1868,10 @@ export default function OraChatScreen() {
           data={messages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{
-            padding: 16,
-            gap: 14,
+            paddingHorizontal: 16,
+            paddingTop: 24,
+            paddingBottom: 32,
+            gap: 24,
             flexGrow: 1,
           }}
           onContentSizeChange={scrollToEnd}
@@ -2747,12 +2749,12 @@ function MessageBubble({
           onLongPress={triggerLongPress}
           delayLongPress={300}
           style={{
-            backgroundColor: c.muted,
-            borderRadius: 18,
-            borderBottomRightRadius: 4,
+            backgroundColor: c.muted + "99",
+            borderRadius: 16,
+            borderTopRightRadius: 4,
             paddingHorizontal: 14,
             paddingVertical: 10,
-            maxWidth: "86%",
+            maxWidth: "85%",
           }}
         >
           <OraAttachmentChip attachment={message.attachment} />
@@ -2762,7 +2764,7 @@ function MessageBubble({
                 color: c.foreground,
                 fontFamily: "Inter_400Regular",
                 fontSize: 15,
-                lineHeight: 21,
+                lineHeight: 24,
               }}
             >
               {message.content}
@@ -2775,7 +2777,7 @@ function MessageBubble({
 
   return (
     <View style={{ flexDirection: "row", gap: 10, maxWidth: "100%" }}>
-      <OraAtom size={26} accentColor={accentColor} style={{ marginTop: 2 }} />
+      <OraAtom size={24} accentColor={accentColor} style={{ marginTop: 2 }} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Pressable
           onLongPress={triggerLongPress}

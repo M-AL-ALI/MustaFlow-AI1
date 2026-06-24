@@ -78,6 +78,21 @@ orb (`OraVoiceOrb`) + contextual export (Download, only when messages>0) + overf
 Match web exactly on: language label "Auto Detect" (not "Auto"), close the sheet after
 toggling Voice responses, and disable New chat + Clear conversation while `sending`.
 
+## Mobile mirrors the website's `layout="full"` OraPanel branch, NOT the docked one (Screen 2)
+
+`pages/ora.tsx` renders `<OraPanel layout="full">`, so the mobile chat must match the
+`isFull` branch of ora-panel.tsx's message map, never the docked defaults:
+message-list `space-y-6` (24px gap) + `pt-6 pb-8`; user text `text-[15px]`; assistant
+text `text-[15px] text-foreground/90`; assistant column `flex-1 min-w-0`.
+User bubble = `bg-muted/60 rounded-2xl rounded-tr-sm` — the squared tail is on the
+**top-right** (not bottom-right), and the fill is muted at 60% alpha. Assistant row =
+atom avatar `size={24}` + `gap-2.5` (10px). Both text blocks use `leading-relaxed`
+(~24px line-height at 15px).
+**Why:** picking the wrong branch (docked text-sm / foreground-85 / space-y-5) silently
+desyncs spacing, opacity, and bubble shape from the real site.
+**How to apply:** RN has no `/60` opacity util — append 8-digit hex alpha (`c.muted + "99"`
+for 60%, `c.foreground + "E6"` for 90%), matching the existing tier-badge convention.
+
 ## The "is this TestFlight or the website?" tell — check the Safari bar
 
 The user repeatedly sends WEBSITE screenshots believing they are the TestFlight app.
