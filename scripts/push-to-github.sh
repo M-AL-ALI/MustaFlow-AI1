@@ -34,7 +34,6 @@ ARG="${1:-}"
 rm -f .git/index.lock .git/refs/heads/main.lock 2>/dev/null || true
 git add \
   "artifacts/ora-mobile/app/(home)/settings.tsx" \
-  artifacts/ora-mobile/lib/types.ts \
   scripts/push-to-github.sh \
   2>/dev/null || true
 

@@ -262,6 +262,8 @@ function UsageRow({ label, used, limit }: { label: string; used: number; limit: 
   );
 }
 
+const PLAN_RANK: Record<string, number> = { free: 0, core: 1, wave: 2 };
+
 function PlanFeatureCards({
   tiers,
   currentTier,
@@ -281,6 +283,8 @@ function PlanFeatureCards({
       {tiers.map((tier) => {
         const isCurrent = tier.id === currentTier || tier.current;
         const upgradeTier = tier.id === "core" || tier.id === "wave" ? tier.id : null;
+        const currentRank = PLAN_RANK[currentTier] ?? 0;
+        const targetRank = PLAN_RANK[tier.id] ?? 0;
         const priceLabel = tier.priceUsd > 0 ? `$${tier.priceUsd}/mo` : "Free";
         return (
           <View
@@ -357,7 +361,7 @@ function PlanFeatureCards({
               ))}
             </View>
 
-            {upgradeTier && !isCurrent ? (
+            {upgradeTier && targetRank > currentRank ? (
               <Button
                 label={`Upgrade to ${tier.name}`}
                 icon={Crown}
