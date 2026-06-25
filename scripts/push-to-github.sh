@@ -33,11 +33,10 @@ ARG="${1:-}"
 # IMPORTANT: remove .git/index.lock BEFORE git add or the add silently fails.
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
-git add \
-  .agents/memory/MEMORY.md \
-  .agents/memory/ora-mobile-export-fidelity.md \
-  scripts/push-to-github.sh \
+git rm -f --ignore-unmatch \
+  "attached_assets/Pasted-Good-progress-but-please-do-NOT-claim-full-Ora-Website-_1782350369376.txt" \
   2>/dev/null || true
+git add scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
