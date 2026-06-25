@@ -1,0 +1,195 @@
+Good progress, but please do NOT claim full Ora Website = Ora Mobile parity yet, and do NOT submit TestFlight yet.
+
+I reviewed the latest commit:
+- real PDF export using expo-print
+- Talk-mode inactive/background lifecycle hardening
+- parity QA document
+
+The commit is useful and mostly correct, but there are still important details to handle and verify.
+
+1. PDF export is improved, but it requires a new native build
+You added expo-print. That is a native Expo module.
+
+Important:
+- If the installed dev client/TestFlight build was created before expo-print was added, hot reload may NOT be enough.
+- PDF export cannot be trusted until the app is rebuilt with expo-print included.
+- A fresh development build or TestFlight build is required before testing PDF export on device.
+
+Expected result after rebuild:
+- Export → PDF creates a real .pdf file.
+- Native share sheet opens with the PDF.
+- The file name should be ora-report.pdf.
+- The file should open in Files / Mail / Preview apps as a real PDF, not HTML.
+
+2. Generated-document export parity is still NOT complete
+Please be precise in wording.
+
+Mobile now supports:
+- Markdown export
+- JSON export
+- CSV/action-plan export
+- real PDF export via expo-print
+- backend-generated files saved/shared natively
+- generated/edited images saved natively
+
+But mobile still does NOT fully match website fidelity for:
+- Word export
+- Excel export
+- Slides export
+
+Website:
+- Word = real .docx
+- Excel = real .xlsx
+- Slides = real .pptx
+
+Mobile currently:
+- Word = .rtf stand-in
+- Excel = .csv stand-in
+- Slides = .html stand-in
+
+So please do not say “all export formats match the website.”
+Correct wording:
+“All export actions exist on mobile, PDF is now real, backend-generated binary files are full parity, but client-side Word/Excel/Slides binary fidelity remains deferred.”
+
+If you want to close this gap later:
+- Word: likely use `docx` with base64 output.
+- Excel: evaluate RN-safe SheetJS or another lightweight approach.
+- Slides: `pptxgenjs` may be risky in React Native because of DOM/Blob assumptions.
+Do not rush these into the current build unless tested carefully on Hermes/iOS.
+
+3. Talk-to-Ora lifecycle improvement is good, but needs real iPhone QA
+The code now distinguishes:
+- `inactive`: abort in-flight TTS synthesis, but do not fully tear down Talk mode.
+- `background`: fully tear down the voice loop: stop recorder, remove TTS player, reset audio mode, exit Talk mode.
+
+This is a reasonable approach, but it must be tested on a real iPhone.
+
+Please test:
+- Start Talk mode, then pull Control Center.
+- Start Talk mode, then open app switcher.
+- Start Talk mode, then trigger Face ID / system prompt if possible.
+- Start Talk mode, then receive a call/banner interruption.
+- Start Talk mode while recording, then lock the phone.
+- Start Talk mode while TTS is generating, then background the app.
+- Start Talk mode while TTS is playing, then background the app.
+- Return to the app after each case.
+
+Expected:
+- No stuck recording.
+- No TTS starts after the app was backgrounded.
+- No late audio playback after leaving the app.
+- No repeated auto-listen loop while inactive/backgrounded.
+- On quick inactive interruptions, Talk mode can continue cleanly when app becomes active again.
+- On full background, Talk mode exits cleanly.
+
+4. Performance fix is code-correct but must be measured
+The MessageBubble memoization fix is good. It should stop settled messages from re-rendering every streaming token.
+
+But it still needs real-device performance QA.
+
+Please test on iPhone:
+- 50+ message conversation.
+- Long streaming answer.
+- Source-heavy answer.
+- Image-heavy answer.
+- Generated-file answer.
+- Scrolling while streaming.
+- Scrolling after the answer completes.
+- Light/dark theme switch after a long thread.
+- Open message actions on old messages after streaming.
+- Save-to-memory chip on old messages after streaming.
+- Follow-up suggestion chip on old messages after streaming.
+
+Expected:
+- Only the active streaming bubble updates.
+- Old messages do not flicker.
+- No scroll jumps.
+- No typing lag.
+- No UI freeze during long streaming.
+- No dropped message state after save-memory or follow-up.
+- No crash or memory pressure from image-heavy replies.
+
+5. Streaming metadata parity must still be proven with examples
+Code review suggests streaming fallback is correct:
+- SSE path handles normal text streaming.
+- Non-SSE fallback triggers `/chat`.
+- `/chat` result maps rich fields through `buildChatExtras`.
+
+But please prove this with actual examples.
+
+Test prompts:
+- A normal long answer.
+- A current/news/source-heavy question.
+- An image generation request.
+- A document/file generation request.
+- A dataset/document analysis request if available.
+- A prompt that produces follow-up suggestions.
+- A prompt that produces memory save candidate.
+
+Expected:
+- Text streams progressively.
+- Blinking cursor appears while streaming.
+- “Thinking…” row appears before first token.
+- If stream cuts off, partial answer stays and cut-off warning appears.
+- Sources render as cards.
+- Suggestions render in the right order.
+- Generated images/files render correctly.
+- Specialist tool fallback does not lose metadata.
+
+6. Plan/API diagnostics must be verified on device
+Before any TestFlight submission, Settings → Diagnostics must show:
+
+- API URL is the intended server.
+- Signed in = yes.
+- Email is the correct account.
+- Clerk token = present.
+- Billing tier matches website.
+- Chat tier matches Billing tier.
+
+For the Core test account, expected:
+- Billing tier: Core Pack
+- Chat tier: Core Pack
+- Accent color: blue
+- Deep Thinking enabled
+
+If mobile still shows Free:
+Do not patch UI. Diagnose:
+- wrong API URL,
+- stale production API,
+- backend not redeployed with superuser resolver fix,
+- wrong Clerk account,
+- missing Clerk token.
+
+7. Visual parity is still separate
+This commit improves capability/performance, not the full visual copy.
+
+Continue screen-by-screen visual approval:
+- Screen 2 response rendering
+- Screen 3 composer / mic / Talk to Ora
+- drawer/sidebar
+- Settings
+- Memory
+- Library
+- ORAX
+- Help
+
+For every screen:
+- compare website screenshot,
+- compare mobile screenshot,
+- compare website source,
+- fix only that screen,
+- wait for approval before moving on.
+
+Definition of done before TestFlight:
+- Typecheck passes.
+- Prettier passes.
+- Lint passes.
+- Ora isolation passes.
+- PDF export tested on a rebuilt native app.
+- Talk mode interruption tested on real iPhone.
+- Long-thread performance tested on real iPhone.
+- Plan diagnostics show correct billing/chat tier.
+- Remaining Word/Excel/Slides fidelity gap is either fixed or explicitly documented as deferred.
+- User approves the current visual screen.
+
+Again: no TestFlight submission until these are confirmed.
