@@ -26,17 +26,18 @@ ARG="${1:-}"
 #
 # Per-wave: agent bash blocks git-add; the workflow context does not.
 # Pattern for a new wave:
-#   1. Add wave files here with explicit git add paths (remove after commit).
+#   1. Add ONLY the files your wave changed to the git add list below.
 #   2. Restart push-to-github workflow — it commits + pushes automatically.
-#   3. Clean up the git add lines in the next push.
+#   3. Remove your wave-specific paths again before finishing, leaving the list
+#      neutral (just this script) so no stale paths linger for the next task.
 #
 # IMPORTANT: remove .git/index.lock BEFORE git add or the add silently fails.
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
-git rm -f --ignore-unmatch \
-  "attached_assets/Pasted-Good-progress-but-please-do-NOT-claim-full-Ora-Website-_1782350369376.txt" \
+# --- per-wave files: add your changed paths above this script entry ---
+git add \
+  scripts/push-to-github.sh \
   2>/dev/null || true
-git add scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
