@@ -355,12 +355,33 @@ export interface UserPreferences {
   autoReadReplies?: boolean;
 }
 
+export type BillingTierId = "free" | "core" | "wave";
+
 export interface BillingSubscription {
   userId?: string;
-  tier: OraTier;
-  status: "active" | "canceled";
-  currentPeriodEnd: string;
+  tier: BillingTierId;
+  status: "active" | "trialing" | "grace_period" | "past_due" | "canceled" | string;
+  sourceTier?: BillingTierId;
+  isSuperuser?: boolean;
+  currentPeriodEnd: string | null;
+  gracePeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  monthlyCredits?: number;
+  maxConcurrentBuilds?: number;
+  stripeConfigured?: boolean;
+  publishableKey?: string;
+  tiers?: BillingTierMeta[];
+}
+
+export interface BillingTierMeta {
+  id: BillingTierId;
+  name: string;
+  priceUsd: number;
+  monthlyCredits: number;
+  maxConcurrentBuilds: number;
+  features: string[];
+  available: boolean;
+  current: boolean;
 }
 
 export interface PaymentMethodInfo {
