@@ -119,4 +119,5 @@
 - [Main-agent pnpm install husky guard](main-agent-pnpm-husky-guard.md) — `pnpm add`/`install` runs `prepare:husky` → git-config write trips the destructive-git guard (can leave a stale `.git/config.lock` you can't rm); run with `HUSKY=0` to skip.
 - [Ora mobile tier badge colors](ora-mobile-tier-badge.md) — tierAccentColor() maps core→#3D83F5 / wave→#F0A742 / free→#995AF2; bg = accent+"20" (8-char RGBA hex).
 - [Ora mobile language selector](ora-mobile-language-selector.md) — language state (auto/en/ar/es/fr) is separate from voiceLang; sent as chatReq.language only when non-auto; picker lives in PlusMenu "Reply language" section.
+- [EAS submit existing iOS build](eas-submit-existing-build.md) — decoupled `eas submit --id` (verify build FINISHED first), GraphQL submissions{byId{status}} is authoritative, setsid eas-cli skips temp .p8 cleanup, native splash/icon baked at build time → fresh build + reinstall.
 - [Ora Mobile chat memo + lifecycle](ora-mobile-chat-lifecycle.md) — memoized bubbles need ref-backed callbacks (stale msgs=data loss, stale persist=wrong convo); background needs a speakGen guard so async TTS can't play after backgrounding.
