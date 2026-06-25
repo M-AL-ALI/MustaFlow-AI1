@@ -95,6 +95,7 @@ import {
   getLocalFileSize,
   MAX_UPLOAD_BYTES,
   saveGeneratedFile,
+  saveHtmlAsPdf,
   saveImageFromUrl,
   saveTextAsFile,
 } from "@/lib/files";
@@ -571,6 +572,16 @@ export default function OraChatScreen() {
   // resume on their own and are intentionally left alone.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
+      // `inactive` is a transient state iOS passes through for call banners,
+      // Control Center, the app switcher, Face ID prompts, etc. Bump the speak
+      // generation so any in-flight TTS *synthesis* aborts before it can begin
+      // playback during an interruption, but leave the recorder, current player,
+      // and Talk mode untouched so a quick peek does not tear down the voice
+      // loop. speak()'s abort path reschedules the Talk turn when still active.
+      if (next === "inactive") {
+        speakGenRef.current += 1;
+        return;
+      }
       if (next !== "background") return;
       speakGenRef.current += 1;
       cancelTalkRestart();
@@ -606,8 +617,13 @@ export default function OraChatScreen() {
           !talkModeRef.current ||
           recordingRef.current ||
           transcribingRef.current ||
-          speakingIdRef.current
+          speakingIdRef.current ||
+          AppState.currentState !== "active"
         ) {
+          // Never open the mic while the app is not foregrounded. If an
+          // interruption (call banner, Control Center, app switcher) is active
+          // when this fires, bail; the resume-on-active effect re-schedules the
+          // turn once the app comes back.
           return;
         }
         void startRecordingRef.current();
@@ -615,6 +631,26 @@ export default function OraChatScreen() {
     },
     [cancelTalkRestart],
   );
+
+  // Resume the Talk loop when the app returns to the foreground after a
+  // transient interruption. Talk mode is only torn down on `background`, so if
+  // it survived (e.g. a quick peek at Control Center) and we are idle, schedule
+  // the next listen turn — this is what actually restarts the loop after a
+  // restart that bailed because the app was still inactive.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      if (
+        talkModeRef.current &&
+        !recordingRef.current &&
+        !transcribingRef.current &&
+        !speakingIdRef.current
+      ) {
+        scheduleTalkRestart(500);
+      }
+    });
+    return () => sub.remove();
+  }, [scheduleTalkRestart]);
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -1077,13 +1113,12 @@ export default function OraChatScreen() {
     async (message: OraMessage) => {
       const title = messageTitle(message);
       try {
-        await saveTextAsFile(
+        await saveHtmlAsPdf(
           reportPdfHtml(
             messages.filter((m) => m.content.trim()),
             title,
           ),
-          "ora-report.html",
-          "text/html",
+          "ora-report.pdf",
         );
       } catch (err) {
         Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
@@ -1256,6 +1291,13 @@ export default function OraChatScreen() {
         // playback after the user has already left.
         if (speakGenRef.current !== gen) {
           setSpeakingId((cur) => (cur === message.id ? null : cur));
+          // Synthesis was aborted by an AppState change. If Talk mode is still
+          // active (a transient `inactive` peek, not a real backgrounding — the
+          // background handler clears talkMode), keep the loop alive so the next
+          // turn can listen again instead of stalling silently.
+          if (talkModeRef.current && !recordingRef.current) {
+            scheduleTalkRestart(700);
+          }
           return;
         }
         const player = createAudioPlayer({ uri: fileUri });

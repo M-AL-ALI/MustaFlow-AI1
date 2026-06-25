@@ -69,6 +69,7 @@
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.23",
     "expo-media-library": "~18.2.1",
+    "expo-print": "~15.0.8",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
     "lucide-react-native": "^1.17.0",

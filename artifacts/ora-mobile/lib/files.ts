@@ -1,6 +1,7 @@
 import { getAuthToken } from "./auth-client";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
+import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { Linking, Platform } from "react-native";
 
@@ -63,12 +64,15 @@ async function saveImageToLibrary(fileUri: string): Promise<void> {
   await MediaLibrary.saveToLibraryAsync(fileUri);
 }
 
-async function shareFile(fileUri: string, mimeType?: string): Promise<void> {
+async function shareFile(fileUri: string, mimeType?: string, uti?: string): Promise<void> {
   const available = await Sharing.isAvailableAsync();
   if (!available) {
     throw new FileSaveError("Sharing is not available on this device.");
   }
-  await Sharing.shareAsync(fileUri, mimeType ? { mimeType } : undefined);
+  const opts: { mimeType?: string; UTI?: string } = {};
+  if (mimeType) opts.mimeType = mimeType;
+  if (uti) opts.UTI = uti;
+  await Sharing.shareAsync(fileUri, Object.keys(opts).length ? opts : undefined);
 }
 
 /**
@@ -123,6 +127,38 @@ export async function saveTextAsFile(
     encoding: FileSystem.EncodingType.UTF8,
   });
   await shareFile(fileUri, mimeType);
+  return "shared";
+}
+
+/**
+ * Render an HTML report to a real PDF on device (via expo-print) and hand it to
+ * the native share sheet. This mirrors the website's print-to-PDF export, but
+ * writes an actual `.pdf` file instead of the portable `.html` stand-in. On web,
+ * the HTML is opened in a new tab so the user can print-to-PDF from the browser.
+ */
+export async function saveHtmlAsPdf(
+  html: string,
+  fileName = "ora-report.pdf",
+): Promise<SaveOutcome> {
+  if (Platform.OS === "web") {
+    await Linking.openURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    return "opened";
+  }
+
+  const { uri } = await Print.printToFileAsync({ html });
+  // printToFileAsync writes to a randomly named cache file; rename it so the
+  // share sheet shows a friendly filename. Fall back to the original uri if the
+  // move fails for any reason.
+  let shareUri = uri;
+  try {
+    const target = cacheUri(fileName.toLowerCase().endsWith(".pdf") ? fileName : `${fileName}.pdf`);
+    await FileSystem.deleteAsync(target, { idempotent: true });
+    await FileSystem.moveAsync({ from: uri, to: target });
+    shareUri = target;
+  } catch {
+    /* keep original uri */
+  }
+  await shareFile(shareUri, "application/pdf", "com.adobe.pdf");
   return "shared";
 }
 

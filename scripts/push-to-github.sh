@@ -31,11 +31,14 @@ ARG="${1:-}"
 #   3. Clean up the git add lines in the next push.
 #
 # IMPORTANT: remove .git/index.lock BEFORE git add or the add silently fails.
-rm -f .git/index.lock .git/refs/heads/main.lock 2>/dev/null || true
+rm -f .git/index.lock .git/refs/heads/main.lock \
+  .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 git add \
   "artifacts/ora-mobile/app/(home)/index.tsx" \
-  .agents/memory/MEMORY.md \
-  .agents/memory/ora-mobile-chat-lifecycle.md \
+  "artifacts/ora-mobile/lib/files.ts" \
+  "artifacts/ora-mobile/package.json" \
+  "artifacts/ora-mobile/docs/qa/parity-and-testflight-checklist.md" \
+  pnpm-lock.yaml \
   scripts/push-to-github.sh \
   2>/dev/null || true
 
