@@ -64,6 +64,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -419,6 +420,13 @@ export default function OraChatScreen() {
   const [editingImage, setEditingImage] = useState(false);
   const temporaryRef = useRef(false);
   temporaryRef.current = temporary;
+  const sendingRef = useRef(false);
+  sendingRef.current = sending;
+  const messagesRef = useRef<OraMessage[]>(messages);
+  messagesRef.current = messages;
+  // Bumped whenever the app is backgrounded so an in-flight speak() can abort
+  // before it ever creates/plays an audio player (no TTS after backgrounding).
+  const speakGenRef = useRef(0);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const router = useRouter();
@@ -555,6 +563,39 @@ export default function OraChatScreen() {
       talkRestartTimerRef.current = null;
     }
   }, []);
+
+  // When the app is backgrounded, tear down the voice loop so it never resumes
+  // into a stuck recording/playback state. iOS suspends JS timers and can
+  // interrupt the microphone while backgrounded, which would otherwise leave
+  // Talk mode mid-cycle (or a TTS clip playing) on return. In-flight SSE streams
+  // resume on their own and are intentionally left alone.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "background") return;
+      speakGenRef.current += 1;
+      cancelTalkRestart();
+      try {
+        playerRef.current?.remove();
+      } catch {
+        /* ignore */
+      }
+      playerRef.current = null;
+      setSpeakingId(null);
+      speakingIdRef.current = null;
+      if (recordingRef.current) {
+        recorder
+          .stop()
+          .then(() => setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }))
+          .catch(() => {});
+        setRecording(false);
+      }
+      if (talkModeRef.current) {
+        setTalkMode(false);
+        talkModeRef.current = false;
+      }
+    });
+    return () => sub.remove();
+  }, [cancelTalkRestart, recorder]);
 
   const scheduleTalkRestart = useCallback(
     (delayMs: number) => {
@@ -852,14 +893,11 @@ export default function OraChatScreen() {
   }, [input, attachment, sending, sendMessage]);
 
   // Tapping a follow-up suggestion chip sends it as the next message.
-  const handleSuggestion = useCallback(
-    (text: string) => {
-      const clean = text.trim();
-      if (!clean || sending) return;
-      void sendMessage(clean, null);
-    },
-    [sending, sendMessage],
-  );
+  const handleSuggestion = useCallback((text: string) => {
+    const clean = text.trim();
+    if (!clean || sendingRef.current) return;
+    void sendMessageRef.current(clean, null);
+  }, []);
 
   // Persist a memory-save candidate, then mark the message as saved in place.
   // Mobile has no dedicated save-candidate endpoint, so saveOraMemory derives a
@@ -867,28 +905,32 @@ export default function OraChatScreen() {
   // returning the titles of any earlier memories this fact superseded so the
   // chip can name exactly what changed. The updated transcript is persisted
   // immediately so the saved/superseded state survives a reload.
-  const handleSaveMemory = useCallback(
-    async (message: OraMessage) => {
-      // Never write memory from an anonymous or temporary chat.
-      if (!isSignedIn || temporaryRef.current) return;
-      const fact = message.memorySaveCandidate?.trim();
-      if (!fact) return;
-      const supersededTitles = await saveOraMemory(fact);
-      const next = messages.map((m) =>
-        m.id === message.id
-          ? {
-              ...m,
-              memorySaved: true,
-              memorySaveCandidate: undefined,
-              memorySupersededTitles: supersededTitles,
-            }
-          : m,
-      );
-      setMessages(next);
-      void persist(next);
-    },
-    [messages, persist, isSignedIn],
-  );
+  // Refs so the memoized save-memory handler stays stable yet always uses the
+  // current persist (correct conversationId) and auth state, even when invoked
+  // from a settled bubble that has not re-rendered.
+  const persistRef = useRef(persist);
+  persistRef.current = persist;
+  const isSignedInRef = useRef(isSignedIn);
+  isSignedInRef.current = isSignedIn;
+  const handleSaveMemory = useCallback(async (message: OraMessage) => {
+    // Never write memory from an anonymous or temporary chat.
+    if (!isSignedInRef.current || temporaryRef.current) return;
+    const fact = message.memorySaveCandidate?.trim();
+    if (!fact) return;
+    const supersededTitles = await saveOraMemory(fact);
+    const next = messagesRef.current.map((m) =>
+      m.id === message.id
+        ? {
+            ...m,
+            memorySaved: true,
+            memorySaveCandidate: undefined,
+            memorySupersededTitles: supersededTitles,
+          }
+        : m,
+    );
+    setMessages(next);
+    void persistRef.current(next);
+  }, []);
 
   // Regenerate the assistant reply for the user turn that produced `message`.
   const handleRegenerate = useCallback(
@@ -1199,6 +1241,7 @@ export default function OraChatScreen() {
         return;
       }
       setSpeakingId(message.id);
+      const gen = speakGenRef.current;
       try {
         // Strip markdown so the voice sounds natural (no "hashtag hashtag" etc.)
         const spokenText = cleanForTts(message.content) || message.content;
@@ -1209,6 +1252,12 @@ export default function OraChatScreen() {
           encoding: FileSystem.EncodingType.Base64,
         });
         await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+        // The app was backgrounded mid-synthesis — abort instead of starting
+        // playback after the user has already left.
+        if (speakGenRef.current !== gen) {
+          setSpeakingId((cur) => (cur === message.id ? null : cur));
+          return;
+        }
         const player = createAudioPlayer({ uri: fileUri });
         playerRef.current = player;
         player.addListener("playbackStatusUpdate", (status) => {
@@ -1902,6 +1951,8 @@ export default function OraChatScreen() {
           ref={listRef}
           data={visibleMessages}
           keyExtractor={(m) => m.id}
+          extraData={`${speakingId ?? ""}|${tierAccent}`}
+          removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={{
             paddingHorizontal: 16,
             paddingTop: 24,
@@ -1991,7 +2042,7 @@ export default function OraChatScreen() {
               message={item}
               accentColor={tierAccent}
               speaking={speakingId === item.id}
-              onSpeak={() => speak(item)}
+              onSpeak={() => speakRef.current(item)}
               onSuggestion={handleSuggestion}
               onSaveMemory={temporary ? undefined : handleSaveMemory}
               onLongPress={() => setActionsMessage(item)}
@@ -2709,7 +2760,7 @@ function RecordingIndicator({
   );
 }
 
-function MessageBubble({
+function MessageBubbleBase({
   message,
   accentColor,
   speaking,
@@ -3051,6 +3102,24 @@ function MessageBubble({
     </View>
   );
 }
+
+// Memoized so a token-by-token streaming update (setMessages every ~55ms) only
+// re-renders the streaming bubble, not all 50+ settled bubbles. Unchanged
+// messages keep their object reference, so this comparator skips them. The
+// callback props are intentionally excluded: they capture the row's own message
+// (identical to `message`) or read live values through refs, so they stay
+// correct even when a settled bubble does not re-render.
+const MessageBubble = React.memo(
+  MessageBubbleBase,
+  (prev, next) =>
+    prev.message === next.message &&
+    prev.accentColor === next.accentColor &&
+    prev.speaking === next.speaking &&
+    // onSaveMemory is stable (deps []); its presence only flips when temporary
+    // mode toggles, so this keeps the memory chip from going stale without
+    // re-rendering on every streaming token.
+    Boolean(prev.onSaveMemory) === Boolean(next.onSaveMemory),
+);
 
 function ConversationRow({
   conv,
