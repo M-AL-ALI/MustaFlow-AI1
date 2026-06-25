@@ -36,6 +36,9 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
+  artifacts/ora-mobile/app.json \
+  "artifacts/ora-mobile/app/(auth)/sign-in.tsx" \
+  artifacts/ora-mobile/assets/splash-ora.png \
   scripts/push-to-github.sh \
   2>/dev/null || true
 

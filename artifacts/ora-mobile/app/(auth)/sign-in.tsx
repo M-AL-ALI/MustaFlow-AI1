@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Logo } from "@/components/Logo";
+import { OraAtom } from "@/components/ora/OraAtom";
 import { Button, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 
@@ -259,8 +259,18 @@ export default function SignInScreen() {
           }}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={{ alignItems: "center", marginBottom: 8 }}>
-            <Logo size={40} />
+          <View style={{ alignItems: "center", marginBottom: 8, gap: 10 }}>
+            <OraAtom size={46} accentColor="#10A37F" animated />
+            <Text
+              style={{
+                color: c.foreground,
+                fontFamily: "Inter_700Bold",
+                fontSize: 20,
+                letterSpacing: -0.4,
+              }}
+            >
+              Ora
+            </Text>
           </View>
 
           {verify ? (
