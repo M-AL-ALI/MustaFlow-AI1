@@ -1,58 +1,74 @@
 # Ora Mobile — Capability/Performance Parity & Pre-TestFlight QA
 
-This document records the audited parity state of the Ora Mobile (Expo) app
-against the website Ora experience, and the on-device QA that must be run by a
-human before a TestFlight build is submitted. Items that require a real device
-or a signed-in account cannot be verified from the build environment and are
-flagged accordingly.
+This document records the audited state of the Ora Mobile (Expo) app against the
+website Ora experience, and the on-device QA that must be run by a human before a
+TestFlight build is submitted.
+
+**Scope note / honest wording:** this is a capability + performance audit, not a
+claim of full website↔mobile parity. Visual parity (Section 6) is still being
+worked screen-by-screen, and several behaviors can only be confirmed on a real
+device. Do **not** describe the app as "full Ora website = Ora mobile parity"
+until every item in the Definition of Done (Section 7) is signed off.
 
 ## 1. Generated-document export parity
 
-Mobile is **not** missing export — it exports all of the same formats the website
-offers. The only remaining difference is **fidelity** for a subset of the
-client-side "export this chat as a document" actions, where mobile emits a
-portable open-format stand-in instead of a binary Office file.
+Precise status: **all export actions exist on mobile, PDF is now real,
+backend-generated binary files are full parity, but client-side Word/Excel/Slides
+binary fidelity remains deferred.** Do not say "all export formats match the
+website."
 
-| Surface                                                  | Website                    | Mobile                                | Status              |
-| -------------------------------------------------------- | -------------------------- | ------------------------------------- | ------------------- |
-| AI-generated files (`/public-ai/generate-file` → base64) | csv/xlsx/docx/pdf/pptx     | csv/xlsx/docx/pdf/pptx (saved/shared) | **Full parity**     |
-| Generated / edited images                                | render + edit + download   | render + edit + photo-library save    | **Full parity**     |
-| Chat export → Markdown                                   | `.md`                      | `.md`                                 | **Full parity**     |
-| Chat export → JSON                                       | `.json`                    | `.json`                               | **Full parity**     |
-| Action-plan export → CSV                                 | `.csv`                     | `.csv`                                | **Full parity**     |
-| Chat export → PDF                                        | browser print → PDF        | real `.pdf` via `expo-print`          | **Full parity**     |
-| Chat export → Word                                       | real `.docx` (`docx`)      | `.rtf` stand-in                       | Deferred (fidelity) |
-| Chat export → Excel                                      | real `.xlsx` (`exceljs`)   | `.csv` stand-in                       | Deferred (fidelity) |
-| Chat export → Slides                                     | real `.pptx` (`pptxgenjs`) | `.html` stand-in                      | Deferred (fidelity) |
+| Surface                                                  | Website                    | Mobile                                | Status                        |
+| -------------------------------------------------------- | -------------------------- | ------------------------------------- | ----------------------------- |
+| AI-generated files (`/public-ai/generate-file` → base64) | csv/xlsx/docx/pdf/pptx     | csv/xlsx/docx/pdf/pptx (saved/shared) | **Full parity**               |
+| Generated / edited images                                | render + edit + download   | render + edit + photo-library save    | **Full parity**               |
+| Chat export → Markdown                                   | `.md`                      | `.md`                                 | **Full parity**               |
+| Chat export → JSON                                       | `.json`                    | `.json`                               | **Full parity**               |
+| Action-plan export → CSV                                 | `.csv`                     | `.csv`                                | **Full parity**               |
+| Chat export → PDF                                        | browser print → PDF        | real `.pdf` via `expo-print`          | Real — **needs native build** |
+| Chat export → Word                                       | real `.docx` (`docx`)      | `.rtf` stand-in                       | Deferred (binary fidelity)    |
+| Chat export → Excel                                      | real `.xlsx` (`exceljs`)   | `.csv` stand-in                       | Deferred (binary fidelity)    |
+| Chat export → Slides                                     | real `.pptx` (`pptxgenjs`) | `.html` stand-in                      | Deferred (binary fidelity)    |
 
-### What changed for this audit
+### PDF export requires a fresh native build (do not test on the old build)
 
-PDF chat export was upgraded from an `.html` stand-in to a real `.pdf` rendered
-on device with `expo-print` (`Print.printToFileAsync`) and handed to the native
-share sheet (`lib/files.ts → saveHtmlAsPdf`). This is a first-party Expo module,
-so it adds no Hermes/bundle risk.
+`expo-print` is a **native** Expo module. It was added after the previous
+dev-client / TestFlight build, so:
 
-### Intentionally deferred (and why)
+- Hot reload / OTA update over an old build is **not** enough — the native module
+  will be missing and PDF export will fail or fall back.
+- PDF export cannot be trusted until the app is rebuilt (a new development build
+  or a new TestFlight build) with `expo-print` linked.
 
-True binary `.docx` / `.xlsx` / `.pptx` for the **client-side chat export**
-menu is intentionally deferred and must not block this build:
+Expected result on a rebuilt app:
 
-- The libraries the website uses are a poor fit for React Native / Hermes right
-  before a build. `pptxgenjs` is RN-hostile (DOM/Blob assumptions); `exceljs`
-  pulls in `Buffer`/Node polyfills; SheetJS (`xlsx`) is RN-supported but adds
-  dependency/audit weight for a convenience path. `docx` (`Packer.toBase64String`)
-  is the most plausible later, but bundling new heavy deps immediately before a
-  TestFlight build is an unnecessary risk.
+- [ ] Export → PDF produces a real `.pdf` (not HTML).
+- [ ] The native share sheet opens with the file.
+- [ ] The file name is `ora-report.pdf`.
+- [ ] The file opens as a real PDF in Files / Mail / Preview (not as HTML).
+
+### Intentionally deferred (and why) — do not rush into this build
+
+True binary `.docx` / `.xlsx` / `.pptx` for the **client-side chat export** menu
+is intentionally deferred and must not block this build:
+
+- The website's libraries are a poor fit for React Native / Hermes: `pptxgenjs`
+  assumes DOM/Blob, `exceljs` pulls in `Buffer`/Node polyfills, and SheetJS
+  (`xlsx`) is RN-supported but adds dependency/audit weight for a convenience
+  path. `docx` (`Packer.toBase64String`) is the most plausible later, but adding
+  heavy deps immediately before a build is unnecessary risk.
 - The capability that actually matters — **Ora generating a real document** — is
-  already at full parity: backend-generated `.docx/.xlsx/.pptx/.pdf/.csv` files
-  arrive as base64 and are saved/shared natively (`saveGeneratedFile`).
-- The current stand-ins are functional: `.rtf` opens in Word/Pages, `.csv` opens
-  in Excel/Numbers, `.html` opens in any browser and can be printed to PDF.
+  already full parity: backend-generated `.docx/.xlsx/.pdf/.pptx/.csv` arrive as
+  base64 and save/share natively (`saveGeneratedFile`).
+- The stand-ins are functional: `.rtf` opens in Word/Pages, `.csv` opens in
+  Excel/Numbers, `.html` opens in any browser and can print to PDF.
 
-When the time comes to close the fidelity gap, the lowest-risk path is `docx`
-(base64 output) for Word; reassess `xlsx`/`pptx` separately.
+If/when this gap is closed (each tested independently on Hermes/iOS first):
 
-## 2. Streaming behavior & non-SSE fallback parity (verified in code)
+- Word: `docx` with base64 output is the lowest-risk path.
+- Excel: evaluate an RN-safe SheetJS approach.
+- Slides: `pptxgenjs` is risky in RN (DOM/Blob); treat as the last/optional item.
+
+## 2. Streaming behavior & non-SSE fallback parity (code-verified)
 
 The mobile send path mirrors the website hook. `streamChatNative` is tried first;
 the result is handled four ways:
@@ -69,8 +85,20 @@ the result is handled four ways:
 - **post-first-token interruption**: keep the partial text already rendered and
   flag `streamCutOff` (renders the "response was cut off" note). No retry.
 
-No metadata gap vs the website was found. This is covered by code review, not a
-device requirement.
+No metadata gap vs the website was found in code. The cases below still need to be
+**proven on device with real prompts** before TestFlight:
+
+- [ ] Normal long answer → text streams progressively; blinking cursor shows;
+      "Thinking…" row appears before the first token.
+- [ ] Current/news/source-heavy question → sources render as cards.
+- [ ] Image generation request → generated image renders.
+- [ ] Document/file generation request → generated file renders + saves.
+- [ ] Dataset/document analysis (if available) → analysis renders.
+- [ ] Prompt that yields follow-up suggestions → suggestions render in order.
+- [ ] Prompt that yields a memory-save candidate → save chip appears.
+- [ ] Force a cut-off (e.g. background mid-stream) → partial answer stays and the
+      cut-off warning appears.
+- [ ] Specialist tool path that falls back to `/chat` → no metadata is lost.
 
 ## 3. Talk-to-Ora lifecycle (code) + on-device checklist
 
@@ -82,46 +110,111 @@ In code:
 - **`inactive`** (call banners, Control Center, app switcher, Face ID): bump
   `speakGenRef` only, so in-flight TTS synthesis cannot begin playback during an
   interruption. The recorder, current player, and Talk mode are left untouched so
-  a transient peek does not tear down the loop; `speak()`'s abort path reschedules
-  the next Talk turn when Talk mode is still active.
-- `speak()` captures `speakGenRef` at start and re-checks it before creating the
-  audio player, so a state change mid-synthesis never starts late playback.
+  a transient peek does not tear down the loop.
+- A restart timer (`scheduleTalkRestart`) refuses to open the mic unless
+  `AppState.currentState === "active"`, and a resume-on-`active` listener restarts
+  the loop once the app returns to the foreground (so a transient interruption
+  continues cleanly). `speak()` captures `speakGenRef` at start and re-checks it
+  before creating the audio player, so a state change mid-synthesis never starts
+  late playback.
 
-Must be confirmed on a real device (cannot be tested from this environment):
+Caveat: this prevents **new** mic/playback starts while not active; it does not
+forcibly stop an already-running recorder on `inactive`. Real interruption
+behavior must be confirmed on a device.
 
-- [ ] Start Talk mode, lock the phone mid-reply → audio stops, no audio resumes
-      on unlock; Talk mode is not stuck mid-cycle.
-- [ ] Start Talk mode, receive a real phone call → TTS/recording yields to the
-      call; after the call the app is in a clean state (not stuck recording).
-- [ ] Pull Control Center / trigger a notification banner mid-reply → quick peek
-      does **not** exit Talk mode; the loop continues to the next turn.
-- [ ] Background the app mid-recording → recording stops, audio mode is reset.
+Must be confirmed on a real iPhone (cannot be tested from this environment):
 
-## 4. Real-device-only items (cannot be verified from this environment)
+- [ ] Start Talk mode, then pull Control Center → quick peek does not exit Talk
+      mode; loop continues to the next turn on return.
+- [ ] Start Talk mode, then open the app switcher → same as above.
+- [ ] Start Talk mode, then trigger Face ID / a system prompt → no stuck state.
+- [ ] Start Talk mode, then receive a call/banner interruption → yields to the
+      call; clean state afterward (not stuck recording).
+- [ ] Start Talk mode while recording, then lock the phone → recording stops; no
+      auto-resume on unlock.
+- [ ] Start Talk mode while TTS is generating, then background → no TTS playback
+      starts after backgrounding.
+- [ ] Start Talk mode while TTS is playing, then background → audio stops; no late
+      playback after leaving the app.
+- [ ] Return to the app after each case → no stuck recording, no repeated
+      auto-listen loop while inactive/backgrounded; quick interruptions resume,
+      full background exits Talk mode cleanly.
 
-These are part of the definition of done but require a physical device and/or a
-signed-in account. They must be run by a human before submitting TestFlight.
+## 4. Performance (memoization in code) + real-device measurement
 
-### Performance pass (real device)
+`MessageBubble` is memoized so settled messages do not re-render on every
+streaming token. This must be **measured** on an iPhone:
 
-- [ ] Cold start to interactive.
-- [ ] Long-conversation scroll stays smooth (chat bubbles are memoized).
-- [ ] Streaming render does not jank during rapid token updates.
-- [ ] Image generation/edit and file export do not block the UI thread.
+- [ ] 50+ message conversation stays responsive.
+- [ ] Long streaming answer — only the active bubble updates; old messages do not
+      flicker.
+- [ ] Source-heavy answer renders without jank.
+- [ ] Image-heavy answer — no crash or memory pressure.
+- [ ] Generated-file answer renders correctly.
+- [ ] Scrolling while streaming — no scroll jumps, no typing lag, no freeze.
+- [ ] Scrolling after the answer completes — smooth.
+- [ ] Light/dark theme switch after a long thread — no jank.
+- [ ] Open message actions on old messages after streaming — state intact.
+- [ ] Save-to-memory chip on old messages after streaming — no dropped state.
+- [ ] Follow-up suggestion chip on old messages after streaming — no dropped state.
 
-### On-device API / plan diagnostics
+## 5. On-device API / plan diagnostics
 
-- [ ] Signed in as the designated Core Pack test account, the diagnostics/plan
-      surface reports the **Core Pack** tier (blue accent), and the API base
-      resolves to the `www` host.
+Before any TestFlight submission, Settings → Diagnostics must show:
 
-### Screen-by-screen visual parity
+- [ ] API URL is the intended server (the `www` host, not the apex).
+- [ ] Signed in = yes.
+- [ ] Email is the correct account.
+- [ ] Clerk token = present.
+- [ ] Billing tier matches the website.
+- [ ] Chat tier matches the Billing tier.
 
-- [ ] Walk each screen (chat, conversations, projects, image edit, plus-menu,
-      language/voice settings, export menu) and confirm spacing, accent colors,
-      tier badge, and iconography match the website Ora intent.
+For the designated Core test account, expected:
+
+- [ ] Billing tier: **Core Pack**
+- [ ] Chat tier: **Core Pack**
+- [ ] Accent color: **blue**
+- [ ] Deep Thinking: **enabled**
+
+If mobile still shows **Free**, do not patch the UI — diagnose the cause:
+
+- wrong API URL,
+- stale production API,
+- backend not redeployed with the superuser resolver fix,
+- wrong Clerk account,
+- missing Clerk token.
+
+## 6. Screen-by-screen visual parity (still separate, in progress)
+
+This audit covers capability/performance, not the full visual copy. Continue
+screen-by-screen, and for **each** screen: compare the website screenshot,
+compare the mobile screenshot, compare the website source, fix only that screen,
+then wait for approval before moving on.
+
+- [ ] Screen 2 — response rendering
+- [ ] Screen 3 — composer / mic / Talk to Ora
+- [ ] Drawer / sidebar
+- [ ] Settings
+- [ ] Memory
+- [ ] Library
+- [ ] ORAX
+- [ ] Help
+
+## 7. Definition of done before TestFlight
+
+- [ ] Typecheck passes.
+- [ ] Prettier passes.
+- [ ] Lint passes.
+- [ ] Ora isolation passes.
+- [ ] PDF export tested on a **rebuilt** native app.
+- [ ] Talk-mode interruption tested on a real iPhone.
+- [ ] Long-thread performance tested on a real iPhone.
+- [ ] Plan diagnostics show the correct billing/chat tier.
+- [ ] Remaining Word/Excel/Slides fidelity gap is either fixed or explicitly
+      documented as deferred (documented as deferred here).
+- [ ] User approves the current visual screen.
 
 ## Do not submit TestFlight
 
-Per the task, do not submit a TestFlight build until the real-device items above
-are completed and signed off.
+Do not submit a TestFlight build until every item above is completed and signed
+off.

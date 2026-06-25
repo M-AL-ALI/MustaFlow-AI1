@@ -34,11 +34,7 @@ ARG="${1:-}"
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 git add \
-  "artifacts/ora-mobile/app/(home)/index.tsx" \
-  "artifacts/ora-mobile/lib/files.ts" \
-  "artifacts/ora-mobile/package.json" \
   "artifacts/ora-mobile/docs/qa/parity-and-testflight-checklist.md" \
-  pnpm-lock.yaml \
   scripts/push-to-github.sh \
   2>/dev/null || true
 
