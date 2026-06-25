@@ -42,7 +42,12 @@ import {
   startPaymentMethodSetup,
   updatePreferences,
 } from "@/lib/api";
-import type { BillingSubscription, OraUsage, PaymentMethodInfo } from "@/lib/types";
+import type {
+  BillingSubscription,
+  BillingTierMeta,
+  OraUsage,
+  PaymentMethodInfo,
+} from "@/lib/types";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
 const APP_BUILD =
@@ -253,6 +258,119 @@ function UsageRow({ label, used, limit }: { label: string; used: number; limit: 
       <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
         {unlimited ? `${used} used` : `${used} / ${limit}`}
       </Text>
+    </View>
+  );
+}
+
+function PlanFeatureCards({
+  tiers,
+  currentTier,
+  onUpgrade,
+  disabled,
+  loading,
+}: {
+  tiers: BillingTierMeta[];
+  currentTier: string;
+  onUpgrade: (tier: "core" | "wave") => void;
+  disabled: boolean;
+  loading: "core" | "wave" | "portal" | "addpm" | null;
+}) {
+  const c = useColors();
+  return (
+    <View style={{ gap: 10 }}>
+      {tiers.map((tier) => {
+        const isCurrent = tier.id === currentTier || tier.current;
+        const upgradeTier = tier.id === "core" || tier.id === "wave" ? tier.id : null;
+        const priceLabel = tier.priceUsd > 0 ? `$${tier.priceUsd}/mo` : "Free";
+        return (
+          <View
+            key={tier.id}
+            style={{
+              borderWidth: 1,
+              borderColor: isCurrent ? c.primary : c.border,
+              backgroundColor: isCurrent ? `${c.primary}14` : c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text
+                  style={{
+                    color: c.foreground,
+                    fontFamily: "Inter_700Bold",
+                    fontSize: 16,
+                  }}
+                >
+                  {tier.name}
+                </Text>
+                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                  {tier.monthlyCredits.toLocaleString()} credits / month ·{" "}
+                  {tier.maxConcurrentBuilds} concurrent build
+                  {tier.maxConcurrentBuilds === 1 ? "" : "s"}
+                </Text>
+              </View>
+              <View style={{ alignItems: "flex-end", gap: 4 }}>
+                <Text
+                  style={{
+                    color: c.foreground,
+                    fontFamily: "Inter_700Bold",
+                    fontSize: 15,
+                  }}
+                >
+                  {priceLabel}
+                </Text>
+                {isCurrent ? (
+                  <Text
+                    style={{
+                      color: c.primary,
+                      fontFamily: "Inter_600SemiBold",
+                      fontSize: 12,
+                    }}
+                  >
+                    Current
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
+            <View style={{ gap: 7 }}>
+              {tier.features.map((feature) => (
+                <View
+                  key={feature}
+                  style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}
+                >
+                  <CheckCircle2 size={15} color={c.accentForeground} style={{ marginTop: 1 }} />
+                  <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 18, flex: 1 }}>
+                    {feature}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {upgradeTier && !isCurrent ? (
+              <Button
+                label={`Upgrade to ${tier.name}`}
+                icon={Crown}
+                variant="secondary"
+                loading={loading === tier.id}
+                disabled={disabled || !tier.available}
+                onPress={() => onUpgrade(upgradeTier)}
+                full
+              />
+            ) : null}
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -668,8 +786,7 @@ export default function SettingsScreen() {
   const anyFail = diagSteps.some((s) => s.status === "fail");
   const currentTier = subscription?.tier ?? "free";
   const isPaid = currentTier === "core" || currentTier === "wave";
-  const canUpgradeToCore = currentTier !== "core" && currentTier !== "wave";
-  const canUpgradeToWave = currentTier !== "wave";
+  const planTiers = subscription?.tiers ?? [];
   const signedInEmail =
     user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? "unknown";
   const sessionTierForCompare = diagPlanSync.sessionTier ?? "free";
@@ -865,27 +982,17 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
 
+                {planTiers.length > 0 && (
+                  <PlanFeatureCards
+                    tiers={planTiers}
+                    currentTier={currentTier}
+                    onUpgrade={(tier) => void startCheckout(tier)}
+                    disabled={planAction !== null}
+                    loading={planAction}
+                  />
+                )}
+
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  {canUpgradeToCore && (
-                    <Button
-                      label="Upgrade to Core Pack"
-                      icon={Crown}
-                      variant="secondary"
-                      loading={planAction === "core"}
-                      disabled={planAction !== null}
-                      onPress={() => void startCheckout("core")}
-                    />
-                  )}
-                  {canUpgradeToWave && (
-                    <Button
-                      label="Upgrade to Deep Wave"
-                      icon={Crown}
-                      variant="secondary"
-                      loading={planAction === "wave"}
-                      disabled={planAction !== null}
-                      onPress={() => void startCheckout("wave")}
-                    />
-                  )}
                   {isPaid && (
                     <Button
                       label="Manage Ora plan"
