@@ -12,11 +12,12 @@ import { setBaseUrl } from "@/lib/auth-client";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { logError } from "@/lib/log";
@@ -58,10 +59,16 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  const [splashDone, setSplashDone] = useState(false);
+  const handleSplashFinish = useCallback(() => setSplashDone(true), []);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
-      const t = setTimeout(() => SplashScreen.hideAsync(), 1500);
+      // Hand off quickly from the static native splash to the animated JS splash
+      // overlay (same dark bg + green atom) so the startup logo visibly moves.
+      const t = setTimeout(() => {
+        void SplashScreen.hideAsync().catch(() => {});
+      }, 100);
       return () => clearTimeout(t);
     }
   }, [fontsLoaded, fontError]);
@@ -95,24 +102,27 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache} proxyUrl={proxyUrl}>
-        <ClerkLoaded>
-          <SafeAreaProvider>
-            <ErrorBoundary
-              onError={(error) => logError("error-boundary", "Unhandled render error", error)}
-            >
-              <QueryClientProvider client={queryClient}>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                  <KeyboardProvider>
-                    <ThemedStatusBar />
-                    <RootLayoutNav />
-                  </KeyboardProvider>
-                </GestureHandlerRootView>
-              </QueryClientProvider>
-            </ErrorBoundary>
-          </SafeAreaProvider>
-        </ClerkLoaded>
-      </ClerkProvider>
+      <View style={{ flex: 1, backgroundColor: "#0a0a0a" }}>
+        <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache} proxyUrl={proxyUrl}>
+          <ClerkLoaded>
+            <SafeAreaProvider>
+              <ErrorBoundary
+                onError={(error) => logError("error-boundary", "Unhandled render error", error)}
+              >
+                <QueryClientProvider client={queryClient}>
+                  <GestureHandlerRootView style={{ flex: 1 }}>
+                    <KeyboardProvider>
+                      <ThemedStatusBar />
+                      <RootLayoutNav />
+                    </KeyboardProvider>
+                  </GestureHandlerRootView>
+                </QueryClientProvider>
+              </ErrorBoundary>
+            </SafeAreaProvider>
+          </ClerkLoaded>
+        </ClerkProvider>
+        {!splashDone && <AnimatedSplash onFinish={handleSplashFinish} />}
+      </View>
     </ThemeProvider>
   );
 }
