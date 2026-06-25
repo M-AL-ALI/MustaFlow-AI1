@@ -10,15 +10,21 @@ import type { Request } from "express";
 // hoisted vi.mock factories below reference it.
 const mockState = vi.hoisted(() => ({
   getAuthMock: vi.fn(),
+  isSuperuserMock: vi.fn(),
   subscriptionRows: [] as Array<{ tier: string | null; status: string }>,
 }));
-const { getAuthMock } = mockState;
+const { getAuthMock, isSuperuserMock } = mockState;
 function setSubscriptionRows(rows: Array<{ tier: string | null; status: string }>): void {
   mockState.subscriptionRows = rows;
 }
 
 vi.mock("@clerk/express", () => ({
   getAuth: (...args: unknown[]) => mockState.getAuthMock(...args),
+}));
+
+vi.mock("../../../lib/superusers", () => ({
+  SUPERUSER_ORA_TIER: "core",
+  isSuperuser: (...args: unknown[]) => mockState.isSuperuserMock(...args),
 }));
 
 // Chainable db.select().from().where() stub whose resolved rows are controlled
@@ -45,6 +51,8 @@ function makeReq(headers: Record<string, string> = {}): Request {
 describe("resolveAuthedOraUser — test-only authenticated path", () => {
   beforeEach(() => {
     getAuthMock.mockReset();
+    isSuperuserMock.mockReset();
+    isSuperuserMock.mockResolvedValue(false);
     setSubscriptionRows([]);
     // Default: getAuth throws as it would without clerkMiddleware mounted.
     getAuthMock.mockImplementation(() => {
@@ -133,5 +141,21 @@ describe("resolveAuthedOraUser — test-only authenticated path", () => {
     setSubscriptionRows([]);
     const result = await resolveAuthedOraUser(makeReq({}));
     expect(result).toEqual({ userId: "clerk-user", tier: "free", isPaid: false });
+  });
+
+  it("real Clerk session, superuser without paid subscription resolves to Core tier", async () => {
+    getAuthMock.mockReturnValue({ userId: "owner-user" });
+    isSuperuserMock.mockResolvedValue(true);
+    setSubscriptionRows([]);
+    const result = await resolveAuthedOraUser(makeReq({}));
+    expect(result).toEqual({ userId: "owner-user", tier: "core", isPaid: true });
+  });
+
+  it("real Clerk session, superuser with explicit Wave subscription keeps Wave tier", async () => {
+    getAuthMock.mockReturnValue({ userId: "owner-user" });
+    isSuperuserMock.mockResolvedValue(true);
+    setSubscriptionRows([{ tier: "wave", status: "active" }]);
+    const result = await resolveAuthedOraUser(makeReq({}));
+    expect(result).toEqual({ userId: "owner-user", tier: "wave", isPaid: true });
   });
 });
