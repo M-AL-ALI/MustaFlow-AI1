@@ -26,6 +26,19 @@ hot reload / OTA over a build made before expo-print was added will NOT have the
 native module, so PDF export fails or falls back. Same rule for any future native
 module added to the mobile app.
 
+**A static top-level `import` of a native module crashes the WHOLE app, not just
+the feature.** `import * as Print from "expo-print"` at the top of `lib/files.ts`
+threw "Cannot find native module 'ExpoPrint'" at module-load time on the old
+build; because files.ts is imported by MessageExtras → index, the red-box took
+down app launch entirely. **Why:** native-module resolution runs during module
+evaluation, before any function is called, so the throw propagates up the import
+graph. **How to apply:** never statically import a newly-added native module at a
+module's top level. Load it lazily behind a guarded `require()` inside the
+function that uses it (cache the result, including the "unavailable" case) and
+degrade that one feature (e.g. PDF → `.html` fallback). The crash fix is pure JS,
+so Metro Fast Refresh delivers it on the existing build — no native rebuild needed
+to STOP the crash (a rebuild is still needed for the feature to actually work).
+
 **How to apply:** if asked to "fix mobile Word/Excel/Slides export," first confirm
 whether it's the backend-generated path (already parity) or the client chat-export
 menu (intentional stand-in) before changing anything — don't treat the stand-ins
