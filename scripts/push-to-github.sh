@@ -34,7 +34,8 @@ ARG="${1:-}"
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 git add \
-  "artifacts/ora-mobile/docs/qa/parity-and-testflight-checklist.md" \
+  .agents/memory/MEMORY.md \
+  .agents/memory/ora-mobile-export-fidelity.md \
   scripts/push-to-github.sh \
   2>/dev/null || true
 
