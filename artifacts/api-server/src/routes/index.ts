@@ -116,6 +116,7 @@ import {
   oraFileAnalysisLimiter,
   oraDatasetAnalysisLimiter,
   oraGenerateFileLimiter,
+  oraExportFileLimiter,
 } from "../lib/rateLimit";
 
 const router: IRouter = Router();
@@ -156,6 +157,10 @@ router.post("/public-ai/chat/stream", oraLimiter);
 router.post("/public-ai/file-analysis", oraFileAnalysisLimiter, oraLimiter);
 router.post("/public-ai/dataset-analysis", oraDatasetAnalysisLimiter, oraLimiter);
 router.post("/public-ai/generate-file", oraGenerateFileLimiter, oraLimiter);
+// Deterministic export is AI-free (no oraLimiter concurrency gate), but still
+// IP-rate-limited so cheaply-minted anonymous sessions can't hammer the
+// CPU/memory-heavy Office/PDF builders.
+router.post("/public-ai/export-file", oraExportFileLimiter);
 router.use(publicAiRouter);
 
 // ── Help Center + Ora Support Mode ────────────────────────────────────────────

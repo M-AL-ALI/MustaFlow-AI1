@@ -417,6 +417,17 @@ export const oraGenerateFileLimiter = createLimiter({
   message: "File generation is temporarily at capacity. Please try again later.",
 });
 
+// Deterministic file export — 30 per IP per hour. No AI/quota is consumed, but
+// each call runs CPU/memory-heavy Office/PDF builders, so frequency is bounded
+// to prevent abuse from cheaply-minted anonymous sessions.
+export const oraExportFileLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 30,
+  keyPrefix: "ora_export_file",
+  limitType: "file_export",
+  message: "File export is temporarily at capacity. Please try again later.",
+});
+
 // Help Center support chat — 20 messages per IP per minute. Each call invokes
 // an AI model, so this is stricter than the general limiter but lenient enough
 // for a normal back-and-forth support conversation.

@@ -12,6 +12,7 @@ import handoffRouter from "./handoff";
 import transcribeRouter from "./transcribe";
 import ttsRouter from "./tts";
 import generateFileRouter from "./generate-file";
+import exportFileRouter from "./export-file";
 import rememberDocumentRouter from "./remember-document";
 
 const router = Router();
@@ -45,6 +46,7 @@ router.use(handoffRouter);
 router.use(transcribeRouter);
 router.use(ttsRouter);
 router.use(generateFileRouter);
+router.use(exportFileRouter);
 router.use(rememberDocumentRouter);
 
 export default router;

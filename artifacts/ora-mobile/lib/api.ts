@@ -6,6 +6,8 @@ import type {
   ChatRequest,
   ChatResponse,
   DatasetAnalysisResponse,
+  FileFormat,
+  GeneratedFile,
   HelpArticle,
   OraAssetsResponse,
   OraConversationDetail,
@@ -160,6 +162,26 @@ export function getOraSession(): Promise<OraSession> {
 
 export function getOraUsage(): Promise<OraUsage> {
   return jsonRequest<OraUsage>("/api/public-ai/usage");
+}
+
+export interface ExportFileRequest {
+  format: FileFormat;
+  content: string;
+  title?: string;
+  filename?: string;
+}
+
+/**
+ * Server-side real Office/PDF export. Sends Markdown the client already has and
+ * receives a real .docx/.xlsx/.pptx/.pdf (base64) built by the same
+ * deterministic builders the website uses. No Ora quota is consumed.
+ */
+export async function exportFile(req: ExportFileRequest): Promise<GeneratedFile> {
+  const res = await jsonRequest<{ fileName: string; fileData: string; mimeType: string }>(
+    "/api/public-ai/export-file",
+    { method: "POST", body: JSON.stringify(req) },
+  );
+  return { ...res, format: req.format };
 }
 
 export function sendChat(req: ChatRequest): Promise<ChatResponse> {

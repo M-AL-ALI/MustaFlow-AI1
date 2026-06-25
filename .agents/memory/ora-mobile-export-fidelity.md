@@ -1,45 +1,46 @@
 ---
 name: Ora Mobile export fidelity
-description: Why mobile chat-export uses open-format stand-ins, which binary libs to avoid in RN, and the native-rebuild rule
+description: Mobile chat-export now produces real binary Office files via a server endpoint; which binary libs to avoid in RN, and the native-rebuild rule
 ---
 
-Mobile chat-export (the "export this chat as a document" menu) intentionally
-emits open-format stand-ins, NOT binary Office files:
+Mobile chat-export (the "export this chat as a document" menu) now produces REAL
+binary Microsoft Office files at website-grade fidelity:
 
-- Word → `.rtf`, Excel → `.csv`, Slides → `.html`.
-- PDF is the exception: real `.pdf` via `expo-print` (`saveHtmlAsPdf` in
-  `lib/files.ts`).
+- Word → real `.docx`, Excel → real `.xlsx`, Slides → real `.pptx`.
+- PDF: real `.pdf` via `expo-print` (`saveHtmlAsPdf` in `lib/files.ts`) — unchanged.
 
-**Backend-generated** binary files (`/public-ai/generate-file` → base64) ARE full
-parity on mobile — saved/shared natively via `saveGeneratedFile`. So "Ora
-generated a real .docx/.xlsx/.pptx" works; only the client-side chat-to-document
-convenience export is lower fidelity.
+**How:** the client does NOT run the heavy Office builders. It POSTs the message
+Markdown + a title to a deterministic server endpoint that reuses the same
+`buildDocx/buildXlsx/buildPptx/buildPdf` builders the website's chat file
+generation relies on, and saves the returned base64 via `saveGeneratedFile`. This
+sidesteps the RN/Hermes incompatibility entirely (builders run on the server).
 
-**Why deferred:** the website's libs are RN/Hermes-hostile — `pptxgenjs` assumes
-DOM/Blob, `exceljs` needs Buffer/Node polyfills, SheetJS (`xlsx`) works but adds
-audit weight. `docx` (`Packer.toBase64String`) is the lowest-risk path if/when
-closing the Word gap. Do NOT add these heavy deps right before a build; test each
-on Hermes/iOS first.
+**Endpoint design (the durable decisions):**
+- `POST /public-ai/export-file` is deterministic Markdown→Office bytes. It is
+  AI-free: no model calls, no Ora quota, no spend-cap, no asset persistence.
+- It is auth-gated (signed-in Ora user OR valid `ora-session` cookie) AND
+  IP-rate-limited (`oraExportFileLimiter`, 30/hr) — uncharged but NOT unmetered.
+  **Why:** anonymous ora-sessions are cheaply minted via the public session
+  route, and the Office/PDF builders are CPU/memory-heavy, so an auth-only gate
+  without a rate limit is a DoS hole. It intentionally does NOT take the
+  `oraLimiter` AI-concurrency semaphore (it isn't an AI call).
+- Server-side Markdown→structure conversion lives in `export-content.ts`
+  (`markdownToDocumentData/PresentationData/TabularData`, pure/deterministic).
 
-**expo-print is a NATIVE module:** PDF export needs a fresh dev/TestFlight build —
-hot reload / OTA over a build made before expo-print was added will NOT have the
-native module, so PDF export fails or falls back. Same rule for any future native
-module added to the mobile app.
+**Heavy libs are still RN/Hermes-hostile — keep them server-only:** `pptxgenjs`
+assumes DOM/Blob, `exceljs` needs Buffer/Node polyfills. Do NOT add these to the
+Expo app; route any new "real binary file" need through a server endpoint instead.
 
-**A static top-level `import` of a native module crashes the WHOLE app, not just
-the feature.** `import * as Print from "expo-print"` at the top of `lib/files.ts`
-threw "Cannot find native module 'ExpoPrint'" at module-load time on the old
-build; because files.ts is imported by MessageExtras → index, the red-box took
-down app launch entirely. **Why:** native-module resolution runs during module
-evaluation, before any function is called, so the throw propagates up the import
-graph. **How to apply:** never statically import a newly-added native module at a
-module's top level. Load it lazily behind a guarded `require()` inside the
-function that uses it (cache the result, including the "unavailable" case) and
-degrade that one feature (e.g. PDF → `.html` fallback). The crash fix is pure JS,
-so Metro Fast Refresh delivers it on the existing build — no native rebuild needed
-to STOP the crash (a rebuild is still needed for the feature to actually work).
+**expo-print is a NATIVE module:** PDF export needs a fresh dev/TestFlight build.
+And **a static top-level `import` of a native module crashes the WHOLE app** (not
+just the feature): native-module resolution runs during module evaluation, before
+any function is called, so the throw propagates up the import graph and red-boxes
+launch. Never statically import a newly-added native module at a module's top
+level — lazy-require behind a guarded `require()` inside the using function (cache
+the "unavailable" case) and degrade just that feature. The crash fix is pure JS
+(Metro Fast Refresh delivers it on the existing build); the feature itself still
+needs a native rebuild.
 
-**How to apply:** if asked to "fix mobile Word/Excel/Slides export," first confirm
-whether it's the backend-generated path (already parity) or the client chat-export
-menu (intentional stand-in) before changing anything — don't treat the stand-ins
-as a bug, and don't claim "all export formats match the website."
+**Deploy coupling:** the export-file endpoint must be live in PROD before a
+TestFlight/production mobile build can use it — mobile calls the deployed API, so
+republish the API server before shipping a build that relies on real exports.

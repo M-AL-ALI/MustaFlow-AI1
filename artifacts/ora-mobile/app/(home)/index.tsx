@@ -111,6 +111,7 @@ import {
   deleteConversation,
   deleteProject,
   editImage,
+  exportFile,
   getConversation,
   getOraSession,
   getPreferences,
@@ -200,50 +201,6 @@ function conversationMarkdown(messages: OraMessage[]): string {
     "",
     ...messages.map((m) => `## ${m.role === "user" ? "User" : "Ora"}\n\n${m.content.trim()}`),
   ].join("\n\n");
-}
-
-function reportRtf(messages: OraMessage[], title: string): string {
-  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}");
-  const body = messages
-    .filter((m) => m.content.trim())
-    .map(
-      (m) =>
-        `{\\b ${esc(m.role === "assistant" ? "Ora" : "You")}:}  ` +
-        `${esc(m.content.trim()).replace(/\n/g, "\\line ")}\\par\\par `,
-    )
-    .join("");
-  return (
-    `{\\rtf1\\ansi\\deff0\n{\\fonttbl{\\f0\\fswiss Arial;}}\n` +
-    `\\f0\\fs24\\b ${esc(title)}\\b0\\par\\par\n${body}}`
-  );
-}
-
-function reportCsv(messages: OraMessage[]): string {
-  const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
-  const rows = messages
-    .filter((m) => m.content.trim())
-    .map((m) => [q(m.role === "assistant" ? "Ora" : "You"), q(m.content.trim())].join(","))
-    .join("\n");
-  return `"Role","Content"\n${rows}`;
-}
-
-function reportPresentationHtml(messages: OraMessage[], title: string): string {
-  const slides = messages
-    .filter((m) => m.role === "assistant" && m.content.trim())
-    .map(
-      (m, i) =>
-        `<section><h2>Slide ${i + 1}</h2>` +
-        `<p>${m.content.trim().replace(/\n/g, "<br>")}</p></section>`,
-    )
-    .join("");
-  return (
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>` +
-    `<style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:20px}` +
-    `section{border-bottom:2px solid #ddd;padding:32px 0;margin-bottom:16px}` +
-    `h2{color:#4B6BFB}p{font-size:16px;line-height:1.6}` +
-    `@media print{section{page-break-after:always}}</style></head>` +
-    `<body><h1>${title}</h1>${slides}</body></html>`
-  );
 }
 
 function reportPdfHtml(messages: OraMessage[], title: string): string {
@@ -1059,55 +1016,47 @@ export default function OraChatScreen() {
     }
   }, []);
 
-  const handleExportWord = useCallback(
-    async (message: OraMessage) => {
-      const title = messageTitle(message);
-      try {
-        await saveTextAsFile(
-          reportRtf(
-            messages.filter((m) => m.content.trim()),
-            title,
-          ),
-          "ora-report.rtf",
-          "application/rtf",
-        );
-      } catch (err) {
-        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
-      }
-    },
-    [messages],
-  );
+  const handleExportWord = useCallback(async (message: OraMessage) => {
+    try {
+      const file = await exportFile({
+        format: "docx",
+        title: messageTitle(message),
+        content: message.content,
+        filename: "ora-report",
+      });
+      await saveGeneratedFile(file);
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
 
-  const handleExportExcel = useCallback(
-    async (message: OraMessage) => {
-      const src = message.datasetResult ? [message] : messages.filter((m) => m.content.trim());
-      try {
-        await saveTextAsFile(reportCsv(src), "ora-data.csv", "text/csv");
-      } catch (err) {
-        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
-      }
-    },
-    [messages],
-  );
+  const handleExportExcel = useCallback(async (message: OraMessage) => {
+    try {
+      const file = await exportFile({
+        format: "xlsx",
+        title: messageTitle(message),
+        content: message.content,
+        filename: "ora-data",
+      });
+      await saveGeneratedFile(file);
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
 
-  const handleExportPresentation = useCallback(
-    async (message: OraMessage) => {
-      const title = messageTitle(message);
-      try {
-        await saveTextAsFile(
-          reportPresentationHtml(
-            messages.filter((m) => m.content.trim()),
-            title,
-          ),
-          "ora-presentation.html",
-          "text/html",
-        );
-      } catch (err) {
-        Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
-      }
-    },
-    [messages],
-  );
+  const handleExportPresentation = useCallback(async (message: OraMessage) => {
+    try {
+      const file = await exportFile({
+        format: "pptx",
+        title: messageTitle(message),
+        content: message.content,
+        filename: "ora-presentation",
+      });
+      await saveGeneratedFile(file);
+    } catch (err) {
+      Alert.alert("Export failed", err instanceof Error ? err.message : "Something went wrong.");
+    }
+  }, []);
 
   const handleExportPdf = useCallback(
     async (message: OraMessage) => {
@@ -3975,28 +3924,28 @@ function MessageActionsSheet({
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={FileText}
-                  label="RTF Document"
+                  label="Word Report"
                   onPress={() => onExportWord(message)}
                 />
               )}
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={FileSpreadsheet}
-                  label="CSV Export"
+                  label="Excel Workbook"
                   onPress={() => onExportExcel(message)}
                 />
               )}
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={Presentation}
-                  label="HTML Slides"
+                  label="Presentation"
                   onPress={() => onExportPresentation(message)}
                 />
               )}
               {isAssistant && hasContent && (
                 <ActionRow
                   icon={FileDown}
-                  label="HTML Report"
+                  label="PDF Report"
                   onPress={() => onExportPdf(message)}
                 />
               )}
