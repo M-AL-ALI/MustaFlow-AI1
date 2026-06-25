@@ -1,7 +1,6 @@
 import { getAuthToken } from "./auth-client";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
-import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { Linking, Platform } from "react-native";
 
@@ -130,11 +129,35 @@ export async function saveTextAsFile(
   return "shared";
 }
 
+type PrintModule = typeof import("expo-print");
+let printModule: PrintModule | null | undefined;
+
+/**
+ * expo-print is a native module. On an older native build (one created before
+ * expo-print was added) the native side is missing, so a static top-level
+ * import throws at module-load time and crashes the entire app — not just PDF
+ * export. Load it lazily and cache the outcome (including the "unavailable"
+ * case) so the app always launches and only PDF export degrades.
+ */
+function getPrintModule(): PrintModule | null {
+  if (printModule === undefined) {
+    try {
+      printModule = require("expo-print") as PrintModule;
+    } catch {
+      printModule = null;
+    }
+  }
+  return printModule;
+}
+
 /**
  * Render an HTML report to a real PDF on device (via expo-print) and hand it to
  * the native share sheet. This mirrors the website's print-to-PDF export, but
- * writes an actual `.pdf` file instead of the portable `.html` stand-in. On web,
- * the HTML is opened in a new tab so the user can print-to-PDF from the browser.
+ * writes an actual `.pdf` file instead of the portable `.html` stand-in.
+ *
+ * Requires a native build that includes expo-print. On web — or on an older
+ * native build that is missing the module — it falls back to an HTML export so
+ * the user still gets their report; a fresh native build restores real PDF.
  */
 export async function saveHtmlAsPdf(
   html: string,
@@ -143,6 +166,14 @@ export async function saveHtmlAsPdf(
   if (Platform.OS === "web") {
     await Linking.openURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     return "opened";
+  }
+
+  const Print = getPrintModule();
+  if (!Print) {
+    // Native PDF module unavailable on this build — fall back to an HTML file so
+    // the export still works. Rebuilding the app restores real PDF output.
+    const htmlName = `${fileName.replace(/\.pdf$/i, "")}.html`;
+    return saveTextAsFile(html, htmlName, "text/html");
   }
 
   const { uri } = await Print.printToFileAsync({ html });

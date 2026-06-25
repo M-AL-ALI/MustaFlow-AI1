@@ -34,10 +34,13 @@ website."
 `expo-print` is a **native** Expo module. It was added after the previous
 dev-client / TestFlight build, so:
 
-- Hot reload / OTA update over an old build is **not** enough — the native module
-  will be missing and PDF export will fail or fall back.
-- PDF export cannot be trusted until the app is rebuilt (a new development build
-  or a new TestFlight build) with `expo-print` linked.
+- The `expo-print` import is lazily guarded, so an old build that is missing the
+  native module no longer crashes the app at launch — PDF export simply falls
+  back to an `.html` export until the app is rebuilt.
+- Hot reload / OTA update over an old build does **not** add the native module —
+  real PDF output stays unavailable until a fresh native build links `expo-print`.
+- PDF export cannot be trusted as real PDF until the app is rebuilt (a new
+  development build or a new TestFlight build) with `expo-print` linked.
 
 Expected result on a rebuilt app:
 
