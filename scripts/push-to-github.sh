@@ -37,6 +37,11 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
   scripts/push-to-github.sh \
+  lib/integrations-openai-ai-server/src/audio/client.ts \
+  artifacts/api-server/src/routes/public-ai/transcribe.ts \
+  artifacts/api-server/src/routes/transcribe.ts \
+  artifacts/api-server/src/routes/public-ai/tts.ts \
+  artifacts/api-server/src/routes/public-ai/__tests__/voice-session.test.ts \
   2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

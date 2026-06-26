@@ -3,7 +3,7 @@
  *
  * Session-gated Whisper endpoint for public Ora voice conversation mode.
  * Accepts raw audio bytes (WebM/Opus from MediaRecorder) and returns a
- * plain-text transcript via gpt-5-mini-transcribe.
+ * plain-text transcript via gpt-4o-mini-transcribe.
  *
  * Rate-limited per IP; requires a valid ora-session cookie.
  * Max payload: 10 MB (voice clips are short; 25 MB limit applies to batch).
@@ -54,7 +54,7 @@ async function directSpeechToText(
   });
   const response = await client.audio.transcriptions.create({
     file,
-    model: process.env.ORA_TRANSCRIBE_MODEL ?? "gpt-5-mini-transcribe",
+    model: process.env.ORA_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe",
     ...(language ? { language } : {}),
   });
   return response.text?.trim() ?? "";

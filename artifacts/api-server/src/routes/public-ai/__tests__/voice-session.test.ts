@@ -54,7 +54,7 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(transcribe).toContain("getDirectTranscribeClient");
     expect(transcribe).toContain("OPENAI_API_KEY");
     expect(transcribe).toContain("ORA_TRANSCRIBE_MODEL");
-    expect(transcribe).toContain("gpt-5-mini-transcribe");
+    expect(transcribe).toContain("gpt-4o-mini-transcribe");
     expect(transcribe).toContain("client.audio.transcriptions.create");
     expect(transcribe).toContain("directSpeechToText");
     expect(transcribe).toContain("Ora transcription proxy failed; trying direct OpenAI fallback");
@@ -84,7 +84,7 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(route).toContain("validateSession");
     expect(route).toContain("oraVoiceTtsLimiter");
     expect(route).toContain("OPENAI_API_KEY");
-    expect(route).toContain("gpt-5-mini-tts");
+    expect(route).toContain("gpt-4o-mini-tts");
     expect(route).toContain('"Content-Type", "audio/mpeg"');
     expect(route).not.toContain("@workspace/integrations-openai-ai-server");
 
