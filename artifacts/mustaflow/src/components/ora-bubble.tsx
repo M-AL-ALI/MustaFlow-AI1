@@ -34,11 +34,13 @@ import type {
 } from "@/hooks/use-ora-chat";
 import { useOraVoice } from "@/hooks/use-ora-voice";
 import { useWhisperRecorder } from "@/hooks/use-whisper-recorder";
+import { useOraRealtimeVoice } from "@/hooks/use-ora-realtime-voice";
 import {
   OraVoiceModeButton,
   OraVoiceLiveArea,
   OraDictationButton,
   OraVoiceConvPanel,
+  mapRealtimeToVoiceState,
 } from "@/components/ora/ora-voice-mode-button";
 import { DatasetResultCard } from "@/components/dataset-result-card";
 import { DynamicAtom, type AtomState } from "@/components/ora/dynamic-atom";
@@ -235,6 +237,8 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     session,
     oraStatus,
     clearConversation,
+    appendVoiceMessage,
+    getRealtimeContext,
   } = chat;
 
   const { isSignedIn } = useUser();
@@ -316,9 +320,14 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const [voiceReady, setVoiceReady] = useState(false);
   const [voiceConvActive, setVoiceConvActive] = useState(false);
   const [voiceConvTtsMuted, setVoiceConvTtsMuted] = useState(false);
+  // Which voice transport drives Voice Conversation Mode: "realtime" (GA OpenAI
+  // Realtime over WebRTC, primary) or "fallback" (legacy whisper -> chat -> TTS).
+  const [voiceTransport, setVoiceTransport] = useState<"realtime" | "fallback">("realtime");
+  const [fallbackNoticeDismissed, setFallbackNoticeDismissed] = useState(false);
 
   // Stable refs — always current, so effects and callbacks never go stale
   const voiceConvActiveRef = useRef(false);
+  const voiceTransportRef = useRef<"realtime" | "fallback">("realtime");
   const wasConvSpeakingRef = useRef(false);
   const lastSpokenAssistantMsgRef = useRef<string | null>(null);
   // Whether the auto-speak effect has armed for the currently loaded transcript.
@@ -328,10 +337,15 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const autoSpeakArmedRef = useRef(false);
   const languageRef = useRef(language);
   const sendMessageRef = useRef(sendMessage);
+  const appendVoiceMessageRef = useRef(appendVoiceMessage);
+  const getRealtimeContextRef = useRef(getRealtimeContext);
 
   voiceConvActiveRef.current = voiceConvActive;
+  voiceTransportRef.current = voiceTransport;
   languageRef.current = language;
   sendMessageRef.current = sendMessage;
+  appendVoiceMessageRef.current = appendVoiceMessage;
+  getRealtimeContextRef.current = getRealtimeContext;
 
   const handleVoiceTranscript = useCallback((text: string) => {
     if (voiceConvActiveRef.current) {
@@ -368,6 +382,44 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const whisperSupported = whisperConv.isSupported;
   const startWhisperRecording = whisperConv.startRecording;
   const cancelWhisperRecording = whisperConv.cancelRecording;
+
+  // ─── Realtime "Talk to Ora" (GA OpenAI Realtime over WebRTC) ───────────────
+  // The model speaks its own audio and reports both transcripts over the data
+  // channel. Each finalized turn is mirrored into the conversation history with
+  // no /chat round-trip (it never calls sendMessage, so cannot double-respond).
+  const handleRealtimeUserTranscript = useCallback((text: string) => {
+    appendVoiceMessageRef.current("user", text);
+  }, []);
+  const handleRealtimeAssistantTranscript = useCallback((text: string) => {
+    appendVoiceMessageRef.current("assistant", text);
+  }, []);
+  // Late realtime failure (the connection dropped after start() already
+  // succeeded). The start()-false branch only covers failures BEFORE the session
+  // is established, so without this the user would be stuck in the realtime view
+  // with a banner but no working transport. Flip to the legacy whisper -> chat ->
+  // tts loop, which the automatic listener effect starts on "fallback".
+  const handleRealtimeFallback = useCallback(() => {
+    if (!voiceConvActiveRef.current) return;
+    if (voiceTransportRef.current !== "realtime") return;
+    setVoiceTransport("fallback");
+    voiceTransportRef.current = "fallback";
+    void voiceRef.current.prepareVoicePlayback();
+  }, []);
+
+  const realtime = useOraRealtimeVoice({
+    onUserTranscript: handleRealtimeUserTranscript,
+    onAssistantTranscript: handleRealtimeAssistantTranscript,
+    onFallback: handleRealtimeFallback,
+  });
+  const realtimeRef = useRef(realtime);
+  realtimeRef.current = realtime;
+
+  const realtimeActive = voiceConvActive && voiceTransport === "realtime";
+  const fallbackNotice =
+    voiceConvActive && voiceTransport === "fallback" && !fallbackNoticeDismissed
+      ? (realtime.fallbackReason ??
+        "Live voice is unavailable right now. Using standard voice mode instead.")
+      : null;
 
   // Auto-clear the transcript-ready hint after 5 s (dictation mode only)
   useEffect(() => {
@@ -406,6 +458,13 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
         lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
       return;
     }
+    // Realtime transport speaks its own audio — never double-speak via server
+    // TTS. Keep the dedup ref current so exiting to typing mode won't replay.
+    if (realtimeActive) {
+      lastSpokenAssistantMsgRef.current =
+        lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
+      return;
+    }
     const shouldSpeak = voiceConvActive ? !voiceConvTtsMuted : voice.isTtsEnabled;
     if (!shouldSpeak) return;
     if (!lastMsg || lastMsg.role !== "assistant") return;
@@ -413,7 +472,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     if (playbackKey === lastSpokenAssistantMsgRef.current) return;
     lastSpokenAssistantMsgRef.current = playbackKey;
     voiceRef.current.speakTextForce(lastMsg.content, languageRef.current);
-  }, [messages, voiceConvActive, voiceConvTtsMuted, voice.isTtsEnabled]);
+  }, [messages, voiceConvActive, voiceConvTtsMuted, voice.isTtsEnabled, realtimeActive]);
 
   // Conversation cycling: track when Ora finishes speaking so the automatic
   // listener can resume.
@@ -433,6 +492,12 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       cancelWhisperRecording();
       return;
     }
+    // Realtime transport keeps the mic live itself — never run the legacy
+    // record/transcribe loop alongside it.
+    if (voiceTransport === "realtime") {
+      cancelWhisperRecording();
+      return;
+    }
     if (!whisperSupported) return;
     if (isLoading || voice.voiceState === "speaking") return;
     if (whisperState !== "idle") return;
@@ -447,6 +512,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
     startWhisperRecording,
     voice.voiceState,
     voiceConvActive,
+    voiceTransport,
     whisperState,
     whisperSupported,
   ]);
@@ -729,31 +795,52 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   const handleEnterVoiceConvMode = useCallback(() => {
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
-    void voiceRef.current.prepareVoicePlayback();
     setInput("");
     setVoiceReady(false);
     setVoiceConvTtsMuted(false);
+    setFallbackNoticeDismissed(false);
     wasConvSpeakingRef.current = false;
     const lastMsgIndex = messages.length - 1;
     const lastMsg = messages[lastMsgIndex];
     lastSpokenAssistantMsgRef.current =
       lastMsg?.role === "assistant" ? `${lastMsgIndex}:${lastMsg.content}` : null;
+    // Default to realtime; fall back to the legacy loop only if it cannot start.
+    setVoiceTransport("realtime");
+    voiceTransportRef.current = "realtime";
     setVoiceConvActive(true);
     voiceConvActiveRef.current = true;
-    // The automatic listener effect starts Whisper once the mode is active.
+
+    const ctx = { ...getRealtimeContextRef.current() };
+    void realtimeRef.current.start(ctx).then((ok) => {
+      if (!voiceConvActiveRef.current) return;
+      if (!ok) {
+        setVoiceTransport("fallback");
+        voiceTransportRef.current = "fallback";
+        void voiceRef.current.prepareVoicePlayback();
+      }
+    });
   }, [messages]);
 
   const handleExitVoiceConvMode = useCallback(() => {
     setVoiceConvActive(false);
     voiceConvActiveRef.current = false;
     wasConvSpeakingRef.current = false;
+    realtimeRef.current.stop();
     voiceRef.current.stopListening();
     voiceRef.current.stopSpeaking();
     whisperConv.cancelRecording();
+    setVoiceTransport("realtime");
+    voiceTransportRef.current = "realtime";
+    setFallbackNoticeDismissed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleToggleVoiceConvTtsMute = useCallback(() => {
+    // Realtime: mute only Ora's audio output (data channel keeps running).
+    if (voiceTransportRef.current === "realtime") {
+      realtimeRef.current.toggleMute();
+      return;
+    }
     setVoiceConvTtsMuted((prev) => {
       const next = !prev;
       if (next) {
@@ -763,6 +850,10 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
       }
       return next;
     });
+  }, []);
+
+  const handleDismissFallbackNotice = useCallback(() => {
+    setFallbackNoticeDismissed(true);
   }, []);
 
   // "Voice responses" toggle (normal typing mode). When enabling, unlock browser
@@ -932,15 +1023,17 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
           </div>
           <div className="flex items-center gap-2">
             {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
-            {(voice.isSupported || whisperConv.isSupported) && (
+            {(realtime.isSupported || voice.isSupported || whisperConv.isSupported) && (
               <OraVoiceModeButton
                 voiceState={
-                  voiceConvActive &&
-                  !(voice.voiceState === "unsupported" && whisperConv.isSupported)
-                    ? voice.voiceState
-                    : "idle"
+                  realtimeActive
+                    ? mapRealtimeToVoiceState(realtime.state)
+                    : voiceConvActive &&
+                        !(voice.voiceState === "unsupported" && whisperConv.isSupported)
+                      ? voice.voiceState
+                      : "idle"
                 }
-                isSupported={voice.isSupported || whisperConv.isSupported}
+                isSupported={realtime.isSupported || voice.isSupported || whisperConv.isSupported}
                 active={voiceConvActive}
                 onStart={handleEnterVoiceConvMode}
                 onStop={handleExitVoiceConvMode}
@@ -1433,6 +1526,13 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
               {voiceConvActive ? (
                 /* ─── Voice Conversation Mode panel ─────────────────── */
                 <OraVoiceConvPanel
+                  transport={voiceTransport}
+                  realtimeState={realtime.state}
+                  interimUserText={realtime.interimUserTranscript}
+                  interimAssistantText={realtime.interimAssistantTranscript}
+                  remainingSeconds={realtime.remainingSeconds}
+                  fallbackNotice={fallbackNotice}
+                  onDismissFallbackNotice={handleDismissFallbackNotice}
                   voiceState={
                     voice.voiceState === "unsupported" && whisperConv.isSupported
                       ? "idle"
@@ -1440,10 +1540,14 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   }
                   interimTranscript={voice.interimTranscript}
                   isLoading={isLoading}
-                  isTtsMuted={voiceConvTtsMuted}
+                  isTtsMuted={realtimeActive ? realtime.isMuted : voiceConvTtsMuted}
                   onToggleTtsMute={handleToggleVoiceConvTtsMute}
                   onExit={handleExitVoiceConvMode}
-                  onInterrupt={() => voiceRef.current.stopSpeaking()}
+                  onInterrupt={
+                    realtimeActive
+                      ? () => realtimeRef.current.interrupt()
+                      : () => voiceRef.current.stopSpeaking()
+                  }
                   size="sm"
                   whisperState={whisperConv.state}
                   whisperSupported={whisperConv.isSupported}

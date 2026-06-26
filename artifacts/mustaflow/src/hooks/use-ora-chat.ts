@@ -158,6 +158,36 @@ export interface AttachedFile {
 
 export type OraMode = "instant" | "deep";
 
+/**
+ * The subset of chat context required to mint a "Talk to Ora" realtime session
+ * with every Ora rule preserved (temporary chat, saved-memory opt-in, the active
+ * Ora project for memory injection, the current conversation, and the selected
+ * language). Derived from the exact same internal state the `/chat` body uses so
+ * isolation/memory behavior stays in a single place.
+ */
+export interface OraRealtimeContext {
+  temporary: boolean;
+  referenceSavedMemories: boolean;
+  oraProjectId: number | null;
+  conversationId: number | null;
+  /** Selected language code; omitted when the user is on "auto". */
+  language?: string;
+  /** Browser language label, sent only when no explicit language is selected. */
+  languageHint?: string;
+  /**
+   * The most recent user utterance from the text conversation, forwarded ONLY as
+   * a ranking hint for saved-memory recall (the realtime session has no "current
+   * message" of its own at start). Omitted when there is no prior user turn.
+   */
+  message?: string;
+  /**
+   * A bounded snapshot of the recent text conversation so the spoken session
+   * continues with the same context the user already sees. Seeded client-side as
+   * lower-authority realtime conversation items, never as system instructions.
+   */
+  history?: { role: "user" | "assistant"; content: string }[];
+}
+
 export interface UseOraChatReturn {
   messages: OraMessage[];
   session: OraSession | null;
@@ -197,6 +227,21 @@ export interface UseOraChatReturn {
    * already in flight.
    */
   retryLastMessage: () => Promise<void>;
+  /**
+   * Append a finalized realtime-voice turn (a single message) to the transcript
+   * WITHOUT a server inference call or per-message quota charge. "Talk to Ora"
+   * realtime mode already has the model's spoken reply locally; this only
+   * persists the turn into the existing conversation history (sessionStorage +
+   * the race-safe debounced server save). No-op for blank content.
+   */
+  appendVoiceMessage: (role: "user" | "assistant", content: string) => void;
+  /**
+   * Snapshot the current chat context (temporary mode, saved-memory opt-in,
+   * active Ora project, conversation, and language) for minting a realtime
+   * "Talk to Ora" session. Mirrors how the `/chat` request body is built so all
+   * Ora memory/isolation rules are preserved without duplicating the logic.
+   */
+  getRealtimeContext: () => OraRealtimeContext;
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -675,6 +720,10 @@ async function consumeOraStream(
 export function useOraChat(): UseOraChatReturn {
   const { isLoaded, isSignedIn } = useUser();
   const [messages, setMessages] = useState<OraMessage[]>([]);
+  // Latest transcript kept in a ref so getRealtimeContext() can snapshot the
+  // recent history + last user utterance without being in its dependency array.
+  const messagesRef = useRef<OraMessage[]>([]);
+  messagesRef.current = messages;
   const [session, setSession] = useState<OraSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2169,6 +2218,65 @@ export function useOraChat(): UseOraChatReturn {
     await sendMessage(lastUserMsg.content, { truncateTo: lastUserIdx });
   }, [messages, isLoading, sendMessage]);
 
+  // Append a finalized realtime-voice turn into the transcript without a server
+  // chat round-trip. The realtime model has already produced the reply locally,
+  // so this only mirrors the spoken turn into the existing history using the
+  // same race-safe persistence path as sendMessage (sessionStorage +
+  // debounced conversation save). It never calls /chat, never mergeUsage (the
+  // mint spend cap already metered the session), and never touches isLoading.
+  const appendVoiceMessage = useCallback(
+    (role: "user" | "assistant", content: string) => {
+      const text = content.trim();
+      if (!text) return;
+      setMessages((prev) => {
+        const next: OraMessage[] = [...prev, { role, content: text }];
+        storeTranscript(next);
+        if (isSignedIn) saveToServer(next);
+        return next;
+      });
+    },
+    [isSignedIn, saveToServer],
+  );
+
+  // Snapshot the live chat context for a realtime "Talk to Ora" session. This
+  // mirrors how the `/chat` request body is assembled (see sendMessage) so the
+  // realtime mint endpoint receives the exact same temporary/memory/project/
+  // conversation/language signals — keeping all Ora rules in one place.
+  const getRealtimeContext = useCallback((): OraRealtimeContext => {
+    const activeConv = convRef.current;
+    const oraProjectId =
+      activeConv?.conversations.find((c) => c.id === activeConv.currentConversationId)?.projectId ??
+      activeConv?.activeProjectId ??
+      null;
+    const currentConvId = activeConv?.currentConversationId;
+    const ctx: OraRealtimeContext = {
+      temporary: temporaryRef.current,
+      referenceSavedMemories: getReferenceSavedMemories(),
+      oraProjectId: typeof oraProjectId === "number" ? oraProjectId : null,
+      conversationId: typeof currentConvId === "number" ? currentConvId : null,
+    };
+    if (language && language !== "auto") {
+      ctx.language = language;
+    } else {
+      ctx.languageHint = navigator.language;
+    }
+    // Carry the recent text conversation into the spoken session so Ora keeps the
+    // same context the user already sees. History is seeded client-side as
+    // lower-authority realtime conversation items (never system instructions);
+    // only the last user utterance is forwarded to the mint as a saved-memory
+    // ranking hint (message).
+    const recent = messagesRef.current
+      .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
+      .slice(-12)
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    if (recent.length > 0) {
+      ctx.history = recent;
+      const lastUser = [...recent].reverse().find((m) => m.role === "user");
+      if (lastUser) ctx.message = lastUser.content;
+    }
+    return ctx;
+  }, [language]);
+
   const oraStatus = deriveOraStatus(
     isLoading,
     uploadState,
@@ -2206,5 +2314,7 @@ export function useOraChat(): UseOraChatReturn {
     temporary,
     setTemporary,
     retryLastMessage,
+    appendVoiceMessage,
+    getRealtimeContext,
   };
 }

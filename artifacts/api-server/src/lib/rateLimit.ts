@@ -340,6 +340,16 @@ export const oraVoiceTtsLimiter = createLimiter({
   message: "Ora voice replies are temporarily at capacity. Please wait before trying again.",
 });
 
+// Realtime "Talk to Ora" session mints. Each call issues a short-lived ephemeral
+// OpenAI token for a bounded, continuous audio session — far more expensive than
+// a text turn — so it gets its own stricter bucket to prevent reconnect abuse.
+export const oraRealtimeSessionLimiter = createLimiter({
+  windowMs: 60 * 60_000,
+  max: 6,
+  keyPrefix: "ora_realtime_session",
+  message: "You have started too many voice sessions recently. Please wait before trying again.",
+});
+
 // Sliding-window counter: 10 image uploads per IP per hour (images only)
 export const oraImageUploadLimiter = createLimiter({
   windowMs: 60 * 60_000,

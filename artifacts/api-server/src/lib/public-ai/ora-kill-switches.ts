@@ -23,6 +23,7 @@
  *   ORA_TTS_DISABLED=true
  *   ORA_TRANSCRIBE_DISABLED=true
  *   ORA_WEB_SEARCH_DISABLED=true
+ *   ORA_REALTIME_DISABLED=true     — disables /realtime/session (Talk to Ora live voice)
  */
 
 export type OraFeature =
@@ -35,7 +36,8 @@ export type OraFeature =
   | "file_generation"
   | "tts"
   | "transcribe"
-  | "web_search";
+  | "web_search"
+  | "realtime";
 
 const FEATURE_ENV_VAR: Record<OraFeature, string> = {
   all: "ORA_DISABLED",
@@ -48,6 +50,7 @@ const FEATURE_ENV_VAR: Record<OraFeature, string> = {
   tts: "ORA_TTS_DISABLED",
   transcribe: "ORA_TRANSCRIBE_DISABLED",
   web_search: "ORA_WEB_SEARCH_DISABLED",
+  realtime: "ORA_REALTIME_DISABLED",
 };
 
 const FEATURE_LABEL: Record<OraFeature, string> = {
@@ -61,6 +64,7 @@ const FEATURE_LABEL: Record<OraFeature, string> = {
   tts: "Voice responses",
   transcribe: "Voice input",
   web_search: "Web search",
+  realtime: "Talk to Ora",
 };
 
 /**

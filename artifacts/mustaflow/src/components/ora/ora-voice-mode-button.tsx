@@ -35,6 +35,39 @@ import {
 import { cn } from "@/lib/utils";
 import type { VoiceState } from "@/hooks/use-ora-voice";
 import type { WhisperState } from "@/hooks/use-whisper-recorder";
+import type { RealtimeVoiceState } from "@/hooks/use-ora-realtime-voice";
+
+/** Format a seconds countdown as m:ss for the realtime session timer. */
+function formatRemaining(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${rem.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Collapse the richer realtime state machine into the header orb's VoiceState.
+ * The detailed live-conversation states are surfaced inside OraVoiceConvPanel;
+ * the header button only needs an active/listening/speaking glow.
+ */
+export function mapRealtimeToVoiceState(state: RealtimeVoiceState): VoiceState {
+  switch (state) {
+    case "listening":
+    case "connecting":
+    case "thinking":
+      return "listening";
+    case "speaking":
+      return "speaking";
+    case "permission_denied":
+      return "permission_denied";
+    case "error":
+      return "error";
+    case "unsupported":
+      return "unsupported";
+    default:
+      return "idle";
+  }
+}
 
 // ─── CSS keyframes (injected once into <head>) ──────────────────────────────
 
@@ -363,6 +396,26 @@ export interface OraVoiceConvPanelProps {
   /** Set to true after a TTS failure to show a one-time text-only notice. */
   ttsUnavailable?: boolean;
   onDismissTtsNotice?: () => void;
+  // ─── Realtime ("Talk to Ora") transport ─────────────────────────────────────
+  /**
+   * Active voice transport. "realtime" renders the GA WebRTC live-conversation
+   * view; "fallback" (default) renders the legacy whisper -> chat -> TTS loop.
+   */
+  transport?: "realtime" | "fallback";
+  /** Realtime connection/turn state — only read when transport === "realtime". */
+  realtimeState?: RealtimeVoiceState;
+  /** Live partial transcript of what the user is currently saying (realtime). */
+  interimUserText?: string;
+  /** Live partial transcript of what Ora is currently saying (realtime). */
+  interimAssistantText?: string;
+  /** Seconds left before the tier duration cap force-ends the realtime call. */
+  remainingSeconds?: number | null;
+  /**
+   * Visible warning shown when realtime could not start (or dropped) and the
+   * legacy fallback loop took over. Rendered in the fallback view.
+   */
+  fallbackNotice?: string | null;
+  onDismissFallbackNotice?: () => void;
 }
 
 export function OraVoiceConvPanel({
@@ -381,8 +434,32 @@ export function OraVoiceConvPanel({
   onWhisperStart,
   ttsUnavailable,
   onDismissTtsNotice,
+  transport = "fallback",
+  realtimeState = "idle",
+  interimUserText = "",
+  interimAssistantText = "",
+  remainingSeconds = null,
+  fallbackNotice = null,
+  onDismissFallbackNotice,
 }: OraVoiceConvPanelProps) {
   useEffect(injectKeyframes, []);
+
+  // ─── Realtime live-conversation view (GA WebRTC) ──────────────────────────
+  if (transport === "realtime") {
+    return (
+      <OraRealtimeConvView
+        state={realtimeState}
+        interimUserText={interimUserText}
+        interimAssistantText={interimAssistantText}
+        remainingSeconds={remainingSeconds}
+        isTtsMuted={isTtsMuted}
+        onToggleTtsMute={onToggleTtsMute}
+        onInterrupt={onInterrupt}
+        onExit={onExit}
+        size={size}
+      />
+    );
+  }
 
   const isListening = voiceState === "listening";
   const isSpeaking = voiceState === "speaking";
@@ -433,6 +510,25 @@ export function OraVoiceConvPanel({
 
   return (
     <div className="rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.06)] px-4 py-3 flex flex-col gap-3">
+      {/* Realtime-unavailable warning — surfaces when the live WebRTC transport
+          could not start (or dropped) and this legacy loop took over. */}
+      {fallbackNotice && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span className="flex-1 leading-snug">{fallbackNotice}</span>
+          {onDismissFallbackNotice && (
+            <button
+              type="button"
+              onClick={onDismissFallbackNotice}
+              aria-label="Dismiss"
+              className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* State row */}
       <div className="flex items-center gap-3">
         <WaveformBars
@@ -567,6 +663,188 @@ export function OraVoiceConvPanel({
         {!useWhisper && whisperIdle && !isSpeaking && !isLoading && (
           <span className={cn("text-muted-foreground/50", labelCls)}>
             {interimTranscript ? `"${interimTranscript}"` : null}
+          </span>
+        )}
+
+        {/* End Voice Mode */}
+        <button
+          type="button"
+          onClick={onExit}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1 text-xs text-destructive/70 hover:border-destructive/55 hover:bg-destructive/5 hover:text-destructive transition-colors"
+        >
+          <PhoneOff className="h-3 w-3" />
+          End
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── OraRealtimeConvView ─────────────────────────────────────────────────────
+// The live "Talk to Ora" conversation surface backed by the GA OpenAI Realtime
+// API over WebRTC. Unlike the legacy fallback view, there is no manual record /
+// transcribe step: the mic is always live, Ora answers as you pause, and you can
+// barge in. This renders connection/turn state, live partial transcripts, the
+// tier duration countdown, mute (Ora audio only), interrupt, and end controls.
+
+interface OraRealtimeConvViewProps {
+  state: RealtimeVoiceState;
+  interimUserText: string;
+  interimAssistantText: string;
+  remainingSeconds: number | null;
+  isTtsMuted: boolean;
+  onToggleTtsMute: () => void;
+  onInterrupt?: () => void;
+  onExit: () => void;
+  size: "sm" | "md";
+}
+
+function OraRealtimeConvView({
+  state,
+  interimUserText,
+  interimAssistantText,
+  remainingSeconds,
+  isTtsMuted,
+  onToggleTtsMute,
+  onInterrupt,
+  onExit,
+  size,
+}: OraRealtimeConvViewProps) {
+  const isConnecting = state === "connecting";
+  const isListening = state === "listening";
+  const isThinking = state === "thinking";
+  const isSpeaking = state === "speaking";
+  const isDenied = state === "permission_denied";
+  const isError = state === "error";
+  const isEnded = state === "ended";
+
+  const labelCls = size === "sm" ? "text-[10px]" : "text-[11px]";
+  const headingCls = size === "sm" ? "text-xs" : "text-sm";
+
+  const stateLabel = isConnecting
+    ? "Connecting…"
+    : isThinking
+      ? "Ora is thinking…"
+      : isSpeaking
+        ? "Ora is speaking…"
+        : isDenied
+          ? "Microphone blocked"
+          : isError
+            ? "Voice connection lost"
+            : isEnded
+              ? "Voice session ended"
+              : isListening
+                ? "Listening…"
+                : "Starting…";
+
+  // The detail line favors whichever live transcript is flowing, then falls back
+  // to context-appropriate guidance.
+  const detail = isConnecting
+    ? "Setting up a live voice connection…"
+    : isThinking
+      ? "Preparing a spoken reply…"
+      : isSpeaking
+        ? interimAssistantText
+          ? interimAssistantText
+          : "Tap interrupt to jump in"
+        : isDenied
+          ? "Allow mic access in your browser, then end and start again"
+          : isError
+            ? "End and try again, or use the text composer"
+            : isEnded
+              ? "Tap the orb to start a new voice session"
+              : isListening
+                ? interimUserText
+                  ? `"${interimUserText}"`
+                  : "Speak naturally — Ora listens as you talk"
+                : "Getting ready…";
+
+  const animated = isConnecting || isListening || isThinking || isSpeaking;
+
+  return (
+    <div className="rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.06)] px-4 py-3 flex flex-col gap-3">
+      {/* State row */}
+      <div className="flex items-center gap-3">
+        <WaveformBars
+          animated={animated}
+          colorClass={isListening ? "bg-red-400" : "bg-[hsl(265_85%_65%)]"}
+          scale={size === "sm" ? 0.85 : 1.1}
+        />
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span
+            className={cn("font-semibold text-foreground flex items-center gap-1.5", headingCls)}
+          >
+            <span className="rounded bg-[hsl(265_85%_65%/0.15)] px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-[hsl(265_85%_65%)]">
+              Live
+            </span>
+            {stateLabel}
+          </span>
+          <span
+            dir="auto"
+            className={cn(
+              "text-muted-foreground/60 leading-snug truncate",
+              labelCls,
+              isListening && interimUserText && "italic",
+              (isDenied || isError) && "text-amber-500/80",
+            )}
+          >
+            {detail}
+          </span>
+        </div>
+        {/* Live recording dot */}
+        {isListening && (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse"
+            aria-label="Listening"
+          />
+        )}
+        {(isConnecting || isThinking) && (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 text-[hsl(265_85%_65%)] animate-spin" />
+        )}
+      </div>
+
+      {/* Controls row */}
+      <div className="flex items-center gap-2">
+        {/* Mute / unmute Ora's spoken audio (mic stays live regardless) */}
+        <button
+          type="button"
+          onClick={onToggleTtsMute}
+          title={isTtsMuted ? "Unmute Ora's voice" : "Mute Ora's voice"}
+          aria-label={isTtsMuted ? "Unmute Ora's voice" : "Mute Ora's voice"}
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors",
+            isTtsMuted
+              ? "border-border/40 text-muted-foreground/50 hover:text-muted-foreground"
+              : "border-[hsl(265_85%_65%/0.35)] text-[hsl(265_85%_65%)] hover:border-[hsl(265_85%_65%/0.55)]",
+          )}
+        >
+          {isTtsMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+          {isTtsMuted ? "Unmute" : "Mute"}
+        </button>
+
+        {/* Interrupt / barge-in (only while Ora is speaking) */}
+        {isSpeaking && onInterrupt && (
+          <button
+            type="button"
+            onClick={onInterrupt}
+            className="flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Mic className="h-3 w-3" />
+            Interrupt
+          </button>
+        )}
+
+        {/* Tier duration countdown */}
+        {remainingSeconds !== null && (
+          <span
+            className={cn(
+              "tabular-nums select-none",
+              labelCls,
+              remainingSeconds <= 30 ? "text-amber-500/90" : "text-muted-foreground/50",
+            )}
+            title="Time left in this voice session"
+          >
+            {formatRemaining(remainingSeconds)}
           </span>
         )}
 

@@ -735,7 +735,7 @@ export async function buildCrossConversationContext(
  * its own `ora_profiles` table and is injected only here, never into the AI
  * Builder.
  */
-async function buildProfileContext(userId: string): Promise<string> {
+export async function buildProfileContext(userId: string): Promise<string> {
   try {
     const { db, oraProfilesTable } = await import("@workspace/db");
     const [p] = await db.select().from(oraProfilesTable).where(eq(oraProfilesTable.userId, userId));
@@ -911,7 +911,7 @@ function sessionAuthBlock(isSignedIn: boolean): string {
     : `\n\n## Current session (authoritative)\nThe user you are talking to right now is NOT signed in. Image generation and live web search require an account: warmly invite them to sign up to unlock these, and never claim you are technically unable to do them.`;
 }
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
   language: string | undefined,
   languageHint: string | undefined,
   isSignedIn: boolean,

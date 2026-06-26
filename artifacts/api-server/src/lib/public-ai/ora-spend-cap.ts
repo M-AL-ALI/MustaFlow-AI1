@@ -43,6 +43,7 @@ export type OraFeatureKind =
   | "dataset_analysis"
   | "image_analysis"
   | "tts_voice"
+  | "realtime_voice"
   | "transcribe"
   | "file_generation"
   | "web_search"
@@ -60,6 +61,11 @@ export const FEATURE_UNITS: Record<OraFeatureKind, number> = {
   dataset_analysis: 5,
   image_analysis: 3,
   tts_voice: 1,
+  // Realtime voice runs a continuous, bidirectional audio session. It is charged
+  // once at session start as a bounded block (the route caps session duration by
+  // tier) rather than per message. Priced like dataset_analysis to reflect the
+  // continuous audio cost relative to a single text turn.
+  realtime_voice: 5,
   transcribe: 1,
   file_generation: 3,
   web_search: 2,

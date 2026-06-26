@@ -1,0 +1,200 @@
+TASK: Rebuild Talk to Ora as true realtime voice conversation on both Ora Website and Ora Mobile.
+
+GOAL:
+Ora Mic and Talk to Ora must be separate features.
+
+Mic = dictation:
+User records voice → Ora transcribes → transcript appears in composer → user edits/sends manually.
+
+Talk to Ora = live voice conversation:
+User starts voice mode → Ora listens continuously → user speaks naturally → Ora understands the turn → Ora replies with streamed voice → user can interrupt → Ora stops speaking and listens again.
+
+Current Talk to Ora is not enough. It currently behaves like:
+record clip → upload to transcribe → send chat message → wait for full reply → generate TTS MP3 → play MP3 → restart recording.
+
+That is not ChatGPT-like realtime voice. Replace Talk to Ora with a realtime voice architecture.
+
+BACKEND REQUIREMENTS:
+Add:
+
+POST /api/public-ai/realtime/session
+
+This endpoint must:
+- Authenticate exactly like current Ora chat.
+- Work for anonymous users.
+- Work for signed-in users.
+- Use the same Ora session cookie.
+- Use the same Clerk bearer token when signed in.
+- Use the same plan/tier resolver.
+- Use the same free/core/wave limits.
+- Use the same temporary chat behavior.
+- Use the same memory/history settings.
+- Use the same selected reply language.
+- Use the same project/conversation context.
+- Never expose the permanent OPENAI_API_KEY to website or mobile clients.
+- Return an ephemeral realtime client secret/session payload for the client to connect to the realtime voice model.
+
+Add env controls:
+ORA_REALTIME_ENABLED=true
+ORA_REALTIME_MODEL=<approved realtime voice model>
+ORA_REALTIME_VOICE=<default voice>
+ORA_REALTIME_DISABLED=false
+
+If realtime is disabled or unavailable, Talk to Ora should fall back to the old transcribe/TTS loop with a visible warning.
+
+WEBSITE REQUIREMENTS:
+Keep Mic dictation unchanged.
+
+Replace only Talk to Ora internals.
+
+Website Talk to Ora must:
+- Open a realtime audio connection when user taps the Talk to Ora orb.
+- Ask for microphone permission if needed.
+- Start listening immediately.
+- Detect when the user is speaking.
+- Detect when the user stops speaking.
+- Send audio continuously, not only after a completed file upload.
+- Show live user transcript as speech is recognized.
+- Auto-send the user’s spoken turn.
+- Receive Ora response audio as a stream.
+- Play Ora audio as it arrives.
+- Show assistant transcript while Ora is speaking.
+- Allow interruption/barge-in.
+- If user speaks while Ora is talking, stop Ora audio immediately and let user continue.
+- Keep conversation context synced to the same chat history.
+- End cleanly when user exits voice mode.
+
+Website UI states:
+- Connecting...
+- Listening...
+- I hear you...
+- Thinking...
+- Ora is speaking...
+- Interrupted
+- Reconnecting...
+- Voice unavailable
+
+Website controls:
+- Talk orb starts/ends voice mode.
+- Mute button mutes Ora’s spoken replies only.
+- Mute must not stop microphone listening.
+- Interrupt button stops Ora’s current speech and resumes listening.
+- End button closes realtime session, stops mic, stops audio, clears timers.
+- Error state must be visible, not silent.
+
+MOBILE REQUIREMENTS:
+Keep Mic dictation unchanged.
+
+Replace only Talk to Ora internals.
+
+Mobile Talk to Ora must:
+- Use a native realtime audio connection.
+- Start microphone capture when Talk mode opens.
+- Stream audio continuously.
+- Detect silence/end of turn without user pressing stop.
+- Auto-send user speech.
+- Receive and play assistant audio chunks immediately.
+- Show user transcript live.
+- Show assistant transcript live.
+- Support interruption/barge-in.
+- Stop assistant audio instantly when user starts speaking.
+- Resume listening after Ora finishes.
+- Handle Bluetooth/AirPods.
+- Work with iOS silent mode.
+- Handle app background/inactive states safely.
+- Reconnect gracefully after network interruption.
+- Never insert Talk mode transcript into the composer.
+- Never require the user to press Send in Talk mode.
+
+Mobile audio handling:
+- Mic dictation uses normal record/transcribe.
+- Talk mode uses realtime audio.
+- Do not share the same UI behavior between them.
+- Talk mode should feel like a call with Ora, not a recording tool.
+
+SHARED TALK TO ORA LOGIC:
+Talk to Ora must follow this behavior:
+1. User taps Talk to Ora.
+2. App creates realtime session from backend.
+3. App opens microphone stream.
+4. Ora shows “Listening.”
+5. User speaks.
+6. Ora shows live transcript.
+7. System detects user stopped speaking.
+8. Ora starts responding.
+9. Ora audio plays as it streams.
+10. Ora transcript appears while speaking.
+11. If user interrupts, assistant audio stops immediately.
+12. User speech becomes the next turn.
+13. When Ora finishes, it returns to listening.
+14. User taps End to close the session.
+
+DO NOT DO:
+- Do not make Talk to Ora use only /transcribe + /chat + /tts.
+- Do not treat Mic and Talk as the same feature.
+- Do not put Talk mode transcript into the text composer.
+- Do not make user manually send in Talk mode.
+- Do not wait for a full MP3 before playing Ora’s answer.
+- Do not silently fail if microphone, realtime connection, or audio playback fails.
+
+FALLBACK BEHAVIOR:
+If realtime fails:
+- Show a clear warning: “Realtime voice is unavailable. Falling back to standard voice mode.”
+- Fall back to current behavior:
+  record utterance → transcribe → auto-send → TTS → restart listening.
+- Diagnostics must show why realtime failed.
+
+DIAGNOSTICS REQUIREMENTS:
+Settings diagnostics should include:
+- Realtime enabled
+- Realtime session endpoint status
+- Realtime client secret created
+- Microphone permission
+- Audio input stream active
+- Assistant audio stream received
+- Interruption supported
+- Fallback used
+- Last realtime error
+
+Existing diagnostics for /transcribe and /tts should remain.
+
+PERFORMANCE TARGETS:
+Target behavior should feel close to ChatGPT Voice:
+- Talk mode opens quickly.
+- Listening starts quickly.
+- End-of-speech detection feels natural.
+- Ora starts speaking without a long pause.
+- Audio streams, not delayed until full file generation.
+- Interrupt works immediately.
+- Long conversations do not cause UI jank.
+- Reconnect/failure states are understandable.
+
+ACCEPTANCE CRITERIA:
+Do not call this done until all are true:
+- Mic dictation works separately.
+- Talk to Ora uses realtime voice, not only the transcribe/TTS loop.
+- Website and mobile both use the same realtime voice architecture.
+- Anonymous user can use Talk to Ora within allowed limits.
+- Signed-in Core/Wave user gets correct tier behavior and accent color.
+- Talk to Ora can be interrupted mid-response.
+- Assistant speech stops immediately on interruption.
+- User can continue speaking after interruption.
+- Assistant audio streams as generated.
+- Live transcript appears for user speech.
+- Assistant transcript appears while Ora speaks.
+- End button fully closes mic/audio/session.
+- Mute only mutes Ora voice, not user mic.
+- Error states are visible.
+- Fallback works if realtime fails.
+- Diagnostics identify exactly where failure happens.
+- Tested on website browser.
+- Tested on real iPhone.
+- Tested with AirPods/Bluetooth.
+- Tested in light and dark mode.
+- Tested anonymous and signed-in.
+- Tested free/core/wave accounts.
+
+IMPORTANT:
+The current backend fix for /transcribe and /tts was necessary, but it only repairs the old voice loop.
+
+To make Ora feel like ChatGPT Voice, build a true realtime voice layer for Talk to Ora. Without realtime audio, Talk to Ora will always feel slower and less natural than ChatGPT, even if it technically works.

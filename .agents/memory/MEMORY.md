@@ -121,3 +121,4 @@
 - [Ora mobile language selector](ora-mobile-language-selector.md) — language state (auto/en/ar/es/fr) is separate from voiceLang; sent as chatReq.language only when non-auto; picker lives in PlusMenu "Reply language" section.
 - [EAS submit existing iOS build](eas-submit-existing-build.md) — decoupled `eas submit --id` (verify build FINISHED first), GraphQL submissions{byId{status}} is authoritative, setsid eas-cli skips temp .p8 cleanup, native splash/icon baked at build time → fresh build + reinstall.
 - [Ora Mobile chat memo + lifecycle](ora-mobile-chat-lifecycle.md) — memoized bubbles need ref-backed callbacks (stale msgs=data loss, stale persist=wrong convo); background needs a speakGen guard so async TTS can't play after backgrounding.
+- [Realtime voice history seeding](ora-realtime-history-seeding.md) — seed recent turns as conversation.item.create items, never session.instructions (transcript-in-instructions = prompt-injection/isolation vector).
