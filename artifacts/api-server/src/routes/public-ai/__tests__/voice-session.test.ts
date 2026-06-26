@@ -47,6 +47,27 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(rateLimit).toContain('keyPrefix: "ora_voice_tts"');
   });
 
+  it("falls back to direct OpenAI transcription when the proxy audio path fails", () => {
+    const transcribe = readPublicAiRoute("transcribe.ts");
+
+    expect(transcribe).toContain('import OpenAI, { toFile } from "openai"');
+    expect(transcribe).toContain("getDirectTranscribeClient");
+    expect(transcribe).toContain("OPENAI_API_KEY");
+    expect(transcribe).toContain("ORA_TRANSCRIBE_MODEL");
+    expect(transcribe).toContain("gpt-5-mini-transcribe");
+    expect(transcribe).toContain("client.audio.transcriptions.create");
+    expect(transcribe).toContain("directSpeechToText");
+    expect(transcribe).toContain("Ora transcription proxy failed; trying direct OpenAI fallback");
+  });
+
+  it("keeps voice spend-cap infrastructure failures from becoming generic 500s", () => {
+    const transcribe = readPublicAiRoute("transcribe.ts");
+    const tts = readPublicAiRoute("tts.ts");
+
+    expect(transcribe).toContain("Ora voice transcription spend-cap check failed open");
+    expect(tts).toContain("Ora voice TTS spend-cap check failed open");
+  });
+
   it("guards the raw-body transcribe stream against hanging on a pre-consumed/aborted request", () => {
     const transcribe = readPublicAiRoute("transcribe.ts");
     // If express.json() already drained the stream (mislabeled application/json),

@@ -9,6 +9,7 @@
  * Max payload: 10 MB (voice clips are short; 25 MB limit applies to batch).
  */
 import { Router } from "express";
+import OpenAI, { toFile } from "openai";
 import { validateSession } from "../../lib/public-ai/session";
 import { oraVoiceTranscribeLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
@@ -17,6 +18,47 @@ import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill
 const router = Router();
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB
+
+const ALLOWED_AUDIO_FORMATS = ["wav", "mp3", "webm", "mp4", "m4a", "ogg"] as const;
+type AudioFormat = (typeof ALLOWED_AUDIO_FORMATS)[number];
+
+const AUDIO_MIME_BY_FORMAT: Record<AudioFormat, string> = {
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  webm: "audio/webm",
+  mp4: "audio/mp4",
+  m4a: "audio/mp4",
+  ogg: "audio/ogg",
+};
+
+let directTranscribeClient: OpenAI | null = null;
+
+function getDirectTranscribeClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) return null;
+  if (!directTranscribeClient) {
+    directTranscribeClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return directTranscribeClient;
+}
+
+async function directSpeechToText(
+  buf: Buffer,
+  format: AudioFormat,
+  language?: string,
+): Promise<string | null> {
+  const client = getDirectTranscribeClient();
+  if (!client) return null;
+
+  const file = await toFile(buf, `ora-voice.${format}`, {
+    type: AUDIO_MIME_BY_FORMAT[format],
+  });
+  const response = await client.audio.transcriptions.create({
+    file,
+    model: process.env.ORA_TRANSCRIBE_MODEL ?? "gpt-5-mini-transcribe",
+    ...(language ? { language } : {}),
+  });
+  return response.text?.trim() ?? "";
+}
 
 router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res) => {
   if (isKillSwitchActive("transcribe")) {
@@ -40,31 +82,36 @@ router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res)
   // ── Daily spend cap (global + per-user + per-IP anonymous) ─────────────
   // Check before reading the audio body to fail fast without consuming up to 10 MB.
   {
-    const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
-    const authed = await resolveAuthedOraUser(req);
-    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
-    const capResult = await checkOraSpendCapAsync(
-      req,
-      "transcribe",
-      authed?.userId ?? null,
-      authed?.tier ?? "anonymous",
-    );
-    if (!capResult.allowed) {
-      res.status(429).json({
-        error: capResult.message,
-        limitType: capResult.limitType,
-        upgradeAvailable: capResult.upgradeAvailable,
-        resetAt: capResult.resetAt,
-        retryAfter: capResult.retryAfter,
-      });
-      return;
+    try {
+      const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
+      const authed = await resolveAuthedOraUser(req);
+      const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+      const capResult = await checkOraSpendCapAsync(
+        req,
+        "transcribe",
+        authed?.userId ?? null,
+        authed?.tier ?? "anonymous",
+      );
+      if (!capResult.allowed) {
+        res.status(429).json({
+          error: capResult.message,
+          limitType: capResult.limitType,
+          upgradeAvailable: capResult.upgradeAvailable,
+          resetAt: capResult.resetAt,
+          retryAfter: capResult.retryAfter,
+        });
+        return;
+      }
+    } catch (err) {
+      logger.warn(
+        { component: "ora-transcribe", err },
+        "Ora voice transcription spend-cap check failed open",
+      );
     }
   }
 
   const formatRaw = (req.query.format as string | undefined)?.toLowerCase() ?? "webm";
-  const ALLOWED = ["wav", "mp3", "webm", "mp4", "m4a", "ogg"] as const;
-  type AudioFormat = (typeof ALLOWED)[number];
-  const format: AudioFormat = (ALLOWED as readonly string[]).includes(formatRaw)
+  const format: AudioFormat = (ALLOWED_AUDIO_FORMATS as readonly string[]).includes(formatRaw)
     ? (formatRaw as AudioFormat)
     : "webm";
 
@@ -154,7 +201,24 @@ router.post("/public-ai/transcribe", oraVoiceTranscribeLimiter, async (req, res)
 
   try {
     const { speechToText } = await import("@workspace/integrations-openai-ai-server/audio");
-    const text = await speechToText(buf, format, language);
+    let text = "";
+    try {
+      text = await speechToText(buf, format, language);
+    } catch (proxyErr) {
+      logger.warn(
+        { component: "ora-transcribe", err: proxyErr, bytes: total, format },
+        "Ora transcription proxy failed; trying direct OpenAI fallback",
+      );
+      const directText = await directSpeechToText(buf, format, language);
+      if (directText === null) {
+        throw proxyErr;
+      }
+      text = directText;
+    }
+    if (!text.trim()) {
+      res.status(502).json({ error: "Transcription returned no speech. Please try again." });
+      return;
+    }
     logger.info(
       {
         component: "ora-transcribe",
