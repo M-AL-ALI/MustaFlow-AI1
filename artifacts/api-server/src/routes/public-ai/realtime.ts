@@ -32,6 +32,11 @@ const OPENAI_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_sec
 
 const DEFAULT_REALTIME_MODEL = "gpt-realtime-mini";
 const DEFAULT_REALTIME_VOICE = "marin";
+const DEFAULT_REALTIME_VAD_TYPE = "semantic_vad";
+const DEFAULT_REALTIME_VAD_EAGERNESS = "low";
+const DEFAULT_REALTIME_VAD_THRESHOLD = 0.5;
+const DEFAULT_REALTIME_VAD_PREFIX_PADDING_MS = 300;
+const DEFAULT_REALTIME_VAD_SILENCE_DURATION_MS = 900;
 
 // Realtime voices accepted by the GA Realtime API. Kept as an allowlist so a bad
 // client value or stale env override can never be forwarded verbatim to OpenAI.
@@ -62,7 +67,10 @@ const VOICE_ADDENDUM =
   "contractions. If a complete answer would be long, give the single most useful point " +
   "first, then offer to go deeper. Expect to be interrupted: if the user starts " +
   "speaking, stop immediately and listen. Ask a brief clarifying question only when you " +
-  "genuinely need one.";
+  "genuinely need one. Your spoken audio and the visible transcript must always use " +
+  "the same language. If the user selected a reply language, speak entirely in that " +
+  "language. If the language is Auto, follow the user's latest spoken language. Do " +
+  "not default to English when the selected language or the user's speech is non-English.";
 
 const bodySchema = z.object({
   language: z.string().max(20).optional(),
@@ -100,6 +108,63 @@ function resolveVoice(requested: string | undefined): string {
   const envVoice = process.env.ORA_REALTIME_VOICE;
   if (envVoice && (REALTIME_VOICES as readonly string[]).includes(envVoice)) return envVoice;
   return DEFAULT_REALTIME_VOICE;
+}
+
+function numberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveTurnDetection():
+  | { type: "semantic_vad"; eagerness: string; create_response: true; interrupt_response: true }
+  | {
+      type: "server_vad";
+      threshold: number;
+      prefix_padding_ms: number;
+      silence_duration_ms: number;
+      create_response: true;
+      interrupt_response: true;
+    } {
+  const type = process.env.ORA_REALTIME_VAD_TYPE?.trim() || DEFAULT_REALTIME_VAD_TYPE;
+
+  if (type === "semantic_vad") {
+    return {
+      type: "semantic_vad",
+      eagerness: process.env.ORA_REALTIME_VAD_EAGERNESS?.trim() || DEFAULT_REALTIME_VAD_EAGERNESS,
+      create_response: true,
+      interrupt_response: true,
+    };
+  }
+
+  if (type !== "server_vad") {
+    logger.warn(
+      { component: "ora-realtime", vadType: type },
+      "Unsupported ORA_REALTIME_VAD_TYPE; falling back to semantic_vad",
+    );
+    return {
+      type: "semantic_vad",
+      eagerness: DEFAULT_REALTIME_VAD_EAGERNESS,
+      create_response: true,
+      interrupt_response: true,
+    };
+  }
+
+  return {
+    type: "server_vad",
+    threshold: numberFromEnv("ORA_REALTIME_VAD_THRESHOLD", DEFAULT_REALTIME_VAD_THRESHOLD),
+    prefix_padding_ms: numberFromEnv(
+      "ORA_REALTIME_VAD_PREFIX_PADDING_MS",
+      DEFAULT_REALTIME_VAD_PREFIX_PADDING_MS,
+    ),
+    silence_duration_ms: numberFromEnv(
+      "ORA_REALTIME_VAD_SILENCE_DURATION_MS",
+      DEFAULT_REALTIME_VAD_SILENCE_DURATION_MS,
+    ),
+    create_response: true,
+    interrupt_response: true,
+  };
 }
 
 /**
@@ -237,6 +302,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
 
   const model = process.env.ORA_REALTIME_MODEL?.trim() || DEFAULT_REALTIME_MODEL;
   const voice = resolveVoice(parsed.data.voice);
+  const turnDetection = resolveTurnDetection();
   const maxDurationSeconds = maxDurationForTier(tier);
 
   const instructions = await buildRealtimeInstructions({
@@ -269,7 +335,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
                 model:
                   process.env.ORA_REALTIME_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe",
               },
-              turn_detection: { type: "server_vad" },
+              turn_detection: turnDetection,
             },
           },
         },

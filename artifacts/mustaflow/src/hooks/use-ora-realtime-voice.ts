@@ -272,9 +272,7 @@ export function useOraRealtimeVoice(
     }
   }, []);
 
-  const interrupt = useCallback(() => {
-    // Cancel any response the model is currently generating and flush queued
-    // output audio so playback stops immediately (WebRTC-specific event).
+  const stopAssistantOutput = useCallback(() => {
     sendEvent({ type: "response.cancel" });
     sendEvent({ type: "output_audio_buffer.clear" });
     const audioEl = audioElRef.current;
@@ -287,8 +285,14 @@ export function useOraRealtimeVoice(
     }
     setInterimAssistantTranscript("");
     assistantTextRef.current = "";
-    if (activeRef.current) setState("listening");
   }, [sendEvent]);
+
+  const interrupt = useCallback(() => {
+    // Cancel any response the model is currently generating and flush queued
+    // output audio so playback stops immediately (WebRTC-specific event).
+    stopAssistantOutput();
+    if (activeRef.current) setState("listening");
+  }, [stopAssistantOutput]);
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
@@ -302,131 +306,139 @@ export function useOraRealtimeVoice(
   }, []);
 
   // ── Data-channel event handling ──────────────────────────────────────────
-  const handleServerEvent = useCallback((raw: string) => {
-    let evt: { type?: string; [k: string]: unknown };
-    try {
-      evt = JSON.parse(raw) as { type?: string };
-    } catch {
-      return;
-    }
-    const type = evt.type;
-    if (!type) return;
+  const handleServerEvent = useCallback(
+    (raw: string) => {
+      let evt: { type?: string; [k: string]: unknown };
+      try {
+        evt = JSON.parse(raw) as { type?: string };
+      } catch {
+        return;
+      }
+      const type = evt.type;
+      if (!type) return;
 
-    switch (type) {
-      // ── User speech / input transcription ──────────────────────────────
-      case "input_audio_buffer.speech_started":
-        // User barged in; the server VAD will interrupt Ora automatically.
-        userTextRef.current = "";
-        setInterimUserTranscript("");
-        if (activeRef.current) setState("listening");
-        break;
-      case "conversation.item.input_audio_transcription.delta": {
-        const delta = typeof evt.delta === "string" ? evt.delta : "";
-        if (delta) {
-          userTextRef.current += delta;
-          setInterimUserTranscript(userTextRef.current);
+      switch (type) {
+        // ── User speech / input transcription ──────────────────────────────
+        case "input_audio_buffer.speech_started":
+          // User barged in. Interrupt locally too, because relying only on the
+          // remote VAD can leave stale audio playing over the next spoken turn.
+          stopAssistantOutput();
+          userTextRef.current = "";
+          setInterimUserTranscript("");
+          if (activeRef.current) setState("listening");
+          break;
+        case "input_audio_buffer.speech_stopped":
+          if (activeRef.current) setState("thinking");
+          break;
+        case "conversation.item.input_audio_transcription.delta": {
+          const delta = typeof evt.delta === "string" ? evt.delta : "";
+          if (delta) {
+            userTextRef.current += delta;
+            setInterimUserTranscript(userTextRef.current);
+          }
+          break;
         }
-        break;
-      }
-      case "conversation.item.input_audio_transcription.completed": {
-        const finalText =
-          (typeof evt.transcript === "string" && evt.transcript) || userTextRef.current;
-        userTextRef.current = "";
-        setInterimUserTranscript("");
-        if (finalText && finalText.trim()) onUserRef.current(finalText.trim());
-        break;
-      }
-      case "conversation.item.input_audio_transcription.failed":
-        userTextRef.current = "";
-        setInterimUserTranscript("");
-        break;
-
-      // ── Assistant response lifecycle ───────────────────────────────────
-      case "response.created":
-        assistantTextRef.current = "";
-        setInterimAssistantTranscript("");
-        if (activeRef.current) setState("thinking");
-        break;
-
-      // Assistant spoken-transcript deltas. Handle GA names plus older aliases.
-      case "response.audio_transcript.delta":
-      case "response.output_audio_transcript.delta":
-      case "response.output_text.delta":
-      case "response.text.delta": {
-        const delta = typeof evt.delta === "string" ? evt.delta : "";
-        if (delta) {
-          assistantTextRef.current += delta;
-          setInterimAssistantTranscript(assistantTextRef.current);
-          if (activeRef.current) setState("speaking");
+        case "conversation.item.input_audio_transcription.completed": {
+          const finalText =
+            (typeof evt.transcript === "string" && evt.transcript) || userTextRef.current;
+          userTextRef.current = "";
+          setInterimUserTranscript("");
+          if (finalText && finalText.trim()) onUserRef.current(finalText.trim());
+          break;
         }
-        break;
-      }
-      case "response.audio_transcript.done":
-      case "response.output_audio_transcript.done":
-      case "response.output_text.done":
-      case "response.text.done": {
-        const finalText =
-          (typeof evt.transcript === "string" && evt.transcript) ||
-          (typeof evt.text === "string" && evt.text) ||
-          assistantTextRef.current;
-        if (finalText && finalText.trim()) {
-          onAssistantRef.current(finalText.trim());
-        }
-        assistantTextRef.current = "";
-        setInterimAssistantTranscript("");
-        break;
-      }
+        case "conversation.item.input_audio_transcription.failed":
+          userTextRef.current = "";
+          setInterimUserTranscript("");
+          break;
 
-      // ── WebRTC output-audio playback markers ───────────────────────────
-      case "output_audio_buffer.started": {
-        // A prior interrupt() pauses the <audio> element to stop playback
-        // immediately. The remote MediaStream is reused across responses, so
-        // ontrack never fires again — resume playback here or every reply after
-        // an interrupt would be silent. No-op when already playing or muted.
-        const audioEl = audioElRef.current;
-        if (audioEl && audioEl.paused) {
-          void audioEl.play().catch(() => {
-            /* autoplay best-effort */
-          });
-        }
-        if (activeRef.current) setState("speaking");
-        break;
-      }
-      case "output_audio_buffer.stopped":
-      case "output_audio_buffer.cleared":
-        if (activeRef.current) setState("listening");
-        break;
-
-      case "response.done":
-        // Flush any assistant text that only arrived via deltas (no explicit
-        // done payload) so the turn is never dropped.
-        if (assistantTextRef.current.trim()) {
-          onAssistantRef.current(assistantTextRef.current.trim());
+        // ── Assistant response lifecycle ───────────────────────────────────
+        case "response.created":
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
-        }
-        if (activeRef.current) setState("listening");
-        break;
+          if (activeRef.current) setState("thinking");
+          break;
 
-      case "error": {
-        const message =
-          (typeof evt.error === "object" &&
-            evt.error &&
-            typeof (evt.error as { message?: string }).message === "string" &&
-            (evt.error as { message?: string }).message) ||
-          "";
-        // Non-fatal model errors are logged but do not tear the call down; the
-        // session can recover on the next turn.
-        if (message) {
-          // eslint-disable-next-line no-console
-          console.warn("[ora-realtime] model error:", message);
+        // Assistant spoken-transcript deltas. Handle GA names plus older aliases.
+        case "response.audio_transcript.delta":
+        case "response.output_audio_transcript.delta":
+        case "response.output_text.delta":
+        case "response.text.delta": {
+          const delta = typeof evt.delta === "string" ? evt.delta : "";
+          if (delta) {
+            assistantTextRef.current += delta;
+            setInterimAssistantTranscript(assistantTextRef.current);
+            if (activeRef.current) setState("speaking");
+          }
+          break;
         }
-        break;
+        case "response.audio_transcript.done":
+        case "response.output_audio_transcript.done":
+        case "response.output_text.done":
+        case "response.text.done": {
+          const finalText =
+            (typeof evt.transcript === "string" && evt.transcript) ||
+            (typeof evt.text === "string" && evt.text) ||
+            assistantTextRef.current;
+          if (finalText && finalText.trim()) {
+            onAssistantRef.current(finalText.trim());
+          }
+          assistantTextRef.current = "";
+          setInterimAssistantTranscript("");
+          break;
+        }
+
+        // ── WebRTC output-audio playback markers ───────────────────────────
+        case "output_audio_buffer.started": {
+          // A prior interrupt() pauses the <audio> element to stop playback
+          // immediately. The remote MediaStream is reused across responses, so
+          // ontrack never fires again — resume playback here or every reply after
+          // an interrupt would be silent. No-op when already playing or muted.
+          const audioEl = audioElRef.current;
+          if (audioEl && audioEl.paused) {
+            void audioEl.play().catch(() => {
+              /* autoplay best-effort */
+            });
+          }
+          if (activeRef.current) setState("speaking");
+          break;
+        }
+        case "output_audio_buffer.stopped":
+        case "output_audio_buffer.cleared":
+          if (activeRef.current) setState("listening");
+          break;
+
+        case "response.done":
+          // Flush any assistant text that only arrived via deltas (no explicit
+          // done payload) so the turn is never dropped.
+          if (assistantTextRef.current.trim()) {
+            onAssistantRef.current(assistantTextRef.current.trim());
+            assistantTextRef.current = "";
+            setInterimAssistantTranscript("");
+          }
+          if (activeRef.current) setState("listening");
+          break;
+
+        case "error": {
+          const message =
+            (typeof evt.error === "object" &&
+              evt.error &&
+              typeof (evt.error as { message?: string }).message === "string" &&
+              (evt.error as { message?: string }).message) ||
+            "";
+          // Non-fatal model errors are logged but do not tear the call down; the
+          // session can recover on the next turn.
+          if (message) {
+            // eslint-disable-next-line no-console
+            console.warn("[ora-realtime] model error:", message);
+          }
+          break;
+        }
+        default:
+          break;
       }
-      default:
-        break;
-    }
-  }, []);
+    },
+    [stopAssistantOutput],
+  );
 
   // ── Start ────────────────────────────────────────────────────────────────
   const start = useCallback(
