@@ -86,24 +86,28 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
 
   // ── Daily spend cap (global + per-user + per-IP anonymous) ─────────────
   {
-    const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
-    const authed = await resolveAuthedOraUser(req);
-    const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
-    const capResult = await checkOraSpendCapAsync(
-      req,
-      "tts_voice",
-      authed?.userId ?? null,
-      authed?.tier ?? "anonymous",
-    );
-    if (!capResult.allowed) {
-      res.status(429).json({
-        error: capResult.message,
-        limitType: capResult.limitType,
-        upgradeAvailable: capResult.upgradeAvailable,
-        resetAt: capResult.resetAt,
-        retryAfter: capResult.retryAfter,
-      });
-      return;
+    try {
+      const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
+      const authed = await resolveAuthedOraUser(req);
+      const { checkOraSpendCapAsync } = await import("../../lib/public-ai/ora-spend-cap");
+      const capResult = await checkOraSpendCapAsync(
+        req,
+        "tts_voice",
+        authed?.userId ?? null,
+        authed?.tier ?? "anonymous",
+      );
+      if (!capResult.allowed) {
+        res.status(429).json({
+          error: capResult.message,
+          limitType: capResult.limitType,
+          upgradeAvailable: capResult.upgradeAvailable,
+          resetAt: capResult.resetAt,
+          retryAfter: capResult.retryAfter,
+        });
+        return;
+      }
+    } catch (err) {
+      logger.warn({ component: "ora-tts", err }, "Ora voice TTS spend-cap check failed open");
     }
   }
 
