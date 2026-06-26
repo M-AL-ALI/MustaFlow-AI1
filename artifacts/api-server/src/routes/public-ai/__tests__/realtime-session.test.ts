@@ -8,7 +8,7 @@
  *   - tier-aware session duration (anon/free 300, core 600, wave 900)
  *   - daily spend-cap block -> 429
  *   - the real OPENAI_API_KEY is never returned; only the ek_ token is
- *   - GA mint body shape (session.type, server_vad, transcription, voice)
+ *   - GA mint body shape (session.type, tuned VAD, transcription, voice)
  *   - saved-memory + profile injection only for signed-in, non-temporary chats
  *   - strict Ora-vs-Builder isolation (no Builder language in instructions)
  *
@@ -27,9 +27,14 @@ import request from "supertest";
 
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..", "..");
 const PUBLIC_AI_DIR = join(REPO_ROOT, "artifacts", "api-server", "src", "routes", "public-ai");
+const MUSTAFLOW_SRC_DIR = join(REPO_ROOT, "artifacts", "mustaflow", "src");
 
 function readRoute(filename: string): string {
   return readFileSync(join(PUBLIC_AI_DIR, filename), "utf-8");
+}
+
+function readMustaflow(relativePath: string): string {
+  return readFileSync(join(MUSTAFLOW_SRC_DIR, relativePath), "utf-8");
 }
 
 // ─── Mocks (hoisted before router import) ─────────────────────────────────────
@@ -107,7 +112,15 @@ interface FetchCapture {
         output: { voice: string };
         input: {
           transcription: { model: string };
-          turn_detection: { type: string };
+          turn_detection: {
+            type: string;
+            eagerness?: string;
+            threshold?: number;
+            prefix_padding_ms?: number;
+            silence_duration_ms?: number;
+            create_response?: boolean;
+            interrupt_response?: boolean;
+          };
         };
       };
     };
@@ -143,6 +156,11 @@ beforeEach(() => {
   delete process.env.ORA_REALTIME_MODEL;
   delete process.env.ORA_REALTIME_VOICE;
   delete process.env.ORA_REALTIME_TRANSCRIBE_MODEL;
+  delete process.env.ORA_REALTIME_VAD_TYPE;
+  delete process.env.ORA_REALTIME_VAD_EAGERNESS;
+  delete process.env.ORA_REALTIME_VAD_THRESHOLD;
+  delete process.env.ORA_REALTIME_VAD_PREFIX_PADDING_MS;
+  delete process.env.ORA_REALTIME_VAD_SILENCE_DURATION_MS;
 
   fetchMock = mintOk();
   vi.stubGlobal("fetch", fetchMock);
@@ -309,7 +327,52 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(body.session.model).toBe("gpt-realtime-mini");
     expect(body.session.audio.output.voice).toBe("marin");
     expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
-    expect(body.session.audio.input.turn_detection.type).toBe("server_vad");
+    expect(body.session.audio.input.turn_detection).toEqual({
+      type: "semantic_vad",
+      eagerness: "low",
+      create_response: true,
+      interrupt_response: true,
+    });
+  });
+
+  it("server VAD env override uses explicit conservative timing and interruption settings", async () => {
+    process.env.ORA_REALTIME_VAD_TYPE = "server_vad";
+    process.env.ORA_REALTIME_VAD_THRESHOLD = "0.55";
+    process.env.ORA_REALTIME_VAD_PREFIX_PADDING_MS = "350";
+    process.env.ORA_REALTIME_VAD_SILENCE_DURATION_MS = "1100";
+
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({});
+
+    expect(res.status).toBe(200);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.input.turn_detection).toEqual({
+      type: "server_vad",
+      threshold: 0.55,
+      prefix_padding_ms: 350,
+      silence_duration_ms: 1100,
+      create_response: true,
+      interrupt_response: true,
+    });
+  });
+
+  it("voice instructions bind spoken audio to the visible transcript language", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ language: "ar" });
+
+    expect(res.status).toBe(200);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.instructions).toContain(
+      "Your spoken audio and the visible transcript must always use the same language.",
+    );
+    expect(body.session.instructions).toContain(
+      "Do not default to English when the selected language or the user's speech is non-English.",
+    );
+    expect(buildSystemPrompt).toHaveBeenCalledWith("ar", undefined, false);
   });
 
   it("anon: buildSystemPrompt called with isSignedIn=false; no profile/memory", async () => {
@@ -698,8 +761,24 @@ describe("Talk to Ora realtime — route wiring", () => {
     expect(src).toContain("oraRealtimeSessionLimiter");
     expect(src).toContain('"realtime_voice"');
     expect(src).toContain('isKillSwitchActive("realtime")');
+    expect(src).toContain("semantic_vad");
     expect(src).toContain("server_vad");
     expect(src).toContain("maxDurationSeconds");
+  });
+
+  it("web realtime barge-in hard-stops local assistant audio on speech-start", () => {
+    const src = readMustaflow("hooks/use-ora-realtime-voice.ts");
+    const helperStart = src.indexOf("const stopAssistantOutput = useCallback");
+    const helperEnd = src.indexOf("const interrupt = useCallback", helperStart);
+    const helper = src.slice(helperStart, helperEnd);
+    expect(helper).toContain('sendEvent({ type: "response.cancel" })');
+    expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
+    expect(helper).toContain("audioEl.pause()");
+
+    const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
+    const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
+    const speechStartBlock = src.slice(speechStart, speechStartEnd);
+    expect(speechStartBlock).toContain("stopAssistantOutput()");
   });
 
   it("kill switch check precedes the session-cookie check in source", () => {
