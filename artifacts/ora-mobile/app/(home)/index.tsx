@@ -91,6 +91,7 @@ import { OraThemeToggle } from "@/components/ora/OraThemeToggle";
 import { OraVoiceOrb } from "@/components/ora/OraVoiceOrb";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { useColors } from "@/hooks/useColors";
+import { useOraRealtimeVoiceNative } from "@/hooks/useOraRealtimeVoiceNative";
 import {
   getLocalFileSize,
   MAX_UPLOAD_BYTES,
@@ -408,6 +409,57 @@ export default function OraChatScreen() {
   talkModeRef.current = talkMode;
   const talkModeMutedRef = useRef(false);
   talkModeMutedRef.current = talkModeMuted;
+  // True while a TRUE realtime (WebRTC) voice session is driving Talk mode. When
+  // set, the legacy transcribe -> chat -> tts loop is fully suppressed (see the
+  // early return in scheduleTalkRestart) so the two voice paths never overlap.
+  const [realtimeActive, setRealtimeActive] = useState(false);
+  const realtimeActiveRef = useRef(false);
+  realtimeActiveRef.current = realtimeActive;
+  // True only during the start()/connect window, before realtimeActive flips
+  // true. The hook marks itself active before start() resolves, so this lets the
+  // background / exit / context-switch handlers abort an in-flight connect that
+  // hasn't resolved yet (otherwise the mic could open after the user left).
+  const realtimeStartingRef = useRef(false);
+  // Monotonic id for each realtime start attempt. Captured before rt.start() and
+  // checked when its promise resolves: a stale resolution (a stop / context
+  // switch / background, or a newer start, ran in between) must touch nothing —
+  // clearing realtimeStartingRef would arm the legacy recorder under the newer
+  // connect, and calling stop() would kill the newer session. Incremented in
+  // stopRealtimeSession (the single teardown chokepoint) and before each start.
+  const realtimeStartGenRef = useRef(0);
+  // Assigned just after the realtime hook is created below; declared up here so
+  // earlier effects (e.g. the AppState background handler) can tear the session
+  // down without a use-before-declaration reference.
+  const realtimeVoiceRef = useRef<ReturnType<typeof useOraRealtimeVoiceNative> | null>(null);
+  // Centralized teardown for the realtime transport. Safe to call whether a
+  // session is fully live (realtimeActive) or still mid-connect
+  // (realtimeStartingRef) — the hook's stop() aborts an in-flight start() too.
+  // Returns true if it actually tore a session down, so context-switch callers
+  // can decide whether to also drop Talk mode.
+  const stopRealtimeSession = useCallback(() => {
+    if (!realtimeActiveRef.current && !realtimeStartingRef.current) return false;
+    // Invalidate any in-flight start() so its late resolution becomes a no-op.
+    realtimeStartGenRef.current += 1;
+    realtimeVoiceRef.current?.stop();
+    setRealtimeActive(false);
+    realtimeActiveRef.current = false;
+    realtimeStartingRef.current = false;
+    return true;
+  }, []);
+  // Used when the user switches conversation/project/temporary context. A live
+  // realtime session is bound to the old thread and has no in-place "continue in
+  // the new thread" path (re-minting would be surprising and costly). The
+  // terminal-state effect is also intentionally skipped once realtimeActiveRef is
+  // cleared, so without this the UI would sit in Talk mode with no transport
+  // running. Drop out of Talk mode entirely instead; the user can re-tap Talk to
+  // start a fresh session bound to the new thread. The legacy loop's own
+  // context-switch behavior (Talk mode survives) is left unchanged.
+  const stopRealtimeForContextSwitch = useCallback(() => {
+    if (stopRealtimeSession() && talkModeRef.current) {
+      setTalkMode(false);
+      talkModeRef.current = false;
+    }
+  }, [stopRealtimeSession]);
   const recorder = useAudioRecorder({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true,
@@ -542,6 +594,10 @@ export default function OraChatScreen() {
       if (next !== "background") return;
       speakGenRef.current += 1;
       cancelTalkRestart();
+      // Tear down a realtime voice session too — its mic/peer connection must not
+      // linger while the app is suspended. Covers a session that is still
+      // connecting (realtimeStartingRef), not just a fully-live one.
+      stopRealtimeSession();
       try {
         playerRef.current?.remove();
       } catch {
@@ -563,15 +619,23 @@ export default function OraChatScreen() {
       }
     });
     return () => sub.remove();
-  }, [cancelTalkRestart, recorder]);
+  }, [cancelTalkRestart, recorder, stopRealtimeSession]);
 
   const scheduleTalkRestart = useCallback(
     (delayMs: number) => {
+      // A realtime WebRTC session fully owns the mic/audio while active, so never
+      // arm the legacy record/transcribe loop underneath it. Also suppress while a
+      // realtime session is still connecting (realtimeStartingRef): an AppState
+      // inactive->active during the connect window could otherwise arm the legacy
+      // recorder underneath an in-flight realtime start.
+      if (realtimeActiveRef.current || realtimeStartingRef.current) return;
       cancelTalkRestart();
       talkRestartTimerRef.current = setTimeout(() => {
         talkRestartTimerRef.current = null;
         if (
           !talkModeRef.current ||
+          realtimeActiveRef.current ||
+          realtimeStartingRef.current ||
           recordingRef.current ||
           transcribingRef.current ||
           speakingIdRef.current ||
@@ -637,6 +701,72 @@ export default function OraChatScreen() {
     },
     [conversationId, isSignedIn],
   );
+
+  // ── TRUE realtime (WebRTC) voice — primary Talk-to-Ora transport ──────────
+  // Appends a finalized realtime turn into the conversation and persists it,
+  // reusing the same message + persist pipeline as typed chat so history and
+  // memory rules are unchanged. Realtime turns are already complete when the
+  // transcript event fires, so they carry no streaming/pending state.
+  const appendRealtimeTurn = useCallback(
+    (role: "user" | "assistant", content: string) => {
+      const msg: OraMessage = { id: uid(), role, content };
+      const nextMsgs = [...messagesRef.current, msg];
+      messagesRef.current = nextMsgs;
+      setMessages(nextMsgs);
+      void persist(nextMsgs, temporaryRef.current);
+      scrollToEnd();
+    },
+    [persist, scrollToEnd],
+  );
+
+  // Flip from the realtime transport back to the legacy transcribe -> chat -> tts
+  // loop when a live session drops mid-call, surfacing a visible warning. Only
+  // acts while Talk mode is still on.
+  const handleRealtimeFallback = useCallback(
+    (reason: string) => {
+      setRealtimeActive(false);
+      realtimeActiveRef.current = false;
+      if (talkModeRef.current) {
+        setVoiceError(reason);
+        scheduleTalkRestart(400);
+      }
+    },
+    [scheduleTalkRestart],
+  );
+
+  const realtimeVoice = useOraRealtimeVoiceNative({
+    onUserTranscript: (t) => appendRealtimeTurn("user", t),
+    onAssistantTranscript: (t) => appendRealtimeTurn("assistant", t),
+    onFallback: handleRealtimeFallback,
+  });
+  realtimeVoiceRef.current = realtimeVoice;
+
+  // The realtime session can end on its own — most commonly the hard duration
+  // cap (the server can't meter audio after the token is minted). The hook flips
+  // to a terminal state but can't touch screen-level Talk state, so clear
+  // realtimeActive here; otherwise the LIVE UI and the scheduleTalkRestart
+  // suppression leave the user stuck. If they're still in Talk mode, drop to the
+  // legacy metered loop so the conversation can continue. The realtimeActiveRef
+  // guard means failed/cancelled starts (which never flipped active) are ignored
+  // here — those are already handled inline by toggleTalkMode's start() branch.
+  const realtimeState = realtimeVoice.state;
+  useEffect(() => {
+    if (
+      realtimeState !== "ended" &&
+      realtimeState !== "error" &&
+      realtimeState !== "permission_denied"
+    ) {
+      return;
+    }
+    if (!realtimeActiveRef.current) return;
+    setRealtimeActive(false);
+    realtimeActiveRef.current = false;
+    realtimeStartingRef.current = false;
+    if (talkModeRef.current) {
+      setVoiceError("Live voice session ended. Switched to basic voice mode.");
+      scheduleTalkRestart(400);
+    }
+  }, [realtimeState, scheduleTalkRestart]);
 
   const sendMessage = useCallback(
     async (text: string, attch: Attachment | null, opts?: { truncateTo?: number }) => {
@@ -1428,23 +1558,30 @@ export default function OraChatScreen() {
   }, [doUpload]);
 
   const newChat = useCallback(() => {
+    // A live realtime session is bound to the current conversation; switching
+    // threads underneath it would mis-persist its transcripts to the new thread,
+    // so stop it (and drop Talk mode if it was driving the session).
+    stopRealtimeForContextSwitch();
     setMessages([]);
     setConversationId(null);
     setAttachment(null);
     setInput("");
-  }, []);
+  }, [stopRealtimeForContextSwitch]);
 
   // Toggle temporary mode. Either direction starts a clean conversation so
   // temporary and saved turns never mix in one thread (mirrors the website).
   const toggleTemporary = useCallback(() => {
     // Block toggling during an in-flight send to avoid clearing a live thread.
     if (sending) return;
+    // Stop realtime first: the new temporary/saved thread must not inherit the
+    // old session's transcripts, and temporary state changes its persistence.
+    stopRealtimeForContextSwitch();
     setTemporary((prev) => !prev);
     setMessages([]);
     setConversationId(null);
     setAttachment(null);
     setInput("");
-  }, [sending]);
+  }, [sending, stopRealtimeForContextSwitch]);
 
   // Header overflow menu: flip the "Voice responses on" preference and persist
   // it, mirroring the website auto-read toggle (settings.autoReadReplies).
@@ -1468,7 +1605,10 @@ export default function OraChatScreen() {
     talkModeRef.current = next;
     if (!next) {
       cancelTalkRestart();
-      // Exiting: stop any TTS that is playing
+      // Exiting Talk mode: stop a realtime session if one is running OR still
+      // connecting, so a mid-connect start() can't open the mic after exit.
+      stopRealtimeSession();
+      // Stop any TTS that is playing.
       if (speakingId) {
         try {
           playerRef.current?.remove();
@@ -1478,24 +1618,95 @@ export default function OraChatScreen() {
         playerRef.current = null;
         setSpeakingId(null);
       }
-      // If the mic is active, stop it (user is leaving voice mode)
+      // If the legacy mic is active, stop it (user is leaving voice mode).
       if (recording) void stopRecordingRef.current();
-    } else {
-      // Entering Talk mode: stop TTS if playing and immediately start listening
-      setTalkModeMuted(false);
-      talkModeMutedRef.current = false;
-      if (speakingId) {
-        try {
-          playerRef.current?.remove();
-        } catch {
-          /* ignore */
-        }
-        playerRef.current = null;
-        setSpeakingId(null);
+      return;
+    }
+
+    // Entering Talk mode. Clear any stale fallback warning and stop legacy audio
+    // that could fight the realtime AVAudioSession.
+    setVoiceError(null);
+    setTalkModeMuted(false);
+    talkModeMutedRef.current = false;
+    if (speakingId) {
+      try {
+        playerRef.current?.remove();
+      } catch {
+        /* ignore */
       }
+      playerRef.current = null;
+      setSpeakingId(null);
+    }
+    if (recordingRef.current) void stopRecordingRef.current();
+
+    const rt = realtimeVoiceRef.current;
+    if (rt?.isSupported) {
+      // Seed the live session with the recent visible conversation so the spoken
+      // turn continues in context (seeded client-side as lower-authority items,
+      // never injected into the server instructions).
+      const recent = messagesRef.current
+        .filter((m) => !m.pending && !m.error && m.content.trim())
+        .slice(-20)
+        .map((m) => ({ role: m.role, content: m.content }));
+      const lastUser = [...recent].reverse().find((m) => m.role === "user");
+      // Mark the connect window so background / exit / context-switch handlers can
+      // abort an in-flight start() that hasn't resolved yet.
+      realtimeStartingRef.current = true;
+      const myAttempt = ++realtimeStartGenRef.current;
+      void rt
+        .start({
+          language: language !== "auto" ? language : undefined,
+          temporary: temporaryRef.current,
+          referenceSavedMemories: !!isSignedInRef.current && !temporaryRef.current,
+          oraProjectId: activeProjectIdRef.current,
+          conversationId,
+          message: lastUser?.content,
+          history: recent,
+        })
+        .then((result) => {
+          // A newer start, or a stop / context switch / background teardown, has
+          // superseded this attempt. That path already owns (and may have
+          // re-minted) the single hook session, so this stale resolution must
+          // touch nothing: clearing realtimeStartingRef would arm the legacy
+          // recorder under the newer connect, and stop() would kill it. The
+          // superseding teardown already stopped this attempt's own session.
+          if (realtimeStartGenRef.current !== myAttempt) return;
+          realtimeStartingRef.current = false;
+          if (!talkModeRef.current) {
+            // User left Talk mode while the session was connecting; the exit path
+            // already called stop() (which aborts start()), but tear down any
+            // session that still managed to complete.
+            if (result.started) realtimeVoiceRef.current?.stop();
+            return;
+          }
+          if (result.started) {
+            setRealtimeActive(true);
+            realtimeActiveRef.current = true;
+          } else {
+            // Realtime could not start on a capable device — show the reason and
+            // drop to the legacy transcribe -> chat -> tts loop.
+            setRealtimeActive(false);
+            realtimeActiveRef.current = false;
+            if (result.reason) setVoiceError(result.reason);
+            scheduleTalkRestart(300);
+          }
+        });
+    } else {
+      // This build has no realtime native module yet — use the legacy loop
+      // silently (no visible warning: it is the pre-existing behavior, and once a
+      // WebRTC-enabled build ships, isSupported is always true).
       scheduleTalkRestart(300);
     }
-  }, [cancelTalkRestart, recording, scheduleTalkRestart, speakingId, talkMode]);
+  }, [
+    cancelTalkRestart,
+    conversationId,
+    language,
+    recording,
+    scheduleTalkRestart,
+    speakingId,
+    stopRealtimeSession,
+    talkMode,
+  ]);
 
   const interruptTalkMode = useCallback(() => {
     try {
@@ -1553,6 +1764,10 @@ export default function OraChatScreen() {
   const loadConversation = useCallback(
     async (id: number) => {
       setShowConversations(false);
+      // Switching to a different saved conversation must stop a live realtime
+      // session bound to the old thread, or its transcripts persist to the wrong
+      // conversation; drop Talk mode too if it was driving the session.
+      stopRealtimeForContextSwitch();
       // Opening a saved conversation always exits temporary mode.
       setTemporary(false);
       try {
@@ -1572,7 +1787,7 @@ export default function OraChatScreen() {
         /* ignore */
       }
     },
-    [scrollToEnd],
+    [scrollToEnd, stopRealtimeForContextSwitch],
   );
 
   const removeConversation = useCallback(
@@ -1708,27 +1923,59 @@ export default function OraChatScreen() {
     ? (projects.find((p) => p.id === activeProjectId)?.name ?? "Project")
     : null;
 
-  const talkStatusTitle = sending
-    ? "Ora is thinking"
-    : speakingId
-      ? "Ora is speaking"
-      : transcribing
-        ? "Transcribing"
-        : recording
-          ? "Listening"
-          : "Voice mode active";
+  // ── Talk-mode status (realtime vs legacy loop) ────────────────────────────
+  const realtimeOn = realtimeActive;
+  const rtState = realtimeVoice.state;
+  // Mute + interrupt are driven by the realtime hook while a live session runs,
+  // and by the legacy loop otherwise.
+  const talkMuted = realtimeOn ? realtimeVoice.isMuted : talkModeMuted;
+  const showInterrupt = realtimeOn
+    ? rtState === "speaking" || rtState === "thinking"
+    : !!speakingId;
+  const onInterruptPress = realtimeOn ? realtimeVoice.interrupt : interruptTalkMode;
+  const onMutePress = realtimeOn ? realtimeVoice.toggleMute : toggleTalkModeMute;
+  const realtimeInterim =
+    realtimeVoice.interimAssistantTranscript || realtimeVoice.interimUserTranscript;
 
-  const talkStatusSubtitle = talkModeMuted
-    ? "Muted - replies stay on screen"
+  const talkStatusTitle = realtimeOn
+    ? rtState === "connecting"
+      ? "Connecting"
+      : rtState === "thinking"
+        ? "Ora is thinking"
+        : rtState === "speaking"
+          ? "Ora is speaking"
+          : "Live voice active"
     : sending
-      ? "Preparing reply..."
+      ? "Ora is thinking"
       : speakingId
-        ? "Tap interrupt to speak"
+        ? "Ora is speaking"
         : transcribing
-          ? "Turning speech into text..."
+          ? "Transcribing"
           : recording
-            ? "Speak naturally - Ora answers when you pause"
-            : "Tap the mic or wait for Ora to listen";
+            ? "Listening"
+            : "Voice mode active";
+
+  const talkStatusSubtitle = realtimeOn
+    ? rtState === "connecting"
+      ? "Setting up a live voice connection..."
+      : talkMuted
+        ? "Muted - Ora can still hear you"
+        : rtState === "speaking"
+          ? "Tap interrupt to jump in"
+          : rtState === "thinking"
+            ? "Ora is responding..."
+            : "Listening - just speak naturally"
+    : talkModeMuted
+      ? "Muted - replies stay on screen"
+      : sending
+        ? "Preparing reply..."
+        : speakingId
+          ? "Tap interrupt to speak"
+          : transcribing
+            ? "Turning speech into text..."
+            : recording
+              ? "Speak naturally - Ora answers when you pause"
+              : "Tap the mic or wait for Ora to listen";
 
   // Header subtitle mirrors the website's transient status line: it only shows
   // while Ora is busy, and is blank otherwise (no usage counter in the header).
@@ -1863,8 +2110,10 @@ export default function OraChatScreen() {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <OraVoiceOrb
               active={talkMode}
-              listening={recording}
-              speaking={!!speakingId}
+              listening={realtimeOn ? rtState === "listening" : recording}
+              speaking={
+                realtimeOn ? rtState === "speaking" || rtState === "thinking" : !!speakingId
+              }
               onPress={toggleTalkMode}
             />
             {messages.length > 0 && (
@@ -2205,15 +2454,45 @@ export default function OraChatScreen() {
                   <PhoneCall size={20} color={tierAccent} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text
-                    style={{
-                      color: c.foreground,
-                      fontFamily: "Inter_600SemiBold",
-                      fontSize: 15,
-                    }}
-                  >
-                    {talkStatusTitle}
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text
+                      style={{
+                        color: c.foreground,
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 15,
+                      }}
+                    >
+                      {talkStatusTitle}
+                    </Text>
+                    {realtimeOn && (
+                      <View
+                        style={{
+                          backgroundColor: tierAccent + "22",
+                          borderRadius: 5,
+                          paddingHorizontal: 5,
+                          paddingVertical: 1,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: tierAccent,
+                            fontSize: 9,
+                            fontFamily: "Inter_700Bold",
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          LIVE
+                        </Text>
+                      </View>
+                    )}
+                    {realtimeOn &&
+                      realtimeVoice.remainingSeconds != null &&
+                      realtimeVoice.remainingSeconds <= 60 && (
+                        <Text style={{ color: c.mutedForeground, fontSize: 11 }}>
+                          {realtimeVoice.remainingSeconds}s
+                        </Text>
+                      )}
+                  </View>
                   <Text style={{ color: c.mutedForeground, fontSize: 12, marginTop: 2 }}>
                     {talkStatusSubtitle}
                   </Text>
@@ -2230,11 +2509,26 @@ export default function OraChatScreen() {
                 />
               )}
 
+              {/* Live transcript preview while a realtime session is speaking/listening */}
+              {realtimeOn && realtimeInterim ? (
+                <Text
+                  style={{
+                    color: c.mutedForeground,
+                    fontSize: 13,
+                    fontStyle: "italic",
+                    marginTop: 2,
+                  }}
+                  numberOfLines={3}
+                >
+                  {realtimeInterim}
+                </Text>
+              ) : null}
+
               {/* Controls */}
               <View style={{ flexDirection: "row", gap: 8 }}>
-                {speakingId && (
+                {showInterrupt && (
                   <Pressable
-                    onPress={interruptTalkMode}
+                    onPress={onInterruptPress}
                     style={{
                       flex: 1,
                       minHeight: 40,
@@ -2254,32 +2548,32 @@ export default function OraChatScreen() {
                   </Pressable>
                 )}
                 <Pressable
-                  onPress={toggleTalkModeMute}
+                  onPress={onMutePress}
                   style={{
                     flex: 1,
                     minHeight: 40,
                     borderRadius: 12,
                     borderWidth: 1,
-                    borderColor: talkModeMuted ? tierAccent + "55" : c.border,
-                    backgroundColor: talkModeMuted ? tierAccent + "15" : "transparent",
+                    borderColor: talkMuted ? tierAccent + "55" : c.border,
+                    backgroundColor: talkMuted ? tierAccent + "15" : "transparent",
                     alignItems: "center",
                     justifyContent: "center",
                     flexDirection: "row",
                     gap: 6,
                   }}
                 >
-                  {talkModeMuted ? (
+                  {talkMuted ? (
                     <VolumeX size={14} color={tierAccent} />
                   ) : (
                     <Volume2 size={14} color={c.foreground} />
                   )}
                   <Text
                     style={{
-                      color: talkModeMuted ? tierAccent : c.foreground,
+                      color: talkMuted ? tierAccent : c.foreground,
                       fontFamily: "Inter_600SemiBold",
                     }}
                   >
-                    {talkModeMuted ? "Unmute" : "Mute"}
+                    {talkMuted ? "Unmute" : "Mute"}
                   </Text>
                 </Pressable>
                 <Pressable

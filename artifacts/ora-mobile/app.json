@@ -69,6 +69,13 @@
           "savePhotosPermission": "Allow Ora to save generated images to your photo library.",
           "isAccessMediaLocationEnabled": false
         }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow Ora to access your camera to capture photos.",
+          "microphonePermission": "Allow Ora to use your microphone so you can talk to Ora by voice."
+        }
       ]
     ],
     "experiments": {

@@ -133,6 +133,8 @@ interface MintResponse {
 function detectSupport(): boolean {
   return (
     typeof window !== "undefined" &&
+    // getUserMedia requires a secure context (https / localhost).
+    window.isSecureContext === true &&
     typeof RTCPeerConnection !== "undefined" &&
     typeof navigator !== "undefined" &&
     !!navigator.mediaDevices &&

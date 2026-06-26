@@ -22,6 +22,7 @@ import {
   CreditCard,
   ShieldAlert,
   Plus,
+  AudioLines,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -245,6 +246,202 @@ function VoiceLanguageSection() {
         </button>
         {saved && <span className="text-sm text-green-500">Saved</span>}
       </div>
+    </SectionCard>
+  );
+}
+
+interface RealtimeDiagnostics {
+  enabled: boolean;
+  configured: boolean;
+  killSwitch: boolean;
+  model: string;
+  defaultVoice: string;
+  tier: string;
+  maxDurationSeconds: number;
+}
+
+/** Mirror of the realtime hook's detectSupport so the card matches actual capability. */
+function detectLiveVoiceSupport(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    // getUserMedia requires a secure context (https / localhost).
+    window.isSecureContext === true &&
+    typeof RTCPeerConnection !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getUserMedia === "function"
+  );
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s === 0 ? `${m} min` : `${m} min ${s} sec`;
+}
+
+function StatusDot({ ok, warn }: { ok: boolean; warn?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-block h-2 w-2 rounded-full",
+        ok ? "bg-emerald-500" : warn ? "bg-amber-500" : "bg-destructive",
+      )}
+    />
+  );
+}
+
+function DiagRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2.5">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">{children}</span>
+    </div>
+  );
+}
+
+function LiveVoiceSection() {
+  const [diag, setDiag] = useState<RealtimeDiagnostics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [micPermission, setMicPermission] = useState<string>("unknown");
+  const supported = detectLiveVoiceSupport();
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch("/api/public-ai/realtime/diagnostics");
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as RealtimeDiagnostics;
+        if (!cancelled) setDiag(data);
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions?.query) return;
+    let cancelled = false;
+    let permStatus: PermissionStatus | null = null;
+    const handleChange = () => {
+      if (!cancelled && permStatus) setMicPermission(permStatus.state);
+    };
+    navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((status) => {
+        if (cancelled) return;
+        permStatus = status;
+        setMicPermission(status.state);
+        status.addEventListener("change", handleChange);
+      })
+      .catch(() => {
+        /* Permissions API unavailable (e.g. Firefox) — leave as unknown. */
+      });
+    return () => {
+      cancelled = true;
+      permStatus?.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  const serverAvailable = !!diag && diag.enabled && diag.configured;
+
+  return (
+    <SectionCard
+      icon={AudioLines}
+      title="Live voice (Talk to Ora)"
+      description="Real-time spoken conversation status for this browser and your account. Checking this does not use any of your daily voice allowance."
+    >
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Checking availability
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <DiagRow label="Service status">
+            {failed ? (
+              <>
+                <StatusDot ok={false} warn />
+                Unknown
+              </>
+            ) : serverAvailable ? (
+              <>
+                <StatusDot ok />
+                Available
+              </>
+            ) : diag && !diag.configured ? (
+              <>
+                <StatusDot ok={false} />
+                Not configured
+              </>
+            ) : (
+              <>
+                <StatusDot ok={false} warn />
+                Temporarily unavailable
+              </>
+            )}
+          </DiagRow>
+
+          {diag && (
+            <>
+              <DiagRow label="Model">
+                <span className="font-mono text-foreground">{diag.model}</span>
+              </DiagRow>
+              <DiagRow label="Voice">
+                <span className="capitalize text-foreground">{diag.defaultVoice}</span>
+              </DiagRow>
+              <DiagRow label="Max session length">
+                <span className="text-foreground">{formatDuration(diag.maxDurationSeconds)}</span>
+              </DiagRow>
+            </>
+          )}
+
+          <DiagRow label="This browser">
+            {supported ? (
+              <>
+                <StatusDot ok />
+                Supported
+              </>
+            ) : (
+              <>
+                <StatusDot ok={false} />
+                Not supported
+              </>
+            )}
+          </DiagRow>
+
+          <DiagRow label="Microphone access">
+            {micPermission === "granted" ? (
+              <>
+                <StatusDot ok />
+                Allowed
+              </>
+            ) : micPermission === "denied" ? (
+              <>
+                <StatusDot ok={false} />
+                Blocked
+              </>
+            ) : micPermission === "prompt" ? (
+              <>
+                <StatusDot ok={false} warn />
+                Ask on start
+              </>
+            ) : (
+              <>
+                <StatusDot ok={false} warn />
+                Unknown
+              </>
+            )}
+          </DiagRow>
+        </div>
+      )}
     </SectionCard>
   );
 }
@@ -1183,6 +1380,7 @@ function OraSettingsInner() {
           <AccountSection />
           <AppearanceSection />
           <VoiceLanguageSection />
+          <LiveVoiceSection />
           <MemorySection />
           <PlanLimitsSection />
         </div>

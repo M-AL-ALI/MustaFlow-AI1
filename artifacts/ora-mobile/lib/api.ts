@@ -33,6 +33,9 @@ import type {
   OraxTaskArtifact,
   OraxTaskMessage,
   PaymentMethodInfo,
+  RealtimeDiagnostics,
+  RealtimeSessionContext,
+  RealtimeSessionResult,
   StreamDonePayload,
   SupportAttachment,
   SupportMessage,
@@ -162,6 +165,37 @@ export function getOraSession(): Promise<OraSession> {
 
 export function getOraUsage(): Promise<OraUsage> {
   return jsonRequest<OraUsage>("/api/public-ai/usage");
+}
+
+/**
+ * Mint a short-lived ephemeral OpenAI Realtime client secret for a TRUE
+ * realtime "Talk to Ora" voice session over WebRTC. The real OPENAI_API_KEY
+ * never reaches the device — only the single-use `ek_...` token is returned.
+ * All Ora rules (tier, spend cap, kill switch, language, project/conversation
+ * context, memory/profile, Builder isolation) are enforced server-side.
+ */
+export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<RealtimeSessionResult> {
+  return jsonRequest<RealtimeSessionResult>("/api/public-ai/realtime/session", {
+    method: "POST",
+    body: JSON.stringify({
+      language: ctx.language,
+      languageHint: ctx.languageHint,
+      temporary: ctx.temporary,
+      referenceSavedMemories: ctx.referenceSavedMemories,
+      oraProjectId: ctx.oraProjectId ?? null,
+      conversationId: ctx.conversationId ?? null,
+      message: ctx.message,
+    }),
+  });
+}
+
+/**
+ * Non-charging realtime diagnostics for the Settings card: server enable/config
+ * state, kill switch, model, default voice, resolved tier, and the per-tier max
+ * session length. Does NOT mint a token or consume any Ora quota.
+ */
+export function getRealtimeDiagnostics(): Promise<RealtimeDiagnostics> {
+  return jsonRequest<RealtimeDiagnostics>("/api/public-ai/realtime/diagnostics");
 }
 
 export interface ExportFileRequest {

@@ -317,4 +317,38 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
   }
 });
 
+/**
+ * GET /api/public-ai/realtime/diagnostics
+ *
+ * Non-charging capability + configuration probe for the "Talk to Ora" realtime
+ * voice feature. Powers the settings diagnostics card so a user (or support) can
+ * see whether live voice is available, which model/voice is in use, and the
+ * per-tier session length — WITHOUT minting a token or consuming any daily
+ * spend-cap units. Read-only: no ora-session cookie required, no OpenAI call.
+ */
+router.get("/public-ai/realtime/diagnostics", async (req, res) => {
+  const killSwitch = isKillSwitchActive("realtime");
+  const envDisabled = process.env.ORA_REALTIME_ENABLED === "false";
+  const configured = !!process.env.OPENAI_API_KEY;
+
+  let tier = "anonymous";
+  try {
+    const authed = await resolveAuthedOraUser(req);
+    tier = authed?.tier ?? "anonymous";
+  } catch {
+    // Best-effort — diagnostics must never block on auth resolution.
+  }
+
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    enabled: !killSwitch && !envDisabled,
+    configured,
+    killSwitch,
+    model: process.env.ORA_REALTIME_MODEL?.trim() || DEFAULT_REALTIME_MODEL,
+    defaultVoice: resolveVoice(undefined),
+    tier,
+    maxDurationSeconds: maxDurationForTier(tier),
+  });
+});
+
 export default router;

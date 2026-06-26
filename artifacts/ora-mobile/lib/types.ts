@@ -110,6 +110,42 @@ export interface OraUsage {
   windowHours: number;
 }
 
+/**
+ * Context forwarded to the realtime mint endpoint. Mirrors the website's
+ * RealtimeStartContext minus `history` (which is seeded client-side over the
+ * data channel as lower-authority conversation items, never sent to the mint).
+ */
+export interface RealtimeSessionContext {
+  language?: string;
+  languageHint?: string;
+  temporary: boolean;
+  referenceSavedMemories: boolean;
+  oraProjectId?: number | null;
+  conversationId?: number | string | null;
+  /** Optional recent utterance used ONLY to rank saved-memory recall. */
+  message?: string;
+}
+
+/** Response from POST /public-ai/realtime/session — a short-lived ek_ token. */
+export interface RealtimeSessionResult {
+  value: string;
+  expiresAt: number | null;
+  model: string;
+  voice: string;
+  maxDurationSeconds: number;
+}
+
+/** Response from GET /public-ai/realtime/diagnostics (non-charging). */
+export interface RealtimeDiagnostics {
+  enabled: boolean;
+  configured: boolean;
+  killSwitch: boolean;
+  model: string;
+  defaultVoice: string;
+  tier: string;
+  maxDurationSeconds: number;
+}
+
 export interface ChatRequest {
   message: string;
   messages: Array<{ role: OraRole; content: string }>;

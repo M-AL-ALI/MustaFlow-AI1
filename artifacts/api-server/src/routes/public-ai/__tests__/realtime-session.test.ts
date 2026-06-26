@@ -595,6 +595,95 @@ describe("Talk to Ora realtime — Ora-vs-Builder isolation", () => {
   });
 });
 
+// ─── 9b. Diagnostics (non-charging) ───────────────────────────────────────────
+
+describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
+  it("GET /diagnostics → 200 with config fields, no cookie, no mint, no charge", async () => {
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      enabled: true,
+      configured: true,
+      killSwitch: false,
+      model: "gpt-realtime-mini",
+      defaultVoice: "marin",
+      tier: "anonymous",
+      maxDurationSeconds: 300,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(checkOraSpendCapAsync)).not.toHaveBeenCalled();
+  });
+
+  it("reports configured=false when OPENAI_API_KEY is missing, still 200", async () => {
+    delete process.env.OPENAI_API_KEY;
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.configured).toBe(false);
+  });
+
+  it("reports enabled=false + killSwitch=true when realtime is disabled, still 200, no mint", async () => {
+    process.env.ORA_REALTIME_DISABLED = "true";
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.enabled).toBe(false);
+    expect(res.body.killSwitch).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports enabled=false when ORA_REALTIME_ENABLED=false, still 200", async () => {
+    process.env.ORA_REALTIME_ENABLED = "false";
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.enabled).toBe(false);
+    expect(res.body.killSwitch).toBe(false);
+  });
+
+  it("returns tier-aware maxDurationSeconds for a signed-in wave user", async () => {
+    vi.mocked(resolveAuthedOraUser).mockResolvedValue({
+      userId: "user_wave",
+      tier: "wave",
+      isPaid: true,
+    });
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.tier).toBe("wave");
+    expect(res.body.maxDurationSeconds).toBe(900);
+  });
+
+  it("returns tier-aware maxDurationSeconds for a signed-in core user", async () => {
+    vi.mocked(resolveAuthedOraUser).mockResolvedValue({
+      userId: "user_core",
+      tier: "core",
+      isPaid: true,
+    });
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.tier).toBe("core");
+    expect(res.body.maxDurationSeconds).toBe(600);
+  });
+
+  it("returns the baseline session length for a signed-in free user", async () => {
+    vi.mocked(resolveAuthedOraUser).mockResolvedValue({
+      userId: "user_free",
+      tier: "free",
+      isPaid: false,
+    });
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.tier).toBe("free");
+    expect(res.body.maxDurationSeconds).toBe(300);
+  });
+
+  it("respects ORA_REALTIME_MODEL / ORA_REALTIME_VOICE overrides", async () => {
+    process.env.ORA_REALTIME_MODEL = "gpt-realtime";
+    process.env.ORA_REALTIME_VOICE = "cedar";
+    const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
+    expect(res.status).toBe(200);
+    expect(res.body.model).toBe("gpt-realtime");
+    expect(res.body.defaultVoice).toBe("cedar");
+  });
+});
+
 // ─── 10. Route wiring (source assertions) ─────────────────────────────────────
 
 describe("Talk to Ora realtime — route wiring", () => {

@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import {
   Activity,
+  AudioLines,
   CheckCircle2,
   Circle,
   CreditCard,
@@ -31,11 +32,13 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button, Card, Pill } from "@/components/ui";
 import { type ThemeOverride, useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
+import { isRealtimeVoiceNativeAvailable } from "@/hooks/useOraRealtimeVoiceNative";
 import {
   API_BASE,
   getPaymentMethod,
   getOraUsage,
   getPreferences,
+  getRealtimeDiagnostics,
   getSubscription,
   openBillingPortal,
   startOraSubscriptionCheckout,
@@ -47,6 +50,7 @@ import type {
   BillingTierMeta,
   OraUsage,
   PaymentMethodInfo,
+  RealtimeDiagnostics,
 } from "@/lib/types";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
@@ -76,6 +80,12 @@ function planLabel(tier?: string | null): string {
   if (tier === "core") return "Core Pack";
   if (tier === "wave") return "Deep Wave";
   return "Free";
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return "—";
+  const mins = Math.round(seconds / 60);
+  return mins <= 1 ? "1 minute" : `${mins} minutes`;
 }
 
 function renewalLabel(subscription: BillingSubscription | null): string {
@@ -480,6 +490,8 @@ export default function SettingsScreen() {
   const [usage, setUsage] = useState<OraUsage | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodInfo | null>(null);
   const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | "addpm" | null>(null);
+  const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
+  const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
 
   useEffect(() => {
     getPreferences()
@@ -487,6 +499,9 @@ export default function SettingsScreen() {
         if (p.voiceLang) setVoiceLangState(p.voiceLang);
         setAutoReadReplies(!!p.autoReadReplies);
       })
+      .catch(() => {});
+    getRealtimeDiagnostics()
+      .then(setRealtimeDiag)
       .catch(() => {});
     if (isSignedIn) {
       getSubscription()
@@ -928,6 +943,47 @@ export default function SettingsScreen() {
               thumbColor={c.primaryForeground}
             />
           </View>
+        </SectionCard>
+
+        {/* Live voice (realtime) */}
+        <SectionCard
+          icon={AudioLines}
+          title="Live voice (Talk to Ora)"
+          description="Talk to Ora in a natural, real-time spoken conversation. If live voice is unavailable, Talk mode falls back to basic voice with a notice."
+        >
+          {realtimeDiag ? (
+            <View style={{ gap: 2 }}>
+              <InfoRow
+                label="Service"
+                value={
+                  realtimeDiag.killSwitch
+                    ? "Temporarily off"
+                    : !realtimeDiag.configured
+                      ? "Not configured"
+                      : realtimeDiag.enabled
+                        ? "Available"
+                        : "Unavailable"
+                }
+                warn={!realtimeDiag.enabled}
+              />
+              <InfoRow label="Model" value={realtimeDiag.model} />
+              <InfoRow label="Voice" value={realtimeDiag.defaultVoice} />
+              <InfoRow
+                label="Max session"
+                value={formatDuration(realtimeDiag.maxDurationSeconds)}
+              />
+              <InfoRow label="Plan" value={planLabel(realtimeDiag.tier)} />
+              <InfoRow
+                label="This device"
+                value={realtimeDeviceReady ? "Ready" : "Update app to enable"}
+                warn={!realtimeDeviceReady}
+              />
+            </View>
+          ) : (
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+              Checking live voice availability...
+            </Text>
+          )}
         </SectionCard>
 
         {/* Plan + Usage + Account — require sign-in */}
