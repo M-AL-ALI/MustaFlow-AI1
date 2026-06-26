@@ -35,3 +35,18 @@ restarting api-server (typecheck won't catch it — only the esbuild build does)
 Note: the lib also has a `textToSpeech` helper that uses `gpt-audio` via
 `chat.completions` (modalities) — that path can go through the proxy, but it's a different
 model/quality and not what the Talk-to-Ora speech route uses.
+
+**Valid model names (the other half of the bug):** `gpt-5-mini-tts` and
+`gpt-5-mini-transcribe` DO NOT EXIST. Direct OpenAI returns `404 model_not_found`; the
+proxy returns `400 UNSUPPORTED_MODEL`. Either error trips the same silent-failure path
+and looks like a voice outage. The working models are **`gpt-4o-mini-tts`** (TTS, direct
+client only) and **`gpt-4o-mini-transcribe`** (transcribe, works via proxy). These are the
+defaults when `ORA_TTS_MODEL` / `ORA_TRANSCRIBE_MODEL` are unset (they are unset in dev and
+prod). **Why:** a plausible-looking but nonexistent model name is easy to introduce and
+typecheck/lint never catch it — only a live call does.
+
+**Known still-broken (separate follow-up):** `lib/agent-creative.ts` (creative-agent asset
+generation, reached via agent-loop `generateAudioAsset`) calls TTS through the **proxy**
+`openai` client's `audio.speech.create`, so it fails with `INVALID_ENDPOINT` regardless of
+model. A model-name swap there is a no-op; it needs the same direct-client refactor as the
+Ora voice route. Out of scope for the Ora voice fix.
