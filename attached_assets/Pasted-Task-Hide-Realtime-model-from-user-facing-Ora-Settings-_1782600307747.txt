@@ -1,0 +1,87 @@
+Task: Hide Realtime model from user-facing Ora Settings and add Marine/Mustafa voice choice on website + mobile
+
+Goal:
+Users should not see that Ora/Aura uses OpenAI/ChatGPT models behind the scenes. The Talk to Ora Live Voice card should stay functional but hide model/provider details. Add a selectable female/male voice option across both Ora Website and Ora Mobile.
+
+Requirements:
+1. Remove model name from all user-facing Talk to Ora / Live Voice settings cards.
+   - Do not show gpt-realtime-mini, gpt-realtime, gpt-5, OpenAI, ChatGPT, or provider model IDs in customer UI.
+   - Keep model information only in server logs or admin-only diagnostics if needed.
+   - Public/customer UI should say something like:
+     - Live voice: Available
+     - Voice: Marine or Mustafa
+     - Status: Ready
+
+2. Add voice selector:
+   - Marine = female voice
+   - Mustafa = male voice
+   - UI labels must be product labels only.
+   - Do not expose raw provider voice IDs such as marin/cedar/etc. in the normal UI.
+
+3. Backend mapping:
+   - Add server-side mapping from product voice key to provider voice ID.
+   - Example shape:
+     marine -> provider female voice
+     mustafa -> provider male voice
+   - Verify the male provider voice by actually minting a realtime session with candidate voice IDs before choosing.
+   - Recommended candidate to test first: cedar, if supported by the current realtime model/key.
+   - Keep ORA_REALTIME_VOICE env override compatible, but normal clients should send product voice keys, not raw provider IDs.
+
+4. Realtime session endpoint:
+   - Accept a safe voice preset from client, e.g. voicePreset: "marine" | "mustafa".
+   - Resolve it server-side to the provider voice.
+   - Return only the product voice label/key to normal clients.
+   - Do not return model name in normal client responses unless it is admin-only or explicitly diagnostic-internal.
+
+5. Website changes:
+   - Ora Settings → Talk to Ora Live Voice:
+     - remove model row
+     - add voice selector for Marine / Mustafa
+     - persist selection
+   - Talk to Ora WebRTC start context should pass the selected voice preset.
+   - Verify existing voice behavior still works.
+
+6. Mobile changes:
+   - Ora Mobile Settings → Talk to Ora Live Voice:
+     - remove model row
+     - add same Marine / Mustafa selector
+     - persist selection using AsyncStorage
+   - Native realtime hook/start context should pass selected voice preset.
+   - No native build yet unless requested later.
+
+7. Privacy/product wording:
+   - User-facing text must not mention OpenAI, ChatGPT, GPT, model IDs, provider voice IDs, or internal implementation.
+   - Acceptable labels:
+     - Marine
+     - Mustafa
+     - Live voice ready
+     - Realtime voice available
+   - Avoid:
+     - gpt-realtime-mini
+     - marin / cedar raw IDs
+     - OpenAI voice
+     - ChatGPT model
+
+8. Tests:
+   - Backend test: voicePreset marine maps to configured female provider voice.
+   - Backend test: voicePreset mustafa maps to verified male provider voice.
+   - Backend test: invalid voicePreset falls back safely to marine or returns 400.
+   - Website source/UI test: settings card does not render model name.
+   - Mobile source/UI test: settings card does not render model name.
+   - Website/mobile tests: both expose Marine and Mustafa labels.
+   - Realtime session test: normal client response does not expose model name.
+
+9. Verification:
+   - Typecheck all three artifacts.
+   - Run realtime-session tests.
+   - Run website voice/settings tests.
+   - Run mobile typecheck and source tests.
+   - Confirm no user-facing string contains gpt-realtime, gpt-5, OpenAI, or ChatGPT in the Live Voice card.
+   - Do not trigger EAS/TestFlight/native build in this task.
+
+Recommendation:
+Use product voice labels:
+- Marine = female
+- Mustafa = male
+
+Keep the provider voice IDs entirely server-side. This gives us branding control and avoids exposing that Ora is powered by ChatGPT/OpenAI behind the scenes.
