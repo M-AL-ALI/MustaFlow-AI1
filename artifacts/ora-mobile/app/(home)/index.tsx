@@ -48,7 +48,7 @@ import {
   Mic,
   MoreHorizontal,
   Pencil,
-  PhoneCall,
+  PhoneOff,
   Plus,
   RefreshCw,
   Send,
@@ -89,6 +89,7 @@ import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
 import { OraThemeToggle } from "@/components/ora/OraThemeToggle";
 import { OraVoiceOrb } from "@/components/ora/OraVoiceOrb";
+import { OraLiveDot, OraWaveBars } from "@/components/ora/OraWaveBars";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { useColors } from "@/hooks/useColors";
 import { useOraRealtimeVoiceNative } from "@/hooks/useOraRealtimeVoiceNative";
@@ -147,6 +148,17 @@ import type {
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Red used for the live "listening" waveform + recording dot (mirrors web red-400). */
+const VOICE_LISTEN_RED = "#f87171";
+
+/** Format a seconds countdown as m:ss for the realtime session timer (mirrors web). */
+function formatRemaining(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${rem.toString().padStart(2, "0")}`;
 }
 
 function cleanForTts(text: string): string {
@@ -1949,14 +1961,23 @@ export default function OraChatScreen() {
   const realtimeInterim =
     realtimeVoice.interimAssistantTranscript || realtimeVoice.interimUserTranscript;
 
+  // Talk-card live state booleans (mirror website OraRealtimeConvView).
+  const talkListening = realtimeOn ? rtState === "listening" : recording;
+  const talkConnecting = realtimeOn && rtState === "connecting";
+  const talkThinking = realtimeOn ? rtState === "thinking" : sending || transcribing;
+  const talkSpeaking = realtimeOn ? rtState === "speaking" : !!speakingId;
+  const talkAnimated = talkListening || talkConnecting || talkThinking || talkSpeaking;
+
   const talkStatusTitle = realtimeOn
     ? rtState === "connecting"
-      ? "Connecting"
+      ? "Connecting…"
       : rtState === "thinking"
-        ? "Ora is thinking"
+        ? "Ora is thinking…"
         : rtState === "speaking"
-          ? "Ora is speaking"
-          : "Live voice active"
+          ? "Ora is speaking…"
+          : rtState === "listening"
+            ? "Listening…"
+            : "Live voice active"
     : sending
       ? "Ora is thinking"
       : speakingId
@@ -1969,14 +1990,16 @@ export default function OraChatScreen() {
 
   const talkStatusSubtitle = realtimeOn
     ? rtState === "connecting"
-      ? "Setting up a live voice connection..."
+      ? "Setting up a live voice connection…"
       : talkMuted
-        ? "Muted - Ora can still hear you"
+        ? "Muted — Ora can still hear you"
         : rtState === "speaking"
-          ? "Tap interrupt to jump in"
+          ? realtimeInterim || "Tap interrupt to jump in"
           : rtState === "thinking"
-            ? "Ora is responding..."
-            : "Listening - just speak naturally"
+            ? "Preparing a spoken reply…"
+            : realtimeVoice.interimUserTranscript
+              ? `"${realtimeVoice.interimUserTranscript}"`
+              : "Speak naturally — Ora listens as you talk"
     : talkModeMuted
       ? "Muted - replies stay on screen"
       : sending
@@ -2438,51 +2461,34 @@ export default function OraChatScreen() {
           )}
 
           {talkMode ? (
-            /* ── Talk to Ora panel ── replaces composer while voice mode is active */
+            /* ── Talk to Ora live card — mirrors website OraRealtimeConvView ── */
             <View
               style={{
-                borderWidth: 1.5,
-                borderColor: tierAccent + "66",
-                borderRadius: 20,
-                backgroundColor: tierAccent + "0d",
-                padding: 14,
-                gap: 12,
+                borderWidth: 1,
+                borderColor: tierAccent + "4d",
+                borderRadius: 16,
+                backgroundColor: tierAccent + "0f",
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                gap: 14,
               }}
             >
-              {/* Status row */}
+              {/* Status row: waveform · (LIVE + title / subtitle) · live dot */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                <View
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 21,
-                    backgroundColor: tierAccent + "20",
-                    borderWidth: 1.5,
-                    borderColor: tierAccent + "55",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <PhoneCall size={20} color={tierAccent} />
-                </View>
-                <View style={{ flex: 1 }}>
+                <OraWaveBars
+                  animated={talkAnimated}
+                  color={talkListening ? VOICE_LISTEN_RED : tierAccent}
+                  scale={1.1}
+                />
+                <View style={{ flex: 1, gap: 2 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text
-                      style={{
-                        color: c.foreground,
-                        fontFamily: "Inter_600SemiBold",
-                        fontSize: 15,
-                      }}
-                    >
-                      {talkStatusTitle}
-                    </Text>
                     {realtimeOn && (
                       <View
                         style={{
-                          backgroundColor: tierAccent + "22",
-                          borderRadius: 5,
-                          paddingHorizontal: 5,
-                          paddingVertical: 1,
+                          backgroundColor: tierAccent + "26",
+                          borderRadius: 4,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
                         }}
                       >
                         <Text
@@ -2497,21 +2503,38 @@ export default function OraChatScreen() {
                         </Text>
                       </View>
                     )}
-                    {realtimeOn &&
-                      realtimeVoice.remainingSeconds != null &&
-                      realtimeVoice.remainingSeconds <= 60 && (
-                        <Text style={{ color: c.mutedForeground, fontSize: 11 }}>
-                          {realtimeVoice.remainingSeconds}s
-                        </Text>
-                      )}
+                    <Text
+                      style={{
+                        color: c.foreground,
+                        fontFamily: "Inter_600SemiBold",
+                        fontSize: 15,
+                        flexShrink: 1,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {talkStatusTitle}
+                    </Text>
                   </View>
-                  <Text style={{ color: c.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                  <Text
+                    style={{
+                      color: c.mutedForeground,
+                      fontSize: 12,
+                      fontStyle:
+                        talkListening && realtimeVoice.interimUserTranscript ? "italic" : "normal",
+                    }}
+                    numberOfLines={1}
+                  >
                     {talkStatusSubtitle}
                   </Text>
                 </View>
+                {talkListening ? (
+                  <OraLiveDot color={VOICE_LISTEN_RED} size={8} />
+                ) : talkConnecting || talkThinking ? (
+                  <ActivityIndicator size="small" color={tierAccent} />
+                ) : null}
               </View>
 
-              {/* Waveform shown inside Talk panel while recording */}
+              {/* Legacy mic waveform — only the fallback loop records via expo-audio */}
               {recording && (
                 <RecordingIndicator
                   recorder={recorder}
@@ -2521,88 +2544,92 @@ export default function OraChatScreen() {
                 />
               )}
 
-              {/* Live transcript preview while a realtime session is speaking/listening */}
-              {realtimeOn && realtimeInterim ? (
-                <Text
-                  style={{
-                    color: c.mutedForeground,
-                    fontSize: 13,
-                    fontStyle: "italic",
-                    marginTop: 2,
-                  }}
-                  numberOfLines={3}
-                >
-                  {realtimeInterim}
-                </Text>
-              ) : null}
-
-              {/* Controls */}
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                {showInterrupt && (
-                  <Pressable
-                    onPress={onInterruptPress}
-                    style={{
-                      flex: 1,
-                      minHeight: 40,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: c.border,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexDirection: "row",
-                      gap: 6,
-                    }}
-                  >
-                    <Square size={14} color={c.foreground} fill={c.foreground} />
-                    <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
-                      Interrupt
-                    </Text>
-                  </Pressable>
-                )}
+              {/* Controls row: Mute · [Interrupt] · timer → End */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <Pressable
                   onPress={onMutePress}
                   style={{
-                    flex: 1,
-                    minHeight: 40,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: talkMuted ? tierAccent + "55" : c.border,
-                    backgroundColor: talkMuted ? tierAccent + "15" : "transparent",
-                    alignItems: "center",
-                    justifyContent: "center",
                     flexDirection: "row",
+                    alignItems: "center",
                     gap: 6,
+                    borderWidth: 1,
+                    borderRadius: 12,
+                    borderColor: talkMuted ? c.border : tierAccent + "59",
+                    paddingHorizontal: 12,
+                    paddingVertical: 7,
                   }}
                 >
                   {talkMuted ? (
-                    <VolumeX size={14} color={tierAccent} />
+                    <VolumeX size={14} color={c.mutedForeground} />
                   ) : (
-                    <Volume2 size={14} color={c.foreground} />
+                    <Volume2 size={14} color={tierAccent} />
                   )}
                   <Text
                     style={{
-                      color: talkMuted ? tierAccent : c.foreground,
+                      color: talkMuted ? c.mutedForeground : tierAccent,
                       fontFamily: "Inter_600SemiBold",
+                      fontSize: 13,
                     }}
                   >
                     {talkMuted ? "Unmute" : "Mute"}
                   </Text>
                 </Pressable>
+
+                {showInterrupt && (
+                  <Pressable
+                    onPress={onInterruptPress}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      borderColor: c.border,
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                    }}
+                  >
+                    <Mic size={14} color={c.mutedForeground} />
+                    <Text
+                      style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 13 }}
+                    >
+                      Interrupt
+                    </Text>
+                  </Pressable>
+                )}
+
+                {realtimeOn && realtimeVoice.remainingSeconds != null && (
+                  <Text
+                    style={{
+                      color: realtimeVoice.remainingSeconds <= 30 ? "#f0a742" : c.mutedForeground,
+                      fontSize: 12,
+                      fontVariant: ["tabular-nums"],
+                    }}
+                  >
+                    {formatRemaining(realtimeVoice.remainingSeconds)}
+                  </Text>
+                )}
+
                 <Pressable
                   onPress={toggleTalkMode}
                   style={{
-                    flex: 1,
-                    minHeight: 40,
-                    borderRadius: 12,
-                    backgroundColor: c.secondary,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    marginLeft: "auto",
                     flexDirection: "row",
+                    alignItems: "center",
                     gap: 6,
+                    borderWidth: 1,
+                    borderRadius: 12,
+                    borderColor: c.destructive + "4d",
+                    paddingHorizontal: 14,
+                    paddingVertical: 7,
                   }}
                 >
-                  <X size={14} color={c.mutedForeground} />
-                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>End</Text>
+                  <PhoneOff size={14} color={c.destructive} />
+                  <Text
+                    style={{ color: c.destructive, fontFamily: "Inter_600SemiBold", fontSize: 13 }}
+                  >
+                    End
+                  </Text>
                 </Pressable>
               </View>
             </View>

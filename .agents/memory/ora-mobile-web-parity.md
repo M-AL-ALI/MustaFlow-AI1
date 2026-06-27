@@ -169,6 +169,23 @@ The tell: a Safari browser bar showing **"mustaflow.com"** + back/refresh at the
 means it is the WEBSITE in mobile Safari, NOT the native app. The native app has no URL
 bar. Always check before treating an image as the native "before".
 
+## Talk to Ora live card mirrors web `OraRealtimeConvView` (Screen: Talk to Ora)
+
+The mobile Talk-to-Ora panel (shown in the composer slot while `talkMode`) mirrors the
+website `OraRealtimeConvView` (`ora-voice-mode-button.tsx`), NOT a circular phone-call
+button: rounded card, small waveform on the LEFT (red while listening, else tier accent),
+`LIVE` pill + bold status title + one-line subtitle ("Speak naturally — Ora listens as you
+talk"), a pulsing red dot top-right while listening (spinner while connecting/thinking), and
+a controls row = bordered Mute pill (accent when UNMUTED, grey when muted) + optional
+Interrupt pill (speaking only) + `m:ss` timer (amber ≤30s) + red destructive End button
+(`PhoneOff`) pushed far right via `marginLeft:"auto"`.
+**Why:** earlier mobile used a PhoneCall avatar + 3 equal buttons; user wants website shape.
+**How to apply:** the RN waveform is `components/ora/OraWaveBars.tsx` — an Animated mirror of
+web `WaveformBars` (same 7-bar BAR_DEFS) exporting `OraWaveBars({animated,color,scale})` and
+`OraLiveDot`. The live interim transcript is folded INTO the subtitle (one line, italic),
+not a separate block. Tier accent stays tier-driven (`tierAccentColor`); only the
+listening/recording state uses red `#f87171` (web red-400).
+
 ## Theme follows the phone by default (decided this session)
 
 `context/ThemeContext.tsx` now defaults `themeOverride` to **"system"** (both the
