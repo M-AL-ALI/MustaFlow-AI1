@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   Plus,
   AudioLines,
+  Focus,
 } from "lucide-react";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
@@ -30,6 +31,11 @@ import { useOraConversations } from "@/hooks/ora-conversations-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Switch } from "@/components/ui/switch";
 import { setVoiceLang, VOICE_LANGUAGES } from "@/hooks/use-voice-input";
+import {
+  readStoredFocusMode,
+  VOICE_FOCUS_STORAGE_KEY,
+  type FocusMode,
+} from "@/hooks/use-ora-realtime-voice";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
 import {
   getReferenceSavedMemories,
@@ -245,6 +251,49 @@ function VoiceLanguageSection() {
           {saving ? "Saving…" : "Save"}
         </button>
         {saved && <span className="text-sm text-green-500">Saved</span>}
+      </div>
+    </SectionCard>
+  );
+}
+
+function FocusModeSection() {
+  // Speaker focus is a client-only preference (this device/browser). It is NOT
+  // synced to the server: the realtime hook reads it at session start to decide
+  // whether the server auto-responds or the client gates replies by focus.
+  const [focused, setFocused] = useState<boolean>(() => readStoredFocusMode() === "focused");
+
+  function handleToggle(next: boolean) {
+    setFocused(next);
+    const mode: FocusMode = next ? "focused" : "normal";
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(VOICE_FOCUS_STORAGE_KEY, mode);
+      }
+    } catch {
+      /* localStorage unavailable (private mode) — keep the in-memory choice. */
+    }
+  }
+
+  return (
+    <SectionCard
+      icon={Focus}
+      title="Speaker focus"
+      description="Controls how Talk to Ora handles other voices in the room. This setting is saved on this device only."
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium">Focused listening</p>
+          <p className="text-xs text-muted-foreground">
+            {focused
+              ? "Ora replies to you and stays quiet for nearby background speakers."
+              : "Ora replies to any nearby speech (original behavior)."}
+          </p>
+        </div>
+        <Switch
+          checked={focused}
+          onCheckedChange={handleToggle}
+          aria-label="Focused listening"
+        />
       </div>
     </SectionCard>
   );
@@ -1381,6 +1430,7 @@ function OraSettingsInner() {
           <AppearanceSection />
           <VoiceLanguageSection />
           <LiveVoiceSection />
+          <FocusModeSection />
           <MemorySection />
           <PlanLimitsSection />
         </div>

@@ -76,6 +76,12 @@ const bodySchema = z.object({
   language: z.string().max(20).optional(),
   languageHint: z.string().max(40).optional(),
   voice: z.string().max(40).optional(),
+  // Speaker-focus mode. "focused" (default) makes the SERVER stop auto-responding
+  // (turn_detection.create_response=false) so the CLIENT decides — via its focus
+  // filter — which transcripts deserve a reply, keeping Ora from answering nearby
+  // background speakers. "normal" keeps the legacy open behavior (server auto
+  // responds to every detected turn). Persisted client-side only; sent per session.
+  focusMode: z.enum(["normal", "focused"]).optional(),
   temporary: z.boolean().optional(),
   referenceSavedMemories: z.boolean().optional(),
   oraProjectId: z.number().int().positive().nullable().optional(),
@@ -129,14 +135,25 @@ function resolveInterruptResponse(): boolean {
   return process.env.ORA_REALTIME_INTERRUPT_RESPONSE?.trim().toLowerCase() === "true";
 }
 
-function resolveTurnDetection():
-  | { type: "semantic_vad"; eagerness: string; create_response: true; interrupt_response: boolean }
+/**
+ * Build the session's turn_detection config. `createResponse` controls whether
+ * the OpenAI server auto-generates a reply after each detected user turn:
+ *  - Normal mode passes `true` (legacy: server responds to every VAD turn).
+ *  - Focused mode passes `false` so the server still does VAD + input
+ *    transcription but never replies on its own; the client then sends an
+ *    explicit `response.create` ONLY for transcripts that clear its speaker-focus
+ *    filter, so Ora stops answering nearby background speakers.
+ */
+function resolveTurnDetection(
+  createResponse: boolean,
+):
+  | { type: "semantic_vad"; eagerness: string; create_response: boolean; interrupt_response: boolean }
   | {
       type: "server_vad";
       threshold: number;
       prefix_padding_ms: number;
       silence_duration_ms: number;
-      create_response: true;
+      create_response: boolean;
       interrupt_response: boolean;
     } {
   const type = process.env.ORA_REALTIME_VAD_TYPE?.trim() || DEFAULT_REALTIME_VAD_TYPE;
@@ -146,7 +163,7 @@ function resolveTurnDetection():
     return {
       type: "semantic_vad",
       eagerness: process.env.ORA_REALTIME_VAD_EAGERNESS?.trim() || DEFAULT_REALTIME_VAD_EAGERNESS,
-      create_response: true,
+      create_response: createResponse,
       interrupt_response,
     };
   }
@@ -159,7 +176,7 @@ function resolveTurnDetection():
     return {
       type: "semantic_vad",
       eagerness: DEFAULT_REALTIME_VAD_EAGERNESS,
-      create_response: true,
+      create_response: createResponse,
       interrupt_response,
     };
   }
@@ -175,7 +192,7 @@ function resolveTurnDetection():
       "ORA_REALTIME_VAD_SILENCE_DURATION_MS",
       DEFAULT_REALTIME_VAD_SILENCE_DURATION_MS,
     ),
-    create_response: true,
+    create_response: createResponse,
     interrupt_response,
   };
 }
@@ -315,7 +332,20 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
 
   const model = process.env.ORA_REALTIME_MODEL?.trim() || DEFAULT_REALTIME_MODEL;
   const voice = resolveVoice(parsed.data.voice);
-  const turnDetection = resolveTurnDetection();
+  // Speaker-focus posture. In Focused mode the server does NOT auto-respond
+  // (create_response=false); the client owns response creation so Ora only replies
+  // to transcripts that clear its focus filter. Normal mode keeps the legacy
+  // behavior where the server replies to every detected turn.
+  //
+  // The product default ("focused") lives CLIENT-SIDE (localStorage / AsyncStorage)
+  // and focus-aware clients always transmit their persisted preference. A MISSING
+  // focusMode therefore means a focus-UNAWARE caller — e.g. an older mobile build
+  // that predates this feature and never sends its own response.create. For those
+  // we must keep the legacy auto-respond posture, so an absent value falls back to
+  // "normal"; defaulting it to "focused" would leave such a client silent forever.
+  const focusMode = parsed.data.focusMode ?? "normal";
+  const createResponse = focusMode !== "focused";
+  const turnDetection = resolveTurnDetection(createResponse);
   const maxDurationSeconds = maxDurationForTier(tier);
 
   const instructions = await buildRealtimeInstructions({
@@ -388,8 +418,15 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
       return;
     }
 
+    // Privacy-safe session diagnostic: mode + whether the server will auto-respond.
+    // No audio, transcript, or user content — only the focus posture for support.
+    logger.info(
+      { component: "ora-realtime", focusMode, createResponse, tier, model, voice },
+      "Ora realtime session minted",
+    );
+
     res.setHeader("Cache-Control", "no-store");
-    res.json({ value, expiresAt, model, voice, maxDurationSeconds });
+    res.json({ value, expiresAt, model, voice, maxDurationSeconds, focusMode, createResponse });
   } catch (err) {
     logger.warn({ component: "ora-realtime", err }, "Ora realtime mint threw");
     res.status(502).json({ error: "Voice conversation failed to start. Please try again." });

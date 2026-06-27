@@ -185,6 +185,7 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
       oraProjectId: ctx.oraProjectId ?? null,
       conversationId: ctx.conversationId ?? null,
       message: ctx.message,
+      focusMode: ctx.focusMode,
     }),
   });
 }

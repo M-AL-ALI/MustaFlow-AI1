@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Circle,
   CreditCard,
+  Focus,
   Info,
   Loader,
   LogOut,
@@ -36,6 +37,7 @@ import {
   getSubscription,
   updatePreferences,
 } from "@/lib/api";
+import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
 import type {
   BillingSubscription,
   BillingTierMeta,
@@ -445,12 +447,17 @@ export default function SettingsScreen() {
 
   const [voiceLang, setVoiceLangState] = useState("en");
   const [autoReadReplies, setAutoReadReplies] = useState(false);
+  // Speaker focus is a client-only preference (this device). Default "focused".
+  const [focusFocused, setFocusFocused] = useState(true);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
   const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
   const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
 
   useEffect(() => {
+    readStoredFocusMode()
+      .then((mode) => setFocusFocused(mode === "focused"))
+      .catch(() => {});
     getPreferences()
       .then((p) => {
         if (p.voiceLang) setVoiceLangState(p.voiceLang);
@@ -486,6 +493,11 @@ export default function SettingsScreen() {
     } catch {
       setAutoReadReplies(!value);
     }
+  }, []);
+
+  const toggleFocusMode = useCallback((value: boolean) => {
+    setFocusFocused(value);
+    void writeStoredFocusMode(value ? "focused" : "normal");
   }, []);
 
   /* ── Diagnostics ───────────────────────────────────────────────────────── */
@@ -841,6 +853,41 @@ export default function SettingsScreen() {
             <Switch
               value={autoReadReplies}
               onValueChange={toggleAutoRead}
+              trackColor={{ false: c.border, true: c.primary }}
+              thumbColor={c.primaryForeground}
+            />
+          </View>
+        </SectionCard>
+
+        {/* Speaker focus */}
+        <SectionCard
+          icon={Focus}
+          title="Speaker focus"
+          description="Controls how Talk to Ora handles other voices in the room. Saved on this device only."
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ color: c.foreground, fontSize: 14 }}>Focused listening</Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                {focusFocused
+                  ? "Ora replies to you and stays quiet for nearby background speakers."
+                  : "Ora replies to any nearby speech (original behavior)."}
+              </Text>
+            </View>
+            <Switch
+              value={focusFocused}
+              onValueChange={toggleFocusMode}
               trackColor={{ false: c.border, true: c.primary }}
               thumbColor={c.primaryForeground}
             />

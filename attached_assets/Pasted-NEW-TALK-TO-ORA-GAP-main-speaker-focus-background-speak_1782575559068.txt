@@ -1,0 +1,102 @@
+NEW TALK TO ORA GAP: main-speaker focus / background speaker rejection
+
+Talk to Ora is now stable, but it still listens to surrounding people too easily. If another person near the user talks, Ora may treat that other person's speech as the user's turn.
+
+Goal:
+Ora should behave more like ChatGPT Voice: stay focused on the primary user, ignore side conversations when possible, and not interrupt/respond to people nearby unless the main user clearly speaks to Ora.
+
+Important:
+This is not the same as noise filtering. The background speaker is real human speech, so simple transcript filtering is not enough.
+
+Required improvements:
+
+1. Add "speaker focus" heuristics before accepting a realtime transcript.
+
+Do not accept every valid transcript as the user's turn. Score the turn first.
+
+Reject or delay acceptance when:
+- transcript is very short
+- audio appears far/low-confidence if available
+- speech starts while another conversation is happening in the room but not directed at Ora
+- transcript does not look addressed to Ora after a period of background speech
+- the user has not recently interacted with Ora
+
+2. Add an "addressing Ora" rule for ambiguous/background speech.
+
+If Talk to Ora is idle/listening and background speech is detected, do not immediately respond unless:
+- the user says "Ora", "Hey Ora", or similar wake/address phrase, OR
+- the transcript is a direct command/question, OR
+- the user recently spoke to Ora in the same focused turn window.
+
+This should be softer than a hard wake word. Normal conversation with Ora should still feel natural once the user is already engaged.
+
+3. Add a focus window.
+
+After the real user speaks to Ora, keep a short active focus window, for example 8–15 seconds.
+
+During that window:
+- accept follow-up user speech naturally
+- still reject side/background speech if it is too short, far, or conversationally unrelated
+
+After the focus window expires:
+- require a clearer direct address or stronger confidence before Ora responds
+
+4. Add optional "Focus mode" setting.
+
+Talk to Ora can have two modes:
+
+Normal:
+- current behavior, more open listening
+
+Focused:
+- stricter filtering
+- ignores likely side conversations
+- may require "Ora" or a direct question after silence/background speech
+
+Default should probably be Focused.
+
+5. Use platform audio processing where possible.
+
+Website:
+- keep echoCancellation/noiseSuppression/autoGainControl enabled
+- investigate browser support for voice isolation / advanced constraints, but do not depend on it
+
+iOS:
+- configure the audio session for voice chat / voice isolation if supported
+- prefer AirPods/headset mic when connected
+- test iPhone speaker mode separately, because speaker mode is more likely to capture other people
+
+6. Add diagnostics for this exact problem.
+
+Log structured, privacy-safe events:
+- transcript candidate received
+- accepted/rejected
+- rejection reason: too short, background-like, not addressed to Ora, outside focus window, echo-like
+- focus window active/inactive
+- language selected
+- barge-in accepted/rejected
+
+Do not log raw audio. Avoid raw transcript logging in production unless explicitly debug-enabled.
+
+7. QA tests.
+
+A. User talks to Ora alone:
+Expected: normal realtime conversation.
+
+B. User is silent, another person talks nearby:
+Expected: Ora does not respond.
+
+C. User talks to Ora, then another person beside them says something unrelated:
+Expected: Ora stays focused and does not respond to the other person.
+
+D. User says "Ora..." from the main position:
+Expected: Ora accepts and responds.
+
+E. Arabic and English:
+Expected: background speech should not change Ora's language.
+
+F. AirPods vs iPhone speaker:
+Expected: AirPods should be much better; iPhone speaker mode should still avoid obvious side conversations.
+
+Definition of done:
+Talk to Ora should not behave like an open room recorder. It should behave like a focused assistant listening to the main user.

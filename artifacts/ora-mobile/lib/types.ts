@@ -115,6 +115,9 @@ export interface OraUsage {
  * RealtimeStartContext minus `history` (which is seeded client-side over the
  * data channel as lower-authority conversation items, never sent to the mint).
  */
+/** Speaker-focus posture; persisted client-side (AsyncStorage). Default "focused". */
+export type FocusMode = "normal" | "focused";
+
 export interface RealtimeSessionContext {
   language?: string;
   languageHint?: string;
@@ -124,6 +127,12 @@ export interface RealtimeSessionContext {
   conversationId?: number | string | null;
   /** Optional recent utterance used ONLY to rank saved-memory recall. */
   message?: string;
+  /**
+   * Speaker-focus mode. "focused" (default) makes the server stop auto-responding
+   * so the client only replies to transcripts that clear the focus filter
+   * (rejecting nearby background speakers). "normal" keeps the legacy behavior.
+   */
+  focusMode?: FocusMode;
 }
 
 /** Response from POST /public-ai/realtime/session — a short-lived ek_ token. */
@@ -133,6 +142,9 @@ export interface RealtimeSessionResult {
   model: string;
   voice: string;
   maxDurationSeconds: number;
+  // Echoed back by the server so diagnostics can confirm the negotiated posture.
+  focusMode?: FocusMode;
+  createResponse?: boolean;
 }
 
 /** Response from GET /public-ai/realtime/diagnostics (non-charging). */

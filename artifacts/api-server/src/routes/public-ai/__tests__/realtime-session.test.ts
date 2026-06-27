@@ -418,6 +418,76 @@ describe("Talk to Ora realtime — anonymous mint", () => {
   });
 });
 
+// ─── 4b. Speaker-focus mode → create_response posture ─────────────────────────
+
+describe("Talk to Ora realtime — speaker-focus create_response posture", () => {
+  it('focusMode "focused" → server does NOT auto-respond (create_response=false)', async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ focusMode: "focused" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.focusMode).toBe("focused");
+    expect(res.body.createResponse).toBe(false);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.input.turn_detection.create_response).toBe(false);
+    // The server still does VAD + transcription; only auto-reply is suppressed.
+    expect(body.session.audio.input.turn_detection.type).toBe("semantic_vad");
+    expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
+  });
+
+  it('focusMode "normal" → server auto-responds (create_response=true)', async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ focusMode: "normal" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.focusMode).toBe("normal");
+    expect(res.body.createResponse).toBe(true);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.input.turn_detection.create_response).toBe(true);
+  });
+
+  it("missing focusMode → legacy normal posture so focus-unaware clients keep replying", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.focusMode).toBe("normal");
+    expect(res.body.createResponse).toBe(true);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.input.turn_detection.create_response).toBe(true);
+  });
+
+  it("invalid focusMode value → 400, no mint", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ focusMode: "aggressive" });
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("focused posture is preserved under the server_vad override", async () => {
+    process.env.ORA_REALTIME_VAD_TYPE = "server_vad";
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ focusMode: "focused" });
+
+    expect(res.status).toBe(200);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.input.turn_detection.type).toBe("server_vad");
+    expect(body.session.audio.input.turn_detection.create_response).toBe(false);
+    // Barge-in stays client-owned regardless of focus posture.
+    expect(body.session.audio.input.turn_detection.interrupt_response).toBe(false);
+  });
+});
+
 // ─── 5. Tier-aware durations + signed-in context ──────────────────────────────
 
 describe("Talk to Ora realtime — tier durations + signed-in context", () => {
@@ -884,5 +954,46 @@ describe("Talk to Ora realtime — route wiring", () => {
     const index = readRoute("index.ts");
     expect(index).toContain('import realtimeRouter from "./realtime"');
     expect(index).toContain("router.use(realtimeRouter)");
+  });
+});
+
+// ─── 11. Speaker-focus scorer parity (web ↔ mobile, byte-identical) ───────────
+//
+// The pure focus scorer is duplicated into both hooks by design (no shared lib),
+// so its BEHAVIOR is unit-tested once against the website copy
+// (artifacts/mustaflow/src/hooks/__tests__/ora-realtime-focus.test.ts). This
+// guard proves the mobile copy is byte-for-byte identical, so that single
+// behavior suite is authoritative for BOTH surfaces. If the two ever diverge,
+// this fails and the unit coverage can no longer be trusted for mobile.
+
+describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
+  const BLOCK_START = 'export type FocusMode = "normal" | "focused";';
+  const BLOCK_END = 'return { accepted: false, reason: "not_addressed_or_outside_focus" };\n}';
+
+  function focusBlock(src: string): string {
+    const start = src.indexOf(BLOCK_START);
+    const end = src.indexOf(BLOCK_END, start);
+    expect(start, "focus block start marker not found").toBeGreaterThan(-1);
+    expect(end, "focus block end marker not found").toBeGreaterThan(-1);
+    return src.slice(start, end + BLOCK_END.length);
+  }
+
+  it("the focus scorer block is byte-for-byte identical across both hooks", () => {
+    const web = focusBlock(readMustaflow("hooks/use-ora-realtime-voice.ts"));
+    const mobile = focusBlock(readOraMobile("hooks/useOraRealtimeVoiceNative.ts"));
+    expect(web.length).toBeGreaterThan(0);
+    expect(mobile).toBe(web);
+  });
+
+  it("both hooks expose the same focus window and core scorer surface", () => {
+    for (const src of [
+      readMustaflow("hooks/use-ora-realtime-voice.ts"),
+      readOraMobile("hooks/useOraRealtimeVoiceNative.ts"),
+    ]) {
+      expect(src).toContain("const FOCUS_WINDOW_MS = 12_000;");
+      expect(src).toContain("export function scoreTranscriptFocus(");
+      expect(src).toContain("export function isAddressedOrDirected(");
+      expect(src).toContain('reason: "not_addressed_or_outside_focus"');
+    }
   });
 });
