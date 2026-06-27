@@ -1,23 +1,18 @@
 import { useAuth, useUser } from "@clerk/expo";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import {
   Activity,
   AudioLines,
   CheckCircle2,
   Circle,
   CreditCard,
-  Crown,
-  ExternalLink,
   Info,
   Loader,
   LogOut,
   Mic,
   Monitor,
   Moon,
-  Plus,
-  ShieldAlert,
   Sun,
   User as UserIcon,
   Volume2,
@@ -35,21 +30,16 @@ import { useColors } from "@/hooks/useColors";
 import { isRealtimeVoiceNativeAvailable } from "@/hooks/useOraRealtimeVoiceNative";
 import {
   API_BASE,
-  getPaymentMethod,
   getOraUsage,
   getPreferences,
   getRealtimeDiagnostics,
   getSubscription,
-  openBillingPortal,
-  startOraSubscriptionCheckout,
-  startPaymentMethodSetup,
   updatePreferences,
 } from "@/lib/api";
 import type {
   BillingSubscription,
   BillingTierMeta,
   OraUsage,
-  PaymentMethodInfo,
   RealtimeDiagnostics,
 } from "@/lib/types";
 
@@ -95,14 +85,6 @@ function renewalLabel(subscription: BillingSubscription | null): string {
   if (subscription?.cancelAtPeriodEnd) return `Access ends ${formatted}`;
   return `Renews ${formatted}`;
 }
-
-function cardLabel(pm: PaymentMethodInfo | null): string {
-  if (!pm?.hasPaymentMethod) return "No payment method on file";
-  const brand = pm.brand ? pm.brand[0]?.toUpperCase() + pm.brand.slice(1) : "Card";
-  return `${brand} ending in ${pm.last4 ?? "----"}`;
-}
-
-const BILLING_RETURN_URL = `${API_BASE}/ora/settings`;
 
 const VOICE_LANGS: { code: string; label: string }[] = [
   { code: "en", label: "English" },
@@ -272,29 +254,18 @@ function UsageRow({ label, used, limit }: { label: string; used: number; limit: 
   );
 }
 
-const PLAN_RANK: Record<string, number> = { free: 0, core: 1, wave: 2 };
-
 function PlanFeatureCards({
   tiers,
   currentTier,
-  onUpgrade,
-  disabled,
-  loading,
 }: {
   tiers: BillingTierMeta[];
   currentTier: string;
-  onUpgrade: (tier: "core" | "wave") => void;
-  disabled: boolean;
-  loading: "core" | "wave" | "portal" | "addpm" | null;
 }) {
   const c = useColors();
   return (
     <View style={{ gap: 10 }}>
       {tiers.map((tier) => {
         const isCurrent = tier.id === currentTier || tier.current;
-        const upgradeTier = tier.id === "core" || tier.id === "wave" ? tier.id : null;
-        const currentRank = PLAN_RANK[currentTier] ?? 0;
-        const targetRank = PLAN_RANK[tier.id] ?? 0;
         const priceLabel = tier.priceUsd > 0 ? `$${tier.priceUsd}/mo` : "Free";
         return (
           <View
@@ -370,18 +341,6 @@ function PlanFeatureCards({
                 </View>
               ))}
             </View>
-
-            {upgradeTier && targetRank > currentRank ? (
-              <Button
-                label={`Upgrade to ${tier.name}`}
-                icon={Crown}
-                variant="secondary"
-                loading={loading === tier.id}
-                disabled={disabled || !tier.available}
-                onPress={() => onUpgrade(upgradeTier)}
-                full
-              />
-            ) : null}
           </View>
         );
       })}
@@ -488,8 +447,6 @@ export default function SettingsScreen() {
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodInfo | null>(null);
-  const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | "addpm" | null>(null);
   const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
   const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
 
@@ -509,9 +466,6 @@ export default function SettingsScreen() {
         .catch(() => {});
       getOraUsage()
         .then(setUsage)
-        .catch(() => {});
-      getPaymentMethod()
-        .then(setPaymentMethod)
         .catch(() => {});
     }
   }, [isSignedIn]);
@@ -533,57 +487,6 @@ export default function SettingsScreen() {
       setAutoReadReplies(!value);
     }
   }, []);
-
-  const openHostedBillingUrl = useCallback(async (remoteUrl?: string, fallback?: string) => {
-    if (!remoteUrl) {
-      Alert.alert("Billing unavailable", fallback ?? "Please try again.");
-      return;
-    }
-    await WebBrowser.openBrowserAsync(remoteUrl);
-  }, []);
-
-  const startCheckout = useCallback(
-    async (tier: "core" | "wave") => {
-      setPlanAction(tier);
-      try {
-        const res = await startOraSubscriptionCheckout({
-          tier,
-          successUrl: BILLING_RETURN_URL,
-          cancelUrl: BILLING_RETURN_URL,
-        });
-        await openHostedBillingUrl(res.checkoutUrl, res.message ?? res.error);
-      } catch (err) {
-        Alert.alert("Could not open checkout", err instanceof Error ? err.message : "Try again.");
-      } finally {
-        setPlanAction(null);
-      }
-    },
-    [openHostedBillingUrl],
-  );
-
-  const openPortal = useCallback(async () => {
-    setPlanAction("portal");
-    try {
-      const res = await openBillingPortal({ returnUrl: BILLING_RETURN_URL });
-      await openHostedBillingUrl(res.url, res.error);
-    } catch (err) {
-      Alert.alert("Could not open billing", err instanceof Error ? err.message : "Try again.");
-    } finally {
-      setPlanAction(null);
-    }
-  }, [openHostedBillingUrl]);
-
-  const addPaymentMethod = useCallback(async () => {
-    setPlanAction("addpm");
-    try {
-      const res = await startPaymentMethodSetup({ returnUrl: BILLING_RETURN_URL });
-      await openHostedBillingUrl(res.url, res.error);
-    } catch (err) {
-      Alert.alert("Could not open card setup", err instanceof Error ? err.message : "Try again.");
-    } finally {
-      setPlanAction(null);
-    }
-  }, [openHostedBillingUrl]);
 
   /* ── Diagnostics ───────────────────────────────────────────────────────── */
 
@@ -804,7 +707,6 @@ export default function SettingsScreen() {
   const allOk = diagSteps.length > 0 && diagSteps.every((s) => s.status === "ok");
   const anyFail = diagSteps.some((s) => s.status === "fail");
   const currentTier = subscription?.tier ?? "free";
-  const isPaid = currentTier === "core" || currentTier === "wave";
   const planTiers = subscription?.tiers ?? [];
   const signedInEmail =
     user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? "unknown";
@@ -1002,7 +904,7 @@ export default function SettingsScreen() {
             <SectionCard
               icon={CreditCard}
               title="Plan & billing"
-              description="Ora plan, renewal, upgrades, and payment method. These actions use the same hosted billing flows as the website."
+              description="Your Ora plan, renewal, and what each plan includes."
             >
               <View style={{ gap: 10 }}>
                 <View
@@ -1043,93 +945,12 @@ export default function SettingsScreen() {
                 </View>
 
                 {planTiers.length > 0 && (
-                  <PlanFeatureCards
-                    tiers={planTiers}
-                    currentTier={currentTier}
-                    onUpgrade={(tier) => void startCheckout(tier)}
-                    disabled={planAction !== null}
-                    loading={planAction}
-                  />
+                  <PlanFeatureCards tiers={planTiers} currentTier={currentTier} />
                 )}
 
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  {isPaid && (
-                    <Button
-                      label="Manage Ora plan"
-                      icon={ExternalLink}
-                      loading={planAction === "portal"}
-                      disabled={planAction !== null}
-                      onPress={() => void openPortal()}
-                    />
-                  )}
-                </View>
-
-                <View
-                  style={{
-                    backgroundColor: c.muted,
-                    borderRadius: c.radius,
-                    paddingHorizontal: 14,
-                    paddingVertical: 12,
-                    gap: 8,
-                  }}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <CreditCard size={17} color={c.accentForeground} />
-                    <Text
-                      style={{
-                        color: c.foreground,
-                        fontFamily: "Inter_600SemiBold",
-                        fontSize: 14,
-                      }}
-                    >
-                      {cardLabel(paymentMethod)}
-                    </Text>
-                  </View>
-                  {paymentMethod?.status === "expired" && (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <ShieldAlert size={15} color={c.destructive} />
-                      <Text style={{ color: c.destructive, fontSize: 12, flex: 1 }}>
-                        This payment method is expired. Update it to keep your plan active.
-                      </Text>
-                    </View>
-                  )}
-                  {paymentMethod?.hasPaymentMethod &&
-                  paymentMethod.expMonth &&
-                  paymentMethod.expYear ? (
-                    <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                      Expires {String(paymentMethod.expMonth).padStart(2, "0")}/
-                      {paymentMethod.expYear}
-                    </Text>
-                  ) : null}
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    <Button
-                      label={
-                        paymentMethod?.hasPaymentMethod
-                          ? "Change payment method"
-                          : "Add payment method"
-                      }
-                      icon={paymentMethod?.hasPaymentMethod ? CreditCard : Plus}
-                      variant="secondary"
-                      loading={planAction === "addpm"}
-                      disabled={planAction !== null}
-                      onPress={() => void addPaymentMethod()}
-                    />
-                    {paymentMethod?.hasPaymentMethod && (
-                      <Button
-                        label="Manage billing"
-                        icon={ExternalLink}
-                        variant="ghost"
-                        loading={planAction === "portal"}
-                        disabled={planAction !== null}
-                        onPress={() => void openPortal()}
-                      />
-                    )}
-                  </View>
-                </View>
-
-                <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
-                  Public App Store release still needs a final IAP/store-compliance decision.
-                  Internal testing can use the same hosted website billing flows for parity review.
+                <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                  Manage your Ora plan on the MustaFlow website. Any plan you have there unlocks
+                  automatically here once you are signed in.
                 </Text>
               </View>
             </SectionCard>

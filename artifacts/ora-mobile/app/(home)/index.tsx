@@ -2652,7 +2652,7 @@ export default function OraChatScreen() {
                     if (!deepAllowed) {
                       Alert.alert(
                         "Deep Thinking",
-                        "Deep Thinking is available with Core Pack or Deep Wave. Upgrade in Settings.",
+                        "Deep Thinking is available with Core Pack or Deep Wave. Manage your plan on the MustaFlow website.",
                         [{ text: "OK" }],
                       );
                       return;
@@ -3942,7 +3942,7 @@ function PlusMenu({
           <ToolRow
             icon={deepAllowed ? Gauge : Lock}
             label="Deep Thinking"
-            sublabel={deepAllowed ? "Step-by-step" : "Upgrade"}
+            sublabel={deepAllowed ? "Step-by-step" : "Locked"}
             active={mode === "deep" && deepAllowed}
             disabled={!deepAllowed}
             accentColor={accentColor}
@@ -3953,7 +3953,7 @@ function PlusMenu({
                 onClose();
                 Alert.alert(
                   "Deep Thinking",
-                  "Deep Thinking is available with Core Pack or Deep Wave. Upgrade in Settings.",
+                  "Deep Thinking is available with Core Pack or Deep Wave. Manage your plan on the MustaFlow website.",
                   [{ text: "OK" }],
                 );
               }
