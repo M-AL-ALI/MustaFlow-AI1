@@ -7,22 +7,33 @@ description: Two non-obvious constraints in the focused-mode (background-speaker
 
 Two constraints that are NOT obvious from the code and were each non-trivial to get right.
 
-## 1. The start-of-session focus-window seed is REQUIRED for multilingual cold-start
+## 1. The start-of-session focus-window seed is STILL the cold-start safety net
 In focused mode the first turn is accepted because `start()` seeds `lastAcceptedUserTurnAt`
 (opening Talk to Ora counts as an address), opening the ~12s focus window.
 
-**Why:** the address/directed detectors are English-centric — `looksDirected` only matches an
-ASCII `?` or an English lead word (what/how/can/tell/...), and `isAddressedToOra` only matches
-Latin "ora"-like tokens. An Arabic first utterance (Arabic `؟`, Arabic-script address) matches
-NEITHER, so without the seed an Arabic primary user's first sentence is rejected and Ora stays
-silent. Removing/weakening the seed breaks the Arabic cold-start QA case.
+**Why:** the address/directed detectors are now multilingual (see below) but still pattern-only —
+they cannot recognize EVERY directed phrasing in every language, and an idle-state declarative
+sentence in any language is intentionally NOT accepted. The seed guarantees the engaged primary
+user's first utterance always gets through regardless of language/phrasing. Removing/weakening the
+seed re-breaks non-English cold-start QA.
+
+**Detectors are multilingual (no longer English-only).** `looksDirected` accepts a turn whose
+FIRST or LAST token is a lead word (last-token handles SOV verb-final imperatives in Turkish/
+Hindi) OR that ends with any of QUESTION_MARKS (ASCII `?`, Arabic `؟` U+061F, fullwidth `？`
+U+FF1F, Armenian U+055E). `isAddressedToOra`/lead-word matching uses `matchesLeadSet` = raw OR
+`foldForMatch` (NFD then strip `\p{M}`): Latin/Arabic lead words are stored accent/harakat-FOLDED,
+Devanagari is stored RAW (folding mangles matras). DIRECT_LEAD_WORDS/ADDRESS_LEAD_WORDS/
+ORA_ADDRESS_TOKENS carry ES/FR/PT/DE/IT/TR/AR/Hindi-Urdu entries + non-Latin Ora transliterations.
+
+**Tokenizer must preserve `\p{M}`.** `normalizeWord` strips `[^\p{L}\p{N}\p{M}]` — the `\p{M}` is
+REQUIRED or Devanagari matras/viramas (`\p{M}`) get stripped and Hindi words never match the lead
+set. `normalizeWord`/`tokenizeTranscript` live OUTSIDE the byte-identical scorer block, so they
+are kept identical in both hooks MANUALLY and guarded by a separate tokenizer source-parity test.
 
 **Inherent limitation:** focus is transcript-only (no voice diarization), so within the seeded
-window a nearby bystander cannot be distinguished from the button-tapper. QA "user silent while
-someone else talks nearby" can therefore accept a bystander in the first ~12s. This is a known
-limitation, not a fixable bug, without speaker fingerprinting (out of scope). Future safe
-improvement: broaden directed/address detection to Unicode `؟` + per-language wake/directive
-lexicons (reduces, not eliminates, reliance on the seed).
+window a nearby bystander cannot be distinguished from the button-tapper, and the first/last-token
+rule can admit a directly-worded background question outside the window. Both are accepted design
+tradeoffs, not fixable without speaker fingerprinting (out of scope).
 
 ## 2. Rejected transcripts must be deleted from the realtime conversation
 Focused mode mints with `turn_detection.create_response=false`, so the CLIENT owns

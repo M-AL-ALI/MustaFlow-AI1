@@ -186,7 +186,7 @@ const FILLER_WORDS = new Set([
 ]);
 
 function normalizeWord(w: string): string {
-  return w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  return w.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]/gu, "");
 }
 function tokenizeTranscript(text: string): string[] {
   return text.split(/\s+/).map(normalizeWord).filter(Boolean);
@@ -260,12 +260,51 @@ export type FocusMode = "normal" | "focused";
 const FOCUS_WINDOW_MS = 12_000;
 
 // Wake / address tokens that re-open focus after silence or background chatter.
-const ORA_ADDRESS_TOKENS = new Set(["ora", "oraa", "orah", "orra", "aura"]);
+// Latin "ora" plus common ASR variants and non-Latin transliterations, so the
+// wake word is recognized regardless of the speaker's language or script. Latin
+// and Arabic entries are stored diacritic-folded (see matchesLeadSet); scripts
+// whose vowel signs are combining marks (Devanagari) are stored and matched raw.
+const ORA_ADDRESS_TOKENS = new Set([
+  "ora",
+  "oraa",
+  "orah",
+  "orra",
+  "aura",
+  "اورا",
+  "اوراه",
+  "ора",
+  "ओरा",
+  "ओराह",
+]);
 // Greeting words that, immediately followed by an address token, still address
-// Ora ("hey ora", "okay ora", "hello ora").
-const ADDRESS_LEAD_WORDS = new Set(["hey", "hi", "hello", "ok", "okay", "yo"]);
-// Question / imperative lead words: a transcript starting with one reads as a
-// directed request even without a wake word (handles cold-start English turns).
+// Ora ("hey ora", "hola ora", "salut ora"). Multilingual, diacritic-folded.
+const ADDRESS_LEAD_WORDS = new Set([
+  "hey",
+  "hi",
+  "hello",
+  "ok",
+  "okay",
+  "yo",
+  "hola",
+  "salut",
+  "ola",
+  "hallo",
+  "ciao",
+  "selam",
+  "merhaba",
+  "مرحبا",
+  "اهلا",
+  "नमस्ते",
+  "नमस्कार",
+]);
+// Interrogative / imperative lead words: a transcript whose FIRST or LAST token
+// is one reads as a directed request to Ora even without a wake word, so a
+// cold-start or re-engagement turn is accepted. Deliberately NOT English-only —
+// it covers the languages Ora supports (verb-first AND verb-final word orders),
+// so a non-English directed turn outside the focus window is not wrongly
+// rejected. Inside the window any language is already accepted; this only gates
+// idle / post-background speech. Latin + Arabic entries are stored
+// diacritic-folded; Devanagari entries are stored and matched raw.
 const DIRECT_LEAD_WORDS = new Set([
   "what",
   "whats",
@@ -310,13 +349,211 @@ const DIRECT_LEAD_WORDS = new Set([
   "compare",
   "calculate",
   "convert",
+  // Spanish
+  "que",
+  "como",
+  "cual",
+  "cuales",
+  "cuando",
+  "donde",
+  "quien",
+  "cuanto",
+  "puedes",
+  "puede",
+  "dime",
+  "explica",
+  "explicame",
+  "traduce",
+  "ayuda",
+  "ayudame",
+  "muestra",
+  "escribe",
+  "busca",
+  "resume",
+  "crea",
+  "describe",
+  // French
+  "quoi",
+  "comment",
+  "quel",
+  "quelle",
+  "quand",
+  "qui",
+  "combien",
+  "pourquoi",
+  "peux",
+  "peuxtu",
+  "dis",
+  "dismoi",
+  "explique",
+  "traduis",
+  "aide",
+  "aidemoi",
+  "montre",
+  "ecris",
+  "cherche",
+  "definis",
+  // Portuguese
+  "oque",
+  "quais",
+  "onde",
+  "quem",
+  "quanto",
+  "porque",
+  "pode",
+  "diga",
+  "explique",
+  "traduz",
+  "ajuda",
+  "ajude",
+  "mostra",
+  "escreve",
+  "leia",
+  // German
+  "was",
+  "wie",
+  "welche",
+  "welcher",
+  "wann",
+  "wo",
+  "wer",
+  "warum",
+  "wieso",
+  "kannst",
+  "kann",
+  "sag",
+  "sage",
+  "erklare",
+  "erklaere",
+  "ubersetze",
+  "uebersetze",
+  "hilf",
+  "zeig",
+  "zeige",
+  "schreib",
+  "suche",
+  "erstelle",
+  // Italian
+  "cosa",
+  "che",
+  "come",
+  "quale",
+  "dove",
+  "chi",
+  "perche",
+  "puoi",
+  "potresti",
+  "dimmi",
+  "spiega",
+  "spiegami",
+  "traduci",
+  "aiuto",
+  "aiutami",
+  "scrivi",
+  "cerca",
+  "riassumi",
+  "apri",
+  "leggi",
+  // Turkish (dotted-i and dotless-i variants both listed)
+  "ne",
+  "nasil",
+  "nasıl",
+  "hangi",
+  "nerede",
+  "kim",
+  "neden",
+  "nicin",
+  "niçin",
+  "misin",
+  "mısın",
+  "soyle",
+  "söyle",
+  "anlat",
+  "acikla",
+  "açıkla",
+  "cevir",
+  "çevir",
+  "yardim",
+  "yardım",
+  "goster",
+  "göster",
+  "ozetle",
+  "özetle",
+  // Arabic (stored without harakat; folded at match time)
+  "ما",
+  "ماذا",
+  "كيف",
+  "لماذا",
+  "متى",
+  "اين",
+  "من",
+  "كم",
+  "هل",
+  "اشرح",
+  "وضح",
+  "ترجم",
+  "ساعدني",
+  "ساعد",
+  "اظهر",
+  "اعرض",
+  "اكتب",
+  "ابحث",
+  "لخص",
+  "اخبرني",
+  // Hindi / Urdu
+  "क्या",
+  "कैसे",
+  "क्यों",
+  "कब",
+  "कौन",
+  "कितना",
+  "बताओ",
+  "समझाओ",
+  "अनुवाद",
+  "दिखाओ",
+  "मदद",
+  "کیا",
+  "کیسے",
+  "کیوں",
+  "کہاں",
+  "بتاؤ",
+  "سمجھاؤ",
+  "مدد",
+  "دکھاؤ",
 ]);
+
+// Question marks across writing systems: Latin "?", Arabic/Urdu "؟" (U+061F),
+// full-width CJK "？" (U+FF1F), Armenian "՞" (U+055E). A trailing question mark
+// signals a directed question in any of Ora's supported languages, not only
+// English, so non-Latin questions outside the focus window are still accepted.
+const QUESTION_MARKS = ["?", "\u061F", "\uFF1F", "\u055E"];
+function endsWithQuestionMark(text: string): boolean {
+  const trimmed = text.trim();
+  return QUESTION_MARKS.some((mark) => trimmed.endsWith(mark));
+}
+// Case/diacritic folding (NFD + strip combining marks) so accented Latin and
+// harakat-bearing Arabic spellings match a single stored entry. Tokens are
+// already lowercased by tokenizeTranscript. Pure and locale-independent so the
+// result is identical on web and mobile.
+function foldForMatch(word: string): string {
+  return word.normalize("NFD").replace(/\p{M}+/gu, "");
+}
+// Match a token against a lead/address set by BOTH its raw and folded form. The
+// raw check preserves scripts whose vowel signs are combining marks and must NOT
+// be stripped (Devanagari); the folded check unifies accented Latin / Arabic.
+function matchesLeadSet(word: string, set: Set<string>): boolean {
+  return set.has(word) || set.has(foldForMatch(word));
+}
 
 /** True when the utterance names Ora at the start (a wake / address phrase). */
 export function isAddressedToOra(words: string[]): boolean {
   if (words.length === 0) return false;
-  if (ORA_ADDRESS_TOKENS.has(words[0])) return true;
-  if (words.length >= 2 && ADDRESS_LEAD_WORDS.has(words[0]) && ORA_ADDRESS_TOKENS.has(words[1])) {
+  if (matchesLeadSet(words[0], ORA_ADDRESS_TOKENS)) return true;
+  if (
+    words.length >= 2 &&
+    matchesLeadSet(words[0], ADDRESS_LEAD_WORDS) &&
+    matchesLeadSet(words[1], ORA_ADDRESS_TOKENS)
+  ) {
     return true;
   }
   return false;
@@ -325,8 +562,13 @@ export function isAddressedToOra(words: string[]): boolean {
 /** True when the utterance reads as a directed command or question to Ora. */
 export function looksDirected(words: string[], text: string): boolean {
   if (words.length === 0) return false;
-  if (text.trim().endsWith("?")) return true;
-  if (DIRECT_LEAD_WORDS.has(words[0])) return true;
+  // A trailing question mark (any script) is the strongest cross-language signal.
+  if (endsWithQuestionMark(text)) return true;
+  // Verb-first (English / Romance / Arabic) and verb-final (Turkish / Hindi /
+  // Urdu) languages place the directive at the START or END of the utterance, so
+  // a lead word in either position reads as directed.
+  if (matchesLeadSet(words[0], DIRECT_LEAD_WORDS)) return true;
+  if (matchesLeadSet(words[words.length - 1], DIRECT_LEAD_WORDS)) return true;
   return false;
 }
 

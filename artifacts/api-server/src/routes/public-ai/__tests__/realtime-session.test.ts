@@ -985,6 +985,27 @@ describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
     expect(mobile).toBe(web);
   });
 
+  it("the tokenizer (normalizeWord/tokenizeTranscript) is identical and Unicode-mark aware", () => {
+    // normalizeWord/tokenizeTranscript live just OUTSIDE the byte-identical block
+    // but the scorer depends on them, so they must stay in lockstep across hooks.
+    // Preserving \p{M} (combining marks) is required for Devanagari (Hindi/Urdu)
+    // matras/viramas to survive tokenization before lead-word matching.
+    const TOK_START = "function normalizeWord(";
+    const TOK_END = "  return text.split(/\\s+/).map(normalizeWord).filter(Boolean);\n}";
+    function tokenizerBlock(src: string): string {
+      const start = src.indexOf(TOK_START);
+      const end = src.indexOf(TOK_END, start);
+      expect(start, "tokenizer start marker not found").toBeGreaterThan(-1);
+      expect(end, "tokenizer end marker not found").toBeGreaterThan(-1);
+      return src.slice(start, end + TOK_END.length);
+    }
+    const web = tokenizerBlock(readMustaflow("hooks/use-ora-realtime-voice.ts"));
+    const mobile = tokenizerBlock(readOraMobile("hooks/useOraRealtimeVoiceNative.ts"));
+    expect(web.length).toBeGreaterThan(0);
+    expect(mobile).toBe(web);
+    expect(web).toContain("\\p{L}\\p{N}\\p{M}");
+  });
+
   it("both hooks expose the same focus window and core scorer surface", () => {
     for (const src of [
       readMustaflow("hooks/use-ora-realtime-voice.ts"),

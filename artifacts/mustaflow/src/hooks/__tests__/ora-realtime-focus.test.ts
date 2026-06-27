@@ -171,3 +171,70 @@ describe("isAddressedOrDirected (barge-in / cold-start gate)", () => {
     expect(isAddressedOrDirected("i had a sandwich for lunch")).toBe(false);
   });
 });
+
+describe("scoreTranscriptFocus — multilingual directed / addressed speech (outside window)", () => {
+  // The scorer must not be English-only: a directed request in any supported
+  // language, outside the focus window, must still make Ora respond.
+  it("accepts a Spanish question (inverted + accented)", () => {
+    expect(score("¿cómo funciona esto?", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts a Spanish imperative by its accented lead verb", () => {
+    expect(score("explícame esto por favor", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts a French imperative", () => {
+    expect(score("traduis ceci en anglais", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts a German interrogative", () => {
+    expect(score("was ist der plan", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts an Italian interrogative", () => {
+    expect(score("come si fa questo", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts a Turkish verb-final imperative (lead word at the END)", () => {
+    expect(score("bunu açıkla", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts an Arabic question via the Arabic question mark", () => {
+    expect(score("ما هذا؟", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts an Arabic imperative by its lead verb", () => {
+    expect(score("اشرح لي هذا", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts a Hindi yes/no question by its lead word", () => {
+    expect(score("क्या यह सही है", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("accepts a Hindi verb-final imperative (lead word at the END)", () => {
+    expect(score("मुझे यह समझाओ", "focused", 60_000).accepted).toBe(true);
+  });
+
+  it("still rejects non-directed non-English background speech outside the window", () => {
+    const v = score("vamos a comer algo luego", "focused", 60_000);
+    expect(v.accepted).toBe(false);
+    expect(v.reason).toBe("not_addressed_or_outside_focus");
+  });
+});
+
+describe("multilingual address tokens and question marks", () => {
+  it("recognizes non-Latin Ora transliterations as an address", () => {
+    expect(isAddressedToOra(["ओरा", "नमस्ते"])).toBe(true); // Devanagari (raw)
+    expect(isAddressedToOra(["أورا"])).toBe(true); // Arabic with hamza (folded)
+  });
+
+  it("treats trailing non-Latin question marks as directed", () => {
+    expect(looksDirected(["ما", "هذا"], "ما هذا؟")).toBe(true); // Arabic ?
+    expect(looksDirected(["これは", "何"], "これは何ですか？")).toBe(true); // full-width ?
+  });
+
+  it("isAddressedOrDirected covers multilingual directed turns", () => {
+    expect(isAddressedOrDirected("ما هذا؟")).toBe(true);
+    expect(isAddressedOrDirected("traduis ceci")).toBe(true);
+  });
+});
