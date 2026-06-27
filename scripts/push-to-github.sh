@@ -37,10 +37,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
   scripts/push-to-github.sh \
-  .agents/memory/eas-novcs-monorepo-easignore.md \
-  artifacts/ora-mobile/app.json \
-  docs/changelog.md \
-  replit.md \
   2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
