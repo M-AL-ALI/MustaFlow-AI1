@@ -1,0 +1,143 @@
+Release readiness audit for Ora Website + Ora Mobile
+
+Goal:
+Do not build/TestFlight yet. Verify that Ora Website and Ora Mobile are wired the same way, feature-complete, payment-safe, performant, and ChatGPT-like before any native build.
+
+Current verified status:
+1. GPT-5 routing is on GitHub main:
+   - Ora search defaults use gpt-5.
+   - Chat/model routing uses the gpt-5 family.
+   - Audio correctly still uses gpt-4o-mini-transcribe and gpt-4o-mini-tts because those are audio models, not chat models.
+   - No app chat/search route should still default to gpt-4o.
+
+2. Mobile payment compliance looks correct on main:
+   - Ora Mobile has no visible Stripe checkout, billing portal, add-payment, or upgrade CTA path.
+   - Existing paid web users can still see/unlock entitlements on mobile.
+   - Website Stripe billing remains active.
+   - Dead billing helper exports still exist in mobile lib/api.ts, but no mobile UI calls them.
+
+3. Mobile route wiring exists for:
+   - chat
+   - streaming chat
+   - realtime Talk to Ora
+   - realtime diagnostics
+   - transcribe
+   - TTS
+   - export-file
+   - memory
+   - support/help/tickets
+
+4. Website route wiring exists for:
+   - Ora realtime voice
+   - legacy transcribe/TTS fallback
+   - billing
+   - support/help/tickets
+   - memory manager
+   - routing diagnostics
+   - source cards / rich response rendering
+
+5. Tests passed in audit:
+   - Website focused feature suite: 120 tests passed.
+   - Backend billing/support non-DB suite: 46 tests passed.
+   - Backend export + memory-extract suite: 37 tests passed.
+   - API lint: 0 errors, only pre-existing warnings.
+   - Website lint: passed.
+
+Blockers before any build:
+1. Realtime parity test suite is currently red on main.
+   - Command scope: api-server realtime/model/routing diagnostics tests.
+   - Result: 106 passed, 2 failed.
+   - Failures are in realtime-session.test.ts:
+     - focus scorer block marker not found
+     - tokenizer marker not found
+   - This looks like brittle source-marker extraction, not necessarily runtime behavior, but it still blocks release.
+   - Fix: update the parity test extraction to use robust explicit start/end markers, or add explicit stable comments around the mirrored tokenizer/focus scorer blocks in both web and mobile hooks.
+   - Then rerun the realtime suite and confirm green.
+
+2. DB-backed tests could not be certified locally because DATABASE_URL is missing.
+   Must run in an environment with a real/staging DB:
+   - support ticket ownership isolation
+   - Ora/Builder isolation
+   - conversation persistence
+   - memory consolidation
+   - memory enhancement/persistence
+
+3. Full typecheck could not be certified from the disposable audit worktree because referenced package dist files were not built there.
+   Need Replit/CI to run:
+   - api-server typecheck
+   - mustaflow typecheck
+   - ora-mobile typecheck
+   from a clean dependency/build state.
+
+4. Search model needs one live production verification after deploy:
+   - Sign in on the live website.
+   - Ask Ora something that forces web search.
+   - Check production logs for ora-web-search.
+   - Confirm model=gpt-5, citations returned, no web_search tool error.
+   - If gpt-5 fails with the web_search tool, set ORA_SEARCH_MODEL=gpt-4o as an env override for search only, while keeping the rest of Ora on gpt-5.
+
+Live QA required before saying “Ora Mobile = Ora Website = ChatGPT”:
+1. Website Talk to Ora:
+   - silent user with nearby speaker
+   - Ora speaking while nearby speaker talks
+   - intentional interruption / barge-in
+   - Arabic, English, Spanish, French, and other supported language turns
+   - language must not drift because of background speaker
+   - latency diagnostics should identify whether delay is VAD, transcript, focus filtering, model, or playback
+   - no mid-speech audio glitch or UI flicker
+
+2. Mobile Talk to Ora:
+   - must wait for fresh native build because WebRTC is native
+   - test iPhone speaker
+   - test AirPods/Bluetooth
+   - test barge-in
+   - test background speaker rejection
+   - test language lock
+   - confirm it behaves like website Talk to Ora
+
+3. Mic dictation:
+   - confirm it remains separate from Talk to Ora
+   - user records voice
+   - Ora transcribes into composer
+   - no live speech-to-speech behavior expected there
+
+4. Payments/plans:
+   - Free account
+   - Core account
+   - Wave account
+   - website checkout
+   - website billing portal
+   - Stripe webhook entitlement sync
+   - mobile Settings diagnostics must show billing tier and chat tier matching
+   - mobile must not open Stripe or external purchase links
+
+5. Memory:
+   - save memory from website
+   - save memory from mobile
+   - memory appears on both platforms
+   - rejected/background voice turns must not create memory
+   - Ora memory must not leak Builder/ORAX context
+
+6. Support system:
+   - website help/support/tickets
+   - mobile help/support/tickets
+   - ticket ownership isolation with DB env
+   - no cross-user ticket access
+
+7. Export/files:
+   - mobile Word/Excel/Slides should use backend export-file route for real docx/xlsx/pptx
+   - mobile PDF needs native expo-print build verification
+   - website exports should match expected formats
+
+8. Performance:
+   - long chat thread
+   - long streaming response
+   - Talk to Ora latency
+   - mobile memory/CPU/jank
+   - background/foreground lifecycle
+   - poor network / reconnect behavior
+
+Decision:
+Do not cut EAS/TestFlight yet.
+First fix the realtime parity test failure, run DB-backed tests in proper env, verify production gpt-5 search, and complete website live QA.
+Only after website QA passes should we cut a fresh native mobile build for real iPhone QA.

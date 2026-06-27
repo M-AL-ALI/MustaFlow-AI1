@@ -1,0 +1,246 @@
+Task: Verify and harden Ora cross-platform account consistency before any build
+
+Goal:
+Before TestFlight/native build, prove that Ora Website and Ora Mobile are using the exact same account identity and shared data:
+email, Clerk user ID, plan/tier, projects, conversations, recent history, memories, profile, support tickets, usage, and feature access.
+
+Important:
+Do not run EAS/TestFlight yet.
+This task is verification + diagnostic hardening only.
+
+What is already wired correctly:
+1. Website auth:
+   - Website uses Clerk.
+   - Website authFetch attaches Authorization: Bearer <Clerk token> for same-origin /api calls.
+   - Website also keeps credentials: include as cookie fallback.
+
+2. Mobile auth:
+   - Ora Mobile uses @clerk/expo.
+   - app/_layout.tsx configures ClerkProvider with the same publishable key/proxy pattern.
+   - (home)/_layout.tsx registers getToken() into the mobile API client.
+   - artifacts/ora-mobile/lib/api.ts attaches Authorization: Bearer <Clerk token> to API requests.
+   - Mobile API base defaults to https://www.mustaflow.com unless EXPO_PUBLIC_DOMAIN overrides it.
+
+3. Server identity:
+   - api-server uses clerkMiddleware().
+   - protected routes run attachUser.
+   - attachUser resolves req.userId from Clerk sessionClaims.userId or auth.userId.
+   - Public Ora routes also resolve signed-in users through resolveAuthedOraUser(req), using the same Clerk userId.
+   - Therefore the source of truth is Clerk userId, not device, not email, and not the anonymous ora-session cookie.
+
+4. Shared Ora data endpoints:
+   Website and mobile both use the same backend endpoints:
+   - /api/ora/conversations
+   - /api/ora/conversations/:id
+   - /api/ora/conversations/:id/messages
+   - /api/ora/projects
+   - /api/ora/memories
+   - /api/ora/profile
+   - /api/billing/subscription
+   - /api/public-ai/session
+   - /api/public-ai/usage
+   - /api/help/support/...
+   - /api/public-ai/realtime/session
+   - /api/public-ai/realtime/diagnostics
+
+5. Server-side ownership filters:
+   - Conversations are filtered by ora_conversations.userId = req.userId.
+   - Projects are filtered by ora_projects.userId = req.userId.
+   - Memories are filtered by knowledge_entries.userId = req.userId, scope="user", origin="ora", archivedAt null.
+   - Profile is stored by ora_profiles.userId.
+   - Billing subscription is stored by user_subscriptions.userId.
+   - Support ticket routes resolve the user through Clerk and should be user-owned.
+   - This is the correct architecture for website/mobile data sharing.
+
+Known nuance:
+Email alone is not enough to prove account equality. The real identity key is Clerk userId. If the same email somehow resolves to a different Clerk user on mobile vs website, data will not match. Diagnostics must show a safe Clerk user fingerprint on both platforms.
+
+Required work:
+1. Add a single server-side account consistency endpoint.
+
+Create a protected endpoint, for example:
+GET /api/ora/account-consistency
+
+It should require Clerk auth and return privacy-safe diagnostic data:
+{
+  ok: true,
+  user: {
+    userIdHash: "first 12 chars of sha256(req.userId)",
+    clerkUserIdLast4: optional last 4 chars only,
+    email: primary email if safely available from Clerk, or null
+  },
+  api: {
+    environment: production/staging/dev if available,
+    host: request host
+  },
+  billing: {
+    billingTier,
+    sourceTier,
+    status,
+    isSuperuser,
+    currentPeriodEnd,
+    cancelAtPeriodEnd
+  },
+  chatSession: {
+    tier,
+    isPaid,
+    messageLimit,
+    imageLimit,
+    resetsAt
+  },
+  counts: {
+    conversations,
+    projects,
+    userLevelMemories,
+    projectMemories,
+    assets,
+    supportTickets
+  },
+  latest: {
+    latestConversationId,
+    latestConversationTitle,
+    latestConversationUpdatedAt,
+    latestProjectId,
+    latestProjectName,
+    latestMemoryId,
+    latestMemoryTitle
+  }
+}
+
+Rules:
+- Do not return raw req.userId unless this is explicitly admin-only.
+- Prefer userIdHash so website and mobile can compare identity without exposing the full Clerk ID.
+- Do not return private message contents.
+- Do not return memory content, only counts/title/id.
+- All counts must be filtered by req.userId.
+- Include enough detail to verify website and mobile are seeing the same account.
+
+2. Add the same diagnostic display to Website Ora Settings.
+
+In website Ora Settings:
+- Show Email.
+- Show User fingerprint.
+- Show Billing tier.
+- Show Chat tier.
+- Show Conversation count.
+- Show Project count.
+- Show Memory count.
+- Show Support ticket count.
+- Show API host/environment.
+- Add a button: "Check account sync".
+- The button calls /api/ora/account-consistency and displays the returned values.
+
+3. Add the same diagnostic display to Ora Mobile Settings.
+
+In mobile Settings Diagnostics:
+- Keep existing rows:
+  - API URL
+  - Streaming
+  - Signed in
+  - Email
+  - Clerk token
+  - Billing tier
+  - Chat tier
+  - Clerk key
+  - Build
+- Add:
+  - User fingerprint
+  - Conversation count
+  - Project count
+  - Memory count
+  - Support ticket count
+  - API host/environment
+- The mobile button should call the same /api/ora/account-consistency endpoint.
+- If mobile is signed in but no Clerk token is available, show a red warning.
+- If billing tier is paid but chat tier is free/anonymous, show a red warning.
+- If the endpoint returns a different fingerprint from website, treat it as a hard blocker.
+
+4. Add a QA checklist for same-account verification.
+
+Manual QA steps:
+A. Sign in on website as the target account.
+B. Open Ora Settings → Account Sync Diagnostics.
+C. Record:
+   - email
+   - user fingerprint
+   - billing tier
+   - chat tier
+   - conversation count
+   - project count
+   - memory count
+   - support ticket count
+D. Sign in on Ora Mobile with the same account.
+E. Open Settings → Diagnostics → Check account sync.
+F. Confirm all of these match:
+   - email
+   - user fingerprint
+   - billing tier
+   - chat tier
+   - conversation count
+   - project count
+   - memory count
+   - support ticket count
+G. Create a new conversation on website.
+H. Refresh mobile history.
+I. Confirm the conversation appears on mobile.
+J. Create a new conversation on mobile.
+K. Refresh website Ora sidebar/history.
+L. Confirm the conversation appears on website.
+M. Create a new Ora project on website.
+N. Confirm it appears on mobile.
+O. Create a new Ora memory on mobile.
+P. Confirm it appears in website Ora Memory.
+Q. Create/update Ora profile/About You on website.
+R. Confirm mobile uses the same profile in replies.
+S. Submit a support ticket on mobile.
+T. Confirm website support/tickets page sees the same ticket.
+
+5. Add automated tests.
+
+Backend tests:
+- /api/ora/account-consistency returns 401 when signed out.
+- Returns userIdHash for signed-in user.
+- Counts only that user's conversations/projects/memories/support tickets.
+- Does not leak another user's data.
+- Billing tier and chat tier resolve from the same userId.
+- Superuser effective tier is included correctly.
+- Memory counts include origin="ora" only and exclude Builder/Vault memories.
+
+Mobile/source tests:
+- Settings calls /api/ora/account-consistency.
+- Diagnostics renders user fingerprint and counts.
+- Existing mobile billing checkout/portal/payment functions are not reachable from UI.
+
+Website/source tests:
+- Ora Settings calls /api/ora/account-consistency.
+- Account Sync Diagnostics renders same fields as mobile.
+- Website still allows Stripe billing; mobile still only displays plan info and does not open Stripe.
+
+6. Current verified state from code audit:
+- Architecture is correct: both platforms share Clerk userId and same backend data tables.
+- Conversation/project/memory/profile/billing/support ownership filters are server-side.
+- Mobile has no visible Stripe purchase path.
+- Website Stripe billing remains active.
+- GPT-5 routing is already on main for chat/search; audio models correctly remain gpt-4o-mini-tts/transcribe.
+
+7. Current blockers before claiming "Ora Website = Ora Mobile = ChatGPT":
+- Need the new account-consistency diagnostic so we can prove same Clerk userId on both surfaces.
+- Need live account QA with real Free/Core/Wave users.
+- Need DB-backed owner-isolation tests in an environment with DATABASE_URL.
+- Need the existing realtime parity test failure fixed:
+  realtime-session.test.ts currently has brittle marker failures:
+  - focus block end marker not found
+  - tokenizer end marker not found
+  Fix the test extraction or add stable start/end comments, then rerun.
+- Need live website Talk-to-Ora QA.
+- Need fresh native build later for mobile realtime QA, but only after website QA passes.
+- Do not build yet.
+
+Definition of Done:
+- Website and mobile both show the same user fingerprint for the same signed-in account.
+- Billing tier and chat tier match on both.
+- Projects, conversations, memories, profile, support tickets, and recent history counts match.
+- Creating data on one platform appears on the other after refresh.
+- Automated tests pass.
+- Realtime parity tests pass.
+- No TestFlight build triggered in this task.
