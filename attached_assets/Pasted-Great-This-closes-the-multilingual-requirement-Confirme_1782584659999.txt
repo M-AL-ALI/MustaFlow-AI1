@@ -1,0 +1,82 @@
+Great. This closes the multilingual requirement.
+
+Confirmed final status:
+- Focus scorer is no longer English-only.
+- Website and mobile scorer blocks are byte-identical.
+- Address/directed speech detection now supports:
+  - English
+  - Arabic
+  - Spanish
+  - French
+  - Portuguese
+  - German
+  - Italian
+  - Turkish
+  - Hindi/Urdu
+  - non-Latin Ora wake/address transliterations
+- Unicode question marks are supported.
+- Devanagari/Hindi tokenization was fixed by preserving Unicode combining marks.
+- Rejected side speech still cannot affect language.
+- Focused mode stays default.
+- Normal mode remains available.
+- Build remains held.
+
+Verification confirmed:
+- mustaflow focus behavior tests: 38 pass
+- api-server realtime-session tests: 56 pass
+- web typecheck: clean
+- mobile typecheck: clean
+- api-server typecheck: clean
+- format check: clean
+- lint: 0 errors
+- architect review: PASS
+- tokenizer parity is machine-guarded
+- web/mobile scorer byte-identity is machine-guarded
+
+Do not build yet.
+
+Next step:
+I will run website Talk to Ora QA manually before we consider a mobile/TestFlight build.
+
+Website QA checklist:
+
+1. Silent user + nearby speaker
+Expected:
+Ora ignores the nearby speaker and does not respond.
+
+2. Ora speaking + nearby speaker
+Expected:
+Ora does not stop herself and does not respond to the nearby person.
+
+3. Intentional interruption by main user
+Expected:
+Ora stops quickly and listens.
+
+4. English main user
+Expected:
+Ora replies in English.
+
+5. Arabic main user
+Expected:
+Ora accepts first Arabic turn and replies in Arabic.
+
+6. Spanish/French/other supported language
+Expected:
+Ora accepts the main user and replies in that language.
+
+7. Background speaker in another language
+Expected:
+Ora ignores it and does not switch language.
+
+8. Selected reply language
+Expected:
+Ora stays in the selected reply language even if background speech is in another language.
+
+9. Auto language
+Expected:
+Only accepted main-user turns can influence language. Rejected side speech cannot.
+
+Known limitation:
+If another person clearly says “Ora” or directly asks Ora a question, Ora may still treat that as addressed speech. True per-person lockout requires speaker identification / voice diarization, which is separate future work.
+
+Hold all builds until website QA passes.
