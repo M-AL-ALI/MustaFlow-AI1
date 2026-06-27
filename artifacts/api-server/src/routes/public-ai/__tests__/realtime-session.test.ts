@@ -967,41 +967,66 @@ describe("Talk to Ora realtime — route wiring", () => {
 // this fails and the unit coverage can no longer be trusted for mobile.
 
 describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
-  const BLOCK_START = 'export type FocusMode = "normal" | "focused";';
-  const BLOCK_END = 'return { accepted: false, reason: "not_addressed_or_outside_focus" };\n}';
+  // Stable comment markers delimit the mirrored regions in BOTH hooks so the
+  // parity slice survives reformatting (Prettier reflow, comment edits, etc.).
+  // We compare the region strictly BETWEEN the markers (exclusive), so the
+  // markers themselves never need to be byte-identical — only the code does.
+  const FOCUS_START = "// ORA_REALTIME_FOCUS_SCORER_PARITY_START";
+  const FOCUS_END = "// ORA_REALTIME_FOCUS_SCORER_PARITY_END";
+  const TOK_START = "// ORA_REALTIME_TOKENIZER_PARITY_START";
+  const TOK_END = "// ORA_REALTIME_TOKENIZER_PARITY_END";
 
-  function focusBlock(src: string): string {
-    const start = src.indexOf(BLOCK_START);
-    const end = src.indexOf(BLOCK_END, start);
-    expect(start, "focus block start marker not found").toBeGreaterThan(-1);
-    expect(end, "focus block end marker not found").toBeGreaterThan(-1);
-    return src.slice(start, end + BLOCK_END.length);
+  function regionBetween(
+    src: string,
+    startMarker: string,
+    endMarker: string,
+    label: string,
+  ): string {
+    const start = src.indexOf(startMarker);
+    expect(start, `${label} start marker not found`).toBeGreaterThan(-1);
+    const contentStart = start + startMarker.length;
+    const end = src.indexOf(endMarker, contentStart);
+    expect(end, `${label} end marker not found`).toBeGreaterThan(-1);
+    return src.slice(contentStart, end);
   }
 
   it("the focus scorer block is byte-for-byte identical across both hooks", () => {
-    const web = focusBlock(readMustaflow("hooks/use-ora-realtime-voice.ts"));
-    const mobile = focusBlock(readOraMobile("hooks/useOraRealtimeVoiceNative.ts"));
-    expect(web.length).toBeGreaterThan(0);
+    const web = regionBetween(
+      readMustaflow("hooks/use-ora-realtime-voice.ts"),
+      FOCUS_START,
+      FOCUS_END,
+      "focus",
+    );
+    const mobile = regionBetween(
+      readOraMobile("hooks/useOraRealtimeVoiceNative.ts"),
+      FOCUS_START,
+      FOCUS_END,
+      "focus",
+    );
+    expect(web.trim().length).toBeGreaterThan(0);
+    expect(web).toContain("export function scoreTranscriptFocus(");
     expect(mobile).toBe(web);
   });
 
   it("the tokenizer (normalizeWord/tokenizeTranscript) is identical and Unicode-mark aware", () => {
-    // normalizeWord/tokenizeTranscript live just OUTSIDE the byte-identical block
-    // but the scorer depends on them, so they must stay in lockstep across hooks.
-    // Preserving \p{M} (combining marks) is required for Devanagari (Hindi/Urdu)
-    // matras/viramas to survive tokenization before lead-word matching.
-    const TOK_START = "function normalizeWord(";
-    const TOK_END = "  return text.split(/\\s+/).map(normalizeWord).filter(Boolean);\n}";
-    function tokenizerBlock(src: string): string {
-      const start = src.indexOf(TOK_START);
-      const end = src.indexOf(TOK_END, start);
-      expect(start, "tokenizer start marker not found").toBeGreaterThan(-1);
-      expect(end, "tokenizer end marker not found").toBeGreaterThan(-1);
-      return src.slice(start, end + TOK_END.length);
-    }
-    const web = tokenizerBlock(readMustaflow("hooks/use-ora-realtime-voice.ts"));
-    const mobile = tokenizerBlock(readOraMobile("hooks/useOraRealtimeVoiceNative.ts"));
-    expect(web.length).toBeGreaterThan(0);
+    // normalizeWord/tokenizeTranscript live just OUTSIDE the focus block but the
+    // scorer depends on them, so they get their own parity markers and must stay
+    // in lockstep across hooks. Preserving \p{M} (combining marks) is required
+    // for Devanagari (Hindi/Urdu) matras/viramas to survive tokenization before
+    // lead-word matching.
+    const web = regionBetween(
+      readMustaflow("hooks/use-ora-realtime-voice.ts"),
+      TOK_START,
+      TOK_END,
+      "tokenizer",
+    );
+    const mobile = regionBetween(
+      readOraMobile("hooks/useOraRealtimeVoiceNative.ts"),
+      TOK_START,
+      TOK_END,
+      "tokenizer",
+    );
+    expect(web.trim().length).toBeGreaterThan(0);
     expect(mobile).toBe(web);
     expect(web).toContain("\\p{L}\\p{N}\\p{M}");
   });

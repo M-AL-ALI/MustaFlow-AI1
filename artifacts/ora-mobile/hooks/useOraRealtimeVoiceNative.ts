@@ -169,12 +169,14 @@ const FILLER_WORDS = new Set([
   "yeah",
 ]);
 
+// ORA_REALTIME_TOKENIZER_PARITY_START
 function normalizeWord(w: string): string {
   return w.toLowerCase().replace(/[^\p{L}\p{N}\p{M}]/gu, "");
 }
 function tokenizeTranscript(text: string): string[] {
   return text.split(/\s+/).map(normalizeWord).filter(Boolean);
 }
+// ORA_REALTIME_TOKENIZER_PARITY_END
 /** True when the user's words are a short subset of Ora's recent speech (echo). */
 function isLikelyEcho(userWords: string[], recentAssistantText: string): boolean {
   if (userWords.length === 0 || userWords.length > 6) return false;
@@ -234,6 +236,7 @@ function isPartialSpeechEvidence(interim: string): boolean {
 // BYTE-FOR-BYTE identical to the copy in
 // artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts.
 
+// ORA_REALTIME_FOCUS_SCORER_PARITY_START
 export type FocusMode = "normal" | "focused";
 
 // After an accepted turn — or the moment the user opens Talk to Ora, which is an
@@ -602,6 +605,7 @@ export function scoreTranscriptFocus(
   if (isAddressedToOra(words) || looksDirected(words, text)) return { accepted: true };
   return { accepted: false, reason: "not_addressed_or_outside_focus" };
 }
+// ORA_REALTIME_FOCUS_SCORER_PARITY_END
 
 /**
  * Structured, privacy-safe realtime voice diagnostics. Emits event names, counts,

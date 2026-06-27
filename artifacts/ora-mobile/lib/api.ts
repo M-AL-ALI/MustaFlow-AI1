@@ -14,6 +14,7 @@ import type {
   OraConversationSummary,
   OraMemory,
   OraMemoryUsed,
+  OraAccountConsistency,
   OraMessage,
   OraProfile,
   OraProjectSummary,
@@ -197,6 +198,17 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
  */
 export function getRealtimeDiagnostics(): Promise<RealtimeDiagnostics> {
   return jsonRequest<RealtimeDiagnostics>("/api/public-ai/realtime/diagnostics");
+}
+
+/**
+ * Privacy-safe account-consistency diagnostics for the Settings "Account sync"
+ * rows. Confirms this device resolves to the SAME server-side identity, plan,
+ * and per-user counts as the website for the same Clerk user. Returns only a
+ * sha256 fingerprint + last-4 of the id (never the raw id), never message or
+ * memory content, and no payment details. Protected route (requires a token).
+ */
+export function getAccountConsistency(): Promise<OraAccountConsistency> {
+  return jsonRequest<OraAccountConsistency>("/api/ora/account-consistency");
 }
 
 export interface ExportFileRequest {

@@ -207,3 +207,72 @@ export interface OraMessageData {
   memorySupersededTitles?: string[];
   memoriesUsed?: OraMemoryUsed[];
 }
+
+/* ── Account consistency diagnostics ───────────────────────────────────────── */
+
+/**
+ * A single "latest" row in the account-consistency snapshot. Carries an id, a
+ * short human label (conversation title / project name / memory title), and a
+ * timestamp only — never message or memory content.
+ */
+export interface OraAccountConsistencyLatest {
+  id: number;
+  label: string | null;
+  at: string | null;
+}
+
+/**
+ * Privacy-safe, owner-scoped account diagnostics returned by
+ * GET /api/ora/account-consistency. Shared by the API server (response shape),
+ * the Ora mobile client (TYPE-only import), and the website Settings panel so
+ * all three confirm the SAME Clerk user resolves to the same server-side
+ * identity, billing tier, chat tier, and per-user counts on every surface.
+ *
+ * Never contains a raw user id, message/memory content, or asset bytes/keys.
+ */
+export interface OraAccountConsistency {
+  identity: {
+    /** First 12 hex chars of sha256(userId) — a stable fingerprint, not the id. */
+    userIdHash: string;
+    /** Last 4 chars of the Clerk user id (null when shorter than 4). */
+    clerkUserIdLast4: string | null;
+    /** The signed-in user's own email, when Clerk resolves it. */
+    email: string | null;
+  };
+  api: {
+    environment: string;
+    host: string | null;
+  };
+  billing: {
+    /** Effective tier after subscription status + superuser fallback. */
+    billingTier: string;
+    /** Raw subscription tier on file ("free" when no subscription row). */
+    sourceTier: string;
+    status: string | null;
+    isSuperuser: boolean;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  };
+  chatSession: {
+    /** Effective tier the chat path uses — always equals billing.billingTier. */
+    tier: string;
+    isPaid: boolean;
+    messageLimit: number;
+    imageLimit: number;
+    resetsAt: string | null;
+  };
+  counts: {
+    conversations: number;
+    projects: number;
+    userLevelMemories: number;
+    projectMemories: number;
+    assets: number;
+    supportTickets: number;
+  };
+  latest: {
+    conversation: OraAccountConsistencyLatest | null;
+    project: OraAccountConsistencyLatest | null;
+    memory: OraAccountConsistencyLatest | null;
+  };
+  checkedAt: string;
+}

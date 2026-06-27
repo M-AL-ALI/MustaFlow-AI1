@@ -14,6 +14,7 @@ import {
   Mic,
   Monitor,
   Moon,
+  RefreshCw,
   Sun,
   User as UserIcon,
   Volume2,
@@ -21,7 +22,7 @@ import {
   XCircle,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -31,6 +32,7 @@ import { useColors } from "@/hooks/useColors";
 import { isRealtimeVoiceNativeAvailable } from "@/hooks/useOraRealtimeVoiceNative";
 import {
   API_BASE,
+  getAccountConsistency,
   getOraUsage,
   getPreferences,
   getRealtimeDiagnostics,
@@ -41,6 +43,7 @@ import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
 import type {
   BillingSubscription,
   BillingTierMeta,
+  OraAccountConsistency,
   OraUsage,
   RealtimeDiagnostics,
 } from "@/lib/types";
@@ -507,6 +510,42 @@ export default function SettingsScreen() {
   const [diagPlanSync, setDiagPlanSync] = useState<DiagPlanSync>(INITIAL_PLAN_SYNC);
   const diagRunningRef = useRef(false);
 
+  /* ── Account sync (cross-platform consistency) ───────────────────────────── */
+
+  const [acctDiag, setAcctDiag] = useState<OraAccountConsistency | null>(null);
+  const [acctLoading, setAcctLoading] = useState(false);
+  const [acctError, setAcctError] = useState<string | null>(null);
+  const [acctTokenMissing, setAcctTokenMissing] = useState(false);
+  const acctRunningRef = useRef(false);
+
+  const runAccountCheck = useCallback(async () => {
+    if (acctRunningRef.current) return;
+    acctRunningRef.current = true;
+    setAcctLoading(true);
+    setAcctError(null);
+    setAcctTokenMissing(false);
+    try {
+      if (isSignedIn) {
+        let token: string | null = null;
+        try {
+          token = await getToken();
+        } catch {
+          token = null;
+        }
+        if (!token) setAcctTokenMissing(true);
+      }
+      const data = await getAccountConsistency();
+      setAcctDiag(data);
+    } catch (err) {
+      setAcctDiag(null);
+      const msg = err instanceof Error ? err.message : String(err);
+      setAcctError(msg);
+    } finally {
+      setAcctLoading(false);
+      acctRunningRef.current = false;
+    }
+  }, [getToken, isSignedIn]);
+
   const updateStep = useCallback((id: string, patch: Partial<DiagStep>) => {
     setDiagSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   }, []);
@@ -756,6 +795,24 @@ export default function SettingsScreen() {
     diagPlanSync.tokenStatus === "unchecked"
       ? "not checked"
       : `${planLabel(sessionTierForCompare)}${diagPlanSync.sessionIsPaid ? " (paid)" : ""}`;
+
+  // Account sync: an ACTIVE paid subscription that does not resolve to a paid
+  // chat session means this device is not authenticating as the same paid user.
+  // Gate on status so a canceled/inactive historical core/wave row (sourceTier
+  // set but no longer effective) does not raise a false mismatch warning.
+  const acctActivePaidStatus =
+    acctDiag?.billing.status === "active" || acctDiag?.billing.status === "trialing";
+  const acctBillingPaid =
+    (acctDiag?.billing.sourceTier === "core" || acctDiag?.billing.sourceTier === "wave") &&
+    acctActivePaidStatus;
+  const acctChatFree = acctDiag ? !acctDiag.chatSession.isPaid : false;
+  const acctTierMismatch = !!acctDiag && acctBillingPaid && acctChatFree;
+  const acctTokenWarn = !!isSignedIn && (acctTokenMissing || (!!acctError && !acctDiag));
+  const acctWarnMessage = acctTokenWarn
+    ? "Signed in on this device, but no Clerk token reached the server. Ora will resolve as anonymous/free here until sign-in is fixed."
+    : acctTierMismatch
+      ? `Plan mismatch: billing says ${planLabel(acctDiag?.billing.sourceTier ?? null)} but this device's chat session is ${planLabel(acctDiag?.chatSession.tier ?? null)}. This device is not resolving the same paid account.`
+      : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -1139,6 +1196,80 @@ export default function SettingsScreen() {
               )}
             </View>
           )}
+        </SectionCard>
+
+        {/* Account sync — cross-platform consistency */}
+        <SectionCard
+          icon={RefreshCw}
+          title="Account sync"
+          description="Confirm this device resolves to the same Ora account, plan, and data as the website."
+        >
+          {acctDiag ? (
+            <View style={{ gap: 6 }}>
+              <InfoRow
+                label="User fingerprint"
+                value={acctDiag.identity.userIdHash || "anonymous"}
+              />
+              <InfoRow
+                label="Account id ending"
+                value={
+                  acctDiag.identity.clerkUserIdLast4
+                    ? `…${acctDiag.identity.clerkUserIdLast4}`
+                    : "—"
+                }
+              />
+              <InfoRow label="Email" value={acctDiag.identity.email ?? "anonymous"} />
+              <InfoRow label="Billing tier" value={planLabel(acctDiag.billing.billingTier)} />
+              <InfoRow
+                label="Chat tier"
+                value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`}
+                warn={acctTierMismatch}
+              />
+              <InfoRow label="Conversations" value={String(acctDiag.counts.conversations)} />
+              <InfoRow label="Projects" value={String(acctDiag.counts.projects)} />
+              <InfoRow label="Saved memories" value={String(acctDiag.counts.userLevelMemories)} />
+              <InfoRow label="Project memories" value={String(acctDiag.counts.projectMemories)} />
+              <InfoRow label="Assets" value={String(acctDiag.counts.assets)} />
+              <InfoRow label="Support tickets" value={String(acctDiag.counts.supportTickets)} />
+              <InfoRow label="API host" value={acctDiag.api.host ?? "—"} />
+              <InfoRow label="Environment" value={acctDiag.api.environment ?? "—"} />
+            </View>
+          ) : (
+            <View
+              style={{
+                backgroundColor: c.muted,
+                borderRadius: c.radius,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              }}
+            >
+              <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
+                {acctError
+                  ? `Could not load account sync: ${acctError}`
+                  : "Run the check to compare this device against your website account."}
+              </Text>
+            </View>
+          )}
+
+          {acctWarnMessage ? (
+            <Text
+              style={{
+                color: "#f87171",
+                fontSize: 12,
+                lineHeight: 18,
+                marginTop: 2,
+              }}
+            >
+              {acctWarnMessage}
+            </Text>
+          ) : null}
+
+          <Button
+            label={acctLoading ? "Checking account sync…" : "Check account sync"}
+            onPress={runAccountCheck}
+            disabled={acctLoading}
+            full
+          />
         </SectionCard>
       </ScrollView>
     </View>

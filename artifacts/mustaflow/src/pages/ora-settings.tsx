@@ -24,7 +24,9 @@ import {
   Plus,
   AudioLines,
   Focus,
+  RefreshCw,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
 import { OraConversationsProvider } from "@/hooks/use-ora-conversations";
 import { useOraConversations } from "@/hooks/ora-conversations-context";
@@ -305,6 +307,46 @@ interface RealtimeDiagnostics {
   maxDurationSeconds: number;
 }
 
+/**
+ * Local mirror of the server's OraAccountConsistency response
+ * (@workspace/ora-contracts). The website artifact does not depend on the
+ * contracts lib, so we keep a structural copy here — the mobile app imports the
+ * canonical type. Only the fields the UI renders are typed.
+ */
+interface AccountConsistency {
+  identity: { userIdHash: string; clerkUserIdLast4: string | null; email: string | null };
+  api: { environment: string; host: string | null };
+  billing: {
+    billingTier: string;
+    sourceTier: string;
+    status: string | null;
+    isSuperuser: boolean;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  };
+  chatSession: {
+    tier: string;
+    isPaid: boolean;
+    messageLimit: number;
+    imageLimit: number;
+    resetsAt: string | null;
+  };
+  counts: {
+    conversations: number;
+    projects: number;
+    userLevelMemories: number;
+    projectMemories: number;
+    assets: number;
+    supportTickets: number;
+  };
+  latest: {
+    conversation: { id: number; label: string | null; at: string | null } | null;
+    project: { id: number; label: string | null; at: string | null } | null;
+    memory: { id: number; label: string | null; at: string | null } | null;
+  };
+  checkedAt: string;
+}
+
 /** Mirror of the realtime hook's detectSupport so the card matches actual capability. */
 function detectLiveVoiceSupport(): boolean {
   return (
@@ -487,6 +529,158 @@ function LiveVoiceSection() {
           </DiagRow>
         </div>
       )}
+    </SectionCard>
+  );
+}
+
+function tierLabel(tier: string): string {
+  if (!tier) return "Free";
+  return tier.charAt(0).toUpperCase() + tier.slice(1);
+}
+
+function AccountSyncSection() {
+  const { isSignedIn } = useClerkUser();
+  const [diag, setDiag] = useState<AccountConsistency | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const runCheck = async () => {
+    setLoading(true);
+    setFailed(false);
+    try {
+      const res = await authFetch("/api/ora/account-consistency");
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as AccountConsistency;
+      setDiag(data);
+    } catch {
+      setFailed(true);
+      setDiag(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Mismatch: signed in on this device but the server resolved no identity. The
+  // billing-vs-chat tier can never disagree (both come from one resolver), but a
+  // signed-in/no-identity gap means tokens are not reaching the API.
+  const tokenMismatch = !!isSignedIn && !!diag && diag.identity.userIdHash.length === 0;
+  const tierMismatch = !!diag && diag.billing.billingTier !== diag.chatSession.tier;
+  const hasWarning = tokenMismatch || tierMismatch;
+
+  return (
+    <SectionCard
+      icon={RefreshCw}
+      title="Account sync"
+      description="Confirm this device is signed in to the same account, with the same plan and data, that Ora uses on the website and mobile app. No payment details are shown here."
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => void runCheck()} disabled={loading} size="sm">
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Checking
+              </>
+            ) : (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Check account sync
+              </>
+            )}
+          </Button>
+          {diag && (
+            <span className="text-xs text-muted-foreground">
+              Checked {new Date(diag.checkedAt).toLocaleString()}
+            </span>
+          )}
+        </div>
+
+        {failed && (
+          <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+            <ShieldAlert className="h-4 w-4" />
+            Could not load account diagnostics. Check that you are signed in and try again.
+          </div>
+        )}
+
+        {diag && (
+          <div className="space-y-3">
+            {hasWarning && (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  {tokenMismatch
+                    ? "You appear signed in on this device, but the server did not recognize your account. Sign out and back in to re-sync."
+                    : "Your billing plan and chat plan do not match. Reload the app; if it persists, contact support."}
+                </span>
+              </div>
+            )}
+
+            <DiagRow label="Email">
+              <span className="font-mono text-foreground">{diag.identity.email ?? "—"}</span>
+            </DiagRow>
+            <DiagRow label="Account fingerprint">
+              <span className="font-mono text-foreground">{diag.identity.userIdHash || "—"}</span>
+            </DiagRow>
+            <DiagRow label="Account id ending">
+              <span className="font-mono text-foreground">
+                {diag.identity.clerkUserIdLast4 ? `…${diag.identity.clerkUserIdLast4}` : "—"}
+              </span>
+            </DiagRow>
+
+            <DiagRow label="Billing plan">
+              <span className="text-foreground">
+                {tierLabel(diag.billing.billingTier)}
+                {diag.billing.isSuperuser ? " (team)" : ""}
+              </span>
+            </DiagRow>
+            <DiagRow label="Chat plan">
+              {tierMismatch ? (
+                <>
+                  <StatusDot ok={false} />
+                  {tierLabel(diag.chatSession.tier)}
+                </>
+              ) : (
+                <>
+                  <StatusDot ok />
+                  {tierLabel(diag.chatSession.tier)}
+                </>
+              )}
+            </DiagRow>
+            <DiagRow label="Daily message limit">
+              <span className="text-foreground">{diag.chatSession.messageLimit}</span>
+            </DiagRow>
+            <DiagRow label="Daily image limit">
+              <span className="text-foreground">{diag.chatSession.imageLimit}</span>
+            </DiagRow>
+
+            <DiagRow label="Conversations">
+              <span className="text-foreground">{diag.counts.conversations}</span>
+            </DiagRow>
+            <DiagRow label="Projects">
+              <span className="text-foreground">{diag.counts.projects}</span>
+            </DiagRow>
+            <DiagRow label="Saved memories">
+              <span className="text-foreground">{diag.counts.userLevelMemories}</span>
+            </DiagRow>
+            <DiagRow label="Project memories">
+              <span className="text-foreground">{diag.counts.projectMemories}</span>
+            </DiagRow>
+            <DiagRow label="Assets">
+              <span className="text-foreground">{diag.counts.assets}</span>
+            </DiagRow>
+            <DiagRow label="Support tickets">
+              <span className="text-foreground">{diag.counts.supportTickets}</span>
+            </DiagRow>
+
+            <DiagRow label="API host">
+              <span className="font-mono text-foreground">{diag.api.host ?? "—"}</span>
+            </DiagRow>
+            <DiagRow label="Environment">
+              <span className="font-mono text-foreground">{diag.api.environment}</span>
+            </DiagRow>
+          </div>
+        )}
+      </div>
     </SectionCard>
   );
 }
@@ -1427,6 +1621,7 @@ function OraSettingsInner() {
           <VoiceLanguageSection />
           <LiveVoiceSection />
           <FocusModeSection />
+          <AccountSyncSection />
           <MemorySection />
           <PlanLimitsSection />
         </div>

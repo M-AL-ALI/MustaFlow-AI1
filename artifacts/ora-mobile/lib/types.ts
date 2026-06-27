@@ -21,6 +21,8 @@ export type {
   OraDatasetResult,
   GeneratedFile,
   OraMessageData,
+  OraAccountConsistency,
+  OraAccountConsistencyLatest,
 } from "@workspace/ora-contracts";
 
 import type {
