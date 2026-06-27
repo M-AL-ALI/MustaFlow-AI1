@@ -105,6 +105,131 @@ const OPENAI_REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const DATA_CHANNEL_NAME = "oai-events";
 const SDP_TIMEOUT_MS = 15_000;
 
+// ─── Voice-stability tuning (mirrored in the website hook) ───────────────────
+// Barge-in confirmation: a raw `input_audio_buffer.speech_started` is NOT trusted
+// as a real interruption. Ora is only cancelled once the speech is confirmed —
+// either it persists for this long OR a genuine (non-filler) transcription delta
+// arrives — so Ora never cuts itself off on its own speaker bleed, room noise, or
+// echo. 320ms sits inside the 250–350ms window that still feels immediate.
+const BARGE_IN_CONFIRM_MS = 320;
+// A finalized user transcript must clear this many meaningful characters to count
+// as a real turn (clear commands like "stop"/"yes"/"no" bypass it).
+const MIN_MEANINGFUL_CHARS = 3;
+// A finalized transcript that arrives within this window after Ora's audio AND
+// echoes Ora's own recent words is treated as mic echo, not a user turn.
+const ECHO_GUARD_MS = 1200;
+
+// ─── Transcript validity filter (mirrored in the website hook) ───────────────
+// Pure + surface-agnostic. Keep BYTE-FOR-BYTE identical to the copy in
+// artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts so both surfaces accept
+// and reject exactly the same utterances.
+
+/** Short but unambiguous spoken commands that are always accepted. */
+const VOICE_COMMANDS = new Set([
+  "stop",
+  "yes",
+  "no",
+  "wait",
+  "go",
+  "continue",
+  "repeat",
+  "cancel",
+  "hi",
+  "hello",
+  "hey",
+]);
+/** Isolated filler / noise words rejected when they arrive on their own. */
+const FILLER_WORDS = new Set([
+  "uh",
+  "um",
+  "umm",
+  "hmm",
+  "hmmm",
+  "mm",
+  "mhm",
+  "mhmm",
+  "huh",
+  "hm",
+  "er",
+  "erm",
+  "ah",
+  "oh",
+  "you",
+  "the",
+  "a",
+  "an",
+  "okay",
+  "ok",
+  "yeah",
+]);
+
+function normalizeWord(w: string): string {
+  return w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+function tokenizeTranscript(text: string): string[] {
+  return text.split(/\s+/).map(normalizeWord).filter(Boolean);
+}
+/** True when the user's words are a short subset of Ora's recent speech (echo). */
+function isLikelyEcho(userWords: string[], recentAssistantText: string): boolean {
+  if (userWords.length === 0 || userWords.length > 6) return false;
+  const assistantWords = new Set(tokenizeTranscript(recentAssistantText));
+  if (assistantWords.size === 0) return false;
+  return userWords.every((w) => assistantWords.has(w));
+}
+
+interface TranscriptVerdict {
+  accepted: boolean;
+  reason?: string;
+}
+
+/**
+ * Decide whether a finalized user transcript is a real turn or noise. Rejecting
+ * here means the turn is never persisted AND can never influence the spoken
+ * language (Auto mode only follows accepted turns).
+ */
+function validateUserTranscript(
+  text: string,
+  opts: { sinceAssistantAudioMs: number; recentAssistantText: string },
+): TranscriptVerdict {
+  const trimmed = text.trim();
+  if (!trimmed) return { accepted: false, reason: "empty" };
+  const words = tokenizeTranscript(trimmed);
+  if (words.length === 0) return { accepted: false, reason: "no_words" };
+  // Clear single-word commands are always accepted, even though they are short.
+  if (words.length === 1 && VOICE_COMMANDS.has(words[0])) return { accepted: true };
+  const joined = words.join("");
+  if (words.length === 1 && (FILLER_WORDS.has(words[0]) || joined.length <= 2)) {
+    return { accepted: false, reason: "filler_or_too_short" };
+  }
+  if (joined.length < MIN_MEANINGFUL_CHARS) return { accepted: false, reason: "too_short" };
+  if (
+    opts.sinceAssistantAudioMs <= ECHO_GUARD_MS &&
+    opts.recentAssistantText &&
+    isLikelyEcho(words, opts.recentAssistantText)
+  ) {
+    return { accepted: false, reason: "echo" };
+  }
+  return { accepted: true };
+}
+
+/** True once an interim transcript is strong enough to confirm a real barge-in. */
+function isPartialSpeechEvidence(interim: string): boolean {
+  const words = tokenizeTranscript(interim);
+  if (words.length === 0) return false;
+  if (words.length === 1 && (FILLER_WORDS.has(words[0]) || words[0].length <= 1)) return false;
+  return words.join("").length >= 2;
+}
+
+/**
+ * Structured, privacy-safe realtime voice diagnostics. Emits event names, counts,
+ * reasons, and the selected language — NEVER raw audio or full transcript text —
+ * so barge-in / transcript-filter decisions can be inspected in the device log.
+ */
+function logVoiceDiag(event: string, detail?: Record<string, unknown>): void {
+  // eslint-disable-next-line no-console
+  console.info("[ora-realtime]", JSON.stringify({ event, ...detail }));
+}
+
 // ─── Guarded native-module load ─────────────────────────────────────────────
 
 type WebRTCModuleType = typeof import("react-native-webrtc");
@@ -207,6 +332,20 @@ export function useOraRealtimeVoiceNative(
   const startGenerationRef = useRef(0);
   const mutedRef = useRef(false);
 
+  // ── Barge-in confirmation + transcript-quality guards (mirror of the web hook) ─
+  // assistantResponseActiveRef: Ora has a response in flight (response.created ->
+  // response.done), even before its first audio frame. assistantSpeakingRef: Ora
+  // audio is actually playing. A barge-in is only meaningful while one is true, so
+  // checking BOTH catches an interruption in the generation-to-first-audio window.
+  const assistantResponseActiveRef = useRef(false);
+  const assistantSpeakingRef = useRef(false);
+  const pendingBargeInRef = useRef(false);
+  const bargeInTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAssistantAudioAtRef = useRef(0);
+  const clientCancelledAtRef = useRef(0);
+  const recentAssistantSpeechRef = useRef("");
+  const selectedLanguageRef = useRef("auto");
+
   const clearDurationTimer = useCallback(() => {
     if (durationTimerRef.current) {
       clearInterval(durationTimerRef.current);
@@ -214,11 +353,22 @@ export function useOraRealtimeVoiceNative(
     }
   }, []);
 
+  const clearBargeInTimer = useCallback(() => {
+    if (bargeInTimerRef.current) {
+      clearTimeout(bargeInTimerRef.current);
+      bargeInTimerRef.current = null;
+    }
+    pendingBargeInRef.current = false;
+  }, []);
+
   const teardown = useCallback(() => {
     activeRef.current = false;
     // Invalidate any in-flight start(): its captured generation no longer matches.
     startGenerationRef.current += 1;
     clearDurationTimer();
+    clearBargeInTimer();
+    assistantResponseActiveRef.current = false;
+    assistantSpeakingRef.current = false;
     sdpAbortRef.current?.abort();
     sdpAbortRef.current = null;
 
@@ -261,7 +411,7 @@ export function useOraRealtimeVoiceNative(
       streamRef.current = null;
     }
     remoteTrackRef.current = null;
-  }, [clearDurationTimer]);
+  }, [clearDurationTimer, clearBargeInTimer]);
 
   const stop = useCallback(() => {
     if (!activeRef.current && state === "idle") return;
@@ -286,18 +436,54 @@ export function useOraRealtimeVoiceNative(
   }, []);
 
   const stopAssistantOutput = useCallback(() => {
+    clientCancelledAtRef.current = Date.now();
     sendEvent({ type: "response.cancel" });
     sendEvent({ type: "output_audio_buffer.clear" });
     const track = remoteTrackRef.current;
     if (track) track.enabled = false;
+    assistantResponseActiveRef.current = false;
+    assistantSpeakingRef.current = false;
     setInterimAssistantTranscript("");
     assistantTextRef.current = "";
   }, [sendEvent]);
 
+  // Cancel Ora because a real interruption was CONFIRMED (sustained speech or a
+  // genuine transcription delta). This is the ONLY path that stops Ora for a
+  // barge-in, so noise / echo / speaker bleed can never cut Ora off mid-sentence.
+  const confirmBargeIn = useCallback(
+    (reason: string) => {
+      if (bargeInTimerRef.current) {
+        clearTimeout(bargeInTimerRef.current);
+        bargeInTimerRef.current = null;
+      }
+      if (!pendingBargeInRef.current) return;
+      pendingBargeInRef.current = false;
+      stopAssistantOutput();
+      logVoiceDiag("assistant_cancelled_for_barge_in", { reason });
+      if (activeRef.current) setState("listening");
+    },
+    [stopAssistantOutput],
+  );
+
+  // A pending speech_started turned out to be a brief blip (speech_stopped before
+  // it could be confirmed). Drop it WITHOUT cancelling Ora.
+  const cancelPendingBargeIn = useCallback((reason: string) => {
+    if (!pendingBargeInRef.current) return;
+    if (bargeInTimerRef.current) {
+      clearTimeout(bargeInTimerRef.current);
+      bargeInTimerRef.current = null;
+    }
+    pendingBargeInRef.current = false;
+    logVoiceDiag("assistant_cancel_ignored_as_noise", { reason });
+  }, []);
+
   const interrupt = useCallback(() => {
+    // Manual interrupt (the user tapped the control). This is always honored —
+    // there is no confirmation gate here, unlike the automatic barge-in path.
+    clearBargeInTimer();
     stopAssistantOutput();
     if (activeRef.current) setState("listening");
-  }, [stopAssistantOutput]);
+  }, [stopAssistantOutput, clearBargeInTimer]);
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
@@ -325,21 +511,56 @@ export function useOraRealtimeVoiceNative(
 
       switch (type) {
         case "input_audio_buffer.speech_started":
-          // User barged in. Interrupt Ora locally too; relying only on server-side
-          // VAD can leave stale audio playing over the next spoken turn.
-          stopAssistantOutput();
+          logVoiceDiag("speech_started", {
+            assistantActive: assistantResponseActiveRef.current,
+            assistantSpeaking: assistantSpeakingRef.current,
+          });
           userTextRef.current = "";
           setInterimUserTranscript("");
-          if (activeRef.current) setState("listening");
+          if (assistantResponseActiveRef.current || assistantSpeakingRef.current) {
+            // Ora is mid-turn. Do NOT cancel yet: arm a short confirmation timer
+            // and wait for proof this is real speech (this timer, or a genuine
+            // transcription delta). Brief blips / echo never confirm, so Ora is
+            // never cut off by its own audio or by room noise.
+            pendingBargeInRef.current = true;
+            if (bargeInTimerRef.current) clearTimeout(bargeInTimerRef.current);
+            bargeInTimerRef.current = setTimeout(() => {
+              bargeInTimerRef.current = null;
+              if (
+                activeRef.current &&
+                pendingBargeInRef.current &&
+                (assistantResponseActiveRef.current || assistantSpeakingRef.current)
+              ) {
+                confirmBargeIn("sustained_speech");
+              } else {
+                pendingBargeInRef.current = false;
+              }
+            }, BARGE_IN_CONFIRM_MS);
+          } else if (activeRef.current) {
+            // Nothing playing — a normal new user turn.
+            setState("listening");
+          }
           break;
         case "input_audio_buffer.speech_stopped":
-          if (activeRef.current) setState("thinking");
+          logVoiceDiag("speech_stopped", { pendingBargeIn: pendingBargeInRef.current });
+          if (pendingBargeInRef.current) {
+            // Speech ended before it could be confirmed: treat as a noise blip and
+            // leave Ora speaking.
+            cancelPendingBargeIn("speech_stopped_before_confirm");
+          } else if (activeRef.current) {
+            setState("thinking");
+          }
           break;
         case "conversation.item.input_audio_transcription.delta": {
           const delta = typeof evt.delta === "string" ? evt.delta : "";
           if (delta) {
             userTextRef.current += delta;
             setInterimUserTranscript(userTextRef.current);
+            // A genuine (non-filler) partial transcript is strong evidence of a
+            // real interruption — confirm immediately so Ora stops fast.
+            if (pendingBargeInRef.current && isPartialSpeechEvidence(userTextRef.current)) {
+              confirmBargeIn("transcript_delta");
+            }
           }
           break;
         }
@@ -353,8 +574,27 @@ export function useOraRealtimeVoiceNative(
           // switched conversation), and persisting it then would append to the new
           // thread's messages — the wrong-thread bug. teardown() sets activeRef
           // false, so a post-teardown event is dropped here.
-          if (activeRef.current && finalText && finalText.trim())
-            onUserRef.current(finalText.trim());
+          if (!activeRef.current) break;
+          const trimmed = (finalText || "").trim();
+          const verdict = validateUserTranscript(trimmed, {
+            sinceAssistantAudioMs: Date.now() - lastAssistantAudioAtRef.current,
+            recentAssistantText: recentAssistantSpeechRef.current,
+          });
+          if (verdict.accepted) {
+            // Only accepted turns are persisted AND only accepted turns may steer
+            // the spoken language in Auto mode.
+            logVoiceDiag("transcript_accepted", {
+              chars: trimmed.length,
+              selected_language: selectedLanguageRef.current,
+            });
+            onUserRef.current(trimmed);
+          } else {
+            logVoiceDiag("transcript_rejected", {
+              rejection_reason: verdict.reason,
+              chars: trimmed.length,
+              selected_language: selectedLanguageRef.current,
+            });
+          }
           break;
         }
         case "conversation.item.input_audio_transcription.failed":
@@ -363,6 +603,7 @@ export function useOraRealtimeVoiceNative(
           break;
 
         case "response.created":
+          assistantResponseActiveRef.current = true;
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
           if (activeRef.current) setState("thinking");
@@ -374,7 +615,13 @@ export function useOraRealtimeVoiceNative(
         case "response.text.delta": {
           const delta = typeof evt.delta === "string" ? evt.delta : "";
           if (delta) {
+            assistantSpeakingRef.current = true;
             assistantTextRef.current += delta;
+            // Keep the echo buffer live: echo guard must compare against what Ora
+            // is speaking *right now*, not only the previous finalized turn.
+            // Preserved across cancel (stopAssistantOutput never clears it) and
+            // time-bounded by ECHO_GUARD_MS in validateUserTranscript.
+            recentAssistantSpeechRef.current = assistantTextRef.current;
             setInterimAssistantTranscript(assistantTextRef.current);
             if (activeRef.current) setState("speaking");
           }
@@ -390,8 +637,12 @@ export function useOraRealtimeVoiceNative(
             assistantTextRef.current;
           // See the user-transcript case: gate on activeRef so a late event after
           // teardown can't append Ora's reply to a newly-switched conversation.
-          if (activeRef.current && finalText && finalText.trim()) {
-            onAssistantRef.current(finalText.trim());
+          const trimmed = (finalText || "").trim();
+          if (activeRef.current && trimmed) {
+            // Remember Ora's words so an immediate echoed user transcript can be
+            // recognised and rejected.
+            recentAssistantSpeechRef.current = trimmed;
+            onAssistantRef.current(trimmed);
           }
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
@@ -399,17 +650,36 @@ export function useOraRealtimeVoiceNative(
         }
 
         case "output_audio_buffer.started":
+          assistantSpeakingRef.current = true;
+          lastAssistantAudioAtRef.current = Date.now();
           if (remoteTrackRef.current) remoteTrackRef.current.enabled = !mutedRef.current;
           if (activeRef.current) setState("speaking");
           break;
         case "output_audio_buffer.stopped":
         case "output_audio_buffer.cleared":
+          assistantSpeakingRef.current = false;
+          lastAssistantAudioAtRef.current = Date.now();
+          // clientInitiated distinguishes our own confirmed barge-in cancel from a
+          // server-driven cancel (e.g. server VAD interrupt_response). A
+          // clientInitiated:false clear while Ora was mid-turn means the BACKEND —
+          // not noise on the client — cut Ora off.
+          logVoiceDiag("output_audio_stopped", {
+            type,
+            clientInitiated: Date.now() - clientCancelledAtRef.current < 1000,
+          });
           if (activeRef.current) setState("listening");
           break;
 
         case "response.done":
-          if (activeRef.current && assistantTextRef.current.trim()) {
-            onAssistantRef.current(assistantTextRef.current.trim());
+          assistantResponseActiveRef.current = false;
+          assistantSpeakingRef.current = false;
+          clearBargeInTimer();
+          if (assistantTextRef.current.trim()) {
+            const trimmed = assistantTextRef.current.trim();
+            if (activeRef.current) {
+              recentAssistantSpeechRef.current = trimmed;
+              onAssistantRef.current(trimmed);
+            }
             assistantTextRef.current = "";
             setInterimAssistantTranscript("");
           }
@@ -420,7 +690,7 @@ export function useOraRealtimeVoiceNative(
           break;
       }
     },
-    [stopAssistantOutput],
+    [confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer],
   );
 
   // ── Start ────────────────────────────────────────────────────────────────
@@ -441,6 +711,15 @@ export function useOraRealtimeVoiceNative(
       setInterimAssistantTranscript("");
       userTextRef.current = "";
       assistantTextRef.current = "";
+      clearBargeInTimer();
+      assistantResponseActiveRef.current = false;
+      assistantSpeakingRef.current = false;
+      lastAssistantAudioAtRef.current = 0;
+      clientCancelledAtRef.current = 0;
+      recentAssistantSpeechRef.current = "";
+      // Auto mode follows accepted user turns; capture the caller's language choice
+      // so rejected (noisy/echo) transcripts can never drift the spoken language.
+      selectedLanguageRef.current = ctx.language || "auto";
       setIsMuted(false);
       mutedRef.current = false;
       setState("connecting");
@@ -730,7 +1009,7 @@ export function useOraRealtimeVoiceNative(
         return { started: false, reason };
       }
     },
-    [isSupported, teardown, handleServerEvent, clearDurationTimer, sendEvent],
+    [isSupported, teardown, handleServerEvent, clearDurationTimer, sendEvent, clearBargeInTimer],
   );
 
   // Cleanup on unmount.

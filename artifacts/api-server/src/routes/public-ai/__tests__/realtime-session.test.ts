@@ -166,6 +166,7 @@ beforeEach(() => {
   delete process.env.ORA_REALTIME_VAD_THRESHOLD;
   delete process.env.ORA_REALTIME_VAD_PREFIX_PADDING_MS;
   delete process.env.ORA_REALTIME_VAD_SILENCE_DURATION_MS;
+  delete process.env.ORA_REALTIME_INTERRUPT_RESPONSE;
 
   fetchMock = mintOk();
   vi.stubGlobal("fetch", fetchMock);
@@ -332,15 +333,18 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(body.session.model).toBe("gpt-realtime-mini");
     expect(body.session.audio.output.voice).toBe("marin");
     expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
+    // interrupt_response defaults FALSE: the client hooks own barge-in via a
+    // confirmation guard, so the server must not also cancel Ora on raw VAD (that
+    // re-introduced the self-interrupt-on-echo bug).
     expect(body.session.audio.input.turn_detection).toEqual({
       type: "semantic_vad",
       eagerness: "low",
       create_response: true,
-      interrupt_response: true,
+      interrupt_response: false,
     });
   });
 
-  it("server VAD env override uses explicit conservative timing and interruption settings", async () => {
+  it("server VAD env override uses explicit conservative timing; interrupt stays client-owned", async () => {
     process.env.ORA_REALTIME_VAD_TYPE = "server_vad";
     process.env.ORA_REALTIME_VAD_THRESHOLD = "0.55";
     process.env.ORA_REALTIME_VAD_PREFIX_PADDING_MS = "350";
@@ -359,8 +363,21 @@ describe("Talk to Ora realtime — anonymous mint", () => {
       prefix_padding_ms: 350,
       silence_duration_ms: 1100,
       create_response: true,
-      interrupt_response: true,
+      interrupt_response: false,
     });
+  });
+
+  it("ORA_REALTIME_INTERRUPT_RESPONSE=true restores server-side interrupt", async () => {
+    process.env.ORA_REALTIME_INTERRUPT_RESPONSE = "true";
+
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({});
+
+    expect(res.status).toBe(200);
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.input.turn_detection.interrupt_response).toBe(true);
   });
 
   it("voice instructions bind spoken audio to the visible transcript language", async () => {
@@ -771,36 +788,84 @@ describe("Talk to Ora realtime — route wiring", () => {
     expect(src).toContain("maxDurationSeconds");
   });
 
-  it("web realtime barge-in hard-stops local assistant audio on speech-start", () => {
+  it("web realtime barge-in is confirmation-guarded; speech-start never hard-stops directly", () => {
     const src = readMustaflow("hooks/use-ora-realtime-voice.ts");
     const helperStart = src.indexOf("const stopAssistantOutput = useCallback");
-    const helperEnd = src.indexOf("const interrupt = useCallback", helperStart);
+    const helperEnd = src.indexOf("const confirmBargeIn = useCallback", helperStart);
     const helper = src.slice(helperStart, helperEnd);
     expect(helper).toContain('sendEvent({ type: "response.cancel" })');
     expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
     expect(helper).toContain("audioEl.pause()");
 
+    // Confirmed barge-in is the ONLY path that actually stops Ora's audio.
+    const confirmStart = src.indexOf("const confirmBargeIn = useCallback");
+    const confirmEnd = src.indexOf("const cancelPendingBargeIn = useCallback", confirmStart);
+    const confirmBlock = src.slice(confirmStart, confirmEnd);
+    expect(confirmBlock).toContain("stopAssistantOutput()");
+
+    // speech_started must NOT cancel immediately; it arms a confirmation timer and
+    // waits for sustained speech (or a real transcription delta) before confirming.
     const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
     const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
     const speechStartBlock = src.slice(speechStart, speechStartEnd);
-    expect(speechStartBlock).toContain("stopAssistantOutput()");
+    expect(speechStartBlock).toContain("pendingBargeInRef.current = true");
+    expect(speechStartBlock).toContain("BARGE_IN_CONFIRM_MS");
+    expect(speechStartBlock).toContain("confirmBargeIn(");
+    expect(speechStartBlock).not.toContain("stopAssistantOutput()");
+
+    // Echo guard must compare against what Ora is speaking RIGHT NOW, so the echo
+    // buffer is updated on every assistant transcript delta (not only on done).
+    const deltaStart = src.indexOf('case "response.audio_transcript.delta"');
+    const deltaEnd = src.indexOf('case "response.audio_transcript.done"', deltaStart);
+    const deltaBlock = src.slice(deltaStart, deltaEnd);
+    expect(deltaBlock).toContain("recentAssistantSpeechRef.current = assistantTextRef.current");
+
+    // ...and the cancel path must NOT wipe that buffer, or an echo arriving right
+    // after a confirmed barge-in would no longer match Ora's just-spoken words.
+    const cancelStart = src.indexOf("const stopAssistantOutput = useCallback");
+    const cancelEnd = src.indexOf("const confirmBargeIn = useCallback", cancelStart);
+    const cancelBlock = src.slice(cancelStart, cancelEnd);
+    expect(cancelBlock).not.toContain('recentAssistantSpeechRef.current = ""');
   });
 
-  it("mobile realtime barge-in hard-stops assistant audio on speech-start", () => {
+  it("mobile realtime barge-in is confirmation-guarded; speech-start never hard-stops directly", () => {
     const src = readOraMobile("hooks/useOraRealtimeVoiceNative.ts");
     const helperStart = src.indexOf("const stopAssistantOutput = useCallback");
-    const helperEnd = src.indexOf("const interrupt = useCallback", helperStart);
+    const helperEnd = src.indexOf("const confirmBargeIn = useCallback", helperStart);
     const helper = src.slice(helperStart, helperEnd);
     expect(helper).toContain('sendEvent({ type: "response.cancel" })');
     expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
     expect(helper).toContain("remoteTrackRef.current");
     expect(helper).toContain("track.enabled = false");
 
+    // Confirmed barge-in is the ONLY path that actually stops Ora's audio.
+    const confirmStart = src.indexOf("const confirmBargeIn = useCallback");
+    const confirmEnd = src.indexOf("const cancelPendingBargeIn = useCallback", confirmStart);
+    const confirmBlock = src.slice(confirmStart, confirmEnd);
+    expect(confirmBlock).toContain("stopAssistantOutput()");
+
     const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
     const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
     const speechStartBlock = src.slice(speechStart, speechStartEnd);
-    expect(speechStartBlock).toContain("stopAssistantOutput()");
+    expect(speechStartBlock).toContain("pendingBargeInRef.current = true");
+    expect(speechStartBlock).toContain("BARGE_IN_CONFIRM_MS");
+    expect(speechStartBlock).toContain("confirmBargeIn(");
+    expect(speechStartBlock).not.toContain("stopAssistantOutput()");
 
+    // Echo guard parity with web: the echo buffer tracks live assistant deltas...
+    const deltaStart = src.indexOf('case "response.audio_transcript.delta"');
+    const deltaEnd = src.indexOf('case "response.audio_transcript.done"', deltaStart);
+    const deltaBlock = src.slice(deltaStart, deltaEnd);
+    expect(deltaBlock).toContain("recentAssistantSpeechRef.current = assistantTextRef.current");
+
+    // ...and the cancel path must NOT wipe it.
+    const cancelStart = src.indexOf("const stopAssistantOutput = useCallback");
+    const cancelEnd = src.indexOf("const confirmBargeIn = useCallback", cancelStart);
+    const cancelBlock = src.slice(cancelStart, cancelEnd);
+    expect(cancelBlock).not.toContain('recentAssistantSpeechRef.current = ""');
+
+    // The remote track must still be re-enabled (respecting mute) when Ora speaks,
+    // otherwise mobile playback stays silent after a barge-in cleared it.
     const outputStarted = src.indexOf('case "output_audio_buffer.started"');
     const outputStartedEnd = src.indexOf('case "output_audio_buffer.stopped"', outputStarted);
     const outputStartedBlock = src.slice(outputStarted, outputStartedEnd);

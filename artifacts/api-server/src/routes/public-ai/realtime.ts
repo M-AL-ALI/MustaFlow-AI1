@@ -117,24 +117,37 @@ function numberFromEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/**
+ * Whether the SERVER's VAD is allowed to interrupt (cancel) Ora's in-flight
+ * response on detected user speech. Default FALSE: the client hooks own barge-in
+ * via a confirmation guard (sustained speech or a real transcription delta), so
+ * letting the server also cancel on raw VAD would re-introduce the self-interrupt
+ * bug where Ora cuts itself off on its own speaker bleed, echo, or room noise.
+ * Set ORA_REALTIME_INTERRUPT_RESPONSE=true only to restore server-side interrupt.
+ */
+function resolveInterruptResponse(): boolean {
+  return process.env.ORA_REALTIME_INTERRUPT_RESPONSE?.trim().toLowerCase() === "true";
+}
+
 function resolveTurnDetection():
-  | { type: "semantic_vad"; eagerness: string; create_response: true; interrupt_response: true }
+  | { type: "semantic_vad"; eagerness: string; create_response: true; interrupt_response: boolean }
   | {
       type: "server_vad";
       threshold: number;
       prefix_padding_ms: number;
       silence_duration_ms: number;
       create_response: true;
-      interrupt_response: true;
+      interrupt_response: boolean;
     } {
   const type = process.env.ORA_REALTIME_VAD_TYPE?.trim() || DEFAULT_REALTIME_VAD_TYPE;
+  const interrupt_response = resolveInterruptResponse();
 
   if (type === "semantic_vad") {
     return {
       type: "semantic_vad",
       eagerness: process.env.ORA_REALTIME_VAD_EAGERNESS?.trim() || DEFAULT_REALTIME_VAD_EAGERNESS,
       create_response: true,
-      interrupt_response: true,
+      interrupt_response,
     };
   }
 
@@ -147,7 +160,7 @@ function resolveTurnDetection():
       type: "semantic_vad",
       eagerness: DEFAULT_REALTIME_VAD_EAGERNESS,
       create_response: true,
-      interrupt_response: true,
+      interrupt_response,
     };
   }
 
@@ -163,7 +176,7 @@ function resolveTurnDetection():
       DEFAULT_REALTIME_VAD_SILENCE_DURATION_MS,
     ),
     create_response: true,
-    interrupt_response: true,
+    interrupt_response,
   };
 }
 

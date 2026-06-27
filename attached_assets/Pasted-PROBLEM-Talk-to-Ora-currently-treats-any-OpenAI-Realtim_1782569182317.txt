@@ -1,0 +1,130 @@
+PROBLEM
+
+Talk to Ora currently treats any OpenAI Realtime `speech_started` event as a real user interruption.
+
+That means if Ora’s own speaker audio leaks back into the mic, or the room has noise, or the browser/VAD thinks it heard a small sound, Ora immediately sends:
+
+response.cancel
+output_audio_buffer.clear
+
+So Ora starts talking, then suddenly stops mid-sentence.
+
+SECOND PROBLEM
+
+When OpenAI sends a finalized user transcript, the website currently accepts any non-empty text as a real user turn.
+
+So if the mic/VAD produces a tiny false transcript from noise, echo, breathing, background sound, or half-detected words, the app may append it as a user message and Ora replies again, even though you did not intentionally speak.
+
+THIRD PROBLEM
+
+Language drift happens because realtime voice is set to follow the latest spoken language in Auto mode. If a false/noisy transcript is detected as English, Arabic, or another language, Ora may switch language even though the real conversation should not switch.
+
+WHY THIS IS DIFFERENT FROM CHATGPT
+
+ChatGPT voice does not behave like “every tiny mic event = user spoke.”
+It has stronger turn detection, echo handling, barge-in validation, and transcript filtering.
+
+Ora needs the same layer:
+
+1. Do not cancel Ora’s speech immediately on every `speech_started`.
+2. Confirm the user is really speaking before barge-in.
+3. Ignore tiny/noisy/phantom transcripts.
+4. Do not let ignored transcripts change the conversation language.
+5. Add diagnostics so we can see when Ora interrupted itself, heard noise, or accepted a transcript.
+
+SOURCE-VERIFIED ISSUE
+
+Website:
+artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts
+
+Mobile:
+artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts
+
+Both surfaces cancel assistant audio on `input_audio_buffer.speech_started`.
+
+Website also accepts any non-empty finalized user transcript and appends it.
+
+Backend:
+artifacts/api-server/src/routes/public-ai/realtime.ts
+
+The backend uses realtime VAD with automatic response creation/interruption enabled, so the client needs stronger guards before treating an event as a real user turn.
+
+TASK FOR REPLIT
+
+Fix Talk to Ora realtime voice stability on both website and mobile before any new build.
+
+Required fixes:
+
+1. Add a barge-in confirmation guard.
+
+When `input_audio_buffer.speech_started` fires while Ora is speaking, do not immediately cancel Ora.
+
+Only cancel if one of these is true:
+- speech continues for at least 250–350ms
+- a real transcription delta arrives
+- user audio is clearly active beyond a noise threshold if available
+
+This prevents Ora from hearing itself and stopping mid-sentence.
+
+2. Add a transcript validity filter.
+
+Before appending a finalized user transcript, reject likely false turns:
+- empty or whitespace
+- one-character / two-character noise
+- common filler/noise fragments like “uh”, “um”, “hmm”, “you”, “the”, “okay” when isolated
+- transcripts below a minimum meaningful length unless they are clear commands like “stop”, “yes”, “no”
+- transcripts generated immediately after assistant audio starts/stops if they look like echo
+
+3. Protect language mode.
+
+Ignored/filtered transcripts must not affect language selection.
+
+If reply language is explicitly selected, Ora must keep speaking that language.
+
+If language is Auto, only valid accepted user turns may update the language.
+
+4. Add safe realtime diagnostics.
+
+Log structured events, not raw audio:
+- speech_started
+- speech_stopped
+- assistant_cancelled_for_barge_in
+- assistant_cancel_ignored_as_noise
+- transcript_accepted
+- transcript_rejected
+- rejection_reason
+- selected_language
+- detected/used language if available
+
+5. Apply the same logic to both:
+- website realtime hook
+- mobile realtime hook
+
+Ora website and Ora mobile must behave the same.
+
+6. QA checklist.
+
+Test these before any TestFlight build:
+
+A. User stays silent for 30 seconds:
+Expected: no user messages, no Ora replies.
+
+B. Ora speaks through phone/laptop speaker:
+Expected: Ora does not stop itself.
+
+C. User intentionally interrupts Ora:
+Expected: Ora stops immediately and listens.
+
+D. User speaks Arabic:
+Expected: transcript and spoken Ora reply stay Arabic.
+
+E. User speaks English:
+Expected: transcript and spoken Ora reply stay English.
+
+F. Auto language:
+Expected: language changes only after a real accepted user turn, not noise.
+
+G. Headphones vs speaker:
+Expected: both work, but speaker mode should not self-interrupt constantly.
+
+This is a P0 voice-quality bug. Do not cut a new build until this is fixed and verified.
