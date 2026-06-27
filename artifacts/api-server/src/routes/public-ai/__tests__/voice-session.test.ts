@@ -93,6 +93,18 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(index).toContain("router.use(ttsRouter)");
   });
 
+  it("passes language-preservation instructions to supported OpenAI TTS models", () => {
+    const route = readPublicAiRoute("tts.ts");
+    expect(route).toContain("function speechInstructions");
+    expect(route).toContain('ar: "Arabic"');
+    expect(route).toContain("`Speak entirely in ${named}.`");
+    expect(route).toContain("Speak in the same language as the provided text.");
+    expect(route).toContain("Do not translate the text into English.");
+    expect(route).toContain("supportsInstructions");
+    expect(route).toContain("instructions: speechInstructions(parsed.data.language)");
+    expect(route).toContain('model !== "tts-1" && model !== "tts-1-hd"');
+  });
+
   it("keeps normal dictation review-before-send while forcing Talk to Ora through server TTS", () => {
     const hook = readFe("hooks/use-ora-voice.ts");
     expect(hook).toContain("onFinalRef.current(finalText)");
@@ -182,18 +194,23 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(mobileHome).toContain("const interruptTalkMode = useCallback");
     expect(mobileHome).toContain("scheduleTalkRestart(250)");
     expect(mobileHome).toContain("const toggleTalkModeMute = useCallback");
-    expect(mobileHome).toContain("onPress={toggleTalkModeMute}");
-    expect(mobileHome).toContain("const talkStatusTitle = sending");
+    expect(mobileHome).toContain("const onInterruptPress = realtimeOn");
+    expect(mobileHome).toContain("const onMutePress = realtimeOn");
+    expect(mobileHome).toContain("onPress={onMutePress}");
+    expect(mobileHome).toContain("const talkStatusTitle = realtimeOn");
     expect(mobileHome).toContain('"Ora is thinking"');
     expect(mobileHome).toContain('"Ora is speaking"');
+    expect(mobileHome).toContain('"Live voice active"');
     expect(mobileHome).toContain('"Transcribing"');
     expect(mobileHome).toContain('"Listening"');
     expect(mobileHome).toContain('"Voice mode active"');
+    expect(mobileHome).toContain('"Tap interrupt to jump in"');
     expect(mobileHome).toContain('"Tap interrupt to speak"');
+    expect(mobileHome).toContain('"Muted - Ora can still hear you"');
     expect(mobileHome).toContain('"Muted - replies stay on screen"');
-    expect(mobileHome).toContain("onPress={interruptTalkMode}");
+    expect(mobileHome).toContain("onPress={onInterruptPress}");
     expect(mobileHome).toContain("Interrupt");
-    expect(mobileHome).toContain('talkModeMuted ? "Unmute" : "Mute"');
+    expect(mobileHome).toContain('talkMuted ? "Unmute" : "Mute"');
     expect(mobileHome).toContain("End");
   });
 
@@ -204,7 +221,8 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(mobileHome).toContain("const TALK_MODE_SILENCE_DB = -48");
     expect(mobileHome).toContain("const TALK_MODE_SILENCE_MS = 1200");
     expect(mobileHome).toContain("const autoStopTalkRecording = useCallback");
-    expect(mobileHome).toContain("autoStopOnSilence={talkMode}");
+    expect(mobileHome).toContain("autoStopOnSilence={true}");
+    expect(mobileHome).toContain("autoStopOnSilence={false}");
     expect(mobileHome).toContain("onAutoStop={autoStopTalkRecording}");
     expect(mobileHome).toContain("heardSpeechRef.current = true");
     expect(mobileHome).toContain("silenceStartedAtRef.current == null");

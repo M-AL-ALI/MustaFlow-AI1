@@ -793,11 +793,18 @@ describe("Talk to Ora realtime — route wiring", () => {
     const helper = src.slice(helperStart, helperEnd);
     expect(helper).toContain('sendEvent({ type: "response.cancel" })');
     expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
+    expect(helper).toContain("remoteTrackRef.current");
+    expect(helper).toContain("track.enabled = false");
 
     const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
     const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
     const speechStartBlock = src.slice(speechStart, speechStartEnd);
     expect(speechStartBlock).toContain("stopAssistantOutput()");
+
+    const outputStarted = src.indexOf('case "output_audio_buffer.started"');
+    const outputStartedEnd = src.indexOf('case "output_audio_buffer.stopped"', outputStarted);
+    const outputStartedBlock = src.slice(outputStarted, outputStartedEnd);
+    expect(outputStartedBlock).toContain("remoteTrackRef.current.enabled = !mutedRef.current");
   });
 
   it("kill switch check precedes the session-cookie check in source", () => {

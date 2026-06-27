@@ -288,6 +288,8 @@ export function useOraRealtimeVoiceNative(
   const stopAssistantOutput = useCallback(() => {
     sendEvent({ type: "response.cancel" });
     sendEvent({ type: "output_audio_buffer.clear" });
+    const track = remoteTrackRef.current;
+    if (track) track.enabled = false;
     setInterimAssistantTranscript("");
     assistantTextRef.current = "";
   }, [sendEvent]);
@@ -397,6 +399,7 @@ export function useOraRealtimeVoiceNative(
         }
 
         case "output_audio_buffer.started":
+          if (remoteTrackRef.current) remoteTrackRef.current.enabled = !mutedRef.current;
           if (activeRef.current) setState("speaking");
           break;
         case "output_audio_buffer.stopped":

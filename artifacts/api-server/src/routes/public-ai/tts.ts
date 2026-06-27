@@ -50,6 +50,31 @@ const ttsSchema = z.object({
   language: z.string().max(20).optional(),
 });
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  ar: "Arabic",
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+};
+
+function speechInstructions(language: string | undefined): string {
+  const lang = language?.trim().toLowerCase();
+  const named = lang && lang !== "auto" ? (LANGUAGE_NAMES[lang] ?? lang) : null;
+  if (named) {
+    return [
+      `Speak entirely in ${named}.`,
+      "Do not translate the text into English.",
+      "Preserve the meaning and language of the provided text exactly.",
+      "Use a natural conversational tone for Ora.",
+    ].join(" ");
+  }
+  return [
+    "Speak in the same language as the provided text.",
+    "Do not translate the text into English.",
+    "Use a natural conversational tone for Ora.",
+  ].join(" ");
+}
+
 router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
   if (isKillSwitchActive("tts")) {
     res.status(503).json(killSwitchBody("tts"));
@@ -112,10 +137,13 @@ router.post("/public-ai/tts", oraVoiceTtsLimiter, async (req, res) => {
   }
 
   try {
+    const model = process.env.ORA_TTS_MODEL ?? "gpt-4o-mini-tts";
+    const supportsInstructions = model !== "tts-1" && model !== "tts-1-hd";
     const response = await client.audio.speech.create({
-      model: process.env.ORA_TTS_MODEL ?? "gpt-4o-mini-tts",
+      model,
       voice,
       input: text,
+      ...(supportsInstructions ? { instructions: speechInstructions(parsed.data.language) } : {}),
       response_format: "mp3",
     });
     const buf = Buffer.from(await response.arrayBuffer());
