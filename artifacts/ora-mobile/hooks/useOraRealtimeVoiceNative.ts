@@ -774,6 +774,15 @@ export function useOraRealtimeVoiceNative(
               focus_window_active: msSinceLastAcceptedTurn <= FOCUS_WINDOW_MS,
               selected_language: selectedLanguageRef.current,
             });
+            // Focused mode keeps create_response off, so the server never replies
+            // to this rejected turn — but it still recorded the transcribed input
+            // as a conversation item. Delete it so rejected background speech can
+            // never condition a later accepted response (e.g. pulling Ora into a
+            // bystander's language). Normal mode leaves server-owned items alone
+            // because the server auto-responds there.
+            if (focusMode === "focused" && typeof evt.item_id === "string" && evt.item_id) {
+              sendEvent({ type: "conversation.item.delete", item_id: evt.item_id });
+            }
           }
           break;
         }

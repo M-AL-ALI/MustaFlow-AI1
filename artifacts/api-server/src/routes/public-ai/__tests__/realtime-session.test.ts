@@ -996,4 +996,19 @@ describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
       expect(src).toContain('reason: "not_addressed_or_outside_focus"');
     }
   });
+
+  it("both hooks delete a rejected focused-mode transcript from the realtime conversation", () => {
+    // In focused mode the server records the transcribed input item even though it
+    // never auto-responds. A rejected (background-speaker) turn must be removed via
+    // conversation.item.delete so it can never condition a later accepted response —
+    // e.g. pull Ora into a nearby speaker's language. Gated to focused mode only;
+    // normal mode leaves server-owned items alone because the server auto-responds.
+    for (const src of [
+      readMustaflow("hooks/use-ora-realtime-voice.ts"),
+      readOraMobile("hooks/useOraRealtimeVoiceNative.ts"),
+    ]) {
+      expect(src).toContain('type: "conversation.item.delete", item_id: evt.item_id');
+      expect(src).toContain('focusMode === "focused" && typeof evt.item_id === "string"');
+    }
+  });
 });
