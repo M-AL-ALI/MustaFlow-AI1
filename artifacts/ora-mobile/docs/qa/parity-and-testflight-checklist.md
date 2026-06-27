@@ -12,22 +12,25 @@ until every item in the Definition of Done (Section 7) is signed off.
 
 ## 1. Generated-document export parity
 
-Precise status: **all export actions exist on mobile, PDF is now real,
-backend-generated binary files are full parity, but client-side Word/Excel/Slides
-binary fidelity remains deferred.** Do not say "all export formats match the
-website."
+Precise status: **all export actions exist on mobile and produce real binaries.**
+Chat export → Word/Excel/Slides now go through the backend
+`POST /public-ai/export-file` route, so the mobile chat export menu returns real
+`.docx/.xlsx/.pptx` built by the same deterministic builders the website uses. PDF
+is real via the native `expo-print` module and therefore still requires a fresh
+native build. The only remaining caveat is that real PDF output needs a rebuilt
+native app (see below).
 
-| Surface                                                  | Website                    | Mobile                                | Status                        |
-| -------------------------------------------------------- | -------------------------- | ------------------------------------- | ----------------------------- |
-| AI-generated files (`/public-ai/generate-file` → base64) | csv/xlsx/docx/pdf/pptx     | csv/xlsx/docx/pdf/pptx (saved/shared) | **Full parity**               |
-| Generated / edited images                                | render + edit + download   | render + edit + photo-library save    | **Full parity**               |
-| Chat export → Markdown                                   | `.md`                      | `.md`                                 | **Full parity**               |
-| Chat export → JSON                                       | `.json`                    | `.json`                               | **Full parity**               |
-| Action-plan export → CSV                                 | `.csv`                     | `.csv`                                | **Full parity**               |
-| Chat export → PDF                                        | browser print → PDF        | real `.pdf` via `expo-print`          | Real — **needs native build** |
-| Chat export → Word                                       | real `.docx` (`docx`)      | `.rtf` stand-in                       | Deferred (binary fidelity)    |
-| Chat export → Excel                                      | real `.xlsx` (`exceljs`)   | `.csv` stand-in                       | Deferred (binary fidelity)    |
-| Chat export → Slides                                     | real `.pptx` (`pptxgenjs`) | `.html` stand-in                      | Deferred (binary fidelity)    |
+| Surface                                                  | Website                    | Mobile                                 | Status                        |
+| -------------------------------------------------------- | -------------------------- | -------------------------------------- | ----------------------------- |
+| AI-generated files (`/public-ai/generate-file` → base64) | csv/xlsx/docx/pdf/pptx     | csv/xlsx/docx/pdf/pptx (saved/shared)  | **Full parity**               |
+| Generated / edited images                                | render + edit + download   | render + edit + photo-library save     | **Full parity**               |
+| Chat export → Markdown                                   | `.md`                      | `.md`                                  | **Full parity**               |
+| Chat export → JSON                                       | `.json`                    | `.json`                                | **Full parity**               |
+| Action-plan export → CSV                                 | `.csv`                     | `.csv`                                 | **Full parity**               |
+| Chat export → PDF                                        | browser print → PDF        | real `.pdf` via `expo-print`           | Real — **needs native build** |
+| Chat export → Word                                       | real `.docx` (`docx`)      | real `.docx` via backend `export-file` | **Full parity**               |
+| Chat export → Excel                                      | real `.xlsx` (`exceljs`)   | real `.xlsx` via backend `export-file` | **Full parity**               |
+| Chat export → Slides                                     | real `.pptx` (`pptxgenjs`) | real `.pptx` via backend `export-file` | **Full parity**               |
 
 ### PDF export requires a fresh native build (do not test on the old build)
 
@@ -49,27 +52,27 @@ Expected result on a rebuilt app:
 - [ ] The file name is `ora-report.pdf`.
 - [ ] The file opens as a real PDF in Files / Mail / Preview (not as HTML).
 
-### Intentionally deferred (and why) — do not rush into this build
+### Office export now uses the backend (gap closed)
 
-True binary `.docx` / `.xlsx` / `.pptx` for the **client-side chat export** menu
-is intentionally deferred and must not block this build:
+True binary `.docx` / `.xlsx` / `.pptx` for the **client-side chat export** menu is
+now produced server-side, so the earlier RN/Hermes binary-fidelity gap no longer
+applies:
 
-- The website's libraries are a poor fit for React Native / Hermes: `pptxgenjs`
-  assumes DOM/Blob, `exceljs` pulls in `Buffer`/Node polyfills, and SheetJS
-  (`xlsx`) is RN-supported but adds dependency/audit weight for a convenience
-  path. `docx` (`Packer.toBase64String`) is the most plausible later, but adding
-  heavy deps immediately before a build is unnecessary risk.
-- The capability that actually matters — **Ora generating a real document** — is
-  already full parity: backend-generated `.docx/.xlsx/.pdf/.pptx/.csv` arrive as
-  base64 and save/share natively (`saveGeneratedFile`).
-- The stand-ins are functional: `.rtf` opens in Word/Pages, `.csv` opens in
-  Excel/Numbers, `.html` opens in any browser and can print to PDF.
+- The chat export menu sends the Markdown the client already has to
+  `POST /public-ai/export-file` and receives a real `.docx/.xlsx/.pptx` (base64)
+  built by the same deterministic builders the website uses, then saves/shares it
+  natively (`saveGeneratedFile`). No Ora quota is consumed.
+- RN-hostile libraries (`pptxgenjs`, `exceljs`) stay server-only and are never
+  bundled into the app, which avoids the DOM/Blob/`Buffer` polyfill problems on
+  Hermes.
+- Ora generating a real document (`/public-ai/generate-file`) remains full parity
+  as before.
 
-If/when this gap is closed (each tested independently on Hermes/iOS first):
+Still to verify on a fresh native build (each format independently on device):
 
-- Word: `docx` with base64 output is the lowest-risk path.
-- Excel: evaluate an RN-safe SheetJS approach.
-- Slides: `pptxgenjs` is risky in RN (DOM/Blob); treat as the last/optional item.
+- [ ] Export → Word produces a real `.docx` that opens in Word/Pages.
+- [ ] Export → Excel produces a real `.xlsx` that opens in Excel/Numbers.
+- [ ] Export → Slides produces a real `.pptx` that opens in Keynote/PowerPoint.
 
 ## 2. Streaming behavior & non-SSE fallback parity (code-verified)
 
