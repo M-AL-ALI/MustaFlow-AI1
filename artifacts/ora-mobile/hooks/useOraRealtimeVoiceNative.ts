@@ -118,6 +118,12 @@ const MIN_MEANINGFUL_CHARS = 3;
 // A finalized transcript that arrives within this window after Ora's audio AND
 // echoes Ora's own recent words is treated as mic echo, not a user turn.
 const ECHO_GUARD_MS = 1200;
+// A transient `output_audio_buffer.stopped` can fire mid-reply (the realtime API
+// chunks playback) and is immediately followed by another `started`. Debounce the
+// stop -> "listening" UI flip by this long so Ora's status does not flicker
+// between speaking and listening during one continuous reply. `response.done` and
+// a client-initiated clear still flip immediately.
+const OUTPUT_STOP_DEBOUNCE_MS = 350;
 
 // ─── Transcript validity filter (mirrored in the website hook) ───────────────
 // Pure + surface-agnostic. Keep BYTE-FOR-BYTE identical to the copy in
@@ -607,6 +613,40 @@ function logVoiceDiag(event: string, detail?: Record<string, unknown>): void {
   console.info("[ora-realtime]", JSON.stringify({ event, ...detail }));
 }
 
+/**
+ * Per-turn latency marks (epoch ms) used to log privacy-safe timing deltas for
+ * each phase of a realtime turn: speech end -> transcript -> response.create ->
+ * model response -> audio playback -> done. Holds NO audio or transcript text.
+ */
+interface TurnTiming {
+  speechStartedAt: number;
+  speechStoppedAt: number;
+  transcriptCompletedAt: number;
+  responseCreateSentAt: number;
+  responseCreatedAt: number;
+  outputStartedAt: number;
+  outputStoppedAt: number;
+  outputCycles: number;
+}
+
+function newTurnTiming(): TurnTiming {
+  return {
+    speechStartedAt: 0,
+    speechStoppedAt: 0,
+    transcriptCompletedAt: 0,
+    responseCreateSentAt: 0,
+    responseCreatedAt: 0,
+    outputStartedAt: 0,
+    outputStoppedAt: 0,
+    outputCycles: 0,
+  };
+}
+
+/** Positive delta between two epoch-ms marks, or null when either is unset. */
+function deltaMs(from: number, to: number): number | null {
+  return from > 0 && to >= from ? to - from : null;
+}
+
 // ─── Guarded native-module load ─────────────────────────────────────────────
 
 type WebRTCModuleType = typeof import("react-native-webrtc");
@@ -728,6 +768,10 @@ export function useOraRealtimeVoiceNative(
   // window inside which follow-ups need no wake word.
   const focusModeRef = useRef<FocusMode>("focused");
   const lastAcceptedUserTurnAtRef = useRef(0);
+  // Per-turn latency marks + the debounce timer that smooths the playback-stop UI
+  // flip (see OUTPUT_STOP_DEBOUNCE_MS).
+  const turnTimingRef = useRef<TurnTiming>(newTurnTiming());
+  const outputStopDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearDurationTimer = useCallback(() => {
     if (durationTimerRef.current) {
@@ -750,6 +794,10 @@ export function useOraRealtimeVoiceNative(
     startGenerationRef.current += 1;
     clearDurationTimer();
     clearBargeInTimer();
+    if (outputStopDebounceRef.current) {
+      clearTimeout(outputStopDebounceRef.current);
+      outputStopDebounceRef.current = null;
+    }
     assistantResponseActiveRef.current = false;
     assistantSpeakingRef.current = false;
     sdpAbortRef.current?.abort();
@@ -851,8 +899,17 @@ export function useOraRealtimeVoiceNative(
       }
       if (!pendingBargeInRef.current) return;
       pendingBargeInRef.current = false;
+      // A confirmed barge-in is an intentional hard stop — drop any pending stop
+      // debounce so the UI flips to "listening" immediately.
+      if (outputStopDebounceRef.current) {
+        clearTimeout(outputStopDebounceRef.current);
+        outputStopDebounceRef.current = null;
+      }
       stopAssistantOutput();
-      logVoiceDiag("assistant_cancelled_for_barge_in", { reason });
+      logVoiceDiag("assistant_cancelled_for_barge_in", {
+        reason,
+        output_cycles: turnTimingRef.current.outputCycles,
+      });
       if (activeRef.current) setState("listening");
     },
     [stopAssistantOutput],
@@ -904,9 +961,12 @@ export function useOraRealtimeVoiceNative(
 
       switch (type) {
         case "input_audio_buffer.speech_started":
+          turnTimingRef.current = newTurnTiming();
+          turnTimingRef.current.speechStartedAt = Date.now();
           logVoiceDiag("speech_started", {
             assistantActive: assistantResponseActiveRef.current,
             assistantSpeaking: assistantSpeakingRef.current,
+            focus_mode: focusModeRef.current,
           });
           userTextRef.current = "";
           setInterimUserTranscript("");
@@ -944,7 +1004,14 @@ export function useOraRealtimeVoiceNative(
           }
           break;
         case "input_audio_buffer.speech_stopped":
-          logVoiceDiag("speech_stopped", { pendingBargeIn: pendingBargeInRef.current });
+          turnTimingRef.current.speechStoppedAt = Date.now();
+          logVoiceDiag("speech_stopped", {
+            pendingBargeIn: pendingBargeInRef.current,
+            since_speech_started_ms: deltaMs(
+              turnTimingRef.current.speechStartedAt,
+              turnTimingRef.current.speechStoppedAt,
+            ),
+          });
           if (pendingBargeInRef.current) {
             // Speech ended before it could be confirmed: treat as a noise blip and
             // leave Ora speaking.
@@ -981,6 +1048,15 @@ export function useOraRealtimeVoiceNative(
           const trimmed = (finalText || "").trim();
           const focusMode = focusModeRef.current;
           const msSinceLastAcceptedTurn = Date.now() - lastAcceptedUserTurnAtRef.current;
+          turnTimingRef.current.transcriptCompletedAt = Date.now();
+          logVoiceDiag("transcript_completed", {
+            chars: trimmed.length,
+            focus_mode: focusMode,
+            speech_stopped_to_transcript_completed_ms: deltaMs(
+              turnTimingRef.current.speechStoppedAt,
+              turnTimingRef.current.transcriptCompletedAt,
+            ),
+          });
           const verdict = scoreTranscriptFocus(trimmed, {
             focusMode,
             sinceAssistantAudioMs: Date.now() - lastAssistantAudioAtRef.current,
@@ -1006,7 +1082,14 @@ export function useOraRealtimeVoiceNative(
             // an accepted, addressed/engaged turn. Rejected background speech never
             // reaches this line, so Ora stays silent for other speakers.
             if (focusMode === "focused") {
+              turnTimingRef.current.responseCreateSentAt = Date.now();
               sendEvent({ type: "response.create" });
+              logVoiceDiag("response_create_sent", {
+                transcript_completed_to_response_create_sent_ms: deltaMs(
+                  turnTimingRef.current.transcriptCompletedAt,
+                  turnTimingRef.current.responseCreateSentAt,
+                ),
+              });
             }
           } else {
             logVoiceDiag("transcript_rejected", {
@@ -1037,12 +1120,28 @@ export function useOraRealtimeVoiceNative(
           setInterimUserTranscript("");
           break;
 
-        case "response.created":
+        case "response.created": {
+          const createdAt = Date.now();
+          const t = turnTimingRef.current;
+          t.responseCreatedAt = createdAt;
+          t.outputCycles = 0;
+          t.outputStartedAt = 0;
+          t.outputStoppedAt = 0;
           assistantResponseActiveRef.current = true;
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
+          logVoiceDiag("response_created", {
+            focus_mode: focusModeRef.current,
+            response_create_sent_to_response_created_ms: deltaMs(t.responseCreateSentAt, createdAt),
+            transcript_completed_to_response_created_ms: deltaMs(
+              t.transcriptCompletedAt,
+              createdAt,
+            ),
+            speech_stopped_to_response_created_ms: deltaMs(t.speechStoppedAt, createdAt),
+          });
           if (activeRef.current) setState("thinking");
           break;
+        }
 
         case "response.audio_transcript.delta":
         case "response.output_audio_transcript.delta":
@@ -1084,31 +1183,88 @@ export function useOraRealtimeVoiceNative(
           break;
         }
 
-        case "output_audio_buffer.started":
+        case "output_audio_buffer.started": {
+          const now = Date.now();
+          const t = turnTimingRef.current;
+          t.outputCycles += 1;
+          // Audio is (re)starting, so any pending stop -> "listening" flip from a
+          // transient `stopped` was premature — cancel it.
+          if (outputStopDebounceRef.current) {
+            clearTimeout(outputStopDebounceRef.current);
+            outputStopDebounceRef.current = null;
+          }
           assistantSpeakingRef.current = true;
-          lastAssistantAudioAtRef.current = Date.now();
+          lastAssistantAudioAtRef.current = now;
           if (remoteTrackRef.current) remoteTrackRef.current.enabled = !mutedRef.current;
+          if (t.outputCycles === 1) {
+            t.outputStartedAt = now;
+            logVoiceDiag("output_audio_started", {
+              response_created_to_output_started_ms: deltaMs(t.responseCreatedAt, now),
+            });
+          } else {
+            logVoiceDiag("output_audio_restarted", { output_cycles: t.outputCycles });
+          }
           if (activeRef.current) setState("speaking");
           break;
+        }
         case "output_audio_buffer.stopped":
-        case "output_audio_buffer.cleared":
+        case "output_audio_buffer.cleared": {
+          const now = Date.now();
+          const t = turnTimingRef.current;
+          t.outputStoppedAt = now;
           assistantSpeakingRef.current = false;
-          lastAssistantAudioAtRef.current = Date.now();
+          lastAssistantAudioAtRef.current = now;
           // clientInitiated distinguishes our own confirmed barge-in cancel from a
           // server-driven cancel (e.g. server VAD interrupt_response). A
           // clientInitiated:false clear while Ora was mid-turn means the BACKEND —
           // not noise on the client — cut Ora off.
+          const clientInitiated = now - clientCancelledAtRef.current < 1000;
           logVoiceDiag("output_audio_stopped", {
             type,
-            clientInitiated: Date.now() - clientCancelledAtRef.current < 1000,
+            clientInitiated,
+            output_cycles: t.outputCycles,
+            output_started_to_output_stopped_ms: deltaMs(t.outputStartedAt, now),
           });
-          if (activeRef.current) setState("listening");
+          // A client-initiated clear (our own confirmed barge-in) is an intentional
+          // hard stop — flip to "listening" now. Otherwise the realtime API can emit
+          // a transient `stopped` mid-reply that is immediately followed by another
+          // `started`; debounce the flip so the status does not flicker. If audio
+          // restarts the debounce is cancelled; `response.done` flips immediately.
+          if (clientInitiated && type === "output_audio_buffer.cleared") {
+            if (outputStopDebounceRef.current) {
+              clearTimeout(outputStopDebounceRef.current);
+              outputStopDebounceRef.current = null;
+            }
+            if (activeRef.current) setState("listening");
+          } else {
+            if (outputStopDebounceRef.current) clearTimeout(outputStopDebounceRef.current);
+            outputStopDebounceRef.current = setTimeout(() => {
+              outputStopDebounceRef.current = null;
+              if (activeRef.current && !assistantSpeakingRef.current) {
+                setState("listening");
+              }
+            }, OUTPUT_STOP_DEBOUNCE_MS);
+          }
           break;
+        }
 
-        case "response.done":
+        case "response.done": {
+          const doneAt = Date.now();
+          const t = turnTimingRef.current;
           assistantResponseActiveRef.current = false;
           assistantSpeakingRef.current = false;
           clearBargeInTimer();
+          // response.done is the authoritative end of the reply: cancel any pending
+          // stop debounce and flip to "listening" without flicker.
+          if (outputStopDebounceRef.current) {
+            clearTimeout(outputStopDebounceRef.current);
+            outputStopDebounceRef.current = null;
+          }
+          logVoiceDiag("response_done", {
+            output_cycles: t.outputCycles,
+            output_stopped_to_response_done_ms: deltaMs(t.outputStoppedAt, doneAt),
+            speech_stopped_to_response_done_ms: deltaMs(t.speechStoppedAt, doneAt),
+          });
           if (assistantTextRef.current.trim()) {
             const trimmed = assistantTextRef.current.trim();
             if (activeRef.current) {
@@ -1120,6 +1276,7 @@ export function useOraRealtimeVoiceNative(
           }
           if (activeRef.current) setState("listening");
           break;
+        }
 
         default:
           break;
