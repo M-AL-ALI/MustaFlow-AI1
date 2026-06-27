@@ -1,0 +1,216 @@
+TASK: Make Talk to Ora focus on the main user like ChatGPT Voice
+
+Context:
+Talk to Ora is now more stable, but it still listens to nearby people. If someone beside or behind the user talks, Ora may treat that speech as the user and respond. This is not just noise; it is valid human speech from the wrong person.
+
+Goal:
+Ora Website = Ora Mobile = ChatGPT-like voice behavior.
+
+Talk to Ora should not behave like an open room recorder. It should stay focused on the primary user, ignore side conversations when possible, and only respond when the main user is clearly talking to Ora.
+
+IMPORTANT:
+Do not cut TestFlight or build yet. Close this voice-focus gap first.
+
+Root cause:
+The realtime session currently allows OpenAI VAD to auto-create responses after detected speech. That means any nearby speaker can trigger Ora.
+
+Required architecture change:
+In Focused mode, the client must own response creation.
+
+Old behavior:
+OpenAI VAD hears speech → automatically creates Ora response.
+
+New behavior:
+OpenAI VAD hears speech → transcript candidate arrives → Ora client scores it → if accepted, client sends response.create → Ora replies.
+
+If rejected, Ora must not respond and must not change language.
+
+Required work:
+
+1. Add focusMode to realtime session context.
+
+Modes:
+- focused: default, ChatGPT-like, rejects likely side conversation
+- normal: looser/open-room behavior if needed
+
+Website and mobile must both send focusMode when starting Talk to Ora.
+
+2. Backend realtime session must support focusMode.
+
+If focusMode = focused:
+turn_detection.create_response = false
+
+If focusMode = normal:
+turn_detection.create_response = true
+
+If focusMode is missing:
+keep legacy-safe behavior so older builds do not go silent.
+
+Do not break old clients.
+
+3. Client-owned response creation in focused mode.
+
+When a finalized transcript arrives:
+- score the transcript
+- reject likely background/side conversation
+- accept clear user-directed speech
+- only after acceptance, send response.create
+
+In focused mode, never allow rejected speech to trigger Ora.
+
+4. Add a focus window.
+
+When the user starts Talk to Ora or speaks a valid accepted turn:
+- open an active focus window, around 10–15 seconds
+
+During the focus window:
+- accept natural follow-up speech more easily
+
+Outside the focus window:
+- require clearer direction, such as:
+  - “Ora”
+  - “Hey Ora”
+  - direct question
+  - direct command
+  - obvious continuation addressed to Ora
+
+5. Add transcript scoring / filtering.
+
+Reject candidates when:
+- empty or whitespace
+- too short
+- filler-only, such as “uh”, “um”, “hmm”
+- echo-like / close to Ora’s own recent speech
+- too soon after Ora output
+- outside focus window and not directed to Ora
+- likely side conversation
+
+Accept candidates when:
+- user says “Ora” or “Hey Ora”
+- direct question
+- direct command
+- valid follow-up inside focus window
+- clear stop / yes / no command when appropriate
+
+6. Protect language behavior.
+
+Rejected speech must not affect language.
+
+If another person nearby speaks English, Arabic, or another language, Ora must not switch language because of that rejected speech.
+
+Only accepted user turns may affect Auto language behavior.
+
+If user explicitly selected a reply language, Ora must stay in that language.
+
+7. Barge-in must respect focus.
+
+Do not stop Ora just because nearby speech starts.
+
+In focused mode:
+- only confirmed user barge-in should stop Ora
+- side speech should not interrupt Ora
+- Ora should not stop mid-sentence because someone else talks nearby
+
+8. Add privacy-safe diagnostics.
+
+Log structured events, not raw audio:
+- transcript_candidate
+- transcript_accepted
+- transcript_rejected
+- rejection_reason
+- focus_window_active
+- response_create_sent
+- barge_in_accepted
+- barge_in_rejected
+- focusMode
+- selected_language
+
+Do not log raw audio.
+Avoid raw transcript logging in production unless debug-enabled.
+
+9. Apply this equally to:
+
+Website:
+artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts
+
+Mobile:
+artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts
+
+Backend:
+artifacts/api-server/src/routes/public-ai/realtime.ts
+
+Website and mobile behavior must match.
+
+10. Add settings / preference.
+
+Add Talk to Ora Focus Mode setting:
+
+Default:
+Focused
+
+Optional mode:
+Normal
+
+Focused = ChatGPT-like, ignores side conversation.
+Normal = looser open listening.
+
+11. Tests required.
+
+Backend tests:
+- focused mode sets create_response false
+- normal mode sets create_response true
+- missing focusMode remains legacy-safe
+- invalid focusMode rejects cleanly
+- realtime session still mints successfully
+
+Web/mobile parity tests:
+- focus scoring logic matches on website and mobile
+- same transcript is accepted/rejected on both platforms
+
+Behavior tests:
+- silence + nearby speaker should not create Ora response
+- “Ora…” should create response
+- valid follow-up inside focus window should create response
+- rejected background speech should not change language
+- rejected background speech should not interrupt Ora
+- accepted user barge-in should stop Ora quickly
+
+12. QA checklist before any build.
+
+Website first:
+A. User silent, another person talks nearby:
+Expected: Ora does not respond.
+
+B. Ora speaking, another person talks nearby:
+Expected: Ora keeps speaking and does not stop herself.
+
+C. User intentionally interrupts Ora:
+Expected: Ora stops quickly and listens.
+
+D. User says “Ora…”:
+Expected: Ora accepts and responds.
+
+E. Arabic:
+Expected: transcript and spoken reply stay Arabic.
+
+F. English:
+Expected: transcript and spoken reply stay English.
+
+G. Background person speaks different language:
+Expected: Ora does not switch language.
+
+Then mobile:
+A. iPhone speaker mode
+B. AirPods/headphones
+C. Mic dictation still separate and working
+D. Same Arabic/English checks
+E. Same background-speaker checks
+
+Definition of done:
+Talk to Ora should no longer behave like an open room recorder.
+Ora should stay focused on the main user.
+Nearby side conversations should not trigger Ora replies.
+Nearby speech should not interrupt Ora.
+Rejected side speech should not change language.
+Website and mobile must behave the same.
+No TestFlight build until this passes on the website first.

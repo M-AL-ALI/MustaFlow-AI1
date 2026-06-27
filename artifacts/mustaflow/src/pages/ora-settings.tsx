@@ -289,11 +289,7 @@ function FocusModeSection() {
               : "Ora replies to any nearby speech (original behavior)."}
           </p>
         </div>
-        <Switch
-          checked={focused}
-          onCheckedChange={handleToggle}
-          aria-label="Focused listening"
-        />
+        <Switch checked={focused} onCheckedChange={handleToggle} aria-label="Focused listening" />
       </div>
     </SectionCard>
   );

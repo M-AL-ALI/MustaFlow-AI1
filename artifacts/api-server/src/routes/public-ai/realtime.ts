@@ -144,10 +144,13 @@ function resolveInterruptResponse(): boolean {
  *    explicit `response.create` ONLY for transcripts that clear its speaker-focus
  *    filter, so Ora stops answering nearby background speakers.
  */
-function resolveTurnDetection(
-  createResponse: boolean,
-):
-  | { type: "semantic_vad"; eagerness: string; create_response: boolean; interrupt_response: boolean }
+function resolveTurnDetection(createResponse: boolean):
+  | {
+      type: "semantic_vad";
+      eagerness: string;
+      create_response: boolean;
+      interrupt_response: boolean;
+    }
   | {
       type: "server_vad";
       threshold: number;

@@ -267,11 +267,49 @@ const ADDRESS_LEAD_WORDS = new Set(["hey", "hi", "hello", "ok", "okay", "yo"]);
 // Question / imperative lead words: a transcript starting with one reads as a
 // directed request even without a wake word (handles cold-start English turns).
 const DIRECT_LEAD_WORDS = new Set([
-  "what", "whats", "why", "how", "when", "where", "who", "which", "whose",
-  "can", "could", "would", "will", "should", "do", "does", "did", "is", "are",
-  "was", "were", "please", "tell", "explain", "show", "give", "help", "make",
-  "write", "find", "search", "translate", "summarize", "summarise", "create",
-  "read", "open", "list", "define", "describe", "compare", "calculate", "convert",
+  "what",
+  "whats",
+  "why",
+  "how",
+  "when",
+  "where",
+  "who",
+  "which",
+  "whose",
+  "can",
+  "could",
+  "would",
+  "will",
+  "should",
+  "do",
+  "does",
+  "did",
+  "is",
+  "are",
+  "was",
+  "were",
+  "please",
+  "tell",
+  "explain",
+  "show",
+  "give",
+  "help",
+  "make",
+  "write",
+  "find",
+  "search",
+  "translate",
+  "summarize",
+  "summarise",
+  "create",
+  "read",
+  "open",
+  "list",
+  "define",
+  "describe",
+  "compare",
+  "calculate",
+  "convert",
 ]);
 
 /** True when the utterance names Ora at the start (a wake / address phrase). */
@@ -347,9 +385,7 @@ export const VOICE_FOCUS_STORAGE_KEY = "mustaflow_voice_focus";
 export function readStoredFocusMode(): FocusMode {
   if (typeof window === "undefined") return "focused";
   try {
-    return window.localStorage.getItem(VOICE_FOCUS_STORAGE_KEY) === "normal"
-      ? "normal"
-      : "focused";
+    return window.localStorage.getItem(VOICE_FOCUS_STORAGE_KEY) === "normal" ? "normal" : "focused";
   } catch {
     return "focused";
   }
@@ -710,8 +746,7 @@ export function useOraRealtimeVoice(
             // barge-in is gated (focused mode, outside the window) only an
             // addressed/directed partial may interrupt Ora.
             if (pendingBargeInRef.current && isPartialSpeechEvidence(userTextRef.current)) {
-              const directedEnough =
-                !bargeInGated() || isAddressedOrDirected(userTextRef.current);
+              const directedEnough = !bargeInGated() || isAddressedOrDirected(userTextRef.current);
               if (directedEnough) confirmBargeIn("transcript_delta");
             }
           }

@@ -245,11 +245,49 @@ const ADDRESS_LEAD_WORDS = new Set(["hey", "hi", "hello", "ok", "okay", "yo"]);
 // Question / imperative lead words: a transcript starting with one reads as a
 // directed request even without a wake word (handles cold-start English turns).
 const DIRECT_LEAD_WORDS = new Set([
-  "what", "whats", "why", "how", "when", "where", "who", "which", "whose",
-  "can", "could", "would", "will", "should", "do", "does", "did", "is", "are",
-  "was", "were", "please", "tell", "explain", "show", "give", "help", "make",
-  "write", "find", "search", "translate", "summarize", "summarise", "create",
-  "read", "open", "list", "define", "describe", "compare", "calculate", "convert",
+  "what",
+  "whats",
+  "why",
+  "how",
+  "when",
+  "where",
+  "who",
+  "which",
+  "whose",
+  "can",
+  "could",
+  "would",
+  "will",
+  "should",
+  "do",
+  "does",
+  "did",
+  "is",
+  "are",
+  "was",
+  "were",
+  "please",
+  "tell",
+  "explain",
+  "show",
+  "give",
+  "help",
+  "make",
+  "write",
+  "find",
+  "search",
+  "translate",
+  "summarize",
+  "summarise",
+  "create",
+  "read",
+  "open",
+  "list",
+  "define",
+  "describe",
+  "compare",
+  "calculate",
+  "convert",
 ]);
 
 /** True when the utterance names Ora at the start (a wake / address phrase). */
@@ -681,8 +719,7 @@ export function useOraRealtimeVoiceNative(
             // A genuine (non-filler) partial transcript is strong evidence of a
             // real interruption — confirm immediately so Ora stops fast.
             if (pendingBargeInRef.current && isPartialSpeechEvidence(userTextRef.current)) {
-              const directedEnough =
-                !bargeInGated() || isAddressedOrDirected(userTextRef.current);
+              const directedEnough = !bargeInGated() || isAddressedOrDirected(userTextRef.current);
               if (directedEnough) confirmBargeIn("transcript_delta");
             }
           }
