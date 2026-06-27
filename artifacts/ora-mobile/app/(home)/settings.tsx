@@ -1061,7 +1061,7 @@ export default function SettingsScreen() {
           ) : null}
 
           <Button
-            label={diagLoading ? "Running diagnostics…" : "Run diagnostics"}
+            label={diagLoading ? "Testing Ora chat…" : "Test Ora chat"}
             onPress={runDiagnostics}
             disabled={diagLoading}
             full
