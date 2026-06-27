@@ -1368,6 +1368,7 @@ export function useOraRealtimeVoiceNative(
           conversationId: ctx.conversationId ?? null,
           message: ctx.message,
           focusMode,
+          voicePreset: ctx.voicePreset,
         });
       } catch (err) {
         // Superseded/cancelled while minting: a newer start()/teardown() took

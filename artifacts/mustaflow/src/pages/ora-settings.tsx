@@ -37,6 +37,10 @@ import {
   readStoredFocusMode,
   VOICE_FOCUS_STORAGE_KEY,
   type FocusMode,
+  type VoicePreset,
+  getStoredVoicePreset,
+  writeStoredVoicePreset,
+  VOICE_PRESET_LABELS,
 } from "@/hooks/use-ora-realtime-voice";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
 import {
@@ -301,8 +305,11 @@ interface RealtimeDiagnostics {
   enabled: boolean;
   configured: boolean;
   killSwitch: boolean;
-  model: string;
-  defaultVoice: string;
+  // Product-safe diagnostics: the underlying model and raw provider voice id are
+  // never sent to the client. Only the product voice preset/label is exposed.
+  defaultVoicePreset: VoicePreset | null;
+  defaultVoiceLabel: string;
+  voices: Array<{ key: VoicePreset; label: string }>;
   tier: string;
   maxDurationSeconds: number;
 }
@@ -392,7 +399,13 @@ function LiveVoiceSection() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [micPermission, setMicPermission] = useState<string>("unknown");
+  const [voicePreset, setVoicePresetState] = useState<VoicePreset>(() => getStoredVoicePreset());
   const supported = detectLiveVoiceSupport();
+
+  const handleVoicePresetChange = (preset: VoicePreset) => {
+    setVoicePresetState(preset);
+    writeStoredVoicePreset(preset);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -478,11 +491,28 @@ function LiveVoiceSection() {
 
           {diag && (
             <>
-              <DiagRow label="Model">
-                <span className="font-mono text-foreground">{diag.model}</span>
-              </DiagRow>
               <DiagRow label="Voice">
-                <span className="capitalize text-foreground">{diag.defaultVoice}</span>
+                <span className="flex items-center gap-1.5">
+                  {(diag.voices?.length
+                    ? diag.voices
+                    : [
+                        { key: "marine" as VoicePreset, label: VOICE_PRESET_LABELS.marine },
+                        { key: "mustafa" as VoicePreset, label: VOICE_PRESET_LABELS.mustafa },
+                      ]
+                  ).map((v) => (
+                    <Button
+                      key={v.key}
+                      type="button"
+                      size="sm"
+                      variant={voicePreset === v.key ? "default" : "outline"}
+                      className="h-7 px-3"
+                      aria-pressed={voicePreset === v.key}
+                      onClick={() => handleVoicePresetChange(v.key)}
+                    >
+                      {v.label}
+                    </Button>
+                  ))}
+                </span>
               </DiagRow>
               <DiagRow label="Max session length">
                 <span className="text-foreground">{formatDuration(diag.maxDurationSeconds)}</span>

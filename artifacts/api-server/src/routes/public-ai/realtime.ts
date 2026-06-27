@@ -31,7 +31,6 @@ const router = Router();
 const OPENAI_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets";
 
 const DEFAULT_REALTIME_MODEL = "gpt-realtime-mini";
-const DEFAULT_REALTIME_VOICE = "marin";
 const DEFAULT_REALTIME_VAD_TYPE = "semantic_vad";
 const DEFAULT_REALTIME_VAD_EAGERNESS = "low";
 const DEFAULT_REALTIME_VAD_THRESHOLD = 0.5;
@@ -52,6 +51,59 @@ const REALTIME_VOICES = [
   "shimmer",
   "verse",
 ] as const;
+
+/**
+ * Product-facing voice presets. The customer UI only ever shows these product
+ * labels (Marine / Mustafa); the raw provider voice IDs below are an internal
+ * implementation detail and are never returned to, or selectable by, normal
+ * clients. Marine is the female voice (provider "marin", the long-standing
+ * default); Mustafa is the male voice (provider "cedar", verified against the
+ * current realtime model). A valid ORA_REALTIME_VOICE env override stays
+ * compatible via resolveVoice() and is reported as a "Custom voice" when it is
+ * not one of these two product voices.
+ */
+const VOICE_PRESETS = {
+  marine: "marin",
+  mustafa: "cedar",
+} as const;
+
+type VoicePresetKey = keyof typeof VOICE_PRESETS;
+
+const DEFAULT_VOICE_PRESET: VoicePresetKey = "marine";
+
+// The provider voice used when no product preset / valid raw voice / env override
+// applies. Derived from the default product preset so the two never drift.
+const DEFAULT_REALTIME_VOICE = VOICE_PRESETS[DEFAULT_VOICE_PRESET];
+
+const VOICE_PRESET_LABELS: Record<VoicePresetKey, string> = {
+  marine: "Marine",
+  mustafa: "Mustafa",
+};
+
+/** Product options surfaced to clients so the selector stays server-driven. */
+const VOICE_PRESET_OPTIONS: { key: VoicePresetKey; label: string }[] = (
+  Object.keys(VOICE_PRESETS) as VoicePresetKey[]
+).map((key) => ({ key, label: VOICE_PRESET_LABELS[key] }));
+
+function isVoicePreset(value: string | undefined): value is VoicePresetKey {
+  return !!value && Object.prototype.hasOwnProperty.call(VOICE_PRESETS, value);
+}
+
+/**
+ * Reverse-map a resolved provider voice to its product preset, or null when the
+ * provider voice (e.g. an ORA_REALTIME_VOICE override like "sage") is not one of
+ * the two product voices. The raw provider id is never exposed to clients.
+ */
+function presetForProviderVoice(voice: string): VoicePresetKey | null {
+  for (const key of Object.keys(VOICE_PRESETS) as VoicePresetKey[]) {
+    if (VOICE_PRESETS[key] === voice) return key;
+  }
+  return null;
+}
+
+function voiceLabelForPreset(preset: VoicePresetKey | null): string {
+  return preset ? VOICE_PRESET_LABELS[preset] : "Custom voice";
+}
 
 /**
  * Spoken-conversation behaviour layered on top of the standard Ora system
@@ -76,6 +128,10 @@ const bodySchema = z.object({
   language: z.string().max(20).optional(),
   languageHint: z.string().max(40).optional(),
   voice: z.string().max(40).optional(),
+  // Product-facing voice selection sent by normal clients (never a raw provider
+  // voice id). The server maps it to a provider voice: marine -> female, mustafa
+  // -> male. An invalid value is rejected (400) rather than silently swapped.
+  voicePreset: z.enum(["marine", "mustafa"]).optional(),
   // Speaker-focus mode. "focused" (default) makes the SERVER stop auto-responding
   // (turn_detection.create_response=false) so the CLIENT decides — via its focus
   // filter — which transcripts deserve a reply, keeping Ora from answering nearby
@@ -114,6 +170,26 @@ function resolveVoice(requested: string | undefined): string {
   const envVoice = process.env.ORA_REALTIME_VOICE;
   if (envVoice && (REALTIME_VOICES as readonly string[]).includes(envVoice)) return envVoice;
   return DEFAULT_REALTIME_VOICE;
+}
+
+/**
+ * Resolve the provider voice + product preset for a session. A valid product
+ * `voicePreset` always wins (this is what normal clients send). Otherwise we fall
+ * back to the legacy raw `voice` param / ORA_REALTIME_VOICE env override / default
+ * and reverse-map the result to a product preset when it maps to one. The raw
+ * provider voice is used ONLY for the upstream OpenAI mint; clients receive the
+ * product preset + label.
+ */
+function resolveVoiceSelection(
+  preset: string | undefined,
+  requestedVoice: string | undefined,
+): { voice: string; preset: VoicePresetKey | null; label: string } {
+  if (isVoicePreset(preset)) {
+    return { voice: VOICE_PRESETS[preset], preset, label: VOICE_PRESET_LABELS[preset] };
+  }
+  const voice = resolveVoice(requestedVoice);
+  const mapped = presetForProviderVoice(voice);
+  return { voice, preset: mapped, label: voiceLabelForPreset(mapped) };
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -334,7 +410,8 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
   }
 
   const model = process.env.ORA_REALTIME_MODEL?.trim() || DEFAULT_REALTIME_MODEL;
-  const voice = resolveVoice(parsed.data.voice);
+  const voiceSelection = resolveVoiceSelection(parsed.data.voicePreset, parsed.data.voice);
+  const voice = voiceSelection.voice;
   // Speaker-focus posture. In Focused mode the server does NOT auto-respond
   // (create_response=false); the client owns response creation so Ora only replies
   // to transcripts that clear its focus filter. Normal mode keeps the legacy
@@ -429,7 +506,20 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     );
 
     res.setHeader("Cache-Control", "no-store");
-    res.json({ value, expiresAt, model, voice, maxDurationSeconds, focusMode, createResponse });
+    // `model` is internal WebRTC transport data (the client builds the realtime
+    // calls URL as ?model=...); it is required here but is NEVER shown in any
+    // user-facing surface. The raw provider voice is intentionally NOT returned —
+    // only the product preset + label, so customers never see provider voice ids.
+    res.json({
+      value,
+      expiresAt,
+      model,
+      voicePreset: voiceSelection.preset,
+      voiceLabel: voiceSelection.label,
+      maxDurationSeconds,
+      focusMode,
+      createResponse,
+    });
   } catch (err) {
     logger.warn({ component: "ora-realtime", err }, "Ora realtime mint threw");
     res.status(502).json({ error: "Voice conversation failed to start. Please try again." });
@@ -458,13 +548,17 @@ router.get("/public-ai/realtime/diagnostics", async (req, res) => {
     // Best-effort — diagnostics must never block on auth resolution.
   }
 
+  // Product-safe diagnostics: the underlying model/provider and raw provider
+  // voice ids are deliberately omitted so they never surface in the settings UI.
+  const defaultSelection = resolveVoiceSelection(undefined, undefined);
   res.setHeader("Cache-Control", "no-store");
   res.json({
     enabled: !killSwitch && !envDisabled,
     configured,
     killSwitch,
-    model: process.env.ORA_REALTIME_MODEL?.trim() || DEFAULT_REALTIME_MODEL,
-    defaultVoice: resolveVoice(undefined),
+    defaultVoicePreset: defaultSelection.preset,
+    defaultVoiceLabel: defaultSelection.label,
+    voices: VOICE_PRESET_OPTIONS,
     tier,
     maxDurationSeconds: maxDurationForTier(tier),
   });

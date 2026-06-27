@@ -317,7 +317,11 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(res.status).toBe(200);
     expect(res.body.value).toBe("ek_test_secret_value");
     expect(res.body.model).toBe("gpt-realtime-mini");
-    expect(res.body.voice).toBe("marin");
+    // The customer-facing surface only ever sees the product voice (Marine/Mustafa),
+    // never the raw provider voice id ("marin").
+    expect(res.body.voicePreset).toBe("marine");
+    expect(res.body.voiceLabel).toBe("Marine");
+    expect(res.body.voice).toBeUndefined();
     expect(res.body.maxDurationSeconds).toBe(300);
     expect(res.body.expiresAt).toBe(1900000000);
     expect(res.headers["cache-control"]).toBe("no-store");
@@ -636,34 +640,84 @@ describe("Talk to Ora realtime — spend cap", () => {
 // ─── 8. Voice + model overrides ───────────────────────────────────────────────
 
 describe("Talk to Ora realtime — voice + model resolution", () => {
-  it("valid requested voice is honored", async () => {
+  it("voicePreset 'marine' maps to the female provider voice, echoed as a product preset", async () => {
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
-      .send({ voice: "cedar" });
-    expect(res.body.voice).toBe("cedar");
+      .send({ voicePreset: "marine" });
+    expect(res.body.voicePreset).toBe("marine");
+    expect(res.body.voiceLabel).toBe("Marine");
+    expect(res.body.voice).toBeUndefined();
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.output.voice).toBe("marin");
+  });
+
+  it("voicePreset 'mustafa' maps to the male provider voice, echoed as a product preset", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ voicePreset: "mustafa" });
+    expect(res.body.voicePreset).toBe("mustafa");
+    expect(res.body.voiceLabel).toBe("Mustafa");
     const { body } = mintBodyFromFetch(fetchMock);
     expect(body.session.audio.output.voice).toBe("cedar");
   });
 
-  it("invalid requested voice falls back to default", async () => {
+  it("invalid voicePreset → 400, no mint", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ voicePreset: "robot" });
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("voicePreset wins over a legacy raw voice param", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ voicePreset: "mustafa", voice: "marin" });
+    expect(res.body.voicePreset).toBe("mustafa");
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.output.voice).toBe("cedar");
+  });
+
+  it("legacy raw voice is still honored upstream but echoed only as a product preset", async () => {
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({ voice: "cedar" });
+    // Raw voice is reverse-mapped to its product preset; the raw id is never echoed.
+    expect(res.body.voicePreset).toBe("mustafa");
+    expect(res.body.voice).toBeUndefined();
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.output.voice).toBe("cedar");
+  });
+
+  it("invalid requested voice falls back to the default product preset", async () => {
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
       .send({ voice: "definitely-not-a-voice" });
-    expect(res.body.voice).toBe("marin");
+    expect(res.body.voicePreset).toBe("marine");
+    expect(res.body.voiceLabel).toBe("Marine");
   });
 
-  it("ORA_REALTIME_VOICE env override is used when no valid request voice", async () => {
+  it("ORA_REALTIME_VOICE env override is used upstream but reported as a Custom voice when unmapped", async () => {
     process.env.ORA_REALTIME_VOICE = "sage";
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
       .send({});
-    expect(res.body.voice).toBe("sage");
+    // sage is a valid provider voice but not a product preset → never exposed by id.
+    expect(res.body.voicePreset).toBeNull();
+    expect(res.body.voiceLabel).toBe("Custom voice");
+    expect(res.body.voice).toBeUndefined();
+    const { body } = mintBodyFromFetch(fetchMock);
+    expect(body.session.audio.output.voice).toBe("sage");
   });
 
-  it("ORA_REALTIME_MODEL env override is forwarded to the mint", async () => {
+  it("ORA_REALTIME_MODEL env override is forwarded to the mint (internal transport only)", async () => {
     process.env.ORA_REALTIME_MODEL = "gpt-realtime";
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
@@ -760,11 +814,19 @@ describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
       enabled: true,
       configured: true,
       killSwitch: false,
-      model: "gpt-realtime-mini",
-      defaultVoice: "marin",
+      defaultVoicePreset: "marine",
+      defaultVoiceLabel: "Marine",
       tier: "anonymous",
       maxDurationSeconds: 300,
     });
+    // Product-safe diagnostics never leak the underlying model/provider or raw
+    // provider voice ids to the settings UI.
+    expect(res.body.model).toBeUndefined();
+    expect(res.body.defaultVoice).toBeUndefined();
+    expect(res.body.voices).toEqual([
+      { key: "marine", label: "Marine" },
+      { key: "mustafa", label: "Mustafa" },
+    ]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(vi.mocked(checkOraSpendCapAsync)).not.toHaveBeenCalled();
   });
@@ -829,13 +891,16 @@ describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
     expect(res.body.maxDurationSeconds).toBe(300);
   });
 
-  it("respects ORA_REALTIME_MODEL / ORA_REALTIME_VOICE overrides", async () => {
+  it("maps an ORA_REALTIME_VOICE override to its product preset, never the raw id or model", async () => {
     process.env.ORA_REALTIME_MODEL = "gpt-realtime";
     process.env.ORA_REALTIME_VOICE = "cedar";
     const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
     expect(res.status).toBe(200);
-    expect(res.body.model).toBe("gpt-realtime");
-    expect(res.body.defaultVoice).toBe("cedar");
+    expect(res.body.defaultVoicePreset).toBe("mustafa");
+    expect(res.body.defaultVoiceLabel).toBe("Mustafa");
+    // No model name and no raw provider voice id in the product-facing diagnostics.
+    expect(res.body.model).toBeUndefined();
+    expect(res.body.defaultVoice).toBeUndefined();
   });
 });
 

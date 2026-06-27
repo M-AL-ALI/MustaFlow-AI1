@@ -132,12 +132,14 @@ import {
   uploadFile,
 } from "@/lib/api";
 import { readStoredFocusMode } from "@/lib/focus-mode";
+import { readStoredVoicePreset } from "@/lib/voice-preset";
 import type {
   Attachment,
   ChatRequest,
   ChatResponse,
   FileFormat,
   FocusMode,
+  VoicePreset,
   GeneratedFile,
   OraConversationSummary,
   OraMessage,
@@ -494,6 +496,9 @@ export default function OraChatScreen() {
   // Speaker-focus posture for realtime voice. Client-only (AsyncStorage), read
   // here and passed into the realtime session start ctx; default "focused".
   const focusModeRef = useRef<FocusMode>("focused");
+  // Product voice for realtime voice. Client-only (AsyncStorage), read here and
+  // passed into the realtime session start ctx; default "marine".
+  const voicePresetRef = useRef<VoicePreset>("marine");
 
   const loadPreferences = useCallback(() => {
     getPreferences()
@@ -505,6 +510,11 @@ export default function OraChatScreen() {
     readStoredFocusMode()
       .then((mode) => {
         focusModeRef.current = mode;
+      })
+      .catch(() => {});
+    readStoredVoicePreset()
+      .then((preset) => {
+        voicePresetRef.current = preset;
       })
       .catch(() => {});
   }, []);
@@ -1686,6 +1696,7 @@ export default function OraChatScreen() {
           message: lastUser?.content,
           history: recent,
           focusMode: focusModeRef.current,
+          voicePreset: voicePresetRef.current,
         })
         .then((result) => {
           // A newer start, or a stop / context switch / background teardown, has

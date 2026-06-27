@@ -187,14 +187,17 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
       conversationId: ctx.conversationId ?? null,
       message: ctx.message,
       focusMode: ctx.focusMode,
+      voicePreset: ctx.voicePreset,
     }),
   });
 }
 
 /**
  * Non-charging realtime diagnostics for the Settings card: server enable/config
- * state, kill switch, model, default voice, resolved tier, and the per-tier max
- * session length. Does NOT mint a token or consume any Ora quota.
+ * state, kill switch, the default product voice (preset + label), the available
+ * product voices, resolved tier, and the per-tier max session length. The
+ * underlying model and raw provider voice id are never returned. Does NOT mint a
+ * token or consume any Ora quota.
  */
 export function getRealtimeDiagnostics(): Promise<RealtimeDiagnostics> {
   return jsonRequest<RealtimeDiagnostics>("/api/public-ai/realtime/diagnostics");

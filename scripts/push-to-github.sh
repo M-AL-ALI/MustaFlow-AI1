@@ -36,6 +36,18 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
+  artifacts/api-server/src/routes/public-ai/realtime.ts \
+  artifacts/api-server/src/routes/public-ai/__tests__/realtime-session.test.ts \
+  artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts \
+  artifacts/mustaflow/src/pages/ora-settings.tsx \
+  artifacts/mustaflow/src/pages/__tests__/ora-live-voice-privacy.test.ts \
+  artifacts/ora-mobile/lib/types.ts \
+  artifacts/ora-mobile/lib/api.ts \
+  artifacts/ora-mobile/lib/voice-preset.ts \
+  artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts \
+  "artifacts/ora-mobile/app/(home)/index.tsx" \
+  "artifacts/ora-mobile/app/(home)/settings.tsx" \
+  artifacts/ora-mobile/lib/__tests__/live-voice-privacy.test.ts \
   scripts/push-to-github.sh \
   2>/dev/null || true
 

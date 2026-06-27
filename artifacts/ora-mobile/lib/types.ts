@@ -120,6 +120,13 @@ export interface OraUsage {
 /** Speaker-focus posture; persisted client-side (AsyncStorage). Default "focused". */
 export type FocusMode = "normal" | "focused";
 
+/**
+ * Product voice for spoken replies, persisted client-side (AsyncStorage).
+ * "marine" = female, "mustafa" = male. The server maps this to the underlying
+ * provider voice; the raw provider voice id is never sent to the device.
+ */
+export type VoicePreset = "marine" | "mustafa";
+
 export interface RealtimeSessionContext {
   language?: string;
   languageHint?: string;
@@ -135,6 +142,11 @@ export interface RealtimeSessionContext {
    * (rejecting nearby background speakers). "normal" keeps the legacy behavior.
    */
   focusMode?: FocusMode;
+  /**
+   * Product voice for this session. When omitted, the server applies the default
+   * ("marine"). The raw provider voice id is never sent from the device.
+   */
+  voicePreset?: VoicePreset;
 }
 
 /** Response from POST /public-ai/realtime/session — a short-lived ek_ token. */
@@ -142,7 +154,11 @@ export interface RealtimeSessionResult {
   value: string;
   expiresAt: number | null;
   model: string;
-  voice: string;
+  // The server returns the product preset/label, not the raw provider voice id.
+  // `voice` is kept optional only for back-compat and is not used by the client.
+  voice?: string;
+  voicePreset?: VoicePreset | null;
+  voiceLabel?: string;
   maxDurationSeconds: number;
   // Echoed back by the server so diagnostics can confirm the negotiated posture.
   focusMode?: FocusMode;
@@ -154,8 +170,11 @@ export interface RealtimeDiagnostics {
   enabled: boolean;
   configured: boolean;
   killSwitch: boolean;
-  model: string;
-  defaultVoice: string;
+  // Product-safe diagnostics: the underlying model and raw provider voice id are
+  // never sent to the client. Only the product voice preset/label is exposed.
+  defaultVoicePreset: VoicePreset | null;
+  defaultVoiceLabel: string;
+  voices: Array<{ key: VoicePreset; label: string }>;
   tier: string;
   maxDurationSeconds: number;
 }

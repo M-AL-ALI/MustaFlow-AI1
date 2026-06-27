@@ -71,6 +71,12 @@ export interface RealtimeStartContext {
    * open behavior. When omitted, the persisted preference is used.
    */
   focusMode?: FocusMode;
+  /**
+   * Product voice for the spoken reply ("marine" = female, "mustafa" = male).
+   * When omitted, the persisted preference is used. The server maps this to the
+   * underlying provider voice; the raw provider id is never exposed to the client.
+   */
+  voicePreset?: VoicePreset;
 }
 
 export interface UseOraRealtimeVoiceOptions {
@@ -643,6 +649,45 @@ export function readStoredFocusMode(): FocusMode {
   }
 }
 
+// ─── Web-only product-voice persistence (NOT part of the byte-identical block) ──
+// Marine (female) / Mustafa (male). Persisted per-browser via localStorage; the
+// server maps the preset to the underlying provider voice and never returns the
+// raw provider voice id. The mobile hook persists the same preference via
+// AsyncStorage instead.
+export type VoicePreset = "marine" | "mustafa";
+
+export const VOICE_PRESET_STORAGE_KEY = "mustaflow_voice_preset";
+
+export const DEFAULT_VOICE_PRESET: VoicePreset = "marine";
+
+/** Display labels for the product voices. */
+export const VOICE_PRESET_LABELS: Record<VoicePreset, string> = {
+  marine: "Marine",
+  mustafa: "Mustafa",
+};
+
+/** Read the persisted product-voice preference; defaults to "marine". */
+export function getStoredVoicePreset(): VoicePreset {
+  if (typeof window === "undefined") return DEFAULT_VOICE_PRESET;
+  try {
+    return window.localStorage.getItem(VOICE_PRESET_STORAGE_KEY) === "mustafa"
+      ? "mustafa"
+      : "marine";
+  } catch {
+    return DEFAULT_VOICE_PRESET;
+  }
+}
+
+/** Persist the product-voice preference for this browser. Best-effort. */
+export function writeStoredVoicePreset(preset: VoicePreset): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(VOICE_PRESET_STORAGE_KEY, preset);
+  } catch {
+    /* localStorage unavailable — keep the in-memory choice. */
+  }
+}
+
 /**
  * Structured, privacy-safe realtime voice diagnostics. Emits event names, counts,
  * reasons, and the selected language — NEVER raw audio or full transcript text —
@@ -691,7 +736,11 @@ interface MintResponse {
   value: string;
   expiresAt: number | null;
   model: string;
-  voice: string;
+  // The server no longer echoes the raw provider voice id; it returns the
+  // product preset + label instead. `voice` is kept optional only for back-compat.
+  voice?: string;
+  voicePreset?: VoicePreset | null;
+  voiceLabel?: string;
   maxDurationSeconds: number;
   // Echoed back by the server so diagnostics can confirm the negotiated posture.
   focusMode?: FocusMode;
@@ -1365,6 +1414,9 @@ export function useOraRealtimeVoice(
       // otherwise fall back to the persisted preference (default "focused").
       const focusMode = ctx.focusMode ?? readStoredFocusMode();
       focusModeRef.current = focusMode;
+      // Resolve the product voice once, at session start. Explicit ctx wins;
+      // otherwise fall back to the persisted preference (default "marine").
+      const voicePreset = ctx.voicePreset ?? getStoredVoicePreset();
       // Opening Talk to Ora is an explicit address: seed the focus window so the
       // user's first utterance is treated as engaged (no wake word required).
       lastAcceptedUserTurnAtRef.current = Date.now();
@@ -1393,6 +1445,7 @@ export function useOraRealtimeVoice(
             conversationId: ctx.conversationId ?? null,
             message: ctx.message,
             focusMode,
+            voicePreset,
           }),
         });
         if (!resp.ok) {

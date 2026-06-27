@@ -40,12 +40,18 @@ import {
   updatePreferences,
 } from "@/lib/api";
 import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
+import {
+  readStoredVoicePreset,
+  writeStoredVoicePreset,
+  VOICE_PRESET_LABELS,
+} from "@/lib/voice-preset";
 import type {
   BillingSubscription,
   BillingTierMeta,
   OraAccountConsistency,
   OraUsage,
   RealtimeDiagnostics,
+  VoicePreset,
 } from "@/lib/types";
 
 const APP_VERSION = Constants.expoConfig?.version ?? "1.0.0";
@@ -452,6 +458,8 @@ export default function SettingsScreen() {
   const [autoReadReplies, setAutoReadReplies] = useState(false);
   // Speaker focus is a client-only preference (this device). Default "focused".
   const [focusFocused, setFocusFocused] = useState(true);
+  // Product voice is a client-only preference (this device). Default "marine".
+  const [voicePreset, setVoicePresetState] = useState<VoicePreset>("marine");
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
   const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
@@ -460,6 +468,9 @@ export default function SettingsScreen() {
   useEffect(() => {
     readStoredFocusMode()
       .then((mode) => setFocusFocused(mode === "focused"))
+      .catch(() => {});
+    readStoredVoicePreset()
+      .then(setVoicePresetState)
       .catch(() => {});
     getPreferences()
       .then((p) => {
@@ -501,6 +512,11 @@ export default function SettingsScreen() {
   const toggleFocusMode = useCallback((value: boolean) => {
     setFocusFocused(value);
     void writeStoredFocusMode(value ? "focused" : "normal");
+  }, []);
+
+  const changeVoicePreset = useCallback((preset: VoicePreset) => {
+    setVoicePresetState(preset);
+    void writeStoredVoicePreset(preset);
   }, []);
 
   /* ── Diagnostics ───────────────────────────────────────────────────────── */
@@ -972,8 +988,54 @@ export default function SettingsScreen() {
                 }
                 warn={!realtimeDiag.enabled}
               />
-              <InfoRow label="Model" value={realtimeDiag.model} />
-              <InfoRow label="Voice" value={realtimeDiag.defaultVoice} />
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  paddingVertical: 8,
+                }}
+              >
+                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Voice</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {(realtimeDiag.voices?.length
+                    ? realtimeDiag.voices
+                    : [
+                        { key: "marine" as VoicePreset, label: VOICE_PRESET_LABELS.marine },
+                        { key: "mustafa" as VoicePreset, label: VOICE_PRESET_LABELS.mustafa },
+                      ]
+                  ).map((v) => {
+                    const active = voicePreset === v.key;
+                    return (
+                      <Pressable
+                        key={v.key}
+                        onPress={() => changeVoicePreset(v.key)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active }}
+                        style={{
+                          paddingVertical: 6,
+                          paddingHorizontal: 14,
+                          borderRadius: c.radius,
+                          borderWidth: 1,
+                          borderColor: active ? c.primary : c.border,
+                          backgroundColor: active ? `${c.primary}18` : c.muted,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: active ? c.primary : c.mutedForeground,
+                            fontSize: 13,
+                            fontFamily: active ? "Inter_600SemiBold" : "Inter_500Medium",
+                          }}
+                        >
+                          {v.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
               <InfoRow
                 label="Max session"
                 value={formatDuration(realtimeDiag.maxDurationSeconds)}
