@@ -2,6 +2,32 @@
 
 An AI-powered app builder for non-technical users. Describe an app idea in natural language; MustaFlow plans, builds, and deploys it.
 
+## Realtime "Talk to Ora" voice — WebRTC (2026-06-26)
+
+Rebuilt "Talk to Ora" as a true low-latency realtime voice conversation using the OpenAI GA Realtime API over WebRTC, on the website and the Expo mobile app. Mic dictation is unchanged and remains a separate feature. The old transcribe -> chat -> tts loop is kept only as a fallback with a visible warning.
+
+Backend (`artifacts/api-server/src/routes/public-ai/realtime.ts`):
+
+- `POST /public-ai/realtime/session` validates the ora-session cookie, resolves the authed user + tier, enforces the `realtime` kill switch, the `ORA_REALTIME_ENABLED` gate, `oraRealtimeSessionLimiter`, and `checkOraSpendCapAsync("realtime_voice")`, then mints a short-lived ephemeral client secret (`ek_...`) via a direct OpenAI client (the AI-integrations proxy rejects audio, so this mirrors the tts.ts direct-key pattern). `OPENAI_API_KEY` is never exposed to the client.
+- Session instructions reuse `ORA_SYSTEM_PROMPT` + `buildSystemPrompt`/`buildProfileContext` + `buildMemoryContext` plus a voice-conversation addendum and the selected language. Tier is used for the spend cap, max session duration, and saved-memory ranking (not injected as standalone instruction text). Builder isolation preserved.
+- Security: recent conversation history is NOT injected into server-side instructions (prompt-injection/isolation vector). History is seeded client-side as lower-authority `conversation.item.create` items after the data channel opens; only the last user utterance is forwarded as a saved-memory ranking hint.
+- `GET /public-ai/realtime/diagnostics` is non-charging (no mint, no spend-cap consumption) and reports `{enabled, configured, killSwitch, model, defaultVoice, tier, maxDurationSeconds}`.
+- Defaults: model `gpt-realtime-mini`, voice `marin`, transcription `gpt-4o-mini-transcribe`. Turn detection defaults to `semantic_vad` (eagerness `low`); the `server_vad` override (`ORA_REALTIME_VAD_TYPE=server_vad`) defaults to threshold 0.5, prefix padding 300 ms, silence 900 ms.
+
+Website (`ora-panel`/`ora-bubble` + `useOraRealtimeVoice`):
+
+- Browser `RTCPeerConnection` + `getUserMedia` + data-channel state machine is the primary Talk transport; the legacy loop is the fallback with a visible warning, and late ICE failed/disconnected flips to it. Mute (Ora audio only), interrupt/barge-in (resumes on `output_audio_buffer.started`), and end are wired. Accent theming reused. User + assistant transcripts captured into the conversation.
+
+Mobile (Expo, `artifacts/ora-mobile`):
+
+- `react-native-webrtc@124.0.7` + `@config-plugins/react-native-webrtc` with native audio routing (Bluetooth/AirPods). Web state machine ported; speakGen/AppState guards reused; mic dictation untouched. The native module cannot ship over-the-air, so a fresh native build is required.
+
+Env (all optional; feature is on by default): `OPENAI_API_KEY` (required to mint), `ORA_REALTIME_ENABLED` (`false` disables), `ORA_REALTIME_DISABLED` (kill switch), `ORA_REALTIME_MODEL`, `ORA_REALTIME_VOICE`, `ORA_REALTIME_TRANSCRIBE_MODEL`, `ORA_REALTIME_VAD_TYPE`, `ORA_REALTIME_VAD_EAGERNESS`, `ORA_REALTIME_VAD_THRESHOLD`, `ORA_REALTIME_VAD_PREFIX_PADDING_MS`, `ORA_REALTIME_VAD_SILENCE_DURATION_MS`.
+
+Tests: `realtime-session.test.ts` (40 tests) covers the disabled gate, kill switch, anon vs signed-in, spend-cap block, voice/model overrides, VAD config, isolation (no Builder language), the no-history-in-instructions regression, and diagnostics. Both typechecks, mustaflow strict lint, and prettier are clean.
+
+iOS delivery: native TestFlight build #23 (v1.0.0) built on EAS from `main` and submitted to TestFlight (submission FINISHED). Native splash/icon are baked at build time, so testers must delete and reinstall the app. Live real-device acceptance (iPhone + AirPods: long-sentence, Arabic, interrupt/barge-in, connection-drop fallback) is a manual user step.
+
 ## E2E Verification Status (as of 2026-06-02)
 
 ### Full-stack / agentic container path — VERIFIED

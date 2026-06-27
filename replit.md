@@ -9,6 +9,7 @@ Full historical implementation notes belong in `docs/changelog.md`. Keep this fi
 - Main product flow: landing page -> account -> describe idea -> AI build/refine -> preview -> test -> publish.
 - Supported app stacks: static web apps, React SPAs, full-stack Node.js apps, and Expo/React Native mobile apps. Stack is auto-detected from the prompt.
 - Ora is the public AI assistant and is intentionally separate from Builder/ORAX project agents.
+- "Talk to Ora" is a true realtime voice conversation (OpenAI GA Realtime API over WebRTC) on website and mobile. The backend mints short-lived ephemeral client secrets via a direct OpenAI client and never exposes `OPENAI_API_KEY`. The old transcribe -> chat -> tts loop remains only as a visible-warning fallback. Mic dictation is unchanged.
 - Ora Phase 6 validation is complete through automated coverage; live signed-in browser validation remains limited by Clerk dev-key/programmatic-auth throttling in dev.
 - Ora response quality has been hardened: direct answers first, cleaner ChatGPT-style formatting, fewer raw Markdown symbols, QA checks for formatting clutter, and frontend rendering for headings/bold/lists/tables.
 - Support Center wiring and protected routes are covered by automated tests; signed-in browser validation should be repeated when Clerk test auth is available.
@@ -41,6 +42,7 @@ Core:
 Important optional env:
 
 - Ora voice TTS: `OPENAI_API_KEY`
+- Ora realtime "Talk to Ora" voice (WebRTC): requires `OPENAI_API_KEY` (direct client mints short-lived ephemeral tokens; the proxy rejects audio). Tuning: `ORA_REALTIME_ENABLED` (default on; `false` disables), `ORA_REALTIME_DISABLED` (kill switch), `ORA_REALTIME_MODEL` (default `gpt-realtime-mini`), `ORA_REALTIME_VOICE` (default `marin`), `ORA_REALTIME_TRANSCRIBE_MODEL`, and `ORA_REALTIME_VAD_*` turn-detection knobs.
 - Anthropic/Gemini/DeepSeek routing: provider keys as configured in `artifacts/api-server/src/lib/public-ai/model-router.ts`
 - Disable DeepSeek temporarily: `DEEPSEEK_DISABLED=true`
 - GitHub OAuth: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URL`
@@ -166,6 +168,7 @@ These are permanent, non-negotiable product constraints. Any code, test, or feat
 ## Known Limitations
 
 - Clerk dev-key warnings are expected in dev. Programmatic signed-in browser tests can be blocked by Clerk throttling/redirects; rerun those manually or in a fresh authenticated session.
+- Realtime "Talk to Ora" has automated coverage, but live real-device acceptance (iPhone + AirPods on TestFlight build #23) and live signed-in browser mic validation remain manual user steps.
 - Publishing v1 serves DB snapshots through the API server unless `EDGE_SERVING_ENABLED` and Cloudflare Worker/R2 are configured.
 - Soft-deleted projects are not self-recoverable from the UI.
 - Self-serve Stripe top-up is not complete; use helper/admin paths for manual credits.
