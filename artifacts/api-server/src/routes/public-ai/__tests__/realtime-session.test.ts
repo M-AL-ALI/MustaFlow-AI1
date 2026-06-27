@@ -28,6 +28,7 @@ import request from "supertest";
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..", "..");
 const PUBLIC_AI_DIR = join(REPO_ROOT, "artifacts", "api-server", "src", "routes", "public-ai");
 const MUSTAFLOW_SRC_DIR = join(REPO_ROOT, "artifacts", "mustaflow", "src");
+const ORA_MOBILE_DIR = join(REPO_ROOT, "artifacts", "ora-mobile");
 
 function readRoute(filename: string): string {
   return readFileSync(join(PUBLIC_AI_DIR, filename), "utf-8");
@@ -35,6 +36,10 @@ function readRoute(filename: string): string {
 
 function readMustaflow(relativePath: string): string {
   return readFileSync(join(MUSTAFLOW_SRC_DIR, relativePath), "utf-8");
+}
+
+function readOraMobile(relativePath: string): string {
+  return readFileSync(join(ORA_MOBILE_DIR, relativePath), "utf-8");
 }
 
 // ─── Mocks (hoisted before router import) ─────────────────────────────────────
@@ -774,6 +779,20 @@ describe("Talk to Ora realtime — route wiring", () => {
     expect(helper).toContain('sendEvent({ type: "response.cancel" })');
     expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
     expect(helper).toContain("audioEl.pause()");
+
+    const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
+    const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);
+    const speechStartBlock = src.slice(speechStart, speechStartEnd);
+    expect(speechStartBlock).toContain("stopAssistantOutput()");
+  });
+
+  it("mobile realtime barge-in hard-stops assistant audio on speech-start", () => {
+    const src = readOraMobile("hooks/useOraRealtimeVoiceNative.ts");
+    const helperStart = src.indexOf("const stopAssistantOutput = useCallback");
+    const helperEnd = src.indexOf("const interrupt = useCallback", helperStart);
+    const helper = src.slice(helperStart, helperEnd);
+    expect(helper).toContain('sendEvent({ type: "response.cancel" })');
+    expect(helper).toContain('sendEvent({ type: "output_audio_buffer.clear" })');
 
     const speechStart = src.indexOf('case "input_audio_buffer.speech_started"');
     const speechStartEnd = src.indexOf('case "input_audio_buffer.speech_stopped"', speechStart);

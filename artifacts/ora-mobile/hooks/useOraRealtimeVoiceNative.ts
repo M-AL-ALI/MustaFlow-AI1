@@ -285,13 +285,17 @@ export function useOraRealtimeVoiceNative(
     }
   }, []);
 
-  const interrupt = useCallback(() => {
+  const stopAssistantOutput = useCallback(() => {
     sendEvent({ type: "response.cancel" });
     sendEvent({ type: "output_audio_buffer.clear" });
     setInterimAssistantTranscript("");
     assistantTextRef.current = "";
-    if (activeRef.current) setState("listening");
   }, [sendEvent]);
+
+  const interrupt = useCallback(() => {
+    stopAssistantOutput();
+    if (activeRef.current) setState("listening");
+  }, [stopAssistantOutput]);
 
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
@@ -306,105 +310,115 @@ export function useOraRealtimeVoiceNative(
   }, []);
 
   // ── Data-channel event handling (identical to the web transport) ──────────
-  const handleServerEvent = useCallback((raw: string) => {
-    let evt: { type?: string; [k: string]: unknown };
-    try {
-      evt = JSON.parse(raw) as { type?: string };
-    } catch {
-      return;
-    }
-    const type = evt.type;
-    if (!type) return;
+  const handleServerEvent = useCallback(
+    (raw: string) => {
+      let evt: { type?: string; [k: string]: unknown };
+      try {
+        evt = JSON.parse(raw) as { type?: string };
+      } catch {
+        return;
+      }
+      const type = evt.type;
+      if (!type) return;
 
-    switch (type) {
-      case "input_audio_buffer.speech_started":
-        userTextRef.current = "";
-        setInterimUserTranscript("");
-        if (activeRef.current) setState("listening");
-        break;
-      case "conversation.item.input_audio_transcription.delta": {
-        const delta = typeof evt.delta === "string" ? evt.delta : "";
-        if (delta) {
-          userTextRef.current += delta;
-          setInterimUserTranscript(userTextRef.current);
+      switch (type) {
+        case "input_audio_buffer.speech_started":
+          // User barged in. Interrupt Ora locally too; relying only on server-side
+          // VAD can leave stale audio playing over the next spoken turn.
+          stopAssistantOutput();
+          userTextRef.current = "";
+          setInterimUserTranscript("");
+          if (activeRef.current) setState("listening");
+          break;
+        case "input_audio_buffer.speech_stopped":
+          if (activeRef.current) setState("thinking");
+          break;
+        case "conversation.item.input_audio_transcription.delta": {
+          const delta = typeof evt.delta === "string" ? evt.delta : "";
+          if (delta) {
+            userTextRef.current += delta;
+            setInterimUserTranscript(userTextRef.current);
+          }
+          break;
         }
-        break;
-      }
-      case "conversation.item.input_audio_transcription.completed": {
-        const finalText =
-          (typeof evt.transcript === "string" && evt.transcript) || userTextRef.current;
-        userTextRef.current = "";
-        setInterimUserTranscript("");
-        // Gate finalized-transcript persistence on activeRef: a final event can
-        // still arrive on the data channel AFTER stop()/teardown() (e.g. the user
-        // switched conversation), and persisting it then would append to the new
-        // thread's messages — the wrong-thread bug. teardown() sets activeRef
-        // false, so a post-teardown event is dropped here.
-        if (activeRef.current && finalText && finalText.trim()) onUserRef.current(finalText.trim());
-        break;
-      }
-      case "conversation.item.input_audio_transcription.failed":
-        userTextRef.current = "";
-        setInterimUserTranscript("");
-        break;
-
-      case "response.created":
-        assistantTextRef.current = "";
-        setInterimAssistantTranscript("");
-        if (activeRef.current) setState("thinking");
-        break;
-
-      case "response.audio_transcript.delta":
-      case "response.output_audio_transcript.delta":
-      case "response.output_text.delta":
-      case "response.text.delta": {
-        const delta = typeof evt.delta === "string" ? evt.delta : "";
-        if (delta) {
-          assistantTextRef.current += delta;
-          setInterimAssistantTranscript(assistantTextRef.current);
-          if (activeRef.current) setState("speaking");
+        case "conversation.item.input_audio_transcription.completed": {
+          const finalText =
+            (typeof evt.transcript === "string" && evt.transcript) || userTextRef.current;
+          userTextRef.current = "";
+          setInterimUserTranscript("");
+          // Gate finalized-transcript persistence on activeRef: a final event can
+          // still arrive on the data channel AFTER stop()/teardown() (e.g. the user
+          // switched conversation), and persisting it then would append to the new
+          // thread's messages — the wrong-thread bug. teardown() sets activeRef
+          // false, so a post-teardown event is dropped here.
+          if (activeRef.current && finalText && finalText.trim())
+            onUserRef.current(finalText.trim());
+          break;
         }
-        break;
-      }
-      case "response.audio_transcript.done":
-      case "response.output_audio_transcript.done":
-      case "response.output_text.done":
-      case "response.text.done": {
-        const finalText =
-          (typeof evt.transcript === "string" && evt.transcript) ||
-          (typeof evt.text === "string" && evt.text) ||
-          assistantTextRef.current;
-        // See the user-transcript case: gate on activeRef so a late event after
-        // teardown can't append Ora's reply to a newly-switched conversation.
-        if (activeRef.current && finalText && finalText.trim()) {
-          onAssistantRef.current(finalText.trim());
-        }
-        assistantTextRef.current = "";
-        setInterimAssistantTranscript("");
-        break;
-      }
+        case "conversation.item.input_audio_transcription.failed":
+          userTextRef.current = "";
+          setInterimUserTranscript("");
+          break;
 
-      case "output_audio_buffer.started":
-        if (activeRef.current) setState("speaking");
-        break;
-      case "output_audio_buffer.stopped":
-      case "output_audio_buffer.cleared":
-        if (activeRef.current) setState("listening");
-        break;
-
-      case "response.done":
-        if (activeRef.current && assistantTextRef.current.trim()) {
-          onAssistantRef.current(assistantTextRef.current.trim());
+        case "response.created":
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
-        }
-        if (activeRef.current) setState("listening");
-        break;
+          if (activeRef.current) setState("thinking");
+          break;
 
-      default:
-        break;
-    }
-  }, []);
+        case "response.audio_transcript.delta":
+        case "response.output_audio_transcript.delta":
+        case "response.output_text.delta":
+        case "response.text.delta": {
+          const delta = typeof evt.delta === "string" ? evt.delta : "";
+          if (delta) {
+            assistantTextRef.current += delta;
+            setInterimAssistantTranscript(assistantTextRef.current);
+            if (activeRef.current) setState("speaking");
+          }
+          break;
+        }
+        case "response.audio_transcript.done":
+        case "response.output_audio_transcript.done":
+        case "response.output_text.done":
+        case "response.text.done": {
+          const finalText =
+            (typeof evt.transcript === "string" && evt.transcript) ||
+            (typeof evt.text === "string" && evt.text) ||
+            assistantTextRef.current;
+          // See the user-transcript case: gate on activeRef so a late event after
+          // teardown can't append Ora's reply to a newly-switched conversation.
+          if (activeRef.current && finalText && finalText.trim()) {
+            onAssistantRef.current(finalText.trim());
+          }
+          assistantTextRef.current = "";
+          setInterimAssistantTranscript("");
+          break;
+        }
+
+        case "output_audio_buffer.started":
+          if (activeRef.current) setState("speaking");
+          break;
+        case "output_audio_buffer.stopped":
+        case "output_audio_buffer.cleared":
+          if (activeRef.current) setState("listening");
+          break;
+
+        case "response.done":
+          if (activeRef.current && assistantTextRef.current.trim()) {
+            onAssistantRef.current(assistantTextRef.current.trim());
+            assistantTextRef.current = "";
+            setInterimAssistantTranscript("");
+          }
+          if (activeRef.current) setState("listening");
+          break;
+
+        default:
+          break;
+      }
+    },
+    [stopAssistantOutput],
+  );
 
   // ── Start ────────────────────────────────────────────────────────────────
   const start = useCallback(
