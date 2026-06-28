@@ -48,6 +48,58 @@ describe("Mobile Settings — Account sync wiring", () => {
     expect(settings).not.toMatch(/checkout/i);
     expect(settings).not.toMatch(/billing-portal|createCheckout|manageBilling/i);
   });
+
+  it("Account sync probes getOraSession() and surfaces public session tier row", () => {
+    expect(settings).toContain("getOraSession");
+    expect(settings).toContain("acctPublicSessionTier");
+    expect(settings).toContain("acctPublicSessionIsPaid");
+    expect(settings).toContain('"Public session tier"');
+    expect(settings).toContain('"Local session tier"');
+    expect(settings).toContain('"Session authenticated"');
+  });
+
+  it("Account sync imports and reads getCurrentSessionTier() from session-store", () => {
+    expect(settings).toContain("getCurrentSessionTier");
+    expect(settings).toContain("getCurrentSessionTier()");
+    expect(settings).toContain("acctLocalSessionTier");
+  });
+
+  it("Account sync warns when public session tier is free but billing is paid", () => {
+    expect(settings).toContain("acctPublicSessionMismatch");
+    expect(settings).toContain("acctLocalSessionMismatch");
+    expect(settings).toContain("acctSessionAuthenticated");
+    // In the acctWarnMessage ternary, the acctPublicSessionMismatch branch must
+    // come before the acctTierMismatch branch so public-session bugs surface first.
+    const warnMessageStart = settings.indexOf("const acctWarnMessage =");
+    expect(warnMessageStart).toBeGreaterThan(-1);
+    const warnMessageBlock = settings.slice(warnMessageStart, warnMessageStart + 800);
+    const publicMismatchInWarn = warnMessageBlock.indexOf("acctPublicSessionMismatch");
+    const tierMismatchInWarn = warnMessageBlock.indexOf("acctTierMismatch");
+    expect(publicMismatchInWarn).toBeGreaterThan(-1);
+    expect(tierMismatchInWarn).toBeGreaterThan(-1);
+    expect(publicMismatchInWarn).toBeLessThan(tierMismatchInWarn);
+  });
+
+  it("Account sync runAccountCheck resets all probe state at the start of each run", () => {
+    // These setters must all appear at the top of runAccountCheck, before any await.
+    const fnStart = settings.indexOf("const runAccountCheck = useCallback(async ()");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = settings.slice(fnStart, fnStart + 1200);
+    expect(fnBody).toContain("setAcctPublicSessionTier(null)");
+    expect(fnBody).toContain("setAcctPublicSessionIsPaid(null)");
+    expect(fnBody).toContain("setAcctPublicSessionError(null)");
+    expect(fnBody).toContain("setAcctLocalSessionTier(getCurrentSessionTier())");
+  });
+
+  it("Plan & billing card surfaces a subscriptionError instead of silently showing Free", () => {
+    expect(settings).toContain("subscriptionError");
+    expect(settings).toContain("setSubscriptionError");
+    // Must have an explicit error branch, not just a fallback to planLabel("free").
+    const errorIdx = settings.indexOf("subscriptionError ?");
+    expect(errorIdx).toBeGreaterThan(-1);
+    const planCardBody = settings.slice(errorIdx, errorIdx + 1200);
+    expect(planCardBody).toContain("Retry");
+  });
 });
 
 describe("Mobile auth-stability guard", () => {
@@ -55,11 +107,26 @@ describe("Mobile auth-stability guard", () => {
   const api = read("../api.ts");
   const layout = read("../../app/(home)/_layout.tsx");
   const settings = read("../../app/(home)/settings.tsx");
+  const index = read("../../app/(home)/index.tsx");
+  const sessionStore = read("../session-store.ts");
 
   it("auth-client exports requireAuthToken, TokenUnavailableError, and setAuthState", () => {
     expect(authClient).toContain("export async function requireAuthToken()");
     expect(authClient).toContain("export class TokenUnavailableError");
     expect(authClient).toContain("export function setAuthState(");
+  });
+
+  it("requireAuthToken waits for auth to load before deciding signed-in state", () => {
+    expect(authClient).toContain("waitForAuthLoaded");
+    expect(authClient).toContain("async function waitForAuthLoaded(");
+    expect(authClient).toContain("_authIsLoaded");
+    // Must await load before checking _authIsSignedIn to prevent race.
+    const fnBody = authClient.slice(
+      authClient.indexOf("export async function requireAuthToken()"),
+      authClient.indexOf("export async function requireAuthToken()") + 400,
+    );
+    expect(fnBody).toContain("waitForAuthLoaded");
+    expect(fnBody).toContain("throw new TokenUnavailableError()");
   });
 
   it("requireAuthToken fails closed for signed-in users with missing token", () => {
@@ -119,5 +186,62 @@ describe("Mobile auth-stability guard", () => {
     expect(settings).toContain("TokenUnavailableError");
     expect(settings).toContain("err instanceof TokenUnavailableError");
     expect(settings).toContain("setAcctTokenPresent(false)");
+  });
+
+  it("session-store exports setCurrentSessionTier, getCurrentSessionTier, getCurrentSessionIsPaid", () => {
+    expect(sessionStore).toContain("export function setCurrentSessionTier(");
+    expect(sessionStore).toContain("export function getCurrentSessionTier()");
+    expect(sessionStore).toContain("export function getCurrentSessionIsPaid()");
+  });
+
+  it("index.tsx gates getOraSession() on isLoaded to prevent auth race on startup", () => {
+    expect(index).toContain("isLoaded");
+    // isLoaded must be destructured from useAuth
+    const useAuthLine = index.slice(
+      index.indexOf("const { isSignedIn"),
+      index.indexOf("const { isSignedIn") + 80,
+    );
+    expect(useAuthLine).toContain("isLoaded");
+    // The session effect must early-return when !isLoaded
+    expect(index).toContain("if (!isLoaded) return");
+  });
+
+  it("index.tsx calls setCurrentSessionTier after a successful getOraSession()", () => {
+    expect(index).toContain("setCurrentSessionTier");
+    // Must be called with the session tier, not just null
+    const sessionEffectStart = index.indexOf("getOraSession()");
+    expect(sessionEffectStart).toBeGreaterThan(-1);
+    const sessionEffectBody = index.slice(sessionEffectStart, sessionEffectStart + 300);
+    expect(sessionEffectBody).toContain("setCurrentSessionTier(s.tier");
+  });
+
+  it("index.tsx catches TokenUnavailableError and does NOT fall to anonymous session", () => {
+    expect(index).toContain("sessionSyncError");
+    expect(index).toContain("setSessionSyncError");
+    // When the error is TokenUnavailableError, must NOT call setSession(null) — that
+    // would create an anonymous session object. The catch branch must distinguish.
+    const catchBlock = index.slice(
+      index.indexOf("catch ((err) => {"),
+      index.indexOf("catch ((err) => {") + 300,
+    );
+    expect(index).toContain('err instanceof TokenUnavailableError');
+    expect(index).toContain('setSessionSyncError("token_unavailable")');
+  });
+
+  it("index.tsx renders a re-sync banner when sessionSyncError is token_unavailable", () => {
+    expect(index).toContain('sessionSyncError === "token_unavailable"');
+    // Must show an error color and a retry affordance
+    const bannerIdx = index.indexOf('sessionSyncError === "token_unavailable"');
+    const bannerBody = index.slice(bannerIdx, bannerIdx + 2000);
+    expect(bannerBody).toContain("#f87171");
+    // Must render the RefreshCw retry icon and re-call getOraSession on press.
+    expect(bannerBody).toContain("RefreshCw");
+    expect(bannerBody.indexOf("getOraSession()")).toBeGreaterThan(-1);
+  });
+
+  it("index.tsx adds isLoaded to the getOraSession useEffect dependency array", () => {
+    // isLoaded must be in deps so the effect re-runs once auth resolves.
+    const effectClose = index.indexOf("}, [loadPreferences, isSignedIn, isLoaded]);");
+    expect(effectClose).toBeGreaterThan(-1);
   });
 });

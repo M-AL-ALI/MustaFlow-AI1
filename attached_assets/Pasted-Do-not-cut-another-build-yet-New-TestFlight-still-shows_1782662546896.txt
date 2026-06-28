@@ -1,0 +1,117 @@
+Do not cut another build yet. New TestFlight still shows account/plan sync instability and Talk to Ora mobile is not matching website quality.
+
+Please verify and fix these remaining gaps before any new TestFlight build.
+
+1. Remaining account-sync bug: auth readiness race
+
+Latest main includes /api/public-ai/session inside pathRequiresAuth(), but that is not enough.
+
+In artifacts/ora-mobile/lib/auth-client.ts, requireAuthToken() currently allows anonymous when _authIsSignedIn is false.
+
+Problem:
+On startup, _authIsSignedIn starts false and _authIsLoaded starts false.
+setAuthState(isLoaded, isSignedIn) is called from a React effect in app/(home)/_layout.tsx.
+A child screen effect can call getOraSession() before that module-level auth state updates.
+Then requireAuthToken() sees _authIsSignedIn=false and returns null.
+So /api/public-ai/session can still be created anonymously/free even though the user is actually signed in.
+
+Required fix:
+For paths in pathRequiresAuth(), do not allow anonymous while auth is not loaded.
+requireAuthToken() should behave like:
+- if auth is not loaded: wait/retry briefly, then throw TokenUnavailableError
+- if auth is loaded and isSignedIn=false: allow anonymous
+- if auth is loaded and isSignedIn=true but no token: retry, then throw
+- if token exists: send Bearer
+
+This must prevent signed-in startup from ever creating an anonymous Ora session.
+
+2. getOraSession() must wait for auth readiness
+
+In artifacts/ora-mobile/app/(home)/index.tsx, getOraSession() runs in an effect based on isSignedIn.
+
+Required fix:
+- Pull isLoaded from useAuth(), not only isSignedIn.
+- Do not call getOraSession() until isLoaded=true.
+- If signed in and TokenUnavailableError occurs, do not set a Free/anonymous session. Show “Re-sync sign-in” or retry.
+- Add a retry after auth becomes ready.
+- On sign-in, force-refresh the Ora session after a valid token is available.
+- On sign-out, explicitly reset/recreate anonymous session.
+
+3. Account Sync can give false confidence
+
+Current /api/ora/account-consistency is useful, but it does not prove the actual current /api/public-ai/session cookie is authenticated.
+
+It reports billing tier and chatSession tier from the same server-side resolver, so those can match while the mobile app’s actual public Ora session was created anonymously earlier.
+
+Required fix:
+Account Sync must include an actual public Ora session probe using the same mobile path:
+- call /api/public-ai/session with required auth
+- confirm returned tier/isPaid matches billing tier
+- confirm the app’s local Ora session tier matches that response
+- display:
+  - localSignedIn
+  - tokenPresent
+  - serverRecognizedUser
+  - billingTier
+  - publicOraSessionTier
+  - localOraSessionTier
+  - sessionAuthenticated yes/no
+
+If billing is Core but publicOraSessionTier or localOraSessionTier is Free, Account Sync must fail.
+
+4. Plan tiers and prices mismatch
+
+Mobile should not hardcode plan prices. It should render prices from the same server source as website.
+
+Please verify:
+- Website and mobile both use the same plan metadata source.
+- Server constants currently show:
+  - Free = $0
+  - Core Pack = $20
+  - Deep Wave = $40
+- If website shows different prices, update the server source of truth, not only mobile.
+- If mobile fails to fetch /api/billing/subscription, do not show misleading Free/default prices. Show “Unable to load plan” and a re-sync action.
+
+Also stop swallowing subscription fetch errors silently in mobile settings. Token/auth errors should be visible.
+
+5. Talk to Ora mobile quality is still not website-equivalent
+
+Do not assume parity from source markers only. Mobile audio is native and different from browser:
+- Website uses browser getUserMedia echoCancellation/noiseSuppression/autoGainControl.
+- Mobile uses react-native-webrtc audio: true and relies on iOS native audio processing.
+- This needs real-device diagnostics.
+
+Required verification:
+- Confirm the TestFlight build includes the AVAudioSession / speaker routing fixes.
+- Log and compare these buckets on mobile:
+  - speech_started
+  - speech_stopped
+  - transcript_completed
+  - focus accept/reject
+  - response_create_sent
+  - response.created
+  - output_audio_started
+  - output_audio_stopped/restarted
+- Test iPhone speaker and AirPods separately.
+- Confirm selected mic route and output route.
+- Confirm Focused mode ignores nearby speakers.
+- Confirm rejected background speech is deleted and cannot affect language.
+- Confirm no fallback legacy loop is running at the same time as realtime.
+
+6. Tests to add before next build
+
+Add tests for:
+- signed-in + auth not loaded does NOT create /api/public-ai/session anonymously
+- signed-in + token temporarily null does NOT create /api/public-ai/session anonymously
+- getOraSession waits for auth readiness
+- Account Sync fails if public Ora session tier differs from billing tier
+- mobile plan UI does not display Free/default when subscription fetch fails
+- anonymous mode still works only when auth loaded and isSignedIn=false
+
+Acceptance before next TestFlight:
+- Fresh install, sign in, Account Sync must show billing tier, public Ora session tier, and local Ora session tier all matching.
+- Kill/reopen app: still matching.
+- Background/foreground: still matching.
+- Talk to Ora while signed in never mints anonymous/free.
+- Mobile plan prices match website.
+- Talk to Ora mobile has real-device logs showing where latency/glitch comes from.

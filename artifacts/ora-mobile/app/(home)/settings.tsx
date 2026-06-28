@@ -33,6 +33,7 @@ import { isRealtimeVoiceNativeAvailable } from "@/hooks/useOraRealtimeVoiceNativ
 import {
   API_BASE,
   getAccountConsistency,
+  getOraSession,
   getOraUsage,
   getPreferences,
   getRealtimeDiagnostics,
@@ -40,6 +41,7 @@ import {
   updatePreferences,
 } from "@/lib/api";
 import { TokenUnavailableError } from "@/lib/auth-client";
+import { getCurrentSessionTier } from "@/lib/session-store";
 import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
 import {
   readStoredVoicePreset,
@@ -462,6 +464,7 @@ export default function SettingsScreen() {
   // Product voice is a client-only preference (this device). Default "marine".
   const [voicePreset, setVoicePresetState] = useState<VoicePreset>("marine");
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [usage, setUsage] = useState<OraUsage | null>(null);
   const [realtimeDiag, setRealtimeDiag] = useState<RealtimeDiagnostics | null>(null);
   const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
@@ -483,9 +486,18 @@ export default function SettingsScreen() {
       .then(setRealtimeDiag)
       .catch(() => {});
     if (isSignedIn) {
+      setSubscriptionError(null);
       getSubscription()
         .then(setSubscription)
-        .catch(() => {});
+        .catch((err) => {
+          const msg =
+            err instanceof TokenUnavailableError
+              ? "Re-sync sign-in to load plan details."
+              : err instanceof Error
+                ? err.message
+                : "Unable to load plan details.";
+          setSubscriptionError(msg);
+        });
       getOraUsage()
         .then(setUsage)
         .catch(() => {});
@@ -535,6 +547,12 @@ export default function SettingsScreen() {
   const [acctTokenMissing, setAcctTokenMissing] = useState(false);
   const [acctLocalSignedIn, setAcctLocalSignedIn] = useState<boolean | null>(null);
   const [acctTokenPresent, setAcctTokenPresent] = useState<boolean | null>(null);
+  // Public session probe: what tier does getOraSession() return with current auth?
+  const [acctPublicSessionTier, setAcctPublicSessionTier] = useState<string | null>(null);
+  const [acctPublicSessionIsPaid, setAcctPublicSessionIsPaid] = useState<boolean | null>(null);
+  const [acctPublicSessionError, setAcctPublicSessionError] = useState<string | null>(null);
+  // Local session tier: what tier was written to the module-level store by index.tsx?
+  const [acctLocalSessionTier, setAcctLocalSessionTier] = useState<string | null>(null);
   const acctRunningRef = useRef(false);
 
   const runAccountCheck = useCallback(async () => {
@@ -545,6 +563,12 @@ export default function SettingsScreen() {
     setAcctTokenMissing(false);
     setAcctLocalSignedIn(!!isSignedIn);
     setAcctTokenPresent(null);
+    setAcctPublicSessionTier(null);
+    setAcctPublicSessionIsPaid(null);
+    setAcctPublicSessionError(null);
+    // Snapshot local tier before any await so it reflects the session state at
+    // the start of the check, not a possible concurrent update.
+    setAcctLocalSessionTier(getCurrentSessionTier());
     try {
       if (isSignedIn) {
         let token: string | null = null;
@@ -558,6 +582,17 @@ export default function SettingsScreen() {
       }
       const data = await getAccountConsistency();
       setAcctDiag(data);
+      // Probe the public Ora session endpoint with the current device auth.
+      // This confirms whether the bearer token produces an authenticated
+      // (paid) session, or falls back to anonymous/free.
+      try {
+        const probe = await getOraSession();
+        setAcctPublicSessionTier(probe.tier ?? "free");
+        setAcctPublicSessionIsPaid(!!probe.isPaid);
+      } catch (probeErr) {
+        const probeMsg = probeErr instanceof Error ? probeErr.message : String(probeErr);
+        setAcctPublicSessionError(probeMsg);
+      }
     } catch (err) {
       setAcctDiag(null);
       if (err instanceof TokenUnavailableError) {
@@ -835,11 +870,29 @@ export default function SettingsScreen() {
   const acctChatFree = acctDiag ? !acctDiag.chatSession.isPaid : false;
   const acctTierMismatch = !!acctDiag && acctBillingPaid && acctChatFree;
   const acctTokenWarn = !!isSignedIn && (acctTokenMissing || (!!acctError && !acctDiag));
+  // Public session probe mismatches: billing is paid but the live probe returned free/anonymous.
+  const acctPublicSessionMismatch =
+    !!isSignedIn && acctBillingPaid && acctPublicSessionTier !== null && !acctPublicSessionIsPaid;
+  // Local session mismatch: the session created at startup has a different tier than billing.
+  const acctLocalSessionMismatch =
+    !!isSignedIn &&
+    acctBillingPaid &&
+    acctLocalSessionTier !== null &&
+    acctLocalSessionTier !== (acctDiag?.billing.billingTier ?? null);
+  // Human-readable session auth label derived from the probe result.
+  const acctSessionAuthenticated: string | null =
+    acctPublicSessionTier !== null
+      ? acctPublicSessionIsPaid
+        ? "yes (paid)"
+        : "no (free/anonymous)"
+      : null;
   const acctWarnMessage = acctTokenWarn
     ? "Signed in on this device, but no Clerk token reached the server. Ora will resolve as anonymous/free here until sign-in is fixed."
-    : acctTierMismatch
-      ? `Plan mismatch: billing says ${planLabel(acctDiag?.billing.sourceTier ?? null)} but this device's chat session is ${planLabel(acctDiag?.chatSession.tier ?? null)}. This device is not resolving the same paid account.`
-      : null;
+    : acctPublicSessionMismatch
+      ? `Session mismatch: billing says ${planLabel(acctDiag?.billing.sourceTier ?? null)} but the public Ora session on this device is ${planLabel(acctPublicSessionTier ?? null)}. The session was likely created before sign-in was ready — re-open the app to re-sync.`
+      : acctTierMismatch
+        ? `Plan mismatch: billing says ${planLabel(acctDiag?.billing.sourceTier ?? null)} but this device's chat session is ${planLabel(acctDiag?.chatSession.tier ?? null)}. This device is not resolving the same paid account.`
+        : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -1094,42 +1147,78 @@ export default function SettingsScreen() {
               description="Your Ora plan, renewal, and what each plan includes."
             >
               <View style={{ gap: 10 }}>
-                <View
-                  style={{
-                    backgroundColor: c.muted,
-                    borderRadius: c.radius,
-                    paddingHorizontal: 14,
-                    paddingVertical: 12,
-                    gap: 5,
-                  }}
-                >
+                {subscriptionError ? (
                   <View
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
+                      backgroundColor: "rgba(239,67,67,0.08)",
+                      borderRadius: c.radius,
+                      borderWidth: 1,
+                      borderColor: "rgba(239,67,67,0.3)",
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
                       gap: 10,
                     }}
                   >
-                    <Text
+                    <Text style={{ color: "#f87171", fontSize: 13, lineHeight: 18 }}>
+                      {subscriptionError}
+                    </Text>
+                    <Button
+                      label="Retry"
+                      onPress={() => {
+                        setSubscriptionError(null);
+                        getSubscription()
+                          .then(setSubscription)
+                          .catch((err) => {
+                            const msg =
+                              err instanceof TokenUnavailableError
+                                ? "Re-sync sign-in to load plan details."
+                                : err instanceof Error
+                                  ? err.message
+                                  : "Unable to load plan details.";
+                            setSubscriptionError(msg);
+                          });
+                      }}
+                      full
+                    />
+                  </View>
+                ) : (
+                  <View
+                    style={{
+                      backgroundColor: c.muted,
+                      borderRadius: c.radius,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      gap: 5,
+                    }}
+                  >
+                    <View
                       style={{
-                        color: c.foreground,
-                        fontFamily: "Inter_700Bold",
-                        fontSize: 17,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
                       }}
                     >
-                      {planLabel(currentTier)}
-                    </Text>
-                    {subscription?.status && (
-                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                        {subscription.status}
+                      <Text
+                        style={{
+                          color: c.foreground,
+                          fontFamily: "Inter_700Bold",
+                          fontSize: 17,
+                        }}
+                      >
+                        {planLabel(currentTier)}
                       </Text>
-                    )}
+                      {subscription?.status && (
+                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                          {subscription.status}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                      {renewalLabel(subscription)}
+                    </Text>
                   </View>
-                  <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                    {renewalLabel(subscription)}
-                  </Text>
-                </View>
+                )}
 
                 {planTiers.length > 0 && (
                   <PlanFeatureCards tiers={planTiers} currentTier={currentTier} />
@@ -1327,6 +1416,32 @@ export default function SettingsScreen() {
                 value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`}
                 warn={acctTierMismatch}
               />
+              <InfoRow
+                label="Public session tier"
+                value={
+                  acctPublicSessionTier !== null
+                    ? `${planLabel(acctPublicSessionTier)}${acctPublicSessionIsPaid ? " (paid)" : ""}`
+                    : acctPublicSessionError
+                      ? "probe failed"
+                      : "—"
+                }
+                warn={acctPublicSessionMismatch}
+              />
+              <InfoRow
+                label="Local session tier"
+                value={acctLocalSessionTier !== null ? planLabel(acctLocalSessionTier) : "—"}
+                warn={acctLocalSessionMismatch}
+              />
+              <InfoRow
+                label="Session authenticated"
+                value={acctSessionAuthenticated ?? (acctPublicSessionError ? "probe failed" : "—")}
+                warn={acctPublicSessionMismatch}
+              />
+              {acctPublicSessionError ? (
+                <Text style={{ color: "#f87171", fontSize: 11, lineHeight: 16 }}>
+                  Session probe: {acctPublicSessionError}
+                </Text>
+              ) : null}
               <InfoRow
                 label="Ora session auth"
                 value={

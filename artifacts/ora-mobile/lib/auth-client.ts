@@ -56,14 +56,39 @@ export class TokenUnavailableError extends Error {
 }
 
 /**
+ * Wait up to maxMs for _authIsLoaded to flip true (set by setAuthState()).
+ * Needed because React runs child effects before parent effects — index.tsx's
+ * useEffect can call getOraSession() before _layout.tsx's useEffect has run
+ * setAuthState(isLoaded=true, isSignedIn=...).
+ */
+async function waitForAuthLoaded(maxMs = 1500): Promise<boolean> {
+  if (_authIsLoaded) return true;
+  const step = 100;
+  let waited = 0;
+  while (waited < maxMs) {
+    await new Promise<void>((r) => setTimeout(r, step));
+    waited += step;
+    if (_authIsLoaded) return true;
+  }
+  return false;
+}
+
+/**
  * Use in place of getAuthToken() for any API call that MUST NOT silently
  * downgrade to anonymous mode while the user believes they are signed in.
  *
- * - isSignedIn=false → returns null (anonymous requests remain allowed).
+ * - auth not loaded yet → waits up to 1.5 s for it; throws if still unloaded.
+ * - isSignedIn=false (after load) → returns null (anonymous requests allowed).
  * - isSignedIn=true, token available → returns the bearer token.
  * - isSignedIn=true, token null after one retry → throws TokenUnavailableError.
  */
 export async function requireAuthToken(): Promise<string | null> {
+  if (!_authIsLoaded) {
+    const loaded = await waitForAuthLoaded(1500);
+    if (!loaded) {
+      throw new TokenUnavailableError();
+    }
+  }
   if (!_authIsSignedIn) return null;
   const first = await getAuthToken();
   if (first) return first;

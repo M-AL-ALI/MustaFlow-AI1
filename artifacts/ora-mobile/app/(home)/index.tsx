@@ -131,7 +131,9 @@ import {
   updatePreferences,
   uploadFile,
 } from "@/lib/api";
+import { TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode } from "@/lib/focus-mode";
+import { setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredVoicePreset } from "@/lib/voice-preset";
 import type {
   Attachment,
@@ -358,12 +360,13 @@ function buildChatExtras(res: ChatResponse): Partial<OraMessage> {
 }
 
 export default function OraChatScreen() {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, isLoaded } = useAuth();
   const c = useColors();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<OraMessage>>(null);
 
   const [session, setSession] = useState<OraSession | null>(null);
+  const [sessionSyncError, setSessionSyncError] = useState<"token_unavailable" | null>(null);
   const [messages, setMessages] = useState<OraMessage[]>([]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<OraMode>("instant");
@@ -526,9 +529,28 @@ export default function OraChatScreen() {
   }, []);
 
   useEffect(() => {
+    // Wait for Clerk auth to load before creating the Ora session.
+    // React runs child effects before parent effects, so _layout.tsx's
+    // setAuthState() may not have been called yet — requireAuthToken()
+    // handles this by polling, but gating here avoids the first-render
+    // race entirely without relying on the polling timeout.
+    if (!isLoaded) return;
+    setSessionSyncError(null);
     getOraSession()
-      .then(setSession)
-      .catch(() => setSession(null));
+      .then((s) => {
+        setSession(s);
+        setCurrentSessionTier(s.tier ?? null, !!s.isPaid);
+      })
+      .catch((err) => {
+        if (err instanceof TokenUnavailableError) {
+          // Signed in but token unavailable — do NOT silently fall to an
+          // anonymous/free session. Show a re-sync prompt instead.
+          setSessionSyncError("token_unavailable");
+        } else {
+          setSession(null);
+          setCurrentSessionTier(null);
+        }
+      });
     loadPreferences();
     // Preload projects so the active-scope banner can resolve a project's name
     // even before the chats drawer is opened. Skip for anonymous users.
@@ -540,7 +562,7 @@ export default function OraChatScreen() {
         })
         .catch(() => {});
     }
-  }, [loadPreferences, isSignedIn]);
+  }, [loadPreferences, isSignedIn, isLoaded]);
 
   // Drop back to standalone if the active project no longer exists (deleted here
   // or externally) once the project list has actually loaded, so a new chat never
@@ -2267,6 +2289,48 @@ export default function OraChatScreen() {
             New chats save to {activeProjectName}
           </Text>
         </Pressable>
+      )}
+
+      {sessionSyncError === "token_unavailable" && (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            backgroundColor: "rgba(239,67,67,0.08)",
+            borderBottomWidth: 1,
+            borderBottomColor: "rgba(239,67,67,0.3)",
+          }}
+        >
+          <AlertCircle size={14} color="#f87171" />
+          <Text style={{ color: "#f87171", fontSize: 12, flex: 1 }}>
+            Sign-in token unavailable. Ora is paused to protect your plan — tap to retry.
+          </Text>
+          <Pressable
+            onPress={() => {
+              setSessionSyncError(null);
+              getOraSession()
+                .then((s) => {
+                  setSession(s);
+                  setCurrentSessionTier(s.tier ?? null, !!s.isPaid);
+                })
+                .catch((err) => {
+                  if (err instanceof TokenUnavailableError) {
+                    setSessionSyncError("token_unavailable");
+                  } else {
+                    setSession(null);
+                    setCurrentSessionTier(null);
+                  }
+                });
+            }}
+            hitSlop={8}
+            style={{ padding: 4 }}
+          >
+            <RefreshCw size={14} color="#f87171" />
+          </Pressable>
+        </View>
       )}
 
       <KeyboardAvoidingView
