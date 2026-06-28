@@ -156,7 +156,7 @@ describe("Talk to Ora realtime — /session minute-budget reservation", () => {
     metering.startRealtimeSession.mockResolvedValue({
       status: "ok",
       sessionId: "11111111-1111-4111-8111-111111111111",
-      maxDurationSeconds: 300,
+      maxDurationSeconds: 1200,
       remainingSeconds: 1200,
       limitSeconds: 1200,
       windowHours: 5,
@@ -170,7 +170,7 @@ describe("Talk to Ora realtime — /session minute-budget reservation", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.realtimeSessionId).toBe("11111111-1111-4111-8111-111111111111");
-    expect(res.body.maxDurationSeconds).toBe(300);
+    expect(res.body.maxDurationSeconds).toBe(1200);
     expect(res.body.remainingSeconds).toBe(1200);
     expect(res.body.limitSeconds).toBe(1200);
     expect(res.body.heartbeatIntervalSeconds).toBe(REALTIME_HEARTBEAT_INTERVAL_SECONDS);
@@ -247,7 +247,7 @@ describe("Talk to Ora realtime — /session minute-budget reservation", () => {
     metering.startRealtimeSession.mockResolvedValue({
       status: "ok",
       sessionId: "22222222-2222-4222-8222-222222222222",
-      maxDurationSeconds: 300,
+      maxDurationSeconds: 1200,
       remainingSeconds: 1200,
       limitSeconds: 1200,
       windowHours: 5,

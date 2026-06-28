@@ -11,7 +11,7 @@
  * Covers:
  *  - per-tier allowances (free 1200s/5h, core 3600s/3h, wave 7200s/3h; anon→free)
  *  - fresh / seeded / elapsed-window usage projection
- *  - start: ok (cap = min(remaining, per-session cap)), over_limit, concurrent
+ *  - start: ok (cap = min(remaining, per-session allowance)), over_limit, concurrent
  *  - heartbeat: charges elapsed delta, never double-charges, ends at the cap
  *  - end: clamps an inflated client duration, never refunds, idempotent
  *  - stale sweep: finalizes at lastHeartbeat + grace, marks 'expired'
@@ -78,30 +78,30 @@ afterAll(async () => {
 });
 
 describe("getRealtimeVoiceAllowance", () => {
-  it("free = 1200s / 5h window / 300s per-session cap", () => {
+  it("free = 1200s / 5h window / 1200s per-session cap", () => {
     expect(getRealtimeVoiceAllowance("free")).toEqual({
       tier: "free",
       limitSeconds: 1200,
       windowHours: 5,
-      sessionCapSeconds: 300,
+      sessionCapSeconds: 1200,
     });
   });
 
-  it("core = 3600s / 3h window / 600s per-session cap", () => {
+  it("core = 3600s / 3h window / 3600s per-session cap", () => {
     expect(getRealtimeVoiceAllowance("core")).toEqual({
       tier: "core",
       limitSeconds: 3600,
       windowHours: 3,
-      sessionCapSeconds: 600,
+      sessionCapSeconds: 3600,
     });
   });
 
-  it("wave = 7200s / 3h window / 900s per-session cap", () => {
+  it("wave = 7200s / 3h window / 7200s per-session cap", () => {
     expect(getRealtimeVoiceAllowance("wave")).toEqual({
       tier: "wave",
       limitSeconds: 7200,
       windowHours: 3,
-      sessionCapSeconds: 900,
+      sessionCapSeconds: 7200,
     });
   });
 
@@ -146,22 +146,22 @@ describe("getRealtimeUsage", () => {
 });
 
 describe("startRealtimeSession", () => {
-  it("ok: reserves a session capped at the per-session ceiling when budget is ample", async () => {
+  it("ok: reserves a session capped at the tier allowance when budget is ample", async () => {
     const key = uniqueKey("start-ok");
     const res = await startRealtimeSession(key, "wave");
     expect(res.status).toBe("ok");
     if (res.status !== "ok") throw new Error("expected ok");
     expect(res.remainingSeconds).toBe(7200);
     expect(res.limitSeconds).toBe(7200);
-    // wave per-session cap (900) < remaining (7200)
-    expect(res.maxDurationSeconds).toBe(900);
+    // wave per-session cap equals the full allowance when budget is ample.
+    expect(res.maxDurationSeconds).toBe(7200);
     expect(res.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.resetsAt).toBeNull();
   });
 
   it("ok: caps maxDurationSeconds to the remaining budget when it is below the per-session cap", async () => {
     const key = uniqueKey("start-low");
-    // free limit 1200, used 1150 -> remaining 50 < per-session cap 300
+    // free limit 1200, used 1150 -> remaining 50 < per-session cap 1200
     await seedWindow(key, 1150);
     const res = await startRealtimeSession(key, "free");
     expect(res.status).toBe("ok");
