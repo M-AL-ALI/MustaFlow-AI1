@@ -33,7 +33,6 @@ import { isRealtimeVoiceNativeAvailable } from "@/hooks/useOraRealtimeVoiceNativ
 import {
   API_BASE,
   getAccountConsistency,
-  getOraSession,
   getOraUsage,
   getPreferences,
   getRealtimeDiagnostics,
@@ -41,7 +40,7 @@ import {
   updatePreferences,
 } from "@/lib/api";
 import { TokenUnavailableError } from "@/lib/auth-client";
-import { getCurrentSessionTier } from "@/lib/session-store";
+import { getCurrentSessionTier, setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
 import {
   readStoredVoicePreset,
@@ -547,10 +546,9 @@ export default function SettingsScreen() {
   const [acctTokenMissing, setAcctTokenMissing] = useState(false);
   const [acctLocalSignedIn, setAcctLocalSignedIn] = useState<boolean | null>(null);
   const [acctTokenPresent, setAcctTokenPresent] = useState<boolean | null>(null);
-  // Public session probe: what tier does getOraSession() return with current auth?
+  // Public session tier: derived non-mutably from account-consistency chatSession response.
   const [acctPublicSessionTier, setAcctPublicSessionTier] = useState<string | null>(null);
   const [acctPublicSessionIsPaid, setAcctPublicSessionIsPaid] = useState<boolean | null>(null);
-  const [acctPublicSessionError, setAcctPublicSessionError] = useState<string | null>(null);
   // Local session tier: what tier was written to the module-level store by index.tsx?
   const [acctLocalSessionTier, setAcctLocalSessionTier] = useState<string | null>(null);
   const acctRunningRef = useRef(false);
@@ -565,7 +563,6 @@ export default function SettingsScreen() {
     setAcctTokenPresent(null);
     setAcctPublicSessionTier(null);
     setAcctPublicSessionIsPaid(null);
-    setAcctPublicSessionError(null);
     // Snapshot local tier before any await so it reflects the session state at
     // the start of the check, not a possible concurrent update.
     setAcctLocalSessionTier(getCurrentSessionTier());
@@ -582,17 +579,14 @@ export default function SettingsScreen() {
       }
       const data = await getAccountConsistency();
       setAcctDiag(data);
-      // Probe the public Ora session endpoint with the current device auth.
-      // This confirms whether the bearer token produces an authenticated
-      // (paid) session, or falls back to anonymous/free.
-      try {
-        const probe = await getOraSession();
-        setAcctPublicSessionTier(probe.tier ?? "free");
-        setAcctPublicSessionIsPaid(!!probe.isPaid);
-      } catch (probeErr) {
-        const probeMsg = probeErr instanceof Error ? probeErr.message : String(probeErr);
-        setAcctPublicSessionError(probeMsg);
-      }
+      // Derive public session tier from account-consistency (non-mutating).
+      // chatSession.tier always equals billing.billingTier per the server contract, so this
+      // avoids a separate getOraSession() POST that could create/overwrite the Ora session cookie.
+      setAcctPublicSessionTier(data.chatSession.tier);
+      setAcctPublicSessionIsPaid(data.chatSession.isPaid);
+      // Sync local session store with the authoritative server value so subsequent
+      // checks show Local and Public session tiers in agreement.
+      setCurrentSessionTier(data.chatSession.tier, data.chatSession.isPaid);
     } catch (err) {
       setAcctDiag(null);
       if (err instanceof TokenUnavailableError) {
@@ -870,9 +864,6 @@ export default function SettingsScreen() {
   const acctChatFree = acctDiag ? !acctDiag.chatSession.isPaid : false;
   const acctTierMismatch = !!acctDiag && acctBillingPaid && acctChatFree;
   const acctTokenWarn = !!isSignedIn && (acctTokenMissing || (!!acctError && !acctDiag));
-  // Public session probe mismatches: billing is paid but the live probe returned free/anonymous.
-  const acctPublicSessionMismatch =
-    !!isSignedIn && acctBillingPaid && acctPublicSessionTier !== null && !acctPublicSessionIsPaid;
   // Local session mismatch: the session created at startup has a different tier than billing.
   const acctLocalSessionMismatch =
     !!isSignedIn &&
@@ -888,8 +879,8 @@ export default function SettingsScreen() {
       : null;
   const acctWarnMessage = acctTokenWarn
     ? "Signed in on this device, but no Clerk token reached the server. Ora will resolve as anonymous/free here until sign-in is fixed."
-    : acctPublicSessionMismatch
-      ? `Session mismatch: billing says ${planLabel(acctDiag?.billing.sourceTier ?? null)} but the public Ora session on this device is ${planLabel(acctPublicSessionTier ?? null)}. The session was likely created before sign-in was ready — re-open the app to re-sync.`
+    : acctLocalSessionMismatch
+      ? `Session mismatch: the Ora session created at startup was ${planLabel(acctLocalSessionTier ?? null)} but the server reports ${planLabel(acctDiag?.billing.billingTier ?? null)}. The session may have been created before sign-in was ready — tap Check Account to re-sync.`
       : acctTierMismatch
         ? `Plan mismatch: billing says ${planLabel(acctDiag?.billing.sourceTier ?? null)} but this device's chat session is ${planLabel(acctDiag?.chatSession.tier ?? null)}. This device is not resolving the same paid account.`
         : null;
@@ -1421,11 +1412,8 @@ export default function SettingsScreen() {
                 value={
                   acctPublicSessionTier !== null
                     ? `${planLabel(acctPublicSessionTier)}${acctPublicSessionIsPaid ? " (paid)" : ""}`
-                    : acctPublicSessionError
-                      ? "probe failed"
-                      : "—"
+                    : "—"
                 }
-                warn={acctPublicSessionMismatch}
               />
               <InfoRow
                 label="Local session tier"
@@ -1434,14 +1422,9 @@ export default function SettingsScreen() {
               />
               <InfoRow
                 label="Session authenticated"
-                value={acctSessionAuthenticated ?? (acctPublicSessionError ? "probe failed" : "—")}
-                warn={acctPublicSessionMismatch}
+                value={acctSessionAuthenticated ?? "—"}
+                warn={acctLocalSessionMismatch}
               />
-              {acctPublicSessionError ? (
-                <Text style={{ color: "#f87171", fontSize: 11, lineHeight: 16 }}>
-                  Session probe: {acctPublicSessionError}
-                </Text>
-              ) : null}
               <InfoRow
                 label="Ora session auth"
                 value={

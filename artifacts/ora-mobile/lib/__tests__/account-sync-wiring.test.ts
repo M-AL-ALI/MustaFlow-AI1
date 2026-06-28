@@ -49,13 +49,17 @@ describe("Mobile Settings — Account sync wiring", () => {
     expect(settings).not.toMatch(/billing-portal|createCheckout|manageBilling/i);
   });
 
-  it("Account sync probes getOraSession() and surfaces public session tier row", () => {
-    expect(settings).toContain("getOraSession");
+  it("Account sync derives public session tier from account-consistency (non-mutating)", () => {
+    // Must NOT call getOraSession() — a POST that creates/overwrites the Ora session cookie.
+    // Derive from acctDiag.chatSession returned by getAccountConsistency() instead.
+    expect(settings).not.toContain("await getOraSession()");
     expect(settings).toContain("acctPublicSessionTier");
     expect(settings).toContain("acctPublicSessionIsPaid");
     expect(settings).toContain('"Public session tier"');
     expect(settings).toContain('"Local session tier"');
     expect(settings).toContain('"Session authenticated"');
+    // Store must be synced with authoritative server value after each check.
+    expect(settings).toContain("setCurrentSessionTier(data.chatSession.tier");
   });
 
   it("Account sync imports and reads getCurrentSessionTier() from session-store", () => {
@@ -64,31 +68,39 @@ describe("Mobile Settings — Account sync wiring", () => {
     expect(settings).toContain("acctLocalSessionTier");
   });
 
-  it("Account sync warns when public session tier is free but billing is paid", () => {
-    expect(settings).toContain("acctPublicSessionMismatch");
+  it("Account sync warns on local session mismatch (startup race) before tier mismatch", () => {
+    // acctPublicSessionMismatch removed — public session always equals billing by server contract.
+    expect(settings).not.toContain("acctPublicSessionMismatch");
     expect(settings).toContain("acctLocalSessionMismatch");
     expect(settings).toContain("acctSessionAuthenticated");
-    // In the acctWarnMessage ternary, the acctPublicSessionMismatch branch must
-    // come before the acctTierMismatch branch so public-session bugs surface first.
+    // In the acctWarnMessage ternary, the acctLocalSessionMismatch branch must
+    // come before the acctTierMismatch branch so startup-race bugs surface first.
     const warnMessageStart = settings.indexOf("const acctWarnMessage =");
     expect(warnMessageStart).toBeGreaterThan(-1);
-    const warnMessageBlock = settings.slice(warnMessageStart, warnMessageStart + 800);
-    const publicMismatchInWarn = warnMessageBlock.indexOf("acctPublicSessionMismatch");
+    const warnMessageBlock = settings.slice(warnMessageStart, warnMessageStart + 900);
+    const localMismatchInWarn = warnMessageBlock.indexOf("acctLocalSessionMismatch");
     const tierMismatchInWarn = warnMessageBlock.indexOf("acctTierMismatch");
-    expect(publicMismatchInWarn).toBeGreaterThan(-1);
+    expect(localMismatchInWarn).toBeGreaterThan(-1);
     expect(tierMismatchInWarn).toBeGreaterThan(-1);
-    expect(publicMismatchInWarn).toBeLessThan(tierMismatchInWarn);
+    expect(localMismatchInWarn).toBeLessThan(tierMismatchInWarn);
   });
 
-  it("Account sync runAccountCheck resets all probe state at the start of each run", () => {
-    // These setters must all appear at the top of runAccountCheck, before any await.
+  it("Account sync runAccountCheck resets probe state and syncs store on each run", () => {
     const fnStart = settings.indexOf("const runAccountCheck = useCallback(async ()");
     expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = settings.slice(fnStart, fnStart + 1200);
+    // Slice to the next const/function declaration so the full callback is captured
+    // regardless of body length — avoids brittle fixed-char-count truncation.
+    const nextDecl = settings.indexOf("\n  const ", fnStart + 1);
+    const fnBody =
+      nextDecl > fnStart ? settings.slice(fnStart, nextDecl) : settings.slice(fnStart);
+    // Probe nulls must appear before any await so they reflect the check start state.
     expect(fnBody).toContain("setAcctPublicSessionTier(null)");
     expect(fnBody).toContain("setAcctPublicSessionIsPaid(null)");
-    expect(fnBody).toContain("setAcctPublicSessionError(null)");
+    // acctPublicSessionError removed: probe is now non-mutating (no getOraSession() POST).
+    expect(fnBody).not.toContain("setAcctPublicSessionError");
     expect(fnBody).toContain("setAcctLocalSessionTier(getCurrentSessionTier())");
+    // Local session store must be synced with the authoritative server value.
+    expect(fnBody).toContain("setCurrentSessionTier(data.chatSession.tier");
   });
 
   it("Plan & billing card surfaces a subscriptionError instead of silently showing Free", () => {
@@ -168,7 +180,11 @@ describe("Mobile auth-stability guard", () => {
   it("streamChatNative uses authHeadersRequired (not plain authHeaders)", () => {
     const streamFnStart = api.indexOf("export async function streamChatNative(");
     expect(streamFnStart).toBeGreaterThan(-1);
-    const streamFnBody = api.slice(streamFnStart, streamFnStart + 500);
+    // Slice to the next exported declaration so the full function body is captured
+    // regardless of function length — avoids brittle fixed-char-count truncation.
+    const nextExport = api.indexOf("\nexport ", streamFnStart + 1);
+    const streamFnBody =
+      nextExport > streamFnStart ? api.slice(streamFnStart, nextExport) : api.slice(streamFnStart);
     expect(streamFnBody).toContain("authHeadersRequired");
     expect(streamFnBody).not.toMatch(/await authHeaders\(/);
   });
