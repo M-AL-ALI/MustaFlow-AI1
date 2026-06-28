@@ -260,4 +260,22 @@ describe("Mobile auth-stability guard", () => {
     const effectClose = index.indexOf("}, [loadPreferences, isSignedIn, isLoaded]);");
     expect(effectClose).toBeGreaterThan(-1);
   });
+
+  it("index.tsx calls setAuthState before getOraSession to prevent stale _authIsSignedIn race", () => {
+    // waitForAuthLoaded() short-circuits when _authIsLoaded is already true (from a
+    // prior render cycle), then reads a stale _authIsSignedIn=false even though
+    // isSignedIn just became true. Calling setAuthState(isLoaded, !!isSignedIn)
+    // synchronously before getOraSession() eliminates the race regardless of React's
+    // child-before-parent effect ordering.
+    expect(index).toContain("import { setAuthState, TokenUnavailableError }");
+    // setAuthState must appear in the session effect body, before getOraSession().
+    const effectStart = index.indexOf("if (!isLoaded) return;");
+    expect(effectStart).toBeGreaterThan(-1);
+    const effectBody = index.slice(effectStart, effectStart + 400);
+    const setAuthStatePos = effectBody.indexOf("setAuthState(isLoaded, !!isSignedIn)");
+    const getOraSessionPos = effectBody.indexOf("getOraSession()");
+    expect(setAuthStatePos).toBeGreaterThan(-1);
+    expect(getOraSessionPos).toBeGreaterThan(-1);
+    expect(setAuthStatePos).toBeLessThan(getOraSessionPos);
+  });
 });

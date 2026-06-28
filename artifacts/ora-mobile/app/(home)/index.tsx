@@ -131,7 +131,7 @@ import {
   updatePreferences,
   uploadFile,
 } from "@/lib/api";
-import { TokenUnavailableError } from "@/lib/auth-client";
+import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode } from "@/lib/focus-mode";
 import { setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredVoicePreset } from "@/lib/voice-preset";
@@ -532,9 +532,13 @@ export default function OraChatScreen() {
     // Wait for Clerk auth to load before creating the Ora session.
     // React runs child effects before parent effects, so _layout.tsx's
     // setAuthState() may not have been called yet — requireAuthToken()
-    // handles this by polling, but gating here avoids the first-render
-    // race entirely without relying on the polling timeout.
+    // handles this by polling for the first load, but when _authIsLoaded is
+    // already true (subsequent re-runs when isSignedIn changes) the poll
+    // short-circuits immediately and sees a stale _authIsSignedIn=false.
+    // Calling setAuthState here makes the module-level state match React state
+    // before any await, so requireAuthToken() never reads a stale value.
     if (!isLoaded) return;
+    setAuthState(isLoaded, !!isSignedIn);
     setSessionSyncError(null);
     getOraSession()
       .then((s) => {
