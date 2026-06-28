@@ -12,6 +12,7 @@ import type {
   OraAssetsResponse,
   OraConversationDetail,
   OraConversationSummary,
+  SupportConversationSummary,
   OraMemory,
   OraMemoryUsed,
   OraAccountConsistency,
@@ -952,6 +953,19 @@ export async function escalateSupport(input: {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export async function listSupportConversations(): Promise<SupportConversationSummary[]> {
+  const data = await jsonRequest<{ conversations?: SupportConversationSummary[] }>(
+    "/help/support/conversations",
+  );
+  return data.conversations ?? [];
+}
+
+export async function getSupportConversation(
+  id: number,
+): Promise<{ id: number; title: string | null; messages: SupportMessage[]; lastMessageAt: string }> {
+  return jsonRequest(`/help/support/conversations/${id}`);
 }
 
 export async function listSupportTickets(): Promise<SupportTicketSummary[]> {
