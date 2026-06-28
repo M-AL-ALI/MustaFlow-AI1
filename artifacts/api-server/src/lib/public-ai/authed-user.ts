@@ -23,11 +23,28 @@ export interface AuthedOraUser {
   isPaid: boolean;
 }
 
+// 60-second in-process tier cache. Tier changes happen at subscription
+// create/cancel — infrequent events — so a short TTL gives substantial
+// latency savings on repeat messages (avoids a DB round-trip on every turn)
+// without delaying visibility of plan changes by more than one minute.
+const _tierCache = new Map<string, { result: AuthedOraUser; expiresAt: number }>();
+const TIER_CACHE_TTL_MS = 60_000;
+
+/** Evict a cached tier entry immediately (call after a subscription change). */
+export function evictTierCache(userId: string): void {
+  _tierCache.delete(userId);
+}
+
 /**
  * Resolve the effective subscription tier for a user from user_subscriptions.
  * Defaults to "free" if there is no active row or the table is unavailable.
+ * Results are cached in-process for 60 seconds to avoid a DB round-trip on
+ * every chat message.
  */
 export async function resolveTierForUser(userId: string): Promise<AuthedOraUser> {
+  const cached = _tierCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
+
   let tier = "free";
   try {
     const { db, userSubscriptionsTable } = await import("@workspace/db");
@@ -42,7 +59,9 @@ export async function resolveTierForUser(userId: string): Promise<AuthedOraUser>
   if (!PAID_TIERS.has(tier) && (await isSuperuser(userId))) {
     tier = SUPERUSER_ORA_TIER;
   }
-  return { userId, tier, isPaid: PAID_TIERS.has(tier) };
+  const result: AuthedOraUser = { userId, tier, isPaid: PAID_TIERS.has(tier) };
+  _tierCache.set(userId, { result, expiresAt: Date.now() + TIER_CACHE_TTL_MS });
+  return result;
 }
 
 /**
