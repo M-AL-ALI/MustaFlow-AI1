@@ -300,7 +300,21 @@ function TicketListItem({
     >
       <div className="flex items-start justify-between gap-2">
         <p className="font-medium text-sm line-clamp-1">{ticket.subject}</p>
-        <StatusBadge status={ticket.status} />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {ticket.emailStatus === "failed" && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
+              <Mail className="h-2.5 w-2.5" />
+              email failed
+            </span>
+          )}
+          {ticket.emailStatus === "skipped" && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <Mail className="h-2.5 w-2.5" />
+              no email
+            </span>
+          )}
+          <StatusBadge status={ticket.status} />
+        </div>
       </div>
       <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">

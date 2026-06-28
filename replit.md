@@ -53,6 +53,7 @@ Important optional env:
 - Neon auto-provisioning: `NEON_API_KEY`, optional `NEON_ORG_ID`
 - Platform domain: `PLATFORM_DOMAIN`, `PLATFORM_CNAME_TARGET`
 - Admin bootstrap: `ADMIN_USER_IDS`
+- Email delivery (support ticket escalation): `RESEND_API_KEY` (required; without it emails are skipped and `emailStatus` is set to `"skipped"`), `SUPPORT_EMAIL` (recipient address for escalated tickets; without it tickets are saved but no email is sent), `SMTP_FROM` (optional "From" address, defaults to `noreply@mustaflow.app`)
 
 ## Migrations
 

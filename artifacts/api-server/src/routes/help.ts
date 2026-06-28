@@ -771,7 +771,48 @@ router.post("/help/support/escalate", supportEscalateLimiter, async (req, res) =
   }
 
   const userEmail = await resolveUserEmail(authed.userId);
-  const recipient = process.env.SUPPORT_EMAIL || "Mustafa_alali74@yahoo.com";
+  const recipient = process.env.SUPPORT_EMAIL;
+  if (!recipient) {
+    // Persist the ticket but skip email when SUPPORT_EMAIL is not configured.
+    let ticketId: number;
+    try {
+      const [row] = await db
+        .insert(supportTicketsTable)
+        .values({
+          userId: authed.userId,
+          userEmail,
+          plan: authed.tier,
+          category: category ?? "other",
+          status: "new",
+          subject,
+          transcript,
+          projectId: safeProjectId,
+          attachments: storedAttachments,
+          deviceInfo: deviceInfo ?? null,
+          supportEmailUsed: null,
+          emailStatus: "skipped",
+        })
+        .returning({ id: supportTicketsTable.id });
+      ticketId = row.id;
+    } catch (err) {
+      logger.error({ component: "help-support", err }, "Failed to persist support ticket");
+      res.status(500).json({ error: "Could not create your support ticket. Please try again." });
+      return;
+    }
+    try {
+      broadcastNewTicket({
+        id: ticketId,
+        subject,
+        category: category ?? "other",
+        plan: authed.tier ?? null,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      logger.warn({ component: "help-support", err }, "Failed to broadcast new-ticket alert");
+    }
+    res.status(201).json({ ticketId, emailStatus: "skipped", supportEmailUsed: null });
+    return;
+  }
 
   // 1) Persist the ticket FIRST so an email failure can never lose the request.
   let ticketId: number;

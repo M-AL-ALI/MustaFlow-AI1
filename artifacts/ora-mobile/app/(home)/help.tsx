@@ -25,14 +25,17 @@ import { Button, Card, Loading } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
   escalateSupport,
+  getSupportConversation,
   getSupportTicket,
   listHelpArticles,
+  listSupportConversations,
   listSupportTickets,
   sendSupportChat,
 } from "@/lib/api";
 import type {
   HelpArticle,
   SupportAttachment,
+  SupportConversationSummary,
   SupportMessage,
   SupportTicketDetail,
   SupportTicketSummary,
@@ -172,6 +175,30 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
   const [attachments, setAttachments] = useState<SupportAttachment[]>([]);
 
   const canEscalate = messages.length > 0;
+
+  // On mount, restore the most-recent support conversation from the server.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const convos = await listSupportConversations();
+        if (cancelled || convos.length === 0) return;
+        // Sort by lastMessageAt desc (server already does, but be defensive).
+        const sorted = [...convos].sort(
+          (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
+        );
+        const latest = sorted[0] as SupportConversationSummary;
+        const detail = await getSupportConversation(latest.id);
+        if (cancelled || !detail.messages?.length) return;
+        setMessages(detail.messages);
+      } catch {
+        // Conversation restoration is best-effort; silently ignore errors.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handlePickAttachment = useCallback(async () => {
     if (attachments.length >= MAX_SUPPORT_ATTACHMENTS) {

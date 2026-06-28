@@ -89,6 +89,14 @@ const SUPPORT_CATEGORIES = [
   { value: "other", label: "Other" },
 ];
 
+const ARTICLE_CATEGORIES = [
+  { value: "general", label: "General" },
+  { value: "account", label: "Account" },
+  { value: "billing", label: "Billing" },
+  { value: "bug", label: "Bug" },
+  { value: "ora", label: "Ora" },
+] as const;
+
 /** Route to a single support ticket's detail page (see App.tsx /support/tickets/:id). */
 export function ticketDetailPath(ticketId: number): string {
   return `/support/tickets/${ticketId}`;
@@ -263,6 +271,7 @@ function SupportChat() {
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [input, setInput] = useState("");
   const [canEscalate, setCanEscalate] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
 
   // escalation form
   const [showEscalate, setShowEscalate] = useState(false);
@@ -390,17 +399,22 @@ function SupportChat() {
     updateMessages(nextWithUser);
     setInput("");
 
+    setSuggestions([]);
     try {
       const res = await chat.mutateAsync({
         data: {
           message: text,
           messages: history,
           category,
+          languageHint: navigator.language || undefined,
           ...(initialProjectId ? { projectId: initialProjectId } : {}),
         },
       });
       updateMessages([...nextWithUser, { role: "assistant", content: res.reply }]);
       setCanEscalate(Boolean(res.canEscalate));
+      if (Array.isArray(res.suggestions) && res.suggestions.length > 0) {
+        setSuggestions(res.suggestions.slice(0, 4));
+      }
     } catch {
       toast({
         title: "Support chat failed",
@@ -563,6 +577,51 @@ function SupportChat() {
           </div>
         )}
       </div>
+
+      {suggestions.length > 0 && !chat.isPending && (
+        <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                setInput(s);
+                setSuggestions([]);
+                void (async () => {
+                  const text = s.trim();
+                  if (!text || chat.isPending) return;
+                  const history = messages;
+                  const nextWithUser: SupportMessage[] = [...history, { role: "user", content: text }];
+                  updateMessages(nextWithUser);
+                  setInput("");
+                  setSuggestions([]);
+                  try {
+                    const res = await chat.mutateAsync({
+                      data: {
+                        message: text,
+                        messages: history,
+                        category,
+                        languageHint: navigator.language || undefined,
+                        ...(initialProjectId ? { projectId: initialProjectId } : {}),
+                      },
+                    });
+                    updateMessages([...nextWithUser, { role: "assistant", content: res.reply }]);
+                    setCanEscalate(Boolean(res.canEscalate));
+                    if (Array.isArray(res.suggestions) && res.suggestions.length > 0) {
+                      setSuggestions(res.suggestions.slice(0, 4));
+                    }
+                  } catch {
+                    updateMessages(history);
+                  }
+                })();
+              }}
+              className="rounded-full border border-primary/40 bg-primary/5 px-3 py-1 text-xs text-primary hover:bg-primary/10 transition-colors"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="border-t border-border p-3">
         <div className="flex items-end gap-2">
@@ -762,12 +821,6 @@ export default function HelpPage() {
   }, [faqs]);
   const articles = useMemo(() => data?.articles ?? [], [data]);
 
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of articles) set.add(a.category);
-    return Array.from(set).sort();
-  }, [articles]);
-
   const visibleArticles = useMemo(() => {
     if (!activeCategory) return articles;
     return articles.filter((a) => a.category === activeCategory);
@@ -822,35 +875,33 @@ export default function HelpPage() {
 
           <section className="space-y-3">
             <h2 className="text-lg font-semibold">Guides</h2>
-            {categories.length > 1 && (
-              <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveCategory(null)}
+                className={
+                  activeCategory === null
+                    ? "rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
+                    : "rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
+                }
+              >
+                All
+              </button>
+              {ARTICLE_CATEGORIES.map((c) => (
                 <button
+                  key={c.value}
                   type="button"
-                  onClick={() => setActiveCategory(null)}
+                  onClick={() => setActiveCategory(c.value)}
                   className={
-                    activeCategory === null
+                    activeCategory === c.value
                       ? "rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
                       : "rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
                   }
                 >
-                  All
+                  {c.label}
                 </button>
-                {categories.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setActiveCategory(c)}
-                    className={
-                      activeCategory === c
-                        ? "rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
-                        : "rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
-                    }
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            )}
+              ))}
+            </div>
             {visibleArticles.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No articles found{search.trim() ? ` for "${search.trim()}"` : ""}.

@@ -475,6 +475,7 @@ describe("POST /help/support/escalate", () => {
 
   it("persists the ticket BEFORE attempting email and returns the email status", async () => {
     authedUser();
+    process.env.SUPPORT_EMAIL = "help@mustaflow.app";
     dbResults.push([{ id: 555 }]); // insert ticket returning
     dbResults.push([]); // update emailStatus
     const app = await buildApp();
@@ -507,7 +508,7 @@ describe("POST /help/support/escalate", () => {
     expect(res.body.emailStatus).toBe("skipped");
   });
 
-  it("stores the default support email when SUPPORT_EMAIL is unset", async () => {
+  it("saves ticket with null supportEmailUsed when SUPPORT_EMAIL is unset (no fallback)", async () => {
     authedUser();
     dbResults.push([{ id: 9 }]);
     dbResults.push([]);
@@ -515,9 +516,9 @@ describe("POST /help/support/escalate", () => {
     const res = await request(app)
       .post("/help/support/escalate")
       .send({ subject: "x", transcript: [] });
-    expect(res.body.supportEmailUsed).toBe("Mustafa_alali74@yahoo.com");
-    const ticket = insertCaptures[0]?.values as { supportEmailUsed: string };
-    expect(ticket.supportEmailUsed).toBe("Mustafa_alali74@yahoo.com");
+    expect(res.status).toBe(201);
+    expect(res.body.supportEmailUsed).toBeNull();
+    expect(res.body.emailStatus).toBe("skipped");
   });
 
   it("honours SUPPORT_EMAIL when configured", async () => {
