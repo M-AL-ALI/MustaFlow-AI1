@@ -1,0 +1,323 @@
+Task: Improve Talk to Ora performance/capability and add per-plan live-voice minute limits
+
+Goal:
+Make Talk to Ora feel closer to ChatGPT Voice in quality, speed, and reliability, while adding clear per-plan live voice session limits for Free / Core Pack / Deep Wave.
+
+Do not run EAS/TestFlight/native build yet unless explicitly asked later.
+
+Product intent:
+Talk to Ora should be:
+- fast to answer
+- clear and concise in spoken replies
+- accurate and useful
+- capable across general knowledge, planning, teaching, coding, business, and product questions
+- stable in noisy environments
+- consistent with the current Ora plan tiers
+- similar in feel to ChatGPT Voice, but branded as Ora
+
+Important:
+Do not claim to users that Ora is ChatGPT or OpenAI.
+Keep provider/model details hidden from user-facing UI.
+Keep the existing Marine/Mustafa product voice selector.
+
+Part 1 — Add live-voice minute budgets by plan
+
+Current desired limits:
+1. Free
+   - 20 minutes of Talk to Ora live voice
+   - resets every 5 hours
+
+2. Core Pack
+   - 60 minutes / 1 hour of Talk to Ora live voice
+   - resets every 3 hours
+
+3. Deep Wave
+   - 120 minutes / 2 hours of Talk to Ora live voice
+   - resets every 3 hours
+
+Implementation details:
+- Add a new realtime voice usage window keyed by Clerk userId for signed-in users.
+- Anonymous users should map to Free-like behavior or stricter anonymous behavior, whichever is already consistent with existing Ora session limits.
+- The budget should meter actual session duration, not just number of minted sessions.
+- If exact real-time duration cannot be tracked server-side after the ephemeral token is minted, use a safe reservation/refund/heartbeat design:
+  - reserve max allowed duration at mint OR
+  - track start timestamp and have client report end duration OR
+  - heartbeat every N seconds while session is active
+- Recommendation: use server-issued session id + client heartbeat/end call:
+  - POST /api/public-ai/realtime/session creates a realtime session record with maxDurationSeconds.
+  - Client sends heartbeat every 30 seconds while connected.
+  - Client sends end event on stop/teardown.
+  - Server accumulates used seconds into a rolling window.
+  - If client disappears, cap the charge at last heartbeat + grace window, never unlimited.
+- Must be robust against abuse:
+  - do not trust client-reported arbitrary duration without server-side cap
+  - do not allow multiple overlapping sessions to bypass limits
+  - enforce per-user concurrent realtime session limit
+  - expire stale active sessions automatically
+
+Suggested backend shape:
+- Add a table or durable usage ledger for realtime voice minutes:
+  - userId or anon/session key
+  - tier
+  - windowStart
+  - windowEnd / resetAt
+  - usedSeconds
+  - activeSessionId
+  - startedAt
+  - lastHeartbeatAt
+  - reservedSeconds / chargedSeconds
+- Add helper:
+  getRealtimeVoiceAllowance(tier):
+    free -> { limitSeconds: 1200, windowHours: 5 }
+    core -> { limitSeconds: 3600, windowHours: 3 }
+    wave -> { limitSeconds: 7200, windowHours: 3 }
+
+- Add endpoints:
+  POST /api/public-ai/realtime/session
+    - before minting, check remaining seconds
+    - set maxDurationSeconds to min(plan remaining seconds, technical max cap)
+    - if no remaining seconds, return 429 with resetAt and plan limit info
+    - return product-safe fields only
+
+  POST /api/public-ai/realtime/heartbeat
+    - body: { realtimeSessionId }
+    - update lastHeartbeatAt
+    - increment/reconcile used seconds safely
+
+  POST /api/public-ai/realtime/end
+    - body: { realtimeSessionId }
+    - finalize charged seconds
+    - clear active session
+
+  GET /api/public-ai/realtime/diagnostics
+    - include product-safe plan allowance:
+      {
+        enabled,
+        available,
+        tier,
+        usedSeconds,
+        remainingSeconds,
+        limitSeconds,
+        resetAt,
+        voicePreset,
+        voiceLabel
+      }
+    - do not expose model names or provider ids
+
+Plan UI:
+- Website Ora Settings → Talk to Ora Live Voice:
+  - show remaining live voice time
+  - show reset time
+  - show selected voice Marine/Mustafa
+  - do not show model/provider
+- Mobile Settings → Talk to Ora Live Voice:
+  - same remaining time and reset time
+  - same selected voice
+  - no model/provider text
+
+In-call UI:
+- show countdown based on server maxDurationSeconds / remainingSeconds
+- when time is nearly over, show friendly warning:
+  “You have about 1 minute of live voice left.”
+- when time ends:
+  “You’ve used your Talk to Ora live voice time for this window. It resets at {time}.”
+- gracefully end the call, do not crash or leave mic open
+
+Part 2 — Improve Talk to Ora performance
+
+Problem:
+User reports Talk to Ora sometimes takes longer to reply and sometimes glitches during talking.
+
+Do not blindly tune VAD or lower safety filters until diagnostics show the slow bucket.
+
+Add/verify privacy-safe timing diagnostics:
+For every realtime turn, log these deltas:
+- speech_started
+- speech_stopped
+- transcript_completed
+- focus_decision_done
+- response_create_sent
+- response_created
+- output_audio_started
+- output_audio_stopped
+- response_done
+
+Calculate:
+- speech_stopped_to_transcript_ms
+- transcript_to_focus_decision_ms
+- focus_decision_to_response_create_ms
+- response_create_to_response_created_ms
+- response_created_to_audio_started_ms
+- total_speech_stopped_to_audio_started_ms
+- audio_output_cycle_count
+- interruption_reason
+- focus_accept/reject reason
+- selected language
+- voice preset
+- tier
+
+Never log raw audio or full transcript text.
+Char counts and reason codes are okay.
+
+Use diagnostics to classify latency:
+1. VAD/transcription slow:
+   speech_stopped_to_transcript_ms is large
+   → consider VAD threshold/silence tuning
+
+2. Focus filter slow:
+   transcript_to_focus_decision_ms or focus_decision_to_response_create_ms is large
+   → optimize local focus scoring
+
+3. Model slow:
+   response_create_to_response_created_ms is large
+   → optimize prompt/session config or model choice
+
+4. Playback slow/glitch:
+   response_created_to_audio_started_ms large or output_audio cycles/gaps high
+   → investigate WebRTC/audio playback handling
+
+Performance goals:
+- For normal short questions, Ora should start responding quickly after the user stops speaking.
+- Target: first audio should ideally begin within ~1–2 seconds after speech end when network/model conditions are normal.
+- Do not sacrifice speaker-focus safety for speed without a clear fallback.
+
+Part 3 — Improve Talk to Ora capability and spoken answer quality
+
+Goal:
+Ora should answer like a strong voice assistant:
+- concise
+- clear
+- accurate
+- not rambling
+- helpful
+- capable across broad topics
+- can teach/explain
+- can reason through plans
+- can ask a clarifying question when needed
+- can say when uncertain
+- can use saved memory/profile/context when allowed
+- must not expose underlying providers/models
+
+Backend/session instruction improvements:
+- Review realtime session instructions in public-ai/realtime.ts.
+- Make sure the voice prompt says:
+  - You are Ora, created by MustaFlow.
+  - Give spoken answers that are clear, concise, and useful.
+  - Prefer short paragraphs and natural spoken language.
+  - For teaching, explain step-by-step but keep it conversational.
+  - If the user asks for deeper detail, expand.
+  - If uncertain, say so and give the best supported answer.
+  - Do not reveal model/provider names.
+  - Do not say you are ChatGPT/OpenAI.
+  - Use the selected language or the language the accepted user turn is in.
+  - Ignore rejected/background speaker turns.
+  - Do not use rejected turns for language, memory, or answer context.
+- Make sure existing memory/profile/project/conversation context is included correctly for signed-in users and omitted for temporary mode.
+
+Important:
+Do not make Ora “know everything” by hallucinating.
+“Strong capability” means better routing, context, clarity, and truthful uncertainty.
+Do not instruct it to pretend certainty.
+
+Part 4 — Speaker focus and language safety must stay intact
+
+Do not regress existing fixes:
+- focused mode remains default
+- rejected background speech is deleted from realtime conversation context
+- no model/provider names in UI
+- Marine/Mustafa voice selector remains
+- voice choice persists on website + mobile
+- selected language / auto language behavior remains stable
+- barge-in remains fast for real user interruptions
+- nearby speakers should not hijack Ora
+
+Add regression tests if any of these areas are touched.
+
+Part 5 — Tests
+
+Backend tests:
+- Free realtime allowance = 20 minutes / reset 5 hours
+- Core realtime allowance = 60 minutes / reset 3 hours
+- Wave realtime allowance = 120 minutes / reset 3 hours
+- remainingSeconds decreases after heartbeat/end
+- over-limit returns 429 with resetAt
+- overlapping sessions cannot bypass limit
+- stale sessions finalize safely
+- diagnostics returns no model/provider id
+- diagnostics returns remainingSeconds/limitSeconds/resetAt
+- voice session response still gives client what it needs for WebRTC but does not render model/provider in user UI
+
+Website tests:
+- Settings shows remaining live voice time
+- Settings shows Marine/Mustafa but no model/provider names
+- starting realtime sends selected voice preset
+- over-limit message renders correctly
+- timing diagnostics are emitted without transcript text
+
+Mobile tests:
+- Settings shows remaining live voice time
+- Settings shows Marine/Mustafa but no model/provider names
+- native realtime start sends selected voice preset
+- over-limit fallback message renders correctly
+- no Stripe/payment changes
+- no TestFlight/EAS build
+
+Realtime parity tests:
+- web and mobile focus/tokenizer guarded blocks remain aligned
+- performance diagnostic events exist on both surfaces
+- speaker-focus behavior remains unchanged
+
+Part 6 — Verification
+
+Run:
+- api-server typecheck
+- mustaflow typecheck
+- ora-mobile typecheck
+- realtime-session tests
+- billing/subscription tests if tier objects changed
+- mobile source tests
+- website settings tests
+- format check
+- lint
+- architect/code review
+
+Do not run EAS/TestFlight/native build.
+
+Part 7 — Manual QA after Replit completes
+
+Website:
+1. Free account:
+   - Talk to Ora shows 20 minutes
+   - reset every 5 hours
+   - over-limit behavior works
+2. Core account:
+   - Talk to Ora shows 60 minutes
+   - reset every 3 hours
+3. Wave account:
+   - Talk to Ora shows 120 minutes
+   - reset every 3 hours
+4. Test Marine voice.
+5. Test Mustafa voice.
+6. Ask simple and complex questions.
+7. Confirm answers are clear and concise.
+8. Confirm no model/provider appears anywhere.
+9. Check timing logs for slow/glitch buckets.
+
+Mobile:
+Only after website passes and a fresh native build is approved:
+1. Same plan limits appear.
+2. Same voice choices appear.
+3. Same countdown/over-limit behavior.
+4. Same Talk to Ora behavior.
+5. Mic dictation remains separate from Talk to Ora.
+
+Definition of Done:
+- Per-plan live voice minutes enforced server-side.
+- Website and mobile display the same allowance.
+- Talk to Ora replies are faster or at least diagnosable by phase.
+- Spoken answer quality is improved without hallucination.
+- Marine/Mustafa still work.
+- No provider/model details shown to users.
+- Existing speaker-focus/language protections remain intact.
+- All tests/checks pass.
+- No native build triggered.
