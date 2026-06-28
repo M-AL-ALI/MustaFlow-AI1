@@ -19,6 +19,7 @@ import {
   Lock,
   Bell,
   BellOff,
+  FlaskConical,
 } from "lucide-react";
 import {
   useListAdminSupportTickets,
@@ -44,6 +45,75 @@ import {
 import { toast } from "@/hooks/use-toast";
 
 type StatusFilter = "all" | "new" | "open" | "resolved";
+
+// Header control: send a diagnostic test email to SUPPORT_EMAIL.
+function TestEmailButton() {
+  const [state, setState] = useState<"idle" | "loading" | "ok" | "err" | "miscfg">("idle");
+  const [detail, setDetail] = useState<string>("");
+
+  async function handleClick() {
+    setState("loading");
+    setDetail("");
+    try {
+      const res = await authFetch("/api/admin/email/test", { method: "POST" });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        emailStatus?: string;
+        recipient?: string | null;
+        error?: string;
+      };
+      if (res.status === 503 || body.emailStatus === "skipped") {
+        setState("miscfg");
+        setDetail(body.error ?? "Email delivery is not configured.");
+      } else if (body.ok && body.emailStatus === "sent") {
+        setState("ok");
+        setDetail(`Sent to ${body.recipient ?? "SUPPORT_EMAIL"}.`);
+      } else {
+        setState("err");
+        setDetail(body.error ?? `Resend returned: ${body.emailStatus ?? "unknown"}`);
+      }
+    } catch {
+      setState("err");
+      setDetail("Network error — check that the API server is running.");
+    }
+    setTimeout(() => setState("idle"), 6000);
+  }
+
+  const icon =
+    state === "loading" ? (
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+    ) : state === "ok" ? (
+      <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+    ) : state === "err" || state === "miscfg" ? (
+      <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+    ) : (
+      <FlaskConical className="h-3.5 w-3.5" />
+    );
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={() => void handleClick()}
+        disabled={state === "loading"}
+        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        title="Send a diagnostic test email to SUPPORT_EMAIL"
+      >
+        {icon}
+        Test email
+      </button>
+      {detail && (
+        <span
+          className={cn(
+            "text-[11px] max-w-[200px] text-right",
+            state === "ok" ? "text-green-600" : "text-amber-600",
+          )}
+        >
+          {detail}
+        </span>
+      )}
+    </div>
+  );
+}
 
 // Header control: toggle real-time new-ticket alerts on/off and (when enabling)
 // offer to turn on native browser notifications.
@@ -177,6 +247,7 @@ export default function SupportInboxPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <TestEmailButton />
           <AlertsToggle />
           <button
             onClick={() => refetchList()}

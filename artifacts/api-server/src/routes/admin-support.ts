@@ -6,6 +6,7 @@
 //   PATCH /api/admin/support-tickets/:id                      — change status
 //   POST  /api/admin/support-tickets/:id/reply               — email the requester
 //   GET   /api/admin/support-tickets/:id/attachments/:assetId — download attachment
+//   POST  /api/admin/email/test                              — send a test email to SUPPORT_EMAIL
 //
 // The support inbox lets staff triage escalated tickets (from Ora Support Mode)
 // without leaving the product. Tickets are persisted by the escalation flow in
@@ -35,6 +36,7 @@ const router: IRouter = Router();
 
 // All routes here are admin-only.
 router.use("/admin/support-tickets", requireAdmin);
+router.use("/admin/email", requireAdmin);
 
 interface TranscriptMessage {
   role: "user" | "assistant";
@@ -484,6 +486,46 @@ router.get("/admin/support-tickets/:id/attachments/:assetId", async (req, res): 
     logger.error({ component: "admin-support", err }, "Failed to download ticket attachment");
     res.status(500).json({ error: "Failed to download attachment" });
   }
+});
+
+// ── POST /api/admin/email/test ─────────────────────────────────────────────────
+// Sends a one-line diagnostic email to SUPPORT_EMAIL so admins can confirm
+// Resend delivery without creating a real support ticket.
+// Returns: { ok, emailStatus, recipient } — never throws.
+router.post("/admin/email/test", async (req, res): Promise<void> => {
+  const recipient = process.env.SUPPORT_EMAIL;
+  const smtpFrom = process.env.SMTP_FROM ?? "noreply@mustaflow.app";
+
+  if (!process.env.RESEND_API_KEY) {
+    res.status(503).json({
+      ok: false,
+      emailStatus: "skipped",
+      recipient: null,
+      error: "RESEND_API_KEY is not configured. Set it in environment secrets and redeploy.",
+    });
+    return;
+  }
+  if (!recipient) {
+    res.status(503).json({
+      ok: false,
+      emailStatus: "skipped",
+      recipient: null,
+      error: "SUPPORT_EMAIL is not configured. Set it in environment secrets and redeploy.",
+    });
+    return;
+  }
+
+  const now = new Date().toUTCString();
+  const emailStatus = await sendEmailWithStatus({
+    to: recipient,
+    subject: `[MustaFlow] Test email — ${now}`,
+    html: `<p style="font-family:sans-serif">This is a delivery test from the MustaFlow admin panel.</p><p style="font-family:sans-serif;color:#666;font-size:12px">Sent at: ${now}<br>From: ${smtpFrom}<br>To: ${recipient}</p>`,
+    text: `MustaFlow admin email delivery test.\n\nSent at: ${now}\nFrom: ${smtpFrom}\nTo: ${recipient}`,
+  });
+
+  logger.info({ component: "admin-email-test", emailStatus, recipient }, "Admin test email result");
+
+  res.json({ ok: emailStatus === "sent", emailStatus, recipient });
 });
 
 export default router;
