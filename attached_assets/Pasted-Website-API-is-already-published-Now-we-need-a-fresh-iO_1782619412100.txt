@@ -1,0 +1,46 @@
+Website/API is already published. Now we need a fresh iOS TestFlight build.
+
+Before building, verify the mobile build source is on the latest GitHub main and includes the published website fixes.
+
+Required checks before EAS build:
+1. HEAD must be 716be166 or newer.
+2. Web and mobile hooks must both contain:
+   - FOCUS_COLD_START_WINDOW_MS = 12_000
+   - FOCUS_FOLLOWUP_WINDOW_MS = 4_000
+   - bargeInRequiresDirection()
+3. Run:
+   - pnpm --filter @workspace/mustaflow test src/hooks/__tests__/ora-realtime-focus.test.ts
+   - pnpm --filter @workspace/api-server test src/routes/public-ai/__tests__/realtime-session.test.ts
+   - pnpm --filter @workspace/api-server test src/routes/public-ai/__tests__/realtime-metering.test.ts src/lib/public-ai/__tests__/ora-realtime-usage.test.ts
+   - pnpm --filter @workspace/mustaflow typecheck
+   - pnpm --filter @workspace/api-server typecheck
+   - pnpm --filter @workspace/ora-mobile typecheck
+
+If all pass, cut the iOS TestFlight build using the existing TestFlight/EAS profile.
+
+Important:
+- Do not change Talk to Ora logic before this build.
+- Do not rebuild/rewrite realtime infrastructure.
+- This build is only to ship the already-verified website/mobile parity code to iOS.
+
+Goal:
+Ora mobile should match Ora website from the same backend and same realtime voice logic:
+- same users/accounts
+- same plans/features
+- same memories/projects/history
+- same Talk to Ora focus mode
+- same Marine/Mustafa voices
+- same live-voice minute budgets
+- same hidden model/provider privacy
+- same background-speaker protection
+
+After TestFlight is available, QA must confirm:
+1. Sign in with same account as website.
+2. Verify projects, memories, conversations, history, and plan tier match website.
+3. Test Talk to Ora with AirPods and speaker.
+4. Confirm background speakers are ignored.
+5. Confirm language does not drift.
+6. Confirm intentional barge-in works only when directed.
+7. Confirm speed/glitch behavior is acceptable.
+
+Do not claim mobile is fully equal to website until this TestFlight build is installed and QA passes.
