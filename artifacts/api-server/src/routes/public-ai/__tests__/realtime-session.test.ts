@@ -1140,7 +1140,10 @@ describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
     const contentStart = start + startMarker.length;
     const end = src.indexOf(endMarker, contentStart);
     expect(end, `${label} end marker not found`).toBeGreaterThan(-1);
-    return src.slice(contentStart, end);
+    // Normalize CRLF -> LF so the byte-for-byte parity check compares code, not
+    // line-ending style. Windows checkouts (git autocrlf) can give one hook CRLF
+    // and the other LF, which would fail the compare despite identical logic.
+    return src.slice(contentStart, end).replace(/\r\n/g, "\n");
   }
 
   it("the focus scorer block is byte-for-byte identical across both hooks", () => {
