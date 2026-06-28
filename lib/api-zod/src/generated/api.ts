@@ -5945,7 +5945,40 @@ export const GetBillingSubscriptionResponse = zod.object({
   "features": zod.array(zod.string()),
   "available": zod.boolean(),
   "current": zod.boolean()
-}))
+})),
+  "oraTiers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "priceUsd": zod.number(),
+  "messageLimit": zod.number(),
+  "imageLimit": zod.number(),
+  "windowHours": zod.number(),
+  "voiceMinutes": zod.number(),
+  "deepThinking": zod.boolean(),
+  "features": zod.array(zod.string()),
+  "available": zod.boolean(),
+  "current": zod.boolean().optional()
+}).describe('Ora-only plan tier metadata. Contains ONLY Ora features (messages, images, voice minutes, Deep Thinking, support level) — never AI Builder credits, concurrent builds, build queue, or Builder connectors. Single source of truth for both website and mobile Ora plan cards.\n')).optional()
+})
+
+
+/**
+ * @summary Public Ora-only plan metadata (single source of truth for Ora plan cards)
+ */
+export const GetBillingOraPlansResponse = zod.object({
+  "tiers": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "priceUsd": zod.number(),
+  "messageLimit": zod.number(),
+  "imageLimit": zod.number(),
+  "windowHours": zod.number(),
+  "voiceMinutes": zod.number(),
+  "deepThinking": zod.boolean(),
+  "features": zod.array(zod.string()),
+  "available": zod.boolean(),
+  "current": zod.boolean().optional()
+}).describe('Ora-only plan tier metadata. Contains ONLY Ora features (messages, images, voice minutes, Deep Thinking, support level) — never AI Builder credits, concurrent builds, build queue, or Builder connectors. Single source of truth for both website and mobile Ora plan cards.\n'))
 })
 
 

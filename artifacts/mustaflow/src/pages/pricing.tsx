@@ -1,5 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
@@ -7,42 +7,85 @@ import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from "@/lib/auth-state-context";
 
-const FREE_FEATURES = [
-  "30 Ora messages every 5 hours",
-  "4 Ora images every 5 hours",
-  "Unlimited file uploads to Ora",
-  "Ora Instant replies",
-  "150 Builder credits / month",
-  "1 concurrent build",
-  '"Built with MustaFlow" badge on published apps',
-  "Static, React SPA, and full-stack projects",
-  "Community support",
-];
+// Ora-only plan tier (mirrors the server's ORA_TIERS_META / OpenAPI OraTierMeta).
+// Contains ONLY Ora features — never AI Builder credits, concurrent builds,
+// build queue, "Built with MustaFlow" badge, or Builder connectors.
+interface OraTierMeta {
+  id: string;
+  name: string;
+  priceUsd: number;
+  messageLimit: number;
+  imageLimit: number;
+  windowHours: number;
+  voiceMinutes: number;
+  deepThinking: boolean;
+  features: string[];
+  available: boolean;
+  current?: boolean;
+}
 
-const CORE_FEATURES = [
-  "100 Ora messages every 3 hours",
-  "15 Ora images every 3 hours",
-  "Unlimited file uploads to Ora",
-  "Ora Instant + Deep Thinking",
-  "1,500 Builder credits / month",
-  "Connectors (GitHub & more)",
-  "3 concurrent builds",
-  "No badge on published apps",
-  "Priority build queue",
-  "Email support",
-];
-
-const WAVE_FEATURES = [
-  "280 Ora messages every 3 hours",
-  "30 Ora images every 3 hours",
-  "Unlimited file uploads to Ora",
-  "Ora Instant + Deep Thinking",
-  "4,000 Builder credits / month",
-  "Connectors (GitHub & more)",
-  "10 concurrent builds",
-  "No badge on published apps",
-  "Priority build queue",
-  "Priority support",
+// Fallback used until GET /api/billing/ora-plans resolves. Must mirror the
+// server's ORA_TIERS_META and stay Ora-only ($40 Deep Wave, no Builder words).
+const ORA_PLAN_FALLBACK: OraTierMeta[] = [
+  {
+    id: "free",
+    name: "Free",
+    priceUsd: 0,
+    messageLimit: 30,
+    imageLimit: 4,
+    windowHours: 5,
+    voiceMinutes: 20,
+    deepThinking: false,
+    available: true,
+    features: [
+      "30 Ora messages every 5 hours",
+      "4 Ora images every 5 hours",
+      "Talk to Ora: 20 voice minutes every 5 hours",
+      "Unlimited file uploads to Ora",
+      "Ora Instant replies",
+      "Community support",
+    ],
+  },
+  {
+    id: "core",
+    name: "Core Pack",
+    priceUsd: 20,
+    messageLimit: 100,
+    imageLimit: 15,
+    windowHours: 3,
+    voiceMinutes: 60,
+    deepThinking: true,
+    available: true,
+    features: [
+      "100 Ora messages every 3 hours",
+      "15 Ora images every 3 hours",
+      "Talk to Ora: 60 voice minutes every 3 hours",
+      "Unlimited file uploads to Ora",
+      "Ora Instant + Deep Thinking",
+      "Saved memory & history",
+      "Email support",
+    ],
+  },
+  {
+    id: "wave",
+    name: "Deep Wave",
+    priceUsd: 40,
+    messageLimit: 280,
+    imageLimit: 30,
+    windowHours: 3,
+    voiceMinutes: 120,
+    deepThinking: true,
+    available: true,
+    features: [
+      "280 Ora messages every 3 hours",
+      "30 Ora images every 3 hours",
+      "Talk to Ora: 120 voice minutes every 3 hours",
+      "Unlimited file uploads to Ora",
+      "Ora Instant + Deep Thinking",
+      "Saved memory & history",
+      "Priority support",
+    ],
+  },
 ];
 
 const ORA_PLAN_LIMITS = [
@@ -56,6 +99,30 @@ export default function PricingPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
+  const [oraTiers, setOraTiers] = useState<OraTierMeta[]>(ORA_PLAN_FALLBACK);
+
+  // Server (ORA_TIERS_META) is the single source of truth. Fall back to the
+  // hardcoded Ora-only tiers until the public endpoint resolves.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch("/api/billing/ora-plans");
+        if (!res.ok) return;
+        const data = (await res.json()) as { tiers?: OraTierMeta[] };
+        if (!cancelled && data.tiers?.length) setOraTiers(data.tiers);
+      } catch {
+        // keep fallback
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const freeTier = oraTiers.find((t) => t.id === "free") ?? ORA_PLAN_FALLBACK[0]!;
+  const coreTier = oraTiers.find((t) => t.id === "core") ?? ORA_PLAN_FALLBACK[1]!;
+  const waveTier = oraTiers.find((t) => t.id === "wave") ?? ORA_PLAN_FALLBACK[2]!;
 
   async function handleSubscribe(tier: "core" | "wave") {
     if (!isSignedIn) {
@@ -131,14 +198,14 @@ export default function PricingPage() {
                 Free
               </p>
               <div className="flex items-baseline gap-1 mb-1">
-                <span className="text-4xl font-extrabold">$0</span>
+                <span className="text-4xl font-extrabold">${freeTier.priceUsd}</span>
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">No credit card required</p>
             </div>
 
             <ul className="space-y-2 flex-1">
-              {FREE_FEATURES.map((f) => (
+              {freeTier.features.map((f) => (
                 <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
                   {f}
@@ -165,14 +232,14 @@ export default function PricingPage() {
                 Core Pack
               </p>
               <div className="flex items-baseline gap-1 mb-1">
-                <span className="text-4xl font-extrabold">$20</span>
+                <span className="text-4xl font-extrabold">${coreTier.priceUsd}</span>
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">Cancel anytime</p>
             </div>
 
             <ul className="space-y-2 flex-1">
-              {CORE_FEATURES.map((f) => (
+              {coreTier.features.map((f) => (
                 <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                   {f}
@@ -206,14 +273,14 @@ export default function PricingPage() {
                 Deep Wave
               </p>
               <div className="flex items-baseline gap-1 mb-1">
-                <span className="text-4xl font-extrabold">$65</span>
+                <span className="text-4xl font-extrabold">${waveTier.priceUsd}</span>
                 <span className="text-sm text-muted-foreground">/month</span>
               </div>
               <p className="text-sm text-muted-foreground">For power builders</p>
             </div>
 
             <ul className="space-y-2 flex-1">
-              {WAVE_FEATURES.map((f) => (
+              {waveTier.features.map((f) => (
                 <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
                   {f}

@@ -129,6 +129,7 @@ import type {
   GetAdminSkillDraft200,
   GetAgentRouting200,
   GetAgentRoutingParams,
+  GetBillingOraPlans200,
   GetBillingSubscription200,
   GetCheckRunTrendsParams,
   GetCheckRunsParams,
@@ -16643,6 +16644,83 @@ export function useGetBillingSubscription<TData = Awaited<ReturnType<typeof getB
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetBillingSubscriptionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetBillingOraPlansUrl = () => {
+
+
+
+
+  return `/api/billing/ora-plans`
+}
+
+/**
+ * @summary Public Ora-only plan metadata (single source of truth for Ora plan cards)
+ */
+export const getBillingOraPlans = async ( options?: RequestInit): Promise<GetBillingOraPlans200> => {
+
+  return customFetch<GetBillingOraPlans200>(getGetBillingOraPlansUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBillingOraPlansQueryKey = () => {
+    return [
+    `/api/billing/ora-plans`
+    ] as const;
+    }
+
+
+export const getGetBillingOraPlansQueryOptions = <TData = Awaited<ReturnType<typeof getBillingOraPlans>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBillingOraPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBillingOraPlansQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBillingOraPlans>>> = ({ signal }) => getBillingOraPlans({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBillingOraPlans>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBillingOraPlansQueryResult = NonNullable<Awaited<ReturnType<typeof getBillingOraPlans>>>
+export type GetBillingOraPlansQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Public Ora-only plan metadata (single source of truth for Ora plan cards)
+ */
+
+export function useGetBillingOraPlans<TData = Awaited<ReturnType<typeof getBillingOraPlans>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBillingOraPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBillingOraPlansQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

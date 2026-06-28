@@ -49,7 +49,7 @@ import {
 } from "@/lib/voice-preset";
 import type {
   BillingSubscription,
-  BillingTierMeta,
+  OraTierMeta,
   OraAccountConsistency,
   OraUsage,
   RealtimeDiagnostics,
@@ -271,7 +271,7 @@ function PlanFeatureCards({
   tiers,
   currentTier,
 }: {
-  tiers: BillingTierMeta[];
+  tiers: OraTierMeta[];
   currentTier: string;
 }) {
   const c = useColors();
@@ -312,9 +312,8 @@ function PlanFeatureCards({
                   {tier.name}
                 </Text>
                 <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  {tier.monthlyCredits.toLocaleString()} credits / month ·{" "}
-                  {tier.maxConcurrentBuilds} concurrent build
-                  {tier.maxConcurrentBuilds === 1 ? "" : "s"}
+                  {tier.messageLimit.toLocaleString()} messages ·{" "}
+                  {tier.imageLimit.toLocaleString()} images / {tier.windowHours}h
                 </Text>
               </View>
               <View style={{ alignItems: "flex-end", gap: 4 }}>
@@ -814,7 +813,7 @@ export default function SettingsScreen() {
   const allOk = diagSteps.length > 0 && diagSteps.every((s) => s.status === "ok");
   const anyFail = diagSteps.some((s) => s.status === "fail");
   const currentTier = subscription?.tier ?? "free";
-  const planTiers = subscription?.tiers ?? [];
+  const planTiers = subscription?.oraTiers ?? [];
   const signedInEmail =
     user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? "unknown";
   const sessionTierForCompare = diagPlanSync.sessionTier ?? "free";

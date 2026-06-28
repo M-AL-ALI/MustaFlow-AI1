@@ -5250,12 +5250,35 @@ paths:
                           items: { type: string }
                         available: { type: boolean }
                         current: { type: boolean }
+                  oraTiers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OraTierMeta"
         "401":
           description: Unauthenticated
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /billing/ora-plans:
+    get:
+      operationId: getBillingOraPlans
+      tags: [billing]
+      summary: Public Ora-only plan metadata (single source of truth for Ora plan cards)
+      responses:
+        "200":
+          description: Ora-only plan tiers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tiers]
+                properties:
+                  tiers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OraTierMeta"
 
   /abuse-reports:
     post:
@@ -6916,6 +6939,30 @@ components:
       properties:
         error: { type: string }
       required: [error]
+
+    OraTierMeta:
+      type: object
+      description: >
+        Ora-only plan tier metadata. Contains ONLY Ora features (messages,
+        images, voice minutes, Deep Thinking, support level) — never AI Builder
+        credits, concurrent builds, build queue, or Builder connectors. Single
+        source of truth for both website and mobile Ora plan cards.
+      required:
+        [id, name, priceUsd, messageLimit, imageLimit, windowHours, voiceMinutes, deepThinking, features, available]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        priceUsd: { type: number }
+        messageLimit: { type: integer }
+        imageLimit: { type: integer }
+        windowHours: { type: integer }
+        voiceMinutes: { type: integer }
+        deepThinking: { type: boolean }
+        features:
+          type: array
+          items: { type: string }
+        available: { type: boolean }
+        current: { type: boolean }
 
     HelpArticle:
       type: object

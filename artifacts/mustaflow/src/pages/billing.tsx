@@ -77,6 +77,23 @@ interface SubscriptionTierMeta {
   current: boolean;
 }
 
+// Ora-only plan tier (mirrors the server's ORA_TIERS_META / OpenAPI OraTierMeta).
+// Contains ONLY Ora features — never AI Builder credits, concurrent builds,
+// build queue, or Builder connectors.
+interface OraTierMeta {
+  id: string;
+  name: string;
+  priceUsd: number;
+  messageLimit: number;
+  imageLimit: number;
+  windowHours: number;
+  voiceMinutes: number;
+  deepThinking: boolean;
+  features: string[];
+  available: boolean;
+  current?: boolean;
+}
+
 interface SubscriptionResponse {
   tier: string;
   status: string;
@@ -87,6 +104,7 @@ interface SubscriptionResponse {
   maxConcurrentBuilds: number;
   stripeConfigured: boolean;
   tiers: SubscriptionTierMeta[];
+  oraTiers?: OraTierMeta[];
 }
 
 interface Invoice {
@@ -834,20 +852,27 @@ function SubscriptionTab({
 
   const currentTier = subscription?.tier ?? "free";
 
-  // Hardcoded plan definitions — Free, Core Pack, Deep Wave.
-  const PLANS = [
+  // Ora-only plan cards — Free, Core Pack, Deep Wave. The server's oraTiers
+  // (single source of truth) is preferred when present; this fallback mirrors
+  // ORA_TIERS_META and must stay Ora-only (NO Builder credits, concurrent
+  // builds, build queue, "Built with MustaFlow" badge, or Builder connectors).
+  const ORA_PLAN_FALLBACK: OraTierMeta[] = [
     {
       id: "free",
       name: "Free",
       priceUsd: 0,
+      messageLimit: 30,
+      imageLimit: 4,
+      windowHours: 5,
+      voiceMinutes: 20,
+      deepThinking: false,
+      available: true,
       features: [
         "30 Ora messages every 5 hours",
         "4 Ora images every 5 hours",
+        "Talk to Ora: 20 voice minutes every 5 hours",
         "Unlimited file uploads to Ora",
         "Ora Instant replies",
-        "150 Builder credits / month",
-        "1 concurrent build",
-        '"Built with MustaFlow" badge on published apps',
         "Community support",
       ],
     },
@@ -855,35 +880,45 @@ function SubscriptionTab({
       id: "core",
       name: "Core Pack",
       priceUsd: 20,
+      messageLimit: 100,
+      imageLimit: 15,
+      windowHours: 3,
+      voiceMinutes: 60,
+      deepThinking: true,
+      available: true,
       features: [
         "100 Ora messages every 3 hours",
         "15 Ora images every 3 hours",
+        "Talk to Ora: 60 voice minutes every 3 hours",
         "Unlimited file uploads to Ora",
         "Ora Instant + Deep Thinking",
-        "1,500 Builder credits / month",
-        "Connectors (GitHub & more)",
-        "3 concurrent builds",
-        "No badge on published apps",
-        "Priority build queue",
+        "Saved memory & history",
+        "Email support",
       ],
     },
     {
       id: "wave",
       name: "Deep Wave",
-      priceUsd: 65,
+      priceUsd: 40,
+      messageLimit: 280,
+      imageLimit: 30,
+      windowHours: 3,
+      voiceMinutes: 120,
+      deepThinking: true,
+      available: true,
       features: [
         "280 Ora messages every 3 hours",
         "30 Ora images every 3 hours",
+        "Talk to Ora: 120 voice minutes every 3 hours",
         "Unlimited file uploads to Ora",
         "Ora Instant + Deep Thinking",
-        "4,000 Builder credits / month",
-        "Connectors (GitHub & more)",
-        "10 concurrent builds",
-        "No badge on published apps",
+        "Saved memory & history",
         "Priority support",
       ],
     },
-  ] as const;
+  ];
+
+  const PLANS = subscription?.oraTiers?.length ? subscription.oraTiers : ORA_PLAN_FALLBACK;
 
   const TIER_LABELS: Record<string, string> = {
     free: "Free",

@@ -29,7 +29,16 @@ import {
   projectsTable,
   userSubscriptionsTable,
 } from "@workspace/db";
-import { TIER_MONTHLY_CREDITS, TIER_PRICE_USD, TIER_MONTHLY_IMAGE_CAP } from "@workspace/db";
+import {
+  TIER_MONTHLY_CREDITS,
+  TIER_PRICE_USD,
+  TIER_MONTHLY_IMAGE_CAP,
+  TIER_ORA_MESSAGE_LIMIT,
+  TIER_ORA_IMAGE_LIMIT,
+  TIER_ORA_WINDOW_HOURS,
+  TIER_ORA_REALTIME_LIMIT_SECONDS,
+} from "@workspace/db";
+import type { SubscriptionTier } from "@workspace/db";
 import { getOrCreateCredits } from "./credits";
 import {
   stripeAvailable,
@@ -139,6 +148,54 @@ export const SUBSCRIPTION_TIERS_META = [
     ],
   },
 ] as const;
+
+// ── Ora-only plan metadata (Ora plan/billing parity) ─────────────────────────
+// Ora surfaces (website Ora settings/pricing/billing plan cards + mobile
+// Settings) must render ONLY Ora features — never AI Builder credits, concurrent
+// builds, build queue, the "Built with MustaFlow" badge, or Builder connectors.
+// This array is the SINGLE SOURCE OF TRUTH consumed by BOTH website and mobile
+// via the API (GET /billing/subscription -> oraTiers, GET /billing/ora-plans).
+// Everything is derived from the canonical per-tier constants in
+// @workspace/db so the numbers can never drift between surfaces.
+const ORA_TIER_IDS = ["free", "core", "wave"] as const;
+
+const ORA_TIER_NAMES: Record<SubscriptionTier, string> = {
+  free: "Free",
+  core: "Core Pack",
+  wave: "Deep Wave",
+};
+
+function oraVoiceMinutes(tier: SubscriptionTier): number {
+  return Math.round(TIER_ORA_REALTIME_LIMIT_SECONDS[tier] / 60);
+}
+
+function buildOraTierFeatures(tier: SubscriptionTier): string[] {
+  const win = TIER_ORA_WINDOW_HOURS[tier];
+  const features = [
+    `${TIER_ORA_MESSAGE_LIMIT[tier]} Ora messages every ${win} hours`,
+    `${TIER_ORA_IMAGE_LIMIT[tier]} Ora images every ${win} hours`,
+    `Talk to Ora: ${oraVoiceMinutes(tier)} voice minutes every ${win} hours`,
+    "Unlimited file uploads to Ora",
+    tier === "free" ? "Ora Instant replies" : "Ora Instant + Deep Thinking",
+  ];
+  if (tier !== "free") features.push("Saved memory & history");
+  features.push(
+    tier === "free" ? "Community support" : tier === "core" ? "Email support" : "Priority support",
+  );
+  return features;
+}
+
+export const ORA_TIERS_META = ORA_TIER_IDS.map((id) => ({
+  id,
+  name: ORA_TIER_NAMES[id],
+  priceUsd: TIER_PRICE_USD[id],
+  messageLimit: TIER_ORA_MESSAGE_LIMIT[id],
+  imageLimit: TIER_ORA_IMAGE_LIMIT[id],
+  windowHours: TIER_ORA_WINDOW_HOURS[id],
+  voiceMinutes: oraVoiceMinutes(id),
+  deepThinking: id !== "free",
+  features: buildOraTierFeatures(id),
+}));
 
 function priceIdForPack(pkg: (typeof CREDIT_PACKAGES)[number]): string | undefined {
   const id = process.env[pkg.priceIdEnv];
@@ -994,6 +1051,23 @@ async function handleSubscriptionDeleted(event: {
 export const billingWebhookRouter: IRouter = Router();
 billingWebhookRouter.post("/billing/webhook", handleStripeWebhook);
 
+// ── Public Ora plans router — mount BEFORE auth wall ──────────────────────────
+// GET /api/billing/ora-plans — PUBLIC Ora-only plan metadata for the anonymous
+// pricing page. Same single source of truth (ORA_TIERS_META) as the authed
+// /billing/subscription -> oraTiers, so website + mobile + marketing never drift.
+// Must stay OUTSIDE the auth wall so signed-out visitors get live server data
+// instead of silently falling back to hardcoded tiers.
+export const billingPublicRouter: IRouter = Router();
+billingPublicRouter.get("/billing/ora-plans", async (_req, res): Promise<void> => {
+  const configured = await stripeAvailable();
+  res.json({
+    tiers: ORA_TIERS_META.map((t) => ({
+      ...t,
+      available: configured || t.id === "free",
+    })),
+  });
+});
+
 // ── Auth-required billing router ──────────────────────────────────────────────
 const router: IRouter = Router();
 
@@ -1139,6 +1213,13 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
       monthlyCredits: t.monthlyCredits,
       maxConcurrentBuilds: t.maxConcurrentBuilds,
       features: t.features,
+      available: configured || t.id === "free",
+      current: effectiveTier === t.id,
+    })),
+    // Ora-only plan metadata (no AI Builder features). Website Ora plan cards
+    // and mobile Settings both render THIS, never the Builder-flavored `tiers`.
+    oraTiers: ORA_TIERS_META.map((t) => ({
+      ...t,
       available: configured || t.id === "free",
       current: effectiveTier === t.id,
     })),

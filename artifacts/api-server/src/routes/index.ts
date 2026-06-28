@@ -33,7 +33,7 @@ import adminRouter from "./admin";
 import adminOraRoutingDiagnosticsRouter from "./admin-ora-routing-diagnostics";
 import adminOraMonitoringRouter from "./admin-ora-monitoring";
 import adminSupportRouter from "./admin-support";
-import billingRouter, { billingWebhookRouter } from "./billing";
+import billingRouter, { billingWebhookRouter, billingPublicRouter } from "./billing";
 import workspacesRouter from "./workspaces";
 import workspaceDomainsRouter from "./workspace-domains";
 import buildsRouter from "./builds";
@@ -134,6 +134,7 @@ router.use(analyticsRouter); // POST /p/:slug/analytics/ping (public ping)
 router.use(publicProdLogRouter); // POST /p/:slug/log (public browser error beacon)
 router.use(sslWebhookRouter); // POST /domain/ssl-webhook (Cloudflare → us)
 router.use(billingWebhookRouter); // POST /billing/webhook    (Stripe → us)
+router.use(billingPublicRouter); // GET /billing/ora-plans   — public Ora plan metadata (no auth)
 router.use(clerkWebhookRouter); // POST /webhooks/clerk     (Clerk → us)
 router.use(publicGalleryRouter); // GET /gallery-templates[/:slug] — public browsing
 router.use(publicExtensionsRouter); // GET /extensions[/:slug] — public browsing

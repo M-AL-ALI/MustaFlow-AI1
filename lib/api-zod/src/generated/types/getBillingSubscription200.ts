@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GetBillingSubscription200TiersItem } from './getBillingSubscription200TiersItem';
+import type { OraTierMeta } from './oraTierMeta';
 
 export type GetBillingSubscription200 = {
   tier: string;
@@ -18,4 +19,5 @@ export type GetBillingSubscription200 = {
   stripeConfigured: boolean;
   publishableKey: string;
   tiers: GetBillingSubscription200TiersItem[];
+  oraTiers?: OraTierMeta[];
 };

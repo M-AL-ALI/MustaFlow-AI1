@@ -29,6 +29,24 @@ export interface ApiError {
   error: string;
 }
 
+/**
+ * Ora-only plan tier metadata. Contains ONLY Ora features (messages, images, voice minutes, Deep Thinking, support level) — never AI Builder credits, concurrent builds, build queue, or Builder connectors. Single source of truth for both website and mobile Ora plan cards.
+
+ */
+export interface OraTierMeta {
+  id: string;
+  name: string;
+  priceUsd: number;
+  messageLimit: number;
+  imageLimit: number;
+  windowHours: number;
+  voiceMinutes: number;
+  deepThinking: boolean;
+  features: string[];
+  available: boolean;
+  current?: boolean;
+}
+
 export interface HelpArticle {
   id: number;
   slug: string;
@@ -5514,6 +5532,11 @@ export type GetBillingSubscription200 = {
   stripeConfigured: boolean;
   publishableKey: string;
   tiers: GetBillingSubscription200TiersItem[];
+  oraTiers?: OraTierMeta[];
+};
+
+export type GetBillingOraPlans200 = {
+  tiers: OraTierMeta[];
 };
 
 export type SubmitAbuseReportBody = {
