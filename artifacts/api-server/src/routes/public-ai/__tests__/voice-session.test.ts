@@ -206,7 +206,7 @@ describe("Talk to Ora voice-session wiring", () => {
     expect(mobileHome).toContain('"Voice mode active"');
     expect(mobileHome).toContain('"Tap interrupt to jump in"');
     expect(mobileHome).toContain('"Tap interrupt to speak"');
-    expect(mobileHome).toContain('"Muted - Ora can still hear you"');
+    expect(mobileHome).toContain('"Muted — Ora can still hear you"');
     expect(mobileHome).toContain('"Muted - replies stay on screen"');
     expect(mobileHome).toContain("onPress={onInterruptPress}");
     expect(mobileHome).toContain("Interrupt");

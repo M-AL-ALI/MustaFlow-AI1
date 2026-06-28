@@ -1,43 +1,40 @@
 ---
 name: Ora realtime route test strategies
-description: The two Talk-to-Ora realtime route test files use opposite DB strategies; the real-DB one is latently broken.
+description: How the three Talk-to-Ora realtime test files split responsibilities; which one owns DB cap arithmetic.
 ---
 
 # Ora realtime route test strategies
 
-The Talk-to-Ora realtime route (`routes/public-ai/realtime.ts`) has two test
-files that take **opposite** approaches to the DB-backed metering service
-`lib/public-ai/ora-realtime-usage`:
+The Talk-to-Ora realtime route (`routes/public-ai/realtime.ts`) is covered by
+three test files with a deliberate division of labor. Keep them in their lanes:
 
-- `realtime-metering.test.ts` **mocks** `ora-realtime-usage` via
-  `vi.mock(..., importOriginal)` and stubs `startRealtimeSession` /
-  `heartbeatRealtimeSession` / `endRealtimeSession` / `getRealtimeUsage` per
-  test. It never touches the real DB, so it is stable.
-- `realtime-session.test.ts` does **not** mock the service, so it exercises the
-  real Postgres metering through the route.
+- `realtime-session.test.ts` — mint config / Ora<->Builder isolation / voice /
+  VAD / privacy / route response shape. It **mocks** the DB-backed metering
+  service `lib/public-ai/ora-realtime-usage` via `vi.mock(..., importOriginal)`,
+  spreading `...actual` and stubbing only the four stateful fns
+  (`startRealtimeSession` / `heartbeatRealtimeSession` / `endRealtimeSession` /
+  `getRealtimeUsage`). It keeps the REAL static allowance
+  (`getRealtimeVoiceAllowance`) + heartbeat cadence via `...actual` so
+  `/diagnostics` + `/session` assert truthful per-tier caps. It must also stub
+  BOTH `oraRealtimeSessionLimiter` AND `oraRealtimeSessionTickLimiter` in the
+  `lib/rateLimit` mock — the heartbeat/end routes import the tick limiter at
+  module load, and omitting it makes the whole suite fail to collect (0 tests).
+- `realtime-metering.test.ts` — budget->HTTP mapping edge cases (over_limit 429,
+  concurrent 409, DB-down 503 fail-closed). Same mock pattern.
+- `ora-realtime-usage.test.ts` — the authoritative DB-backed cap test. Owns the
+  per-tier minute arithmetic (free 1200 / core 3600 / wave 7200 s; window hours
+  free 5 / core,wave 3), atomic heartbeat delta, stale finalize, idempotent end,
+  concurrency. This is the ONLY file that hits real Postgres.
 
-**Two latent bugs in `realtime-session.test.ts` (it has never actually
-collected on main, so no one caught these):**
+**Why this split:** an earlier `realtime-session.test.ts` ran the real DB
+through the route and was latently broken (shared userIds + no `/end` cleanup ->
+409 concurrency cascade, plus a missing tick-limiter mock). Mocking the service
+there removed the flakiness while keeping cap arithmetic end-to-end in
+`ora-realtime-usage.test.ts`. Don't re-introduce real-DB metering into the route
+config suite.
 
-1. Its `vi.mock("../../../lib/rateLimit", ...)` only stubs
-   `oraRealtimeSessionLimiter` and omits `oraRealtimeSessionTickLimiter`, which
-   the heartbeat + end routes import. Missing export → the whole suite fails to
-   collect (hard error, 0 tests run).
-2. Even with that mock added, the tier-duration and memory-gating tests share a
-   fixed `userId` (`user_123` / `user_mem`), start real sessions, and never call
-   `/end` or clean up between tests. The concurrency rule (max 1 active session
-   per usageKey) then returns `409` on the 2nd/3rd request, cascading into
-   `undefined maxDurationSeconds` and `calls[0]`-of-undefined failures.
-
-**Why this matters / how to apply:** if you make `realtime-session.test.ts`
-collect (add the tick-limiter mock), expect 7 real-DB failures. To make it
-green you must either (a) add a `beforeEach` that deletes the test usageKeys'
-rows from `ora_realtime_sessions` + `ora_realtime_usage_windows` (mirrors the
-DB-backed `ora-realtime-usage.test.ts` pattern), or (b) switch it to mock
-`ora-realtime-usage` like `realtime-metering.test.ts` (but then the per-tier
-duration assertions become assert-what-you-mock and lose end-to-end value).
-
-The per-tier duration arithmetic (free 1200 / core 3600 / wave 7200 seconds,
-matching the per-window budget so a single session can use the full allowance)
-is already validated end-to-end by the DB-backed `ora-realtime-usage.test.ts`,
-which passes. Treat that as the authoritative cap test.
+**`voice-session.test.ts` source-string parity gotcha:** it asserts EXACT mobile
+home (`app/(home)/index.tsx`) label literals. The realtime status copy uses
+em-dashes (`—`, e.g. "Muted — Ora can still hear you") while the legacy voice
+loop copy uses hyphens (`-`, e.g. "Muted - replies stay on screen"). Reword
+either side and you must update the matching assertion or the test fails.

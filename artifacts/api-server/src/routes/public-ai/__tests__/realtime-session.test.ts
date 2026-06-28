@@ -15,6 +15,12 @@
  * The heavy chat module is mocked so this test stays isolated and fast; the real
  * Ora-vs-Builder isolation of buildSystemPrompt is covered by ora-isolation.test.ts.
  * Here we additionally guard the realtime route's own assembly + voice addendum.
+ *
+ * The DB-backed metering service (ora-realtime-usage) is also mocked: this suite
+ * owns mint config / isolation / voice / VAD / privacy / route response shape, not
+ * the minute-budget arithmetic (covered by ora-realtime-usage.test.ts) or the
+ * budget->HTTP mapping of over_limit/concurrent/DB-down (covered by
+ * realtime-metering.test.ts).
  */
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -42,10 +48,20 @@ function readOraMobile(relativePath: string): string {
   return readFileSync(join(ORA_MOBILE_DIR, relativePath), "utf-8");
 }
 
+// ─── Hoisted metering mock state ──────────────────────────────────────────────
+
+const metering = vi.hoisted(() => ({
+  startRealtimeSession: vi.fn(),
+  heartbeatRealtimeSession: vi.fn(),
+  endRealtimeSession: vi.fn(),
+  getRealtimeUsage: vi.fn(),
+}));
+
 // ─── Mocks (hoisted before router import) ─────────────────────────────────────
 
 vi.mock("../../../lib/rateLimit", () => ({
   oraRealtimeSessionLimiter: (_: unknown, __: unknown, next: () => void) => next(),
+  oraRealtimeSessionTickLimiter: (_: unknown, __: unknown, next: () => void) => next(),
 }));
 
 vi.mock("../../../lib/logger", () => ({
@@ -82,6 +98,20 @@ vi.mock("../chat", () => ({
     used: [],
   })),
 }));
+
+// The metering service is mocked so the route is the unit under test. Keep the
+// real static per-tier allowance + heartbeat cadence (so /diagnostics + /session
+// report truthful budget numbers), but stub the stateful DB-backed functions.
+vi.mock("../../../lib/public-ai/ora-realtime-usage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../lib/public-ai/ora-realtime-usage")>();
+  return {
+    ...actual,
+    startRealtimeSession: metering.startRealtimeSession,
+    heartbeatRealtimeSession: metering.heartbeatRealtimeSession,
+    endRealtimeSession: metering.endRealtimeSession,
+    getRealtimeUsage: metering.getRealtimeUsage,
+  };
+});
 
 // ─── Imports after mocks ──────────────────────────────────────────────────────
 
@@ -181,6 +211,40 @@ beforeEach(() => {
     upgradeAvailable: false,
     message: "",
   } as Awaited<ReturnType<typeof checkOraSpendCapAsync>>);
+
+  // Default metering: a healthy reservation (free baseline) so the route reaches
+  // the mint and the budget fields flow back. Individual tests override
+  // startRealtimeSession when they assert tier forwarding. The budget->HTTP edge
+  // cases (over_limit / concurrent / DB-down) are owned by realtime-metering.test.ts.
+  metering.startRealtimeSession.mockReset();
+  metering.heartbeatRealtimeSession.mockReset();
+  metering.endRealtimeSession.mockReset();
+  metering.getRealtimeUsage.mockReset();
+  metering.startRealtimeSession.mockResolvedValue({
+    status: "ok",
+    sessionId: "00000000-0000-4000-8000-000000000000",
+    maxDurationSeconds: 1200,
+    remainingSeconds: 1200,
+    limitSeconds: 1200,
+    windowHours: 5,
+    resetsAt: null,
+  });
+  metering.endRealtimeSession.mockResolvedValue({
+    status: "ended",
+    chargedSeconds: 0,
+    usedSeconds: 0,
+    remainingSeconds: 1200,
+    limitSeconds: 1200,
+    resetsAt: null,
+  });
+  metering.getRealtimeUsage.mockResolvedValue({
+    usedSeconds: 0,
+    limitSeconds: 1200,
+    remainingSeconds: 1200,
+    windowHours: 5,
+    windowStart: null,
+    resetsAt: null,
+  });
 });
 
 afterEach(() => {
@@ -494,7 +558,7 @@ describe("Talk to Ora realtime — speaker-focus create_response posture", () =>
 
 // ─── 5. Tier-aware durations + signed-in context ──────────────────────────────
 
-describe("Talk to Ora realtime — tier durations + signed-in context", () => {
+describe("Talk to Ora realtime — signed-in reservation + context injection", () => {
   function signIn(tier: string) {
     vi.mocked(resolveAuthedOraUser).mockResolvedValue({
       userId: "user_123",
@@ -503,34 +567,48 @@ describe("Talk to Ora realtime — tier durations + signed-in context", () => {
     });
   }
 
-  it("wave tier → 7200s session", async () => {
+  it("reserves under the signed-in userId + tier and echoes the budget", async () => {
     signIn("wave");
+    metering.startRealtimeSession.mockResolvedValue({
+      status: "ok",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      maxDurationSeconds: 7200,
+      remainingSeconds: 7200,
+      limitSeconds: 7200,
+      windowHours: 3,
+      resetsAt: null,
+    });
+
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
       .send({});
+
     expect(res.status).toBe(200);
+    // Route behavior (not arithmetic): a signed-in user is metered under their
+    // userId and the tier is forwarded so the service can size the budget. The
+    // per-tier seconds themselves are asserted against the REAL allowance in the
+    // diagnostics block below and in ora-realtime-usage.test.ts.
+    expect(metering.startRealtimeSession).toHaveBeenCalledWith("user_123", "wave");
+    // The route echoes whatever budget the metering service reserved.
+    expect(res.body.realtimeSessionId).toBe("22222222-2222-4222-8222-222222222222");
     expect(res.body.maxDurationSeconds).toBe(7200);
+    expect(res.body.remainingSeconds).toBe(7200);
+    expect(res.body.limitSeconds).toBe(7200);
+  });
+
+  it("injects the signed-in system prompt + profile context for a reserved session", async () => {
+    signIn("core");
+
+    const res = await request(makeApp())
+      .post("/api/public-ai/realtime/session")
+      .set("Cookie", freshCookie())
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(metering.startRealtimeSession).toHaveBeenCalledWith("user_123", "core");
     expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, true);
     expect(buildProfileContext).toHaveBeenCalledWith("user_123");
-  });
-
-  it("core tier → 3600s session", async () => {
-    signIn("core");
-    const res = await request(makeApp())
-      .post("/api/public-ai/realtime/session")
-      .set("Cookie", freshCookie())
-      .send({});
-    expect(res.body.maxDurationSeconds).toBe(3600);
-  });
-
-  it("free tier → 1200s session", async () => {
-    signIn("free");
-    const res = await request(makeApp())
-      .post("/api/public-ai/realtime/session")
-      .set("Cookie", freshCookie())
-      .send({});
-    expect(res.body.maxDurationSeconds).toBe(1200);
   });
 });
 
