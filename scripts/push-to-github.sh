@@ -35,26 +35,6 @@ ARG="${1:-}"
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
-git add \
-  artifacts/api-server/src/routes/billing.ts \
-  artifacts/api-server/src/routes/index.ts \
-  artifacts/api-server/src/routes/__tests__/billing-ora-plans-public.test.ts \
-  artifacts/api-server/src/routes/__tests__/ora-tiers-meta.test.ts \
-  artifacts/mustaflow/src/pages/__tests__/billing-plan-cards.test.ts \
-  artifacts/mustaflow/src/pages/billing.tsx \
-  artifacts/mustaflow/src/pages/pricing.tsx \
-  "artifacts/ora-mobile/app/(home)/settings.tsx" \
-  artifacts/ora-mobile/lib/types.ts \
-  artifacts/ora-mobile/lib/__tests__/billing-plan-cards.test.ts \
-  lib/api-spec/openapi.yaml \
-  lib/api-client-react/src/generated/api.schemas.ts \
-  lib/api-client-react/src/generated/api.ts \
-  lib/api-zod/src/generated/api.ts \
-  lib/api-zod/src/generated/types/getBillingSubscription200.ts \
-  lib/api-zod/src/generated/types/getBillingOraPlans200.ts \
-  lib/api-zod/src/generated/types/oraTierMeta.ts \
-  lib/api-zod/src/generated/types/index.ts \
-  2>/dev/null || true
 git add scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
