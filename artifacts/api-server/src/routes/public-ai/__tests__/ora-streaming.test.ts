@@ -1202,10 +1202,7 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
     // for up to 60 seconds after a Stripe webhook fires.
     const fs = await import("fs");
     const path = await import("path");
-    const src = fs.readFileSync(
-      path.resolve(__dirname, "../../billing.ts"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve(__dirname, "../../billing.ts"), "utf8");
     // Must be >=5: checkout, invoice.paid, payment_failed (x2 branches),
     // subscription.updated, subscription.deleted.
     const matches = src.match(/evictTierCache\(/g) ?? [];

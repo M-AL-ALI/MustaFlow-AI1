@@ -91,8 +91,7 @@ describe("Mobile Settings — Account sync wiring", () => {
     // Slice to the next const/function declaration so the full callback is captured
     // regardless of body length — avoids brittle fixed-char-count truncation.
     const nextDecl = settings.indexOf("\n  const ", fnStart + 1);
-    const fnBody =
-      nextDecl > fnStart ? settings.slice(fnStart, nextDecl) : settings.slice(fnStart);
+    const fnBody = nextDecl > fnStart ? settings.slice(fnStart, nextDecl) : settings.slice(fnStart);
     // Probe nulls must appear before any await so they reflect the check start state.
     expect(fnBody).toContain("setAcctPublicSessionTier(null)");
     expect(fnBody).toContain("setAcctPublicSessionIsPaid(null)");
@@ -240,7 +239,7 @@ describe("Mobile auth-stability guard", () => {
       index.indexOf("catch ((err) => {"),
       index.indexOf("catch ((err) => {") + 300,
     );
-    expect(index).toContain('err instanceof TokenUnavailableError');
+    expect(index).toContain("err instanceof TokenUnavailableError");
     expect(index).toContain('setSessionSyncError("token_unavailable")');
   });
 

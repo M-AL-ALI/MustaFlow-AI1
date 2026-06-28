@@ -267,13 +267,7 @@ function UsageRow({ label, used, limit }: { label: string; used: number; limit: 
   );
 }
 
-function PlanFeatureCards({
-  tiers,
-  currentTier,
-}: {
-  tiers: OraTierMeta[];
-  currentTier: string;
-}) {
+function PlanFeatureCards({ tiers, currentTier }: { tiers: OraTierMeta[]; currentTier: string }) {
   const c = useColors();
   return (
     <View style={{ gap: 10 }}>
@@ -312,8 +306,8 @@ function PlanFeatureCards({
                   {tier.name}
                 </Text>
                 <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  {tier.messageLimit.toLocaleString()} messages ·{" "}
-                  {tier.imageLimit.toLocaleString()} images / {tier.windowHours}h
+                  {tier.messageLimit.toLocaleString()} messages · {tier.imageLimit.toLocaleString()}{" "}
+                  images / {tier.windowHours}h
                 </Text>
               </View>
               <View style={{ alignItems: "flex-end", gap: 4 }}>

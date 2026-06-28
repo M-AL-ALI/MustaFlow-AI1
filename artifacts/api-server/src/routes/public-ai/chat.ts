@@ -1853,13 +1853,13 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // it is read (which is the case here — each bucket is set at its own point).
   const timing = {
     t0: Date.now(), // request entered handler (past kill switches)
-    t1: 0,          // after session validation
-    t2: 0,          // after auth user resolved
-    t3: 0,          // after spend-cap check
-    t4: 0,          // after quota reserve + route decision
-    t5: 0,          // after memory/context/profile loaded (concurrent)
-    t6: 0,          // after SSE headers flushed + start event emitted
-    t7: 0,          // after stream loop complete
+    t1: 0, // after session validation
+    t2: 0, // after auth user resolved
+    t3: 0, // after spend-cap check
+    t4: 0, // after quota reserve + route decision
+    t5: 0, // after memory/context/profile loaded (concurrent)
+    t6: 0, // after SSE headers flushed + start event emitted
+    t7: 0, // after stream loop complete
     tFirstToken: -1, // first token written to client (-1 = not received)
   };
 
@@ -1926,20 +1926,20 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // available now. Previously these started after the routing decision (classifier
   // AI call + quota), adding up to 600 ms of unnecessary sequential delay.
   // They are awaited (with an Instant-mode timeout) after routing completes.
-  const earlyMemoryP = authed && referenceSavedMemories && !temporary
-    ? buildMemoryContext(authed.userId, oraProjectId, message, planTier)
-    : Promise.resolve<MemoryContextResult>({ text: "", used: [] });
+  const earlyMemoryP =
+    authed && referenceSavedMemories && !temporary
+      ? buildMemoryContext(authed.userId, oraProjectId, message, planTier)
+      : Promise.resolve<MemoryContextResult>({ text: "", used: [] });
   // Guard: prevent unhandled rejections when an early-exit path (429, spend cap)
   // returns before earlyMemoryP is awaited. The builders have internal try/catch
   // but this is a defensive belt-and-suspenders guard.
   void earlyMemoryP.catch(() => undefined);
-  const earlyCrossConvP = authed && referenceChatHistory && !temporary
-    ? buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
-    : Promise.resolve("");
+  const earlyCrossConvP =
+    authed && referenceChatHistory && !temporary
+      ? buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
+      : Promise.resolve("");
   void earlyCrossConvP.catch(() => undefined);
-  const earlyProfileP = authed
-    ? buildProfileContext(authed.userId)
-    : Promise.resolve("");
+  const earlyProfileP = authed ? buildProfileContext(authed.userId) : Promise.resolve("");
   void earlyProfileP.catch(() => undefined);
 
   const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
@@ -2115,7 +2115,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Deep mode gets a generous 2000 ms budget (complex reasoning tolerates it).
   const CTX_BUDGET_MS = deepAllowed ? 2_000 : 600;
   const [memory, crossConvContext, profileContext] = await Promise.all([
-    withTimeout(earlyMemoryP, CTX_BUDGET_MS, { text: "", used: [] as Array<{ id: number; title: string }> }),
+    withTimeout(earlyMemoryP, CTX_BUDGET_MS, {
+      text: "",
+      used: [] as Array<{ id: number; title: string }>,
+    }),
     withTimeout(earlyCrossConvP, CTX_BUDGET_MS, ""),
     withTimeout(earlyProfileP, CTX_BUDGET_MS, ""),
   ]);
@@ -2410,12 +2413,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       replyChars: streamedReply.length,
       // Per-bucket timing breakdown (ms) — privacy-safe, no user content.
       timingMs: {
-        sessionMs: timing.t1 - timing.t0,        // session cookie validation
-        authMs: timing.t2 - timing.t1,            // Clerk JWT + DB user resolve
-        spendCapMs: timing.t3 - timing.t2,        // global / per-IP spend-cap check
-        quotaMs: timing.t4 - timing.t3,           // routing decision + quota reserve
-        contextMs: timing.t5 - timing.t4,         // memory + cross-conv + profile (concurrent)
-        headerFlushMs: timing.t6 - timing.t5,     // model selection + SSE headers flush
+        sessionMs: timing.t1 - timing.t0, // session cookie validation
+        authMs: timing.t2 - timing.t1, // Clerk JWT + DB user resolve
+        spendCapMs: timing.t3 - timing.t2, // global / per-IP spend-cap check
+        quotaMs: timing.t4 - timing.t3, // routing decision + quota reserve
+        contextMs: timing.t5 - timing.t4, // memory + cross-conv + profile (concurrent)
+        headerFlushMs: timing.t6 - timing.t5, // model selection + SSE headers flush
         ttftMs: timing.tFirstToken >= 0 ? timing.tFirstToken - timing.t0 : -1,
         streamMs: timing.t7 - (timing.tFirstToken >= 0 ? timing.tFirstToken : timing.t6),
         totalMs: timing.t7 - timing.t0,

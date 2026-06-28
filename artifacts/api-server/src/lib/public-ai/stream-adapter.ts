@@ -293,7 +293,7 @@ export async function* streamOraMessage(
       // pendingBuffer (not-yet-emitted text), which is reset to "" after each
       // flush. accumulated tracks the full response for error-recovery.
       let accumulated = "";
-      let pendingBuffer = "";    // text received but not yet emitted
+      let pendingBuffer = ""; // text received but not yet emitted
       let providerDeltaCount = 0;
       let usedSimulatedChunks = false;
       let providerMidStreamErr: Error | null = null;

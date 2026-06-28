@@ -6948,7 +6948,18 @@ components:
         credits, concurrent builds, build queue, or Builder connectors. Single
         source of truth for both website and mobile Ora plan cards.
       required:
-        [id, name, priceUsd, messageLimit, imageLimit, windowHours, voiceMinutes, deepThinking, features, available]
+        [
+          id,
+          name,
+          priceUsd,
+          messageLimit,
+          imageLimit,
+          windowHours,
+          voiceMinutes,
+          deepThinking,
+          features,
+          available,
+        ]
       properties:
         id: { type: string }
         name: { type: string }

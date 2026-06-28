@@ -43,7 +43,9 @@ function neverSignal(): AbortSignal {
 }
 
 /** Collect all events from the generator into an array. */
-async function collect(gen: AsyncGenerator<OraStreamProviderEvent>): Promise<OraStreamProviderEvent[]> {
+async function collect(
+  gen: AsyncGenerator<OraStreamProviderEvent>,
+): Promise<OraStreamProviderEvent[]> {
   const out: OraStreamProviderEvent[] = [];
   for await (const ev of gen) out.push(ev);
   return out;
@@ -246,12 +248,12 @@ describe("large delta (≥ 200 chars) — simulation fallback", () => {
 
 describe("mixed stream (real tokens then a large buffered chunk)", () => {
   it("marks usedSimulatedChunks: true and preserves full text", async () => {
-    const smallPart = "Hello world ";    // 2 words, triggers a real-time emit
+    const smallPart = "Hello world "; // 2 words, triggers a real-time emit
     const largePart = "echo ".repeat(60); // 300 chars, triggers simulation
 
     streamChatCompletionMock.mockImplementation(async function* () {
       yield "Hello ";
-      yield "world ";  // after 2nd small delta: pendingBuffer="Hello world " → emit "Hello world "
+      yield "world "; // after 2nd small delta: pendingBuffer="Hello world " → emit "Hello world "
       yield largePart; // large delta: pending="" + largePart → simulation
     });
 
