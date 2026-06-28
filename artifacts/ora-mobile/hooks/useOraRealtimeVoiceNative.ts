@@ -262,13 +262,12 @@ function isPartialSpeechEvidence(interim: string): boolean {
 
 // ORA_REALTIME_FOCUS_SCORER_PARITY_START
 export type FocusMode = "normal" | "focused";
-
-// After an accepted turn — or the moment the user opens Talk to Ora, which is an
-// explicit address — Ora stays "engaged" for this long. Inside the window,
-// follow-ups are accepted naturally in ANY language (no wake word). Outside it,
-// speech must be addressed to Ora or be a clear directed command/question, so a
-// nearby side conversation no longer makes Ora speak. 12s sits in the 8–15s band.
-const FOCUS_WINDOW_MS = 12_000;
+// Opening Talk to Ora is treated as an explicit address, so the first utterance
+// gets a longer multilingual grace window. After that, follow-ups get a short
+// window only; outside it, speech must be addressed/directed so a nearby side
+// conversation no longer makes Ora speak or interrupt.
+const FOCUS_COLD_START_WINDOW_MS = 12_000;
+const FOCUS_FOLLOWUP_WINDOW_MS = 4_000;
 
 // Wake / address tokens that re-open focus after silence or background chatter.
 // Latin "ora" plus common ASR variants and non-Latin transliterations, so the
@@ -597,6 +596,10 @@ interface FocusVerdict {
   viaWindow?: boolean;
 }
 
+function focusWindowMsForTurnCount(acceptedTurnCount: number): number {
+  return acceptedTurnCount <= 0 ? FOCUS_COLD_START_WINDOW_MS : FOCUS_FOLLOWUP_WINDOW_MS;
+}
+
 /**
  * Speaker-focus decision, layered on validateUserTranscript. In "normal" mode it
  * is a pass-through (legacy open listening). In "focused" mode it accepts engaged
@@ -611,6 +614,7 @@ export function scoreTranscriptFocus(
     sinceAssistantAudioMs: number;
     recentAssistantText: string;
     msSinceLastAcceptedTurn: number;
+    acceptedTurnCount: number;
   },
 ): FocusVerdict {
   const base = validateUserTranscript(text, {
@@ -623,8 +627,13 @@ export function scoreTranscriptFocus(
   const words = tokenizeTranscript(text);
   // Clear single-word commands (stop/yes/no/...) are always addressed.
   if (words.length === 1 && VOICE_COMMANDS.has(words[0])) return { accepted: true };
-  // Engaged: inside the focus window accept natural follow-ups in any language.
-  if (opts.msSinceLastAcceptedTurn <= FOCUS_WINDOW_MS) return { accepted: true, viaWindow: true };
+  // Opening Talk to Ora is an explicit address, so the FIRST utterance gets a
+  // longer multilingual cold-start window. After that, keep ambient-room exposure
+  // short: natural follow-ups still work, but nearby conversations no longer get
+  // a fresh 12s open mic after every accepted turn.
+  if (opts.msSinceLastAcceptedTurn <= focusWindowMsForTurnCount(opts.acceptedTurnCount)) {
+    return { accepted: true, viaWindow: true };
+  }
   // Idle / post-background: require an explicit address or a directed request.
   if (isAddressedToOra(words) || looksDirected(words, text)) return { accepted: true };
   return { accepted: false, reason: "not_addressed_or_outside_focus" };
@@ -803,6 +812,7 @@ export function useOraRealtimeVoiceNative(
   // window inside which follow-ups need no wake word.
   const focusModeRef = useRef<FocusMode>("focused");
   const lastAcceptedUserTurnAtRef = useRef(0);
+  const acceptedUserTurnCountRef = useRef(0);
   // Per-turn latency marks + the debounce timer that smooths the playback-stop UI
   // flip (see OUTPUT_STOP_DEBOUNCE_MS).
   const turnTimingRef = useRef<TurnTiming>(newTurnTiming());
@@ -1030,15 +1040,11 @@ export function useOraRealtimeVoiceNative(
     assistantTextRef.current = "";
   }, [sendEvent]);
 
-  // Outside the focus window in focused mode, a raw sustained-speech timer is NOT
-  // enough to interrupt Ora — it is likely a background speaker. In that state a
-  // barge-in is confirmed only when the partial transcript is addressed/directed.
-  const bargeInGated = useCallback(
-    () =>
-      focusModeRef.current === "focused" &&
-      Date.now() - lastAcceptedUserTurnAtRef.current > FOCUS_WINDOW_MS,
-    [],
-  );
+  // In focused mode, automatic barge-in is intentionally stricter than turn
+  // acceptance. If Ora is already speaking, only addressed/directed speech may
+  // stop her; otherwise nearby conversation inside the follow-up window can still
+  // chop Ora mid-sentence. The manual Interrupt button remains immediate.
+  const bargeInRequiresDirection = useCallback(() => focusModeRef.current === "focused", []);
 
   // Cancel Ora because a real interruption was CONFIRMED (sustained speech or a
   // genuine transcription delta). This is the ONLY path that stops Ora for a
@@ -1137,14 +1143,14 @@ export function useOraRealtimeVoiceNative(
                 (assistantResponseActiveRef.current || assistantSpeakingRef.current)
               ) {
                 const directedEnough =
-                  !bargeInGated() || isAddressedOrDirected(userTextRef.current);
+                  !bargeInRequiresDirection() || isAddressedOrDirected(userTextRef.current);
                 if (directedEnough) {
                   confirmBargeIn("sustained_speech");
                 } else {
                   // Likely a background speaker while the user is not engaged. Keep
                   // the barge-in pending (a later addressed delta can still confirm
                   // it) but do NOT cut Ora off on sustained speech alone.
-                  logVoiceDiag("barge_in_deferred", { reason: "background_outside_focus" });
+                  logVoiceDiag("barge_in_deferred", { reason: "requires_directed_speech" });
                 }
               } else {
                 pendingBargeInRef.current = false;
@@ -1180,7 +1186,8 @@ export function useOraRealtimeVoiceNative(
             // A genuine (non-filler) partial transcript is strong evidence of a
             // real interruption — confirm immediately so Ora stops fast.
             if (pendingBargeInRef.current && isPartialSpeechEvidence(userTextRef.current)) {
-              const directedEnough = !bargeInGated() || isAddressedOrDirected(userTextRef.current);
+              const directedEnough =
+                !bargeInRequiresDirection() || isAddressedOrDirected(userTextRef.current);
               if (directedEnough) confirmBargeIn("transcript_delta");
             }
           }
@@ -1200,10 +1207,13 @@ export function useOraRealtimeVoiceNative(
           const trimmed = (finalText || "").trim();
           const focusMode = focusModeRef.current;
           const msSinceLastAcceptedTurn = Date.now() - lastAcceptedUserTurnAtRef.current;
+          const acceptedTurnCount = acceptedUserTurnCountRef.current;
+          const activeFocusWindowMs = focusWindowMsForTurnCount(acceptedTurnCount);
           turnTimingRef.current.transcriptCompletedAt = Date.now();
           logVoiceDiag("transcript_completed", {
             chars: trimmed.length,
             focus_mode: focusMode,
+            accepted_turn_count: acceptedTurnCount,
             speech_stopped_to_transcript_completed_ms: deltaMs(
               turnTimingRef.current.speechStoppedAt,
               turnTimingRef.current.transcriptCompletedAt,
@@ -1214,17 +1224,20 @@ export function useOraRealtimeVoiceNative(
             sinceAssistantAudioMs: Date.now() - lastAssistantAudioAtRef.current,
             recentAssistantText: recentAssistantSpeechRef.current,
             msSinceLastAcceptedTurn,
+            acceptedTurnCount,
           });
           if (verdict.accepted) {
-            // Re-open the focus window: an accepted turn means the user is engaged,
-            // so natural follow-ups in any language are accepted for the next
-            // FOCUS_WINDOW_MS without a wake word. Only accepted turns are persisted
-            // AND only accepted turns may steer the spoken language in Auto mode.
+            // Accepted turns keep the user engaged, but after the first utterance
+            // the follow-up window is intentionally short so nearby conversations
+            // are less likely to be treated as the main user.
             lastAcceptedUserTurnAtRef.current = Date.now();
+            acceptedUserTurnCountRef.current = acceptedTurnCount + 1;
             logVoiceDiag("transcript_accepted", {
               chars: trimmed.length,
               focus_mode: focusMode,
-              focus_window_active: msSinceLastAcceptedTurn <= FOCUS_WINDOW_MS,
+              accepted_turn_count: acceptedTurnCount,
+              focus_window_active: msSinceLastAcceptedTurn <= activeFocusWindowMs,
+              focus_window_ms: activeFocusWindowMs,
               via_focus_window: verdict.viaWindow === true,
               selected_language: selectedLanguageRef.current,
             });
@@ -1248,7 +1261,9 @@ export function useOraRealtimeVoiceNative(
               rejection_reason: verdict.reason,
               chars: trimmed.length,
               focus_mode: focusMode,
-              focus_window_active: msSinceLastAcceptedTurn <= FOCUS_WINDOW_MS,
+              accepted_turn_count: acceptedTurnCount,
+              focus_window_active: msSinceLastAcceptedTurn <= activeFocusWindowMs,
+              focus_window_ms: activeFocusWindowMs,
               selected_language: selectedLanguageRef.current,
             });
             // Focused mode keeps create_response off, so the server never replies
@@ -1434,7 +1449,7 @@ export function useOraRealtimeVoiceNative(
           break;
       }
     },
-    [confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer, bargeInGated, sendEvent],
+    [confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer, bargeInRequiresDirection, sendEvent],
   );
 
   // ── Start ────────────────────────────────────────────────────────────────
@@ -1473,6 +1488,7 @@ export function useOraRealtimeVoiceNative(
       // Opening Talk to Ora is an explicit address: seed the focus window so the
       // user's first utterance is treated as engaged (no wake word required).
       lastAcceptedUserTurnAtRef.current = Date.now();
+      acceptedUserTurnCountRef.current = 0;
       setIsMuted(false);
       mutedRef.current = false;
       setOverLimit(null);

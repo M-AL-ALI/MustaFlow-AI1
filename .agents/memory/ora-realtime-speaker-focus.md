@@ -9,13 +9,17 @@ Two constraints that are NOT obvious from the code and were each non-trivial to 
 
 ## 1. The start-of-session focus-window seed is STILL the cold-start safety net
 In focused mode the first turn is accepted because `start()` seeds `lastAcceptedUserTurnAt`
-(opening Talk to Ora counts as an address), opening the ~12s focus window.
+(opening Talk to Ora counts as an address), opening the ~12s COLD-START focus window.
 
 **Why:** the address/directed detectors are now multilingual (see below) but still pattern-only —
 they cannot recognize EVERY directed phrasing in every language, and an idle-state declarative
 sentence in any language is intentionally NOT accepted. The seed guarantees the engaged primary
 user's first utterance always gets through regardless of language/phrasing. Removing/weakening the
 seed re-breaks non-English cold-start QA.
+
+After the first accepted turn, do **not** reopen another long 12s open-room window. Follow-ups use
+the short `FOCUS_FOLLOWUP_WINDOW_MS` (~4s) so natural "and what about..." continuations still work,
+but a nearby side conversation 8-12s later is rejected instead of becoming the next user turn.
 
 **Detectors are multilingual (no longer English-only).** `looksDirected` accepts a turn whose
 FIRST or LAST token is a lead word (last-token handles SOV verb-final imperatives in Turkish/
@@ -30,10 +34,16 @@ REQUIRED or Devanagari matras/viramas (`\p{M}`) get stripped and Hindi words nev
 set. `normalizeWord`/`tokenizeTranscript` live OUTSIDE the byte-identical scorer block, so they
 are kept identical in both hooks MANUALLY and guarded by a separate tokenizer source-parity test.
 
-**Inherent limitation:** focus is transcript-only (no voice diarization), so within the seeded
-window a nearby bystander cannot be distinguished from the button-tapper, and the first/last-token
-rule can admit a directly-worded background question outside the window. Both are accepted design
-tradeoffs, not fixable without speaker fingerprinting (out of scope).
+**Inherent limitation:** focus is transcript-only (no voice diarization), so within the initial
+cold-start seed a nearby bystander cannot be distinguished from the button-tapper, and the
+first/last-token rule can admit a directly-worded background question outside the window. Both are
+accepted design tradeoffs, not fixable without speaker fingerprinting (out of scope).
+
+## 1b. Automatic barge-in is stricter than turn acceptance
+When Ora is already responding, focused mode must require addressed/directed partial speech before
+automatic barge-in cancels her. Do not let the follow-up window alone confirm barge-in while Ora is
+speaking; otherwise background speech inside the window chops Ora mid-sentence. The manual
+Interrupt button remains immediate.
 
 ## 2. Rejected transcripts must be deleted from the realtime conversation
 Focused mode mints with `turn_detection.create_response=false`, so the CLIENT owns

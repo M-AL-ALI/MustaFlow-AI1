@@ -8,17 +8,18 @@ description: How the three Talk-to-Ora realtime test files split responsibilitie
 The Talk-to-Ora realtime route (`routes/public-ai/realtime.ts`) is covered by
 three test files with a deliberate division of labor. Keep them in their lanes:
 
-- `realtime-session.test.ts` — mint config / Ora<->Builder isolation / voice /
+- `realtime-session.test.ts` ? mint config / Ora<->Builder isolation / voice /
   VAD / privacy / route response shape. It **mocks** the DB-backed metering
-  service `lib/public-ai/ora-realtime-usage` via `vi.mock(..., importOriginal)`,
-  spreading `...actual` and stubbing only the four stateful fns
-  (`startRealtimeSession` / `heartbeatRealtimeSession` / `endRealtimeSession` /
-  `getRealtimeUsage`). It keeps the REAL static allowance
-  (`getRealtimeVoiceAllowance`) + heartbeat cadence via `...actual` so
-  `/diagnostics` + `/session` assert truthful per-tier caps. It must also stub
-  BOTH `oraRealtimeSessionLimiter` AND `oraRealtimeSessionTickLimiter` in the
-  `lib/rateLimit` mock — the heartbeat/end routes import the tick limiter at
-  module load, and omitting it makes the whole suite fail to collect (0 tests).
+  service `lib/public-ai/ora-realtime-usage` with a self-contained mock: static
+  `getRealtimeVoiceAllowance` values + `REALTIME_HEARTBEAT_INTERVAL_SECONDS`,
+  and stubs for the four stateful fns (`startRealtimeSession` /
+  `heartbeatRealtimeSession` / `endRealtimeSession` / `getRealtimeUsage`). Do
+  **not** call `importOriginal` here: importing the real module requires
+  `DATABASE_URL` at module load, so the route/config suite fails to collect in
+  non-DB environments. It must also stub BOTH `oraRealtimeSessionLimiter` AND
+  `oraRealtimeSessionTickLimiter` in the `lib/rateLimit` mock ? the
+  heartbeat/end routes import the tick limiter at module load, and omitting it
+  makes the whole suite fail to collect (0 tests).
 - `realtime-metering.test.ts` — budget->HTTP mapping edge cases (over_limit 429,
   concurrent 409, DB-down 503 fail-closed). Same mock pattern.
 - `ora-realtime-usage.test.ts` — the authoritative DB-backed cap test. Owns the

@@ -102,10 +102,16 @@ vi.mock("../chat", () => ({
 // The metering service is mocked so the route is the unit under test. Keep the
 // real static per-tier allowance + heartbeat cadence (so /diagnostics + /session
 // report truthful budget numbers), but stub the stateful DB-backed functions.
-vi.mock("../../../lib/public-ai/ora-realtime-usage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../lib/public-ai/ora-realtime-usage")>();
+vi.mock("../../../lib/public-ai/ora-realtime-usage", () => {
+  const allowanceByTier = {
+    free: { tier: "free", limitSeconds: 1200, windowHours: 5, sessionCapSeconds: 1200 },
+    core: { tier: "core", limitSeconds: 3600, windowHours: 3, sessionCapSeconds: 3600 },
+    wave: { tier: "wave", limitSeconds: 7200, windowHours: 3, sessionCapSeconds: 7200 },
+  } as const;
   return {
-    ...actual,
+    REALTIME_HEARTBEAT_INTERVAL_SECONDS: 30,
+    getRealtimeVoiceAllowance: (tier: string) =>
+      tier === "core" || tier === "wave" ? allowanceByTier[tier] : allowanceByTier.free,
     startRealtimeSession: metering.startRealtimeSession,
     heartbeatRealtimeSession: metering.heartbeatRealtimeSession,
     endRealtimeSession: metering.endRealtimeSession,
@@ -1024,6 +1030,8 @@ describe("Talk to Ora realtime — route wiring", () => {
     expect(speechStartBlock).toContain("pendingBargeInRef.current = true");
     expect(speechStartBlock).toContain("BARGE_IN_CONFIRM_MS");
     expect(speechStartBlock).toContain("confirmBargeIn(");
+    expect(speechStartBlock).toContain("bargeInRequiresDirection()");
+    expect(speechStartBlock).toContain("isAddressedOrDirected(userTextRef.current)");
     expect(speechStartBlock).not.toContain("stopAssistantOutput()");
 
     // Echo guard must compare against what Ora is speaking RIGHT NOW, so the echo
@@ -1063,6 +1071,8 @@ describe("Talk to Ora realtime — route wiring", () => {
     expect(speechStartBlock).toContain("pendingBargeInRef.current = true");
     expect(speechStartBlock).toContain("BARGE_IN_CONFIRM_MS");
     expect(speechStartBlock).toContain("confirmBargeIn(");
+    expect(speechStartBlock).toContain("bargeInRequiresDirection()");
+    expect(speechStartBlock).toContain("isAddressedOrDirected(userTextRef.current)");
     expect(speechStartBlock).not.toContain("stopAssistantOutput()");
 
     // Echo guard parity with web: the echo buffer tracks live assistant deltas...
@@ -1179,7 +1189,9 @@ describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
       readMustaflow("hooks/use-ora-realtime-voice.ts"),
       readOraMobile("hooks/useOraRealtimeVoiceNative.ts"),
     ]) {
-      expect(src).toContain("const FOCUS_WINDOW_MS = 12_000;");
+      expect(src).toContain("const FOCUS_COLD_START_WINDOW_MS = 12_000;");
+      expect(src).toContain("const FOCUS_FOLLOWUP_WINDOW_MS = 4_000;");
+      expect(src).toContain("acceptedTurnCount: number");
       expect(src).toContain("export function scoreTranscriptFocus(");
       expect(src).toContain("export function isAddressedOrDirected(");
       expect(src).toContain('reason: "not_addressed_or_outside_focus"');

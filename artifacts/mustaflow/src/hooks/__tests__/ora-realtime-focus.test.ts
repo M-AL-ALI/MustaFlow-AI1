@@ -28,10 +28,12 @@ function score(
   focusMode: FocusMode,
   msSinceLastAcceptedTurn: number,
   overrides: Partial<typeof CLEAN> = {},
+  acceptedTurnCount = 1,
 ) {
   return scoreTranscriptFocus(text, {
     focusMode,
     msSinceLastAcceptedTurn,
+    acceptedTurnCount,
     ...CLEAN,
     ...overrides,
   });
@@ -68,17 +70,23 @@ describe("scoreTranscriptFocus — focused mode, base rejections propagate", () 
 
 describe("scoreTranscriptFocus — focused mode, inside the focus window", () => {
   it("accepts a natural follow-up with viaWindow when engaged", () => {
-    const v = score("and what about the second one", "focused", 5_000);
+    const v = score("and what about the second one", "focused", 3_000);
     expect(v).toEqual({ accepted: true, viaWindow: true });
   });
 
   it("accepts a non-English follow-up inside the window (no wake word needed)", () => {
-    const v = score("y el siguiente paso cual es", "focused", 8_000);
+    const v = score("y el siguiente paso cual es", "focused", 3_000);
     expect(v).toEqual({ accepted: true, viaWindow: true });
   });
 
-  it("accepts exactly at the 12s window boundary", () => {
-    expect(score("keep going please", "focused", 12_000).accepted).toBe(true);
+  it("accepts the first utterance exactly at the 12s cold-start boundary", () => {
+    expect(score("keep going please", "focused", 12_000, {}, 0).accepted).toBe(true);
+  });
+
+  it("rejects undirected background speech after the shorter follow-up window", () => {
+    const v = score("yeah i think we should grab lunch later", "focused", 8_000);
+    expect(v.accepted).toBe(false);
+    expect(v.reason).toBe("not_addressed_or_outside_focus");
   });
 });
 
