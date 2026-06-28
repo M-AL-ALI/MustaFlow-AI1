@@ -169,7 +169,9 @@ function pathRequiresAuth(path: string): boolean {
 
 async function jsonRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const buildHeaders = pathRequiresAuth(path) ? authHeadersRequired : authHeaders;
-  const headers = await buildHeaders(init.body ? { "Content-Type": "application/json" } : undefined);
+  const headers = await buildHeaders(
+    init.body ? { "Content-Type": "application/json" } : undefined,
+  );
   const res = await fetchOrThrow(url(path), {
     ...init,
     headers: mergeHeaders(headers, init.headers),
