@@ -47,17 +47,16 @@ export const REALTIME_HEARTBEAT_INTERVAL_SECONDS = 30;
 export const REALTIME_STALE_GRACE_SECONDS = 60;
 
 /**
- * Per-session ceiling (seconds). A single session may use the full remaining
- * plan allowance, so this matches the per-window budget for each tier. The
- * effective cap is min(remainingSeconds, this), which therefore reduces to the
- * remaining budget; the budget window itself is the only ceiling on cumulative
- * voice time. (Heartbeat charging + stale-session expiry still bound the cost
- * of a forgotten/runaway tab to actual elapsed time within the budget.)
+ * Per-session ceiling (seconds). Product requirement: each tier's Talk to Ora
+ * session can run for the full live-voice allowance when that much budget
+ * remains (Free 20m, Core 60m, Wave 120m). The effective cap is still
+ * min(remainingSeconds, this), and heartbeats/stale-expiry protect forgotten
+ * tabs from running unmetered.
  */
 export const TIER_ORA_REALTIME_SESSION_CAP_SECONDS: Record<SubscriptionTier, number> = {
-  free: 1200, // 20 min (full free allowance)
-  core: 3600, // 60 min (full core allowance)
-  wave: 7200, // 120 min (full wave allowance)
+  free: 1200, // 20 min
+  core: 3600, // 60 min
+  wave: 7200, // 120 min
 };
 
 /** Coerce an arbitrary tier string to a known tier, defaulting to "free". */

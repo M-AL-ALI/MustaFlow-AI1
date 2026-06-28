@@ -5,7 +5,7 @@
  * (POST /api/public-ai/realtime/session):
  *   - feature gates (kill switch + ORA_REALTIME_ENABLED=false)
  *   - session cookie required (anonymous + signed-in both carry ora-session)
- *   - tier-aware session duration (anon/free 300, core 600, wave 900)
+ *   - tier-aware session duration (anon/free 1200, core 3600, wave 7200)
  *   - daily spend-cap block -> 429
  *   - the real OPENAI_API_KEY is never returned; only the ek_ token is
  *   - GA mint body shape (session.type, tuned VAD, transcription, voice)
@@ -308,7 +308,7 @@ describe("Talk to Ora realtime — mint configuration + failures", () => {
 // ─── 4. Anonymous happy path + GA body shape ──────────────────────────────────
 
 describe("Talk to Ora realtime — anonymous mint", () => {
-  it("anon → 200, returns ek_ token, default model/voice, 300s, no-store", async () => {
+  it("anon → 200, returns ek_ token, default model/voice, 1200s, no-store", async () => {
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
@@ -322,7 +322,7 @@ describe("Talk to Ora realtime — anonymous mint", () => {
     expect(res.body.voicePreset).toBe("marine");
     expect(res.body.voiceLabel).toBe("Marine");
     expect(res.body.voice).toBeUndefined();
-    expect(res.body.maxDurationSeconds).toBe(300);
+    expect(res.body.maxDurationSeconds).toBe(1200);
     expect(res.body.expiresAt).toBe(1900000000);
     expect(res.headers["cache-control"]).toBe("no-store");
 
@@ -503,34 +503,34 @@ describe("Talk to Ora realtime — tier durations + signed-in context", () => {
     });
   }
 
-  it("wave tier → 900s session", async () => {
+  it("wave tier → 7200s session", async () => {
     signIn("wave");
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
       .send({});
     expect(res.status).toBe(200);
-    expect(res.body.maxDurationSeconds).toBe(900);
+    expect(res.body.maxDurationSeconds).toBe(7200);
     expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, true);
     expect(buildProfileContext).toHaveBeenCalledWith("user_123");
   });
 
-  it("core tier → 600s session", async () => {
+  it("core tier → 3600s session", async () => {
     signIn("core");
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
       .send({});
-    expect(res.body.maxDurationSeconds).toBe(600);
+    expect(res.body.maxDurationSeconds).toBe(3600);
   });
 
-  it("free tier → 300s session", async () => {
+  it("free tier → 1200s session", async () => {
     signIn("free");
     const res = await request(makeApp())
       .post("/api/public-ai/realtime/session")
       .set("Cookie", freshCookie())
       .send({});
-    expect(res.body.maxDurationSeconds).toBe(300);
+    expect(res.body.maxDurationSeconds).toBe(1200);
   });
 });
 
@@ -817,7 +817,7 @@ describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
       defaultVoicePreset: "marine",
       defaultVoiceLabel: "Marine",
       tier: "anonymous",
-      maxDurationSeconds: 300,
+      maxDurationSeconds: 1200,
     });
     // Product-safe diagnostics never leak the underlying model/provider or raw
     // provider voice ids to the settings UI.
@@ -864,7 +864,7 @@ describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
     const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
     expect(res.status).toBe(200);
     expect(res.body.tier).toBe("wave");
-    expect(res.body.maxDurationSeconds).toBe(900);
+    expect(res.body.maxDurationSeconds).toBe(7200);
   });
 
   it("returns tier-aware maxDurationSeconds for a signed-in core user", async () => {
@@ -876,7 +876,7 @@ describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
     const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
     expect(res.status).toBe(200);
     expect(res.body.tier).toBe("core");
-    expect(res.body.maxDurationSeconds).toBe(600);
+    expect(res.body.maxDurationSeconds).toBe(3600);
   });
 
   it("returns the baseline session length for a signed-in free user", async () => {
@@ -888,7 +888,7 @@ describe("Talk to Ora realtime — diagnostics (non-charging)", () => {
     const res = await request(makeApp()).get("/api/public-ai/realtime/diagnostics");
     expect(res.status).toBe(200);
     expect(res.body.tier).toBe("free");
-    expect(res.body.maxDurationSeconds).toBe(300);
+    expect(res.body.maxDurationSeconds).toBe(1200);
   });
 
   it("maps an ORA_REALTIME_VOICE override to its product preset, never the raw id or model", async () => {

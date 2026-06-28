@@ -11,7 +11,7 @@
  * Covers:
  *  - per-tier allowances (free 1200s/5h, core 3600s/3h, wave 7200s/3h; anon→free)
  *  - fresh / seeded / elapsed-window usage projection
- *  - start: ok (cap = min(remaining, per-session cap)), over_limit, concurrent
+ *  - start: ok (cap = min(remaining, per-session allowance)), over_limit, concurrent
  *  - heartbeat: charges elapsed delta, never double-charges, ends at the cap
  *  - end: clamps an inflated client duration, never refunds, idempotent
  *  - stale sweep: finalizes at lastHeartbeat + grace, marks 'expired'
@@ -78,7 +78,7 @@ afterAll(async () => {
 });
 
 describe("getRealtimeVoiceAllowance", () => {
-  it("free = 1200s / 5h window / 1200s per-session cap (full allowance)", () => {
+  it("free = 1200s / 5h window / 1200s per-session cap", () => {
     expect(getRealtimeVoiceAllowance("free")).toEqual({
       tier: "free",
       limitSeconds: 1200,
@@ -87,7 +87,7 @@ describe("getRealtimeVoiceAllowance", () => {
     });
   });
 
-  it("core = 3600s / 3h window / 3600s per-session cap (full allowance)", () => {
+  it("core = 3600s / 3h window / 3600s per-session cap", () => {
     expect(getRealtimeVoiceAllowance("core")).toEqual({
       tier: "core",
       limitSeconds: 3600,
@@ -96,7 +96,7 @@ describe("getRealtimeVoiceAllowance", () => {
     });
   });
 
-  it("wave = 7200s / 3h window / 7200s per-session cap (full allowance)", () => {
+  it("wave = 7200s / 3h window / 7200s per-session cap", () => {
     expect(getRealtimeVoiceAllowance("wave")).toEqual({
       tier: "wave",
       limitSeconds: 7200,
@@ -146,14 +146,14 @@ describe("getRealtimeUsage", () => {
 });
 
 describe("startRealtimeSession", () => {
-  it("ok: reserves a session for the full remaining allowance when budget is ample", async () => {
+  it("ok: reserves a session capped at the tier allowance when budget is ample", async () => {
     const key = uniqueKey("start-ok");
     const res = await startRealtimeSession(key, "wave");
     expect(res.status).toBe("ok");
     if (res.status !== "ok") throw new Error("expected ok");
     expect(res.remainingSeconds).toBe(7200);
     expect(res.limitSeconds).toBe(7200);
-    // wave per-session cap (7200) == remaining (7200): full allowance available
+    // wave per-session cap equals the full allowance when budget is ample.
     expect(res.maxDurationSeconds).toBe(7200);
     expect(res.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.resetsAt).toBeNull();
