@@ -1,3 +1,4 @@
+- [Ora mobile session auth guard](ora-mobile-session-auth-guard.md) — /api/public-ai/session MUST be in pathRequiresAuth; omitting it silently creates anonymous sessions for signed-in users (billing=Core, chat=Free mismatch).
 - [EAS Phase 3 setup](eas-phase3-setup.md) — EAS_NO_VCS=1 required (git guard); Expo secret is `Expo_Token` not EXPO_TOKEN; iOS needs deploymentTarget:"16.0" for SDK 54+RN 0.81.
 - [EXPO_APPLE_TEAM_TYPE casing](expo-apple-team-type-casing.md) — secret stored as "Individual" but EAS CLI requires all-caps "INDIVIDUAL"; override with shell prefix or fix the secret.
 - [EAS iOS AppCheckCore modular headers fix](expo-eas-podfile-modular-headers.md) — insert `use_modular_headers!` before `install! 'cocoapods'` via withDangerousMod; @expo/config-plugins must be a direct devDep (pnpm isolation).

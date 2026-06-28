@@ -161,6 +161,7 @@ function pathRequiresAuth(path: string): boolean {
     path.startsWith("/api/me/") ||
     path.startsWith("/api/orax/") ||
     path.startsWith("/api/billing/subscription") ||
+    path === "/api/public-ai/session" ||
     path === "/api/public-ai/chat" ||
     path === "/api/public-ai/usage" ||
     path.startsWith("/api/public-ai/realtime/session")

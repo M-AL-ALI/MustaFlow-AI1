@@ -77,11 +77,21 @@ describe("Mobile auth-stability guard", () => {
   it("api.ts guards signed-in routes via pathRequiresAuth", () => {
     expect(api).toContain("function pathRequiresAuth(");
     expect(api).toContain("authHeadersRequired");
+    expect(api).toContain('"/api/public-ai/session"');
     expect(api).toContain('"/api/public-ai/chat"');
     expect(api).toContain('"/api/public-ai/usage"');
     expect(api).toContain('"/api/public-ai/realtime/session"');
     expect(api).toContain('"/api/ora/"');
     expect(api).toContain("requireAuthToken");
+  });
+
+  it("/api/public-ai/session is in pathRequiresAuth so a signed-in user cannot silently get an anonymous session", () => {
+    const pathRequiresAuthFn = api.slice(
+      api.indexOf("function pathRequiresAuth("),
+      api.indexOf("function pathRequiresAuth(") + 600,
+    );
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/session"');
+    expect(pathRequiresAuthFn).not.toContain('"/api/public-ai/session" // excluded');
   });
 
   it("jsonRequest uses authHeadersRequired for guarded routes", () => {
