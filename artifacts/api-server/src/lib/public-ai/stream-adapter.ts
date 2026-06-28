@@ -121,6 +121,7 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
 export type OraStreamProviderEvent =
   | { type: "candidate"; provider: string; model: string; usedFallback: boolean }
   | { type: "token"; text: string }
+  | { type: "metrics"; usedSimulatedChunks: boolean; providerDeltaCount: number }
   | { type: "done" }
   | { type: "error"; firstTokenSent: boolean; err: Error };
 
@@ -164,6 +165,15 @@ const SIMULATE_WORDS_PER_GROUP = 2;
  * over ~6000 ms — both clearly visible before the "done" event lands.
  */
 const SIMULATE_DELAY_MS = 50;
+
+/**
+ * Byte length at or above which a single provider delta is treated as a
+ * proxy-buffered chunk rather than a real streaming token. Large single deltas
+ * indicate the upstream proxy accumulated the full completion and delivered it
+ * all at once; in that case we fall back to simulateChunkStream on the pending
+ * buffer so the user still sees word-by-word animation.
+ */
+const LARGE_CHUNK_THRESHOLD = 200;
 
 /**
  * Split the full accumulated provider response into word-group sub-tokens with
@@ -248,46 +258,94 @@ export async function* streamOraMessage(
         disableThinking: true,
       });
 
-      // Accumulate the full provider response before simulating. A nested
-      // try-catch lets us distinguish two mid-stream failure cases:
-      //   • throw with no content  → rethrow so the outer catch retries the
-      //                              next candidate (no tokens sent yet).
-      //   • throw with partial text → simulate what we received so the user
-      //                              sees the partial reply, then emit an
-      //                              interrupted error rather than a blank one.
+      // Real-time word-group streaming with large-chunk simulation fallback.
+      //
+      // For each provider delta:
+      //   • Small delta (< LARGE_CHUNK_THRESHOLD chars) — real streaming token.
+      //     Accumulate into pendingBuffer; emit a 2-word group immediately once
+      //     the buffer holds at least SIMULATE_WORDS_PER_GROUP words. No
+      //     artificial 50 ms delay — the provider's natural token rate provides
+      //     pacing, and the client-side 55 ms render gate prevents visual
+      //     batching of fast-arriving frames.
+      //   • Large delta (≥ LARGE_CHUNK_THRESHOLD chars) — proxy-buffered chunk.
+      //     Run simulateChunkStream on the current pendingBuffer (which already
+      //     includes the large delta) so the user still sees word-by-word
+      //     animation even when the upstream proxy delivers the full completion
+      //     in one piece.
+      //
+      // Re-emitting already-sent text is avoided: simulation always operates on
+      // pendingBuffer (not-yet-emitted text), which is reset to "" after each
+      // flush. accumulated tracks the full response for error-recovery.
       let accumulated = "";
+      let pendingBuffer = "";    // text received but not yet emitted
+      let providerDeltaCount = 0;
+      let usedSimulatedChunks = false;
       let providerMidStreamErr: Error | null = null;
+
       try {
         for await (const delta of gen) {
           if (signal.aborted) return;
           accumulated += delta;
+          pendingBuffer += delta;
+          providerDeltaCount++;
+
+          if (delta.length >= LARGE_CHUNK_THRESHOLD) {
+            // Large buffered chunk — simulate the entire pending buffer
+            // (which already includes this large delta) word-by-word.
+            usedSimulatedChunks = true;
+            for await (const piece of simulateChunkStream(pendingBuffer, signal)) {
+              if (signal.aborted) return;
+              firstTokenSent = true;
+              yield { type: "token", text: piece };
+            }
+            pendingBuffer = "";
+          } else {
+            // Real streaming token — emit a 2-word group as soon as ready.
+            const wordCount = (pendingBuffer.match(/\S+/g) ?? []).length;
+            if (wordCount >= SIMULATE_WORDS_PER_GROUP) {
+              firstTokenSent = true;
+              yield { type: "token", text: pendingBuffer };
+              pendingBuffer = "";
+              // Yield to the event loop so abort signals are checked promptly
+              // even under a very fast provider.
+              await new Promise<void>((r) => setTimeout(r, 0));
+            }
+          }
         }
       } catch (err) {
         providerMidStreamErr = err as Error;
       }
 
-      // Nothing received at all — propagate so the outer catch can try the
-      // next candidate (or surface stream_failed if no candidates remain).
+      // Nothing received at all — rethrow so the outer catch retries the next
+      // candidate (or surfaces stream_failed if no candidates remain).
       if (providerMidStreamErr && !accumulated) {
         throw providerMidStreamErr;
       }
 
-      // Simulate word-by-word streaming over the full (or partial) text.
-      // simulateChunkStream yields 2-word groups with 50 ms delays so the
-      // frontend sees progressive text regardless of proxy buffering.
-      for await (const piece of simulateChunkStream(accumulated, signal)) {
-        if (signal.aborted) return;
-        firstTokenSent = true;
-        yield { type: "token", text: piece };
+      // Flush any text still waiting in the pending buffer.
+      if (pendingBuffer && !signal.aborted) {
+        if (usedSimulatedChunks) {
+          // Already in simulation mode — keep consistent word-by-word pacing.
+          for await (const piece of simulateChunkStream(pendingBuffer, signal)) {
+            if (signal.aborted) return;
+            firstTokenSent = true;
+            yield { type: "token", text: piece };
+          }
+        } else {
+          // Real streaming — emit the trailing word group immediately.
+          firstTokenSent = true;
+          yield { type: "token", text: pendingBuffer };
+        }
       }
 
-      // Partial content received and simulated — report as interrupted so the
-      // client shows the partial reply + an error notice rather than silence.
+      // Partial content received — report as interrupted so the client shows
+      // the partial reply + an error notice rather than silence.
       if (providerMidStreamErr) {
         yield { type: "error", firstTokenSent: true, err: providerMidStreamErr };
         return;
       }
 
+      yield { type: "metrics", usedSimulatedChunks, providerDeltaCount };
       yield { type: "done" };
       return;
     } catch (candidateErr) {

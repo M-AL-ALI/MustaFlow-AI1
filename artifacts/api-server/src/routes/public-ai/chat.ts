@@ -1844,6 +1844,18 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     return;
   }
 
+  // ── Per-bucket latency tracking ───────────────────────────────────────────
+  // Privacy-safe: only timings and routing metadata logged — no prompt text,
+  // no memory content, no user identifiers beyond anonymised tier/mode.
+  const _t0 = Date.now(); // request entered handler (past kill switches)
+  let _t1 = _t0; // after session validation
+  let _t2 = _t0; // after auth user resolved
+  let _t3 = _t0; // after spend-cap check
+  let _t4 = _t0; // after quota reserve + route decision
+  let _t5 = _t0; // after memory/context/profile loaded (concurrent)
+  let _t6 = _t0; // after SSE headers flushed + start event emitted
+  let _tFirstToken: number | null = null; // first token written to client
+
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request body" });
@@ -1876,6 +1888,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     res.status(401).json({ error: "Session expired. Please start a new session." });
     return;
   }
+  _t1 = Date.now(); // session cookie validated
 
   if (!scanUserInput(message)) {
     res
@@ -1886,6 +1899,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
+  _t2 = Date.now(); // auth user resolved (Clerk JWT + DB lookup)
   const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
@@ -1919,6 +1933,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       return;
     }
   }
+  _t3 = Date.now(); // spend-cap check complete
 
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
@@ -2013,6 +2028,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       return;
     }
   }
+  _t4 = Date.now(); // quota reserved + route decision complete
 
   // ── Conversational answer / deep thinking (token streaming) ─────────────────
 
@@ -2060,6 +2076,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       : Promise.resolve(""),
     authed ? buildProfileContext(authed.userId) : Promise.resolve(""),
   ]);
+  _t5 = Date.now(); // memory + cross-conv + profile context loaded
 
   // Rolling conversation summary. The summary refresh is a separate AI call
   // (timeout up to 5s, frequently the long pole) and is only needed to enrich
@@ -2223,6 +2240,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     type: "start",
     ...(conversationId ? { conversationId: String(conversationId) } : {}),
   });
+  _t6 = Date.now(); // SSE headers flushed + start event emitted
 
   // Abort the stream when the client closes the connection.
   const abortController = new AbortController();
@@ -2250,6 +2268,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   let streamProvider: Provider = candidates[0]?.provider ?? "openai";
   let streamModel = candidates[0]?.model ?? primaryModel;
   let streamFailed = false;
+  let streamMetrics = { usedSimulatedChunks: false, providerDeltaCount: 0 };
 
   try {
     for await (const event of streamOraMessage({
@@ -2267,10 +2286,16 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         if (!firstTokenSent) {
           // Cancel the first-token timeout — we have a live stream.
           clearTimeout(firstTokenTimer);
+          _tFirstToken = Date.now(); // first token written to client
         }
         firstTokenSent = true;
         streamedReply += event.text;
         writeSSE(res, { type: "token", text: event.text });
+      } else if (event.type === "metrics") {
+        streamMetrics = {
+          usedSimulatedChunks: event.usedSimulatedChunks,
+          providerDeltaCount: event.providerDeltaCount,
+        };
       } else if (event.type === "error") {
         streamFailed = true;
       }
@@ -2280,7 +2305,19 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     clearTimeout(firstTokenTimer);
   }
 
-  const latencyMs = Date.now() - start;
+  const _t7 = Date.now(); // stream loop completed
+  const latencyMs = _t7 - start;
+
+  // Fire memory-save-candidate extraction immediately after the stream ends.
+  // Previously this was a sequential await before writeSSE(done), adding 1-3s
+  // of post-stream latency. Running it concurrently with video/suggestion
+  // post-processing eliminates that sequential delay.
+  // extractMemorySaveCandidate takes the user message + tier (not the reply),
+  // so it can start as soon as the stream loop completes.
+  const memoryCandidatePromise =
+    authed && !temporary && !referenceAnalysisTurn
+      ? extractMemorySaveCandidate(message, planTier).catch(() => null)
+      : Promise.resolve(null);
 
   if (abortController.signal.aborted) {
     res.end();
@@ -2328,6 +2365,23 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       usedFallback,
       maxTokens,
       replyChars: streamedReply.length,
+      // Per-bucket timing breakdown (ms) — privacy-safe, no user content.
+      timingMs: {
+        sessionMs: _t1 - _t0,      // session cookie validation
+        authMs: _t2 - _t1,         // Clerk JWT + DB user resolve
+        spendCapMs: _t3 - _t2,     // global / per-IP spend-cap check
+        quotaMs: _t4 - _t3,        // routing decision + quota reserve
+        contextMs: _t5 - _t4,      // memory + cross-conv + profile (concurrent)
+        headerFlushMs: _t6 - _t5,  // model selection + SSE headers flush
+        ttftMs: _tFirstToken !== null ? _tFirstToken - _t0 : -1,
+        streamMs: _t7 - (_tFirstToken ?? _t6),
+        totalMs: _t7 - _t0,
+      },
+      streaming: {
+        realTime: !streamMetrics.usedSimulatedChunks,
+        providerDeltaCount: streamMetrics.providerDeltaCount,
+        memoryCount: memory.used.length,
+      },
     },
     "Ora streaming completion",
   );
@@ -2361,12 +2415,13 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     }
   }
 
-  const memoryCandidate =
-    authed && !temporary && !referenceAnalysisTurn
-      ? await extractMemorySaveCandidate(message, planTier)
-      : null;
-
-  const usage = await oraUsageResponse(authed, updatedPayload.msgCount);
+  // Await memory candidate and usage concurrently. memoryCandidatePromise was
+  // fired right after the stream loop, so it has been running in parallel with
+  // the video extraction and suggestion awaiting above.
+  const [memoryCandidate, usage] = await Promise.all([
+    memoryCandidatePromise,
+    oraUsageResponse(authed, updatedPayload.msgCount),
+  ]);
 
   // The rolling-summary refresh was kicked off before streaming and ran
   // concurrently with the AI stream. Resolve it now (already settled in the
@@ -2400,7 +2455,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         ? { resetsAt: typeof usage.resetsAt === "string" ? usage.resetsAt : null }
         : {}),
       ...(usage.windowHours != null ? { windowHours: Number(usage.windowHours) } : {}),
-      isRealStreaming: isRealProviderStreaming(streamProvider),
+      isRealStreaming: !streamMetrics.usedSimulatedChunks,
     },
   });
   res.end();
