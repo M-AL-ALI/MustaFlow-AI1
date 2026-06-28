@@ -39,6 +39,7 @@ import {
   getSubscription,
   updatePreferences,
 } from "@/lib/api";
+import { TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode, writeStoredFocusMode } from "@/lib/focus-mode";
 import {
   readStoredVoicePreset,
@@ -532,6 +533,8 @@ export default function SettingsScreen() {
   const [acctLoading, setAcctLoading] = useState(false);
   const [acctError, setAcctError] = useState<string | null>(null);
   const [acctTokenMissing, setAcctTokenMissing] = useState(false);
+  const [acctLocalSignedIn, setAcctLocalSignedIn] = useState<boolean | null>(null);
+  const [acctTokenPresent, setAcctTokenPresent] = useState<boolean | null>(null);
   const acctRunningRef = useRef(false);
 
   const runAccountCheck = useCallback(async () => {
@@ -540,6 +543,8 @@ export default function SettingsScreen() {
     setAcctLoading(true);
     setAcctError(null);
     setAcctTokenMissing(false);
+    setAcctLocalSignedIn(!!isSignedIn);
+    setAcctTokenPresent(null);
     try {
       if (isSignedIn) {
         let token: string | null = null;
@@ -548,14 +553,20 @@ export default function SettingsScreen() {
         } catch {
           token = null;
         }
+        setAcctTokenPresent(!!token);
         if (!token) setAcctTokenMissing(true);
       }
       const data = await getAccountConsistency();
       setAcctDiag(data);
     } catch (err) {
       setAcctDiag(null);
-      const msg = err instanceof Error ? err.message : String(err);
-      setAcctError(msg);
+      if (err instanceof TokenUnavailableError) {
+        setAcctTokenMissing(true);
+        setAcctTokenPresent(false);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        setAcctError(msg);
+      }
     } finally {
       setAcctLoading(false);
       acctRunningRef.current = false;
@@ -1276,6 +1287,25 @@ export default function SettingsScreen() {
           title="Account sync"
           description="Confirm this device resolves to the same Ora account, plan, and data as the website."
         >
+          {acctLocalSignedIn !== null && (
+            <View style={{ gap: 4 }}>
+              <InfoRow label="Local signed in" value={acctLocalSignedIn ? "yes" : "no"} />
+              {acctLocalSignedIn && (
+                <InfoRow
+                  label="Token present"
+                  value={acctTokenPresent === null ? "checking" : acctTokenPresent ? "yes" : "no"}
+                  warn={acctTokenPresent === false}
+                />
+              )}
+              {acctDiag && (
+                <InfoRow
+                  label="Server recognized"
+                  value={acctDiag.identity.clerkUserIdLast4 ? "yes" : "no"}
+                  warn={acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
+                />
+              )}
+            </View>
+          )}
           {acctDiag ? (
             <View style={{ gap: 6 }}>
               <InfoRow
@@ -1296,6 +1326,17 @@ export default function SettingsScreen() {
                 label="Chat tier"
                 value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`}
                 warn={acctTierMismatch}
+              />
+              <InfoRow
+                label="Ora session auth"
+                value={
+                  acctDiag.identity.clerkUserIdLast4
+                    ? acctDiag.chatSession.isPaid
+                      ? "authenticated (paid)"
+                      : "authenticated (free)"
+                    : "anonymous"
+                }
+                warn={!!acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
               />
               <InfoRow label="Conversations" value={String(acctDiag.counts.conversations)} />
               <InfoRow label="Projects" value={String(acctDiag.counts.projects)} />

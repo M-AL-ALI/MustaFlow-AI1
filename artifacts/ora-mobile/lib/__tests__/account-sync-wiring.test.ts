@@ -40,7 +40,6 @@ describe("Mobile Settings — Account sync wiring", () => {
   it("shows red warnings for signed-in-no-token and billing/chat tier mismatch", () => {
     expect(settings).toContain("acctTokenWarn");
     expect(settings).toContain("acctTierMismatch");
-    // Red warning color used elsewhere in this screen for failures.
     expect(settings).toContain('color: "#f87171"');
   });
 
@@ -48,5 +47,67 @@ describe("Mobile Settings — Account sync wiring", () => {
     expect(settings).not.toMatch(/stripe/i);
     expect(settings).not.toMatch(/checkout/i);
     expect(settings).not.toMatch(/billing-portal|createCheckout|manageBilling/i);
+  });
+});
+
+describe("Mobile auth-stability guard", () => {
+  const authClient = read("../auth-client.ts");
+  const api = read("../api.ts");
+  const layout = read("../../app/(home)/_layout.tsx");
+  const settings = read("../../app/(home)/settings.tsx");
+
+  it("auth-client exports requireAuthToken, TokenUnavailableError, and setAuthState", () => {
+    expect(authClient).toContain("export async function requireAuthToken()");
+    expect(authClient).toContain("export class TokenUnavailableError");
+    expect(authClient).toContain("export function setAuthState(");
+  });
+
+  it("requireAuthToken fails closed for signed-in users with missing token", () => {
+    expect(authClient).toContain("_authIsSignedIn");
+    expect(authClient).toContain("throw new TokenUnavailableError()");
+    expect(authClient).toContain("if (!_authIsSignedIn) return null");
+  });
+
+  it("layout syncs isSignedIn into module-level auth state on every change", () => {
+    expect(layout).toContain("setAuthState");
+    expect(layout).toContain("isSignedIn");
+    expect(layout).toContain("setAuthState(isLoaded, isSignedIn");
+  });
+
+  it("api.ts guards signed-in routes via pathRequiresAuth", () => {
+    expect(api).toContain("function pathRequiresAuth(");
+    expect(api).toContain("authHeadersRequired");
+    expect(api).toContain('"/api/public-ai/chat"');
+    expect(api).toContain('"/api/public-ai/usage"');
+    expect(api).toContain('"/api/public-ai/realtime/session"');
+    expect(api).toContain('"/api/ora/"');
+    expect(api).toContain("requireAuthToken");
+  });
+
+  it("jsonRequest uses authHeadersRequired for guarded routes", () => {
+    expect(api).toContain("pathRequiresAuth(path) ? authHeadersRequired : authHeaders");
+  });
+
+  it("streamChatNative uses authHeadersRequired (not plain authHeaders)", () => {
+    const streamFnStart = api.indexOf("export async function streamChatNative(");
+    expect(streamFnStart).toBeGreaterThan(-1);
+    const streamFnBody = api.slice(streamFnStart, streamFnStart + 500);
+    expect(streamFnBody).toContain("authHeadersRequired");
+    expect(streamFnBody).not.toMatch(/await authHeaders\(/);
+  });
+
+  it("Account Sync shows localSignedIn, tokenPresent, and serverRecognized rows", () => {
+    expect(settings).toContain("acctLocalSignedIn");
+    expect(settings).toContain("acctTokenPresent");
+    expect(settings).toContain('"Local signed in"');
+    expect(settings).toContain('"Token present"');
+    expect(settings).toContain('"Server recognized"');
+    expect(settings).toContain('"Ora session auth"');
+  });
+
+  it("Account Sync handles TokenUnavailableError without overwriting the token warning", () => {
+    expect(settings).toContain("TokenUnavailableError");
+    expect(settings).toContain("err instanceof TokenUnavailableError");
+    expect(settings).toContain("setAcctTokenPresent(false)");
   });
 });

@@ -1,5 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
-import { setAuthTokenGetter } from "@/lib/auth-client";
+import { setAuthState, setAuthTokenGetter } from "@/lib/auth-client";
 import { DrawerContentScrollView, DrawerContentComponentProps } from "@react-navigation/drawer";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -210,7 +210,11 @@ function CustomDrawer(props: DrawerContentComponentProps) {
 
 export default function HomeLayout() {
   const c = useColors();
-  const { isLoaded, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+
+  useEffect(() => {
+    setAuthState(isLoaded, isSignedIn ?? false);
+  }, [isLoaded, isSignedIn]);
 
   useEffect(() => {
     setAuthTokenGetter(async () => {

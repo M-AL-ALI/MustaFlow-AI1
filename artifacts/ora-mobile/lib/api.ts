@@ -1,4 +1,4 @@
-import { getAuthToken } from "./auth-client";
+import { getAuthToken, requireAuthToken } from "./auth-client";
 
 import type {
   AnalysisResponse,
@@ -88,6 +88,20 @@ async function authHeaders(extra?: Record<string, string>): Promise<Headers> {
   return headers;
 }
 
+/**
+ * Like authHeaders, but uses requireAuthToken() so a signed-in user with a
+ * temporarily unavailable Clerk token fails closed (throws TokenUnavailableError)
+ * instead of silently downgrading to anonymous mode.
+ */
+async function authHeadersRequired(extra?: Record<string, string>): Promise<Headers> {
+  const headers = new Headers(extra);
+  const token = await requireAuthToken();
+  if (token && !headers.has("authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return headers;
+}
+
 function url(path: string): string {
   return path.startsWith("http") ? path : `${API_BASE}${path}`;
 }
@@ -135,8 +149,27 @@ async function parseError(res: Response): Promise<never> {
   throw new ApiRequestError(res.status, message, body);
 }
 
+/**
+ * Returns true for routes that MUST NOT silently fall through to anonymous
+ * mode when the user is signed in. Matched paths use authHeadersRequired()
+ * which throws TokenUnavailableError (signed-in + no token) instead of
+ * proceeding without a bearer.
+ */
+function pathRequiresAuth(path: string): boolean {
+  return (
+    path.startsWith("/api/ora/") ||
+    path.startsWith("/api/me/") ||
+    path.startsWith("/api/orax/") ||
+    path.startsWith("/api/billing/subscription") ||
+    path === "/api/public-ai/chat" ||
+    path === "/api/public-ai/usage" ||
+    path.startsWith("/api/public-ai/realtime/session")
+  );
+}
+
 async function jsonRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = await authHeaders(init.body ? { "Content-Type": "application/json" } : undefined);
+  const buildHeaders = pathRequiresAuth(path) ? authHeadersRequired : authHeaders;
+  const headers = await buildHeaders(init.body ? { "Content-Type": "application/json" } : undefined);
   const res = await fetchOrThrow(url(path), {
     ...init,
     headers: mergeHeaders(headers, init.headers),
@@ -325,7 +358,7 @@ export async function streamChatNative(
   if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "true") return null;
   if (typeof ReadableStream === "undefined") return null;
 
-  const headers = await authHeaders({ "Content-Type": "application/json" });
+  const headers = await authHeadersRequired({ "Content-Type": "application/json" });
   let res: Response;
   try {
     res = await fetch(url("/api/public-ai/chat/stream"), {
