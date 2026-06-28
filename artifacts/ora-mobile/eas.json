@@ -35,7 +35,9 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true",
-        "EXPO_PUBLIC_DOMAIN": "www.mustaflow.com"
+        "EXPO_PUBLIC_DOMAIN": "www.mustaflow.com",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsud3d3Lm11c3RhZmxvdy5jb20k",
+        "EXPO_PUBLIC_CLERK_PROXY_URL": "https://www.mustaflow.com/api/__clerk"
       }
     },
     "production": {
@@ -46,7 +48,9 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_ORA_STREAMING_ENABLED": "true",
-        "EXPO_PUBLIC_DOMAIN": "www.mustaflow.com"
+        "EXPO_PUBLIC_DOMAIN": "www.mustaflow.com",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsud3d3Lm11c3RhZmxvdy5jb20k",
+        "EXPO_PUBLIC_CLERK_PROXY_URL": "https://www.mustaflow.com/api/__clerk"
       }
     }
   },
