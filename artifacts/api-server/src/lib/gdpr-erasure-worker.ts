@@ -36,6 +36,7 @@ import {
 } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
+import { evictTierCache } from "./public-ai/authed-user";
 import { destroyContainer } from "./container";
 import { objectStorageClient } from "./objectStorage";
 
@@ -126,6 +127,7 @@ export async function runGdprErasure(userId: string): Promise<void> {
 
   // ── 8. Hard-delete subscription record ───────────────────────────────────
   await db.delete(userSubscriptionsTable).where(eq(userSubscriptionsTable.userId, userId));
+  evictTierCache(userId);
 
   // ── 9. Hard-delete personal access tokens ────────────────────────────────
   await db.delete(personalAccessTokensTable).where(eq(personalAccessTokensTable.userId, userId));

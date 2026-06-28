@@ -46,6 +46,7 @@ import {
   getStripePublishableKey,
   invalidateStripeCredentialCache,
 } from "../lib/stripeClient";
+import { evictTierCache } from "../lib/public-ai/authed-user";
 import {
   PLAN_TIERS,
   type PlanTier,
@@ -836,6 +837,7 @@ async function handleCheckoutCompleted(
       })
       .where(eq(userSubscriptionsTable.userId, userId));
 
+    evictTierCache(userId);
     // Grant first monthly credits immediately
     await maybeGrantMonthlyCredits(userId, subscriptionId, currentPeriodStart);
     logger.info({ userId, tier, subscriptionId }, "Subscription activated via checkout");
@@ -925,6 +927,7 @@ async function handleInvoicePaid(event: {
     .set({ status: "active", currentPeriodEnd, gracePeriodEnd: null, updatedAt: sql`now()` })
     .where(eq(userSubscriptionsTable.userId, sub.userId));
 
+  evictTierCache(sub.userId);
   // Grant monthly credits atomically — credit_grants unique constraint prevents duplicates
   await maybeGrantMonthlyCredits(sub.userId, subscriptionId, currentPeriodStart);
   logger.info(
@@ -963,6 +966,7 @@ async function handleInvoicePaymentFailed(event: {
         updatedAt: sql`now()`,
       })
       .where(eq(userSubscriptionsTable.userId, sub.userId));
+    evictTierCache(sub.userId);
     logger.warn(
       { userId: sub.userId, attemptCount },
       "invoice.payment_failed: max retries hit — downgraded to free",
@@ -972,6 +976,7 @@ async function handleInvoicePaymentFailed(event: {
       .update(userSubscriptionsTable)
       .set({ status: "grace_period", gracePeriodEnd, updatedAt: sql`now()` })
       .where(eq(userSubscriptionsTable.userId, sub.userId));
+    evictTierCache(sub.userId);
     logger.warn(
       { userId: sub.userId, attemptCount, gracePeriodEnd },
       "invoice.payment_failed: grace period started",
@@ -1015,6 +1020,7 @@ async function handleSubscriptionUpdated(event: {
       updatedAt: sql`now()`,
     })
     .where(eq(userSubscriptionsTable.userId, sub.userId));
+  evictTierCache(sub.userId);
   logger.info(
     { userId: sub.userId, status: mappedStatus, cancelAtPeriodEnd },
     "Subscription updated",
@@ -1044,6 +1050,7 @@ async function handleSubscriptionDeleted(event: {
       updatedAt: sql`now()`,
     })
     .where(eq(userSubscriptionsTable.userId, sub.userId));
+  evictTierCache(sub.userId);
   logger.info({ userId: sub.userId, subscriptionId }, "Subscription deleted — downgraded to free");
 }
 

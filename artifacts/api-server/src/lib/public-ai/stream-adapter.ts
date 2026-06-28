@@ -109,6 +109,21 @@ export function anySignal(signals: AbortSignal[]): AbortSignal {
 }
 
 /**
+ * Race a promise against a fixed deadline. If the promise resolves before `ms`
+ * milliseconds, returns its value; if the deadline fires first, returns `fallback`.
+ *
+ * The context builders (memory, cross-conversation, profile) are started in
+ * parallel with auth so this caps only the REMAINING wait after routing, not
+ * an absolute deadline from request start.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
+/**
  * Provider-level event emitted by `streamOraMessage`. Separate from the
  * SSE-wire `OraStreamEvent` so the route can translate as needed.
  *
@@ -135,15 +150,16 @@ export interface StreamOraParams {
 }
 
 /**
- * Always accumulate all provider chunks before simulating. This guarantees
- * word-by-word streaming regardless of whether the AI proxy delivers one large
- * chunk or many small real tokens — both cases are handled identically by
- * running the full accumulated text through simulateChunkStream.
+ * Smooth word-group streaming with immediate start (no full-answer wait).
  *
- * The old per-chunk threshold approach broke when the Gemini integration proxy
- * started returning real streaming tokens (each < 25 chars): those small chunks
- * bypassed simulateChunkStream entirely, fired in rapid succession, and the
- * Replit dev proxy or React 18 automatic batching delivered them all at once.
+ * For real streaming tokens (small deltas), the pending buffer is flushed
+ * through simulateChunkStream once it reaches SIMULATE_WORDS_PER_GROUP words.
+ * This produces the smooth 50 ms word-group cadence users are used to, while
+ * starting on the FIRST 2-word group instead of waiting for the full answer
+ * to arrive — preserving improved TTFT while restoring the visual feel.
+ *
+ * For proxy-buffered chunks (large single deltas), simulateChunkStream runs
+ * on the full pending buffer so the user still sees progressive text delivery.
  */
 
 /**
@@ -258,15 +274,15 @@ export async function* streamOraMessage(
         disableThinking: true,
       });
 
-      // Real-time word-group streaming with large-chunk simulation fallback.
+      // Smooth word-group streaming with immediate start.
       //
       // For each provider delta:
       //   • Small delta (< LARGE_CHUNK_THRESHOLD chars) — real streaming token.
-      //     Accumulate into pendingBuffer; emit a 2-word group immediately once
-      //     the buffer holds at least SIMULATE_WORDS_PER_GROUP words. No
-      //     artificial 50 ms delay — the provider's natural token rate provides
-      //     pacing, and the client-side 55 ms render gate prevents visual
-      //     batching of fast-arriving frames.
+      //     Accumulate into pendingBuffer; once ≥ SIMULATE_WORDS_PER_GROUP words
+      //     have buffered, flush through simulateChunkStream for the smooth 50 ms
+      //     word-group cadence users expect. Streaming STARTS on the first 2-word
+      //     group (no full-answer wait), preserving improved TTFT while restoring
+      //     the visual feel from before the TTFT audit.
       //   • Large delta (≥ LARGE_CHUNK_THRESHOLD chars) — proxy-buffered chunk.
       //     Run simulateChunkStream on the current pendingBuffer (which already
       //     includes the large delta) so the user still sees word-by-word
@@ -300,15 +316,17 @@ export async function* streamOraMessage(
             }
             pendingBuffer = "";
           } else {
-            // Real streaming token — emit a 2-word group as soon as ready.
+            // Real streaming token — flush through simulateChunkStream once
+            // enough words have accumulated. Starts on the first 2-word group
+            // (improved TTFT) while keeping the smooth 50 ms visual cadence.
             const wordCount = (pendingBuffer.match(/\S+/g) ?? []).length;
             if (wordCount >= SIMULATE_WORDS_PER_GROUP) {
-              firstTokenSent = true;
-              yield { type: "token", text: pendingBuffer };
+              for await (const piece of simulateChunkStream(pendingBuffer, signal)) {
+                if (signal.aborted) return;
+                firstTokenSent = true;
+                yield { type: "token", text: piece };
+              }
               pendingBuffer = "";
-              // Yield to the event loop so abort signals are checked promptly
-              // even under a very fast provider.
-              await new Promise<void>((r) => setTimeout(r, 0));
             }
           }
         }
@@ -322,19 +340,15 @@ export async function* streamOraMessage(
         throw providerMidStreamErr;
       }
 
-      // Flush any text still waiting in the pending buffer.
+      // Flush any remaining text through simulateChunkStream for consistent
+      // word-group pacing. For real tokens this is a short trailing fragment
+      // (< 2 words) that resolves almost instantly; for large-chunk tails it
+      // keeps the established 50 ms simulation cadence.
       if (pendingBuffer && !signal.aborted) {
-        if (usedSimulatedChunks) {
-          // Already in simulation mode — keep consistent word-by-word pacing.
-          for await (const piece of simulateChunkStream(pendingBuffer, signal)) {
-            if (signal.aborted) return;
-            firstTokenSent = true;
-            yield { type: "token", text: piece };
-          }
-        } else {
-          // Real streaming — emit the trailing word group immediately.
+        for await (const piece of simulateChunkStream(pendingBuffer, signal)) {
+          if (signal.aborted) return;
           firstTokenSent = true;
-          yield { type: "token", text: pendingBuffer };
+          yield { type: "token", text: piece };
         }
       }
 

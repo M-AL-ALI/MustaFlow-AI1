@@ -1,24 +1,27 @@
 /**
  * Unit tests for streamOraMessage (stream-adapter.ts).
  *
- * Focus: the real-time-vs-simulation decision boundary introduced in the
- * TTFT audit. Specifically:
+ * Product decision (TTFT audit + UX restore):
+ *   Real streaming tokens (small deltas < 200 chars) and large proxy-buffered
+ *   chunks (≥ 200 chars) BOTH flow through simulateChunkStream — small-delta
+ *   groups are flushed on the first 2-word accumulation (improved TTFT) with
+ *   the smooth 50 ms word-group cadence restored.
  *
- *   • Small deltas (< 200 chars) → 2-word groups emitted immediately with no
- *     artificial delay; usedSimulatedChunks stays false.
- *   • Large deltas (≥ 200 chars) → simulateChunkStream word-by-word;
+ *   • Small deltas → 2-word groups sent through simulateChunkStream;
+ *     usedSimulatedChunks stays false (flag tracks large-chunk path).
+ *   • Large deltas (≥ 200 chars) → simulateChunkStream on full buffer;
  *     usedSimulatedChunks becomes true.
- *   • Mixed stream (small deltas then one large chunk) → first N tokens are
- *     real-time; the large chunk triggers simulation; reply is lossless.
+ *   • Mixed stream (small deltas then one large chunk) → reply is lossless,
+ *     usedSimulatedChunks: true.
  *   • metrics event carries correct usedSimulatedChunks + providerDeltaCount.
  *   • Pending buffer is flushed after the provider loop ends.
- *   • Pre-first-token error → throws (outer catch retries next candidate).
+ *   • Pre-first-token error → yields { type: "error", firstTokenSent: false }.
  *   • Post-first-token error → yields { type: "error", firstTokenSent: true }.
  *   • AbortSignal mid-stream causes generator to return early.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { streamOraMessage, type OraStreamProviderEvent } from "../stream-adapter";
+import { streamOraMessage, withTimeout, type OraStreamProviderEvent } from "../stream-adapter";
 
 // ---------------------------------------------------------------------------
 // Mock streamChatCompletion so tests never hit a real API.
@@ -471,5 +474,38 @@ describe("event ordering", () => {
     // Exactly one metrics and one done.
     expect(types.filter((t) => t === "metrics")).toHaveLength(1);
     expect(types.filter((t) => t === "done")).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. withTimeout — deadline racing
+// ---------------------------------------------------------------------------
+
+describe("withTimeout", () => {
+  it("resolves with the promise value when the promise wins the race", async () => {
+    const fast = Promise.resolve(42);
+    const result = await withTimeout(fast, 1000, 0);
+    expect(result).toBe(42);
+  });
+
+  it("resolves with the fallback value when the deadline fires first", async () => {
+    // A promise that never resolves — the 1 ms deadline fires first.
+    const never = new Promise<number>(() => undefined);
+    const result = await withTimeout(never, 1, -1);
+    expect(result).toBe(-1);
+  });
+
+  it("works with non-numeric fallback types", async () => {
+    const never = new Promise<string>(() => undefined);
+    const result = await withTimeout(never, 1, "default");
+    expect(result).toBe("default");
+  });
+
+  it("resolves with the promise when it wins against a 0ms deadline", async () => {
+    // Microtask promise resolves synchronously in the same tick.
+    const micro = Promise.resolve("fast");
+    // 0ms deadline uses setTimeout which yields to the microtask queue first.
+    const result = await withTimeout(micro, 0, "slow");
+    expect(result).toBe("fast");
   });
 });

@@ -1169,4 +1169,49 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
       server.on("error", (e) => reject(e));
     });
   }, 12000);
+
+  // ── Promise guards: void catch() on early-exit promises ──────────────────
+
+  it("structural: chat.ts has void catch guards on classifierPromise before any early-exit", async () => {
+    // This guard prevents unhandled promise rejections when a 429, spend-cap,
+    // or other early-exit path returns before `await classifierPromise` is
+    // reached. classifyIntent fires in parallel with auth, so it is always
+    // in-flight when early exits happen.
+    const fs = await import("fs");
+    const path = await import("path");
+    const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
+    expect(src).toContain("void classifierPromise.catch(() => undefined)");
+  });
+
+  it("structural: chat.ts has void catch guards on all early-context promises", async () => {
+    // earlyMemoryP, earlyCrossConvP, and earlyProfileP are started right after
+    // auth resolves. A 429 (authed message limit) or spend-cap early-exit
+    // fires before the Promise.all that awaits them — the guards prevent any
+    // unexpected rejection from becoming an unhandled rejection.
+    const fs = await import("fs");
+    const path = await import("path");
+    const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
+    expect(src).toContain("void earlyMemoryP.catch(() => undefined)");
+    expect(src).toContain("void earlyCrossConvP.catch(() => undefined)");
+    expect(src).toContain("void earlyProfileP.catch(() => undefined)");
+  });
+
+  it("structural: billing.ts has evictTierCache calls after every subscription mutation", async () => {
+    // Tier cache must be evicted synchronously after every DB write that changes
+    // a subscription — otherwise the stale in-process cache serves the old tier
+    // for up to 60 seconds after a Stripe webhook fires.
+    const fs = await import("fs");
+    const path = await import("path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../../billing.ts"),
+      "utf8",
+    );
+    // Must be >=5: checkout, invoice.paid, payment_failed (x2 branches),
+    // subscription.updated, subscription.deleted.
+    const matches = src.match(/evictTierCache\(/g) ?? [];
+    expect(
+      matches.length,
+      "billing.ts must call evictTierCache at >=5 mutation sites",
+    ).toBeGreaterThanOrEqual(5);
+  });
 }, 30000);

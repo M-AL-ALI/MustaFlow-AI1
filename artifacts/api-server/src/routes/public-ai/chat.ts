@@ -46,6 +46,7 @@ import { eq, and, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import type { SubscriptionTier } from "@workspace/db";
 import type { OraQuotaKind } from "../../lib/public-ai/ora-usage";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
+import { withTimeout } from "../../lib/public-ai/stream-adapter";
 
 // Authenticated Ora users are metered by per-user ROLLING-WINDOW quotas per
 // subscription tier (TIER_ORA_MESSAGE_LIMIT / TIER_ORA_IMAGE_LIMIT) — NOT by the
@@ -54,22 +55,6 @@ import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill
 async function oraMessageLimit(tier: string): Promise<number> {
   const { TIER_ORA_MESSAGE_LIMIT } = await import("@workspace/db");
   return TIER_ORA_MESSAGE_LIMIT[tier as SubscriptionTier] ?? TIER_ORA_MESSAGE_LIMIT.free;
-}
-
-/**
- * Race a promise against a fixed deadline. If the promise resolves before `ms`
- * milliseconds, returns its value. If the deadline fires first, returns `fallback`.
- *
- * Used to apply an Instant-mode cap on context-builder latency so a slow DB
- * query does not hold up the first streaming token. The context builders are
- * started early (in parallel with auth), so this caps only the REMAINING wait
- * time after routing — not an absolute deadline from the start of the request.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
 }
 
 function oraPlanTier(authed: AuthedOraUser | null): OraPlanTier {
@@ -1925,6 +1910,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // parallel max(auth, classify). routeOraMessage accepts a pre-computed
   // `classifier` result so it skips its own internal AI call when we supply one.
   const classifierPromise = classifyIntent(message);
+  // Attach a no-op catch so any unexpected rejection from classifyIntent does
+  // not become an unhandled rejection when an early-return path (429, spend cap)
+  // exits before `await classifierPromise` is reached.
+  void classifierPromise.catch(() => undefined);
 
   const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
@@ -1940,12 +1929,18 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   const earlyMemoryP = authed && referenceSavedMemories && !temporary
     ? buildMemoryContext(authed.userId, oraProjectId, message, planTier)
     : Promise.resolve<MemoryContextResult>({ text: "", used: [] });
+  // Guard: prevent unhandled rejections when an early-exit path (429, spend cap)
+  // returns before earlyMemoryP is awaited. The builders have internal try/catch
+  // but this is a defensive belt-and-suspenders guard.
+  void earlyMemoryP.catch(() => undefined);
   const earlyCrossConvP = authed && referenceChatHistory && !temporary
     ? buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
     : Promise.resolve("");
+  void earlyCrossConvP.catch(() => undefined);
   const earlyProfileP = authed
     ? buildProfileContext(authed.userId)
     : Promise.resolve("");
+  void earlyProfileP.catch(() => undefined);
 
   const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
