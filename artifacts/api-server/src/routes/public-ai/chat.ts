@@ -1847,14 +1847,20 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // ── Per-bucket latency tracking ───────────────────────────────────────────
   // Privacy-safe: only timings and routing metadata logged — no prompt text,
   // no memory content, no user identifiers beyond anonymised tier/mode.
-  const _t0 = Date.now(); // request entered handler (past kill switches)
-  let _t1 = _t0; // after session validation
-  let _t2 = _t0; // after auth user resolved
-  let _t3 = _t0; // after spend-cap check
-  let _t4 = _t0; // after quota reserve + route decision
-  let _t5 = _t0; // after memory/context/profile loaded (concurrent)
-  let _t6 = _t0; // after SSE headers flushed + start event emitted
-  let _tFirstToken: number | null = null; // first token written to client
+  // Object accumulator avoids the no-useless-assignment lint rule that fires
+  // when let variables are given an initial value that is overwritten before
+  // it is read (which is the case here — each bucket is set at its own point).
+  const timing = {
+    t0: Date.now(), // request entered handler (past kill switches)
+    t1: 0,          // after session validation
+    t2: 0,          // after auth user resolved
+    t3: 0,          // after spend-cap check
+    t4: 0,          // after quota reserve + route decision
+    t5: 0,          // after memory/context/profile loaded (concurrent)
+    t6: 0,          // after SSE headers flushed + start event emitted
+    t7: 0,          // after stream loop complete
+    tFirstToken: -1, // first token written to client (-1 = not received)
+  };
 
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -1888,7 +1894,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     res.status(401).json({ error: "Session expired. Please start a new session." });
     return;
   }
-  _t1 = Date.now(); // session cookie validated
+  timing.t1 = Date.now(); // session cookie validated
 
   if (!scanUserInput(message)) {
     res
@@ -1899,7 +1905,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
-  _t2 = Date.now(); // auth user resolved (Clerk JWT + DB lookup)
+  timing.t2 = Date.now(); // auth user resolved (Clerk JWT + DB lookup)
   const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
@@ -1933,7 +1939,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       return;
     }
   }
-  _t3 = Date.now(); // spend-cap check complete
+  timing.t3 = Date.now(); // spend-cap check complete
 
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
@@ -2028,7 +2034,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       return;
     }
   }
-  _t4 = Date.now(); // quota reserved + route decision complete
+  timing.t4 = Date.now(); // quota reserved + route decision complete
 
   // ── Conversational answer / deep thinking (token streaming) ─────────────────
 
@@ -2076,7 +2082,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       : Promise.resolve(""),
     authed ? buildProfileContext(authed.userId) : Promise.resolve(""),
   ]);
-  _t5 = Date.now(); // memory + cross-conv + profile context loaded
+  timing.t5 = Date.now(); // memory + cross-conv + profile context loaded
 
   // Rolling conversation summary. The summary refresh is a separate AI call
   // (timeout up to 5s, frequently the long pole) and is only needed to enrich
@@ -2204,7 +2210,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Import stream helpers BEFORE flushHeaders so anySignal is available for
   // the first-token timeout we create here (timeout must be set up before we
   // start streaming, and cookies must be set before headers flush).
-  const { writeSSE, isRealProviderStreaming, anySignal, streamOraMessage } =
+  const { writeSSE, anySignal, streamOraMessage } =
     await import("../../lib/public-ai/stream-adapter");
 
   // Pre-increment session + set cookie BEFORE flushing SSE headers — once
@@ -2240,7 +2246,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     type: "start",
     ...(conversationId ? { conversationId: String(conversationId) } : {}),
   });
-  _t6 = Date.now(); // SSE headers flushed + start event emitted
+  timing.t6 = Date.now(); // SSE headers flushed + start event emitted
 
   // Abort the stream when the client closes the connection.
   const abortController = new AbortController();
@@ -2286,7 +2292,7 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         if (!firstTokenSent) {
           // Cancel the first-token timeout — we have a live stream.
           clearTimeout(firstTokenTimer);
-          _tFirstToken = Date.now(); // first token written to client
+          timing.tFirstToken = Date.now(); // first token written to client
         }
         firstTokenSent = true;
         streamedReply += event.text;
@@ -2305,8 +2311,8 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     clearTimeout(firstTokenTimer);
   }
 
-  const _t7 = Date.now(); // stream loop completed
-  const latencyMs = _t7 - start;
+  timing.t7 = Date.now(); // stream loop completed
+  const latencyMs = timing.t7 - start;
 
   // Fire memory-save-candidate extraction immediately after the stream ends.
   // Previously this was a sequential await before writeSSE(done), adding 1-3s
@@ -2367,15 +2373,15 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       replyChars: streamedReply.length,
       // Per-bucket timing breakdown (ms) — privacy-safe, no user content.
       timingMs: {
-        sessionMs: _t1 - _t0,      // session cookie validation
-        authMs: _t2 - _t1,         // Clerk JWT + DB user resolve
-        spendCapMs: _t3 - _t2,     // global / per-IP spend-cap check
-        quotaMs: _t4 - _t3,        // routing decision + quota reserve
-        contextMs: _t5 - _t4,      // memory + cross-conv + profile (concurrent)
-        headerFlushMs: _t6 - _t5,  // model selection + SSE headers flush
-        ttftMs: _tFirstToken !== null ? _tFirstToken - _t0 : -1,
-        streamMs: _t7 - (_tFirstToken ?? _t6),
-        totalMs: _t7 - _t0,
+        sessionMs: timing.t1 - timing.t0,        // session cookie validation
+        authMs: timing.t2 - timing.t1,            // Clerk JWT + DB user resolve
+        spendCapMs: timing.t3 - timing.t2,        // global / per-IP spend-cap check
+        quotaMs: timing.t4 - timing.t3,           // routing decision + quota reserve
+        contextMs: timing.t5 - timing.t4,         // memory + cross-conv + profile (concurrent)
+        headerFlushMs: timing.t6 - timing.t5,     // model selection + SSE headers flush
+        ttftMs: timing.tFirstToken >= 0 ? timing.tFirstToken - timing.t0 : -1,
+        streamMs: timing.t7 - (timing.tFirstToken >= 0 ? timing.tFirstToken : timing.t6),
+        totalMs: timing.t7 - timing.t0,
       },
       streaming: {
         realTime: !streamMetrics.usedSimulatedChunks,
