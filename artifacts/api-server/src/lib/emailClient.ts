@@ -37,7 +37,10 @@ export async function sendEmail(opts: {
   text?: string;
 }): Promise<void> {
   if (!resendEnabled()) {
-    logger.debug({ to: opts.to, subject: opts.subject }, "email: RESEND_API_KEY not configured; skipping");
+    logger.debug(
+      { to: opts.to, subject: opts.subject },
+      "email: RESEND_API_KEY not configured; skipping",
+    );
     return;
   }
   try {
@@ -51,7 +54,10 @@ export async function sendEmail(opts: {
       text: opts.text,
     });
     if (error) {
-      logger.warn({ err: error, to: opts.to, subject: opts.subject }, "email: send failed (non-fatal)");
+      logger.warn(
+        { err: error, to: opts.to, subject: opts.subject },
+        "email: send failed (non-fatal)",
+      );
     } else {
       logger.info({ to: opts.to, subject: opts.subject }, "email: sent");
     }
@@ -76,7 +82,10 @@ export async function sendEmailWithStatus(opts: {
   text?: string;
 }): Promise<EmailDeliveryStatus> {
   if (!resendEnabled()) {
-    logger.debug({ to: opts.to, subject: opts.subject }, "email: RESEND_API_KEY not configured; skipping");
+    logger.debug(
+      { to: opts.to, subject: opts.subject },
+      "email: RESEND_API_KEY not configured; skipping",
+    );
     return "skipped";
   }
   try {
@@ -90,7 +99,10 @@ export async function sendEmailWithStatus(opts: {
       text: opts.text,
     });
     if (error) {
-      logger.warn({ err: error, to: opts.to, subject: opts.subject }, "email: send failed (non-fatal)");
+      logger.warn(
+        { err: error, to: opts.to, subject: opts.subject },
+        "email: send failed (non-fatal)",
+      );
       return "failed";
     }
     logger.info({ to: opts.to, subject: opts.subject }, "email: sent");

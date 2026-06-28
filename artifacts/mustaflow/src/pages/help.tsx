@@ -591,7 +591,10 @@ function SupportChat() {
                   const text = s.trim();
                   if (!text || chat.isPending) return;
                   const history = messages;
-                  const nextWithUser: SupportMessage[] = [...history, { role: "user", content: text }];
+                  const nextWithUser: SupportMessage[] = [
+                    ...history,
+                    { role: "user", content: text },
+                  ];
                   updateMessages(nextWithUser);
                   setInput("");
                   setSuggestions([]);
@@ -665,10 +668,13 @@ function SupportChat() {
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="space-y-1.5">
               <p>
-                Ticket #{escalateResult.ticketId} created.{" "}
                 {escalateResult.emailStatus === "sent"
-                  ? "Our team has been notified by email."
-                  : "Our team will review it shortly."}
+                  ? `Ticket #${escalateResult.ticketId} created and support team was emailed.`
+                  : escalateResult.emailStatus === "failed"
+                    ? `Ticket #${escalateResult.ticketId} created, but email notification failed; staff can still see it in the support inbox.`
+                    : escalateResult.emailStatus === "skipped"
+                      ? `Ticket #${escalateResult.ticketId} created, but support email is not configured; staff must review the support inbox.`
+                      : `Ticket #${escalateResult.ticketId} created. Our team will review it shortly.`}
               </p>
               <Link
                 href={ticketDetailPath(escalateResult.ticketId)}

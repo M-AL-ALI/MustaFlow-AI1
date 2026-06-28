@@ -283,7 +283,16 @@ function SupportChat({ onTicketCreated }: { onTicketCreated: (ticketId: number) 
         },
         attachments: attachments.length > 0 ? attachments : undefined,
       });
-      Alert.alert("Ticket created", `Support ticket #${res.ticketId} was created.`);
+      Alert.alert(
+        "Ticket #" + res.ticketId,
+        res.emailStatus === "sent"
+          ? "Ticket created and support team was emailed."
+          : res.emailStatus === "failed"
+            ? "Ticket created, but email notification failed; staff can still see it in the support inbox."
+            : res.emailStatus === "skipped"
+              ? "Ticket created, but support email is not configured; staff must review the support inbox."
+              : "Ticket created. Our team will review it shortly.",
+      );
       onTicketCreated(res.ticketId);
     } catch (err) {
       Alert.alert("Could not create ticket", err instanceof Error ? err.message : "Try again.");

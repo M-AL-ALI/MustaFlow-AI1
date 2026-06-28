@@ -22,12 +22,21 @@ function makeChain() {
   let pendingInsertTable: unknown = null;
   const chain: Record<string, unknown> = {};
   const passthrough = [
-    "from", "where", "orderBy", "limit", "set", "returning",
-    "onConflictDoNothing", "onConflictDoUpdate",
+    "from",
+    "where",
+    "orderBy",
+    "limit",
+    "set",
+    "returning",
+    "onConflictDoNothing",
+    "onConflictDoUpdate",
   ];
   for (const m of passthrough) chain[m] = vi.fn(() => chain);
   chain.select = vi.fn(() => chain);
-  chain.insert = vi.fn((table: unknown) => { pendingInsertTable = table; return chain; });
+  chain.insert = vi.fn((table: unknown) => {
+    pendingInsertTable = table;
+    return chain;
+  });
   chain.update = vi.fn(() => chain);
   chain.delete = vi.fn(() => chain);
   chain.values = vi.fn((values: unknown) => {
@@ -50,8 +59,7 @@ function tableProxy(name: string) {
   return new Proxy(
     { _name: name, $inferSelect: {} },
     {
-      get: (t, p) =>
-        p in t ? (t as Record<string, unknown>)[p as string] : { _col: p },
+      get: (t, p) => (p in t ? (t as Record<string, unknown>)[p as string] : { _col: p }),
     },
   );
 }

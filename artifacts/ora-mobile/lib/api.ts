@@ -162,6 +162,7 @@ function pathRequiresAuth(path: string): boolean {
     path.startsWith("/api/me/") ||
     path.startsWith("/api/orax/") ||
     path.startsWith("/api/billing/subscription") ||
+    path.startsWith("/api/help/support/") ||
     path === "/api/public-ai/session" ||
     path === "/api/public-ai/chat" ||
     path === "/api/public-ai/usage" ||
@@ -936,7 +937,7 @@ export async function sendSupportChat(input: {
   category?: string;
   language?: string;
 }): Promise<{ reply: string; canEscalate?: boolean }> {
-  return jsonRequest("/help/support/chat", {
+  return jsonRequest("/api/help/support/chat", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -949,7 +950,7 @@ export async function escalateSupport(input: {
   deviceInfo?: Record<string, unknown> | null;
   attachments?: SupportAttachment[];
 }): Promise<{ ticketId: number; emailStatus?: string; supportEmailUsed?: string }> {
-  return jsonRequest("/help/support/escalate", {
+  return jsonRequest("/api/help/support/escalate", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -957,24 +958,27 @@ export async function escalateSupport(input: {
 
 export async function listSupportConversations(): Promise<SupportConversationSummary[]> {
   const data = await jsonRequest<{ conversations?: SupportConversationSummary[] }>(
-    "/help/support/conversations",
+    "/api/help/support/conversations",
   );
   return data.conversations ?? [];
 }
 
-export async function getSupportConversation(
-  id: number,
-): Promise<{ id: number; title: string | null; messages: SupportMessage[]; lastMessageAt: string }> {
-  return jsonRequest(`/help/support/conversations/${id}`);
+export async function getSupportConversation(id: number): Promise<{
+  id: number;
+  title: string | null;
+  messages: SupportMessage[];
+  lastMessageAt: string;
+}> {
+  return jsonRequest(`/api/help/support/conversations/${id}`);
 }
 
 export async function listSupportTickets(): Promise<SupportTicketSummary[]> {
-  const data = await jsonRequest<{ tickets?: SupportTicketSummary[] }>("/help/support/tickets");
+  const data = await jsonRequest<{ tickets?: SupportTicketSummary[] }>("/api/help/support/tickets");
   return data.tickets ?? [];
 }
 
 export function getSupportTicket(id: number): Promise<SupportTicketDetail> {
-  return jsonRequest<SupportTicketDetail>(`/help/support/tickets/${id}`);
+  return jsonRequest<SupportTicketDetail>(`/api/help/support/tickets/${id}`);
 }
 
 // ---------------------------------------------------------------------------
