@@ -312,6 +312,13 @@ interface RealtimeDiagnostics {
   voices: Array<{ key: VoicePreset; label: string }>;
   tier: string;
   maxDurationSeconds: number;
+  // Per-plan live-voice budget. Privacy-safe: seconds + reset time only, never
+  // the underlying model or raw provider voice id.
+  limitSeconds?: number | null;
+  windowHours?: number | null;
+  usedSeconds?: number | null;
+  remainingSeconds?: number | null;
+  resetsAt?: string | null;
 }
 
 /**
@@ -372,6 +379,19 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return s === 0 ? `${m} min` : `${m} min ${s} sec`;
+}
+
+/** Relative "in about Nh/Nm" for when the live-voice budget refreshes. */
+function formatResetAt(resetsAt: string | null | undefined): string {
+  if (!resetsAt) return "—";
+  const ms = Date.parse(resetsAt);
+  if (Number.isNaN(ms)) return "—";
+  const diff = ms - Date.now();
+  if (diff <= 0) return "Available now";
+  const minutes = Math.ceil(diff / 60000);
+  if (minutes < 60) return `in about ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return `in about ${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 function StatusDot({ ok, warn }: { ok: boolean; warn?: boolean }) {
@@ -517,6 +537,20 @@ function LiveVoiceSection() {
               <DiagRow label="Max session length">
                 <span className="text-foreground">{formatDuration(diag.maxDurationSeconds)}</span>
               </DiagRow>
+              {typeof diag.remainingSeconds === "number" &&
+                typeof diag.limitSeconds === "number" && (
+                  <DiagRow label="Voice time left">
+                    <span className="text-foreground">
+                      {formatDuration(Math.max(0, diag.remainingSeconds))} of{" "}
+                      {formatDuration(diag.limitSeconds)}
+                    </span>
+                  </DiagRow>
+                )}
+              {diag.resetsAt && (
+                <DiagRow label="Refreshes">
+                  <span className="text-foreground">{formatResetAt(diag.resetsAt)}</span>
+                </DiagRow>
+              )}
             </>
           )}
 

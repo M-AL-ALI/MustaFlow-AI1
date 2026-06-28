@@ -78,6 +78,19 @@ export const TIER_ORA_WINDOW_HOURS: Record<SubscriptionTier, number> = {
   wave: 3,
 };
 
+// ── Ora LIVE-VOICE ("Talk to Ora") rolling-window minute budgets ────────────
+// "Talk to Ora" realtime voice is metered by ACTUAL spoken seconds per tier,
+// independent of the message/image budget above. The window length reuses the
+// same TIER_ORA_WINDOW_HOURS clock per tier (free 5h, core 3h, wave 3h) so the
+// two budgets refill on the same cadence, but the SECOND allowance is a
+// dedicated constant so message-budget changes never silently change voice.
+// Anonymous visitors are metered with the free allowance.
+export const TIER_ORA_REALTIME_LIMIT_SECONDS: Record<SubscriptionTier, number> = {
+  free: 1200, // 20 minutes / 5h window
+  core: 3600, // 60 minutes / 3h window
+  wave: 7200, // 120 minutes / 3h window
+};
+
 // Per-user subscription row. Created on first subscribe or free-tier initialisation.
 export const userSubscriptionsTable = pgTable(
   "user_subscriptions",
@@ -128,3 +141,62 @@ export const oraUsageWindowsTable = pgTable(
 
 export type OraUsageWindow = typeof oraUsageWindowsTable.$inferSelect;
 export type InsertOraUsageWindow = typeof oraUsageWindowsTable.$inferInsert;
+
+// Per-key Ora LIVE-VOICE ROLLING-WINDOW budget ledger. Tracks ACTUAL spoken
+// seconds toward the tier's voice minute budget. Exactly ONE row per usage key
+// (signed-in: the user id; anonymous: "anon:"+hash). `window_start` marks when
+// the current voice window opened (set on the first charged second after a
+// reset); `used_seconds` accumulates within it and resets once
+// now() - window_start >= the tier's window length. Charged atomically via
+// upsert deltas so overlapping heartbeats can never lose or double-count time.
+export const oraRealtimeUsageWindowsTable = pgTable(
+  "ora_realtime_usage_windows",
+  {
+    id: serial("id").primaryKey(),
+    // Metering key: user id for signed-in users, "anon:<hash>" for anonymous.
+    usageKey: text("usage_key").notNull(),
+    // When the user's current rolling voice window opened.
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
+    // Spoken seconds charged within the current window.
+    usedSeconds: integer("used_seconds").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ora_realtime_usage_windows_key_uniq").on(t.usageKey)],
+);
+
+export type OraRealtimeUsageWindow = typeof oraRealtimeUsageWindowsTable.$inferSelect;
+export type InsertOraRealtimeUsageWindow = typeof oraRealtimeUsageWindowsTable.$inferInsert;
+
+// Per-session reconciliation / concurrency / audit record for a single minted
+// "Talk to Ora" realtime session. The id is a server-issued unguessable UUID
+// returned to the client and echoed on every heartbeat/end. `charged_seconds`
+// is how much of this session's elapsed time has already been debited to the
+// usage window; each heartbeat adds the delta up to `max_duration_seconds`.
+// `status` is 'active' while live, 'ended' on graceful end, 'expired' when a
+// stale session (no heartbeat past the grace period) is finalized.
+export const oraRealtimeSessionsTable = pgTable(
+  "ora_realtime_sessions",
+  {
+    // Server-issued UUID; also the client-facing realtimeSessionId.
+    id: text("id").primaryKey(),
+    usageKey: text("usage_key").notNull(),
+    tier: text("tier").notNull(),
+    // Hard per-session ceiling = min(remaining budget, technical per-session cap).
+    maxDurationSeconds: integer("max_duration_seconds").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }).notNull().defaultNow(),
+    // Seconds of this session already debited to the usage window.
+    chargedSeconds: integer("charged_seconds").notNull().default(0),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("ora_realtime_sessions_key_status_idx").on(t.usageKey, t.status),
+    index("ora_realtime_sessions_status_heartbeat_idx").on(t.status, t.lastHeartbeatAt),
+  ],
+);
+
+export type OraRealtimeSession = typeof oraRealtimeSessionsTable.$inferSelect;
+export type InsertOraRealtimeSession = typeof oraRealtimeSessionsTable.$inferInsert;

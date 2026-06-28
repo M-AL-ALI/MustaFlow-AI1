@@ -36,6 +36,28 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
+  artifacts/api-server/src/lib/rateLimit.ts \
+  artifacts/api-server/src/lib/startup-migrations.ts \
+  artifacts/api-server/src/lib/public-ai/ora-realtime-usage.ts \
+  artifacts/api-server/src/lib/public-ai/__tests__/ora-realtime-usage.test.ts \
+  artifacts/api-server/src/routes/public-ai/realtime.ts \
+  artifacts/api-server/src/routes/public-ai/__tests__/realtime-metering.test.ts \
+  artifacts/mustaflow/src/components/ora-bubble.tsx \
+  artifacts/mustaflow/src/components/ora-panel.tsx \
+  artifacts/mustaflow/src/components/ora/ora-voice-mode-button.tsx \
+  artifacts/mustaflow/src/hooks/use-ora-realtime-voice.ts \
+  artifacts/mustaflow/src/pages/ora-settings.tsx \
+  artifacts/ora-mobile/app/\(home\)/index.tsx \
+  artifacts/ora-mobile/app/\(home\)/settings.tsx \
+  artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts \
+  artifacts/ora-mobile/lib/api.ts \
+  artifacts/ora-mobile/lib/types.ts \
+  lib/db/src/schema/subscriptions.ts \
+  scripts/package.json \
+  scripts/src/migrate-all-outstanding.ts \
+  scripts/src/migrate-ora-realtime-usage.ts \
+  .agents/memory/MEMORY.md \
+  .agents/memory/ora-realtime-session-race.md \
   scripts/push-to-github.sh \
   2>/dev/null || true
 

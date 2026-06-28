@@ -39,8 +39,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NativeModules } from "react-native";
-import { createRealtimeSession, ApiRequestError } from "@/lib/api";
-import type { RealtimeSessionContext } from "@/lib/types";
+import {
+  createRealtimeSession,
+  endRealtimeSession,
+  heartbeatRealtimeSession,
+  ApiRequestError,
+} from "@/lib/api";
+import type {
+  RealtimeHeartbeatResult,
+  RealtimeOverLimit,
+  RealtimeSessionContext,
+} from "@/lib/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,13 +96,21 @@ export interface UseOraRealtimeVoiceNativeReturn {
   interimAssistantTranscript: string;
   remainingSeconds: number | null;
   /**
+   * Set when the per-plan live-voice budget is exhausted (at start or mid-call).
+   * The caller shows a graceful "out of voice time" state with the reset time
+   * instead of falling back to the legacy loop (which would bypass the cap).
+   */
+  overLimit: RealtimeOverLimit | null;
+  /**
    * Attempt to start a realtime session. Resolves with `started: true` once the
    * SDP exchange completes, or `started: false` plus a human-readable `reason`
    * the caller can surface as a visible warning before dropping to the legacy
    * voice loop. The reason is returned (not just stored in state) so the caller
    * can read it synchronously after the await.
    */
-  start: (ctx: RealtimeStartContext) => Promise<{ started: boolean; reason: string | null }>;
+  start: (
+    ctx: RealtimeStartContext,
+  ) => Promise<{ started: boolean; reason: string | null; overLimit?: boolean }>;
   stop: () => void;
   interrupt: () => void;
   toggleMute: () => void;
@@ -104,6 +121,13 @@ export interface UseOraRealtimeVoiceNativeReturn {
 const OPENAI_REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const DATA_CHANNEL_NAME = "oai-events";
 const SDP_TIMEOUT_MS = 15_000;
+// How often to beat the live-voice budget when the server does not specify a
+// cadence. Each beat charges elapsed seconds and re-syncs the remaining time.
+// Mirrors the website hook.
+const DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30;
+// Below this many seconds left, the countdown UI shows a "running low" warning.
+// Kept in sync with the website hook's LOW_TIME_WARNING_SECONDS.
+export const LOW_TIME_WARNING_SECONDS = 60;
 
 // ─── Voice-stability tuning (mirrored in the website hook) ───────────────────
 // Barge-in confirmation: a raw `input_audio_buffer.speech_started` is NOT trusted
@@ -728,6 +752,7 @@ export function useOraRealtimeVoiceNative(
   const [interimUserTranscript, setInterimUserTranscript] = useState("");
   const [interimAssistantTranscript, setInterimAssistantTranscript] = useState("");
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [overLimit, setOverLimit] = useState<RealtimeOverLimit | null>(null);
 
   const onUserRef = useRef(options.onUserTranscript);
   onUserRef.current = options.onUserTranscript;
@@ -741,6 +766,12 @@ export function useOraRealtimeVoiceNative(
   const streamRef = useRef<MediaStreamLike | null>(null);
   const remoteTrackRef = useRef<RTCTrackLike | null>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Live-voice budget metering. heartbeatTimerRef beats the per-plan budget;
+  // realtimeSessionIdRef + sessionStartedAtRef drive the elapsed-seconds charge
+  // and the local countdown. The server clock stays authoritative.
+  const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const realtimeSessionIdRef = useRef<string | null>(null);
+  const sessionStartedAtRef = useRef(0);
   const sdpAbortRef = useRef<AbortController | null>(null);
   const userTextRef = useRef("");
   const assistantTextRef = useRef("");
@@ -784,6 +815,36 @@ export function useOraRealtimeVoiceNative(
     }
   }, []);
 
+  const clearHeartbeatTimer = useCallback(() => {
+    if (heartbeatTimerRef.current) {
+      clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+  }, []);
+
+  // Best-effort end beacon: tell the server the live-voice session ended so it
+  // finalizes the charge now instead of waiting for stale-session expiry. The
+  // server clock is authoritative and stale expiry is the safety net if this
+  // never lands, so this never blocks teardown and never throws. Reports only the
+  // session id + client-measured elapsed seconds — never audio/transcript.
+  const finalizeSession = useCallback(() => {
+    const id = realtimeSessionIdRef.current;
+    if (!id) return;
+    realtimeSessionIdRef.current = null;
+    const startedAt = sessionStartedAtRef.current;
+    sessionStartedAtRef.current = 0;
+    const durationSeconds =
+      startedAt > 0 ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : undefined;
+    logVoiceDiag("session_end_sent", { duration_seconds: durationSeconds ?? null });
+    try {
+      void endRealtimeSession(id, durationSeconds).catch(() => {
+        /* best-effort — stale-session expiry finalizes if this never lands */
+      });
+    } catch {
+      /* never let teardown throw */
+    }
+  }, []);
+
   const clearBargeInTimer = useCallback(() => {
     if (bargeInTimerRef.current) {
       clearTimeout(bargeInTimerRef.current);
@@ -797,7 +858,9 @@ export function useOraRealtimeVoiceNative(
     // Invalidate any in-flight start(): its captured generation no longer matches.
     startGenerationRef.current += 1;
     clearDurationTimer();
+    clearHeartbeatTimer();
     clearBargeInTimer();
+    finalizeSession();
     if (outputStopDebounceRef.current) {
       clearTimeout(outputStopDebounceRef.current);
       outputStopDebounceRef.current = null;
@@ -846,7 +909,7 @@ export function useOraRealtimeVoiceNative(
       streamRef.current = null;
     }
     remoteTrackRef.current = null;
-  }, [clearDurationTimer, clearBargeInTimer]);
+  }, [clearDurationTimer, clearHeartbeatTimer, clearBargeInTimer, finalizeSession]);
 
   const stop = useCallback(() => {
     if (!activeRef.current && state === "idle") return;
@@ -858,6 +921,91 @@ export function useOraRealtimeVoiceNative(
     assistantTextRef.current = "";
     setState((s) => (s === "error" || s === "unsupported" ? s : "ended"));
   }, [teardown, state]);
+
+  // Beat the per-plan live-voice budget on a cadence: charge the elapsed seconds
+  // for this session and re-sync the displayed countdown to the server budget
+  // (authoritative). A 503 means metering is unavailable (fail-closed -> drop to
+  // the legacy loop, which is metered by Ora chat quotas); a 404 / `ended:true` /
+  // remaining<=0 means the budget is spent (end gracefully, NO fallback, since
+  // that would bypass the cap). A network blip is ignored — the next beat or the
+  // server's stale-session expiry reconciles the charge. Reports only the session
+  // id + client-measured elapsed seconds, never audio or transcript text.
+  const sendHeartbeat = useCallback(async () => {
+    const id = realtimeSessionIdRef.current;
+    if (!id) return;
+    const durationSeconds =
+      sessionStartedAtRef.current > 0
+        ? Math.max(0, Math.floor((Date.now() - sessionStartedAtRef.current) / 1000))
+        : 0;
+
+    let body: RealtimeHeartbeatResult | null = null;
+    let httpStatus = 0;
+    let httpOk = false;
+    try {
+      body = await heartbeatRealtimeSession(id, durationSeconds);
+      httpStatus = 200;
+      httpOk = true;
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        httpStatus = err.status;
+        if (err.body && typeof err.body === "object") {
+          body = err.body as RealtimeHeartbeatResult;
+        }
+      } else {
+        // Network blip — do NOT end the call. The next beat (or stale-session
+        // expiry on the server) reconciles the charge.
+        logVoiceDiag("heartbeat_network_error");
+        return;
+      }
+    }
+
+    // Re-sync the displayed countdown to the server budget (authoritative), but
+    // never raise it above the local per-session countdown.
+    if (httpOk && typeof body?.remainingSeconds === "number") {
+      const serverRemaining = Math.max(0, Math.floor(body.remainingSeconds));
+      setRemainingSeconds((prev) =>
+        prev == null ? serverRemaining : Math.min(prev, serverRemaining),
+      );
+    }
+
+    const failClosed = httpStatus === 503;
+    const budgetEnded =
+      body?.ended === true || httpStatus === 404 || (body?.remainingSeconds ?? 1) <= 0;
+    if (!failClosed && !budgetEnded) return;
+    if (!activeRef.current) return;
+
+    // The server has finalized (or can't be reached): skip the redundant /end.
+    realtimeSessionIdRef.current = null;
+    logVoiceDiag("heartbeat_ended", { status: httpStatus, fail_closed: failClosed });
+
+    if (failClosed) {
+      // Metering outage — fall back to the legacy loop (text + TTS is metered by
+      // Ora chat quotas, not the realtime budget) instead of stranding the user.
+      const reason = "Live voice is temporarily unavailable. Using basic voice mode.";
+      teardown();
+      setInterimUserTranscript("");
+      setInterimAssistantTranscript("");
+      setRemainingSeconds(null);
+      setState("idle");
+      setFallbackReason(reason);
+      onFallbackRef.current?.(reason);
+      return;
+    }
+
+    // Budget exhausted — end gracefully with the reset time. Do NOT fall back
+    // (that would bypass the per-plan voice cap).
+    teardown();
+    setInterimUserTranscript("");
+    setInterimAssistantTranscript("");
+    setRemainingSeconds(0);
+    setOverLimit({
+      message:
+        "You've used all your live voice time for now. It refreshes later — you can keep chatting with Ora by text in the meantime.",
+      resetsAt: body?.resetsAt ?? null,
+      upgradeAvailable: false,
+    });
+    setState("ended");
+  }, [teardown]);
 
   const sendEvent = useCallback((event: Record<string, unknown>) => {
     const dc = dcRef.current;
@@ -1291,7 +1439,9 @@ export function useOraRealtimeVoiceNative(
 
   // ── Start ────────────────────────────────────────────────────────────────
   const start = useCallback(
-    async (ctx: RealtimeStartContext): Promise<{ started: boolean; reason: string | null }> => {
+    async (
+      ctx: RealtimeStartContext,
+    ): Promise<{ started: boolean; reason: string | null; overLimit?: boolean }> => {
       const mod = loadWebRTC();
       if (!isSupported || !mod) {
         const reason = "Live voice isn't available on this app version. Using basic voice mode.";
@@ -1325,6 +1475,7 @@ export function useOraRealtimeVoiceNative(
       lastAcceptedUserTurnAtRef.current = Date.now();
       setIsMuted(false);
       mutedRef.current = false;
+      setOverLimit(null);
       setState("connecting");
       activeRef.current = true;
       // Capture this start()'s generation. teardown() (stop / context switch /
@@ -1376,6 +1527,46 @@ export function useOraRealtimeVoiceNative(
         // state (which a newer session may now own).
         if (!isCurrent()) return { started: false, reason: null };
         activeRef.current = false;
+        // Budget exhausted (429 realtime_voice_minutes) or a concurrent session
+        // (409 realtime_voice_concurrent): do NOT fall back to the legacy loop,
+        // which would bypass the per-plan voice cap. Surface a graceful "out of
+        // voice time" state and signal overLimit so the caller exits Talk mode
+        // instead of restarting the metered loop.
+        if (err instanceof ApiRequestError) {
+          const eb = (err.body && typeof err.body === "object" ? err.body : {}) as {
+            error?: string;
+            limitType?: string;
+            upgradeAvailable?: boolean;
+            resetAt?: string | null;
+            resetsAt?: string | null;
+          };
+          if (err.status === 429 && eb.limitType === "realtime_voice_minutes") {
+            logVoiceDiag("realtime_over_limit", { limit_type: eb.limitType });
+            setOverLimit({
+              message:
+                typeof eb.error === "string"
+                  ? eb.error
+                  : "You've used all your live voice time for now. It refreshes later — you can keep chatting with Ora by text in the meantime.",
+              resetsAt: eb.resetAt ?? eb.resetsAt ?? null,
+              upgradeAvailable: eb.upgradeAvailable ?? false,
+            });
+            setState("ended");
+            return { started: false, reason: null, overLimit: true };
+          }
+          if (err.status === 409 && eb.limitType === "realtime_voice_concurrent") {
+            logVoiceDiag("realtime_concurrent", { limit_type: eb.limitType });
+            setOverLimit({
+              message:
+                typeof eb.error === "string"
+                  ? eb.error
+                  : "Live voice is already active on another device or tab.",
+              resetsAt: null,
+              upgradeAvailable: false,
+            });
+            setState("ended");
+            return { started: false, reason: null, overLimit: true };
+          }
+        }
         setState("idle");
         const reason =
           err instanceof ApiRequestError &&
@@ -1583,7 +1774,22 @@ export function useOraRealtimeVoiceNative(
           return { started: false, reason: null };
         }
 
-        // Duration cap — the server cannot meter audio once the token is live.
+        // Remember the session for budget metering: the heartbeat charges elapsed
+        // seconds and the /end beacon finalizes the charge. The server clock is
+        // authoritative; these client marks only drive the local countdown.
+        realtimeSessionIdRef.current = mint.realtimeSessionId ?? null;
+        sessionStartedAtRef.current = Date.now();
+        logVoiceDiag("session_started", {
+          max_duration_seconds: Math.max(0, Math.floor(mint.maxDurationSeconds || 0)),
+          remaining_seconds:
+            typeof mint.remainingSeconds === "number" ? mint.remainingSeconds : null,
+          limit_seconds: typeof mint.limitSeconds === "number" ? mint.limitSeconds : null,
+        });
+
+        // Duration cap — the server cannot meter audio once the token is live, so
+        // the client counts down from maxDurationSeconds (= min(remaining budget,
+        // per-session cap)) and auto-ends at zero. The heartbeat re-syncs this to
+        // the server budget so it never drifts above the real remaining minutes.
         const cap = Math.max(0, Math.floor(mint.maxDurationSeconds || 0));
         if (cap > 0) {
           setRemainingSeconds(cap);
@@ -1591,6 +1797,11 @@ export function useOraRealtimeVoiceNative(
             setRemainingSeconds((prev) => {
               if (prev == null) return prev;
               const nextVal = prev - 1;
+              // One-time "running low" signal (privacy-safe: seconds only). Fires
+              // naturally once as the 1s countdown crosses the threshold.
+              if (nextVal === LOW_TIME_WARNING_SECONDS) {
+                logVoiceDiag("low_time_warning", { remaining_seconds: nextVal });
+              }
               if (nextVal <= 0) {
                 clearDurationTimer();
                 teardown();
@@ -1602,6 +1813,19 @@ export function useOraRealtimeVoiceNative(
               return nextVal;
             });
           }, 1000);
+        }
+
+        // Heartbeat: charge elapsed seconds to the per-plan budget on a cadence
+        // (server-specified, else the default). Skipped when the mint did not
+        // return a session id (older server) so metering simply no-ops.
+        if (realtimeSessionIdRef.current) {
+          const beatSeconds =
+            typeof mint.heartbeatIntervalSeconds === "number" && mint.heartbeatIntervalSeconds > 0
+              ? mint.heartbeatIntervalSeconds
+              : DEFAULT_HEARTBEAT_INTERVAL_SECONDS;
+          heartbeatTimerRef.current = setInterval(() => {
+            void sendHeartbeat();
+          }, beatSeconds * 1000);
         }
 
         return { started: true, reason: null };
@@ -1620,7 +1844,15 @@ export function useOraRealtimeVoiceNative(
         return { started: false, reason };
       }
     },
-    [isSupported, teardown, handleServerEvent, clearDurationTimer, sendEvent, clearBargeInTimer],
+    [
+      isSupported,
+      teardown,
+      handleServerEvent,
+      clearDurationTimer,
+      sendEvent,
+      clearBargeInTimer,
+      sendHeartbeat,
+    ],
   );
 
   // Cleanup on unmount.
@@ -1639,6 +1871,7 @@ export function useOraRealtimeVoiceNative(
     interimUserTranscript,
     interimAssistantTranscript,
     remainingSeconds,
+    overLimit,
     start,
     stop,
     interrupt,

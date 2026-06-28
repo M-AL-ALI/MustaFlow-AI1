@@ -783,6 +783,7 @@ export default function OraChatScreen() {
   // guard means failed/cancelled starts (which never flipped active) are ignored
   // here — those are already handled inline by toggleTalkMode's start() branch.
   const realtimeState = realtimeVoice.state;
+  const realtimeOverLimit = realtimeVoice.overLimit;
   useEffect(() => {
     if (
       realtimeState !== "ended" &&
@@ -796,10 +797,19 @@ export default function OraChatScreen() {
     realtimeActiveRef.current = false;
     realtimeStartingRef.current = false;
     if (talkModeRef.current) {
+      // Live-voice budget exhausted mid-call: do NOT drop to the legacy metered
+      // loop (that would bypass the per-plan voice cap). Exit Talk mode and show
+      // the reset time; the user can keep chatting by text.
+      if (realtimeOverLimit) {
+        setTalkMode(false);
+        talkModeRef.current = false;
+        setVoiceError(realtimeOverLimit.message);
+        return;
+      }
       setVoiceError("Live voice session ended. Switched to basic voice mode.");
       scheduleTalkRestart(400);
     }
-  }, [realtimeState, scheduleTalkRestart]);
+  }, [realtimeState, realtimeOverLimit, scheduleTalkRestart]);
 
   const sendMessage = useCallback(
     async (text: string, attch: Attachment | null, opts?: { truncateTo?: number }) => {
@@ -1717,6 +1727,19 @@ export default function OraChatScreen() {
           if (result.started) {
             setRealtimeActive(true);
             realtimeActiveRef.current = true;
+          } else if (result.overLimit) {
+            // Live-voice budget exhausted (or a concurrent session) at connect
+            // time: exit Talk mode and show the reset time. Do NOT fall back to
+            // the legacy loop (that would bypass the per-plan voice cap).
+            setRealtimeActive(false);
+            realtimeActiveRef.current = false;
+            setTalkMode(false);
+            talkModeRef.current = false;
+            const ol = realtimeVoiceRef.current?.overLimit;
+            setVoiceError(
+              ol?.message ??
+                "You've used all your live voice time for now. You can keep chatting with Ora by text.",
+            );
           } else {
             // Realtime could not start on a capable device — show the reason and
             // drop to the legacy transcribe -> chat -> tts loop.

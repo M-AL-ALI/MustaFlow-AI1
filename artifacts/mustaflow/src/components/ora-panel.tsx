@@ -1856,6 +1856,7 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     interimUserText={realtime.interimUserTranscript}
                     interimAssistantText={realtime.interimAssistantTranscript}
                     remainingSeconds={realtime.remainingSeconds}
+                    overLimit={realtime.overLimit}
                     fallbackNotice={fallbackNotice}
                     onDismissFallbackNotice={handleDismissFallbackNotice}
                     voiceState={

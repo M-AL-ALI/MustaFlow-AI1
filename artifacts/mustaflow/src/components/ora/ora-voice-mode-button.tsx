@@ -35,7 +35,11 @@ import {
 import { cn } from "@/lib/utils";
 import type { VoiceState } from "@/hooks/use-ora-voice";
 import type { WhisperState } from "@/hooks/use-whisper-recorder";
-import type { RealtimeVoiceState } from "@/hooks/use-ora-realtime-voice";
+import {
+  LOW_TIME_WARNING_SECONDS,
+  type RealtimeVoiceState,
+  type RealtimeOverLimit,
+} from "@/hooks/use-ora-realtime-voice";
 
 /** Format a seconds countdown as m:ss for the realtime session timer. */
 function formatRemaining(totalSeconds: number): string {
@@ -43,6 +47,21 @@ function formatRemaining(totalSeconds: number): string {
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return `${m}:${rem.toString().padStart(2, "0")}`;
+}
+
+/** Human-friendly "refreshes in ~Nh/Nm" hint for the per-plan live-voice budget. */
+function formatResetHint(resetsAt: string | null | undefined): string | null {
+  if (!resetsAt) return null;
+  const resetMs = Date.parse(resetsAt);
+  if (Number.isNaN(resetMs)) return null;
+  const diffMs = resetMs - Date.now();
+  if (diffMs <= 0) return "Your voice time has refreshed — start a new session";
+  const totalMinutes = Math.ceil(diffMs / 60000);
+  if (totalMinutes < 60) {
+    return `Refreshes in about ${totalMinutes} minute${totalMinutes === 1 ? "" : "s"}`;
+  }
+  const hours = Math.round(totalMinutes / 60);
+  return `Refreshes in about ${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 /**
@@ -411,6 +430,12 @@ export interface OraVoiceConvPanelProps {
   /** Seconds left before the tier duration cap force-ends the realtime call. */
   remainingSeconds?: number | null;
   /**
+   * Set when the per-plan live-voice budget is exhausted (at start or mid-call).
+   * Rendered as a graceful "out of voice time" message with the reset time in
+   * the ended state — never a fallback (that would bypass the cap).
+   */
+  overLimit?: RealtimeOverLimit | null;
+  /**
    * Visible warning shown when realtime could not start (or dropped) and the
    * legacy fallback loop took over. Rendered in the fallback view.
    */
@@ -439,6 +464,7 @@ export function OraVoiceConvPanel({
   interimUserText = "",
   interimAssistantText = "",
   remainingSeconds = null,
+  overLimit = null,
   fallbackNotice = null,
   onDismissFallbackNotice,
 }: OraVoiceConvPanelProps) {
@@ -452,6 +478,7 @@ export function OraVoiceConvPanel({
         interimUserText={interimUserText}
         interimAssistantText={interimAssistantText}
         remainingSeconds={remainingSeconds}
+        overLimit={overLimit}
         isTtsMuted={isTtsMuted}
         onToggleTtsMute={onToggleTtsMute}
         onInterrupt={onInterrupt}
@@ -692,6 +719,7 @@ interface OraRealtimeConvViewProps {
   interimUserText: string;
   interimAssistantText: string;
   remainingSeconds: number | null;
+  overLimit: RealtimeOverLimit | null;
   isTtsMuted: boolean;
   onToggleTtsMute: () => void;
   onInterrupt?: () => void;
@@ -704,6 +732,7 @@ function OraRealtimeConvView({
   interimUserText,
   interimAssistantText,
   remainingSeconds,
+  overLimit,
   isTtsMuted,
   onToggleTtsMute,
   onInterrupt,
@@ -752,7 +781,9 @@ function OraRealtimeConvView({
           : isError
             ? "End and try again, or use the text composer"
             : isEnded
-              ? "Tap the orb to start a new voice session"
+              ? overLimit
+                ? ""
+                : "Tap the orb to start a new voice session"
               : isListening
                 ? interimUserText
                   ? `"${interimUserText}"`
@@ -760,6 +791,13 @@ function OraRealtimeConvView({
                 : "Getting ready…";
 
   const animated = isConnecting || isListening || isThinking || isSpeaking;
+  const resetHint = formatResetHint(overLimit?.resetsAt);
+  // "Running low" once the per-session countdown crosses the warning threshold.
+  const lowTime =
+    !overLimit &&
+    remainingSeconds !== null &&
+    remainingSeconds > 0 &&
+    remainingSeconds <= LOW_TIME_WARNING_SECONDS;
 
   return (
     <div className="rounded-xl border border-[hsl(265_85%_65%/0.3)] bg-[hsl(265_85%_65%/0.06)] px-4 py-3 flex flex-col gap-3">
@@ -803,6 +841,19 @@ function OraRealtimeConvView({
         )}
       </div>
 
+      {/* Over-limit notice — per-plan live-voice budget is used up. Graceful, no
+          fallback (that would bypass the cap); text Ora is still available. */}
+      {overLimit && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+          <p className={cn("text-amber-600/90 dark:text-amber-400/90 leading-snug", labelCls)}>
+            {overLimit.message}
+          </p>
+          {resetHint && (
+            <p className={cn("mt-1 text-muted-foreground/70", labelCls)}>{resetHint}</p>
+          )}
+        </div>
+      )}
+
       {/* Controls row */}
       <div className="flex items-center gap-2">
         {/* Mute / unmute Ora's spoken audio (mic stays live regardless) */}
@@ -834,15 +885,15 @@ function OraRealtimeConvView({
           </button>
         )}
 
-        {/* Tier duration countdown */}
-        {remainingSeconds !== null && (
+        {/* Tier duration countdown — amber once the live-voice budget runs low */}
+        {remainingSeconds !== null && !overLimit && (
           <span
             className={cn(
               "tabular-nums select-none",
               labelCls,
-              remainingSeconds <= 30 ? "text-amber-500/90" : "text-muted-foreground/50",
+              lowTime ? "text-amber-500/90" : "text-muted-foreground/50",
             )}
-            title="Time left in this voice session"
+            title={lowTime ? "Voice time running low" : "Time left in this voice session"}
           >
             {formatRemaining(remainingSeconds)}
           </span>

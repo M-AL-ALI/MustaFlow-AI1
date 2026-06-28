@@ -1531,6 +1531,7 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
                   interimUserText={realtime.interimUserTranscript}
                   interimAssistantText={realtime.interimAssistantTranscript}
                   remainingSeconds={realtime.remainingSeconds}
+                  overLimit={realtime.overLimit}
                   fallbackNotice={fallbackNotice}
                   onDismissFallbackNotice={handleDismissFallbackNotice}
                   voiceState={

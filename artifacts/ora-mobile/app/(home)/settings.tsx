@@ -1040,6 +1040,16 @@ export default function SettingsScreen() {
                 label="Max session"
                 value={formatDuration(realtimeDiag.maxDurationSeconds)}
               />
+              {typeof realtimeDiag.remainingSeconds === "number" &&
+                typeof realtimeDiag.limitSeconds === "number" && (
+                  <InfoRow
+                    label="Voice time left"
+                    value={`${formatDuration(Math.max(0, realtimeDiag.remainingSeconds))} of ${formatDuration(realtimeDiag.limitSeconds)}`}
+                  />
+                )}
+              {realtimeDiag.resetsAt && (
+                <InfoRow label="Refreshes" value={formatReset(realtimeDiag.resetsAt)} />
+              )}
               <InfoRow label="Plan" value={planLabel(realtimeDiag.tier)} />
               <InfoRow
                 label="This device"

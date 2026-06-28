@@ -35,6 +35,7 @@ import type {
   OraxTaskMessage,
   PaymentMethodInfo,
   RealtimeDiagnostics,
+  RealtimeHeartbeatResult,
   RealtimeSessionContext,
   RealtimeSessionResult,
   StreamDonePayload,
@@ -193,9 +194,42 @@ export function createRealtimeSession(ctx: RealtimeSessionContext): Promise<Real
 }
 
 /**
+ * Beat the live-voice budget: charge the elapsed seconds for this session to the
+ * per-plan minute window and re-sync the remaining time. Reports ONLY the session
+ * id + client-measured elapsed seconds — never audio or transcript text. The
+ * server clock stays authoritative; a 503 means metering is unavailable
+ * (fail-closed) and a 404/`ended:true`/remaining<=0 means the budget is spent.
+ */
+export function heartbeatRealtimeSession(
+  realtimeSessionId: string,
+  durationSeconds: number,
+): Promise<RealtimeHeartbeatResult> {
+  return jsonRequest<RealtimeHeartbeatResult>("/api/public-ai/realtime/heartbeat", {
+    method: "POST",
+    body: JSON.stringify({ realtimeSessionId, durationSeconds }),
+  });
+}
+
+/**
+ * Finalize the live-voice session so its minutes are charged promptly instead of
+ * waiting for the server's stale-session expiry. Idempotent and best-effort:
+ * reports only the session id + elapsed seconds (never audio/transcript).
+ */
+export function endRealtimeSession(
+  realtimeSessionId: string,
+  durationSeconds?: number,
+): Promise<void> {
+  return jsonRequest<void>("/api/public-ai/realtime/end", {
+    method: "POST",
+    body: JSON.stringify({ realtimeSessionId, durationSeconds }),
+  });
+}
+
+/**
  * Non-charging realtime diagnostics for the Settings card: server enable/config
  * state, kill switch, the default product voice (preset + label), the available
- * product voices, resolved tier, and the per-tier max session length. The
+ * product voices, resolved tier, the per-tier max session length, and the
+ * per-plan voice budget (used/remaining/limit seconds + reset time). The
  * underlying model and raw provider voice id are never returned. Does NOT mint a
  * token or consume any Ora quota.
  */

@@ -350,6 +350,16 @@ export const oraRealtimeSessionLimiter = createLimiter({
   message: "You have started too many voice sessions recently. Please wait before trying again.",
 });
 
+// Realtime voice heartbeat/end ticks. These fire on a ~30s cadence for the life
+// of a session plus a final end, so the bucket is generous (one active session
+// is ~2/min) but still bounds a client spamming the metering endpoints.
+export const oraRealtimeSessionTickLimiter = createLimiter({
+  windowMs: 60_000,
+  max: 60,
+  keyPrefix: "ora_realtime_tick",
+  message: "Too many voice session updates. Please slow down.",
+});
+
 // Sliding-window counter: 10 image uploads per IP per hour (images only)
 export const oraImageUploadLimiter = createLimiter({
   windowMs: 60 * 60_000,

@@ -16,14 +16,23 @@
  * injection (signed-in, non-temporary only), and strict Ora-vs-Builder
  * isolation (instructions are assembled from Ora-only context).
  */
-import { Router } from "express";
+import { createHash } from "node:crypto";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import { validateSession } from "../../lib/public-ai/session";
-import { oraRealtimeSessionLimiter } from "../../lib/rateLimit";
+import { oraRealtimeSessionLimiter, oraRealtimeSessionTickLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import { resolveAuthedOraUser, type AuthedOraUser } from "../../lib/public-ai/authed-user";
 import { checkOraSpendCapAsync } from "../../lib/public-ai/ora-spend-cap";
+import {
+  startRealtimeSession,
+  heartbeatRealtimeSession,
+  endRealtimeSession,
+  getRealtimeUsage,
+  getRealtimeVoiceAllowance,
+  REALTIME_HEARTBEAT_INTERVAL_SECONDS,
+} from "../../lib/public-ai/ora-realtime-usage";
 import { buildSystemPrompt, buildProfileContext, buildMemoryContext } from "./chat";
 
 const router = Router();
@@ -117,9 +126,18 @@ const VOICE_ADDENDUM =
   "actually talks. Do NOT use markdown, headings, bullet lists, tables, code blocks, " +
   "or symbols like asterisks or pipes; speak in plain spoken language. Use natural " +
   "contractions. If a complete answer would be long, give the single most useful point " +
-  "first, then offer to go deeper. Expect to be interrupted: if the user starts " +
-  "speaking, stop immediately and listen. Ask a brief clarifying question only when you " +
-  "genuinely need one. Your spoken audio and the visible transcript must always use " +
+  "first, then offer to go deeper. When you explain something, teach it simply: lead " +
+  "with the direct answer, then add just enough plain-spoken detail to make it land. " +
+  "Be honest about uncertainty — if you are unsure or do not know, say so briefly " +
+  "instead of guessing, and suggest how the user could find out. Expect to be " +
+  "interrupted: if the user starts speaking, stop immediately and listen. Ask a brief " +
+  "clarifying question only when you genuinely need one. You are Ora, by MustaFlow; if " +
+  "asked what you are, who made you, or what model or company powers you, keep the " +
+  "spoken answer to that you are Ora by MustaFlow and do not name or confirm any " +
+  "specific AI provider, model family, or technology vendor. Reply only to the person " +
+  "you are talking with: ignore background speech, side conversations, and any turn the " +
+  "client did not direct to you when deciding what to answer, which language to speak, " +
+  "and what to remember. Your spoken audio and the visible transcript must always use " +
   "the same language. If the user selected a reply language, speak entirely in that " +
   "language. If the language is Auto, follow the user's latest spoken language. Do " +
   "not default to English when the selected language or the user's speech is non-English.";
@@ -154,15 +172,33 @@ const bodySchema = z.object({
   message: z.string().max(4000).optional(),
 });
 
+function clientIpForKey(req: Request): string {
+  return (
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+    req.socket.remoteAddress ??
+    "unknown"
+  );
+}
+
 /**
- * Hard cap on a single continuous voice session, by tier. The server cannot
- * meter audio after the ephemeral token is issued, so the client must force a
- * disconnect at this duration. Charged once up-front via the spend cap.
+ * Derive the rolling-budget usage key for live-voice metering. Signed-in users
+ * are keyed by their stable userId so the budget follows the account across
+ * devices. Anonymous visitors are keyed by a non-reversible hash of their
+ * ora-session token (stable for the life of that session cookie), falling back
+ * to a hashed client IP when no token is present. The raw token/IP is never
+ * stored — only the digest — and the same derivation is reused by /heartbeat,
+ * /end and /diagnostics so a session always charges the same ledger row.
  */
-function maxDurationForTier(tier: string): number {
-  if (tier === "wave") return 900; // 15 min
-  if (tier === "core") return 600; // 10 min
-  return 300; // anonymous + free: 5 min
+function deriveUsageKey(
+  authed: AuthedOraUser | null,
+  sessionToken: string | undefined,
+  req: Request,
+): string {
+  if (authed?.userId) return authed.userId;
+  if (sessionToken) {
+    return "anon:" + createHash("sha256").update(sessionToken).digest("hex").slice(0, 48);
+  }
+  return "anon:ip:" + createHash("sha256").update(clientIpForKey(req)).digest("hex").slice(0, 48);
 }
 
 function resolveVoice(requested: string | undefined): string {
@@ -409,6 +445,50 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
     logger.warn({ component: "ora-realtime", err }, "Ora realtime spend-cap check failed open");
   }
 
+  // ── Reserve live-voice minutes (per-plan rolling budget, FAIL-CLOSED) ───────
+  // Unlike the spend cap above (which fails open), the minute budget gates real
+  // audio cost: a DB outage must BLOCK voice (503) rather than grant unlimited
+  // minutes. Anonymous callers are metered with the free allowance under their
+  // hashed session key. The actual seconds are charged later via /heartbeat.
+  const usageKey = deriveUsageKey(authed, sessionToken, req);
+  let reservation: Awaited<ReturnType<typeof startRealtimeSession>>;
+  try {
+    reservation = await startRealtimeSession(usageKey, tier);
+  } catch (err) {
+    logger.error(
+      { component: "ora-realtime", err },
+      "Ora realtime budget reservation failed — failing closed",
+    );
+    res.status(503).json({
+      error: "Voice conversations are temporarily unavailable. Please try again shortly.",
+    });
+    return;
+  }
+  if (reservation.status === "over_limit") {
+    res.status(429).json({
+      error:
+        "You've used all your live voice time for now. It refreshes later — you can keep chatting with Ora by text in the meantime.",
+      limitType: "realtime_voice_minutes",
+      upgradeAvailable: tier !== "wave",
+      remainingSeconds: 0,
+      limitSeconds: reservation.limitSeconds,
+      resetAt: reservation.resetsAt,
+    });
+    return;
+  }
+  if (reservation.status === "concurrent") {
+    res.status(409).json({
+      error: "You already have a live voice session running. End it before starting another.",
+      limitType: "realtime_voice_concurrent",
+      remainingSeconds: reservation.remainingSeconds,
+      limitSeconds: reservation.limitSeconds,
+      resetAt: reservation.resetsAt,
+    });
+    return;
+  }
+  const realtimeSessionId = reservation.sessionId;
+  const maxDurationSeconds = reservation.maxDurationSeconds;
+
   const model = process.env.ORA_REALTIME_MODEL?.trim() || DEFAULT_REALTIME_MODEL;
   const voiceSelection = resolveVoiceSelection(parsed.data.voicePreset, parsed.data.voice);
   const voice = voiceSelection.voice;
@@ -426,7 +506,20 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
   const focusMode = parsed.data.focusMode ?? "normal";
   const createResponse = focusMode !== "focused";
   const turnDetection = resolveTurnDetection(createResponse);
-  const maxDurationSeconds = maxDurationForTier(tier);
+
+  // If minting the upstream token fails for any reason, release the reserved
+  // session so it neither holds the single-concurrency slot nor charges minutes
+  // (ending with duration 0 charges nothing). Best-effort — never throws.
+  const cancelReservation = async () => {
+    try {
+      await endRealtimeSession(realtimeSessionId, usageKey, tier, 0);
+    } catch (err) {
+      logger.warn(
+        { component: "ora-realtime", err, realtimeSessionId },
+        "Failed to release reserved realtime session after mint failure",
+      );
+    }
+  };
 
   const instructions = await buildRealtimeInstructions({
     authed,
@@ -477,6 +570,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
         },
         "Ora realtime client-secret mint failed",
       );
+      await cancelReservation();
       res.status(502).json({ error: "Voice conversation failed to start. Please try again." });
       return;
     }
@@ -494,6 +588,7 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
         { component: "ora-realtime", model, voice },
         "Ora realtime mint returned no client secret value",
       );
+      await cancelReservation();
       res.status(502).json({ error: "Voice conversation failed to start. Please try again." });
       return;
     }
@@ -519,10 +614,120 @@ router.post("/public-ai/realtime/session", oraRealtimeSessionLimiter, async (req
       maxDurationSeconds,
       focusMode,
       createResponse,
+      // Live-voice budget metering: the client stores realtimeSessionId, beats it
+      // on heartbeatIntervalSeconds, and counts down from maxDurationSeconds /
+      // remainingSeconds, ending at /end. resetsAt is when the budget refills.
+      realtimeSessionId,
+      remainingSeconds: reservation.remainingSeconds,
+      limitSeconds: reservation.limitSeconds,
+      resetsAt: reservation.resetsAt,
+      heartbeatIntervalSeconds: REALTIME_HEARTBEAT_INTERVAL_SECONDS,
     });
   } catch (err) {
     logger.warn({ component: "ora-realtime", err }, "Ora realtime mint threw");
+    await cancelReservation();
     res.status(502).json({ error: "Voice conversation failed to start. Please try again." });
+  }
+});
+
+const tickBodySchema = z.object({
+  realtimeSessionId: z.string().uuid(),
+  // The client's own measured session duration (seconds). Advisory only — the
+  // server clamps it to [alreadyCharged, min(serverElapsed, maxDuration)] so it
+  // can never inflate the charge beyond the authoritative server clock.
+  durationSeconds: z.number().int().nonnegative().max(86_400).optional(),
+});
+
+/**
+ * POST /api/public-ai/realtime/heartbeat
+ *
+ * Charges elapsed live-voice seconds for an active session and reports the
+ * remaining budget. Idempotent and safe to call repeatedly (~every 30s). Returns
+ * ended:true when the session has hit its cap so the client tears down audio.
+ * FAIL-CLOSED: a metering DB error returns 503 + ended:true so the client stops.
+ */
+router.post("/public-ai/realtime/heartbeat", oraRealtimeSessionTickLimiter, async (req, res) => {
+  const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+  if (!sessionToken || !validateSession(sessionToken)) {
+    res.status(401).json({ error: "No active session.", ended: true });
+    return;
+  }
+  const parsed = tickBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid heartbeat request." });
+    return;
+  }
+  const authed = await resolveAuthedOraUser(req);
+  const tier = authed?.tier ?? "anonymous";
+  const usageKey = deriveUsageKey(authed, sessionToken, req);
+  try {
+    const result = await heartbeatRealtimeSession(parsed.data.realtimeSessionId, usageKey, tier);
+    res.setHeader("Cache-Control", "no-store");
+    if (result.status === "not_found") {
+      res.status(404).json({ status: "not_found", ended: true });
+      return;
+    }
+    res.json({
+      status: result.status,
+      ended: result.ended,
+      remainingSeconds: result.remainingSeconds,
+      limitSeconds: result.limitSeconds,
+      resetsAt: result.resetsAt,
+    });
+  } catch (err) {
+    logger.warn(
+      { component: "ora-realtime", err },
+      "Ora realtime heartbeat failed — failing closed",
+    );
+    res.status(503).json({ error: "Voice metering is temporarily unavailable.", ended: true });
+  }
+});
+
+/**
+ * POST /api/public-ai/realtime/end
+ *
+ * Finalizes a live-voice session on graceful client teardown (or page-hide
+ * beacon). Idempotent: ending an unknown/already-ended session is a no-op
+ * success so retries and beacons never error. The optional durationSeconds is
+ * clamped server-side and can neither inflate nor refund the charge.
+ */
+router.post("/public-ai/realtime/end", oraRealtimeSessionTickLimiter, async (req, res) => {
+  const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+  if (!sessionToken || !validateSession(sessionToken)) {
+    res.status(401).json({ error: "No active session.", ended: true });
+    return;
+  }
+  const parsed = tickBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid end request." });
+    return;
+  }
+  const authed = await resolveAuthedOraUser(req);
+  const tier = authed?.tier ?? "anonymous";
+  const usageKey = deriveUsageKey(authed, sessionToken, req);
+  try {
+    const result = await endRealtimeSession(
+      parsed.data.realtimeSessionId,
+      usageKey,
+      tier,
+      parsed.data.durationSeconds,
+    );
+    res.setHeader("Cache-Control", "no-store");
+    if (result.status === "not_found") {
+      // Idempotent: nothing to finalize — treat as a successful end.
+      res.json({ status: "ended", ended: true });
+      return;
+    }
+    res.json({
+      status: result.status,
+      ended: true,
+      remainingSeconds: result.remainingSeconds,
+      limitSeconds: result.limitSeconds,
+      resetsAt: result.resetsAt,
+    });
+  } catch (err) {
+    logger.warn({ component: "ora-realtime", err }, "Ora realtime end failed");
+    res.status(503).json({ error: "Could not finalize the voice session.", ended: true });
   }
 });
 
@@ -541,11 +746,33 @@ router.get("/public-ai/realtime/diagnostics", async (req, res) => {
   const configured = !!process.env.OPENAI_API_KEY;
 
   let tier = "anonymous";
+  let authed: AuthedOraUser | null = null;
   try {
-    const authed = await resolveAuthedOraUser(req);
+    authed = await resolveAuthedOraUser(req);
     tier = authed?.tier ?? "anonymous";
   } catch {
     // Best-effort — diagnostics must never block on auth resolution.
+  }
+
+  const allowance = getRealtimeVoiceAllowance(tier);
+
+  // Live usage is best-effort here: diagnostics must never hard-block, so a
+  // metering DB error leaves the usage fields null and the card just shows the
+  // static allowance. Enforcement still happens FAIL-CLOSED at /session +
+  // /heartbeat. The usage key mirrors the /session derivation so the numbers
+  // match the budget that will actually be charged.
+  let usedSeconds: number | null = null;
+  let remainingSeconds: number | null = null;
+  let resetsAt: string | null = null;
+  try {
+    const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+    const usageKey = deriveUsageKey(authed, sessionToken, req);
+    const usage = await getRealtimeUsage(usageKey, tier);
+    usedSeconds = usage.usedSeconds;
+    remainingSeconds = usage.remainingSeconds;
+    resetsAt = usage.resetsAt;
+  } catch {
+    // Leave nulls — the UI shows the allowance without live usage.
   }
 
   // Product-safe diagnostics: the underlying model/provider and raw provider
@@ -560,7 +787,14 @@ router.get("/public-ai/realtime/diagnostics", async (req, res) => {
     defaultVoiceLabel: defaultSelection.label,
     voices: VOICE_PRESET_OPTIONS,
     tier,
-    maxDurationSeconds: maxDurationForTier(tier),
+    // Technical per-session ceiling (a single session can never run longer).
+    maxDurationSeconds: allowance.sessionCapSeconds,
+    // Rolling per-plan voice budget for the tier and how it refills.
+    limitSeconds: allowance.limitSeconds,
+    windowHours: allowance.windowHours,
+    usedSeconds,
+    remainingSeconds,
+    resetsAt,
   });
 });
 

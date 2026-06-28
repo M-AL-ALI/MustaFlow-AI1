@@ -149,6 +149,22 @@ export interface RealtimeSessionContext {
   voicePreset?: VoicePreset;
 }
 
+/**
+ * Surfaced when the per-plan live-voice MINUTE budget is exhausted (at session
+ * start, or mid-call when the budget runs out). The caller shows a graceful
+ * "out of voice time" state with the reset time INSTEAD of falling back to the
+ * legacy transcribe -> chat -> tts loop, which would bypass the voice cap.
+ * Mirrors the website's RealtimeOverLimit.
+ */
+export interface RealtimeOverLimit {
+  /** Short, spoken-budget-safe message (no provider/model naming). */
+  message: string;
+  /** ISO timestamp when the voice budget refills, when known. */
+  resetsAt: string | null;
+  /** True when a higher plan would grant more live-voice minutes. */
+  upgradeAvailable: boolean;
+}
+
 /** Response from POST /public-ai/realtime/session — a short-lived ek_ token. */
 export interface RealtimeSessionResult {
   value: string;
@@ -163,6 +179,23 @@ export interface RealtimeSessionResult {
   // Echoed back by the server so diagnostics can confirm the negotiated posture.
   focusMode?: FocusMode;
   createResponse?: boolean;
+  // Live-voice budget metering. The client stores realtimeSessionId, beats it on
+  // heartbeatIntervalSeconds, counts down from maxDurationSeconds, and finalizes
+  // at /end. resetsAt is when the per-plan budget refills.
+  realtimeSessionId?: string;
+  remainingSeconds?: number | null;
+  limitSeconds?: number | null;
+  resetsAt?: string | null;
+  heartbeatIntervalSeconds?: number | null;
+}
+
+/** Response from POST /public-ai/realtime/heartbeat (charges elapsed seconds). */
+export interface RealtimeHeartbeatResult {
+  status?: string;
+  ended?: boolean;
+  remainingSeconds?: number | null;
+  limitSeconds?: number | null;
+  resetsAt?: string | null;
 }
 
 /** Response from GET /public-ai/realtime/diagnostics (non-charging). */
@@ -177,6 +210,13 @@ export interface RealtimeDiagnostics {
   voices: Array<{ key: VoicePreset; label: string }>;
   tier: string;
   maxDurationSeconds: number;
+  // Per-plan live-voice budget. Privacy-safe: seconds + reset time only, never
+  // the underlying model or raw provider voice id.
+  limitSeconds?: number | null;
+  windowHours?: number | null;
+  usedSeconds?: number | null;
+  remainingSeconds?: number | null;
+  resetsAt?: string | null;
 }
 
 export interface ChatRequest {
