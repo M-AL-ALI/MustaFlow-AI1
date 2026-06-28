@@ -9,9 +9,13 @@
  *      add the mic track, and create the "oai-events" data channel.
  *   3. Exchange SDP directly with OpenAI's GA Realtime endpoint
  *      (POST https://api.openai.com/v1/realtime/calls?model=...).
- *   4. Ora's audio arrives on a remote track and plays automatically through the
- *      device (react-native-webrtc routes it to the active output, e.g. AirPods).
- *      Transcripts arrive as data-channel events.
+ *   4. Ora's audio arrives on a remote track. The session category is set to
+ *      playAndRecord via setAudioModeAsync before capture so the mic is live and
+ *      the remote track plays. iOS does NOT route a WebRTC playAndRecord session
+ *      to the loudspeaker by default (it prefers the earpiece) and there is no JS
+ *      API for it, so the native build's config plugin adds defaultToSpeaker to
+ *      react-native-webrtc's audio session category options (AirPods still win
+ *      when connected). Transcripts arrive as data-channel events.
  *
  * Design rules (identical to the web hook):
  *  - Owns ONLY the realtime transport + state machine. Transcript persistence is
@@ -39,6 +43,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NativeModules } from "react-native";
+import { setAudioModeAsync } from "expo-audio";
 import {
   createRealtimeSession,
   endRealtimeSession,
@@ -1605,6 +1610,17 @@ export function useOraRealtimeVoiceNative(
         const reason = "Live voice failed to start. Using basic voice mode.";
         setFallbackReason(reason);
         return { started: false, reason };
+      }
+
+      // Own the iOS audio session for the realtime call BEFORE capturing the mic.
+      // expo-audio's allowsRecording:true maps to the .playAndRecord category; the
+      // legacy transcribe/speak paths use .playback (allowsRecording:false), and if
+      // one of those lands here the mic captures silence — Ora never hears the user
+      // and never replies. Best-effort: a failure must not abort the call.
+      try {
+        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      } catch {
+        /* non-fatal: getUserMedia may still succeed */
       }
 
       // 2) Capture the microphone (iOS prompts via NSMicrophoneUsageDescription).

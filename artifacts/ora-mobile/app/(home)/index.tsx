@@ -460,6 +460,12 @@ export default function OraChatScreen() {
     setRealtimeActive(false);
     realtimeActiveRef.current = false;
     realtimeStartingRef.current = false;
+    // Hand the iOS audio session back to the playback-only category now that the
+    // realtime capture is gone — clears the active-mic state and restores normal
+    // silent-mode / speak() behavior. Best-effort and only on terminal teardown
+    // (exit Talk mode, context switch, background, over-limit), never as a prelude
+    // to another start(), so it cannot race the realtime capture session.
+    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(() => {});
     return true;
   }, []);
   // Used when the user switches conversation/project/temporary context. A live
@@ -1356,7 +1362,12 @@ export default function OraChatScreen() {
     };
     try {
       await recorder.stop();
-      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+      // Never reset to the playback-only category while a realtime voice session
+      // is starting or live — that stomps the WebRTC capture session and the mic
+      // goes silent. The realtime hook owns the audio mode in that case.
+      if (!realtimeStartingRef.current && !realtimeActiveRef.current) {
+        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+      }
       const uri = recorder.uri;
       if (!uri) {
         reportTranscribeFailure("Couldn't capture any audio. Please try again.");
@@ -1408,7 +1419,10 @@ export default function OraChatScreen() {
         await FileSystem.writeAsStringAsync(fileUri, base64, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+        // Skip while realtime voice owns the session (see stopRecording note).
+        if (!realtimeStartingRef.current && !realtimeActiveRef.current) {
+          await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+        }
         // The app was backgrounded mid-synthesis — abort instead of starting
         // playback after the user has already left.
         if (speakGenRef.current !== gen) {
@@ -1680,10 +1694,16 @@ export default function OraChatScreen() {
       playerRef.current = null;
       setSpeakingId(null);
     }
-    if (recordingRef.current) void stopRecordingRef.current();
-
     const rt = realtimeVoiceRef.current;
     if (rt?.isSupported) {
+      // Mark the connect window BEFORE stopping the legacy recorder. stopRecording
+      // resets the audio session to the playback-only category, which would stomp
+      // the realtime WebRTC capture we are about to open (mic goes silent, Ora
+      // never hears the user and never replies). The guard on that reset keys off
+      // realtimeStartingRef, so it must be set first. It also lets background /
+      // exit / context-switch handlers abort an in-flight start().
+      realtimeStartingRef.current = true;
+      if (recordingRef.current) void stopRecordingRef.current();
       // Seed the live session with the recent visible conversation so the spoken
       // turn continues in context (seeded client-side as lower-authority items,
       // never injected into the server instructions).
@@ -1692,9 +1712,6 @@ export default function OraChatScreen() {
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
       const lastUser = [...recent].reverse().find((m) => m.role === "user");
-      // Mark the connect window so background / exit / context-switch handlers can
-      // abort an in-flight start() that hasn't resolved yet.
-      realtimeStartingRef.current = true;
       const myAttempt = ++realtimeStartGenRef.current;
       void rt
         .start({
@@ -1753,6 +1770,7 @@ export default function OraChatScreen() {
       // This build has no realtime native module yet — use the legacy loop
       // silently (no visible warning: it is the pre-existing behavior, and once a
       // WebRTC-enabled build ships, isSupported is always true).
+      if (recordingRef.current) void stopRecordingRef.current();
       scheduleTalkRestart(300);
     }
   }, [
