@@ -35,11 +35,7 @@ ARG="${1:-}"
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
-git add \
-  artifacts/api-server/src/lib/public-ai/ora-realtime-usage.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/ora-realtime-usage.test.ts \
-  scripts/push-to-github.sh \
-  2>/dev/null || true
+git add scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then
