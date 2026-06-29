@@ -6,6 +6,11 @@ import {
   ORA_FILE_COMPLETENESS_ADDENDUM,
 } from "../prompt";
 import { buildSystemPrompt } from "../../../routes/public-ai/chat";
+import {
+  buildTabularSystemPrompt,
+  buildPresentationSystemPrompt,
+  buildDocumentSystemPrompt,
+} from "../file-builder";
 
 describe("ORA_IDENTITY_BLOCK export", () => {
   it("is exported as a non-empty string", () => {
@@ -34,6 +39,28 @@ describe("ORA_IDENTITY_BLOCK export", () => {
 
   it("tells the model to say it is powered by MustaFlow AI when asked", () => {
     expect(ORA_IDENTITY_BLOCK).toContain("powered by MustaFlow AI");
+  });
+});
+
+describe("ORA_IDENTITY_BLOCK — compliance: no backend architecture disclosure", () => {
+  it("does not contain 'multi-provider'", () => {
+    expect(ORA_IDENTITY_BLOCK).not.toContain("multi-provider");
+  });
+
+  it("does not contain 'model stack'", () => {
+    expect(ORA_IDENTITY_BLOCK).not.toContain("model stack");
+  });
+
+  it("does not contain 'specialized models'", () => {
+    expect(ORA_IDENTITY_BLOCK).not.toContain("specialized models");
+  });
+
+  it("uses the safe proprietary AI systems statement", () => {
+    expect(ORA_IDENTITY_BLOCK).toContain("proprietary AI systems");
+  });
+
+  it("instructs the model not to disclose routing architecture", () => {
+    expect(ORA_IDENTITY_BLOCK).toContain("routing architecture");
   });
 });
 
@@ -116,5 +143,47 @@ describe("buildSystemPrompt identity propagation", () => {
     for (const p of paths) {
       expect(p).toContain("MustaFlow AI");
     }
+  });
+});
+
+describe("file-builder system prompts — identity embedding", () => {
+  it("buildTabularSystemPrompt (csv) includes ORA_IDENTITY_BLOCK", () => {
+    const prompt = buildTabularSystemPrompt("csv");
+    expect(prompt).toContain(ORA_IDENTITY_BLOCK);
+  });
+
+  it("buildTabularSystemPrompt (xlsx) includes ORA_IDENTITY_BLOCK", () => {
+    const prompt = buildTabularSystemPrompt("xlsx");
+    expect(prompt).toContain(ORA_IDENTITY_BLOCK);
+  });
+
+  it("buildPresentationSystemPrompt includes ORA_IDENTITY_BLOCK", () => {
+    const prompt = buildPresentationSystemPrompt();
+    expect(prompt).toContain(ORA_IDENTITY_BLOCK);
+  });
+
+  it("buildDocumentSystemPrompt (docx) includes ORA_IDENTITY_BLOCK", () => {
+    const prompt = buildDocumentSystemPrompt("docx");
+    expect(prompt).toContain(ORA_IDENTITY_BLOCK);
+  });
+
+  it("buildDocumentSystemPrompt (pdf) includes ORA_IDENTITY_BLOCK", () => {
+    const prompt = buildDocumentSystemPrompt("pdf");
+    expect(prompt).toContain(ORA_IDENTITY_BLOCK);
+  });
+
+  it("buildTabularSystemPrompt also retains ORA_FILE_COMPLETENESS_ADDENDUM", () => {
+    const prompt = buildTabularSystemPrompt("csv");
+    expect(prompt).toContain(ORA_FILE_COMPLETENESS_ADDENDUM);
+  });
+
+  it("buildPresentationSystemPrompt also retains ORA_FILE_COMPLETENESS_ADDENDUM", () => {
+    const prompt = buildPresentationSystemPrompt();
+    expect(prompt).toContain(ORA_FILE_COMPLETENESS_ADDENDUM);
+  });
+
+  it("buildDocumentSystemPrompt also retains ORA_FILE_COMPLETENESS_ADDENDUM", () => {
+    const prompt = buildDocumentSystemPrompt("docx");
+    expect(prompt).toContain(ORA_FILE_COMPLETENESS_ADDENDUM);
   });
 });

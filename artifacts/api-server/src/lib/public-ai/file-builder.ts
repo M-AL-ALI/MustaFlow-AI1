@@ -27,7 +27,7 @@ import {
 import { PassThrough } from "stream";
 import { createChatCompletion } from "../ai-providers";
 import { logger } from "../logger";
-import { ORA_FILE_COMPLETENESS_ADDENDUM, type FileFormat } from "./prompt";
+import { ORA_FILE_COMPLETENESS_ADDENDUM, ORA_IDENTITY_BLOCK, type FileFormat } from "./prompt";
 import {
   getOraProviderRoutingSnapshot,
   normalizeOraPlanTier,
@@ -181,7 +181,7 @@ const SOURCE_DATA_DIRECTIVE =
   `- Do not remove sections the user did not ask to remove.\n` +
   `- Do not invent new content beyond what the requested edit requires.`;
 
-function buildTabularSystemPrompt(
+export function buildTabularSystemPrompt(
   format: "csv" | "xlsx",
   language?: string,
   hasSourceData = false,
@@ -225,11 +225,13 @@ function buildTabularSystemPrompt(
     `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}` +
     quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
-    ORA_FILE_COMPLETENESS_ADDENDUM
+    ORA_FILE_COMPLETENESS_ADDENDUM +
+    "\n\n" +
+    ORA_IDENTITY_BLOCK
   );
 }
 
-function buildPresentationSystemPrompt(
+export function buildPresentationSystemPrompt(
   language?: string,
   hasSourceData = false,
   quality: OraFileQualityProfile = resolveOraFileQualityProfile({
@@ -268,11 +270,13 @@ function buildPresentationSystemPrompt(
     `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}` +
     quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
-    ORA_FILE_COMPLETENESS_ADDENDUM
+    ORA_FILE_COMPLETENESS_ADDENDUM +
+    "\n\n" +
+    ORA_IDENTITY_BLOCK
   );
 }
 
-function buildDocumentSystemPrompt(
+export function buildDocumentSystemPrompt(
   format: "docx" | "pdf",
   language?: string,
   hasSourceData = false,
@@ -329,7 +333,9 @@ function buildDocumentSystemPrompt(
     profGuidance +
     quality.instruction +
     (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
-    ORA_FILE_COMPLETENESS_ADDENDUM
+    ORA_FILE_COMPLETENESS_ADDENDUM +
+    "\n\n" +
+    ORA_IDENTITY_BLOCK
   );
 }
 
