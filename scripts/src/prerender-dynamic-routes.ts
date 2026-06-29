@@ -126,15 +126,28 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 async function run(): Promise<void> {
-  // Graceful no-op when DATABASE_URL is absent — the script is wired into
-  // the postbuild pipeline where DATABASE_URL may not be set (e.g. CI builds
-  // without a live DB, local `pnpm build`). Static routes are still prerendered
-  // by scripts/prerender.ts; this step only adds dynamic gallery/profile stubs.
+  // DATABASE_URL is required. Dynamic prerendering of /gallery/:slug and
+  // /u/:username pages is mandatory — without it, social bots and AI crawlers
+  // see only a generic shell and get no SEO-meaningful content. A build that
+  // cannot produce prerendered gallery pages is considered incomplete and must
+  // not be published. Set SKIP_DYNAMIC_PRERENDER=1 ONLY in local dev /
+  // DATABASE-less CI environments where you intentionally accept the SEO gap.
   if (!process.env.DATABASE_URL) {
-    console.log(
-      "[prerender-dynamic] DATABASE_URL not set — skipping dynamic prerender (no DB available).",
+    if (process.env.SKIP_DYNAMIC_PRERENDER === "1") {
+      console.warn(
+        "[prerender-dynamic] WARNING: SKIP_DYNAMIC_PRERENDER=1 — database not available, " +
+          "skipping gallery/profile prerender. Published builds must NOT use this flag: " +
+          "gallery detail pages will have no pre-rendered content for crawlers.",
+      );
+      process.exit(0);
+    }
+    console.error(
+      "[prerender-dynamic] FATAL: DATABASE_URL is not set. " +
+        "Gallery detail pages cannot be pre-rendered without database access. " +
+        "Provide DATABASE_URL before building, or set SKIP_DYNAMIC_PRERENDER=1 to " +
+        "explicitly accept incomplete SEO coverage (local/dev builds only).",
     );
-    process.exit(0);
+    process.exit(1);
   }
 
   // Prefer the lightweight public entry as template — fewer preloaded chunks.
@@ -180,7 +193,8 @@ async function run(): Promise<void> {
       ),
     ]);
 
-    let count = 0;
+    let templateCount = 0;
+    let profileCount = 0;
 
     for (const tpl of templatesResult.rows) {
       const categoryLabel = CATEGORY_LABELS[tpl.category] ?? tpl.category;
@@ -222,7 +236,7 @@ async function run(): Promise<void> {
       };
 
       writeRoute(indexHtml, route);
-      count++;
+      templateCount++;
     }
 
     for (const profile of profilesResult.rows) {
@@ -260,12 +274,38 @@ async function run(): Promise<void> {
       };
 
       writeRoute(indexHtml, route);
-      count++;
+      profileCount++;
     }
 
+    const totalCount = templateCount + profileCount;
     console.log(
-      `[prerender-dynamic] Done — ${count} dynamic routes rendered (${templatesResult.rows.length} templates, ${profilesResult.rows.length} profiles).`,
+      `[prerender-dynamic] Done — ${totalCount} dynamic routes rendered (${templateCount} gallery templates, ${profileCount} profiles).`,
     );
+
+    // Post-render assertion: if the DB has published gallery templates, verify
+    // that each expected index.html was actually written to disk. A mismatch
+    // (e.g. a write error that was silently swallowed) would mean crawlers see
+    // an unrendered shell page instead of the SEO content.
+    if (templatesResult.rows.length > 0) {
+      const missing: string[] = [];
+      for (const tpl of templatesResult.rows) {
+        const expectedPath = join(DIST_DIR, "gallery", tpl.slug, "index.html");
+        if (!existsSync(expectedPath)) {
+          missing.push(`/gallery/${tpl.slug}`);
+        }
+      }
+      if (missing.length > 0) {
+        console.error(
+          `[prerender-dynamic] FATAL: ${missing.length} gallery page(s) were expected but not found on disk:\n` +
+            missing.map((p) => `  ${p}`).join("\n") +
+            "\nThis indicates a write failure during prerendering.",
+        );
+        process.exit(1);
+      }
+      console.log(
+        `[prerender-dynamic] Verified ${templatesResult.rows.length} gallery detail page(s) present on disk.`,
+      );
+    }
   } finally {
     client.release();
     await pool.end();

@@ -166,10 +166,20 @@ export default function GalleryDetailPage() {
   };
 
   if (loading) {
+    const slugTitle = slug
+      ? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : "Template";
     return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <>
+        <PageMeta
+          title={`${slugTitle} — Template Gallery`}
+          description={`View the ${slugTitle} app template in the MustaFlow AI template gallery.`}
+          path={`/gallery/${slug}`}
+        />
+        <div className="flex items-center justify-center py-32">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </>
     );
   }
 
