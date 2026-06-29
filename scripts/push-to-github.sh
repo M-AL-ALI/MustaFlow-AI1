@@ -32,6 +32,7 @@ ARG="${1:-}"
 #      neutral (just this script) so no stale paths linger for the next task.
 #
 # IMPORTANT: remove .git/index.lock BEFORE git add or the add silently fails.
+git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
@@ -89,7 +90,7 @@ if [ -z "$REALLY_FORCE" ]; then
       echo "GitHub has $AHEAD commit(s) ahead of local — merging before push …"
       git -c user.name="${GIT_AUTHOR_NAME:-MustaFlow Agent}" \
           -c user.email="${GIT_AUTHOR_EMAIL:-agent@mustaflow.app}" \
-          merge --no-edit "refs/remotes/github/$BRANCH" || {
+          merge --no-edit -X ours "refs/remotes/github/$BRANCH" || {
         echo "ERROR: merge conflict — resolve manually and re-run push" >&2
         exit 1
       }
