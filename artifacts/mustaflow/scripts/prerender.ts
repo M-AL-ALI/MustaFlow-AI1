@@ -565,14 +565,12 @@ const PUBLIC_ROUTES: RouteMetadata[] = [
     title: `Terms of Service | ${SITE_NAME}`,
     description:
       "Read the MustaFlow AI Terms of Service. Learn about acceptable use, intellectual property, and your rights as a user.",
-    noIndex: true,
   },
   {
     path: "/privacy",
     title: `Privacy Policy | ${SITE_NAME}`,
     description:
       "Learn how MustaFlow AI collects, uses, and protects your data. We are committed to privacy and transparency.",
-    noIndex: true,
   },
 ];
 
