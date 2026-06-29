@@ -1183,17 +1183,19 @@ describe("POST /public-ai/chat/stream — full token flow", () => {
     expect(src).toContain("void classifierPromise.catch(() => undefined)");
   });
 
-  it("structural: chat.ts has void catch guards on all early-context promises", async () => {
-    // earlyMemoryP, earlyCrossConvP, and earlyProfileP are started right after
-    // auth resolves. A 429 (authed message limit) or spend-cap early-exit
-    // fires before the Promise.all that awaits them — the guards prevent any
-    // unexpected rejection from becoming an unhandled rejection.
+  it("structural: chat.ts has void catch guards on early-context promises", async () => {
+    // earlyMemoryP and earlyProfileP are started right after auth resolves.
+    // A 429 (authed message limit) or spend-cap early-exit fires before the
+    // Promise.all that awaits them — the guards prevent unhandled rejections.
+    // buildCrossConversationContext is called inline in the Promise.all (not as
+    // an early background promise) so it does not need a separate catch guard.
     const fs = await import("fs");
     const path = await import("path");
     const src = fs.readFileSync(path.resolve(__dirname, "../chat.ts"), "utf8");
     expect(src).toContain("void earlyMemoryP.catch(() => undefined)");
-    expect(src).toContain("void earlyCrossConvP.catch(() => undefined)");
     expect(src).toContain("void earlyProfileP.catch(() => undefined)");
+    // Cross-conv context runs inline in Promise.all — no early background promise.
+    expect(src).not.toContain("void earlyCrossConvP.catch(() => undefined)");
   });
 
   it("structural: billing.ts has evictTierCache calls after every subscription mutation", async () => {
