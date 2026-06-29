@@ -8,7 +8,6 @@ export default function TermsPage() {
         title="Terms of Service"
         description="Read the MustaFlow AI Terms of Service. Learn about acceptable use, intellectual property, and your rights as a user."
         path="/terms"
-        noIndex={true}
       />
       <div className="space-y-3">
         <div className="flex items-center gap-3">
