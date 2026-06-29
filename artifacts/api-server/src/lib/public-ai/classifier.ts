@@ -48,7 +48,9 @@ Rules:
 - Only use simple_faq with high confidence for genuinely short factual questions (e.g. "What is MustaFlow?", "How much does it cost?").
 - Never return anything other than the JSON format above.`;
 
-const DEFAULT_RESULT: ClassifierResult = {
+/** Safe fallback when the classifier times out or fails. Defaults to the
+ *  premium/high path so quality is never degraded by a slow provider. */
+export const CLASSIFIER_FALLBACK: ClassifierResult = {
   intent: "premium",
   confidence: "high",
   topic: "general",
@@ -86,12 +88,12 @@ export async function classifyIntent(userMessage: string): Promise<ClassifierRes
           component: "ora-classifier",
           model,
           latencyMs: Date.now() - start,
-          ...DEFAULT_RESULT,
+          ...CLASSIFIER_FALLBACK,
           usedDefault,
         },
         "Classifier returned empty — defaulting to premium/high",
       );
-      return DEFAULT_RESULT;
+      return CLASSIFIER_FALLBACK;
     }
 
     let parsed: { intent?: string; confidence?: string; topic?: string } = {};
@@ -104,12 +106,12 @@ export async function classifyIntent(userMessage: string): Promise<ClassifierRes
           component: "ora-classifier",
           model,
           latencyMs: Date.now() - start,
-          ...DEFAULT_RESULT,
+          ...CLASSIFIER_FALLBACK,
           usedDefault,
         },
         "Classifier returned invalid JSON — defaulting to premium/high",
       );
-      return DEFAULT_RESULT;
+      return CLASSIFIER_FALLBACK;
     }
 
     const intent = parsed.intent;
@@ -155,13 +157,13 @@ export async function classifyIntent(userMessage: string): Promise<ClassifierRes
         component: "ora-classifier",
         model,
         latencyMs: Date.now() - start,
-        ...DEFAULT_RESULT,
+        ...CLASSIFIER_FALLBACK,
         usedDefault,
         raw,
       },
       "Classifier returned unknown intent — defaulting to premium/high",
     );
-    return DEFAULT_RESULT;
+    return CLASSIFIER_FALLBACK;
   } catch (err) {
     usedDefault = true;
     logger.info(
@@ -169,12 +171,12 @@ export async function classifyIntent(userMessage: string): Promise<ClassifierRes
         component: "ora-classifier",
         model,
         latencyMs: Date.now() - start,
-        ...DEFAULT_RESULT,
+        ...CLASSIFIER_FALLBACK,
         usedDefault,
         err,
       },
       "Classifier threw — defaulting to premium/high",
     );
-    return DEFAULT_RESULT;
+    return CLASSIFIER_FALLBACK;
   }
 }

@@ -19,7 +19,11 @@ import {
   summarizePastedReferenceSignals,
 } from "../../lib/public-ai/prompt";
 
-import { classifyIntent, type OraTopic } from "../../lib/public-ai/classifier";
+import {
+  classifyIntent,
+  CLASSIFIER_FALLBACK,
+  type OraTopic,
+} from "../../lib/public-ai/classifier";
 import {
   routeOraMessage,
   checkToolAccess,
@@ -1045,10 +1049,48 @@ router.post("/public-ai/chat", async (req, res) => {
     return;
   }
 
+  // Privacy-safe per-bucket timing (mirrors streaming route).
+  const timing = {
+    t0: Date.now(), // request entered handler (past kill switches)
+    t1: Date.now(), // session validated (set here, immediately after validation)
+    t2: 0, // after auth user resolved
+    t3: 0, // after spend-cap check
+    t4: 0, // after route decision + quota reserve
+    t5: 0, // after context builders awaited
+  };
+
+  // Fire the intent classifier immediately — it only needs the message text,
+  // not the auth result. Running it in parallel with resolveAuthedOraUser turns
+  // what was a sequential (auth → classify) into parallel max(auth, classify).
+  // routeOraMessage accepts a pre-computed `classifier` result and skips its
+  // own internal AI call when we supply one.
+  const classifierPromise = classifyIntent(message);
+  // Attach a no-op catch so any unexpected rejection from classifyIntent does
+  // not become an unhandled rejection when an early-return path exits before
+  // `await classifierPromise` is reached.
+  void classifierPromise.catch(() => undefined);
+
   // Resolve the signed-in user (if any). Authenticated users draw on their
   // monthly credit balance and are exempt from the anonymous visitor cap.
   const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
+  timing.t2 = Date.now();
+
+  // planTier is available as soon as auth resolves (only depends on authed.tier).
+  const planTier = oraPlanTier(authed);
+
+  // Start context builders in parallel immediately after auth — userId and
+  // planTier are both available now. Previously these were sequential awaits
+  // inside the answer-path, adding 100-2500ms of unnecessary serial delay.
+  // They are awaited (with an Instant-mode timeout) after routing completes.
+  const earlyMemoryP =
+    authed && referenceSavedMemories && !temporary
+      ? buildMemoryContext(authed.userId, oraProjectId, message, planTier)
+      : Promise.resolve({ text: "", used: [] as Array<{ id: number; title: string }> });
+  void earlyMemoryP.catch(() => undefined);
+  const earlyProfileP = authed ? buildProfileContext(authed.userId) : Promise.resolve("");
+  void earlyProfileP.catch(() => undefined);
+
   const effectiveMsgLimit = authed ? await oraMessageLimit(authed.tier) : MSG_LIMIT_VALUE;
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
@@ -1082,6 +1124,7 @@ router.post("/public-ai/chat", async (req, res) => {
       return;
     }
   }
+  timing.t3 = Date.now();
 
   if (!scanUserInput(message)) {
     res
@@ -1092,6 +1135,17 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
 
+  // Await the classifier that was fired in parallel with auth. Most of its
+  // latency is already consumed; this wait is only the remaining gap. For
+  // Instant mode a 500 ms deadline guards against a slow provider — the
+  // premium/high fallback never degrades quality. Deep mode allows 2000 ms.
+  const classifierTimeoutMs = mode === "instant" ? 500 : 2_000;
+  const classifierResult = await withTimeout(
+    classifierPromise,
+    classifierTimeoutMs,
+    CLASSIFIER_FALLBACK,
+  );
+
   // Route the message through the Ora orchestrator. Ora is a STANDALONE
   // assistant: build/"make me an app" requests are answered as normal
   // conversation — never refused, never auto-handed-off to the Builder.
@@ -1099,6 +1153,7 @@ router.post("/public-ai/chat", async (req, res) => {
     message,
     mode,
     recentMessages: messages.slice(-8),
+    classifier: classifierResult, // pre-computed above — skips the internal AI call
   });
   const deepAllowed = decision.tool === "deep_thinking";
 
@@ -1179,6 +1234,7 @@ router.post("/public-ai/chat", async (req, res) => {
       return;
     }
   }
+  timing.t4 = Date.now();
 
   // ── File generation tool ────────────────────────────────────────────────────
   if (decision.tool === "file_generation" && decision.fileFormat) {
@@ -1445,12 +1501,14 @@ router.post("/public-ai/chat", async (req, res) => {
     // search answer stays tailored (e.g. resolving "near me" to a saved city).
     // Mirrors the conversational branch: profile is always applied for signed-in
     // users; saved memories respect the referenceSavedMemories opt-out toggle.
-    const searchProfileContext = authed ? await buildProfileContext(authed.userId) : "";
+    // Await the context builders started in parallel after auth; they have likely
+    // already settled by this point (after the classifier + routing overhead).
+    const searchProfileContext = await withTimeout(earlyProfileP, 600, "");
     // Temporary ("incognito") chats never read long-term saved memories.
-    const searchMemory =
-      authed && referenceSavedMemories && !temporary
-        ? await buildMemoryContext(authed.userId, oraProjectId, message, authed.tier)
-        : { text: "", used: [] };
+    const searchMemory = await withTimeout(earlyMemoryP, 600, {
+      text: "",
+      used: [] as Array<{ id: number; title: string }>,
+    });
     const searchPersonalContext = searchProfileContext + searchMemory.text;
     try {
       const result = await runOraWebSearch({
@@ -1482,11 +1540,8 @@ router.post("/public-ai/chat", async (req, res) => {
   }
 
   // ── Conversational answer / deep thinking ───────────────────────────────────
-  const classifierResult = {
-    intent: decision.intent,
-    confidence: decision.confidence,
-    topic: decision.topic,
-  };
+  // classifierResult and planTier are pre-computed in the parallel fan-out above;
+  // no re-declaration needed here.
 
   // Deep Thinking always uses the strongest model with a larger token budget so
   // the step-by-step reasoning has room to land. Otherwise fall back to the
@@ -1498,7 +1553,6 @@ router.post("/public-ai/chat", async (req, res) => {
   // The routing tier mirrors the model/token dial above. `openaiModel` is the
   // env-aware OpenAI model the router uses verbatim for its OpenAI candidate.
   const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
-  const planTier = oraPlanTier(authed);
   const primaryModel = openAiModelForOraRoute(routeTier, planTier);
   const expertiseProfile = buildOraExpertiseProfile({
     message,
@@ -1521,39 +1575,43 @@ router.post("/public-ai/chat", async (req, res) => {
       ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
       : [];
 
-  // Saved memories are opt-out and only available to signed-in users. Temporary
-  // ("incognito") chats never read long-term memory.
-  const memory =
-    authed && referenceSavedMemories && !temporary
-      ? await buildMemoryContext(authed.userId, oraProjectId, message, planTier)
-      : { text: "", used: [] };
-
-  // Cross-conversation recall: pull relevant gist from the user's OTHER recent
-  // conversations (same tier per isolation). Gated on chat-history being on and
-  // the chat NOT being temporary — and only for signed-in users (anonymous
-  // sessions have no persisted conversations to recall from).
-  const crossConvContext =
+  // Await the context builders that were started in parallel after auth.
+  // Instant mode applies a 600 ms remaining-budget cap; Deep mode gets 2000 ms.
+  // The builders have been in flight since t2 so most latency is already consumed.
+  const CTX_BUDGET_MS = deepAllowed ? 2_000 : 600;
+  const [memory, crossConvContext, profileContext] = await Promise.all([
+    withTimeout(earlyMemoryP, CTX_BUDGET_MS, {
+      text: "",
+      used: [] as Array<{ id: number; title: string }>,
+    }),
     authed && referenceChatHistory && !temporary
-      ? await buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
-      : "";
+      ? withTimeout(
+          buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId),
+          CTX_BUDGET_MS,
+          ""
+        )
+      : Promise.resolve(""),
+    withTimeout(earlyProfileP, CTX_BUDGET_MS, ""),
+  ]);
+  timing.t5 = Date.now();
 
-  // The Ora profile ("About you") is custom instructions — always applied for
-  // signed-in users when present, independent of the saved-memories toggle.
-  const profileContext = authed ? await buildProfileContext(authed.userId) : "";
-
-  // Rolling conversation summary: when the chat has grown past the recent
-  // window, fold the newly overflowed turns into a compact running summary so
-  // facts/decisions from early in the chat stay in context. Bounded + fail-safe
-  // (returns the prior summary on any error). Skipped entirely when the user
-  // has chat history turned off, or for short chats with no overflow.
+  // Rolling conversation summary. Use the client-provided prior summary for the
+  // model prompt so this turn is never blocked on a slow AI summary refresh.
+  // Fire the refresh concurrently and await it AFTER the model returns so the
+  // echoed value the client persists is up-to-date. Fail-safe to priorSummary.
   let conversationSummary = referenceChatHistory && !temporary ? (priorSummary ?? "").trim() : "";
+  let summaryPromise: Promise<string> | null = null;
   if (referenceChatHistory && !temporary && summarizeMessages.length > 0) {
-    const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
-    conversationSummary = await updateConversationSummary({
-      priorSummary: conversationSummary,
-      newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
-      subscriptionTier: planTier,
-    });
+    const priorForSummary = conversationSummary;
+    summaryPromise = (async () => {
+      const { updateConversationSummary } = await import("../../lib/public-ai/conversation-summary");
+      return updateConversationSummary({
+        priorSummary: priorForSummary,
+        newMessages: summarizeMessages.map((m) => ({ role: m.role, content: m.content })),
+        subscriptionTier: planTier,
+      });
+    })();
+    summaryPromise = summaryPromise.catch(() => priorForSummary);
   }
   const summaryContext = conversationSummary
     ? `\n\n## Earlier in this conversation\nThe following is a running summary of earlier parts of THIS conversation that have scrolled out of the recent message window. Treat these as established context and stay consistent with them, but defer to anything more recent:\n${conversationSummary}`
@@ -1789,19 +1847,46 @@ router.post("/public-ai/chat", async (req, res) => {
   // Ora is a standalone assistant. It NEVER proactively routes to any external
   // builder or handoff endpoint — no topic- or message-count-based redirects.
 
-  // Surface a memory-save candidate when the user stated a durable fact. This is
-  // a non-binding suggestion for signed-in users; the client decides whether to
-  // offer the save. It never persists anything on its own. Model-based
-  // extraction catches durable facts phrased outside the fixed regex patterns
-  // and avoids offering to save transient chatter; it fails safe to the regex
-  // detector and never throws.
-  // Temporary ("incognito") chats never surface a memory-save candidate, so the
-  // client has nothing to persist.
-  const memoryCandidate =
+  // Fire memory-save extraction immediately after the model returns — it only
+  // needs the user message + tier, so it can run concurrently with the usage
+  // query below. Previously this was a sequential await, adding ~300ms.
+  const memoryCandidatePromise =
     authed && !temporary && !referenceAnalysisTurn
-      ? await extractMemorySaveCandidate(message, planTier)
-      : null;
-  const usage = await oraUsageResponse(authed, payload.msgCount);
+      ? extractMemorySaveCandidate(message, planTier).catch(() => null)
+      : Promise.resolve(null);
+
+  // Await summary refresh, memory candidate, and usage concurrently.
+  // summaryPromise has been in flight since before the model call, so it is
+  // usually already settled by the time we get here.
+  if (summaryPromise) {
+    conversationSummary = await summaryPromise;
+  }
+  const [memoryCandidate, usage] = await Promise.all([
+    memoryCandidatePromise,
+    oraUsageResponse(authed, payload.msgCount),
+  ]);
+
+  const totalMs = Date.now() - timing.t0;
+  logger.info(
+    {
+      component: "ora-chat",
+      intent: classifierResult.intent,
+      confidence: classifierResult.confidence,
+      topic: classifierResult.topic,
+      routeTier,
+      planTier,
+      totalMs,
+      timingMs: {
+        sessionMs: timing.t1 - timing.t0,
+        authMs: timing.t2 - timing.t1,
+        spendCapMs: timing.t3 - timing.t2,
+        quotaMs: timing.t4 - timing.t3,
+        contextMs: timing.t5 - timing.t4,
+        modelMs: totalMs - (timing.t5 - timing.t0),
+      },
+    },
+    "Ora non-streaming completion",
+  );
 
   res.json({
     reply,
@@ -1934,11 +2019,6 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // returns before earlyMemoryP is awaited. The builders have internal try/catch
   // but this is a defensive belt-and-suspenders guard.
   void earlyMemoryP.catch(() => undefined);
-  const earlyCrossConvP =
-    authed && referenceChatHistory && !temporary
-      ? buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId)
-      : Promise.resolve("");
-  void earlyCrossConvP.catch(() => undefined);
   const earlyProfileP = authed ? buildProfileContext(authed.userId) : Promise.resolve("");
   void earlyProfileP.catch(() => undefined);
 
@@ -1979,8 +2059,15 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   // Await the classifier that was fired in parallel with auth. Most of its
   // latency is already consumed; this wait is only the remaining gap between
-  // when auth+spend finished and when the AI call completes.
-  const classifierResult = await classifierPromise;
+  // when auth+spend finished and when the AI call completes. For Instant mode
+  // a 500 ms deadline guards against a slow provider — the premium/high fallback
+  // never degrades quality. Deep mode allows 2000 ms.
+  const classifierTimeoutMsStream = mode === "instant" ? 500 : 2_000;
+  const classifierResult = await withTimeout(
+    classifierPromise,
+    classifierTimeoutMsStream,
+    CLASSIFIER_FALLBACK,
+  );
 
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
@@ -2119,7 +2206,13 @@ router.post("/public-ai/chat/stream", async (req, res) => {
       text: "",
       used: [] as Array<{ id: number; title: string }>,
     }),
-    withTimeout(earlyCrossConvP, CTX_BUDGET_MS, ""),
+    authed && referenceChatHistory && !temporary
+      ? withTimeout(
+          buildCrossConversationContext(authed.userId, oraProjectId, message, conversationId),
+          CTX_BUDGET_MS,
+          ""
+        )
+      : Promise.resolve(""),
     withTimeout(earlyProfileP, CTX_BUDGET_MS, ""),
   ]);
   timing.t5 = Date.now(); // memory + cross-conv + profile context loaded
