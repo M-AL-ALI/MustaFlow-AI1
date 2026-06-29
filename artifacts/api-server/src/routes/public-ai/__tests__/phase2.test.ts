@@ -213,6 +213,35 @@ describe("File store", () => {
   });
 });
 
+// ─── Text extraction: PPTX (officeparser v7 AST regression) ───────────────────
+describe("extractText — PPTX", () => {
+  it("extracts text from a real .pptx file", async () => {
+    const { default: pptxgen } = await import("pptxgenjs");
+    const { extractText } = await import("../../../lib/public-ai/file-extract");
+
+    const pptx = new pptxgen();
+    const slide1 = pptx.addSlide();
+    slide1.addText("Hello MustaFlow Quarterly Review", { x: 1, y: 1, w: 8, h: 1 });
+    slide1.addText("Revenue up 42% YoY", { x: 1, y: 2.2, w: 8, h: 0.6 });
+    const slide2 = pptx.addSlide();
+    slide2.addText("Roadmap: ship PPTX parsing fix", { x: 1, y: 1, w: 8, h: 1 });
+
+    const buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+
+    const text = await extractText(buffer, "pptx");
+    expect(text).toContain("Hello MustaFlow Quarterly Review");
+    expect(text).toContain("Revenue up 42% YoY");
+    expect(text).toContain("Roadmap: ship PPTX parsing fix");
+  }, 60_000);
+
+  it("throws ExtractionError for a non-PPTX buffer", async () => {
+    const { extractText } = await import("../../../lib/public-ai/file-extract");
+    await expect(extractText(Buffer.from("not a pptx at all"), "pptx")).rejects.toThrow(
+      /could not be read/i,
+    );
+  }, 30_000);
+});
+
 // ─── Route-level: upload and file-analysis ────────────────────────────────────
 describe("Route-level: upload endpoint", () => {
   let app: express.Express;

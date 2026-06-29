@@ -48,8 +48,19 @@ async function extractPdf(buffer: Buffer): Promise<string> {
 async function extractPptx(buffer: Buffer): Promise<string> {
   try {
     const officeparser = (await import("officeparser")).default;
-    const text = await officeparser.parseOffice(buffer, { outputErrorToConsole: false });
-    const trimmed = (typeof text === "string" ? text : "").trim();
+    // officeparser v7 returns a structured AST (not a string). Call toText() to
+    // get plain text. Older versions returned a string directly, so guard both.
+    const parsed: unknown = await officeparser.parseOffice(buffer);
+    let text = "";
+    if (typeof parsed === "string") {
+      text = parsed;
+    } else if (
+      parsed &&
+      typeof (parsed as { toText?: unknown }).toText === "function"
+    ) {
+      text = (parsed as { toText: () => string }).toText();
+    }
+    const trimmed = text.trim();
     if (!trimmed) throw new ExtractionError("no-text");
     return truncateWithNote(trimmed);
   } catch (err) {
