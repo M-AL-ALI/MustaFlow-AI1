@@ -126,13 +126,16 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 async function run(): Promise<void> {
-  // Graceful no-op when DATABASE_URL is absent — the script is wired into
-  // the postbuild pipeline where DATABASE_URL may not be set (e.g. CI builds
-  // without a live DB, local `pnpm build`). Static routes are still prerendered
-  // by scripts/prerender.ts; this step only adds dynamic gallery/profile stubs.
+  // DATABASE_URL is required for dynamic prerendering. When it is absent we
+  // exit 0 so that local `pnpm build` and DATABASE-less CI environments can
+  // still produce a functional (though SEO-incomplete) bundle. In all
+  // production / deployment builds DATABASE_URL MUST be set — the postbuild
+  // pipeline no longer uses `|| true`, so any real failure will abort the build.
   if (!process.env.DATABASE_URL) {
-    console.log(
-      "[prerender-dynamic] DATABASE_URL not set — skipping dynamic prerender (no DB available).",
+    console.warn(
+      "[prerender-dynamic] WARNING: DATABASE_URL not set — skipping dynamic gallery/profile " +
+        "prerender. Gallery detail pages will fall back to client-side rendering for this build. " +
+        "Set DATABASE_URL before building for production to ensure full SEO coverage.",
     );
     process.exit(0);
   }
