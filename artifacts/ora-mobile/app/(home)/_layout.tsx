@@ -19,6 +19,7 @@ import React, { useEffect } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ActiveProjectProvider } from "@/context/ActiveProjectContext";
 import { useColors } from "@/hooks/useColors";
 
 const mustaflowLogo = require("@/assets/mustaflow-logo.png");
@@ -242,21 +243,23 @@ export default function HomeLayout() {
   }
 
   return (
-    <Drawer
-      drawerContent={(props) => <CustomDrawer {...props} />}
-      screenOptions={{
-        headerShown: false,
-        drawerType: "front",
-        swipeEdgeWidth: 60,
-        sceneStyle: { backgroundColor: c.background },
-      }}
-    >
-      <Drawer.Screen name="index" />
-      <Drawer.Screen name="orax" />
-      <Drawer.Screen name="memory" />
-      <Drawer.Screen name="library" />
-      <Drawer.Screen name="settings" />
-      <Drawer.Screen name="help" />
-    </Drawer>
+    <ActiveProjectProvider>
+      <Drawer
+        drawerContent={(props) => <CustomDrawer {...props} />}
+        screenOptions={{
+          headerShown: false,
+          drawerType: "front",
+          swipeEdgeWidth: 60,
+          sceneStyle: { backgroundColor: c.background },
+        }}
+      >
+        <Drawer.Screen name="index" />
+        <Drawer.Screen name="orax" />
+        <Drawer.Screen name="memory" />
+        <Drawer.Screen name="library" />
+        <Drawer.Screen name="settings" />
+        <Drawer.Screen name="help" />
+      </Drawer>
+    </ActiveProjectProvider>
   );
 }

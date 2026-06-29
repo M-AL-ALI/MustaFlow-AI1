@@ -131,6 +131,7 @@ import {
   updatePreferences,
   uploadFile,
 } from "@/lib/api";
+import { useActiveProject } from "@/context/ActiveProjectContext";
 import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode } from "@/lib/focus-mode";
 import { setCurrentSessionTier } from "@/lib/session-store";
@@ -381,7 +382,7 @@ export default function OraChatScreen() {
   // The project new chats are filed under. null = standalone ("Recent"). This
   // single state is the source of truth for scope; new conversations created by
   // persist() inherit it via activeProjectIdRef. No route-derived tri-state.
-  const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
+  const { activeProjectId, setActiveProjectId } = useActiveProject();
   const activeProjectIdRef = useRef<number | null>(null);
   activeProjectIdRef.current = activeProjectId;
   // True once the project list has loaded at least once, so the "active project
@@ -945,6 +946,7 @@ export default function OraChatScreen() {
             referenceSavedMemories: !!isSignedIn && !temporary,
             referenceChatHistory: !!isSignedIn && !temporary,
             temporary,
+            oraProjectId: activeProjectIdRef.current,
           };
 
           // Try streaming first; fall back to regular sendChat when unavailable.
@@ -1115,7 +1117,7 @@ export default function OraChatScreen() {
     if (!isSignedInRef.current || temporaryRef.current) return;
     const fact = message.memorySaveCandidate?.trim();
     if (!fact) return;
-    const supersededTitles = await saveOraMemory(fact);
+    const supersededTitles = await saveOraMemory(fact, activeProjectIdRef.current);
     const next = messagesRef.current.map((m) =>
       m.id === message.id
         ? {

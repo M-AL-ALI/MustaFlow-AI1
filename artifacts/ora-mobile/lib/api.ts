@@ -13,6 +13,7 @@ import type {
   OraConversationDetail,
   OraConversationSummary,
   SupportConversationSummary,
+  MemoryUsage,
   OraMemory,
   OraMemoryUsed,
   OraAccountConsistency,
@@ -589,16 +590,36 @@ export function updateProfile(profile: Partial<OraProfile>): Promise<unknown> {
   });
 }
 
-export async function listMemories(): Promise<OraMemory[]> {
-  const data = await jsonRequest<{ memories: OraMemory[] }>("/api/ora/memories");
+export async function listMemories(oraProjectId?: number | null): Promise<OraMemory[]> {
+  const url =
+    typeof oraProjectId === "number"
+      ? `/api/ora/memories?oraProjectId=${oraProjectId}`
+      : "/api/ora/memories";
+  const data = await jsonRequest<{ memories: OraMemory[] }>(url);
   return data.memories ?? [];
 }
 
-export function createMemory(title: string, content: string): Promise<unknown> {
+export function getMemoryUsage(): Promise<MemoryUsage> {
+  return jsonRequest<MemoryUsage>("/api/ora/memories/usage");
+}
+
+export function createMemory(
+  title: string,
+  content: string,
+  oraProjectId?: number | null,
+): Promise<unknown> {
   return jsonRequest("/api/ora/memories", {
     method: "POST",
-    body: JSON.stringify({ title, content }),
+    body: JSON.stringify({
+      title,
+      content,
+      ...(oraProjectId != null ? { oraProjectId } : {}),
+    }),
   });
+}
+
+export function clearAllMemories(): Promise<unknown> {
+  return jsonRequest("/api/ora/memories", { method: "DELETE" });
 }
 
 /** Derive a short memory title from a fact (mirrors the web deriveTitle). */
@@ -614,12 +635,19 @@ function deriveMemoryTitle(fact: string): string {
  * this save superseded so the chat can name exactly what changed. Throws on a
  * non-2xx response so callers leave the candidate unsaved.
  */
-export async function saveOraMemory(fact: string): Promise<string[]> {
+export async function saveOraMemory(
+  fact: string,
+  oraProjectId?: number | null,
+): Promise<string[]> {
   const content = fact.trim();
   if (!content) throw new Error("Cannot save an empty memory");
   const data = await jsonRequest<{ superseded?: { title: string }[] }>("/api/ora/memories", {
     method: "POST",
-    body: JSON.stringify({ title: deriveMemoryTitle(content), content }),
+    body: JSON.stringify({
+      title: deriveMemoryTitle(content),
+      content,
+      ...(oraProjectId != null ? { oraProjectId } : {}),
+    }),
   });
   return (data.superseded ?? []).map((s) => s.title).filter((t) => t.trim().length > 0);
 }

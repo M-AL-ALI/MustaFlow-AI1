@@ -240,6 +240,12 @@ export interface ChatRequest {
    * the server charges the slot normally.
    */
   streamFallbackToken?: string;
+  /**
+   * When set, the server injects memories scoped to this Ora project into the
+   * AI context alongside user-level memories. Must match a project owned by
+   * the current user; the server enforces ownership.
+   */
+  oraProjectId?: number | null;
 }
 
 export interface ChatResponse {
@@ -344,7 +350,14 @@ export interface OraMemory {
   content: string;
   enabled: boolean;
   sourceConversationId: number | null;
+  oraProjectId: number | null;
+  supersededBy: number | null;
   createdAt: string;
+}
+
+export interface MemoryUsage {
+  count: number;
+  cap: number;
 }
 
 export interface OraConversationSummary {
