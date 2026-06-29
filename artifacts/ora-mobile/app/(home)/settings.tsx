@@ -637,7 +637,7 @@ function MemorySection() {
           onValueChange={handleRefHistory}
         />
         <ToggleRow
-          label="Auto-save clear memories"
+          label="Auto-save memories"
           description="Automatically save facts when you explicitly ask Ora to remember them."
           value={autoSave}
           onValueChange={handleAutoSave}

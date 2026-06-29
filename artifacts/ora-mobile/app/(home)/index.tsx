@@ -134,7 +134,7 @@ import {
 import { useActiveProject } from "@/context/ActiveProjectContext";
 import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode } from "@/lib/focus-mode";
-import { getReferenceChatHistory, getReferenceSavedMemories } from "@/lib/memory-settings";
+import { getAutoSaveMemories, getReferenceChatHistory, getReferenceSavedMemories } from "@/lib/memory-settings";
 import { setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredVoicePreset } from "@/lib/voice-preset";
 import type {
@@ -2463,7 +2463,7 @@ export default function OraChatScreen() {
               speaking={speakingId === item.id}
               onSpeak={() => speakRef.current(item)}
               onSuggestion={handleSuggestion}
-              onSaveMemory={temporary ? undefined : handleSaveMemory}
+              onSaveMemory={(!temporary && getAutoSaveMemories()) ? handleSaveMemory : undefined}
               onLongPress={() => setActionsMessage(item)}
               onEditImage={(id) => {
                 setEditingImageId(id);
