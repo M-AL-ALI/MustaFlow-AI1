@@ -1,5 +1,6 @@
 import { useAuth } from "@clerk/expo";
 import Constants from "expo-constants";
+import { useLocalSearchParams } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import {
@@ -610,7 +611,17 @@ export default function HelpScreen() {
   const insets = useSafeAreaInsets();
   const { isSignedIn } = useAuth();
   const signedIn = !!isSignedIn;
-  const [tab, setTab] = useState<HelpTab>("articles");
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<HelpTab>(() => {
+    if (tabParam === "support" || tabParam === "tickets") return tabParam;
+    return "articles";
+  });
+
+  useEffect(() => {
+    if (tabParam === "articles" || tabParam === "support" || tabParam === "tickets") {
+      setTab(tabParam);
+    }
+  }, [tabParam]);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [articles, setArticles] = useState<HelpArticle[]>([]);

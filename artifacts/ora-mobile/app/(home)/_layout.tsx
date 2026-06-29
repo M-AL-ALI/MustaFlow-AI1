@@ -499,13 +499,14 @@ function CustomDrawer(props: DrawerContentComponentProps) {
     name: string;
     label: string;
     icon: React.ComponentType<{ size: number; color: string }>;
+    tab?: string;
   }[] = [
     { name: "orax", label: "Orax", icon: TerminalSquare },
     { name: "memory", label: "Memory", icon: Brain },
     { name: "library", label: "Library", icon: BookOpen },
-    { name: "help", label: "Help Center", icon: HelpCircle },
-    { name: "help", label: "Report Issue", icon: Bug },
-    { name: "help", label: "My Support Tickets", icon: LifeBuoy },
+    { name: "help", label: "Help Center", icon: HelpCircle, tab: "articles" },
+    { name: "help", label: "Report Issue", icon: Bug, tab: "support" },
+    { name: "help", label: "My Support Tickets", icon: LifeBuoy, tab: "tickets" },
     { name: "settings", label: "Settings", icon: Settings },
   ];
 
@@ -513,9 +514,10 @@ function CustomDrawer(props: DrawerContentComponentProps) {
     name: string;
     label: string;
     icon: React.ComponentType<{ size: number; color: string }>;
+    tab?: string;
   }[] = [
     { name: "settings", label: "Settings", icon: Settings },
-    { name: "help", label: "Help", icon: HelpCircle },
+    { name: "help", label: "Help", icon: HelpCircle, tab: "articles" },
   ];
 
   const navItems = isSignedIn ? signedInNavItems : anonNavItems;
@@ -669,7 +671,13 @@ function CustomDrawer(props: DrawerContentComponentProps) {
                 item.label !== "Report Issue" &&
                 item.label !== "My Support Tickets"
               }
-              onPress={() => props.navigation.navigate(item.name)}
+              onPress={() => {
+                if (item.tab) {
+                  router.push({ pathname: `/(home)/${item.name}`, params: { tab: item.tab } } as never);
+                } else {
+                  props.navigation.navigate(item.name);
+                }
+              }}
               c={c}
             />
           ))}
