@@ -76,13 +76,14 @@ cd "$SCRIPT_DIR/.."
 echo ""
 echo "Starting EAS TestFlight build (profile: testflight, platform: ios) ..."
 echo "Auto-submit is enabled — the build will be submitted to TestFlight automatically."
-EAS_NO_VCS=1 EXPO_TOKEN="$Expo_Token" \
+EAS_NO_VCS=1 EAS_SKIP_AUTO_FINGERPRINT=1 EXPO_TOKEN="$Expo_Token" \
   pnpm dlx eas-cli@latest build \
     --profile testflight \
     --platform ios \
     --non-interactive \
     --auto-submit \
     --no-wait \
+    < /dev/null \
     2>&1
 
 echo "Done. Monitor build progress at https://expo.dev/accounts/mus192/projects/mustaflow-ai/builds"
