@@ -36,6 +36,14 @@ git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
+git add artifacts/api-server/src/routes/public-ai/chat.ts 2>/dev/null || true
+git add artifacts/api-server/src/routes/public-ai/dataset-analysis.ts 2>/dev/null || true
+git add artifacts/api-server/src/routes/seo.ts 2>/dev/null || true
+git add artifacts/api-server/src/routes/profile-ssr.ts 2>/dev/null || true
+git add artifacts/api-server/src/routes/profiles.ts 2>/dev/null || true
+git add artifacts/api-server/src/routes/gdpr.ts 2>/dev/null || true
+git add artifacts/api-server/src/lib/serveSnapshot.ts 2>/dev/null || true
+git add artifacts/api-server/src/lib/ogImage.ts 2>/dev/null || true
 git add scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

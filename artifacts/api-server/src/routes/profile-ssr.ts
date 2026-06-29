@@ -28,7 +28,7 @@ export const profileSsrRouter: IRouter = Router();
 
 const BASE_URL = process.env["PLATFORM_DOMAIN"]
   ? `https://${process.env["PLATFORM_DOMAIN"]}`
-  : "https://mustaflow.app";
+  : "https://www.mustaflow.com";
 const SITE_NAME = "MustaFlow AI";
 const DEFAULT_OG_IMAGE = `${BASE_URL}/opengraph.jpg`;
 

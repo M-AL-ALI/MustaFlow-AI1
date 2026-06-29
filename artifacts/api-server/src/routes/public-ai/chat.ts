@@ -790,10 +790,10 @@ export async function buildProfileContext(userId: string): Promise<string> {
 }
 
 const IMAGE_GENERATE_CTA =
-  "Image generation is available for signed-in MustaFlow users. Sign up at mustaflow.app to access AI image generation, including inline images here in Ora and the full Image Studio with quality presets, aspect ratios, and style controls.";
+  "Image generation is available for signed-in MustaFlow users. Sign up at www.mustaflow.com to access AI image generation, including inline images here in Ora and the full Image Studio with quality presets, aspect ratios, and style controls.";
 
 const SEARCH_SIGNIN_CTA =
-  "Live web search is available for signed-in MustaFlow users. Sign up at mustaflow.app and I'll search the web for you, then answer with up-to-date information and cited sources.";
+  "Live web search is available for signed-in MustaFlow users. Sign up at www.mustaflow.com and I'll search the web for you, then answer with up-to-date information and cited sources.";
 
 /**
  * Build an explicit file-availability hint injected into the system prompt.
@@ -1119,9 +1119,9 @@ router.post("/public-ai/chat", async (req, res) => {
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
-      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at mustaflow.app for unlimited conversations, memory, image generation, and more.`,
+      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at www.mustaflow.com for unlimited conversations, memory, image generation, and more.`,
       upgradeCta: true,
-      signUpUrl: "https://mustaflow.app/sign-up",
+      signUpUrl: "https://www.mustaflow.com/sign-up",
       msgCount: session.msgCount,
       msgLimit: MSG_LIMIT_VALUE,
     });
@@ -2060,9 +2060,9 @@ router.post("/public-ai/chat/stream", async (req, res) => {
 
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
-      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at mustaflow.app for unlimited conversations, memory, image generation, and more.`,
+      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at www.mustaflow.com for unlimited conversations, memory, image generation, and more.`,
       upgradeCta: true,
-      signUpUrl: "https://mustaflow.app/sign-up",
+      signUpUrl: "https://www.mustaflow.com/sign-up",
       msgCount: session.msgCount,
       msgLimit: MSG_LIMIT_VALUE,
     });

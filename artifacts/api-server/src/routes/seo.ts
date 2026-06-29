@@ -10,7 +10,7 @@ import { logger } from "../lib/logger";
 
 export const seoRouter: IRouter = Router();
 
-const BASE_URL = "https://mustaflow.app";
+const BASE_URL = "https://www.mustaflow.com";
 
 function xmlEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

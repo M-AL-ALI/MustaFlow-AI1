@@ -148,9 +148,9 @@ router.post("/public-ai/dataset-analysis", async (req, res) => {
   const authed = await resolveAuthedOraUser(req);
   if (!authed && session.msgCount >= MSG_LIMIT_VALUE) {
     res.status(429).json({
-      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at mustaflow.app for unlimited conversations, memory, image generation, and more.`,
+      error: `You've reached the ${MSG_LIMIT_VALUE}-message limit for anonymous sessions. Sign up free at www.mustaflow.com for unlimited conversations, memory, image generation, and more.`,
       upgradeCta: true,
-      signUpUrl: "https://mustaflow.app/sign-up",
+      signUpUrl: "https://www.mustaflow.com/sign-up",
       msgCount: session.msgCount,
       msgLimit: MSG_LIMIT_VALUE,
     });

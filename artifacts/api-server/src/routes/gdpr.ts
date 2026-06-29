@@ -112,7 +112,7 @@ router.get("/me/export", async (req, res): Promise<void> => {
         "Signed upload download URLs expire 7 days from export time.",
         "Generated file binaries are excluded from ora-chat.json; only file metadata is included.",
         "To request account deletion or cancel a pending erasure: privacy@mustaflow.app",
-        "Data Processing Agreement: https://mustaflow.app/privacy",
+        "Data Processing Agreement: https://www.mustaflow.com/privacy",
       ].join("\n"),
     );
 

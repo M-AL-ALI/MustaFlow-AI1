@@ -117,6 +117,6 @@ export function generateOgSvg(opts: {
   <!-- Footer -->
   <rect x="0" y="580" width="1200" height="50" fill="#ffffff" opacity="0.02"/>
   <text x="80" y="612" font-family="system-ui,sans-serif" font-size="20" fill="#475569" font-weight="500">MustaFlow AI</text>
-  <text x="1120" y="612" font-family="system-ui,sans-serif" font-size="20" fill="${accent}" font-weight="600" text-anchor="end">mustaflow.app</text>
+  <text x="1120" y="612" font-family="system-ui,sans-serif" font-size="20" fill="${accent}" font-weight="600" text-anchor="end">www.mustaflow.com</text>
 </svg>`;
 }

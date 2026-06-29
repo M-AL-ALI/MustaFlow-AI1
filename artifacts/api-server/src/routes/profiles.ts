@@ -258,7 +258,7 @@ router.get("/me/profile/badge", async (req, res): Promise<void> => {
 
     const origin = process.env.PLATFORM_DOMAIN
       ? `https://${process.env.PLATFORM_DOMAIN}`
-      : "https://mustaflow.app";
+      : "https://www.mustaflow.com";
 
     const badgeUrl = `${origin}/badge/built-with-mustaflow.svg`;
     const profileUrl = `${origin}/u/${profile.username}`;

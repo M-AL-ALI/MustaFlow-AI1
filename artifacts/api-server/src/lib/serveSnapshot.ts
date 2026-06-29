@@ -23,7 +23,7 @@ import { logger } from "./logger";
 // Core/pro/team subscribers are exempt. Cache TTL: 60 seconds.
 
 const BADGE_HTML =
-  '<div style="position:fixed;bottom:12px;right:12px;font-size:11px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:4px 8px;border-radius:4px"><a href="https://mustaflow.app" target="_blank" style="color:#fff;text-decoration:none">Built with MustaFlow</a></div>';
+  '<div style="position:fixed;bottom:12px;right:12px;font-size:11px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:4px 8px;border-radius:4px"><a href="https://www.mustaflow.com" target="_blank" style="color:#fff;text-decoration:none">Built with MustaFlow</a></div>';
 
 interface TierCacheEntry {
   tier: string;
