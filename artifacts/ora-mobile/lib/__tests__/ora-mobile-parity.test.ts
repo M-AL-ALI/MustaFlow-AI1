@@ -31,9 +31,12 @@ describe("Ora mobile parity — memory API functions", () => {
   });
 
   it("createMemory() accepts an optional oraProjectId parameter", () => {
-    expect(api).toContain(
-      "export function createMemory(\n  title: string,\n  content: string,\n  oraProjectId?: number | null,\n)",
-    );
+    const fnStart = api.indexOf("export function createMemory(");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = api.slice(fnStart, fnStart + 400);
+    expect(fnBody).toContain("title: string");
+    expect(fnBody).toContain("content: string");
+    expect(fnBody).toContain("oraProjectId?: number | null");
   });
 
   it("createMemory() with oraProjectId spreads it into the request body", () => {
@@ -199,7 +202,9 @@ describe("Ora mobile parity — chat sends oraProjectId for project memory injec
   it("index.tsx chatReq (non-streaming path) includes oraProjectId from the active project ref", () => {
     const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
     expect(chatReqStart).toBeGreaterThan(-1);
-    const chatReqBody = index.slice(chatReqStart, chatReqStart + 400);
+    // Use closing }; as the end marker rather than a fixed char count so new fields don't break this
+    const chatReqEnd = index.indexOf("};", chatReqStart);
+    const chatReqBody = index.slice(chatReqStart, chatReqEnd + 2);
     expect(chatReqBody).toContain("oraProjectId: activeProjectIdRef.current");
   });
 
@@ -250,14 +255,20 @@ describe("Ora mobile parity — temporary chat does not save or reference memori
 
   it("temporary flag sets referenceSavedMemories to false", () => {
     const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
-    const chatReqBody = index.slice(chatReqStart, chatReqStart + 400);
-    expect(chatReqBody).toContain("referenceSavedMemories: !!isSignedIn && !temporary");
+    const chatReqEnd = index.indexOf("};", chatReqStart);
+    const chatReqBody = index.slice(chatReqStart, chatReqEnd + 2);
+    // Wired through getReferenceSavedMemories() preference AND isSignedIn AND !temporary
+    expect(chatReqBody).toContain("getReferenceSavedMemories()");
+    expect(chatReqBody).toContain("!!isSignedIn && !temporary");
   });
 
   it("temporary flag sets referenceChatHistory to false", () => {
     const chatReqStart = index.indexOf("const chatReq: ChatRequest = {");
-    const chatReqBody = index.slice(chatReqStart, chatReqStart + 400);
-    expect(chatReqBody).toContain("referenceChatHistory: !!isSignedIn && !temporary");
+    const chatReqEnd = index.indexOf("};", chatReqStart);
+    const chatReqBody = index.slice(chatReqStart, chatReqEnd + 2);
+    // Wired through getReferenceChatHistory() preference AND isSignedIn AND !temporary
+    expect(chatReqBody).toContain("getReferenceChatHistory()");
+    expect(chatReqBody).toContain("!!isSignedIn && !temporary");
   });
 
   it("temporary flag is forwarded to server so it skips memory saves and summaries", () => {

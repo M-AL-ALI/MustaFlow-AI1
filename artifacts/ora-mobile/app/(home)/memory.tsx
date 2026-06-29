@@ -716,6 +716,7 @@ function HistoryTab() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { setPendingConversationId } = useActiveProject();
   const [conversations, setConversations] = useState<OraConversationSummary[]>([]);
   const [projects, setProjects] = useState<OraProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -823,6 +824,7 @@ function HistoryTab() {
                 <>
                   <Pressable
                     onPress={() => {
+                      setPendingConversationId(conv.id);
                       router.push("/(home)");
                     }}
                     style={{ gap: 4 }}
