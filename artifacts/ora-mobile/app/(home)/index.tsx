@@ -383,6 +383,8 @@ export default function OraChatScreen() {
   // single state is the source of truth for scope; new conversations created by
   // persist() inherit it via activeProjectIdRef. No route-derived tri-state.
   const { activeProjectId, setActiveProjectId } = useActiveProject();
+  const { pendingConversationId, setPendingConversationId, newConversationTick } =
+    useActiveProject();
   const activeProjectIdRef = useRef<number | null>(null);
   activeProjectIdRef.current = activeProjectId;
   // True once the project list has loaded at least once, so the "active project
@@ -1925,6 +1927,25 @@ export default function OraChatScreen() {
   const selectProjectScope = useCallback((projectId: number) => {
     setActiveProjectId(projectId);
   }, []);
+
+  // ── Drawer → chat bridge ──────────────────────────────────────────────────
+  // When the sidebar taps a conversation, load it here and clear the pending id.
+  useEffect(() => {
+    if (pendingConversationId != null) {
+      loadConversation(pendingConversationId);
+      setPendingConversationId(null);
+    }
+  }, [pendingConversationId, loadConversation, setPendingConversationId]);
+
+  // When the sidebar triggers "New conversation" (or selects a project), start
+  // a fresh chat. The tick is 0 on mount so the initial render never fires.
+  useEffect(() => {
+    if (newConversationTick > 0) {
+      newChat();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newConversationTick]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const openCreateProject = useCallback(() => {
     setEditingProject(null);
