@@ -1,4 +1,46 @@
-import { describe, expect, it } from "vitest";
+/**
+ * Pure-prompt identity tests.
+ *
+ * These tests only inspect string content — no AI calls are made.
+ * vi.mock() stubs the transitive AI-provider chain so the test runs in any
+ * CI / audit shell without AI_INTEGRATIONS_* env vars.
+ */
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../../ai-providers", () => ({
+  createChatCompletion: vi.fn(),
+  streamChatCompletion: vi.fn(),
+  ANTHROPIC_STREAM_THRESHOLD_CHARS: 15_000,
+}));
+
+vi.mock("../model-router", () => ({
+  getOraProviderRoutingSnapshot: vi.fn(() => ({})),
+  normalizeOraPlanTier: vi.fn(() => "free" as const),
+  openAiModelForOraFile: vi.fn(() => "gpt-4o-mini"),
+  openAiModelForOraRoute: vi.fn(() => "gpt-4o-mini"),
+  openAiModelForOraVision: vi.fn(() => "gpt-4o-mini"),
+  openAiModelForOraImage: vi.fn(() => "gpt-image-1"),
+  openAiModelForOraSearch: vi.fn(() => "gpt-4o-mini"),
+  openAiModelForOraMemory: vi.fn(() => "gpt-4o-mini"),
+  oraImageQualityForPlan: vi.fn(() => "standard"),
+  runCandidateChain: vi.fn(),
+  selectOraFileModelRoute: vi.fn(() => [
+    { model: "gpt-4o-mini", provider: "openai", priority: 1 },
+  ]),
+  selectOraMemoryModelRoute: vi.fn(() => [
+    { model: "gpt-4o-mini", provider: "openai", priority: 1 },
+  ]),
+  selectOraVisionModelRoute: vi.fn(() => [
+    { model: "gpt-4o-mini", provider: "openai", priority: 1 },
+  ]),
+  selectOraModelRoute: vi.fn(() => [
+    { model: "gpt-4o-mini", provider: "openai", priority: 1 },
+  ]),
+  classifyProviderError: vi.fn(() => "unknown"),
+  MODEL_DEFAULTS: { openai: { fast: "gpt-4o-mini", premium: "gpt-4o", deep: "o3-mini" } },
+  isDeepSeekAvailable: vi.fn(() => false),
+}));
+
 import {
   ORA_IDENTITY_BLOCK,
   ORA_SYSTEM_PROMPT,
