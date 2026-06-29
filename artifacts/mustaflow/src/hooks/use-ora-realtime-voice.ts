@@ -180,7 +180,12 @@ const ECHO_GUARD_MS = 1200;
 // stop -> "listening" UI flip by this long so Ora's status does not flicker
 // between speaking and listening during one continuous reply. `response.done` and
 // a client-initiated clear still flip immediately.
-const OUTPUT_STOP_DEBOUNCE_MS = 350;
+const OUTPUT_STOP_DEBOUNCE_MS = 600;
+// If the state remains "thinking" for this long without Ora starting to speak
+// or response.done arriving, assume the event was lost and recover to
+// "listening". 15 s sits comfortably above real model latency while preventing
+// an indefinite stuck state caused by a dropped data-channel message.
+const THINKING_WATCHDOG_MS = 15_000;
 
 // ─── Transcript validity filter (mirrored in the mobile hook) ────────────────
 // Pure + surface-agnostic. Keep BYTE-FOR-BYTE identical to the copy in
@@ -882,6 +887,8 @@ export function useOraRealtimeVoice(
   // flip (see OUTPUT_STOP_DEBOUNCE_MS).
   const turnTimingRef = useRef<TurnTiming>(newTurnTiming());
   const outputStopDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Watchdog: clears a stuck "thinking" state if response.done never arrives.
+  const thinkingWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearDurationTimer = useCallback(() => {
     if (durationTimerRef.current) {
@@ -948,6 +955,10 @@ export function useOraRealtimeVoice(
     if (outputStopDebounceRef.current) {
       clearTimeout(outputStopDebounceRef.current);
       outputStopDebounceRef.current = null;
+    }
+    if (thinkingWatchdogRef.current) {
+      clearTimeout(thinkingWatchdogRef.current);
+      thinkingWatchdogRef.current = null;
     }
     assistantResponseActiveRef.current = false;
     assistantSpeakingRef.current = false;
@@ -1263,6 +1274,7 @@ export function useOraRealtimeVoice(
           }
           break;
         case "input_audio_buffer.speech_stopped":
+
           turnTimingRef.current.speechStoppedAt = Date.now();
           logVoiceDiag("speech_stopped", {
             pendingBargeIn: pendingBargeInRef.current,
@@ -1277,6 +1289,17 @@ export function useOraRealtimeVoice(
             cancelPendingBargeIn("speech_stopped_before_confirm");
           } else if (activeRef.current) {
             setState("thinking");
+            // Start the watchdog. If response.done never arrives (lost data-channel
+            // message or model error) we recover to "listening" automatically.
+            if (thinkingWatchdogRef.current) clearTimeout(thinkingWatchdogRef.current);
+            thinkingWatchdogRef.current = setTimeout(() => {
+              thinkingWatchdogRef.current = null;
+              if (activeRef.current) {
+                logVoiceDiag("thinking_watchdog_timeout");
+                assistantResponseActiveRef.current = false;
+                setState("listening");
+              }
+            }, THINKING_WATCHDOG_MS);
           }
           break;
         case "conversation.item.input_audio_transcription.delta": {
@@ -1407,7 +1430,21 @@ export function useOraRealtimeVoice(
             ),
             speech_stopped_to_response_created_ms: deltaMs(t.speechStoppedAt, createdAt),
           });
-          if (activeRef.current) setState("thinking");
+          if (activeRef.current) {
+            setState("thinking");
+            // Re-arm the watchdog: response.created can arrive after speech_stopped
+            // (overlapping turns), so reset the deadline to give the model a fresh
+            // 15 s from this point.
+            if (thinkingWatchdogRef.current) clearTimeout(thinkingWatchdogRef.current);
+            thinkingWatchdogRef.current = setTimeout(() => {
+              thinkingWatchdogRef.current = null;
+              if (activeRef.current) {
+                logVoiceDiag("thinking_watchdog_timeout");
+                assistantResponseActiveRef.current = false;
+                setState("listening");
+              }
+            }, THINKING_WATCHDOG_MS);
+          }
           break;
         }
 
@@ -1460,6 +1497,12 @@ export function useOraRealtimeVoice(
           if (outputStopDebounceRef.current) {
             clearTimeout(outputStopDebounceRef.current);
             outputStopDebounceRef.current = null;
+          }
+          // Audio arrived: the model is clearly making progress, so the thinking
+          // watchdog is no longer needed.
+          if (thinkingWatchdogRef.current) {
+            clearTimeout(thinkingWatchdogRef.current);
+            thinkingWatchdogRef.current = null;
           }
           assistantSpeakingRef.current = true;
           lastAssistantAudioAtRef.current = now;
@@ -1537,6 +1580,15 @@ export function useOraRealtimeVoice(
             clearTimeout(outputStopDebounceRef.current);
             outputStopDebounceRef.current = null;
           }
+          if (thinkingWatchdogRef.current) {
+            clearTimeout(thinkingWatchdogRef.current);
+            thinkingWatchdogRef.current = null;
+          }
+          // Refresh the focus window so the user can follow up naturally right
+          // after Ora finishes speaking — casual replies like "that's great" or
+          // "continue" pass the focus filter within FOCUS_FOLLOWUP_WINDOW_MS of
+          // this moment without requiring a wake word.
+          lastAcceptedUserTurnAtRef.current = Date.now();
           logVoiceDiag("response_done", {
             output_cycles: t.outputCycles,
             output_stopped_to_response_done_ms: deltaMs(t.outputStoppedAt, doneAt),
@@ -1564,11 +1616,23 @@ export function useOraRealtimeVoice(
               typeof (evt.error as { message?: string }).message === "string" &&
               (evt.error as { message?: string }).message) ||
             "";
-          // Non-fatal model errors are logged but do not tear the call down; the
-          // session can recover on the next turn.
-          if (message) {
-            // eslint-disable-next-line no-console
-            console.warn("[ora-realtime] model error:", message);
+          logVoiceDiag("model_error", { message: message || "unknown" });
+          // If a model error arrives while we are mid-response (thinking or
+          // speaking), response.done may never follow. Clear the active-response
+          // flags and recover to "listening" so the user is never stranded. The
+          // session stays open — the next accepted turn starts a new response.
+          if (assistantResponseActiveRef.current || assistantSpeakingRef.current) {
+            assistantResponseActiveRef.current = false;
+            assistantSpeakingRef.current = false;
+            if (thinkingWatchdogRef.current) {
+              clearTimeout(thinkingWatchdogRef.current);
+              thinkingWatchdogRef.current = null;
+            }
+            if (outputStopDebounceRef.current) {
+              clearTimeout(outputStopDebounceRef.current);
+              outputStopDebounceRef.current = null;
+            }
+            if (activeRef.current) setState("listening");
           }
           break;
         }
