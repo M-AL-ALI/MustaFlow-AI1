@@ -367,11 +367,21 @@ export function buildOraImageGenerationProfile(input: {
   const aspectRatio = resolveOraImageAspectRatio(originalPrompt, kind);
   const style = resolveOraImageStyle(originalPrompt, kind);
 
+  // For brief prompts (fewer than 10 words), guide the model to expand with
+  // composition, lighting, and style details while keeping the stated subject.
+  // For detailed prompts, follow the user's description closely.
+  const wordCount = originalPrompt.trim().split(/\s+/).length;
+  const promptExpansion =
+    wordCount < 10
+      ? "The user's request is brief — expand it creatively: infer a plausible setting, add specific lighting (e.g. natural light, golden hour, studio lighting), camera/composition cues (e.g. close-up portrait, wide-angle landscape, rule-of-thirds framing), and style/mood details (e.g. photorealistic, cinematic, painterly). Preserve the stated subject exactly; do not invent conflicting elements."
+      : "Follow the user's detailed prompt closely; do not invent elements they did not describe.";
+
   const prompt = [
     `User request: ${originalPrompt}`,
+    promptExpansion,
     planGuidance(planTier, "generation"),
     kindGuidance(kind, planTier),
-    "Preserve the user's requested subject, mood, colors, brands, and constraints.",
+    "Preserve the user's requested subject, mood, colors, brands, and constraints exactly.",
     "If text is requested, keep it minimal and legible; otherwise do not add random text, captions, signatures, UI labels, or watermarks.",
   ].join(" ");
 

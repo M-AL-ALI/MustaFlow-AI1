@@ -256,6 +256,16 @@ export const ORA_SEARCH_PATTERNS: RegExp[] = [
   // this value in my file" do NOT get hijacked into a live web search.
   /\bsearch\s+(?:the\s+|on\s+)?(?:web|internet|online|google|market)\b/i,
   /\b(find|search|look\s*up|locate|browse)\b[^.?!]{0,40}\b(online|on\s+the\s+(?:web|internet)|on\s+google)\b/i,
+  // ── Time-sensitive queries not covered above ─────────────────────────────────
+  // Current price beyond financial instruments: "how much does X cost today",
+  // "how much is a Big Mac right now?" (no cost keyword needed — time anchor is sufficient).
+  /\bhow\s+much\s+(?:does|do|is|are)\b[^.?!]{0,80}\b(?:now|today|currently|right\s+now|at\s+the\s+moment)\b/i,
+  /\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:current\s+)?price\s+of\b/i,
+  // Company or service live-status: "is X still open", "is X bankrupt", "is X down",
+  // "is Twitter still called Twitter?" (name/rebrand checks are time-sensitive too).
+  /\bis\b[^.?!]{1,60}\b(?:still\s+(?:open|available|active|operating|in\s+business|running|accepting|called|named|known\s+as)|(?:down|offline|live|closed|discontinued|bankrupt|acquired|shut\s+down|collapsed|suspended|renamed|rebranded))\b/i,
+  // Who currently holds a named role or position
+  /\bwho\s+is\s+(?:the\s+)?(?:current|new|acting|latest)\b[^.?!]{0,50}\b(?:ceo|cto|coo|cfo|president|prime\s+minister|chancellor|mayor|governor|secretary|director|head|chief|leader|coach|manager|owner)\b/i,
 ];
 
 export function isWebSearchRequest(message: string): boolean {

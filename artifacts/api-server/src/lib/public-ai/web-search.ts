@@ -20,6 +20,8 @@ import { normalizeOraPlanTier, openAiModelForOraSearch, type OraPlanTier } from 
 export interface OraSource {
   title: string;
   url: string;
+  /** ISO date string if the source's publication date was found in the annotation, else undefined. */
+  date?: string;
 }
 
 /** A real image found on the web during search, shown inline in the chat. */
@@ -218,7 +220,16 @@ export function extractSources(output: unknown): OraSource[] {
         const cleaned = cleanSourceUrl(url);
         if (!cleaned) continue; // drop non-http(s) / malformed citations
         const title = typeof ann?.title === "string" && ann.title.trim() ? ann.title.trim() : null;
-        sources.push({ title: title ?? hostnameOf(cleaned), url: cleaned });
+        // Try to extract a publication date from the annotation payload. The
+        // Responses API does not guarantee a date field, so we probe several
+        // plausible key names and fall back to undefined when none are found.
+        const rawDate =
+          (ann?.date as string | undefined) ??
+          (ann?.published_at as string | undefined) ??
+          (ann?.publishedDate as string | undefined) ??
+          undefined;
+        const date = typeof rawDate === "string" && rawDate.trim() ? rawDate.trim() : undefined;
+        sources.push({ title: title ?? hostnameOf(cleaned), url: cleaned, ...(date ? { date } : {}) });
       }
     }
   }
@@ -258,6 +269,8 @@ const LOW_QUALITY_SOURCE_HOSTS = [
   "twitter.",
   "quora.",
   "answers.",
+  "reddit.",
+  "medium.com",
 ];
 
 const TRUSTED_NEWS_HOSTS = [
@@ -391,7 +404,7 @@ export function inferOraSearchPlan(input: { query: string; wantsVideos?: boolean
       ? "silently decompose the request into targeted searches before answering"
       : "use the most direct targeted search needed to answer",
     freshness === "current"
-      ? `treat freshness as important; today's date is ${todayIso()} and volatile facts need exact dates`
+      ? `treat freshness as important; today's date is ${todayIso()}; for volatile facts cite the source's publication date in your answer; if you cannot confirm a date, say "date not confirmed" rather than omitting it`
       : "do not over-search evergreen background unless the query needs verification",
     sourceStrategy === "official"
       ? "prefer official, primary, or documentation pages over summaries"

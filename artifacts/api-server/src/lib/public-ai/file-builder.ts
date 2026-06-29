@@ -27,7 +27,7 @@ import {
 import { PassThrough } from "stream";
 import { createChatCompletion } from "../ai-providers";
 import { logger } from "../logger";
-import type { FileFormat } from "./prompt";
+import { ORA_FILE_COMPLETENESS_ADDENDUM, type FileFormat } from "./prompt";
 import {
   getOraProviderRoutingSnapshot,
   normalizeOraPlanTier,
@@ -224,7 +224,8 @@ function buildTabularSystemPrompt(
     `5. Data must be internally consistent — e.g. dates in chronological order, ids sequential.\n` +
     `6. Only these keys are allowed: title, sheetName, headers, columnTypes, rows.${langNote}` +
     quality.instruction +
-    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
+    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
+    ORA_FILE_COMPLETENESS_ADDENDUM
   );
 }
 
@@ -266,7 +267,8 @@ function buildPresentationSystemPrompt(
     `6. Match the presentation topic and purpose to exactly what the user asked for.\n` +
     `7. Only these keys are allowed: title, subtitle, slides (each with heading and bullets).${langNote}` +
     quality.instruction +
-    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
+    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
+    ORA_FILE_COMPLETENESS_ADDENDUM
   );
 }
 
@@ -326,7 +328,8 @@ function buildDocumentSystemPrompt(
     `9. Allowed keys: title, subtitle, sections (each with heading, content, bullets, table). No other top-level keys.${langNote}` +
     profGuidance +
     quality.instruction +
-    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "")
+    (hasSourceData ? SOURCE_DATA_DIRECTIVE : "") +
+    ORA_FILE_COMPLETENESS_ADDENDUM
   );
 }
 
