@@ -126,16 +126,26 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 async function run(): Promise<void> {
-  // DATABASE_URL is required for dynamic prerendering. When it is absent we
-  // exit 0 so that local `pnpm build` and DATABASE-less CI environments can
-  // still produce a functional (though SEO-incomplete) bundle. In all
-  // production / deployment builds DATABASE_URL MUST be set — the postbuild
-  // pipeline no longer uses `|| true`, so any real failure will abort the build.
+  // REQUIRE_DYNAMIC_PRERENDER=1 opts any build into strict mode: a missing
+  // DATABASE_URL becomes a hard failure instead of a skip. Set this flag in
+  // all production / deployment pipelines so that gallery detail pages are
+  // guaranteed to have pre-rendered HTML in every published build.
+  const strict = process.env.REQUIRE_DYNAMIC_PRERENDER === "1";
+
   if (!process.env.DATABASE_URL) {
+    if (strict) {
+      console.error(
+        "[prerender-dynamic] FATAL: REQUIRE_DYNAMIC_PRERENDER=1 but DATABASE_URL is not set. " +
+          "Gallery detail pages cannot be pre-rendered without database access. " +
+          "Provide DATABASE_URL or unset REQUIRE_DYNAMIC_PRERENDER to allow a skip.",
+      );
+      process.exit(1);
+    }
     console.warn(
       "[prerender-dynamic] WARNING: DATABASE_URL not set — skipping dynamic gallery/profile " +
         "prerender. Gallery detail pages will fall back to client-side rendering for this build. " +
-        "Set DATABASE_URL before building for production to ensure full SEO coverage.",
+        "Set DATABASE_URL (and REQUIRE_DYNAMIC_PRERENDER=1) before building for production " +
+        "to ensure full SEO coverage.",
     );
     process.exit(0);
   }
@@ -183,7 +193,8 @@ async function run(): Promise<void> {
       ),
     ]);
 
-    let count = 0;
+    let templateCount = 0;
+    let profileCount = 0;
 
     for (const tpl of templatesResult.rows) {
       const categoryLabel = CATEGORY_LABELS[tpl.category] ?? tpl.category;
@@ -225,7 +236,7 @@ async function run(): Promise<void> {
       };
 
       writeRoute(indexHtml, route);
-      count++;
+      templateCount++;
     }
 
     for (const profile of profilesResult.rows) {
@@ -263,12 +274,38 @@ async function run(): Promise<void> {
       };
 
       writeRoute(indexHtml, route);
-      count++;
+      profileCount++;
     }
 
+    const totalCount = templateCount + profileCount;
     console.log(
-      `[prerender-dynamic] Done — ${count} dynamic routes rendered (${templatesResult.rows.length} templates, ${profilesResult.rows.length} profiles).`,
+      `[prerender-dynamic] Done — ${totalCount} dynamic routes rendered (${templateCount} gallery templates, ${profileCount} profiles).`,
     );
+
+    // Post-render assertion: if the DB has published gallery templates, verify
+    // that each expected index.html was actually written to disk. A mismatch
+    // (e.g. a write error that was silently swallowed) would mean crawlers see
+    // an unrendered shell page instead of the SEO content.
+    if (templatesResult.rows.length > 0) {
+      const missing: string[] = [];
+      for (const tpl of templatesResult.rows) {
+        const expectedPath = join(DIST_DIR, "gallery", tpl.slug, "index.html");
+        if (!existsSync(expectedPath)) {
+          missing.push(`/gallery/${tpl.slug}`);
+        }
+      }
+      if (missing.length > 0) {
+        console.error(
+          `[prerender-dynamic] FATAL: ${missing.length} gallery page(s) were expected but not found on disk:\n` +
+            missing.map((p) => `  ${p}`).join("\n") +
+            "\nThis indicates a write failure during prerendering.",
+        );
+        process.exit(1);
+      }
+      console.log(
+        `[prerender-dynamic] Verified ${templatesResult.rows.length} gallery detail page(s) present on disk.`,
+      );
+    }
   } finally {
     client.release();
     await pool.end();
