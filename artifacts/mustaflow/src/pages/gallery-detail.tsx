@@ -167,9 +167,16 @@ export default function GalleryDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <>
+        <PageMeta
+          title="Template Gallery"
+          description="Explore app templates in the MustaFlow AI template gallery."
+          path={`/gallery/${slug}`}
+        />
+        <div className="flex items-center justify-center py-32">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </>
     );
   }
 
