@@ -134,6 +134,7 @@ import {
 import { useActiveProject } from "@/context/ActiveProjectContext";
 import { setAuthState, TokenUnavailableError } from "@/lib/auth-client";
 import { readStoredFocusMode } from "@/lib/focus-mode";
+import { getReferenceChatHistory, getReferenceSavedMemories } from "@/lib/memory-settings";
 import { setCurrentSessionTier } from "@/lib/session-store";
 import { readStoredVoicePreset } from "@/lib/voice-preset";
 import type {
@@ -945,8 +946,8 @@ export default function OraChatScreen() {
             messages: history,
             mode,
             language: language !== "auto" ? language : undefined,
-            referenceSavedMemories: !!isSignedIn && !temporary,
-            referenceChatHistory: !!isSignedIn && !temporary,
+            referenceSavedMemories: getReferenceSavedMemories() && !!isSignedIn && !temporary,
+            referenceChatHistory: getReferenceChatHistory() && !!isSignedIn && !temporary,
             temporary,
             oraProjectId: activeProjectIdRef.current,
           };
@@ -1747,7 +1748,7 @@ export default function OraChatScreen() {
         .start({
           language: language !== "auto" ? language : undefined,
           temporary: temporaryRef.current,
-          referenceSavedMemories: !!isSignedInRef.current && !temporaryRef.current,
+          referenceSavedMemories: getReferenceSavedMemories() && !!isSignedInRef.current && !temporaryRef.current,
           oraProjectId: activeProjectIdRef.current,
           conversationId,
           message: lastUser?.content,

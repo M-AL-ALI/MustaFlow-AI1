@@ -349,6 +349,7 @@ export interface OraMemory {
   title: string;
   content: string;
   enabled: boolean;
+  category: string | null;
   sourceConversationId: number | null;
   oraProjectId: number | null;
   supersededBy: number | null;

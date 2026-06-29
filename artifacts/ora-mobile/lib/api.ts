@@ -55,7 +55,7 @@ import type {
  * getAuthToken() (registered in (home)/_layout.tsx). Pre-auth Ora endpoints
  * (`public-ai/*`) work even when the token is null.
  */
-const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN || "www.mustaflow.com";
+export const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN || "www.mustaflow.com";
 export const API_BASE = `https://${DOMAIN}`;
 
 export class ApiRequestError extends Error {
@@ -607,6 +607,7 @@ export function createMemory(
   title: string,
   content: string,
   oraProjectId?: number | null,
+  category?: string | null,
 ): Promise<unknown> {
   return jsonRequest("/api/ora/memories", {
     method: "POST",
@@ -614,6 +615,7 @@ export function createMemory(
       title,
       content,
       ...(oraProjectId != null ? { oraProjectId } : {}),
+      ...(category ? { category } : {}),
     }),
   });
 }
@@ -654,7 +656,7 @@ export async function saveOraMemory(
 
 export function updateMemory(
   id: number,
-  patch: Partial<Pick<OraMemory, "title" | "content" | "enabled">>,
+  patch: Partial<Pick<OraMemory, "title" | "content" | "enabled" | "category">>,
 ): Promise<unknown> {
   return jsonRequest(`/api/ora/memories/${id}`, {
     method: "PATCH",
@@ -717,6 +719,17 @@ export function moveConversation(id: number, projectId: number | null): Promise<
     method: "PATCH",
     body: JSON.stringify({ projectId }),
   });
+}
+
+export function renameConversation(id: number, title: string): Promise<unknown> {
+  return jsonRequest(`/api/ora/conversations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export function clearAllConversations(): Promise<unknown> {
+  return jsonRequest("/api/ora/conversations", { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------
