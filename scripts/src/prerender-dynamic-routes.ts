@@ -126,28 +126,28 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 async function run(): Promise<void> {
-  // REQUIRE_DYNAMIC_PRERENDER=1 opts any build into strict mode: a missing
-  // DATABASE_URL becomes a hard failure instead of a skip. Set this flag in
-  // all production / deployment pipelines so that gallery detail pages are
-  // guaranteed to have pre-rendered HTML in every published build.
-  const strict = process.env.REQUIRE_DYNAMIC_PRERENDER === "1";
-
+  // DATABASE_URL is required. Dynamic prerendering of /gallery/:slug and
+  // /u/:username pages is mandatory — without it, social bots and AI crawlers
+  // see only a generic shell and get no SEO-meaningful content. A build that
+  // cannot produce prerendered gallery pages is considered incomplete and must
+  // not be published. Set SKIP_DYNAMIC_PRERENDER=1 ONLY in local dev /
+  // DATABASE-less CI environments where you intentionally accept the SEO gap.
   if (!process.env.DATABASE_URL) {
-    if (strict) {
-      console.error(
-        "[prerender-dynamic] FATAL: REQUIRE_DYNAMIC_PRERENDER=1 but DATABASE_URL is not set. " +
-          "Gallery detail pages cannot be pre-rendered without database access. " +
-          "Provide DATABASE_URL or unset REQUIRE_DYNAMIC_PRERENDER to allow a skip.",
+    if (process.env.SKIP_DYNAMIC_PRERENDER === "1") {
+      console.warn(
+        "[prerender-dynamic] WARNING: SKIP_DYNAMIC_PRERENDER=1 — database not available, " +
+          "skipping gallery/profile prerender. Published builds must NOT use this flag: " +
+          "gallery detail pages will have no pre-rendered content for crawlers.",
       );
-      process.exit(1);
+      process.exit(0);
     }
-    console.warn(
-      "[prerender-dynamic] WARNING: DATABASE_URL not set — skipping dynamic gallery/profile " +
-        "prerender. Gallery detail pages will fall back to client-side rendering for this build. " +
-        "Set DATABASE_URL (and REQUIRE_DYNAMIC_PRERENDER=1) before building for production " +
-        "to ensure full SEO coverage.",
+    console.error(
+      "[prerender-dynamic] FATAL: DATABASE_URL is not set. " +
+        "Gallery detail pages cannot be pre-rendered without database access. " +
+        "Provide DATABASE_URL before building, or set SKIP_DYNAMIC_PRERENDER=1 to " +
+        "explicitly accept incomplete SEO coverage (local/dev builds only).",
     );
-    process.exit(0);
+    process.exit(1);
   }
 
   // Prefer the lightweight public entry as template — fewer preloaded chunks.
