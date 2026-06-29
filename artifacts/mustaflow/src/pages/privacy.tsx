@@ -8,7 +8,6 @@ export default function PrivacyPage() {
         title="Privacy Policy"
         description="Learn how MustaFlow AI collects, uses, and protects your data. We are committed to privacy and transparency."
         path="/privacy"
-        noIndex={true}
       />
       <div className="space-y-3">
         <div className="flex items-center gap-3">
