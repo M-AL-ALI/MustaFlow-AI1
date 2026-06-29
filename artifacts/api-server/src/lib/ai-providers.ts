@@ -266,6 +266,14 @@ export interface CreateChatCompletionParams {
   response_format?: { type: "json_object" } | { type: "text" };
   max_completion_tokens?: number;
   signal?: AbortSignal;
+  /**
+   * When true, disables Gemini 3's silent "thinking" phase by setting
+   * thinkingBudget:0. Without this, Gemini 3 Flash Preview consumes the
+   * entire token budget on reasoning, leaving no tokens for the actual reply
+   * (content = "" → null). Mirror of the same flag on StreamChatCompletionParams.
+   * Ignored by all other providers.
+   */
+  disableThinking?: boolean;
 }
 
 /**
@@ -939,6 +947,13 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
   const config: Record<string, any> = {
     maxOutputTokens: params.max_completion_tokens ?? 8192,
   };
+  if (params.disableThinking) {
+    // Gemini 3 Flash Preview uses a silent "thinking" phase that can consume
+    // the entire token budget when max_completion_tokens is low (e.g. 450),
+    // leaving the actual reply empty (content = "" → null → 502). Mirrors the
+    // same flag already used on the streaming path (streamGemini / streamChatCompletion).
+    config.thinkingConfig = { thinkingBudget: 0 };
+  }
   if (systemParts.length > 0) {
     config.systemInstruction = { parts: [{ text: systemParts.join("\n\n") }] };
   }

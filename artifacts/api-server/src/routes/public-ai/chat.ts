@@ -1743,6 +1743,7 @@ router.post("/public-ai/chat", async (req, res) => {
             messages: callMessages,
             response_format: { type: "text" },
             max_completion_tokens: maxTokens,
+            disableThinking: true,
           }),
         (candidate, i, candidateErr) =>
           logger.warn(
