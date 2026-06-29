@@ -357,7 +357,7 @@ export interface OraMemory {
 
 export interface MemoryUsage {
   count: number;
-  cap: number;
+  limit: number;
 }
 
 export interface OraConversationSummary {

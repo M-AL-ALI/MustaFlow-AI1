@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const read = (rel: string) => readFileSync(path.join(__dirname, rel), "utf8");
+const read = (rel: string) =>
+  readFileSync(path.join(__dirname, rel), "utf8").replace(/\r\n/g, "\n");
 
 // ── API layer ──────────────────────────────────────────────────────────────
 
@@ -81,12 +82,21 @@ describe("Ora mobile parity — memory API functions", () => {
     expect(ifaceBody).toContain("supersededBy: number | null");
   });
 
-  it("MemoryUsage type has count and cap fields", () => {
+  it("MemoryUsage type has count and limit fields", () => {
     const ifaceStart = types.indexOf("export interface MemoryUsage {");
     expect(ifaceStart).toBeGreaterThan(-1);
     const ifaceBody = types.slice(ifaceStart, ifaceStart + 120);
     expect(ifaceBody).toContain("count: number");
-    expect(ifaceBody).toContain("cap: number");
+    expect(ifaceBody).toContain("limit: number");
+  });
+
+  it("restoreMemory() sends POST to /api/ora/memories/:id/restore", () => {
+    expect(api).toContain("export function restoreMemory(");
+    const fnStart = api.indexOf("export function restoreMemory(");
+    const fnBody = api.slice(fnStart, fnStart + 200);
+    expect(fnBody).toContain("/api/ora/memories/");
+    expect(fnBody).toContain("/restore");
+    expect(fnBody).toContain('method: "POST"');
   });
 });
 
@@ -128,11 +138,16 @@ describe("Ora mobile parity — memory screen project support", () => {
     expect(compBody).toContain("createMemory(title.trim(), content.trim(), projectId)");
   });
 
-  it("memory screen renders UsageMeter with capacity count and cap", () => {
+  it("memory screen renders UsageMeter with capacity count and limit", () => {
     expect(screen).toContain("function UsageMeter(");
     expect(screen).toContain("usage.count");
-    expect(screen).toContain("usage.cap");
+    expect(screen).toContain("usage.limit");
     expect(screen).toContain("<UsageMeter usage={usage}");
+  });
+
+  it("memory screen uses restoreMemory() (not updateMemory) for superseded restore", () => {
+    expect(screen).toContain("restoreMemory");
+    expect(screen).not.toContain("updateMemory(m.id, { enabled: true })");
   });
 
   it("memory screen shows superseded memories with a Superseded badge", () => {

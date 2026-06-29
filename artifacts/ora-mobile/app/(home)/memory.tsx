@@ -25,6 +25,7 @@ import {
   getMemoryUsage,
   getProfile,
   listMemories,
+  restoreMemory,
   updateMemory,
   updateProfile,
 } from "@/lib/api";
@@ -171,13 +172,13 @@ function ProfileTab() {
 function UsageMeter({ usage }: { usage: MemoryUsage | null }) {
   const c = useColors();
   if (!usage) return null;
-  const pct = Math.min(100, Math.round((usage.count / usage.cap) * 100));
+  const pct = Math.min(100, Math.round((usage.count / usage.limit) * 100));
   return (
     <View style={{ gap: 6 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Memory capacity</Text>
         <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-          {usage.count} / {usage.cap}
+          {usage.count} / {usage.limit}
         </Text>
       </View>
       <View
@@ -260,7 +261,7 @@ function MemoriesTab() {
         prev.map((x) => (x.id === m.id ? { ...x, enabled: true, supersededBy: null } : x)),
       );
       try {
-        await updateMemory(m.id, { enabled: true });
+        await restoreMemory(m.id);
       } catch {
         await reload();
       }
@@ -446,7 +447,7 @@ function ProjectMemoriesTab({ projectId }: { projectId: number }) {
         prev.map((x) => (x.id === m.id ? { ...x, enabled: true, supersededBy: null } : x)),
       );
       try {
-        await updateMemory(m.id, { enabled: true });
+        await restoreMemory(m.id);
       } catch {
         await reload();
       }

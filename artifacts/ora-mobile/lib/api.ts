@@ -666,6 +666,14 @@ export function deleteMemory(id: number): Promise<unknown> {
   return jsonRequest(`/api/ora/memories/${id}`, { method: "DELETE" });
 }
 
+/**
+ * Restore a superseded memory: clears superseded_by and re-enables the row.
+ * PATCH cannot clear superseded_by; the backend exposes a dedicated endpoint.
+ */
+export function restoreMemory(id: number): Promise<unknown> {
+  return jsonRequest(`/api/ora/memories/${id}/restore`, { method: "POST" });
+}
+
 export async function listConversations(): Promise<OraConversationSummary[]> {
   const data = await jsonRequest<{ conversations: OraConversationSummary[] }>(
     "/api/ora/conversations",
