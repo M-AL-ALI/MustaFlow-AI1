@@ -72,6 +72,30 @@ function isNonEnglishLanguage(value: string | undefined): boolean {
 }
 
 /**
+ * Lightweight sync heuristics used by the Instant fast-lane to detect prompts
+ * that carry a special-intent signal and MUST NOT skip the classifier.
+ * Conservative: a false negative (missing intent) just falls through to the
+ * normal classifier path; a false positive is fine (fast-lane is opt-in).
+ */
+function looksLikeImageGenerationIntent(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    /\b(generate|create|draw|make|design|paint|render|show me)\b/.test(m) &&
+    /\b(image|photo|picture|pic|illustration|artwork|logo|icon|avatar|banner|poster)\b/.test(m)
+  );
+}
+function looksLikeWebSearchIntent(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return /\b(search|find online|look up|google|browse|what.{0,5}(latest|current|recent|today|news))\b/.test(
+    m,
+  );
+}
+function looksLikeFileGenIntent(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return /\b(pdf|csv|excel|spreadsheet|docx|pptx|presentation)\b/.test(m);
+}
+
+/**
  * Build the usage fields returned to the client. For signed-in users this
  * reflects current rolling-window message/image usage + reset time; for
  * anonymous visitors it reflects the per-session message counter.
@@ -1135,16 +1159,23 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
 
-  // Await the classifier that was fired in parallel with auth. Most of its
-  // latency is already consumed; this wait is only the remaining gap. For
-  // Instant mode a 500 ms deadline guards against a slow provider — the
-  // premium/high fallback never degrades quality. Deep mode allows 2000 ms.
+  // Instant fast-lane: short, simple prompts with no special-intent signals
+  // skip the classifier await entirely. In production the classifier consistently
+  // takes 2–4 s and always hits the 500 ms deadline — spending 500 ms for zero
+  // routing benefit. Skipping it saves the full timeout from quotaMs; the
+  // classifier keeps running in the background and logs its result for analysis.
+  const isInstantFastLane =
+    mode === "instant" &&
+    message.length <= 120 &&
+    documentRefs.length === 0 &&
+    !looksLikeImageGenerationIntent(message) &&
+    !looksLikeWebSearchIntent(message) &&
+    !looksLikeFileGenIntent(message);
+
   const classifierTimeoutMs = mode === "instant" ? 500 : 2_000;
-  const classifierResult = await withTimeout(
-    classifierPromise,
-    classifierTimeoutMs,
-    CLASSIFIER_FALLBACK,
-  );
+  const classifierResult = isInstantFastLane
+    ? CLASSIFIER_FALLBACK // skip ~500 ms wait; classifier resolved async for logging only
+    : await withTimeout(classifierPromise, classifierTimeoutMs, CLASSIFIER_FALLBACK);
 
   // Route the message through the Ora orchestrator. Ora is a STANDALONE
   // assistant: build/"make me an app" requests are answered as normal
@@ -1547,9 +1578,10 @@ router.post("/public-ai/chat", async (req, res) => {
   // the step-by-step reasoning has room to land. Otherwise fall back to the
   // mini model only when the classifier is highly confident this is a simple FAQ.
   const usesMini =
-    !deepAllowed &&
-    classifierResult.intent === "simple_faq" &&
-    classifierResult.confidence === "high";
+    isInstantFastLane || // fast-lane always routes to the mini/fast model
+    (!deepAllowed &&
+      classifierResult.intent === "simple_faq" &&
+      classifierResult.confidence === "high");
   // The routing tier mirrors the model/token dial above. `openaiModel` is the
   // env-aware OpenAI model the router uses verbatim for its OpenAI candidate.
   const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
@@ -1576,9 +1608,10 @@ router.post("/public-ai/chat", async (req, res) => {
       : [];
 
   // Await the context builders that were started in parallel after auth.
-  // Instant mode applies a 600 ms remaining-budget cap; Deep mode gets 2000 ms.
-  // The builders have been in flight since t2 so most latency is already consumed.
-  const CTX_BUDGET_MS = deepAllowed ? 2_000 : 600;
+  // Deep mode: 2000 ms. Fast-lane: 150 ms (simple prompts need minimal context).
+  // Standard Instant: 300 ms (tightened from 600 ms — memory/profile resolve in
+  // <20 ms in practice, so the cap is rarely the bottleneck).
+  const CTX_BUDGET_MS = deepAllowed ? 2_000 : isInstantFastLane ? 150 : 300;
   const [memory, crossConvContext, profileContext] = await Promise.all([
     withTimeout(earlyMemoryP, CTX_BUDGET_MS, {
       text: "",
@@ -2057,17 +2090,23 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   }
   timing.t3 = Date.now(); // spend-cap check complete
 
-  // Await the classifier that was fired in parallel with auth. Most of its
-  // latency is already consumed; this wait is only the remaining gap between
-  // when auth+spend finished and when the AI call completes. For Instant mode
-  // a 500 ms deadline guards against a slow provider — the premium/high fallback
-  // never degrades quality. Deep mode allows 2000 ms.
+  // Instant fast-lane: short, simple prompts with no special-intent signals
+  // skip the classifier await entirely. In production the classifier consistently
+  // takes 2–4 s and always hits the 500 ms deadline — spending 500 ms for zero
+  // routing benefit. Skipping saves the full classifier timeout from quotaMs;
+  // the classifier keeps running in the background and logs for analysis.
+  const isInstantFastLane =
+    mode === "instant" &&
+    message.length <= 120 &&
+    documentRefs.length === 0 &&
+    !looksLikeImageGenerationIntent(message) &&
+    !looksLikeWebSearchIntent(message) &&
+    !looksLikeFileGenIntent(message);
+
   const classifierTimeoutMsStream = mode === "instant" ? 500 : 2_000;
-  const classifierResult = await withTimeout(
-    classifierPromise,
-    classifierTimeoutMsStream,
-    CLASSIFIER_FALLBACK,
-  );
+  const classifierResult = isInstantFastLane
+    ? CLASSIFIER_FALLBACK // skip ~500 ms wait; classifier resolved async for logging only
+    : await withTimeout(classifierPromise, classifierTimeoutMsStream, CLASSIFIER_FALLBACK);
 
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
@@ -2170,9 +2209,10 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // planTier was computed right after auth resolved (above).
 
   const usesMini =
-    !deepAllowed &&
-    classifierResult.intent === "simple_faq" &&
-    classifierResult.confidence === "high";
+    isInstantFastLane || // fast-lane always routes to the mini/fast model
+    (!deepAllowed &&
+      classifierResult.intent === "simple_faq" &&
+      classifierResult.confidence === "high");
   const routeTier: OraRouteTier = deepAllowed ? "deep" : usesMini ? "fast" : "premium";
   const primaryModel = openAiModelForOraRoute(routeTier, planTier);
   const expertiseProfile = buildOraExpertiseProfile({
@@ -2197,10 +2237,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   // Await the context builders that were started in parallel with auth (above).
   // Instant mode applies a 600 ms remaining-budget cap so a slow DB query does
   // not hold up the first streaming token. The promises have been in flight
-  // since t2, so "600 ms" is the maximum ADDITIONAL wait after routing — not
+  // since t2, so the budget is the maximum ADDITIONAL wait after routing — not
   // an absolute deadline from the start of the request.
-  // Deep mode gets a generous 2000 ms budget (complex reasoning tolerates it).
-  const CTX_BUDGET_MS = deepAllowed ? 2_000 : 600;
+  // Deep mode: 2000 ms. Fast-lane: 150 ms (simple prompts need minimal context).
+  // Standard Instant: 300 ms (tightened from 600 ms — memory/profile resolve in
+  // <20 ms in practice so the cap is rarely the limiting factor).
+  const CTX_BUDGET_MS = deepAllowed ? 2_000 : isInstantFastLane ? 150 : 300;
   const [memory, crossConvContext, profileContext] = await Promise.all([
     withTimeout(earlyMemoryP, CTX_BUDGET_MS, {
       text: "",
