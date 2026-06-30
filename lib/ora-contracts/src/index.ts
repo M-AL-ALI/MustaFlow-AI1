@@ -35,6 +35,10 @@ export const oraGeneratedFileSchema = z
     fileData: z.string().optional(),
     mimeType: z.string(),
     format: z.string(),
+    // Durable library asset id. Unlike `fileData`, this is KEPT through the
+    // transform so a reloaded message can still be downloaded by fetching
+    // /api/ora/assets/:id/download (signed-in users only).
+    assetId: z.number().int().optional(),
   })
   .transform(({ fileData: _fileData, ...rest }) => rest);
 
@@ -176,6 +180,12 @@ export interface GeneratedFile {
   fileData?: string;
   mimeType: string;
   format: FileFormat;
+  /**
+   * Durable library asset id. Present for files generated while signed in.
+   * Survives persistence (bytes do not), so a reloaded message can still be
+   * downloaded via /api/ora/assets/:id/download when `fileData` is absent.
+   */
+  assetId?: number;
 }
 
 /**

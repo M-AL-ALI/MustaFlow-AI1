@@ -91,7 +91,7 @@ vi.mock("../../../lib/public-ai/orchestrator", () => ({
 }));
 
 vi.mock("../../../lib/public-ai/carried-docs", () => ({
-  buildCarriedDocumentContext: vi.fn().mockReturnValue(""),
+  buildCarriedDocumentContext: vi.fn().mockResolvedValue(""),
 }));
 
 vi.mock("../../../lib/public-ai/expertise", () => ({

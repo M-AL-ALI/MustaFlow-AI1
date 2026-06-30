@@ -20,6 +20,7 @@ import {
   MAX_TEXT_CHARS_PER_FILE,
   MAX_TOTAL_CHARS_PER_SESSION,
 } from "../../lib/public-ai/file-store";
+import { persistFileContextBestEffort } from "../../lib/public-ai/file-context-store";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
@@ -303,6 +304,19 @@ router.post(
           mimeType: file.mimetype,
           base64: file.buffer.toString("base64"),
         });
+        // Durable text-only mirror so signed-in users can still reference this
+        // dataset after the in-memory entry expires or the session rotates.
+        persistFileContextBestEffort({
+          userId: authed.userId,
+          fileRef,
+          sessionId: session.sessionId,
+          filename: validation.sanitizedName,
+          mimeType: file.mimetype,
+          fileType: validation.type,
+          extractedText: "",
+          charCount: 0,
+          datasetSummary: summary,
+        });
       }
 
       res.json({
@@ -387,6 +401,18 @@ router.post(
         fileName: validation.sanitizedName,
         mimeType: file.mimetype,
         base64: file.buffer.toString("base64"),
+      });
+      // Durable text-only mirror so signed-in users can still reference this
+      // document after the in-memory entry expires or the session rotates.
+      persistFileContextBestEffort({
+        userId: authed.userId,
+        fileRef,
+        sessionId: session.sessionId,
+        filename: validation.sanitizedName,
+        mimeType: file.mimetype,
+        fileType: validation.type,
+        extractedText: extractedText.slice(0, charCount),
+        charCount,
       });
     }
 

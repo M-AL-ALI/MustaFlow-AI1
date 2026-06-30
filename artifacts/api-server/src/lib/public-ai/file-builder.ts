@@ -25,18 +25,15 @@ import {
   type ProfessionalDocType,
 } from "./professional-doc.js";
 import { PassThrough } from "stream";
-import { createChatCompletion } from "../ai-providers";
 import { logger } from "../logger";
 import { ORA_FILE_COMPLETENESS_ADDENDUM, ORA_IDENTITY_BLOCK, type FileFormat } from "./prompt";
-import {
-  getOraProviderRoutingSnapshot,
-  normalizeOraPlanTier,
-  openAiModelForOraFile,
-  runCandidateChain,
-  selectOraFileModelRoute,
-  type ModelCandidate,
-  type OraPlanTier,
-} from "./model-router";
+// NOTE: AI provider + model-router VALUES are intentionally NOT statically imported.
+// `../ai-providers` constructs an OpenAI client at module load (reading AI env), so a
+// static import would make every importer of this module — including the deliberately
+// AI-free /public-ai/export-file route — fail when AI env is absent. The only function
+// that needs them is `generateFileFromPrompt`, which lazy-imports them at call time.
+// Types are erased at compile time and are safe to import statically.
+import type { ModelCandidate, OraPlanTier } from "./model-router";
 import PptxGenJS from "pptxgenjs";
 
 export type { FileFormat };
@@ -1452,6 +1449,17 @@ export async function generateFileFromPrompt(
   hasSourceData = false,
   subscriptionTier?: string | null,
 ): Promise<GeneratedFileResult> {
+  // Lazy-load AI provider + routing here so this module stays AI-free at import
+  // time (see import note above). Only prompt-based generation needs a model.
+  const { createChatCompletion } = await import("../ai-providers");
+  const {
+    getOraProviderRoutingSnapshot,
+    normalizeOraPlanTier,
+    openAiModelForOraFile,
+    runCandidateChain,
+    selectOraFileModelRoute,
+  } = await import("./model-router");
+
   const isTabular = format === "csv" || format === "xlsx";
   const isPptx = format === "pptx";
   const planTier = normalizeOraPlanTier(subscriptionTier);

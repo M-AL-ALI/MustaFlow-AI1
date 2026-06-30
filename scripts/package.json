@@ -124,6 +124,7 @@
     "migrate-ora-memory-supersede": "tsx ./src/migrate-ora-memory-supersede.ts",
     "migrate-ora-spend-ledger": "tsx ./src/migrate-ora-spend-ledger.ts",
     "migrate-ora-realtime-usage": "tsx ./src/migrate-ora-realtime-usage.ts",
+    "migrate-ora-file-contexts": "tsx ./src/migrate-ora-file-contexts.ts",
     "prerender-dynamic-routes": "tsx ./src/prerender-dynamic-routes.ts",
     "migrate-all-outstanding": "tsx ./src/migrate-all-outstanding.ts",
     "validate-developer-mode": "tsx ./src/validate-developer-mode.ts",

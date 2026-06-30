@@ -3873,6 +3873,39 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-ora-file-contexts ───────────────────────────────────────────────
+  {
+    name: "migrate-ora-file-contexts",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ora_file_contexts (
+          id              SERIAL PRIMARY KEY,
+          user_id         TEXT NOT NULL,
+          file_ref        TEXT NOT NULL,
+          session_id      TEXT NOT NULL,
+          asset_id        INTEGER,
+          filename        TEXT NOT NULL,
+          mime_type       TEXT NOT NULL,
+          file_type       TEXT NOT NULL,
+          extracted_text  TEXT NOT NULL DEFAULT '',
+          char_count      INTEGER NOT NULL DEFAULT 0,
+          dataset_summary JSONB,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_at      TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ora_file_contexts_user_ref_unique ON ora_file_contexts (user_id, file_ref)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS ora_file_contexts_user_id_idx ON ora_file_contexts (user_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

@@ -11,7 +11,7 @@
  * 7. Log safety: forbidden fields are never logged
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
@@ -534,11 +534,29 @@ const VALID_AI_RESPONSE = JSON.stringify({
 
 describe("/api/public-ai/dataset-analysis", () => {
   let app: express.Express;
+  let prevAnthropicBaseUrl: string | undefined;
+  let prevAnthropicApiKey: string | undefined;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     process.env.ORA_SESSION_SECRET = TEST_SECRET;
+    // Make Anthropic an AVAILABLE fallback provider so the candidate chain has a
+    // second candidate after OpenAI. getOraProviderRoutingSnapshot() reads these
+    // env vars at call time; without them only OpenAI is selected and the
+    // invalid-primary-JSON fallback path can never exercise a second provider.
+    // createChatCompletion is mocked, so no real Anthropic call is made.
+    prevAnthropicBaseUrl = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+    prevAnthropicApiKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+    process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL = "https://anthropic.test";
+    process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = "test-anthropic-key";
     app = await buildApp();
+  });
+
+  afterEach(() => {
+    if (prevAnthropicBaseUrl === undefined) delete process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+    else process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL = prevAnthropicBaseUrl;
+    if (prevAnthropicApiKey === undefined) delete process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+    else process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = prevAnthropicApiKey;
   });
 
   it("returns 401 with no session cookie", async () => {
@@ -704,6 +722,9 @@ describe("/api/public-ai/dataset-analysis", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.result.usedFallback).toBe(true);
+    // Proves the chain actually advanced to the second (fallback) candidate after
+    // the primary returned invalid JSON, rather than 502-ing on a single candidate.
+    expect(vi.mocked(createChatCompletion)).toHaveBeenCalledTimes(2);
   });
 
   it("returns 429 when session message limit is reached", async () => {

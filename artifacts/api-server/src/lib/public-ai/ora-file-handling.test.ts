@@ -147,7 +147,7 @@ describe("buildDatasetContextBlock — sheet awareness", () => {
 });
 
 describe("buildCarriedDocumentContext — datasets are carried", () => {
-  it("renders a dataset upload (empty extractedText) via its summary", () => {
+  it("renders a dataset upload (empty extractedText) via its summary", async () => {
     const sessionId = "sess-dataset-1";
     const ref = storeFile({
       sessionId,
@@ -158,7 +158,7 @@ describe("buildCarriedDocumentContext — datasets are carried", () => {
       datasetSummary: makeSummary(),
     });
 
-    const ctx = buildCarriedDocumentContext([ref], sessionId, "make a CSV from this");
+    const ctx = await buildCarriedDocumentContext([ref], sessionId, "make a CSV from this");
     expect(ctx).toContain("[ATTACHED FILES");
     expect(ctx).toContain("sales.xlsx");
     // Real header values from the dataset summary must be present.
@@ -166,7 +166,7 @@ describe("buildCarriedDocumentContext — datasets are carried", () => {
     expect(ctx).toContain("Amount");
   });
 
-  it("carries a plain-text document via extractedText", () => {
+  it("carries a plain-text document via extractedText", async () => {
     const sessionId = "sess-doc-1";
     const ref = storeFile({
       sessionId,
@@ -176,12 +176,12 @@ describe("buildCarriedDocumentContext — datasets are carried", () => {
       charCount: 30,
     });
 
-    const ctx = buildCarriedDocumentContext([ref], sessionId);
+    const ctx = await buildCarriedDocumentContext([ref], sessionId);
     expect(ctx).toContain("notes.txt");
     expect(ctx).toContain("quarterly revenue was 1.2M");
   });
 
-  it("returns empty string when refs belong to another session", () => {
+  it("returns empty string when refs belong to another session", async () => {
     const ref = storeFile({
       sessionId: "owner-session",
       filename: "secret.txt",
@@ -189,11 +189,11 @@ describe("buildCarriedDocumentContext — datasets are carried", () => {
       extractedText: "private",
       charCount: 7,
     });
-    expect(buildCarriedDocumentContext([ref], "different-session")).toBe("");
+    expect(await buildCarriedDocumentContext([ref], "different-session")).toBe("");
   });
 
-  it("returns empty string for no refs", () => {
-    expect(buildCarriedDocumentContext([], "any")).toBe("");
+  it("returns empty string for no refs", async () => {
+    expect(await buildCarriedDocumentContext([], "any")).toBe("");
   });
 });
 

@@ -1191,7 +1191,12 @@ router.post("/public-ai/chat", async (req, res) => {
   // Re-hydrate any documents the user uploaded earlier this conversation so
   // follow-up questions ("what did that file say?") and "make a summary of it"
   // both have the source text. Empty when nothing resolves (expired/foreign).
-  const carriedDocs = buildCarriedDocumentContext(documentRefs, session.sessionId, message);
+  const carriedDocs = await buildCarriedDocumentContext(
+    documentRefs,
+    session.sessionId,
+    message,
+    authed?.userId ?? null,
+  );
 
   // Plan gating is derived entirely from the selected tool's required access
   // level. Denied requests return a CTA without charging or counting them.
@@ -1290,37 +1295,38 @@ router.post("/public-ai/chat", async (req, res) => {
       const { token, payload } = chargeSession(session, streamFallbackToken);
       setSessionCookie(res, token);
       const usage = await oraUsageResponse(authed, payload.msgCount);
+      // Persist to the durable asset library BEFORE responding so the returned
+      // asset id can ride on the download card (keeping it usable after reload
+      // and on other devices). Best-effort — a library failure must never break
+      // the in-chat generation. Only for signed-in users.
+      let assetId: number | null = null;
+      if (authed && result.fileData) {
+        try {
+          const { persistOraAsset } = await import("../../lib/ora-assets");
+          assetId = await persistOraAsset({
+            userId: authed.userId,
+            kind: "file",
+            fileName: result.fileName,
+            mimeType: result.mimeType,
+            format: detectedFormat,
+            prompt: message,
+            base64: result.fileData,
+          });
+        } catch (persistErr) {
+          logger.error(
+            { component: "ora-chat-file", err: persistErr },
+            "Failed to persist generated file to asset library",
+          );
+        }
+      }
       res.json({
         reply: result.reply,
         fileName: result.fileName,
         fileData: result.fileData,
         mimeType: result.mimeType,
+        ...(assetId != null ? { assetId } : {}),
         ...usage,
       });
-      // Persist to the durable asset library (best-effort, after the response so
-      // it never adds latency) so the generated file survives chat resets,
-      // reloads, and other devices. Only for signed-in users.
-      if (authed && result.fileData) {
-        void (async () => {
-          try {
-            const { persistOraAsset } = await import("../../lib/ora-assets");
-            await persistOraAsset({
-              userId: authed.userId,
-              kind: "file",
-              fileName: result.fileName,
-              mimeType: result.mimeType,
-              format: detectedFormat,
-              prompt: message,
-              base64: result.fileData,
-            });
-          } catch (persistErr) {
-            logger.error(
-              { component: "ora-chat-file", err: persistErr },
-              "Failed to persist generated file to asset library",
-            );
-          }
-        })();
-      }
     } catch (err) {
       await refundOraQuotaFor(authed, quotaKind);
       logger.error(
@@ -2130,7 +2136,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   });
   const deepAllowed = decision.tool === "deep_thinking";
 
-  const carriedDocs = buildCarriedDocumentContext(documentRefs, session.sessionId, message);
+  const carriedDocs = await buildCarriedDocumentContext(
+    documentRefs,
+    session.sessionId,
+    message,
+    authed?.userId ?? null,
+  );
 
   const access = checkToolAccess(decision.tool, {
     authed: !!authed,

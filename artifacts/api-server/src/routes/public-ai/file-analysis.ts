@@ -6,7 +6,7 @@ import {
   setSessionCookie,
   MSG_LIMIT_VALUE,
 } from "../../lib/public-ai/session";
-import { getFile } from "../../lib/public-ai/file-store";
+import { resolveFileEntry } from "../../lib/public-ai/file-context-store";
 import { scanUserInput, ORA_SYSTEM_PROMPT } from "../../lib/public-ai/prompt";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
 import {
@@ -154,7 +154,10 @@ router.post("/public-ai/file-analysis", async (req, res) => {
     return;
   }
 
-  const fileEntry = getFile(fileRef, session.sessionId);
+  const fileEntry = await resolveFileEntry(fileRef, {
+    sessionId: session.sessionId,
+    userId: authed?.userId ?? null,
+  });
   if (!fileEntry) {
     res.status(404).json({
       error: "This file is no longer available. It may have expired. Please upload it again.",

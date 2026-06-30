@@ -100,6 +100,26 @@ function downloadOraFile(file: GeneratedFile) {
   }, 2000);
 }
 
+// Download a durable library asset by id (reloaded messages drop the inline
+// bytes but keep the asset id). authFetch attaches the bearer token so the
+// owner-scoped /download route authorizes the request.
+async function downloadOraAssetById(assetId: number, fileName: string) {
+  const res = await authFetch(`/api/ora/assets/${assetId}/download?download=1`);
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 2000);
+}
+
 const FILE_FORMAT_OPTIONS: { value: FileFormat; label: string; ext: string }[] = [
   { value: "csv", label: "CSV Spreadsheet", ext: ".csv" },
   { value: "xlsx", label: "Excel (.xlsx)", ext: ".xlsx" },
@@ -1518,6 +1538,33 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                       <button
                         type="button"
                         onClick={() => downloadOraFile(msg.generatedFile!)}
+                        className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.06)] hover:bg-[hsl(var(--ora-accent-hsl)/0.12)] hover:border-[hsl(var(--ora-accent-hsl)/0.55)] px-3.5 py-3 transition-all cursor-pointer"
+                      >
+                        <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--ora-accent-hsl)/0.15)]">
+                          <FileSpreadsheet className="h-4.5 w-4.5 text-[hsl(var(--ora-accent-hsl))]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate text-foreground">
+                            {msg.generatedFile.fileName}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            {msg.generatedFile.format.toUpperCase()} · Click to download
+                          </p>
+                        </div>
+                        <Download className="h-4 w-4 text-[hsl(var(--ora-accent-hsl))] shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                    ) : msg.generatedFile.assetId != null ? (
+                      // Reloaded message with a durable library asset: the inline
+                      // bytes are gone, but the file is still downloadable via its
+                      // asset id.
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadOraAssetById(
+                            msg.generatedFile!.assetId!,
+                            msg.generatedFile!.fileName,
+                          )
+                        }
                         className="mt-2 w-full text-left group flex items-center gap-3 rounded-xl border border-[hsl(var(--ora-accent-hsl)/0.35)] bg-[hsl(var(--ora-accent-hsl)/0.06)] hover:bg-[hsl(var(--ora-accent-hsl)/0.12)] hover:border-[hsl(var(--ora-accent-hsl)/0.55)] px-3.5 py-3 transition-all cursor-pointer"
                       >
                         <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--ora-accent-hsl)/0.15)]">

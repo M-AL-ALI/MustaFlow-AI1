@@ -257,6 +257,7 @@ export interface ChatResponse {
   fileName?: string;
   fileData?: string;
   mimeType?: string;
+  assetId?: number;
   imageUrl?: string;
   imageId?: number;
   memorySaveCandidate?: string;

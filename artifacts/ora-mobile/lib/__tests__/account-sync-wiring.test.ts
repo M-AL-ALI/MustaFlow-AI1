@@ -176,6 +176,31 @@ describe("Mobile auth-stability guard", () => {
     expect(api).toContain("pathRequiresAuth(path) ? authHeadersRequired : authHeaders");
   });
 
+  it("pathRequiresAuth covers every Ora file create/read/analysis route", () => {
+    const pathRequiresAuthFn = api.slice(
+      api.indexOf("function pathRequiresAuth("),
+      api.indexOf("function pathRequiresAuth(") + 1200,
+    );
+    // A signed-in user must fail closed (bearer attached or TokenUnavailableError),
+    // never silently upload/analyze/export as anonymous. Anonymous users still work
+    // because requireAuthToken() returns null when signed out.
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/upload"');
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/file-analysis"');
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/dataset-analysis"');
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/image-analysis"');
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/export-file"');
+    expect(pathRequiresAuthFn).toContain('"/api/public-ai/generate-file"');
+  });
+
+  it("uploadFile (multipart, bypasses jsonRequest) uses authHeadersRequired", () => {
+    const fnStart = api.indexOf("export async function uploadFile(");
+    expect(fnStart).toBeGreaterThan(-1);
+    const nextExport = api.indexOf("\nexport ", fnStart + 1);
+    const fnBody = nextExport > fnStart ? api.slice(fnStart, nextExport) : api.slice(fnStart);
+    expect(fnBody).toContain("authHeadersRequired");
+    expect(fnBody).not.toMatch(/await authHeaders\(/);
+  });
+
   it("streamChatNative uses authHeadersRequired (not plain authHeaders)", () => {
     const streamFnStart = api.indexOf("export async function streamChatNative(");
     expect(streamFnStart).toBeGreaterThan(-1);

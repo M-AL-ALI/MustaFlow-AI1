@@ -123,23 +123,23 @@ describe("file-store cross-session isolation", () => {
 // ── 2. File carryover (text documents) ───────────────────────────────────────
 
 describe("buildCarriedDocumentContext — text file carryover", () => {
-  it("returns empty string when refs list is empty", () => {
-    expect(buildCarriedDocumentContext([], makeSession())).toBe("");
+  it("returns empty string when refs list is empty", async () => {
+    expect(await buildCarriedDocumentContext([], makeSession())).toBe("");
   });
 
-  it("returns empty string when the ref belongs to a different session", () => {
+  it("returns empty string when the ref belongs to a different session", async () => {
     const ownerSession = makeSession();
     const ref = storeText(ownerSession, "notes.txt", "important notes");
     const otherSession = makeSession();
 
-    expect(buildCarriedDocumentContext([ref], otherSession)).toBe("");
+    expect(await buildCarriedDocumentContext([ref], otherSession)).toBe("");
   });
 
-  it("returns formatted block containing the file content", () => {
+  it("returns formatted block containing the file content", async () => {
     const session = makeSession();
     const ref = storeText(session, "report.txt", "quarterly earnings: 42");
 
-    const result = buildCarriedDocumentContext([ref], session);
+    const result = await buildCarriedDocumentContext([ref], session);
 
     expect(result).toContain("quarterly earnings: 42");
     expect(result).toContain("File: report.txt");
@@ -147,11 +147,11 @@ describe("buildCarriedDocumentContext — text file carryover", () => {
     expect(result).toContain("[END OF ATTACHED FILES]");
   });
 
-  it("neutralises triple-quote delimiters in file content", () => {
+  it("neutralises triple-quote delimiters in file content", async () => {
     const session = makeSession();
     const ref = storeText(session, "sneaky.txt", 'say """ and escape');
 
-    const result = buildCarriedDocumentContext([ref], session);
+    const result = await buildCarriedDocumentContext([ref], session);
 
     // The raw """ must not appear unescaped inside the block.
     // The sanitiser inserts a zero-width space: " \u200b"" ".
@@ -159,12 +159,12 @@ describe("buildCarriedDocumentContext — text file carryover", () => {
     expect(result).toContain("\u200b");
   });
 
-  it("respects the character budget (MAX_CARRIED_DOC_CHARS)", () => {
+  it("respects the character budget (MAX_CARRIED_DOC_CHARS)", async () => {
     const session = makeSession();
     const bigText = "x".repeat(MAX_CARRIED_DOC_CHARS + 5_000);
     const ref = storeText(session, "huge.txt", bigText);
 
-    const result = buildCarriedDocumentContext([ref], session);
+    const result = await buildCarriedDocumentContext([ref], session);
 
     // The output itself must not exceed budget + reasonable overhead.
     expect(result.length).toBeLessThan(MAX_CARRIED_DOC_CHARS + 500);
@@ -174,7 +174,7 @@ describe("buildCarriedDocumentContext — text file carryover", () => {
 // ── 3. Dataset carryover ─────────────────────────────────────────────────────
 
 describe("buildCarriedDocumentContext — dataset file carryover", () => {
-  it("uses datasetSummary when extractedText is empty", () => {
+  it("uses datasetSummary when extractedText is empty", async () => {
     const session = makeSession();
     const ref = storeFile({
       sessionId: session,
@@ -215,14 +215,14 @@ describe("buildCarriedDocumentContext — dataset file carryover", () => {
       },
     });
 
-    const result = buildCarriedDocumentContext([ref], session);
+    const result = await buildCarriedDocumentContext([ref], session);
 
     expect(result).toContain("sales.csv");
     expect(result).toContain("100");
     expect(result).toContain("[ATTACHED FILES");
   });
 
-  it("skips an entry whose extractedText and datasetSummary are both absent", () => {
+  it("skips an entry whose extractedText and datasetSummary are both absent", async () => {
     const session = makeSession();
     const ref = storeFile({
       sessionId: session,
@@ -232,19 +232,19 @@ describe("buildCarriedDocumentContext — dataset file carryover", () => {
       charCount: 0,
     });
 
-    expect(buildCarriedDocumentContext([ref], session)).toBe("");
+    expect(await buildCarriedDocumentContext([ref], session)).toBe("");
   });
 });
 
 // ── 4. Multi-file directory header ────────────────────────────────────────────
 
 describe("buildCarriedDocumentContext — multi-file directory", () => {
-  it("includes a numbered directory when 2 files resolve", () => {
+  it("includes a numbered directory when 2 files resolve", async () => {
     const session = makeSession();
     const ref1 = storeText(session, "report.pdf", "annual report content");
     const ref2 = storeText(session, "data.csv", "col1,col2\n1,2");
 
-    const result = buildCarriedDocumentContext([ref1, ref2], session);
+    const result = await buildCarriedDocumentContext([ref1, ref2], session);
 
     expect(result).toContain("[1]");
     expect(result).toContain("[2]");
@@ -254,22 +254,22 @@ describe("buildCarriedDocumentContext — multi-file directory", () => {
     expect(result).toContain("Use the correct one based on context");
   });
 
-  it("includes both file blocks in the output when 2 files are present", () => {
+  it("includes both file blocks in the output when 2 files are present", async () => {
     const session = makeSession();
     const ref1 = storeText(session, "a.txt", "alpha content");
     const ref2 = storeText(session, "b.txt", "beta content");
 
-    const result = buildCarriedDocumentContext([ref1, ref2], session);
+    const result = await buildCarriedDocumentContext([ref1, ref2], session);
 
     expect(result).toContain("alpha content");
     expect(result).toContain("beta content");
   });
 
-  it("does NOT include a numbered directory for a single file", () => {
+  it("does NOT include a numbered directory for a single file", async () => {
     const session = makeSession();
     const ref = storeText(session, "solo.txt", "only file");
 
-    const result = buildCarriedDocumentContext([ref], session);
+    const result = await buildCarriedDocumentContext([ref], session);
 
     expect(result).not.toContain("[1]");
     expect(result).not.toContain("Use the correct one based on context");

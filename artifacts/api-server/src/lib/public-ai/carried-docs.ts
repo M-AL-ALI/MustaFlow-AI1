@@ -9,7 +9,7 @@
  * Used by both the chat route (follow-up Q&A + auto-detected file generation)
  * and the standalone /generate-file route, so the two paths behave identically.
  */
-import { getFile } from "./file-store.js";
+import { resolveFileEntry } from "./file-context-store.js";
 import { buildDatasetContextBlock } from "./dataset-prompt.js";
 
 // Char budget for re-injected document context so a few large uploads can't
@@ -29,18 +29,21 @@ export const MAX_CARRIED_DOC_CHARS = 12_000;
  * to another session). The honesty prompt covers the "I no longer have that
  * file" case when nothing resolves.
  */
-export function buildCarriedDocumentContext(
+export async function buildCarriedDocumentContext(
   refs: string[],
   sessionId: string,
   userQuestion = "",
-): string {
+  userId?: string | null,
+): Promise<string> {
   if (refs.length === 0) return "";
   const blocks: string[] = [];
   let used = 0;
   // Newest refs first so the most recent uploads win the char budget.
   for (const ref of [...refs].reverse()) {
     if (used >= MAX_CARRIED_DOC_CHARS) break;
-    const entry = getFile(ref, sessionId);
+    // Memory first (fast, session-scoped); then the durable DB mirror for
+    // signed-in users so an expired/rotated session still resolves their file.
+    const entry = await resolveFileEntry(ref, { sessionId, userId });
     if (!entry) continue;
 
     let text = entry.extractedText?.trim() ?? "";

@@ -167,7 +167,17 @@ function pathRequiresAuth(path: string): boolean {
     path === "/api/public-ai/session" ||
     path === "/api/public-ai/chat" ||
     path === "/api/public-ai/usage" ||
-    path.startsWith("/api/public-ai/realtime/session")
+    path.startsWith("/api/public-ai/realtime/session") ||
+    // File create/read/analysis routes: a signed-in user must attach a bearer so
+    // the request is metered + persisted under their account, never silently as
+    // anonymous. requireAuthToken() still returns null for truly signed-out
+    // users, so anonymous uploads/exports keep working.
+    path === "/api/public-ai/upload" ||
+    path === "/api/public-ai/file-analysis" ||
+    path === "/api/public-ai/dataset-analysis" ||
+    path === "/api/public-ai/image-analysis" ||
+    path === "/api/public-ai/export-file" ||
+    path === "/api/public-ai/generate-file"
   );
 }
 
@@ -311,6 +321,41 @@ export function sendChat(req: ChatRequest): Promise<ChatResponse> {
   return jsonRequest<ChatResponse>("/api/public-ai/chat", {
     method: "POST",
     body: JSON.stringify(req),
+  });
+}
+
+export interface GenerateFileRequest {
+  /** The user's current-turn request describing the file to create. */
+  message: string;
+  /** Recent conversation history for context (server caps at 20). */
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  format: FileFormat;
+  language?: string;
+  /**
+   * UUID refs of documents/datasets uploaded earlier this conversation. When
+   * present the server re-hydrates their real content so creation transforms
+   * actual data instead of fabricating it. Server caps at 5.
+   */
+  documentRefs?: string[];
+}
+
+/**
+ * Ask Ora to author a brand-new file (csv/xlsx/docx/pdf/pptx) from a prompt.
+ * Mirrors the website "Create file" flow. Returns the same shape as a chat
+ * reply: a short `reply` plus the generated file's bytes and, for signed-in
+ * users, a durable `assetId` so the download card survives a reload. Draws on
+ * the rolling-window message quota (server-enforced).
+ */
+export function generateFile(req: GenerateFileRequest): Promise<ChatResponse> {
+  return jsonRequest<ChatResponse>("/api/public-ai/generate-file", {
+    method: "POST",
+    body: JSON.stringify({
+      message: req.message,
+      messages: req.messages,
+      format: req.format,
+      ...(req.language ? { language: req.language } : {}),
+      documentRefs: req.documentRefs ?? [],
+    }),
   });
 }
 
@@ -480,7 +525,10 @@ export async function uploadFile(file: {
     name: file.name,
     type: file.type,
   } as unknown as Blob);
-  const headers = await authHeaders();
+  // Multipart upload bypasses jsonRequest(), so it must opt into the same
+  // fail-closed auth as the other file routes in pathRequiresAuth(): a signed-in
+  // user with a temporarily-missing token throws instead of uploading as anon.
+  const headers = await authHeadersRequired();
   const res = await fetchOrThrow(url("/api/public-ai/upload"), {
     method: "POST",
     body: form,

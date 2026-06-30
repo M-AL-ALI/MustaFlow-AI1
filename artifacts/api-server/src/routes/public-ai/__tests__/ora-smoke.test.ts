@@ -148,6 +148,10 @@ const fileBuilderMock = vi.hoisted(() => ({
   })),
 }));
 
+const assetsMock = vi.hoisted(() => ({
+  persistOraAsset: vi.fn(async (): Promise<number | null> => 1),
+}));
+
 const imageMock = vi.hoisted(() => ({
   generateImage: vi.fn(async () => ({
     openaiUrl: "data:image/png;base64,aW1hZ2U=",
@@ -177,6 +181,12 @@ const usageMock = vi.hoisted(() => ({
     windowStart: null,
     resetsAt: null,
   })),
+  oraMessageFields: vi.fn(
+    async (authed: { userId: string; tier: string } | null, sessionMsgCount: number) =>
+      authed
+        ? { msgCount: 1, msgLimit: 100, resetsAt: null }
+        : { msgCount: sessionMsgCount, msgLimit: 50, resetsAt: null },
+  ),
 }));
 
 // ─── vi.mock declarations ─────────────────────────────────────────────────────
@@ -218,7 +228,7 @@ vi.mock("../../../lib/image-provider", () => ({
 }));
 
 vi.mock("../../../lib/ora-assets", () => ({
-  persistOraAsset: vi.fn(async () => 1),
+  persistOraAsset: assetsMock.persistOraAsset,
   parseDataUri: (value: string) => {
     const match = value.match(/^data:([^;]+);base64,(.+)$/);
     return match ? { mimeType: match[1], base64: match[2] } : null;
@@ -382,6 +392,17 @@ async function buildTranscribeApp() {
   app.use(cookieParser());
   app.use(express.json());
   const router = (await import("../transcribe")).default;
+  app.use(router);
+  return app;
+}
+
+async function buildGenerateFileApp() {
+  process.env.ORA_SESSION_SECRET = TEST_SECRET;
+  process.env.PUBLIC_AI_ENABLED = "true";
+  const app = express();
+  app.use(cookieParser());
+  app.use(express.json());
+  const router = (await import("../generate-file")).default;
   app.use(router);
   return app;
 }
@@ -1157,5 +1178,86 @@ describe("k) Frontend wiring — authFetch, STT→input, TTS auto-speak dedup, s
   it("use-ora-chat server transcript restore is guarded by transcriptRestoredRef (no double-fetch)", () => {
     expect(oraChat).toContain("transcriptRestoredRef");
     expect(oraChat).toMatch(/transcriptRestoredRef\.current\s*=\s*true/);
+  });
+});
+
+// ─── n) Explicit file generation — POST /public-ai/generate-file ──────────────
+
+describe("n) Explicit file generation — POST /public-ai/generate-file", () => {
+  let app: express.Express;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    authState.user = null;
+    app = await buildGenerateFileApp();
+  });
+
+  it("returns 401 when ora-session cookie is absent", async () => {
+    const res = await request(app)
+      .post("/public-ai/generate-file")
+      .send({ message: "Make a CSV", format: "csv", messages: [] });
+
+    expect(res.status).toBe(401);
+    expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for an unsupported format", async () => {
+    const res = await request(app)
+      .post("/public-ai/generate-file")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Make a thing", format: "txt", messages: [] });
+
+    expect(res.status).toBe(400);
+    expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
+  });
+
+  it("generates a file and surfaces assetId for a signed-in user", async () => {
+    authState.user = { userId: "gen-user-1", tier: "core", isPaid: true };
+
+    const res = await request(app)
+      .post("/public-ai/generate-file")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Make a CSV of my data", format: "csv", messages: [] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.fileName).toMatch(/\.csv$/);
+    expect(res.body.fileData).toBeTruthy();
+    expect(res.body.mimeType).toBe("text/csv");
+    expect(res.body.assetId).toBe(1);
+    expect(assetsMock.persistOraAsset).toHaveBeenCalledTimes(1);
+    expect(usageMock.consumeOraQuota).toHaveBeenCalledWith("gen-user-1", "core", "message");
+  });
+
+  it("still returns the file (200, no assetId) when durable persistence fails — best-effort", async () => {
+    authState.user = { userId: "gen-user-2", tier: "core", isPaid: true };
+    assetsMock.persistOraAsset.mockRejectedValueOnce(new Error("R2/library outage"));
+
+    const res = await request(app)
+      .post("/public-ai/generate-file")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Make a CSV of my data", format: "csv", messages: [] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.fileName).toMatch(/\.csv$/);
+    expect(res.body.fileData).toBeTruthy();
+    expect(res.body.assetId).toBeUndefined();
+    // The persist WAS attempted (and threw) — best-effort, not silently skipped.
+    expect(assetsMock.persistOraAsset).toHaveBeenCalledTimes(1);
+    // A failed persist must NOT refund the message quota — the user got the file.
+    expect(usageMock.refundOraQuota).not.toHaveBeenCalled();
+  });
+
+  it("does NOT persist an asset for an anonymous visitor (file still generated)", async () => {
+    authState.user = null;
+
+    const res = await request(app)
+      .post("/public-ai/generate-file")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Make a CSV of my data", format: "csv", messages: [] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.fileData).toBeTruthy();
+    expect(res.body.assetId).toBeUndefined();
+    expect(assetsMock.persistOraAsset).not.toHaveBeenCalled();
   });
 });

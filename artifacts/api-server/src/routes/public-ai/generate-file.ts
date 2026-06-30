@@ -121,7 +121,12 @@ router.post("/public-ai/generate-file", async (req, res) => {
   // Re-hydrate any uploaded documents/datasets so the file is built from the
   // user's real data. Empty when nothing resolves (expired/foreign refs); in
   // that case generation falls back to its non-source-data behavior.
-  const carriedDocs = buildCarriedDocumentContext(documentRefs, session.sessionId, message);
+  const carriedDocs = await buildCarriedDocumentContext(
+    documentRefs,
+    session.sessionId,
+    message,
+    authed?.userId ?? null,
+  );
   const filePrompt = carriedDocs ? `${message}\n\n${carriedDocs}` : message;
   const hasSourceData = carriedDocs.length > 0;
 
@@ -141,18 +146,33 @@ router.post("/public-ai/generate-file", async (req, res) => {
     );
 
     // Persist to the durable asset library for signed-in users so the file
-    // survives chat resets, reloads, and other devices. Best-effort.
+    // survives chat resets, reloads, and other devices. Best-effort — a library
+    // failure must never break generation. The returned asset id is surfaced on
+    // the response so the download card stays usable after reload.
+    let assetId: number | null = null;
     if (authed) {
-      const { persistOraAsset } = await import("../../lib/ora-assets");
-      await persistOraAsset({
-        userId: authed.userId,
-        kind: "file",
-        fileName: result.fileName,
-        mimeType: result.mimeType,
-        format,
-        prompt: message,
-        base64: result.fileData,
-      });
+      try {
+        const { persistOraAsset } = await import("../../lib/ora-assets");
+        assetId = await persistOraAsset({
+          userId: authed.userId,
+          kind: "file",
+          fileName: result.fileName,
+          mimeType: result.mimeType,
+          format,
+          prompt: message,
+          base64: result.fileData,
+        });
+      } catch (assetErr) {
+        // Durable-library persistence is a bonus, not a requirement. A failure
+        // here (DB/R2/library outage) must never break file creation: keep
+        // assetId null and still return the freshly generated inline bytes, which
+        // remain downloadable for this session. Do NOT fall through to the outer
+        // catch (that refunds quota and 500s a file the user actually received).
+        logger.warn(
+          { component: "ora-generate-file", format, err: assetErr },
+          "Durable asset persistence failed; returning inline file without assetId",
+        );
+      }
     }
 
     const { token, payload } = incrementMessageCount(session);
@@ -174,6 +194,7 @@ router.post("/public-ai/generate-file", async (req, res) => {
       fileName: result.fileName,
       fileData: result.fileData,
       mimeType: result.mimeType,
+      ...(assetId != null ? { assetId } : {}),
       ...usage,
     });
   } catch (err) {

@@ -30,6 +30,7 @@ import {
   ExternalLink,
   FileDown,
   FileJson,
+  FilePlus2,
   FileSpreadsheet,
   FileText,
   Presentation,
@@ -114,6 +115,7 @@ import {
   deleteProject,
   editImage,
   exportFile,
+  generateFile,
   getConversation,
   getOraSession,
   getPreferences,
@@ -341,6 +343,9 @@ function buildGeneratedFile(res: ChatResponse): GeneratedFile | undefined {
     fileData: res.fileData,
     mimeType: res.mimeType,
     format: detectFileFormat(res.fileName, res.mimeType),
+    // Carried so a reloaded message (bytes dropped) can still download via the
+    // durable library asset.
+    ...(res.assetId != null ? { assetId: res.assetId } : {}),
   };
 }
 
@@ -410,7 +415,14 @@ export default function OraChatScreen() {
   // before it ever creates/plays an audio player (no TTS after backgrounding).
   const speakGenRef = useRef(0);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showGenerateFile, setShowGenerateFile] = useState(false);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  // UUID refs of documents/datasets uploaded this conversation. The server
+  // re-hydrates their real content during file creation so a generated file is
+  // built from the user's actual data instead of fabricated values. Cleared on
+  // every context switch (new chat, temporary toggle, conversation load) since
+  // refs are session-scoped. Capped at the server's max (5, most recent first).
+  const documentRefsRef = useRef<string[]>([]);
   const router = useRouter();
   const [actionsMessage, setActionsMessage] = useState<OraMessage | null>(null);
 
@@ -1095,6 +1107,72 @@ export default function OraChatScreen() {
     await sendMessage(text, attch);
   }, [input, attachment, sending, sendMessage]);
 
+  // Author a brand-new file (csv/xlsx/docx/pdf/pptx) from a prompt via the
+  // "Create file" sheet. Mirrors the website Create-file flow: append the user's
+  // request and a pending assistant turn, call the dedicated generate-file
+  // endpoint (re-hydrating any uploaded source data), then settle the reply with
+  // a downloadable generated-file card. Generation is non-streaming.
+  const handleGenerateFile = useCallback(
+    async (prompt: string, format: FileFormat) => {
+      const text = prompt.trim();
+      if (!text || sending) return;
+      setShowGenerateFile(false);
+
+      const turnIsTemporary = temporary;
+      const userMsg: OraMessage = { id: uid(), role: "user", content: text };
+      const pendingId = uid();
+      const pendingMsg: OraMessage = {
+        id: pendingId,
+        role: "assistant",
+        content: "",
+        pending: true,
+      };
+      const history = messages
+        .filter((m) => !m.pending && !m.error)
+        .slice(-20)
+        .map((m) => ({ role: m.role, content: m.content }));
+      const next = [...messages, userMsg, pendingMsg];
+      setMessages(next);
+      setSending(true);
+      scrollToEnd();
+
+      try {
+        const res = await generateFile({
+          message: text,
+          messages: history,
+          format,
+          language: language !== "auto" ? language : undefined,
+          documentRefs: documentRefsRef.current,
+        });
+        const assistant: OraMessage = {
+          id: pendingId,
+          role: "assistant",
+          content: res.reply,
+          ...buildChatExtras(res),
+        };
+        if (res.msgCount != null && res.msgLimit != null) {
+          setSession((s) => (s ? { ...s, msgCount: res.msgCount!, msgLimit: res.msgLimit! } : s));
+        }
+        const finalMsgs = next.map((m) => (m.id === pendingId ? assistant : m));
+        setMessages(finalMsgs);
+        scrollToEnd();
+        void persist(finalMsgs, turnIsTemporary);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Couldn't create that file. Try again.";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === pendingId
+              ? { ...m, pending: false, isStreaming: false, error: true, content: msg }
+              : m,
+          ),
+        );
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, messages, temporary, language, scrollToEnd, persist],
+  );
+
   // Tapping a follow-up suggestion chip sends it as the next message.
   const handleSuggestion = useCallback((text: string) => {
     const clean = text.trim();
@@ -1534,9 +1612,19 @@ export default function OraChatScreen() {
         const res = await uploadFile({ uri: file.uri, name: file.name, type: file.type });
         const ref = res.imageRef ?? res.fileRef;
         if (!ref) throw new Error("Upload failed");
+        const kind = attachmentKind(res.fileType, isImage || res.kind === "image");
+        // Remember document/dataset refs so a later "Create file" can build from
+        // the user's real uploaded data. Images carry no extractable text, so
+        // they're excluded. Keep the 5 most recent (server cap), newest first.
+        if (kind === "document" || kind === "dataset") {
+          documentRefsRef.current = [
+            ref,
+            ...documentRefsRef.current.filter((r) => r !== ref),
+          ].slice(0, 5);
+        }
         setAttachment({
           ref,
-          kind: attachmentKind(res.fileType, isImage || res.kind === "image"),
+          kind,
           filename: res.filename ?? file.name,
           fileType: res.fileType,
         });
@@ -1654,6 +1742,7 @@ export default function OraChatScreen() {
     setConversationId(null);
     setAttachment(null);
     setInput("");
+    documentRefsRef.current = [];
   }, [stopRealtimeForContextSwitch]);
 
   // Toggle temporary mode. Either direction starts a clean conversation so
@@ -1669,6 +1758,7 @@ export default function OraChatScreen() {
     setConversationId(null);
     setAttachment(null);
     setInput("");
+    documentRefsRef.current = [];
   }, [sending, stopRealtimeForContextSwitch]);
 
   // Header overflow menu: flip the "Voice responses on" preference and persist
@@ -1877,6 +1967,9 @@ export default function OraChatScreen() {
       stopRealtimeForContextSwitch();
       // Opening a saved conversation always exits temporary mode.
       setTemporary(false);
+      // Uploaded-file refs are session-scoped to the prior thread; drop them so a
+      // "Create file" in this conversation never reuses a stale ref.
+      documentRefsRef.current = [];
       try {
         const detail = await getConversation(id);
         setConversationId(id);
@@ -2999,10 +3092,22 @@ export default function OraChatScreen() {
           setShowPlusMenu(false);
           void handleBrowseFiles();
         }}
+        onGenerateFile={() => {
+          setShowPlusMenu(false);
+          setShowGenerateFile(true);
+        }}
         onSelectMode={(m) => {
           setMode(m);
           setShowPlusMenu(false);
         }}
+      />
+
+      <GenerateFileSheet
+        visible={showGenerateFile}
+        accentColor={tierAccent}
+        sending={sending}
+        onClose={() => setShowGenerateFile(false)}
+        onGenerate={handleGenerateFile}
       />
 
       <OraHeaderMenu
@@ -4062,6 +4167,171 @@ function ProjectEditorModal({
   );
 }
 
+// Format options for the "Create file" sheet. Order mirrors the website's
+// most-common-first ordering; values are the server-accepted file formats.
+const GENERATE_FILE_FORMATS: {
+  value: FileFormat;
+  label: string;
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+}[] = [
+  { value: "docx", label: "Word document (.docx)", icon: FileText },
+  { value: "pdf", label: "PDF (.pdf)", icon: FileDown },
+  { value: "xlsx", label: "Excel spreadsheet (.xlsx)", icon: FileSpreadsheet },
+  { value: "csv", label: "CSV (.csv)", icon: FileSpreadsheet },
+  { value: "pptx", label: "PowerPoint (.pptx)", icon: Presentation },
+];
+
+// Bottom sheet to author a brand-new file from a prompt. Collects a description
+// and a target format, then hands both to onGenerate. State resets each time the
+// sheet opens so a prior draft never leaks into a new request.
+function GenerateFileSheet({
+  visible,
+  accentColor,
+  sending,
+  onClose,
+  onGenerate,
+}: {
+  visible: boolean;
+  accentColor: string;
+  sending: boolean;
+  onClose: () => void;
+  onGenerate: (prompt: string, format: FileFormat) => void;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const [prompt, setPrompt] = useState("");
+  const [format, setFormat] = useState<FileFormat>("docx");
+
+  useEffect(() => {
+    if (visible) {
+      setPrompt("");
+      setFormat("docx");
+    }
+  }, [visible]);
+
+  const canGenerate = prompt.trim().length > 0 && !sending;
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <Pressable style={{ flex: 1 }} onPress={onClose} />
+          <View
+            style={{
+              backgroundColor: c.card,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              paddingTop: 8,
+              paddingBottom: insets.bottom + 12,
+            }}
+          >
+            <View
+              style={{
+                alignSelf: "center",
+                width: 40,
+                height: 4,
+                borderRadius: 2,
+                backgroundColor: c.border,
+                marginBottom: 8,
+              }}
+            />
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                paddingHorizontal: 20,
+                paddingVertical: 4,
+              }}
+            >
+              <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 17 }}>
+                Create a file
+              </Text>
+              <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+                <X size={20} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+
+            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
+              <SheetSectionLabel label="What should it contain?" />
+              <View style={{ paddingHorizontal: 20 }}>
+                <TextInput
+                  value={prompt}
+                  onChangeText={setPrompt}
+                  multiline
+                  placeholder="e.g. A budget spreadsheet for a 3-day trip to Tokyo"
+                  placeholderTextColor={c.mutedForeground}
+                  accessibilityLabel="Describe the file to create"
+                  style={{
+                    minHeight: 80,
+                    maxHeight: 160,
+                    borderWidth: 1,
+                    borderColor: c.border,
+                    borderRadius: 12,
+                    padding: 12,
+                    color: c.foreground,
+                    fontFamily: "Inter_400Regular",
+                    fontSize: 15,
+                    textAlignVertical: "top",
+                  }}
+                />
+              </View>
+
+              <SheetSectionLabel label="Format" />
+              {GENERATE_FILE_FORMATS.map((f) => (
+                <ToolRow
+                  key={f.value}
+                  icon={f.icon}
+                  label={f.label}
+                  active={format === f.value}
+                  accentColor={accentColor}
+                  onPress={() => setFormat(f.value)}
+                />
+              ))}
+            </ScrollView>
+
+            <View style={{ paddingHorizontal: 20, paddingTop: 12 }}>
+              <Pressable
+                onPress={() => onGenerate(prompt, format)}
+                disabled={!canGenerate}
+                accessibilityRole="button"
+                accessibilityLabel="Create file"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  height: 50,
+                  borderRadius: 14,
+                  backgroundColor: canGenerate ? accentColor : c.secondary,
+                }}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <FilePlus2 size={18} color={canGenerate ? "#ffffff" : c.mutedForeground} />
+                )}
+                <Text
+                  style={{
+                    color: canGenerate ? "#ffffff" : c.mutedForeground,
+                    fontFamily: "Inter_600SemiBold",
+                    fontSize: 15,
+                  }}
+                >
+                  {sending ? "Creating\u2026" : "Create file"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 function PlusMenu({
   visible,
   mode,
@@ -4071,6 +4341,7 @@ function PlusMenu({
   onTakePhoto,
   onPickPhoto,
   onBrowseFiles,
+  onGenerateFile,
   onSelectMode,
 }: {
   visible: boolean;
@@ -4081,6 +4352,7 @@ function PlusMenu({
   onTakePhoto: () => void;
   onPickPhoto: () => void;
   onBrowseFiles: () => void;
+  onGenerateFile: () => void;
   onSelectMode: (mode: OraMode) => void;
 }) {
   const c = useColors();
@@ -4113,6 +4385,9 @@ function PlusMenu({
           <ActionRow icon={Camera} label="Take photo" onPress={onTakePhoto} />
           <ActionRow icon={Images} label="Photo library" onPress={onPickPhoto} />
           <ActionRow icon={FolderOpen} label="Browse files" onPress={onBrowseFiles} />
+
+          <SheetSectionLabel label="Create" />
+          <ActionRow icon={FilePlus2} label="Create file" onPress={onGenerateFile} />
 
           <SheetSectionLabel label="Tools" />
           <ToolRow

@@ -80,9 +80,13 @@ async function shareFile(fileUri: string, mimeType?: string, uti?: string): Prom
  * On web, the bytes are opened in a new tab as a data URI.
  */
 export async function saveGeneratedFile(file: GeneratedFile): Promise<SaveOutcome> {
-  // Persisted/reloaded messages drop the base64 bytes (only metadata survives),
-  // so a download from history is impossible — guide the user to regenerate.
+  // Persisted/reloaded messages drop the base64 bytes (only metadata survives).
+  // For signed-in users the file was also saved to the durable library, so fall
+  // back to downloading it by asset id; otherwise guide the user to regenerate.
   if (!file.fileData) {
+    if (file.assetId != null) {
+      return downloadAssetById(file.assetId, file.fileName, file.mimeType);
+    }
     throw new FileSaveError(
       "These file contents are no longer available. Regenerate it to download.",
     );
@@ -199,7 +203,27 @@ export async function saveHtmlAsPdf(
  * the download URL is opened in a new tab.
  */
 export async function saveAsset(asset: OraAsset): Promise<SaveOutcome> {
-  const downloadUrl = `${API_BASE}/api/ora/assets/${asset.id}/download`;
+  return downloadAssetById(
+    asset.id,
+    asset.fileName,
+    asset.mimeType,
+    asset.kind === "image" || isImageMime(asset.mimeType),
+  );
+}
+
+/**
+ * Download a durable library asset by id and save/share it. Used both by the
+ * Library (saveAsset) and by reloaded chat messages whose inline bytes were
+ * dropped but that carry an asset id (saveGeneratedFile fallback). The bearer
+ * token is attached so the owner-scoped /download route authorizes the request.
+ */
+async function downloadAssetById(
+  id: number,
+  fileName: string,
+  mimeType: string,
+  isImage = isImageMime(mimeType),
+): Promise<SaveOutcome> {
+  const downloadUrl = `${API_BASE}/api/ora/assets/${id}/download`;
 
   if (Platform.OS === "web") {
     await Linking.openURL(downloadUrl);
@@ -207,7 +231,7 @@ export async function saveAsset(asset: OraAsset): Promise<SaveOutcome> {
   }
 
   const token = await getAuthToken();
-  const fileUri = cacheUri(asset.fileName);
+  const fileUri = cacheUri(fileName);
   const result = await FileSystem.downloadAsync(downloadUrl, fileUri, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
@@ -215,11 +239,11 @@ export async function saveAsset(asset: OraAsset): Promise<SaveOutcome> {
     throw new FileSaveError(`Could not download file (HTTP ${result.status}).`);
   }
 
-  if (asset.kind === "image" || isImageMime(asset.mimeType)) {
+  if (isImage) {
     await saveImageToLibrary(result.uri);
     return "image-saved";
   }
-  await shareFile(result.uri, asset.mimeType);
+  await shareFile(result.uri, mimeType);
   return "shared";
 }
 

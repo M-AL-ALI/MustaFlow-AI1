@@ -19,6 +19,12 @@ export interface GeneratedFile {
   fileData?: string;
   mimeType: string;
   format: FileFormat;
+  /**
+   * Durable library asset id. Present for files generated while signed in and,
+   * unlike `fileData`, persisted with the message — so a reloaded card can still
+   * download via /api/ora/assets/:id/download when the inline bytes are gone.
+   */
+  assetId?: number;
 }
 
 export interface OraSource {
@@ -1473,6 +1479,7 @@ export function useOraChat(): UseOraChatReturn {
             fileName?: string;
             fileData?: string;
             mimeType?: string;
+            assetId?: number;
             imageUrl?: string;
             imageId?: number;
             memorySaveCandidate?: string;
@@ -1520,6 +1527,7 @@ export function useOraChat(): UseOraChatReturn {
                     fileData: d.fileData,
                     mimeType: d.mimeType,
                     format: d.fileName.split(".").pop() as GeneratedFile["format"],
+                    ...(d.assetId != null ? { assetId: d.assetId } : {}),
                   } satisfies GeneratedFile,
                 }
               : {}),
