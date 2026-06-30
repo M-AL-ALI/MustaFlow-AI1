@@ -1,3 +1,4 @@
+- [Ora Mobile XHR SSE transport](ora-mobile-xhr-sse.md) — Hermes fetch/ReadableStream buffers the full body before any read(); XHR onreadystatechange + renderChain queue (55ms) is the only way to get word-by-word on device.
 - [Ora mobile session auth guard](ora-mobile-session-auth-guard.md) — /api/public-ai/session MUST be in pathRequiresAuth; omitting it silently creates anonymous sessions for signed-in users (billing=Core, chat=Free mismatch).
 - [Ora mobile session auth race](ora-mobile-session-auth-race.md) — call setAuthState(isLoaded, !!isSignedIn) BEFORE getOraSession() in every child useEffect; waitForAuthLoaded() short-circuits when already loaded, reading stale _authIsSignedIn=false.
 - [EAS Phase 3 setup](eas-phase3-setup.md) — EAS_NO_VCS=1 required (git guard); Expo secret is `Expo_Token` not EXPO_TOKEN; iOS needs deploymentTarget:"16.0" for SDK 54+RN 0.81.

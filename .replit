@@ -123,3 +123,19 @@ AI_PROVIDER_PLAN = "anthropic:claude-sonnet-4-6"
 AI_PROVIDER_ARCHITECT = "anthropic:claude-opus-4-7"
 STRIPE_CORE_PRICE_ID = "price_1Tg8OsDf10Zq7SrDgELV4lIw"
 STRIPE_WAVE_PRICE_ID = "price_1Tg8OtDf10Zq7SrDl8q9CvT7"
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 20279
+externalPort = 3000
+
+[[ports]]
+localPort = 21457
+externalPort = 3001
