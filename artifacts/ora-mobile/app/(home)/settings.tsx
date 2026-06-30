@@ -35,6 +35,7 @@ import {
   API_BASE,
   DOMAIN,
   getAccountConsistency,
+  getLastStreamDiagnostics,
   getOraUsage,
   getPaymentMethod,
   getPreferences,
@@ -1862,6 +1863,97 @@ export default function SettingsScreen() {
             />
             <InfoRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
             <InfoRow label="Build" value={APP_VERSION_LABEL} />
+            {/* Streaming runtime — populated after the last Ora chat turn */}
+            {(() => {
+              const sd = getLastStreamDiagnostics();
+              if (!sd) return null;
+              return (
+                <View style={{ marginTop: 6, gap: 4 }}>
+                  <Text
+                    style={{
+                      color: c.mutedForeground,
+                      fontSize: 11,
+                      fontFamily: "Inter_600SemiBold",
+                      letterSpacing: 0.5,
+                      textTransform: "uppercase",
+                      marginBottom: 2,
+                    }}
+                  >
+                    Streaming runtime (last chat)
+                  </Text>
+                  <InfoRow
+                    label="ReadableStream"
+                    value={sd.readableStreamAvailable ? "available" : "unavailable"}
+                  />
+                  <InfoRow
+                    label="Kill switch"
+                    value={sd.killSwitchActive ? "ON" : "off"}
+                    warn={sd.killSwitchActive}
+                  />
+                  <InfoRow
+                    label="Auth"
+                    value={
+                      sd.authResult + (sd.authMs != null ? ` (${sd.authMs}ms)` : "")
+                    }
+                    warn={sd.authResult === "threw"}
+                  />
+                  <InfoRow
+                    label="XHR used"
+                    value={sd.xhrUsed ? "yes" : "no"}
+                    warn={!sd.xhrUsed && !sd.killSwitchActive}
+                  />
+                  {sd.endpointUrl ? (
+                    <InfoRow
+                      label="Endpoint"
+                      value={sd.endpointUrl.replace(`https://${DOMAIN}`, "")}
+                    />
+                  ) : null}
+                  {sd.httpStatus != null ? (
+                    <InfoRow
+                      label="HTTP status"
+                      value={String(sd.httpStatus)}
+                      warn={sd.httpStatus >= 400}
+                    />
+                  ) : null}
+                  {sd.contentType ? (
+                    <InfoRow
+                      label="Content-Type"
+                      value={(sd.contentType.split(";")[0] ?? sd.contentType).trim()}
+                      warn={!sd.contentType.includes("text/event-stream")}
+                    />
+                  ) : null}
+                  {sd.headersMs != null ? (
+                    <InfoRow label="Headers in" value={`${sd.headersMs}ms`} />
+                  ) : null}
+                  {sd.firstTokenMs != null ? (
+                    <InfoRow label="First token in" value={`${sd.firstTokenMs}ms`} />
+                  ) : null}
+                  <InfoRow
+                    label="Tokens received"
+                    value={String(sd.tokenCount)}
+                    warn={sd.tokenCount === 0 && sd.returnValue === "ok"}
+                  />
+                  <InfoRow
+                    label="Done arrived"
+                    value={sd.doneArrived ? "yes" : "no"}
+                    warn={!sd.doneArrived && sd.returnValue === "ok"}
+                  />
+                  <InfoRow
+                    label="Result"
+                    value={sd.returnValue}
+                    warn={sd.returnValue !== "ok"}
+                  />
+                  <InfoRow
+                    label="Fell back to /chat"
+                    value={sd.fallbackCalled ? "yes" : "no"}
+                    warn={sd.fallbackCalled}
+                  />
+                  <Text style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}>
+                    Captured {new Date(sd.capturedAt).toLocaleTimeString()}
+                  </Text>
+                </View>
+              );
+            })()}
           </View>
           {planSyncMessage ? (
             <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>

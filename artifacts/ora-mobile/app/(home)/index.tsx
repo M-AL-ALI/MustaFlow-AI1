@@ -127,6 +127,7 @@ import {
   saveConversationMessages,
   saveOraMemory,
   sendChat,
+  notifyStreamFallbackCalled,
   streamChatNative,
   synthesizeSpeech,
   transcribeAudio,
@@ -981,7 +982,8 @@ export default function OraChatScreen() {
           );
 
           if (streamResult === null) {
-            // Feature disabled or ReadableStream missing — total fallback.
+            // Streaming could not start — fall back to regular /chat.
+            notifyStreamFallbackCalled();
             const res = await sendChat(chatReq);
             assistant = {
               id: pendingId,
@@ -1023,6 +1025,7 @@ export default function OraChatScreen() {
             // Pre-first-token failure — the stream pre-incremented the session.
             // Retry via /chat with the signed fallback token so the server
             // acknowledges the increment without double-charging.
+            notifyStreamFallbackCalled();
             const res = await sendChat({
               ...chatReq,
               ...(streamResult.fallbackToken

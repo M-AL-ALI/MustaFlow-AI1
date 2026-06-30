@@ -293,7 +293,9 @@ describe("Ora mobile parity — streamChatNative gate matches website behaviour"
   it("streaming gate is opt-out (=== false) not opt-in (!== true)", () => {
     const fnStart = api.indexOf("export async function streamChatNative(");
     expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = api.slice(fnStart, fnStart + 600);
+    // Use 3000 chars so the diagnostics init block doesn't push the kill-switch
+    // check past the window (the diag struct is ~400 chars before the gate).
+    const fnBody = api.slice(fnStart, fnStart + 3000);
     // New gate: kill switch fires only when explicitly "false"
     expect(fnBody).toContain('EXPO_PUBLIC_ORA_STREAMING_ENABLED === "false"');
     // Old opt-in gate must NOT appear

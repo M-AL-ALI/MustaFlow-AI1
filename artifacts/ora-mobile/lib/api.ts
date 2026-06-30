@@ -359,12 +359,156 @@ export function generateFile(req: GenerateFileRequest): Promise<ChatResponse> {
   });
 }
 
+// ─── Stream diagnostics ──────────────────────────────────────────────────────
+
+/**
+ * Captures every observable signal from the last streamChatNative() call.
+ * Written to a module-level record so Settings can display it on-demand as a
+ * screenshot-able diagnostic for TestFlight QA. Read via getLastStreamDiagnostics().
+ */
+export interface StreamChatDiagnostics {
+  /** True if `typeof ReadableStream !== "undefined"` at call time (informational only). */
+  readableStreamAvailable: boolean;
+  /** True if the EXPO_PUBLIC_ORA_STREAMING_ENABLED="false" kill switch fired. */
+  killSwitchActive: boolean;
+  /** Outcome of authHeadersRequired(). */
+  authResult: "ok" | "threw" | "not_attempted";
+  /** ms spent obtaining auth headers, or null if not attempted. */
+  authMs: number | null;
+  /** True when an XHR request was initiated (false if function returned early). */
+  xhrUsed: boolean;
+  /** Full endpoint URL that was requested, or null if no request was made. */
+  endpointUrl: string | null;
+  /** HTTP status code, or null if the request failed before a response. */
+  httpStatus: number | null;
+  /** Content-Type header from the server response, or null. */
+  contentType: string | null;
+  /** ms from call start to XHR readyState=2 (headers received), or null. */
+  headersMs: number | null;
+  /** ms from call start to first SSE `token` event, or null. */
+  firstTokenMs: number | null;
+  /** Number of SSE `token` events received. */
+  tokenCount: number;
+  /** True if a `done` SSE event was received. */
+  doneArrived: boolean;
+  /** What streamChatNative() returned. */
+  returnValue:
+    | "null_killswitch"
+    | "null_auth_threw"
+    | "null_request_failed"
+    | "null_bad_response"
+    | "null_no_done"
+    | "ok"
+    | "fail_pre_token"
+    | "fail_post_token"
+    | "exception";
+  /** True when index.tsx fell back to sendChat() after a null or fail_pre result. */
+  fallbackCalled: boolean;
+  /** Unix ms when this record was captured. */
+  capturedAt: number;
+}
+
+let _lastStreamDiag: StreamChatDiagnostics | null = null;
+
+/** Returns diagnostics from the most recent streamChatNative() call, or null. */
+export function getLastStreamDiagnostics(): StreamChatDiagnostics | null {
+  return _lastStreamDiag;
+}
+
+/**
+ * Called by index.tsx immediately before the sendChat() fallback so Settings
+ * can show that the caller did NOT stream (streamChatNative returned null or
+ * fail_pre_token).
+ */
+export function notifyStreamFallbackCalled(): void {
+  if (_lastStreamDiag) {
+    _lastStreamDiag = { ..._lastStreamDiag, fallbackCalled: true };
+  }
+}
+
+// ─── XHR-based SSE transport ─────────────────────────────────────────────────
+
+/**
+ * Posts `bodyStr` to `endpoint` and calls `onRawChunk` progressively as the
+ * server pushes SSE data. React Native's XMLHttpRequest.responseText grows
+ * incrementally on each readyState=3 callback, so callers receive new bytes as
+ * they arrive — instead of the entire body at once like Hermes fetch/ReadableStream.
+ * This is the same mechanism used by react-native-sse and similar libraries.
+ */
+function sseViaXHR(
+  endpoint: string,
+  headers: Headers,
+  bodyStr: string,
+  signal: AbortSignal | undefined,
+  onHeadersReceived: (ms: number) => void,
+  onRawChunk: (chunk: string) => void,
+): Promise<{ ok: boolean; status: number; contentType: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", endpoint, true);
+    headers.forEach((v, k) => xhr.setRequestHeader(k, v));
+
+    const start = Date.now();
+    let offset = 0;
+    let settled = false;
+    let headersFired = false;
+
+    function settle(ok: boolean, status: number, ct: string) {
+      if (settled) return;
+      settled = true;
+      resolve({ ok, status, contentType: ct });
+    }
+
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 2 && !headersFired) {
+        headersFired = true;
+        onHeadersReceived(Date.now() - start);
+      }
+      if (xhr.readyState >= 3) {
+        const rt: string = (xhr.responseText as string | null) ?? "";
+        if (rt.length > offset) {
+          onRawChunk(rt.slice(offset));
+          offset = rt.length;
+        }
+      }
+      if (xhr.readyState === 4) {
+        settle(
+          xhr.status >= 200 && xhr.status < 300,
+          xhr.status,
+          xhr.getResponseHeader("content-type") ?? "",
+        );
+      }
+    };
+
+    xhr.onerror = () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error("XHR network error"));
+      }
+    };
+
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        xhr.abort();
+        if (!settled) {
+          settled = true;
+          reject(new Error("AbortError"));
+        }
+      });
+    }
+
+    xhr.send(bodyStr);
+  });
+}
+
+// ─── Stream result type ──────────────────────────────────────────────────────
+
 /**
  * Result of a native streaming attempt. Discriminated union:
  *
  * null
- *   ReadableStream is unavailable or the network request failed before any
- *   SSE connection was established. No pre-increment occurred.
+ *   Streaming could not be initiated (kill switch, auth failure, network error,
+ *   or bad server response). No pre-increment occurred.
  *
  * { ok: true }
  *   Stream completed normally. Use `reply` (or `streamedContent`) as the
@@ -404,46 +548,78 @@ export async function streamChatNative(
   onToken: (delta: string) => void | Promise<void>,
   signal?: AbortSignal,
 ): Promise<StreamChatNativeResult> {
-  // Streaming is on by default. Set EXPO_PUBLIC_ORA_STREAMING_ENABLED="false"
-  // as an explicit kill switch to fall back to the non-streaming /chat path.
-  if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED === "false") return null;
-  if (typeof ReadableStream === "undefined") return null;
+  const callStart = Date.now();
+  const diag: StreamChatDiagnostics = {
+    readableStreamAvailable: typeof ReadableStream !== "undefined",
+    killSwitchActive: false,
+    authResult: "not_attempted",
+    authMs: null,
+    xhrUsed: false,
+    endpointUrl: null,
+    httpStatus: null,
+    contentType: null,
+    headersMs: null,
+    firstTokenMs: null,
+    tokenCount: 0,
+    doneArrived: false,
+    returnValue: "exception",
+    fallbackCalled: false,
+    capturedAt: callStart,
+  };
 
-  const headers = await authHeadersRequired({ "Content-Type": "application/json" });
-  let res: Response;
-  try {
-    res = await fetch(url("/api/public-ai/chat/stream"), {
-      method: "POST",
-      body: JSON.stringify(req),
-      headers,
-      credentials: "include",
-      signal,
-    });
-  } catch {
-    return null;
+  function finish(rv: StreamChatDiagnostics["returnValue"]): void {
+    diag.returnValue = rv;
+    _lastStreamDiag = { ...diag };
   }
 
-  const contentType = res.headers.get("content-type") ?? "";
-  if (!res.ok || !contentType.includes("text/event-stream")) return null;
-  if (!res.body) return null;
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let donePayload: StreamDonePayload | null = null;
-  // Track whether at least one token arrived. An SSE `error` before the first
-  // token triggers a silent /chat fallback; after means interrupted mid-reply.
-  let firstTokenReceived = false;
-  let accumulated = "";
-
   try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+    // Kill switch: set EXPO_PUBLIC_ORA_STREAMING_ENABLED="false" to opt out.
+    if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED === "false") {
+      diag.killSwitchActive = true;
+      finish("null_killswitch");
+      return null;
+    }
 
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
+    // Auth headers — fail closed: a signed-in user with no token must NOT
+    // silently downgrade to anonymous mode on a streaming request.
+    const authStart = Date.now();
+    let headers: Headers;
+    try {
+      headers = await authHeadersRequired({ "Content-Type": "application/json" });
+      diag.authResult = "ok";
+      diag.authMs = Date.now() - authStart;
+    } catch {
+      diag.authResult = "threw";
+      diag.authMs = Date.now() - authStart;
+      finish("null_auth_threw");
+      return null;
+    }
+
+    const endpoint = url("/api/public-ai/chat/stream");
+    diag.endpointUrl = endpoint;
+    diag.xhrUsed = true;
+    const bodyStr = JSON.stringify(req);
+
+    // SSE parse state
+    let sseBuffer = "";
+    let donePayload: StreamDonePayload | null = null;
+    let firstTokenReceived = false;
+    let accumulated = "";
+    let earlyError:
+      | { ok: false; firstToken: false; fallbackToken?: string }
+      | { ok: false; firstToken: true; reply: string }
+      | null = null;
+
+    // Promise chain for word-by-word rendering: each token appends a 55 ms step.
+    // Even when XHR delivers multiple SSE tokens in a single readyState=3 callback
+    // (Hermes can batch chunks), the chain drains one token at a time so the UI
+    // paints incrementally — independent of how bytes physically arrive.
+    let renderChain = Promise.resolve();
+
+    function processRawChunk(raw: string): void {
+      sseBuffer += raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const parts = sseBuffer.split("\n\n");
+      sseBuffer = parts.pop() ?? "";
 
       for (const part of parts) {
         if (!part.trim()) continue;
@@ -466,52 +642,106 @@ export async function streamChatNative(
         const type = eventTypeLine ?? (parsed.type as string | undefined);
         if (!type) continue;
 
-        if (type === "start") {
-          // Connection confirmed — no action needed.
-        } else if (type === "token") {
+        if (type === "token") {
           const text = (parsed as { text?: string }).text ?? "";
-          firstTokenReceived = true;
+          if (!firstTokenReceived) {
+            firstTokenReceived = true;
+            diag.firstTokenMs = Date.now() - callStart;
+          }
+          diag.tokenCount += 1;
           accumulated += text;
-          // Await supports both sync (void) and async callers; the 55ms sleep
-          // that follows gives React Native time to paint each word-by-word chunk
-          // instead of batching the whole response into one repaint.
-          await Promise.resolve(onToken(text));
-          await new Promise<void>((resolve) => setTimeout(resolve, 55));
+          // Enqueue: each token renders with a ~55 ms gap so React Native
+          // paints word-by-word even when chunks arrive in bursts.
+          renderChain = renderChain.then(async () => {
+            await Promise.resolve(onToken(text));
+            await new Promise<void>((resolve) => setTimeout(resolve, 55));
+          });
         } else if (type === "done") {
           donePayload = (parsed as { payload: StreamDonePayload }).payload;
+          diag.doneArrived = true;
         } else if (type === "error") {
           const code = (parsed as { code?: string }).code;
           const fallbackToken = (parsed as { fallbackToken?: string }).fallbackToken;
           if (!firstTokenReceived || code === "stream_failed") {
-            // Pre-first-token failure — carry the signed token so the caller
-            // can present it to /chat to avoid double-charging the quota.
-            return { ok: false, firstToken: false, fallbackToken };
+            earlyError = { ok: false, firstToken: false, fallbackToken };
+          } else {
+            earlyError = { ok: false, firstToken: true, reply: accumulated };
           }
-          // Post-first-token interruption — partial text already forwarded.
-          // Do NOT auto-fallback; preserve what the user has seen.
-          return { ok: false, firstToken: true, reply: accumulated };
         }
       }
     }
-  } finally {
-    reader.releaseLock();
-  }
 
-  if (!donePayload) return null;
-  return {
-    ok: true,
-    reply: donePayload.reply ?? "",
-    msgCount: donePayload.msgCount,
-    msgLimit: donePayload.msgLimit,
-    isRealStreaming: donePayload.isRealStreaming,
-    suggestions: donePayload.suggestions,
-    videos: donePayload.videos,
-    memorySaveCandidate: donePayload.memorySaveCandidate,
-    memorySaveCandidateConfidence: donePayload.memorySaveCandidateConfidence,
-    memorySaveCandidateSensitive: donePayload.memorySaveCandidateSensitive,
-    memoriesUsed: donePayload.memoriesUsed,
-    conversationSummary: donePayload.conversationSummary,
-  };
+    // XHR streams responseText progressively in React Native (readyState=3
+    // callbacks carry new bytes as they arrive). This bypasses the Hermes
+    // fetch/ReadableStream limitation where the entire body is buffered before
+    // any read() yields — which caused the "all at once" symptom on device.
+    let xhrResult: { ok: boolean; status: number; contentType: string };
+    try {
+      xhrResult = await sseViaXHR(
+        endpoint,
+        headers,
+        bodyStr,
+        signal,
+        (ms) => {
+          diag.headersMs = ms;
+        },
+        processRawChunk,
+      );
+    } catch {
+      finish("null_request_failed");
+      return null;
+    }
+
+    diag.httpStatus = xhrResult.status;
+    diag.contentType = xhrResult.contentType;
+
+    if (!xhrResult.ok || !xhrResult.contentType.includes("text/event-stream")) {
+      finish("null_bad_response");
+      return null;
+    }
+
+    // Drain the render chain: wait for all token callbacks + 55 ms gaps before
+    // returning. Callers can inspect `streamedContent` immediately after await.
+    await renderChain;
+
+    // TypeScript's control-flow analysis narrows callback-captured `let`s to
+    // their initial values across async boundaries. Re-read via explicit casts
+    // so the compiler trusts the runtime values that processRawChunk wrote.
+    const resolvedError = earlyError as
+      | { ok: false; firstToken: false; fallbackToken?: string }
+      | { ok: false; firstToken: true; reply: string }
+      | null;
+    const resolvedDone = donePayload as StreamDonePayload | null;
+
+    if (resolvedError != null) {
+      finish(resolvedError.firstToken ? "fail_post_token" : "fail_pre_token");
+      return resolvedError;
+    }
+
+    if (resolvedDone == null) {
+      finish("null_no_done");
+      return null;
+    }
+
+    finish("ok");
+    return {
+      ok: true,
+      reply: resolvedDone.reply ?? "",
+      msgCount: resolvedDone.msgCount,
+      msgLimit: resolvedDone.msgLimit,
+      isRealStreaming: resolvedDone.isRealStreaming,
+      suggestions: resolvedDone.suggestions,
+      videos: resolvedDone.videos,
+      memorySaveCandidate: resolvedDone.memorySaveCandidate,
+      memorySaveCandidateConfidence: resolvedDone.memorySaveCandidateConfidence,
+      memorySaveCandidateSensitive: resolvedDone.memorySaveCandidateSensitive,
+      memoriesUsed: resolvedDone.memoriesUsed,
+      conversationSummary: resolvedDone.conversationSummary,
+    };
+  } catch {
+    finish("exception");
+    return null;
+  }
 }
 
 export async function uploadFile(file: {
