@@ -1174,6 +1174,7 @@ export function createTask(input: {
   kind: "analyze" | "coding";
   prompt: string;
   title?: string;
+  startThread?: boolean;
 }): Promise<{ task: OraxTask }> {
   return jsonRequest("/api/orax/tasks", {
     method: "POST",

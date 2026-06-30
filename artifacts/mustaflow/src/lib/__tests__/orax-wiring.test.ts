@@ -146,3 +146,44 @@ describe("ORAX product-surface wiring", () => {
     expect(routesIndex).toContain("router.use(oraxRouter)");
   });
 });
+
+describe("ORAX mobile parity guard", () => {
+  const mobilePage = read("../../../../ora-mobile/app/(home)/orax.tsx");
+  // Route ownership lives in api.ts (imported fns); component guards are on mobilePage.
+  const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+
+  it("uses ORAX-owned workflow routes and avoids Ora chat endpoints", () => {
+    // Routes are defined in api.ts, not in the component directly.
+    expect(mobileApi).toContain("/api/orax/");
+    // Component must never reach into Ora chat or AI Builder.
+    expect(mobilePage).not.toContain("/api/public-ai/chat");
+    expect(mobilePage).not.toContain("useOraChat");
+    expect(mobilePage).not.toContain("/api/projects/");
+    expect(mobilePage).not.toContain("/api/credits");
+  });
+
+  it("exposes Start ORAX chat first-message thread semantics", () => {
+    expect(mobilePage).toContain("Start ORAX chat");
+    expect(mobilePage).toContain("startThread: true");
+    expect(mobilePage).toContain("The first message becomes the task prompt");
+    expect(mobilePage).toContain("stored separately from Ora chat and");
+    expect(mobilePage).toContain("not Ora");
+    expect(mobilePage).toContain("Task created, but first message failed to save");
+    expect(mobilePage).toContain("setTaskMessageDraft(");
+  });
+
+  it("clears task-scoped state immediately on task switches", () => {
+    expect(mobilePage).toContain("const activeTaskIdRef = useRef<number | null>(null)");
+    expect(mobilePage).toContain("activeTaskIdRef.current !== selectedTask.id");
+    expect(mobilePage).toContain("activeTaskIdRef.current = selectedTask.id");
+    expect(mobilePage).toContain("if (activeTaskIdRef.current !== taskId) return");
+  });
+
+  it("renders an execution lifecycle section from task artifacts", () => {
+    expect(mobilePage).toContain("Execution lifecycle");
+    expect(mobilePage).toContain("Draft patch generated");
+    expect(mobilePage).toContain("Sandbox result");
+    expect(mobilePage).toContain("Controlled checks result");
+    expect(mobilePage).toContain("Pull request result");
+  });
+});

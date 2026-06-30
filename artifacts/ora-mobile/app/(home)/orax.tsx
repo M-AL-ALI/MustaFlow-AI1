@@ -14,7 +14,7 @@ import {
   TerminalSquare,
   X,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -109,6 +109,14 @@ export default function OraxScreen() {
   const [connectingGithubRepoId, setConnectingGithubRepoId] = useState<number | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
+  // Task-switch guard — cleared state that is scoped to a single ORAX task so
+  // stale async callbacks from a previous task never overwrite the active task's data.
+  const activeTaskIdRef = useRef<number | null>(null);
+  const [taskMessageDraft, setTaskMessageDraft] = useState("");
+  // "Start ORAX chat" — first-message thread creation mode
+  const [startingThread, setStartingThread] = useState(false);
+  const [threadFirstMessage, setThreadFirstMessage] = useState("");
+
   const reload = useCallback(async () => {
     setLoading(true);
     const [capRes, repoRes, taskRes] = await Promise.allSettled([
@@ -195,6 +203,10 @@ export default function OraxScreen() {
     const task = selectedTask;
     const text = taskChatInput.trim();
     if (!task || !text || sendingTaskMessage) return;
+    const taskId = task.id;
+    // Guard: prevent a message that was staged for task A from sending if the
+    // user has already switched to task B. Not Ora — task threads are ORAX-only.
+    if (activeTaskIdRef.current !== taskId) return;
     setTaskChatInput("");
     setSendingTaskMessage(true);
     try {
@@ -212,6 +224,67 @@ export default function OraxScreen() {
       setSendingTaskMessage(false);
     }
   }, [selectedTask, sendingTaskMessage, taskChatInput]);
+
+  // Clear task-scoped state immediately when the user switches to a different task.
+  // Thread messages, approvals, and artifacts are stored separately from Ora chat and
+  // AI Builder history — this is not Ora history and not AI Builder state.
+  useEffect(() => {
+    if (!selectedTask) return;
+    const switchedTasks = activeTaskIdRef.current !== selectedTask.id;
+    activeTaskIdRef.current = selectedTask.id;
+    if (switchedTasks) {
+      setTaskMessages([]);
+      setTaskApprovals([]);
+      setTaskArtifacts([]);
+      setTaskMessageDraft("");
+    }
+    // Only re-run when task id changes — ref mutation is intentionally excluded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTask?.id]);
+
+  // When a task is created but the first-message send failed, pre-fill the chat input
+  // so the user can retry without re-typing.
+  useEffect(() => {
+    if (taskMessageDraft) {
+      setTaskChatInput(taskMessageDraft);
+      setTaskMessageDraft("");
+    }
+  }, [taskMessageDraft]);
+
+  // Create a task and immediately open its thread ("Start ORAX chat").
+  // The first message becomes the task prompt and also seeds the thread.
+  const createTaskWithThread = useCallback(async () => {
+    const firstMessage = threadFirstMessage.trim();
+    if (!taskRepoId || !firstMessage) return;
+    setCreatingTask(true);
+    let createdTask: (typeof tasks)[number] | null = null;
+    try {
+      const body = await createTask({
+        repositoryId: taskRepoId,
+        kind: taskKind,
+        prompt: firstMessage,
+        startThread: true,
+      });
+      createdTask = body.task;
+      activeTaskIdRef.current = body.task.id;
+      const refreshed = await listTasks();
+      setTasks(refreshed);
+      setStartingThread(false);
+      setThreadFirstMessage("");
+      setTab("tasks");
+      void loadTaskDetail(body.task);
+    } catch (err) {
+      if (createdTask) {
+        // Task created, but first message failed to save — pre-fill the draft.
+        setTaskMessageDraft(firstMessage);
+        void loadTaskDetail(createdTask);
+      } else {
+        Alert.alert("Could not create task", err instanceof Error ? err.message : "Try again.");
+      }
+    } finally {
+      setCreatingTask(false);
+    }
+  }, [taskRepoId, taskKind, threadFirstMessage, loadTaskDetail]);
 
   const handleConnectGithub = useCallback(
     async (repoId: number) => {
@@ -673,6 +746,36 @@ export default function OraxScreen() {
                     disabled={!taskRepoId || !taskPrompt.trim()}
                     full
                   />
+                  <Button
+                    label="Start ORAX chat"
+                    icon={MessageCircle}
+                    variant="secondary"
+                    onPress={() => setStartingThread((v) => !v)}
+                    disabled={!taskRepoId}
+                    full
+                  />
+                  {startingThread && (
+                    <View style={{ gap: 8 }}>
+                      <TextField
+                        label="First message"
+                        placeholder="What should Orax do first?"
+                        value={threadFirstMessage}
+                        onChangeText={setThreadFirstMessage}
+                        multiline
+                        style={{ minHeight: 60, textAlignVertical: "top" }}
+                      />
+                      <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                        The first message becomes the task prompt and opens a live ORAX thread.
+                      </Text>
+                      <Button
+                        label="Create task + open thread"
+                        onPress={createTaskWithThread}
+                        loading={creatingTask}
+                        disabled={!taskRepoId || !threadFirstMessage.trim()}
+                        full
+                      />
+                    </View>
+                  )}
                 </Card>
                 {tasks.length === 0 ? (
                   <EmptyState
@@ -744,8 +847,8 @@ export default function OraxScreen() {
                         {selectedTask.title || "ORAX task"}
                       </Text>
                       <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                        Thread, approvals, and artifacts are ORAX-only and never appear in normal
-                        Ora chat.
+                        Thread messages, approvals, and artifacts are stored separately from Ora chat and
+                        project knowledge — not Ora history, not AI Builder data.
                       </Text>
                     </View>
 
@@ -812,6 +915,44 @@ export default function OraxScreen() {
                           disabled={!taskChatInput.trim()}
                           full
                         />
+
+                        <Text
+                          style={{
+                            color: c.foreground,
+                            fontFamily: "Inter_600SemiBold",
+                            fontSize: 14,
+                          }}
+                        >
+                          Execution lifecycle
+                        </Text>
+                        {taskArtifacts.length === 0 ? (
+                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                            No execution events yet.
+                          </Text>
+                        ) : (
+                          taskArtifacts
+                            .filter((a) =>
+                              ["draft_patch", "sandbox_result", "command_result", "github_pr_result"].includes(
+                                a.type,
+                              ),
+                            )
+                            .map((a) => {
+                              const LIFECYCLE_LABELS: Record<string, string> = {
+                                draft_patch: "Draft patch generated",
+                                sandbox_result: "Sandbox result",
+                                command_result: "Controlled checks result",
+                                github_pr_result: "Pull request result",
+                              };
+                              return (
+                                <Text
+                                  key={a.id}
+                                  style={{ color: c.mutedForeground, fontSize: 13 }}
+                                >
+                                  • {LIFECYCLE_LABELS[a.type] ?? a.type}
+                                </Text>
+                              );
+                            })
+                        )}
 
                         <Text
                           style={{
