@@ -401,12 +401,12 @@ export type StreamChatNativeResult =
 
 export async function streamChatNative(
   req: ChatRequest,
-  onToken: (delta: string) => void,
+  onToken: (delta: string) => void | Promise<void>,
   signal?: AbortSignal,
 ): Promise<StreamChatNativeResult> {
-  // When the streaming feature flag is disabled, return null immediately so
-  // the caller falls through to the regular sendChat path — no probe request.
-  if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "true") return null;
+  // Streaming is on by default. Set EXPO_PUBLIC_ORA_STREAMING_ENABLED="false"
+  // as an explicit kill switch to fall back to the non-streaming /chat path.
+  if (process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED === "false") return null;
   if (typeof ReadableStream === "undefined") return null;
 
   const headers = await authHeadersRequired({ "Content-Type": "application/json" });
@@ -441,7 +441,7 @@ export async function streamChatNative(
       const { value, done } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
       const parts = buffer.split("\n\n");
       buffer = parts.pop() ?? "";
 
@@ -472,9 +472,10 @@ export async function streamChatNative(
           const text = (parsed as { text?: string }).text ?? "";
           firstTokenReceived = true;
           accumulated += text;
-          onToken(text);
-          // Yield ~55ms between tokens (mirrors web use-ora-chat.ts) so batched
-          // SSE frames render progressively, word-by-word, instead of all at once.
+          // Await supports both sync (void) and async callers; the 55ms sleep
+          // that follows gives React Native time to paint each word-by-word chunk
+          // instead of batching the whole response into one repaint.
+          await Promise.resolve(onToken(text));
           await new Promise<void>((resolve) => setTimeout(resolve, 55));
         } else if (type === "done") {
           donePayload = (parsed as { payload: StreamDonePayload }).payload;

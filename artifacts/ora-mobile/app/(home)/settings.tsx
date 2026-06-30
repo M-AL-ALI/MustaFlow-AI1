@@ -23,15 +23,7 @@ import {
   XCircle,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  Switch,
-  Text,
-  View,
-} from "react-native";
+import { Alert, Image, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -86,7 +78,7 @@ const APP_VERSION_LABEL = APP_BUILD
   ? `Version ${APP_VERSION} (${APP_BUILD})`
   : `Version ${APP_VERSION}`;
 
-const STREAMING_ENABLED = process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED === "true";
+const STREAMING_ENABLED = process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "false";
 const WEBSITE_SETTINGS_URL = `https://${DOMAIN}/settings`;
 
 const VOICE_LANGS: { code: string; label: string }[] = [
@@ -147,7 +139,11 @@ function renewalLabel(subscription: BillingSubscription | null, tier: string): s
   if (!raw) return "Rolling usage window";
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return "Rolling usage window";
-  const formatted = d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  const formatted = d.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
   if (subscription?.cancelAtPeriodEnd) return `Access ends on ${formatted}`;
   return `Renews on ${formatted}`;
 }
@@ -182,17 +178,41 @@ interface DiagPlanSync {
   sessionTier: string | null;
   sessionIsPaid: boolean | null;
 }
-const INITIAL_PLAN_SYNC: DiagPlanSync = { tokenStatus: "unchecked", sessionTier: null, sessionIsPaid: null };
+const INITIAL_PLAN_SYNC: DiagPlanSync = {
+  tokenStatus: "unchecked",
+  sessionTier: null,
+  sessionIsPaid: null,
+};
 
 function initSteps(): DiagStep[] {
   const base = API_BASE;
   const steps: DiagStep[] = [
-    { id: "transport", label: "Transport check", url: `${base}/api/public-ai/session`, status: "pending" },
-    { id: "session", label: "POST /api/public-ai/session", url: `${base}/api/public-ai/session`, status: "pending" },
-    { id: "chat", label: "POST /api/public-ai/chat", url: `${base}/api/public-ai/chat`, status: "pending" },
+    {
+      id: "transport",
+      label: "Transport check",
+      url: `${base}/api/public-ai/session`,
+      status: "pending",
+    },
+    {
+      id: "session",
+      label: "POST /api/public-ai/session",
+      url: `${base}/api/public-ai/session`,
+      status: "pending",
+    },
+    {
+      id: "chat",
+      label: "POST /api/public-ai/chat",
+      url: `${base}/api/public-ai/chat`,
+      status: "pending",
+    },
   ];
   if (STREAMING_ENABLED) {
-    steps.push({ id: "stream", label: "POST /api/public-ai/chat/stream", url: `${base}/api/public-ai/chat/stream`, status: "pending" });
+    steps.push({
+      id: "stream",
+      label: "POST /api/public-ai/chat/stream",
+      url: `${base}/api/public-ai/chat/stream`,
+      status: "pending",
+    });
   }
   return steps;
 }
@@ -234,9 +254,27 @@ function SectionCard({
 function InfoRow({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 10 }}>
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: c.muted,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+      }}
+    >
       <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{label}</Text>
-      <Text numberOfLines={1} style={{ color: warn ? "#f87171" : c.foreground, fontSize: 13, fontFamily: "Inter_500Medium", maxWidth: "60%" }}>
+      <Text
+        numberOfLines={1}
+        style={{
+          color: warn ? "#f87171" : c.foreground,
+          fontSize: 13,
+          fontFamily: "Inter_500Medium",
+          maxWidth: "60%",
+        }}
+      >
         {value}
       </Text>
     </View>
@@ -272,11 +310,19 @@ function ToggleRow({
       }}
     >
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ color: disabled ? c.mutedForeground : c.foreground, fontFamily: "Inter_500Medium", fontSize: 14 }}>
+        <Text
+          style={{
+            color: disabled ? c.mutedForeground : c.foreground,
+            fontFamily: "Inter_500Medium",
+            fontSize: 14,
+          }}
+        >
           {label}
         </Text>
         {description ? (
-          <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 17 }}>{description}</Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 17 }}>
+            {description}
+          </Text>
         ) : null}
       </View>
       <Switch
@@ -290,12 +336,36 @@ function ToggleRow({
   );
 }
 
-function BigUsageCard({ label, remaining, limit }: { label: string; remaining: number; limit: number }) {
+function BigUsageCard({
+  label,
+  remaining,
+  limit,
+}: {
+  label: string;
+  remaining: number;
+  limit: number;
+}) {
   const c = useColors();
   const warn = remaining <= 0 || (limit > 0 && remaining < limit * 0.1);
   return (
-    <View style={{ flex: 1, backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12, gap: 2 }}>
-      <Text style={{ color: warn ? "#f87171" : c.foreground, fontFamily: "Inter_700Bold", fontSize: 28, lineHeight: 32 }}>
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: c.muted,
+        borderRadius: c.radius,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        gap: 2,
+      }}
+    >
+      <Text
+        style={{
+          color: warn ? "#f87171" : c.foreground,
+          fontFamily: "Inter_700Bold",
+          fontSize: 28,
+          lineHeight: 32,
+        }}
+      >
         {remaining.toLocaleString()}
       </Text>
       <Text style={{ color: c.mutedForeground, fontSize: 12 }}>{label} left</Text>
@@ -310,26 +380,68 @@ function DiagStepRow({ step }: { step: DiagStep }) {
   const isFail = step.status === "fail";
   const isRunning = step.status === "running";
   return (
-    <View style={{ borderRadius: c.radius, borderWidth: 1, borderColor: isFail ? "rgba(239,67,67,0.3)" : isOk ? "rgba(74,222,128,0.2)" : c.border, backgroundColor: isFail ? "rgba(239,67,67,0.06)" : isOk ? "rgba(74,222,128,0.05)" : c.muted, padding: 12, gap: 4 }}>
+    <View
+      style={{
+        borderRadius: c.radius,
+        borderWidth: 1,
+        borderColor: isFail ? "rgba(239,67,67,0.3)" : isOk ? "rgba(74,222,128,0.2)" : c.border,
+        backgroundColor: isFail ? "rgba(239,67,67,0.06)" : isOk ? "rgba(74,222,128,0.05)" : c.muted,
+        padding: 12,
+        gap: 4,
+      }}
+    >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         {isOk && <CheckCircle2 size={15} color="#4ade80" />}
         {isFail && <XCircle size={15} color="#f87171" />}
         {isRunning && <Loader size={15} color={c.accentForeground} />}
         {step.status === "pending" && <Circle size={15} color={c.border} />}
-        <Text style={{ color: c.foreground, fontSize: 13, fontFamily: "Inter_500Medium", flex: 1 }}>{step.label}</Text>
+        <Text style={{ color: c.foreground, fontSize: 13, fontFamily: "Inter_500Medium", flex: 1 }}>
+          {step.label}
+        </Text>
         {step.httpStatus != null && (
-          <Text style={{ color: isOk ? "#4ade80" : "#f87171", fontSize: 12, fontFamily: "Inter_500Medium" }}>{step.httpStatus}</Text>
+          <Text
+            style={{
+              color: isOk ? "#4ade80" : "#f87171",
+              fontSize: 12,
+              fontFamily: "Inter_500Medium",
+            }}
+          >
+            {step.httpStatus}
+          </Text>
         )}
       </View>
-      <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 11, marginLeft: 23 }}>{step.url}</Text>
+      <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 11, marginLeft: 23 }}>
+        {step.url}
+      </Text>
       {isOk && step.detail ? (
-        <Text numberOfLines={3} style={{ color: "#4ade80", fontSize: 12, marginLeft: 23, marginTop: 2 }}>{step.detail}</Text>
+        <Text
+          numberOfLines={3}
+          style={{ color: "#4ade80", fontSize: 12, marginLeft: 23, marginTop: 2 }}
+        >
+          {step.detail}
+        </Text>
       ) : null}
       {isFail && step.errorMsg ? (
-        <Text numberOfLines={4} style={{ color: "#f87171", fontSize: 12, marginLeft: 23, marginTop: 2 }}>{step.errorMsg}</Text>
+        <Text
+          numberOfLines={4}
+          style={{ color: "#f87171", fontSize: 12, marginLeft: 23, marginTop: 2 }}
+        >
+          {step.errorMsg}
+        </Text>
       ) : null}
       {isFail && step.bodySnippet ? (
-        <Text numberOfLines={4} style={{ color: c.mutedForeground, fontSize: 11, marginLeft: 23, marginTop: 2, fontFamily: "Inter_400Regular" }}>{step.bodySnippet}</Text>
+        <Text
+          numberOfLines={4}
+          style={{
+            color: c.mutedForeground,
+            fontSize: 11,
+            marginLeft: 23,
+            marginTop: 2,
+            fontFamily: "Inter_400Regular",
+          }}
+        >
+          {step.bodySnippet}
+        </Text>
       ) : null}
     </View>
   );
@@ -397,7 +509,10 @@ function AccountSection() {
         "Not available",
         "Email changes are not available for this account type. Visit the MustaFlow website to manage your account.",
         [
-          { text: "Open website", onPress: () => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL) },
+          {
+            text: "Open website",
+            onPress: () => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL),
+          },
           { text: "Cancel", style: "cancel" },
         ],
       );
@@ -406,7 +521,9 @@ function AccountSection() {
     setEmailBusy(true);
     try {
       const emailResource = await user.createEmailAddress({ email: trimmed });
-      await (emailResource as { prepareVerification: (opts: { strategy: string }) => Promise<unknown> }).prepareVerification({ strategy: "email_code" });
+      await (
+        emailResource as { prepareVerification: (opts: { strategy: string }) => Promise<unknown> }
+      ).prepareVerification({ strategy: "email_code" });
       pendingEmailRef.current = emailResource;
       setEmailMode("verify");
     } catch (err) {
@@ -436,7 +553,10 @@ function AccountSection() {
       Alert.alert("Email updated", "Your primary email address has been changed.");
       resetEmailFlow();
     } catch (err) {
-      Alert.alert("Could not verify email", clerkError(err, "The code may be incorrect or expired."));
+      Alert.alert(
+        "Could not verify email",
+        clerkError(err, "The code may be incorrect or expired."),
+      );
     } finally {
       setEmailBusy(false);
     }
@@ -457,7 +577,10 @@ function AccountSection() {
         "Not available",
         "Password changes are not available for this account type. Visit the MustaFlow website to manage your account.",
         [
-          { text: "Open website", onPress: () => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL) },
+          {
+            text: "Open website",
+            onPress: () => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL),
+          },
           { text: "Cancel", style: "cancel" },
         ],
       );
@@ -469,7 +592,10 @@ function AccountSection() {
       Alert.alert("Password updated", "Your password has been changed.");
       resetPwFlow();
     } catch (err) {
-      Alert.alert("Could not change password", clerkError(err, "Check your current password and try again."));
+      Alert.alert(
+        "Could not change password",
+        clerkError(err, "Check your current password and try again."),
+      );
     } finally {
       setPwBusy(false);
     }
@@ -482,12 +608,25 @@ function AccountSection() {
         {hasAvatar ? (
           <Image source={{ uri: avatarUrl }} style={{ width: 48, height: 48, borderRadius: 24 }} />
         ) : (
-          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: `${c.primary}30`, alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ color: c.primary, fontFamily: "Inter_700Bold", fontSize: 18 }}>{initials}</Text>
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              backgroundColor: `${c.primary}30`,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: c.primary, fontFamily: "Inter_700Bold", fontSize: 18 }}>
+              {initials}
+            </Text>
           </View>
         )}
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>{displayName}</Text>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+            {displayName}
+          </Text>
           {emailAddress ? (
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{emailAddress}</Text>
           ) : null}
@@ -496,10 +635,22 @@ function AccountSection() {
 
       {/* Email change */}
       {emailMode === "idle" && (
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 10 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: c.muted,
+            borderRadius: c.radius,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+          }}
+        >
           <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Email</Text>
           <Pressable onPress={() => setEmailMode("input")} hitSlop={8}>
-            <Text style={{ color: c.primary, fontSize: 13, fontFamily: "Inter_500Medium" }}>Change</Text>
+            <Text style={{ color: c.primary, fontSize: 13, fontFamily: "Inter_500Medium" }}>
+              Change
+            </Text>
           </Pressable>
         </View>
       )}
@@ -514,7 +665,12 @@ function AccountSection() {
           />
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Button label="Cancel" variant="ghost" onPress={resetEmailFlow} style={{ flex: 1 }} />
-            <Button label={emailBusy ? "Sending…" : "Send code"} onPress={() => void sendEmailCode()} loading={emailBusy} style={{ flex: 1 }} />
+            <Button
+              label={emailBusy ? "Sending…" : "Send code"}
+              onPress={() => void sendEmailCode()}
+              loading={emailBusy}
+              style={{ flex: 1 }}
+            />
           </View>
         </View>
       )}
@@ -530,18 +686,40 @@ function AccountSection() {
             keyboardType="number-pad"
           />
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Button label="Back" variant="ghost" onPress={() => setEmailMode("input")} style={{ flex: 1 }} />
-            <Button label={emailBusy ? "Verifying…" : "Verify"} onPress={() => void confirmEmailCode()} loading={emailBusy} style={{ flex: 1 }} />
+            <Button
+              label="Back"
+              variant="ghost"
+              onPress={() => setEmailMode("input")}
+              style={{ flex: 1 }}
+            />
+            <Button
+              label={emailBusy ? "Verifying…" : "Verify"}
+              onPress={() => void confirmEmailCode()}
+              loading={emailBusy}
+              style={{ flex: 1 }}
+            />
           </View>
         </View>
       )}
 
       {/* Password change */}
       {!pwOpen && (
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 10 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: c.muted,
+            borderRadius: c.radius,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+          }}
+        >
           <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Password</Text>
           <Pressable onPress={() => setPwOpen(true)} hitSlop={8}>
-            <Text style={{ color: c.primary, fontSize: 13, fontFamily: "Inter_500Medium" }}>Change</Text>
+            <Text style={{ color: c.primary, fontSize: 13, fontFamily: "Inter_500Medium" }}>
+              Change
+            </Text>
           </Pressable>
         </View>
       )}
@@ -567,7 +745,12 @@ function AccountSection() {
           />
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Button label="Cancel" variant="ghost" onPress={resetPwFlow} style={{ flex: 1 }} />
-            <Button label={pwBusy ? "Saving…" : "Save password"} onPress={() => void changePassword()} loading={pwBusy} style={{ flex: 1 }} />
+            <Button
+              label={pwBusy ? "Saving…" : "Save password"}
+              onPress={() => void changePassword()}
+              loading={pwBusy}
+              style={{ flex: 1 }}
+            />
           </View>
         </View>
       )}
@@ -622,7 +805,11 @@ function MemorySection() {
   };
 
   return (
-    <SectionCard icon={Brain} title="Memory & references" description="Control what Ora remembers and references when replying to you.">
+    <SectionCard
+      icon={Brain}
+      title="Memory & references"
+      description="Control what Ora remembers and references when replying to you."
+    >
       <View style={{ gap: 8 }}>
         <ToggleRow
           label="Reference saved memories"
@@ -668,15 +855,21 @@ export default function SettingsScreen() {
   const realtimeDeviceReady = isRealtimeVoiceNativeAvailable();
 
   useEffect(() => {
-    readStoredFocusMode().then((mode) => setFocusFocused(mode === "focused")).catch(() => {});
-    readStoredVoicePreset().then(setVoicePresetState).catch(() => {});
+    readStoredFocusMode()
+      .then((mode) => setFocusFocused(mode === "focused"))
+      .catch(() => {});
+    readStoredVoicePreset()
+      .then(setVoicePresetState)
+      .catch(() => {});
     getPreferences()
       .then((p) => {
         setVoiceLangState(p.voiceLang ?? "");
         setAutoReadReplies(!!p.autoReadReplies);
       })
       .catch(() => {});
-    getRealtimeDiagnostics().then(setRealtimeDiag).catch(() => {});
+    getRealtimeDiagnostics()
+      .then(setRealtimeDiag)
+      .catch(() => {});
     if (isSignedIn) {
       setSubscriptionError(null);
       getSubscription()
@@ -690,8 +883,12 @@ export default function SettingsScreen() {
                 : "Unable to load plan details.";
           setSubscriptionError(msg);
         });
-      getOraUsage().then(setUsage).catch(() => {});
-      getPaymentMethod().then(setPaymentMethod).catch(() => {});
+      getOraUsage()
+        .then(setUsage)
+        .catch(() => {});
+      getPaymentMethod()
+        .then(setPaymentMethod)
+        .catch(() => {});
     }
   }, [isSignedIn]);
 
@@ -757,7 +954,11 @@ export default function SettingsScreen() {
     try {
       if (isSignedIn) {
         let token: string | null = null;
-        try { token = await getToken(); } catch { token = null; }
+        try {
+          token = await getToken();
+        } catch {
+          token = null;
+        }
         setAcctTokenPresent(!!token);
         if (!token) setAcctTokenMissing(true);
       }
@@ -810,27 +1011,52 @@ export default function SettingsScreen() {
 
     updateStep("transport", { status: "running" });
     try {
-      const r = await fetchWithTimeout(`${API_BASE}/api/public-ai/session`, { method: "GET", headers: authHeaders }, 8000);
+      const r = await fetchWithTimeout(
+        `${API_BASE}/api/public-ai/session`,
+        { method: "GET", headers: authHeaders },
+        8000,
+      );
       if (r.status < 500) {
         updateStep("transport", { status: "ok", httpStatus: r.status, detail: "Server reachable" });
       } else {
         let body = "";
-        try { body = (await r.text()).slice(0, 200); } catch { /* ignore */ }
+        try {
+          body = (await r.text()).slice(0, 200);
+        } catch {
+          /* ignore */
+        }
         updateStep("transport", { status: "fail", httpStatus: r.status, bodySnippet: body });
       }
     } catch (err) {
-      updateStep("transport", { status: "fail", errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}` });
+      updateStep("transport", {
+        status: "fail",
+        errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
 
     updateStep("session", { status: "running" });
     try {
-      const r = await fetchWithTimeout(`${API_BASE}/api/public-ai/session`, { method: "POST", headers: jsonHeaders }, 12000);
+      const r = await fetchWithTimeout(
+        `${API_BASE}/api/public-ai/session`,
+        { method: "POST", headers: jsonHeaders },
+        12000,
+      );
       let body = "";
-      try { body = (await r.text()).slice(0, 400); } catch { /* ignore */ }
+      try {
+        body = (await r.text()).slice(0, 400);
+      } catch {
+        /* ignore */
+      }
       if (r.ok) {
         let parsed: Record<string, unknown> | null = null;
-        try { parsed = JSON.parse(body) as Record<string, unknown>; } catch { /* ignore */ }
-        const detail = parsed ? `msgs ${String(parsed.msgCount ?? "?")}/${String(parsed.msgLimit ?? "?")}, tier: ${String(parsed.tier ?? "free/anonymous")}` : "OK";
+        try {
+          parsed = JSON.parse(body) as Record<string, unknown>;
+        } catch {
+          /* ignore */
+        }
+        const detail = parsed
+          ? `msgs ${String(parsed.msgCount ?? "?")}/${String(parsed.msgLimit ?? "?")}, tier: ${String(parsed.tier ?? "free/anonymous")}`
+          : "OK";
         const sessionTier = typeof parsed?.tier === "string" ? parsed.tier : null;
         const sessionIsPaid = parsed?.isPaid === true;
         setDiagPlanSync((prev) => ({ ...prev, sessionTier, sessionIsPaid }));
@@ -839,25 +1065,56 @@ export default function SettingsScreen() {
         updateStep("session", { status: "fail", httpStatus: r.status, bodySnippet: body });
       }
     } catch (err) {
-      updateStep("session", { status: "fail", errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}` });
+      updateStep("session", {
+        status: "fail",
+        errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
 
     updateStep("chat", { status: "running" });
     try {
-      const chatBody = JSON.stringify({ message: "hi", messages: [], language: "en", mode: "instant", referenceSavedMemories: false, referenceChatHistory: false, temporary: true });
-      const r = await fetchWithTimeout(`${API_BASE}/api/public-ai/chat`, { method: "POST", headers: jsonHeaders, body: chatBody }, 25000);
+      const chatBody = JSON.stringify({
+        message: "hi",
+        messages: [],
+        language: "en",
+        mode: "instant",
+        referenceSavedMemories: false,
+        referenceChatHistory: false,
+        temporary: true,
+      });
+      const r = await fetchWithTimeout(
+        `${API_BASE}/api/public-ai/chat`,
+        { method: "POST", headers: jsonHeaders, body: chatBody },
+        25000,
+      );
       let body = "";
-      try { body = (await r.text()).slice(0, 500); } catch { /* ignore */ }
+      try {
+        body = (await r.text()).slice(0, 500);
+      } catch {
+        /* ignore */
+      }
       if (r.ok) {
         let parsed: Record<string, unknown> | null = null;
-        try { parsed = JSON.parse(body) as Record<string, unknown>; } catch { /* ignore */ }
-        const reply = typeof parsed?.reply === "string" ? parsed.reply.trim().slice(0, 100) : body.slice(0, 80);
-        updateStep("chat", { status: "ok", httpStatus: r.status, detail: reply || "(empty reply)" });
+        try {
+          parsed = JSON.parse(body) as Record<string, unknown>;
+        } catch {
+          /* ignore */
+        }
+        const reply =
+          typeof parsed?.reply === "string" ? parsed.reply.trim().slice(0, 100) : body.slice(0, 80);
+        updateStep("chat", {
+          status: "ok",
+          httpStatus: r.status,
+          detail: reply || "(empty reply)",
+        });
       } else {
         updateStep("chat", { status: "fail", httpStatus: r.status, bodySnippet: body });
       }
     } catch (err) {
-      updateStep("chat", { status: "fail", errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}` });
+      updateStep("chat", {
+        status: "fail",
+        errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
 
     if (STREAMING_ENABLED) {
@@ -865,8 +1122,21 @@ export default function SettingsScreen() {
       const streamCtrl = new AbortController();
       const streamTimer = setTimeout(() => streamCtrl.abort(), 10000);
       try {
-        const streamBody = JSON.stringify({ message: "hi", messages: [], language: "en", mode: "instant", referenceSavedMemories: false, referenceChatHistory: false, temporary: true });
-        const r = await fetch(`${API_BASE}/api/public-ai/chat/stream`, { method: "POST", headers: jsonHeaders, body: streamBody, signal: streamCtrl.signal });
+        const streamBody = JSON.stringify({
+          message: "hi",
+          messages: [],
+          language: "en",
+          mode: "instant",
+          referenceSavedMemories: false,
+          referenceChatHistory: false,
+          temporary: true,
+        });
+        const r = await fetch(`${API_BASE}/api/public-ai/chat/stream`, {
+          method: "POST",
+          headers: jsonHeaders,
+          body: streamBody,
+          signal: streamCtrl.signal,
+        });
         clearTimeout(streamTimer);
         streamCtrl.abort();
         const ct = r.headers.get("content-type") ?? "(none)";
@@ -874,16 +1144,26 @@ export default function SettingsScreen() {
           updateStep("stream", { status: "ok", httpStatus: r.status, detail: ct });
         } else {
           let body = "";
-          try { body = (await r.text()).slice(0, 200); } catch { /* ignore */ }
+          try {
+            body = (await r.text()).slice(0, 200);
+          } catch {
+            /* ignore */
+          }
           updateStep("stream", { status: "fail", httpStatus: r.status, bodySnippet: body });
         }
       } catch (err) {
         clearTimeout(streamTimer);
         const isAbort = err instanceof Error && err.name === "AbortError";
         if (isAbort) {
-          updateStep("stream", { status: "fail", errorMsg: "Timed out — no response headers within 10 s" });
+          updateStep("stream", {
+            status: "fail",
+            errorMsg: "Timed out — no response headers within 10 s",
+          });
         } else {
-          updateStep("stream", { status: "fail", errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}` });
+          updateStep("stream", {
+            status: "fail",
+            errorMsg: `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
       }
     }
@@ -906,7 +1186,9 @@ export default function SettingsScreen() {
   const isPaid = currentTier === "core" || currentTier === "wave";
   const signedInEmail =
     typeof isSignedIn === "boolean" && isSignedIn
-      ? (diagPlanSync.tokenStatus !== "unchecked" ? (acctDiag?.identity.email ?? "—") : "—")
+      ? diagPlanSync.tokenStatus !== "unchecked"
+        ? (acctDiag?.identity.email ?? "—")
+        : "—"
       : "anonymous";
   const sessionTierForCompare = diagPlanSync.sessionTier ?? "free";
   const billingTier = subscription?.tier ?? null;
@@ -926,9 +1208,13 @@ export default function SettingsScreen() {
       ? `Plan mismatch: billing says ${planLabel(billingTier)} but chat session says ${planLabel(sessionTierForCompare)}. The chat request is not resolving the same paid user.`
       : null;
   const tokenStatusLabel =
-    diagPlanSync.tokenStatus === "unchecked" ? "not checked" :
-    diagPlanSync.tokenStatus === "present" ? "present" :
-    diagPlanSync.tokenStatus === "missing" ? "missing" : "error";
+    diagPlanSync.tokenStatus === "unchecked"
+      ? "not checked"
+      : diagPlanSync.tokenStatus === "present"
+        ? "present"
+        : diagPlanSync.tokenStatus === "missing"
+          ? "missing"
+          : "error";
   const billingTierLabel = !isSignedIn
     ? "anonymous"
     : billingTier
@@ -954,7 +1240,9 @@ export default function SettingsScreen() {
     acctLocalSessionTier !== (acctDiag?.billing.billingTier ?? null);
   const acctSessionAuthenticated: string | null =
     acctPublicSessionTier !== null
-      ? acctPublicSessionIsPaid ? "yes (paid)" : "no (free/anonymous)"
+      ? acctPublicSessionIsPaid
+        ? "yes (paid)"
+        : "no (free/anonymous)"
       : null;
   const acctWarnMessage = acctTokenWarn
     ? "Signed in on this device, but no Clerk token reached the server. Ora will resolve as anonymous/free here until sign-in is fixed."
@@ -966,26 +1254,32 @@ export default function SettingsScreen() {
 
   const msgRemaining = usage ? Math.max(0, usage.messageLimit - usage.messageCount) : null;
   const imgRemaining = usage ? Math.max(0, usage.imageLimit - usage.imageCount) : null;
-  const windowStarted = usage ? (usage.messageCount > 0 || usage.imageCount > 0) : false;
+  const windowStarted = usage ? usage.messageCount > 0 || usage.imageCount > 0 : false;
 
   const pmBrand = paymentMethod?.brand
     ? paymentMethod.brand.slice(0, 1).toUpperCase() + paymentMethod.brand.slice(1)
     : "Card";
-  const pmExpiry = paymentMethod?.expMonth && paymentMethod?.expYear
-    ? `${paymentMethod.expMonth}/${String(paymentMethod.expYear).slice(-2)}`
-    : null;
+  const pmExpiry =
+    paymentMethod?.expMonth && paymentMethod?.expYear
+      ? `${paymentMethod.expMonth}/${String(paymentMethod.expYear).slice(-2)}`
+      : null;
   const pmExpired = paymentMethod?.status === "expired";
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <ScreenHeader title="Settings" subtitle="Preferences & account" />
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}>
-
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 24 }}
+      >
         {/* 1. Account */}
         <AccountSection />
 
         {/* 2. Appearance */}
-        <SectionCard icon={Sun} title="Appearance" description="Choose light, dark, or follow your system setting.">
+        <SectionCard
+          icon={Sun}
+          title="Appearance"
+          description="Choose light, dark, or follow your system setting."
+        >
           <View style={{ flexDirection: "row", gap: 8 }}>
             {THEME_OPTIONS.map(({ value, label, Icon }) => {
               const active = themeOverride === value;
@@ -995,10 +1289,27 @@ export default function SettingsScreen() {
                   onPress={() => void setThemeOverride(value)}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: active }}
-                  style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: c.radius, borderWidth: 1, borderColor: active ? c.primary : c.border, backgroundColor: active ? `${c.primary}18` : c.muted }}
+                  style={{
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    paddingVertical: 10,
+                    borderRadius: c.radius,
+                    borderWidth: 1,
+                    borderColor: active ? c.primary : c.border,
+                    backgroundColor: active ? `${c.primary}18` : c.muted,
+                  }}
                 >
                   <Icon size={14} color={active ? c.primary : c.mutedForeground} />
-                  <Text style={{ color: active ? c.primary : c.mutedForeground, fontSize: 13, fontFamily: active ? "Inter_600SemiBold" : "Inter_500Medium" }}>
+                  <Text
+                    style={{
+                      color: active ? c.primary : c.mutedForeground,
+                      fontSize: 13,
+                      fontFamily: active ? "Inter_600SemiBold" : "Inter_500Medium",
+                    }}
+                  >
                     {label}
                   </Text>
                 </Pressable>
@@ -1008,7 +1319,11 @@ export default function SettingsScreen() {
         </SectionCard>
 
         {/* 3. Voice input (with Auto-detect) */}
-        <SectionCard icon={Mic} title="Voice input" description="Language used when you dictate messages to Ora.">
+        <SectionCard
+          icon={Mic}
+          title="Voice input"
+          description="Language used when you dictate messages to Ora."
+        >
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {VOICE_LANGS_WITH_AUTO.map((l) => (
               <Pill
@@ -1027,9 +1342,26 @@ export default function SettingsScreen() {
         </SectionCard>
 
         {/* 4. Read replies aloud (mobile-only) */}
-        <SectionCard icon={Volume2} title="Read replies aloud" description="Ora speaks each new reply automatically in your voice-input language.">
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12 }}>
-            <Text style={{ color: c.foreground, fontSize: 14, flex: 1 }}>Auto-play spoken replies</Text>
+        <SectionCard
+          icon={Volume2}
+          title="Read replies aloud"
+          description="Ora speaks each new reply automatically in your voice-input language."
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: c.foreground, fontSize: 14, flex: 1 }}>
+              Auto-play spoken replies
+            </Text>
             <Switch
               value={autoReadReplies}
               onValueChange={(v) => void toggleAutoRead(v)}
@@ -1040,11 +1372,35 @@ export default function SettingsScreen() {
         </SectionCard>
 
         {/* 5. Live voice (Talk to Ora) */}
-        <SectionCard icon={AudioLines} title="Live voice (Talk to Ora)" description="Talk to Ora in a natural, real-time spoken conversation. If live voice is unavailable, Talk mode falls back to basic voice with a notice.">
+        <SectionCard
+          icon={AudioLines}
+          title="Live voice (Talk to Ora)"
+          description="Talk to Ora in a natural, real-time spoken conversation. If live voice is unavailable, Talk mode falls back to basic voice with a notice."
+        >
           {realtimeDiag ? (
             <View style={{ gap: 2 }}>
-              <InfoRow label="Service" value={realtimeDiag.killSwitch ? "Temporarily off" : !realtimeDiag.configured ? "Not configured" : realtimeDiag.enabled ? "Available" : "Unavailable"} warn={!realtimeDiag.enabled} />
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingVertical: 8 }}>
+              <InfoRow
+                label="Service"
+                value={
+                  realtimeDiag.killSwitch
+                    ? "Temporarily off"
+                    : !realtimeDiag.configured
+                      ? "Not configured"
+                      : realtimeDiag.enabled
+                        ? "Available"
+                        : "Unavailable"
+                }
+                warn={!realtimeDiag.enabled}
+              />
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  paddingVertical: 8,
+                }}
+              >
                 <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Voice</Text>
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   {(realtimeDiag.voices?.length
@@ -1061,9 +1417,22 @@ export default function SettingsScreen() {
                         onPress={() => changeVoicePreset(v.key)}
                         accessibilityRole="radio"
                         accessibilityState={{ selected: active }}
-                        style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: c.radius, borderWidth: 1, borderColor: active ? c.primary : c.border, backgroundColor: active ? `${c.primary}18` : c.muted }}
+                        style={{
+                          paddingVertical: 6,
+                          paddingHorizontal: 14,
+                          borderRadius: c.radius,
+                          borderWidth: 1,
+                          borderColor: active ? c.primary : c.border,
+                          backgroundColor: active ? `${c.primary}18` : c.muted,
+                        }}
                       >
-                        <Text style={{ color: active ? c.primary : c.mutedForeground, fontSize: 13, fontFamily: active ? "Inter_600SemiBold" : "Inter_500Medium" }}>
+                        <Text
+                          style={{
+                            color: active ? c.primary : c.mutedForeground,
+                            fontSize: 13,
+                            fontFamily: active ? "Inter_600SemiBold" : "Inter_500Medium",
+                          }}
+                        >
                           {v.label}
                         </Text>
                       </Pressable>
@@ -1071,24 +1440,52 @@ export default function SettingsScreen() {
                   })}
                 </View>
               </View>
-              <InfoRow label="Max session" value={formatDuration(realtimeDiag.maxDurationSeconds)} />
-              {typeof realtimeDiag.remainingSeconds === "number" && typeof realtimeDiag.limitSeconds === "number" && (
-                <InfoRow label="Voice time left" value={`${formatDuration(Math.max(0, realtimeDiag.remainingSeconds))} of ${formatDuration(realtimeDiag.limitSeconds)}`} />
-              )}
+              <InfoRow
+                label="Max session"
+                value={formatDuration(realtimeDiag.maxDurationSeconds)}
+              />
+              {typeof realtimeDiag.remainingSeconds === "number" &&
+                typeof realtimeDiag.limitSeconds === "number" && (
+                  <InfoRow
+                    label="Voice time left"
+                    value={`${formatDuration(Math.max(0, realtimeDiag.remainingSeconds))} of ${formatDuration(realtimeDiag.limitSeconds)}`}
+                  />
+                )}
               {realtimeDiag.resetsAt && (
                 <InfoRow label="Refreshes" value={formatReset(realtimeDiag.resetsAt)} />
               )}
               <InfoRow label="Plan" value={planLabel(realtimeDiag.tier)} />
-              <InfoRow label="This device" value={realtimeDeviceReady ? "Ready" : "Update app to enable"} warn={!realtimeDeviceReady} />
+              <InfoRow
+                label="This device"
+                value={realtimeDeviceReady ? "Ready" : "Update app to enable"}
+                warn={!realtimeDeviceReady}
+              />
             </View>
           ) : (
-            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Checking live voice availability...</Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+              Checking live voice availability...
+            </Text>
           )}
         </SectionCard>
 
         {/* 6. Speaker focus */}
-        <SectionCard icon={Focus} title="Speaker focus" description="Controls how Talk to Ora handles other voices in the room. Saved on this device only.">
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12 }}>
+        <SectionCard
+          icon={Focus}
+          title="Speaker focus"
+          description="Controls how Talk to Ora handles other voices in the room. Saved on this device only."
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={{ color: c.foreground, fontSize: 14 }}>Focused listening</Text>
               <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
@@ -1097,34 +1494,90 @@ export default function SettingsScreen() {
                   : "Ora replies to any nearby speech (original behavior)."}
               </Text>
             </View>
-            <Switch value={focusFocused} onValueChange={toggleFocusMode} trackColor={{ false: c.border, true: c.primary }} thumbColor={c.primaryForeground} />
+            <Switch
+              value={focusFocused}
+              onValueChange={toggleFocusMode}
+              trackColor={{ false: c.border, true: c.primary }}
+              thumbColor={c.primaryForeground}
+            />
           </View>
         </SectionCard>
 
         {/* 7. Account sync */}
-        <SectionCard icon={RefreshCw} title="Account sync" description="Confirm this device resolves to the same Ora account, plan, and data as the website.">
+        <SectionCard
+          icon={RefreshCw}
+          title="Account sync"
+          description="Confirm this device resolves to the same Ora account, plan, and data as the website."
+        >
           {acctLocalSignedIn !== null && (
             <View style={{ gap: 4 }}>
               <InfoRow label="Local signed in" value={acctLocalSignedIn ? "yes" : "no"} />
               {acctLocalSignedIn && (
-                <InfoRow label="Token present" value={acctTokenPresent === null ? "checking" : acctTokenPresent ? "yes" : "no"} warn={acctTokenPresent === false} />
+                <InfoRow
+                  label="Token present"
+                  value={acctTokenPresent === null ? "checking" : acctTokenPresent ? "yes" : "no"}
+                  warn={acctTokenPresent === false}
+                />
               )}
               {acctDiag && (
-                <InfoRow label="Server recognized" value={acctDiag.identity.clerkUserIdLast4 ? "yes" : "no"} warn={acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4} />
+                <InfoRow
+                  label="Server recognized"
+                  value={acctDiag.identity.clerkUserIdLast4 ? "yes" : "no"}
+                  warn={acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
+                />
               )}
             </View>
           )}
           {acctDiag ? (
             <View style={{ gap: 6 }}>
-              <InfoRow label="User fingerprint" value={acctDiag.identity.userIdHash || "anonymous"} />
-              <InfoRow label="Account id ending" value={acctDiag.identity.clerkUserIdLast4 ? `…${acctDiag.identity.clerkUserIdLast4}` : "—"} />
+              <InfoRow
+                label="User fingerprint"
+                value={acctDiag.identity.userIdHash || "anonymous"}
+              />
+              <InfoRow
+                label="Account id ending"
+                value={
+                  acctDiag.identity.clerkUserIdLast4
+                    ? `…${acctDiag.identity.clerkUserIdLast4}`
+                    : "—"
+                }
+              />
               <InfoRow label="Email" value={acctDiag.identity.email ?? "anonymous"} />
               <InfoRow label="Billing tier" value={planLabel(acctDiag.billing.billingTier)} />
-              <InfoRow label="Chat tier" value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`} warn={acctTierMismatch} />
-              <InfoRow label="Public session tier" value={acctPublicSessionTier !== null ? `${planLabel(acctPublicSessionTier)}${acctPublicSessionIsPaid ? " (paid)" : ""}` : "—"} />
-              <InfoRow label="Local session tier" value={acctLocalSessionTier !== null ? planLabel(acctLocalSessionTier) : "—"} warn={acctLocalSessionMismatch} />
-              <InfoRow label="Session authenticated" value={acctSessionAuthenticated ?? "—"} warn={acctLocalSessionMismatch} />
-              <InfoRow label="Ora session auth" value={acctDiag.identity.clerkUserIdLast4 ? (acctDiag.chatSession.isPaid ? "authenticated (paid)" : "authenticated (free)") : "anonymous"} warn={!!acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4} />
+              <InfoRow
+                label="Chat tier"
+                value={`${planLabel(acctDiag.chatSession.tier)}${acctDiag.chatSession.isPaid ? " (paid)" : ""}`}
+                warn={acctTierMismatch}
+              />
+              <InfoRow
+                label="Public session tier"
+                value={
+                  acctPublicSessionTier !== null
+                    ? `${planLabel(acctPublicSessionTier)}${acctPublicSessionIsPaid ? " (paid)" : ""}`
+                    : "—"
+                }
+              />
+              <InfoRow
+                label="Local session tier"
+                value={acctLocalSessionTier !== null ? planLabel(acctLocalSessionTier) : "—"}
+                warn={acctLocalSessionMismatch}
+              />
+              <InfoRow
+                label="Session authenticated"
+                value={acctSessionAuthenticated ?? "—"}
+                warn={acctLocalSessionMismatch}
+              />
+              <InfoRow
+                label="Ora session auth"
+                value={
+                  acctDiag.identity.clerkUserIdLast4
+                    ? acctDiag.chatSession.isPaid
+                      ? "authenticated (paid)"
+                      : "authenticated (free)"
+                    : "anonymous"
+                }
+                warn={!!acctLocalSignedIn && !acctDiag.identity.clerkUserIdLast4}
+              />
               <InfoRow label="Conversations" value={String(acctDiag.counts.conversations)} />
               <InfoRow label="Projects" value={String(acctDiag.counts.projects)} />
               <InfoRow label="Saved memories" value={String(acctDiag.counts.userLevelMemories)} />
@@ -1135,16 +1588,32 @@ export default function SettingsScreen() {
               <InfoRow label="Environment" value={acctDiag.api.environment ?? "—"} />
             </View>
           ) : (
-            <View style={{ backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12 }}>
+            <View
+              style={{
+                backgroundColor: c.muted,
+                borderRadius: c.radius,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              }}
+            >
               <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
-                {acctError ? `Could not load account sync: ${acctError}` : "Run the check to compare this device against your website account."}
+                {acctError
+                  ? `Could not load account sync: ${acctError}`
+                  : "Run the check to compare this device against your website account."}
               </Text>
             </View>
           )}
           {acctWarnMessage ? (
-            <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>{acctWarnMessage}</Text>
+            <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>
+              {acctWarnMessage}
+            </Text>
           ) : null}
-          <Button label={acctLoading ? "Checking account sync…" : "Check account sync"} onPress={() => void runAccountCheck()} disabled={acctLoading} full />
+          <Button
+            label={acctLoading ? "Checking account sync…" : "Check account sync"}
+            onPress={() => void runAccountCheck()}
+            disabled={acctLoading}
+            full
+          />
         </SectionCard>
 
         {/* 8. Memory & references */}
@@ -1152,11 +1621,27 @@ export default function SettingsScreen() {
 
         {/* 9. Plan & billing (signed-in only) */}
         {isSignedIn && (
-          <SectionCard icon={CreditCard} title="Plan & billing" description="Your Ora plan, usage, and billing.">
+          <SectionCard
+            icon={CreditCard}
+            title="Plan & billing"
+            description="Your Ora plan, usage, and billing."
+          >
             <View style={{ gap: 10 }}>
               {subscriptionError ? (
-                <View style={{ backgroundColor: "rgba(239,67,67,0.08)", borderRadius: c.radius, borderWidth: 1, borderColor: "rgba(239,67,67,0.3)", paddingHorizontal: 14, paddingVertical: 12, gap: 10 }}>
-                  <Text style={{ color: "#f87171", fontSize: 13, lineHeight: 18 }}>{subscriptionError}</Text>
+                <View
+                  style={{
+                    backgroundColor: "rgba(239,67,67,0.08)",
+                    borderRadius: c.radius,
+                    borderWidth: 1,
+                    borderColor: "rgba(239,67,67,0.3)",
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    gap: 10,
+                  }}
+                >
+                  <Text style={{ color: "#f87171", fontSize: 13, lineHeight: 18 }}>
+                    {subscriptionError}
+                  </Text>
                   <Button
                     label="Retry"
                     onPress={() => {
@@ -1179,13 +1664,32 @@ export default function SettingsScreen() {
               ) : (
                 <>
                   {/* Current plan card */}
-                  <View style={{ backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12, gap: 4 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                      <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 17 }}>
+                  <View
+                    style={{
+                      backgroundColor: c.muted,
+                      borderRadius: c.radius,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      gap: 4,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <Text
+                        style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 17 }}
+                      >
                         {planLabel(currentTier)}
                       </Text>
                       {subscription?.status && subscription.status !== "active" && (
-                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{subscription.status}</Text>
+                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                          {subscription.status}
+                        </Text>
                       )}
                     </View>
                     <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
@@ -1197,8 +1701,16 @@ export default function SettingsScreen() {
                   {usage && msgRemaining !== null && imgRemaining !== null && (
                     <>
                       <View style={{ flexDirection: "row", gap: 8 }}>
-                        <BigUsageCard label="Messages" remaining={msgRemaining} limit={usage.messageLimit} />
-                        <BigUsageCard label="Images" remaining={imgRemaining} limit={usage.imageLimit} />
+                        <BigUsageCard
+                          label="Messages"
+                          remaining={msgRemaining}
+                          limit={usage.messageLimit}
+                        />
+                        <BigUsageCard
+                          label="Images"
+                          remaining={imgRemaining}
+                          limit={usage.imageLimit}
+                        />
                       </View>
                       <Text style={{ color: c.mutedForeground, fontSize: 12, textAlign: "center" }}>
                         {windowStarted
@@ -1235,33 +1747,86 @@ export default function SettingsScreen() {
 
                   {/* Payment method */}
                   {paymentMethod && (
-                    <View style={{ backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12, gap: 8 }}>
+                    <View
+                      style={{
+                        backgroundColor: c.muted,
+                        borderRadius: c.radius,
+                        paddingHorizontal: 14,
+                        paddingVertical: 12,
+                        gap: 8,
+                      }}
+                    >
                       {paymentMethod.hasPaymentMethod ? (
                         <>
                           <View style={{ gap: 3 }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                              <Text style={{ color: c.foreground, fontFamily: "Inter_500Medium", fontSize: 14 }}>
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: c.foreground,
+                                  fontFamily: "Inter_500Medium",
+                                  fontSize: 14,
+                                }}
+                              >
                                 {pmBrand} ending {paymentMethod.last4}
                               </Text>
                               {pmExpired && (
-                                <View style={{ backgroundColor: "rgba(239,67,67,0.15)", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                                  <Text style={{ color: "#f87171", fontSize: 11, fontFamily: "Inter_500Medium" }}>Expired</Text>
+                                <View
+                                  style={{
+                                    backgroundColor: "rgba(239,67,67,0.15)",
+                                    borderRadius: 4,
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 2,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: "#f87171",
+                                      fontSize: 11,
+                                      fontFamily: "Inter_500Medium",
+                                    }}
+                                  >
+                                    Expired
+                                  </Text>
                                 </View>
                               )}
                             </View>
                             {pmExpiry && (
-                              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Expires {pmExpiry}</Text>
+                              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                                Expires {pmExpiry}
+                              </Text>
                             )}
                           </View>
                           <View style={{ gap: 6 }}>
-                            <Button label="Change payment method" variant="secondary" onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)} full />
-                            <Button label="Manage billing" variant="ghost" onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)} full />
+                            <Button
+                              label="Change payment method"
+                              variant="secondary"
+                              onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                              full
+                            />
+                            <Button
+                              label="Manage billing"
+                              variant="ghost"
+                              onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                              full
+                            />
                           </View>
                         </>
                       ) : (
                         <>
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>No payment method on file.</Text>
-                          <Button label="Add payment method" onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)} full />
+                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                            No payment method on file.
+                          </Text>
+                          <Button
+                            label="Add payment method"
+                            onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                            full
+                          />
                         </>
                       )}
                     </View>
@@ -1273,31 +1838,62 @@ export default function SettingsScreen() {
         )}
 
         {/* 10. Diagnostics (mobile-only) */}
-        <SectionCard icon={Wifi} title="Diagnostics" description="Step-by-step connectivity and chat-path check.">
+        <SectionCard
+          icon={Wifi}
+          title="Diagnostics"
+          description="Step-by-step connectivity and chat-path check."
+        >
           <View style={{ gap: 6 }}>
             <InfoRow label="API URL" value={API_BASE} />
             <InfoRow label="Streaming" value={STREAMING_ENABLED ? "on" : "off"} />
             <InfoRow label="Signed in" value={isSignedIn ? "yes" : "no"} warn={!isSignedIn} />
             <InfoRow label="Email" value={isSignedIn ? signedInEmail : "anonymous"} />
             <InfoRow label="Clerk token" value={tokenStatusLabel} warn={signedInMissingToken} />
-            <InfoRow label="Billing tier" value={billingTierLabel} warn={!!isSignedIn && !billingTier} />
+            <InfoRow
+              label="Billing tier"
+              value={billingTierLabel}
+              warn={!!isSignedIn && !billingTier}
+            />
             <InfoRow label="Chat tier" value={chatTierLabel} warn={planSyncWarn} />
-            <InfoRow label="Clerk key" value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"} warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY} />
+            <InfoRow
+              label="Clerk key"
+              value={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? "set" : "MISSING"}
+              warn={!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
+            />
             <InfoRow label="Slug" value={Constants.expoConfig?.slug ?? "—"} />
             <InfoRow label="Build" value={APP_VERSION_LABEL} />
           </View>
           {planSyncMessage ? (
-            <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>{planSyncMessage}</Text>
+            <Text style={{ color: "#f87171", fontSize: 12, lineHeight: 18, marginTop: 2 }}>
+              {planSyncMessage}
+            </Text>
           ) : null}
-          <Button label={diagLoading ? "Testing Ora chat…" : "Test Ora chat"} onPress={() => void runDiagnostics()} disabled={diagLoading} full />
+          <Button
+            label={diagLoading ? "Testing Ora chat…" : "Test Ora chat"}
+            onPress={() => void runDiagnostics()}
+            disabled={diagLoading}
+            full
+          />
           {diagSteps.length > 0 && (
             <View style={{ gap: 8, marginTop: 4 }}>
               {diagSteps.map((step) => (
                 <DiagStepRow key={step.id} step={step} />
               ))}
               {!diagLoading && (
-                <Text style={{ color: anyFail ? "#f87171" : allOk ? "#4ade80" : c.mutedForeground, fontSize: 13, textAlign: "center", marginTop: 4, fontFamily: "Inter_600SemiBold" }}>
-                  {anyFail ? "One or more steps failed — see details above." : allOk ? "All checks passed." : "Check in progress…"}
+                <Text
+                  style={{
+                    color: anyFail ? "#f87171" : allOk ? "#4ade80" : c.mutedForeground,
+                    fontSize: 13,
+                    textAlign: "center",
+                    marginTop: 4,
+                    fontFamily: "Inter_600SemiBold",
+                  }}
+                >
+                  {anyFail
+                    ? "One or more steps failed — see details above."
+                    : allOk
+                      ? "All checks passed."
+                      : "Check in progress…"}
                 </Text>
               )}
             </View>
@@ -1306,12 +1902,21 @@ export default function SettingsScreen() {
 
         {/* 11. About */}
         <SectionCard icon={Info} title="About" description="App version and build.">
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: c.muted, borderRadius: c.radius, paddingHorizontal: 14, paddingVertical: 12 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backgroundColor: c.muted,
+              borderRadius: c.radius,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
             <Text style={{ color: c.foreground, fontSize: 14 }}>Ora</Text>
             <Text style={{ color: c.mutedForeground, fontSize: 13 }}>{APP_VERSION_LABEL}</Text>
           </View>
         </SectionCard>
-
       </ScrollView>
     </View>
   );

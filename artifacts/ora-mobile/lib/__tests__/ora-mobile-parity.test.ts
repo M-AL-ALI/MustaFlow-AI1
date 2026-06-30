@@ -46,9 +46,11 @@ describe("Ora mobile parity — memory API functions", () => {
   });
 
   it("saveOraMemory() accepts an optional oraProjectId parameter", () => {
-    expect(api).toContain(
-      "export async function saveOraMemory(\n  fact: string,\n  oraProjectId?: number | null,\n)",
-    );
+    expect(api).toContain("export async function saveOraMemory(");
+    const fnStart = api.indexOf("export async function saveOraMemory(");
+    const fnSig = api.slice(fnStart, fnStart + 120);
+    expect(fnSig).toContain("fact: string");
+    expect(fnSig).toContain("oraProjectId?: number | null");
   });
 
   it("saveOraMemory() with oraProjectId spreads it into the POST body", () => {
@@ -184,19 +186,13 @@ describe("Ora mobile parity — chat sends oraProjectId for project memory injec
   const index = read("../../app/(home)/index.tsx");
 
   it("index.tsx imports useActiveProject from context", () => {
-    expect(index).toContain(
-      'import { useActiveProject } from "@/context/ActiveProjectContext"',
-    );
+    expect(index).toContain('import { useActiveProject } from "@/context/ActiveProjectContext"');
   });
 
   it("index.tsx uses useActiveProject to get activeProjectId (not local useState)", () => {
-    expect(index).toContain(
-      "const { activeProjectId, setActiveProjectId } = useActiveProject();",
-    );
+    expect(index).toContain("const { activeProjectId, setActiveProjectId } = useActiveProject();");
     // Must NOT have local useState for activeProjectId
-    expect(index).not.toContain(
-      "const [activeProjectId, setActiveProjectId] = useState",
-    );
+    expect(index).not.toContain("const [activeProjectId, setActiveProjectId] = useState");
   });
 
   it("index.tsx chatReq (non-streaming path) includes oraProjectId from the active project ref", () => {
@@ -240,7 +236,10 @@ describe("Ora mobile parity — ActiveProjectContext wiring", () => {
     // Provider must wrap the Drawer; verify the provider body contains a Drawer element
     const providerStart = layout.indexOf("<ActiveProjectProvider>");
     expect(providerStart).toBeGreaterThan(-1);
-    const providerBody = layout.slice(providerStart, layout.indexOf("</ActiveProjectProvider>") + 24);
+    const providerBody = layout.slice(
+      providerStart,
+      layout.indexOf("</ActiveProjectProvider>") + 24,
+    );
     // The Drawer component (not DrawerContentScrollView) is inside the provider
     expect(providerBody).toContain("drawerContent=");
     expect(providerBody).toContain("</Drawer>");
@@ -283,6 +282,53 @@ describe("Ora mobile parity — temporary chat does not save or reference memori
     const handleBody = index.slice(handleStart, handleStart + 300);
     expect(handleBody).toContain("temporaryRef.current");
     expect(handleBody).toContain("isSignedInRef.current");
+  });
+});
+
+// ── Streaming gate parity ───────────────────────────────────────────────────
+
+describe("Ora mobile parity — streamChatNative gate matches website behaviour", () => {
+  const api = read("../api.ts");
+
+  it("streaming gate is opt-out (=== false) not opt-in (!== true)", () => {
+    const fnStart = api.indexOf("export async function streamChatNative(");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = api.slice(fnStart, fnStart + 600);
+    // New gate: kill switch fires only when explicitly "false"
+    expect(fnBody).toContain('EXPO_PUBLIC_ORA_STREAMING_ENABLED === "false"');
+    // Old opt-in gate must NOT appear
+    expect(fnBody).not.toContain('EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "true"');
+  });
+
+  it("onToken signature accepts async callbacks (void | Promise<void>)", () => {
+    const fnStart = api.indexOf("export async function streamChatNative(");
+    const signatureBody = api.slice(fnStart, fnStart + 200);
+    expect(signatureBody).toContain("void | Promise<void>");
+  });
+
+  it("onToken is awaited via Promise.resolve for async safety", () => {
+    expect(api).toContain("await Promise.resolve(onToken(text))");
+  });
+
+  it("SSE buffer normalizes CRLF line endings before splitting", () => {
+    // The pattern is unique to streamChatNative; search the full file rather
+    // than a fixed-size slice so it doesn't break when the function grows.
+    expect(api).toContain('.replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n")');
+    // Must appear inside the function body (after its declaration)
+    const fnStart = api.indexOf("export async function streamChatNative(");
+    expect(api.indexOf('.replace(/\\r\\n/g, "\\n")', fnStart)).toBeGreaterThan(fnStart);
+  });
+
+  it("55ms yield between tokens is present for React Native word-by-word paint", () => {
+    expect(api).toContain("setTimeout(resolve, 55)");
+    const fnStart = api.indexOf("export async function streamChatNative(");
+    expect(api.indexOf("setTimeout(resolve, 55)", fnStart)).toBeGreaterThan(fnStart);
+  });
+
+  it("settings STREAMING_ENABLED constant mirrors the opt-out gate", () => {
+    const settings = read("../../app/(home)/settings.tsx");
+    expect(settings).toContain('EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "false"');
+    expect(settings).not.toContain('EXPO_PUBLIC_ORA_STREAMING_ENABLED === "true"');
   });
 });
 

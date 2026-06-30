@@ -27,8 +27,9 @@ describe("Ora Mobile — plan/billing parity", () => {
   it("renders BigUsageCard for message and image quotas (website-parity plan display)", () => {
     // New design uses BigUsageCard components to show remaining messages / images
     expect(settings).toContain("function BigUsageCard(");
-    // BigUsageCard is rendered for both quota types
-    expect(settings).toContain('BigUsageCard label');
+    // BigUsageCard is rendered for both quota types (label prop may be on a separate line)
+    expect(settings).toContain('label="Messages"');
+    expect(settings).toContain('label="Images"');
     // Renewal date comes from subscription via renewalLabel helper
     expect(settings).toContain("function renewalLabel(");
     expect(settings).toContain("renewalLabel(subscription");
