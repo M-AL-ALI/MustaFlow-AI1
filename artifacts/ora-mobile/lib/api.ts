@@ -685,10 +685,7 @@ function deriveMemoryTitle(fact: string): string {
  * this save superseded so the chat can name exactly what changed. Throws on a
  * non-2xx response so callers leave the candidate unsaved.
  */
-export async function saveOraMemory(
-  fact: string,
-  oraProjectId?: number | null,
-): Promise<string[]> {
+export async function saveOraMemory(fact: string, oraProjectId?: number | null): Promise<string[]> {
   const content = fact.trim();
   if (!content) throw new Error("Cannot save an empty memory");
   const data = await jsonRequest<{ superseded?: { title: string }[] }>("/api/ora/memories", {
