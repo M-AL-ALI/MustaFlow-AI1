@@ -178,7 +178,8 @@ describe("ORAX product-surface wiring", () => {
 
   it("keeps normal assistant replies conversational instead of bookkeeping reports", () => {
     expect(oraxApiRoute).toContain('"I\'ll work from here."');
-    expect(oraxApiRoute).toContain('title: "Inspect source files"');
+    expect(oraxApiRoute).toContain('"Inspect source files"');
+    expect(oraxApiRoute).toContain('"Inspect related source files"');
     expect(oraxApiRoute).toContain("composerMetadataSchema");
     expect(oraxApiRoute).toContain('permissionMode: z.enum(["ask", "auto", "read_only"])');
     expect(oraxApiRoute).toContain(
@@ -189,7 +190,14 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain('ingestionStatus: z.enum(["ready", "unsupported", "error"])');
     expect(oraxApiRoute).toContain("normalizeOraxComposerAttachments");
     expect(oraxApiRoute).toContain("buildOraxComposerAttachmentContext");
-    expect(oraxApiRoute).toContain("const effectiveUserMessage = userMessageContext");
+    expect(oraxApiRoute).toContain("buildOraxComposerAttachmentAnalysis");
+    expect(oraxApiRoute).toContain("buildOraxAttachmentAnalysisContext");
+    expect(oraxApiRoute).toContain("extractOraxAttachmentErrorSignals");
+    expect(oraxApiRoute).toContain("parseOraxImageDimensions");
+    expect(oraxApiRoute).toContain("attachmentAnalysis");
+    expect(oraxApiRoute).toContain("suggestedFocus");
+    expect(oraxApiRoute).toContain("const attachmentAnalysisContext = attachmentAnalysis");
+    expect(oraxApiRoute).toContain("const effectiveUserMessage = [");
     expect(oraxApiRoute).toContain("attachmentContext: userMessageContext");
     expect(oraxApiRoute).toContain("...(parsed.data.metadata ?? {})");
     expect(oraxApiRoute).toContain("composer: composerMetadata ?? null");

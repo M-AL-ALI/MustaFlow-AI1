@@ -91,6 +91,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   filenames only. Text/code files are read into bounded `contentText`, small
   screenshots/images are attached as bounded data URLs for visual/UI context,
   and unsupported or oversized binaries are explicitly marked as unreadable.
+- Before replying, Orax must analyze readable attachments into task metadata:
+  detect likely file paths, error output, commands, framework/language signals,
+  and screenshot/image dimensions when available, then use that analysis to
+  shape the conversational reply and inline next action.
 - Composer control state must travel through ORAX-owned task-message metadata,
   not Ora chat, project chat, credits, or AI Builder endpoints.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions

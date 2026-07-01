@@ -95,6 +95,34 @@ const taskMessageSchema = z.object({
 
 type OraxComposerAttachmentInput = z.infer<typeof composerAttachmentSchema>;
 
+type OraxComposerAttachmentAnalysis = {
+  summary: string;
+  attachments: Array<{
+    name: string;
+    contentKind: string;
+    ingestionStatus: string;
+    readable: boolean;
+    signals: string[];
+    detectedPaths: string[];
+    errors: string[];
+    commands: string[];
+    frameworks: string[];
+    languages: string[];
+    image?: {
+      mimeType: string;
+      width?: number;
+      height?: number;
+      likelyScreenshot: boolean;
+    };
+  }>;
+  detectedPaths: string[];
+  errors: string[];
+  commands: string[];
+  frameworks: string[];
+  languages: string[];
+  suggestedFocus: string[];
+};
+
 const githubConnectSchema = z.object({
   token: z.string().min(8).max(5000),
 });
@@ -571,9 +599,20 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
         }
       : undefined;
     const userMessageContext = buildOraxComposerAttachmentContext(composerMetadata?.attachments);
-    const effectiveUserMessage = userMessageContext
-      ? `${parsed.data.content}\n\n${userMessageContext}`
-      : parsed.data.content;
+    const attachmentAnalysis = buildOraxComposerAttachmentAnalysis(
+      composerMetadata?.attachments,
+      parsed.data.content,
+    );
+    const attachmentAnalysisContext = attachmentAnalysis
+      ? buildOraxAttachmentAnalysisContext(attachmentAnalysis)
+      : null;
+    const effectiveUserMessage = [
+      parsed.data.content,
+      attachmentAnalysisContext,
+      userMessageContext,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const now = new Date();
     const [message] = await db
       .insert(oraxTaskMessagesTable)
@@ -589,6 +628,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
             ? {
                 composer: composerMetadata,
                 attachmentContext: userMessageContext,
+                attachmentAnalysis,
               }
             : {}),
           source: "orax-task-thread",
@@ -603,6 +643,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       approvals,
       artifacts,
       userMessage: effectiveUserMessage,
+      attachmentAnalysis,
     });
     const checkpoint = buildOraxCheckpointSummary({ task, approvals, artifacts });
     const assistantContent = buildOraxTaskThreadReply({
@@ -613,6 +654,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       checkpoint,
       userMessage: effectiveUserMessage,
       attachmentContext: userMessageContext,
+      attachmentAnalysis,
     });
     const [assistantMessage] = await db
       .insert(oraxTaskMessagesTable)
@@ -631,6 +673,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
           checkpoint,
           composer: composerMetadata ?? null,
           attachmentContext: userMessageContext,
+          attachmentAnalysis,
           resumeMode: isOraxResumeQuestion(effectiveUserMessage),
           actionSuggestions,
         },
@@ -2824,6 +2867,365 @@ function truncateOraxAttachmentText(text: string, max: number): string {
   return text.slice(0, max);
 }
 
+function buildOraxComposerAttachmentAnalysis(
+  attachments: OraxComposerAttachmentInput[] | undefined,
+  userMessage: string,
+): OraxComposerAttachmentAnalysis | null {
+  if (!attachments?.length) return null;
+
+  const analyzed = attachments.map((attachment) =>
+    analyzeOraxComposerAttachment(attachment, userMessage),
+  );
+  const detectedPaths = mergeOraxDetectedPaths(
+    analyzed.flatMap((attachment) => attachment.detectedPaths),
+  );
+  const errors = uniqueOraxSignals(
+    analyzed.flatMap((attachment) => attachment.errors),
+    8,
+  );
+  const commands = uniqueOraxSignals(
+    analyzed.flatMap((attachment) => attachment.commands),
+    8,
+  );
+  const frameworks = uniqueOraxSignals(
+    analyzed.flatMap((attachment) => attachment.frameworks),
+    8,
+  );
+  const languages = uniqueOraxSignals(
+    analyzed.flatMap((attachment) => attachment.languages),
+    8,
+  );
+  const suggestedFocus = buildOraxAttachmentSuggestedFocus({
+    attachments: analyzed,
+    detectedPaths,
+    errors,
+    commands,
+    frameworks,
+    languages,
+  });
+
+  return {
+    summary: summarizeOraxAttachmentAnalysis({
+      attachmentCount: analyzed.length,
+      textCount: analyzed.filter((attachment) => attachment.contentKind === "text").length,
+      imageCount: analyzed.filter((attachment) => attachment.contentKind === "image").length,
+      unsupportedCount: analyzed.filter((attachment) => !attachment.readable).length,
+      errors,
+      frameworks,
+      languages,
+      detectedPaths,
+    }),
+    attachments: analyzed,
+    detectedPaths,
+    errors,
+    commands,
+    frameworks,
+    languages,
+    suggestedFocus,
+  };
+}
+
+function analyzeOraxComposerAttachment(
+  attachment: OraxComposerAttachmentInput,
+  userMessage: string,
+): OraxComposerAttachmentAnalysis["attachments"][number] {
+  const contentKind = attachment.contentKind ?? "unsupported";
+  const ingestionStatus = attachment.ingestionStatus ?? "unsupported";
+  const text = attachment.contentText?.trim() ?? "";
+  const detectedPaths = mergeOraxDetectedPaths([
+    ...(text ? extractOraxCandidatePaths(text) : []),
+    ...extractOraxCandidatePaths(attachment.name),
+  ]);
+  const errors = text ? extractOraxAttachmentErrorSignals(text) : [];
+  const commands = text ? extractOraxAttachmentCommandSignals(text) : [];
+  const frameworks = text ? detectOraxAttachmentFrameworks(text) : [];
+  const languages = detectOraxAttachmentLanguages(attachment.name, attachment.type, text);
+  const image =
+    attachment.dataUrl && contentKind === "image"
+      ? analyzeOraxImageAttachment(attachment, userMessage)
+      : undefined;
+  const signals = uniqueOraxSignals(
+    [
+      ...errors.map((error) => `error: ${error}`),
+      ...commands.map((command) => `command: ${command}`),
+      ...frameworks.map((framework) => `framework: ${framework}`),
+      ...languages.map((language) => `language: ${language}`),
+      image?.likelyScreenshot ? "visual: likely screenshot" : undefined,
+    ].filter((value): value is string => Boolean(value)),
+    8,
+  );
+
+  return {
+    name: attachment.name,
+    contentKind,
+    ingestionStatus,
+    readable: Boolean(text || attachment.dataUrl),
+    signals,
+    detectedPaths,
+    errors,
+    commands,
+    frameworks,
+    languages,
+    image,
+  };
+}
+
+function analyzeOraxImageAttachment(
+  attachment: OraxComposerAttachmentInput,
+  userMessage: string,
+): NonNullable<OraxComposerAttachmentAnalysis["attachments"][number]["image"]> {
+  const parsed = parseOraxDataUrl(attachment.dataUrl ?? "");
+  const dimensions = parsed ? parseOraxImageDimensions(parsed.mimeType, parsed.bytes) : null;
+  const likelyScreenshot =
+    /screenshot|screen|photo|ui|layout|button|mobile|web|app/i.test(
+      `${attachment.name} ${userMessage}`,
+    ) || Boolean(dimensions && Math.max(dimensions.width, dimensions.height) >= 900);
+
+  return {
+    mimeType: parsed?.mimeType ?? attachment.type ?? "image/*",
+    width: dimensions?.width,
+    height: dimensions?.height,
+    likelyScreenshot,
+  };
+}
+
+function parseOraxDataUrl(dataUrl: string): { mimeType: string; bytes: Buffer } | null {
+  const match = dataUrl.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  try {
+    return {
+      mimeType: match[1] ?? "application/octet-stream",
+      bytes: Buffer.from(match[2]!, "base64"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseOraxImageDimensions(
+  mimeType: string,
+  bytes: Buffer,
+): { width: number; height: number } | null {
+  if (mimeType === "image/png" && bytes.length >= 24) {
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if ((mimeType === "image/jpeg" || mimeType === "image/jpg") && bytes.length > 4) {
+    return parseOraxJpegDimensions(bytes);
+  }
+  if (mimeType === "image/webp" && bytes.length >= 30) {
+    return parseOraxWebpDimensions(bytes);
+  }
+  return null;
+}
+
+function parseOraxJpegDimensions(bytes: Buffer): { width: number; height: number } | null {
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    const length = bytes.readUInt16BE(offset + 2);
+    if (length < 2) return null;
+    if (marker !== undefined && marker >= 0xc0 && marker <= 0xc3 && offset + 8 < bytes.length) {
+      return {
+        height: bytes.readUInt16BE(offset + 5),
+        width: bytes.readUInt16BE(offset + 7),
+      };
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
+function parseOraxWebpDimensions(bytes: Buffer): { width: number; height: number } | null {
+  const chunk = bytes.subarray(12, 16).toString("ascii");
+  if (chunk === "VP8X" && bytes.length >= 30) {
+    return {
+      width: 1 + bytes.readUIntLE(24, 3),
+      height: 1 + bytes.readUIntLE(27, 3),
+    };
+  }
+  if (chunk === "VP8 " && bytes.length >= 30) {
+    return {
+      width: bytes.readUInt16LE(26) & 0x3fff,
+      height: bytes.readUInt16LE(28) & 0x3fff,
+    };
+  }
+  return null;
+}
+
+function extractOraxAttachmentErrorSignals(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const matches = lines.filter((line) =>
+    /\b(error|exception|traceback|failed|failure|cannot|can't|syntaxerror|typeerror|referenceerror|ts\d{4}|eslint|unhandled|stack)\b/i.test(
+      line,
+    ),
+  );
+  return uniqueOraxSignals(matches.map((line) => line.trim()).filter(Boolean), 8);
+}
+
+function extractOraxAttachmentCommandSignals(text: string): string[] {
+  const matches =
+    text.match(
+      /\b(?:pnpm|npm|yarn|bun|node|npx|tsx|tsc|vite|vitest|jest|eslint|expo|gradle|xcodebuild|pod|ruby|python|pip|go|cargo|docker|git)\s+[^\r\n]{1,120}/g,
+    ) ?? [];
+  return uniqueOraxSignals(
+    matches.map((command) => command.trim()),
+    8,
+  );
+}
+
+function detectOraxAttachmentFrameworks(text: string): string[] {
+  const checks: Array<[string, RegExp]> = [
+    ["React", /\breact\b|from ["']react["']|\.tsx?\b/i],
+    ["Vite", /\bvite\b|vite\.config/i],
+    ["Next.js", /\bnext\b|next\.config|app\/page\./i],
+    ["Expo", /\bexpo\b|expo-router|react-native/i],
+    ["React Native", /react-native|StyleSheet\.create/i],
+    ["Express", /\bexpress\b|app\.(get|post|use)\(/i],
+    ["Drizzle", /\bdrizzle\b|drizzle-orm/i],
+    ["Prisma", /\bprisma\b|schema\.prisma/i],
+    ["Tailwind", /\btailwind\b|className=/i],
+    ["Vitest", /\bvitest\b|describe\(|expect\(/i],
+  ];
+  return checks
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([label]) => label)
+    .slice(0, 8);
+}
+
+function detectOraxAttachmentLanguages(
+  name: string,
+  type: string | undefined,
+  text: string,
+): string[] {
+  const lower = name.toLowerCase();
+  const languageByExtension: Array<[string, string]> = [
+    [".tsx", "TypeScript React"],
+    [".ts", "TypeScript"],
+    [".jsx", "JavaScript React"],
+    [".js", "JavaScript"],
+    [".json", "JSON"],
+    [".md", "Markdown"],
+    [".css", "CSS"],
+    [".html", "HTML"],
+    [".py", "Python"],
+    [".go", "Go"],
+    [".rs", "Rust"],
+    [".swift", "Swift"],
+    [".kt", "Kotlin"],
+    [".sql", "SQL"],
+    [".yaml", "YAML"],
+    [".yml", "YAML"],
+  ];
+  const fromExtension = languageByExtension
+    .filter(([extension]) => lower.endsWith(extension))
+    .map(([, language]) => language);
+  const fromMime = type?.startsWith("text/") ? ["Text"] : [];
+  const fromContent = [
+    /\bimport\s+.+\s+from\b/.test(text) ? "JavaScript/TypeScript" : null,
+    /<([A-Za-z][\w-]*)(\s|>)/.test(text) ? "Markup" : null,
+  ].filter((value): value is string => Boolean(value));
+  return uniqueOraxSignals([...fromExtension, ...fromMime, ...fromContent], 4);
+}
+
+function buildOraxAttachmentSuggestedFocus(input: {
+  attachments: OraxComposerAttachmentAnalysis["attachments"];
+  detectedPaths: string[];
+  errors: string[];
+  commands: string[];
+  frameworks: string[];
+  languages: string[];
+}): string[] {
+  const focus: string[] = [];
+  if (input.detectedPaths.length) {
+    focus.push(`Inspect ${input.detectedPaths.slice(0, 4).join(", ")}`);
+  }
+  if (input.errors.length) {
+    focus.push("Address the detected error output");
+  }
+  if (input.commands.length) {
+    focus.push(`Re-run or validate ${input.commands[0]}`);
+  }
+  const hasScreenshot = input.attachments.some((attachment) => attachment.image?.likelyScreenshot);
+  if (hasScreenshot) {
+    focus.push("Use the screenshot as visual/UI feedback");
+  }
+  if (input.frameworks.length) {
+    focus.push(`Preserve the ${input.frameworks.slice(0, 3).join(", ")} patterns`);
+  }
+  if (!focus.length && input.languages.length) {
+    focus.push(`Review the attached ${input.languages.slice(0, 2).join(" and ")} context`);
+  }
+  return uniqueOraxSignals(focus, 5);
+}
+
+function summarizeOraxAttachmentAnalysis(input: {
+  attachmentCount: number;
+  textCount: number;
+  imageCount: number;
+  unsupportedCount: number;
+  errors: string[];
+  frameworks: string[];
+  languages: string[];
+  detectedPaths: string[];
+}): string {
+  const parts = [`${input.attachmentCount} attachment${input.attachmentCount === 1 ? "" : "s"}`];
+  if (input.textCount) parts.push(`${input.textCount} readable text/code`);
+  if (input.imageCount) parts.push(`${input.imageCount} image/screenshot`);
+  if (input.unsupportedCount) parts.push(`${input.unsupportedCount} unreadable`);
+  const signals = [
+    input.errors.length
+      ? `${input.errors.length} error signal${input.errors.length === 1 ? "" : "s"}`
+      : null,
+    input.detectedPaths.length
+      ? `${input.detectedPaths.length} file path${input.detectedPaths.length === 1 ? "" : "s"}`
+      : null,
+    input.frameworks.length ? input.frameworks.slice(0, 3).join(", ") : null,
+    !input.frameworks.length && input.languages.length
+      ? input.languages.slice(0, 3).join(", ")
+      : null,
+  ].filter(Boolean);
+  return `Analyzed ${parts.join(", ")}${signals.length ? `; detected ${signals.join("; ")}` : ""}.`;
+}
+
+function buildOraxAttachmentAnalysisContext(analysis: OraxComposerAttachmentAnalysis): string {
+  const lines = [
+    `Orax attachment analysis: ${analysis.summary}`,
+    analysis.detectedPaths.length
+      ? `Detected paths: ${analysis.detectedPaths.slice(0, 12).join(", ")}`
+      : null,
+    analysis.errors.length ? `Error signals: ${analysis.errors.slice(0, 5).join(" | ")}` : null,
+    analysis.commands.length
+      ? `Command signals: ${analysis.commands.slice(0, 5).join(" | ")}`
+      : null,
+    analysis.frameworks.length ? `Frameworks: ${analysis.frameworks.join(", ")}` : null,
+    analysis.suggestedFocus.length
+      ? `Suggested focus: ${analysis.suggestedFocus.join(" | ")}`
+      : null,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+function mergeOraxDetectedPaths(paths: string[]): string[] {
+  return Array.from(new Set(paths.filter((pathName) => !pathName.startsWith("http")))).slice(
+    0,
+    ORAX_FILE_READ_LIMITS.maxFiles,
+  );
+}
+
+function uniqueOraxSignals(values: string[], max: number): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized || seen.has(normalized.toLowerCase())) continue;
+    seen.add(normalized.toLowerCase());
+    unique.push(normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized);
+    if (unique.length >= max) break;
+  }
+  return unique;
+}
+
 function buildOraxTaskThreadReply(input: {
   task: OraxTask;
   approvals: OraxTaskApproval[];
@@ -2832,6 +3234,7 @@ function buildOraxTaskThreadReply(input: {
   checkpoint: OraxCheckpointSummary;
   userMessage: string;
   attachmentContext?: string | null;
+  attachmentAnalysis?: OraxComposerAttachmentAnalysis | null;
 }): string {
   if (isOraxResumeQuestion(input.userMessage)) {
     return buildOraxCheckpointResumeReply(input.checkpoint);
@@ -2853,7 +3256,11 @@ function buildOraxTaskThreadReply(input: {
 
   return [
     "I'll work from here.",
-    input.attachmentContext ? summarizeOraxAttachmentContext(input.attachmentContext) : null,
+    input.attachmentAnalysis
+      ? `I analyzed the attached context: ${input.attachmentAnalysis.summary}`
+      : input.attachmentContext
+        ? summarizeOraxAttachmentContext(input.attachmentContext)
+        : null,
     nextStep,
   ]
     .filter(Boolean)
@@ -2911,6 +3318,7 @@ function buildOraxTaskActionSuggestions(input: {
   approvals: OraxTaskApproval[];
   artifacts: OraxTaskArtifact[];
   userMessage: string;
+  attachmentAnalysis?: OraxComposerAttachmentAnalysis | null;
 }): OraxTaskActionSuggestion[] {
   const suggestions: OraxTaskActionSuggestion[] = [];
   const pendingApproval = input.approvals.find((approval) => approval.status === "pending");
@@ -2982,18 +3390,29 @@ function buildOraxTaskActionSuggestions(input: {
     });
   }
 
-  const extractedPaths = extractOraxCandidatePaths(input.userMessage);
+  const extractedPaths = mergeOraxDetectedPaths([
+    ...extractOraxCandidatePaths(input.userMessage),
+    ...(input.attachmentAnalysis?.detectedPaths ?? []),
+  ]);
+  const analyzedAttachments = Boolean(
+    input.attachmentAnalysis?.attachments.some((item) => item.readable),
+  );
   if (extractedPaths.length > 0 || suggestions.length === 0) {
     suggestions.push({
       type: "read_files",
-      title: "Inspect source files",
+      title: analyzedAttachments ? "Inspect related source files" : "Inspect source files",
       description:
         extractedPaths.length > 0
           ? "I found likely file paths in your message. Continue here to let Orax inspect them."
-          : "Continue here to let Orax inspect the relevant files before planning a code change.",
+          : analyzedAttachments
+            ? "I analyzed the attached context. Continue here to inspect the source files that should drive the fix."
+            : "Continue here to let Orax inspect the relevant files before planning a code change.",
       buttonLabel: extractedPaths.length > 0 ? "Use detected paths" : undefined,
       paths: extractedPaths,
-      reason: `Task discussion: ${input.task.title}`.slice(0, 1000),
+      reason: (input.attachmentAnalysis?.suggestedFocus.length
+        ? `Attachment analysis: ${input.attachmentAnalysis.suggestedFocus.join("; ")}`
+        : `Task discussion: ${input.task.title}`
+      ).slice(0, 1000),
     });
   }
 

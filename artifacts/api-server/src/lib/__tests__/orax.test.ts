@@ -465,7 +465,14 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain('ingestionStatus: z.enum(["ready", "unsupported", "error"])');
     expect(routeSource).toContain("normalizeOraxComposerAttachments");
     expect(routeSource).toContain("buildOraxComposerAttachmentContext");
-    expect(routeSource).toContain("const effectiveUserMessage = userMessageContext");
+    expect(routeSource).toContain("buildOraxComposerAttachmentAnalysis");
+    expect(routeSource).toContain("buildOraxAttachmentAnalysisContext");
+    expect(routeSource).toContain("extractOraxAttachmentErrorSignals");
+    expect(routeSource).toContain("parseOraxImageDimensions");
+    expect(routeSource).toContain("attachmentAnalysis");
+    expect(routeSource).toContain("suggestedFocus");
+    expect(routeSource).toContain("const attachmentAnalysisContext = attachmentAnalysis");
+    expect(routeSource).toContain("const effectiveUserMessage = [");
     expect(routeSource).toContain("attachmentContext: userMessageContext");
     expect(routeSource).toContain("Image data URL for visual/UI context:");
     expect(routeSource).toContain("...(parsed.data.metadata ?? {})");
