@@ -1,7 +1,7 @@
 import {
   AlertCircle,
-  ArrowUp,
   ArrowLeft,
+  ArrowUp,
   Bot,
   CheckCircle2,
   Code2,
@@ -24,10 +24,13 @@ import {
   TerminalSquare,
   XCircle,
 } from "lucide-react-native";
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from "expo-audio";
+import * as DocumentPicker from "expo-document-picker";
 import { useNavigation } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -63,11 +66,16 @@ import {
   runApprovedFileRead,
   runApprovedSandbox,
   scanRepository,
+  transcribeAudio,
 } from "@/lib/api";
 import type {
   OraxApproval,
   OraxArtifact,
   OraxCapabilities,
+  OraxComposerAttachment,
+  OraxComposerMetadata,
+  OraxComposerPermissionMode,
+  OraxComposerReasoning,
   OraxRepository,
   OraxScan,
   OraxTask,
@@ -105,6 +113,19 @@ const TASK_KINDS: Array<{ value: OraxTaskKind; label: string }> = [
   { value: "fix", label: "Fix" },
 ];
 
+const ORAX_COMPOSER_MODELS = ["Orax 5.5", "Orax 5.1"] as const;
+const ORAX_REASONING_OPTIONS: Array<{ value: OraxComposerReasoning; label: string }> = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "extra_high", label: "Extra High" },
+];
+const ORAX_PERMISSION_OPTIONS: Array<{ value: OraxComposerPermissionMode; label: string }> = [
+  { value: "ask", label: "Ask" },
+  { value: "auto", label: "Auto" },
+  { value: "read_only", label: "Read" },
+];
+
 const DEFAULT_COMMANDS = ["patch-static-checks", "json-syntax", "node-syntax"];
 const ORAX_TAGLINE = "MustaFlow AI coding agent for repositories";
 const COMMAND_OPTIONS = [
@@ -121,6 +142,7 @@ export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY });
   const [threadOpen, setThreadOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [homeComposeOpen, setHomeComposeOpen] = useState(false);
@@ -150,6 +172,15 @@ export default function OraxScreen() {
   const [taskPrompt, setTaskPrompt] = useState("");
   const [taskKind, setTaskKind] = useState<OraxTaskKind>("analyze");
   const [threadDraft, setThreadDraft] = useState("");
+  const [composerAttachments, setComposerAttachments] = useState<OraxComposerAttachment[]>([]);
+  const [composerModel, setComposerModel] =
+    useState<(typeof ORAX_COMPOSER_MODELS)[number]>("Orax 5.5");
+  const [composerReasoning, setComposerReasoning] = useState<OraxComposerReasoning>("extra_high");
+  const [composerPermissionMode, setComposerPermissionMode] =
+    useState<OraxComposerPermissionMode>("ask");
+  const [composerInputMode, setComposerInputMode] = useState<"text" | "voice">("text");
+  const [recordingVoice, setRecordingVoice] = useState(false);
+  const [transcribingVoice, setTranscribingVoice] = useState(false);
 
   const [approvalPaths, setApprovalPaths] = useState("");
   const [approvalReason, setApprovalReason] = useState("");
@@ -224,6 +255,8 @@ export default function OraxScreen() {
     setDraftInstructions("");
     setPrTitle("");
     setPrConfirm("");
+    setComposerAttachments([]);
+    setComposerInputMode("text");
   }, []);
 
   const loadRoot = useCallback(async () => {
@@ -413,9 +446,113 @@ export default function OraxScreen() {
     setShowDetails(false);
   }, [clearTaskScopedState]);
 
+  const buildComposerMetadata = useCallback(
+    (inputMode: "text" | "voice" = composerInputMode): OraxComposerMetadata => ({
+      composer: {
+        model: composerModel,
+        reasoning: composerReasoning,
+        permissionMode: composerPermissionMode,
+        inputMode,
+        attachments: composerAttachments,
+      },
+    }),
+    [
+      composerAttachments,
+      composerInputMode,
+      composerModel,
+      composerPermissionMode,
+      composerReasoning,
+    ],
+  );
+
+  const pickComposerAttachments = useCallback(async () => {
+    const slots = Math.max(0, 6 - composerAttachments.length);
+    if (slots === 0) {
+      Alert.alert("Attachment limit", "Orax can attach up to 6 files to one message.");
+      return;
+    }
+    const result = await DocumentPicker.getDocumentAsync({
+      multiple: true,
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled) return;
+    const assets = result.assets.slice(0, slots);
+    const attachments = assets.map((asset) => ({
+      id: `${asset.name}-${asset.size ?? 0}-${asset.uri}`,
+      name: asset.name,
+      type: asset.mimeType ?? "application/octet-stream",
+      size: asset.size,
+      source: "mobile" as const,
+    }));
+    setComposerAttachments((prev) => [...prev, ...attachments]);
+    if (result.assets.length > slots) {
+      Alert.alert("Attachment limit", "Only the first 6 attachments were added.");
+    }
+  }, [composerAttachments.length]);
+
+  const removeComposerAttachment = useCallback((id?: string) => {
+    setComposerAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  }, []);
+
+  const cycleComposerPermissionMode = useCallback(() => {
+    setComposerPermissionMode((current) => {
+      const index = ORAX_PERMISSION_OPTIONS.findIndex((option) => option.value === current);
+      return ORAX_PERMISSION_OPTIONS[(index + 1) % ORAX_PERMISSION_OPTIONS.length].value;
+    });
+  }, []);
+
+  const toggleComposerVoiceInput = useCallback(async () => {
+    if (transcribingVoice) return;
+    if (recordingVoice) {
+      setRecordingVoice(false);
+      setTranscribingVoice(true);
+      try {
+        await recorder.stop();
+        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
+        const uri = recorder.uri;
+        if (!uri) {
+          throw new Error("No audio captured");
+        }
+        const text = (await transcribeAudio(uri, "m4a")).trim();
+        if (!text) {
+          throw new Error("Empty transcript");
+        }
+        setThreadDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+        setComposerInputMode("voice");
+      } catch {
+        Alert.alert(
+          "Transcription failed",
+          "Orax could not transcribe that audio. Please try again.",
+        );
+      } finally {
+        setTranscribingVoice(false);
+      }
+      return;
+    }
+
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Microphone access needed",
+          "Enable microphone permission in Settings to dictate an Orax message.",
+        );
+        return;
+      }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setRecordingVoice(true);
+    } catch {
+      setRecordingVoice(false);
+      Alert.alert("Recording failed", "Orax could not start recording. Please try again.");
+    }
+  }, [recorder, recordingVoice, transcribingVoice]);
+
   const sendThreadMessage = useCallback(async () => {
-    const text = threadDraft.trim();
-    if (!text) return;
+    const text = threadDraft.trim() || "Review the attached Orax context.";
+    if (!threadDraft.trim() && composerAttachments.length === 0) return;
+    const metadata = buildComposerMetadata();
 
     if (!selectedTask) {
       const repoId = selectedRepo?.id;
@@ -429,7 +566,9 @@ export default function OraxScreen() {
         setSelectedTaskId(created.task.id);
         setTaskPrompt("");
         setThreadDraft("");
-        await appendTaskMessage(created.task.id, text);
+        setComposerAttachments([]);
+        setComposerInputMode("text");
+        await appendTaskMessage(created.task.id, text, metadata);
         await loadTaskDetails(created.task.id);
         setThreadOpen(true);
         setHomeComposeOpen(false);
@@ -439,10 +578,21 @@ export default function OraxScreen() {
     }
 
     await runAction("send-thread", async () => {
-      await appendTaskMessage(selectedTask.id, text);
+      await appendTaskMessage(selectedTask.id, text, metadata);
       setThreadDraft("");
+      setComposerAttachments([]);
+      setComposerInputMode("text");
     });
-  }, [loadTaskDetails, runAction, selectedRepo?.id, selectedTask, taskKind, threadDraft]);
+  }, [
+    buildComposerMetadata,
+    composerAttachments.length,
+    loadTaskDetails,
+    runAction,
+    selectedRepo?.id,
+    selectedTask,
+    taskKind,
+    threadDraft,
+  ]);
 
   const submitReadApproval = useCallback(async () => {
     if (!selectedTask) return;
@@ -697,10 +847,7 @@ export default function OraxScreen() {
                         {selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "Orax"}
                       </Text>
                     </View>
-                    <Pressable
-                      onPress={startNewThread}
-                      hitSlop={10}
-                    >
+                    <Pressable onPress={startNewThread} hitSlop={10}>
                       <Plus size={20} color={c.mutedForeground} />
                     </Pressable>
                   </View>
@@ -782,437 +929,471 @@ export default function OraxScreen() {
                       style={{ flex: 1, color: c.foreground, fontSize: 16 }}
                     />
                   </View>
-                  <Button
-                    label="Chat"
-                    icon={MessageSquare}
-                    onPress={startNewThread}
-                  />
+                  <Button label="Chat" icon={MessageSquare} onPress={startNewThread} />
                 </View>
               </>
             ) : (
               <>
-            <View style={{ gap: 12 }}>
-              {detailsLoading ? <Loading label="Loading thread..." /> : null}
-              {latestAssistantSuggestion ? (
-                <SuggestionCard
-                  suggestion={latestAssistantSuggestion}
-                  onPress={() => applySuggestion(latestAssistantSuggestion)}
-                />
-              ) : null}
-              {selectedTask ? (
-                <>
-                  <View style={{ gap: 10 }}>
-                    {messages.length === 0 ? (
-                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                        No thread messages yet. Ask Orax to resume, explain approval, or inspect
-                        files.
-                      </Text>
-                    ) : (
-                      messages
-                        .slice(-10)
-                        .map((message) => <MessageBubble key={message.id} message={message} />)
-                    )}
-                  </View>
-                  {approvals
-                    .filter(
-                      (approval) => approval.status === "pending" || approval.status === "approved",
-                    )
-                    .map((approval) => (
-                      <ApprovalCard
-                        key={approval.id}
-                        approval={approval}
-                        busyAction={busyAction}
-                        onApprove={() =>
-                          void runAction(`approve-${approval.id}`, async () => {
-                            await decideApproval(approval.id, "approved");
-                          })
-                        }
-                        onDeny={() =>
-                          void runAction(`deny-${approval.id}`, async () => {
-                            await decideApproval(approval.id, "denied");
-                          })
-                        }
-                        onRun={() =>
-                          void runAction(`run-${approval.id}`, async () => {
-                            if (approval.action === "read_files") {
-                              await runApprovedFileRead(approval.id);
-                            } else if (approval.action === "sandbox_run") {
-                              await runApprovedSandbox(approval.id);
-                            } else if (approval.action === "safe_check") {
-                              await runApprovedCommands(approval.id);
-                            } else if (approval.action === "github_pr") {
-                              await createApprovedGithubPr(approval.id);
-                            }
-                          })
-                        }
-                      />
-                    ))}
-                </>
-              ) : (
-                <Text style={{ color: c.mutedForeground, fontSize: 15, lineHeight: 22 }}>
-                  Ask Orax what to work on.
-                </Text>
-              )}
-              <OraxComposer
-                value={threadDraft}
-                onChangeText={setThreadDraft}
-                onSend={sendThreadMessage}
-                loading={busyAction === "send-thread" || busyAction === "create-task"}
-                disabled={!threadDraft.trim() || (!selectedTask && !selectedRepo)}
-              />
-            </View>
-
-            {false ? (
-              <>
-            <TaskFocusCard
-              task={selectedTask}
-              repo={selectedRepo}
-              checkpointNextStep={latestCheckpoint?.nextStep}
-              pendingApprovals={approvals.filter((approval) => approval.status === "pending").length}
-              artifactCount={artifacts.length}
-              onRefresh={() => void refreshCurrent()}
-              refreshing={busyAction === "refresh"}
-            />
-
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Task history" icon={TerminalSquare} />
-              {repos.length === 0 ? (
-                <EmptyState
-                  icon={GitBranch}
-                  title="Connect a repository"
-                  subtitle="Orax starts with a GitHub repository, then keeps code work isolated behind approvals."
-                />
-              ) : (
-                <>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    {TASK_KINDS.map((kind) => (
-                      <Pill
-                        key={kind.value}
-                        label={kind.label}
-                        active={taskKind === kind.value}
-                        onPress={() => setTaskKind(kind.value)}
-                      />
-                    ))}
-                  </View>
-                  <TextField
-                    label="Start Orax task"
-                    placeholder="Ask Orax to inspect, plan, review, or fix code..."
-                    value={taskPrompt}
-                    onChangeText={setTaskPrompt}
-                    multiline
-                    style={{ minHeight: 88, textAlignVertical: "top" }}
-                  />
-                  <Button
-                    label="Start chat"
-                    icon={Play}
-                    onPress={submitTask}
-                    loading={busyAction === "create-task"}
-                    disabled={!selectedRepo || !taskPrompt.trim()}
-                    full
-                  />
-                  <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
-                    The first message becomes the task prompt and stays in the Orax task thread, not
-                    normal Ora history or AI Builder.
-                  </Text>
-                  {tasks.length ? (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ gap: 8 }}
-                    >
-                      {tasks.map((task) => (
-                        <Pressable key={task.id} onPress={() => selectTask(task)}>
-                          <View
-                            style={{
-                              width: 240,
-                              minHeight: 92,
-                              borderWidth: 1,
-                              borderColor: task.id === selectedTask?.id ? c.primary : c.border,
-                              borderRadius: 8,
-                              padding: 12,
-                              gap: 6,
-                              backgroundColor: task.id === selectedTask?.id ? c.accent : c.muted,
-                            }}
-                          >
-                            <Text
-                              numberOfLines={2}
-                              style={{
-                                color: c.foreground,
-                                fontFamily: "Inter_600SemiBold",
-                                fontSize: 14,
-                              }}
-                            >
-                              {task.title ?? task.prompt ?? "Orax task"}
-                            </Text>
-                            <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                              #{task.id} - {task.kind} - {task.status}
-                            </Text>
-                          </View>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  ) : null}
-                </>
-              )}
-            </Card>
-
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Task shortcuts" icon={Bot} />
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                <Button
-                  label="Resume task"
-                  variant="secondary"
-                  onPress={() =>
-                    setThreadDraft("Where are we right now, and what is the next approved step?")
-                  }
-                />
-                <Button
-                  label="Explain approval"
-                  variant="secondary"
-                  onPress={() =>
-                    setThreadDraft(
-                      "Explain the current pending approval, its risk, and what will happen if I approve it.",
-                    )
-                  }
-                />
-                <Button
-                  label="Summarize result"
-                  variant="secondary"
-                  onPress={() =>
-                    setThreadDraft(
-                      "Summarize result: what changed, what checks ran, and what remains?",
-                    )
-                  }
-                />
-              </View>
-            </Card>
-
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Context and actions" icon={Code2} />
-              <InfoGrid
-                items={[
-                  ["Repo", selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "none"],
-                  ["Pending", String(approvals.filter((approval) => approval.status === "pending").length)],
-                  ["Events", String(lifecycleItems.length)],
-                ]}
-              />
-              <TextField
-                label="Files to read"
-                placeholder={"src/app.tsx\npackage.json"}
-                autoCapitalize="none"
-                value={approvalPaths}
-                onChangeText={setApprovalPaths}
-                multiline
-                style={{ minHeight: 76, textAlignVertical: "top" }}
-              />
-              <TextField
-                label="Reason"
-                placeholder="Why Orax needs these files"
-                value={approvalReason}
-                onChangeText={setApprovalReason}
-              />
-              <Button
-                label="Create approval request"
-                icon={Lock}
-                variant="secondary"
-                onPress={submitReadApproval}
-                loading={busyAction === "request-read"}
-                disabled={!selectedTask || !approvalPaths.trim()}
-                full
-              />
-              <TextField
-                label="Draft patch instructions"
-                placeholder="Optional implementation notes"
-                value={draftInstructions}
-                onChangeText={setDraftInstructions}
-                multiline
-                style={{ minHeight: 66, textAlignVertical: "top" }}
-              />
-              <Button
-                label="Generate draft patch"
-                icon={Code2}
-                onPress={() =>
-                  void runAction("draft-patch", async () => {
-                    if (!selectedTask || !readApproval) return;
-                    await generateDraftPatch({
-                      taskId: selectedTask.id,
-                      approvalId: readApproval.id,
-                      instructions: draftInstructions.trim() || undefined,
-                    });
-                  })
-                }
-                loading={busyAction === "draft-patch"}
-                disabled={!selectedTask || !readApproval}
-                full
-              />
-              <Button
-                label="Request sandbox approval"
-                icon={ShieldCheck}
-                variant="secondary"
-                onPress={() =>
-                  void runAction("sandbox-approval", async () => {
-                    if (!selectedTask || !latestDraftPatch) return;
-                    await requestSandboxApproval({
-                      taskId: selectedTask.id,
-                      artifactId: latestDraftPatch.id,
-                    });
-                  })
-                }
-                loading={busyAction === "sandbox-approval"}
-                disabled={!selectedTask || !latestDraftPatch}
-                full
-              />
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {COMMAND_OPTIONS.map((command) => (
-                  <Pill
-                    key={command.id}
-                    label={command.label}
-                    active={selectedCommands.includes(command.id)}
-                    onPress={() => toggleCommand(command.id)}
-                  />
-                ))}
-              </View>
-              <Button
-                label="Request controlled checks"
-                icon={TerminalSquare}
-                variant="secondary"
-                onPress={() =>
-                  void runAction("command-approval", async () => {
-                    if (!selectedTask || !latestSandbox) return;
-                    await requestCommandApproval({
-                      taskId: selectedTask.id,
-                      artifactId: latestSandbox.id,
-                      commands: selectedCommands,
-                    });
-                  })
-                }
-                loading={busyAction === "command-approval"}
-                disabled={!selectedTask || !latestSandbox || selectedCommands.length === 0}
-                full
-              />
-              <TextField
-                label="Type CREATE PR"
-                placeholder="CREATE PR"
-                autoCapitalize="characters"
-                value={prConfirm}
-                onChangeText={setPrConfirm}
-              />
-              <Button
-                label="Request PR approval"
-                icon={GitPullRequest}
-                variant="secondary"
-                onPress={() =>
-                  void runAction("pr-approval", async () => {
-                    if (!selectedTask || !latestCommand) return;
-                    await requestGithubPrApproval({
-                      taskId: selectedTask.id,
-                      artifactId: latestCommand.id,
-                      title: prTitle.trim() || undefined,
-                    });
-                    setPrConfirm("");
-                  })
-                }
-                loading={busyAction === "pr-approval"}
-                disabled={!selectedTask || !latestCommand || prConfirm.trim() !== "CREATE PR"}
-                full
-              />
-            </Card>
-
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Approvals" icon={Lock} />
-              {approvals.length === 0 ? (
-                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  No approvals requested yet.
-                </Text>
-              ) : (
-                approvals.map((approval) => (
-                  <ApprovalCard
-                    key={approval.id}
-                    approval={approval}
-                    busyAction={busyAction}
-                    onApprove={() =>
-                      void runAction(`approve-${approval.id}`, async () => {
-                        await decideApproval(approval.id, "approved");
-                      })
-                    }
-                    onDeny={() =>
-                      void runAction(`deny-${approval.id}`, async () => {
-                        await decideApproval(approval.id, "denied");
-                      })
-                    }
-                    onRun={() =>
-                      void runAction(`run-${approval.id}`, async () => {
-                        if (approval.action === "read_files") {
-                          await runApprovedFileRead(approval.id);
-                        } else if (approval.action === "sandbox_run") {
-                          await runApprovedSandbox(approval.id);
-                        } else if (approval.action === "safe_check") {
-                          await runApprovedCommands(approval.id);
-                        } else if (approval.action === "github_pr") {
-                          await createApprovedGithubPr(approval.id);
-                        }
-                      })
-                    }
-                  />
-                ))
-              )}
-            </Card>
-
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Execution lifecycle" icon={ShieldCheck} />
-              {lifecycleItems.length === 0 ? (
-                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  No lifecycle activity yet.
-                </Text>
-              ) : (
-                lifecycleItems.map((item) => <LifecycleRow key={item.id} item={item} />)
-              )}
-            </Card>
-
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Repository" icon={GitBranch} />
-              <TextField
-                label="Repository URL"
-                placeholder="https://github.com/owner/repo"
-                autoCapitalize="none"
-                value={repoUrl}
-                onChangeText={setRepoUrl}
-              />
-              <Button
-                label="Connect repository"
-                icon={Plus}
-                onPress={submitRepository}
-                loading={busyAction === "add-repo"}
-                disabled={!repoUrl.trim()}
-                full
-              />
-              {selectedRepo ? (
-                <>
-                  <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
-                    {selectedRepo.owner}/{selectedRepo.name}
-                  </Text>
-                  <Button
-                    label="Scan repository"
-                    icon={RefreshCw}
-                    variant="secondary"
-                    onPress={submitScan}
-                    loading={busyAction === "scan-repo"}
-                    full
-                  />
-                  {latestScan ? (
-                    <InfoGrid
-                      items={[
-                        ["Status", latestScan.status],
-                        ["Files", String(latestScan.fileCount ?? 0)],
-                        ["Branch", latestScan.branch],
-                      ]}
+                <View style={{ gap: 12 }}>
+                  {detailsLoading ? <Loading label="Loading thread..." /> : null}
+                  {latestAssistantSuggestion ? (
+                    <SuggestionCard
+                      suggestion={latestAssistantSuggestion}
+                      onPress={() => applySuggestion(latestAssistantSuggestion)}
                     />
                   ) : null}
-                </>
-              ) : null}
-            </Card>
-            </>
-            ) : null}
+                  {selectedTask ? (
+                    <>
+                      <View style={{ gap: 10 }}>
+                        {messages.length === 0 ? (
+                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                            No thread messages yet. Ask Orax to resume, explain approval, or inspect
+                            files.
+                          </Text>
+                        ) : (
+                          messages
+                            .slice(-10)
+                            .map((message) => <MessageBubble key={message.id} message={message} />)
+                        )}
+                      </View>
+                      {approvals
+                        .filter(
+                          (approval) =>
+                            approval.status === "pending" || approval.status === "approved",
+                        )
+                        .map((approval) => (
+                          <ApprovalCard
+                            key={approval.id}
+                            approval={approval}
+                            busyAction={busyAction}
+                            onApprove={() =>
+                              void runAction(`approve-${approval.id}`, async () => {
+                                await decideApproval(approval.id, "approved");
+                              })
+                            }
+                            onDeny={() =>
+                              void runAction(`deny-${approval.id}`, async () => {
+                                await decideApproval(approval.id, "denied");
+                              })
+                            }
+                            onRun={() =>
+                              void runAction(`run-${approval.id}`, async () => {
+                                if (approval.action === "read_files") {
+                                  await runApprovedFileRead(approval.id);
+                                } else if (approval.action === "sandbox_run") {
+                                  await runApprovedSandbox(approval.id);
+                                } else if (approval.action === "safe_check") {
+                                  await runApprovedCommands(approval.id);
+                                } else if (approval.action === "github_pr") {
+                                  await createApprovedGithubPr(approval.id);
+                                }
+                              })
+                            }
+                          />
+                        ))}
+                    </>
+                  ) : (
+                    <Text style={{ color: c.mutedForeground, fontSize: 15, lineHeight: 22 }}>
+                      Ask Orax what to work on.
+                    </Text>
+                  )}
+                  <OraxComposer
+                    value={threadDraft}
+                    onChangeText={setThreadDraft}
+                    onSend={sendThreadMessage}
+                    attachments={composerAttachments}
+                    onAddAttachment={() => void pickComposerAttachments()}
+                    onRemoveAttachment={removeComposerAttachment}
+                    model={composerModel}
+                    reasoning={composerReasoning}
+                    permissionMode={composerPermissionMode}
+                    onChangeModel={setComposerModel}
+                    onChangeReasoning={setComposerReasoning}
+                    onCyclePermission={cycleComposerPermissionMode}
+                    onToggleVoice={() => void toggleComposerVoiceInput()}
+                    voiceActive={recordingVoice}
+                    voiceLoading={transcribingVoice}
+                    loading={busyAction === "send-thread" || busyAction === "create-task"}
+                    disabled={
+                      (!threadDraft.trim() && composerAttachments.length === 0) ||
+                      (!selectedTask && !selectedRepo)
+                    }
+                  />
+                </View>
+
+                {false ? (
+                  <>
+                    <TaskFocusCard
+                      task={selectedTask}
+                      repo={selectedRepo}
+                      checkpointNextStep={latestCheckpoint?.nextStep}
+                      pendingApprovals={
+                        approvals.filter((approval) => approval.status === "pending").length
+                      }
+                      artifactCount={artifacts.length}
+                      onRefresh={() => void refreshCurrent()}
+                      refreshing={busyAction === "refresh"}
+                    />
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Task history" icon={TerminalSquare} />
+                      {repos.length === 0 ? (
+                        <EmptyState
+                          icon={GitBranch}
+                          title="Connect a repository"
+                          subtitle="Orax starts with a GitHub repository, then keeps code work isolated behind approvals."
+                        />
+                      ) : (
+                        <>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                            {TASK_KINDS.map((kind) => (
+                              <Pill
+                                key={kind.value}
+                                label={kind.label}
+                                active={taskKind === kind.value}
+                                onPress={() => setTaskKind(kind.value)}
+                              />
+                            ))}
+                          </View>
+                          <TextField
+                            label="Start Orax task"
+                            placeholder="Ask Orax to inspect, plan, review, or fix code..."
+                            value={taskPrompt}
+                            onChangeText={setTaskPrompt}
+                            multiline
+                            style={{ minHeight: 88, textAlignVertical: "top" }}
+                          />
+                          <Button
+                            label="Start chat"
+                            icon={Play}
+                            onPress={submitTask}
+                            loading={busyAction === "create-task"}
+                            disabled={!selectedRepo || !taskPrompt.trim()}
+                            full
+                          />
+                          <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
+                            The first message becomes the task prompt and stays in the Orax task
+                            thread, not normal Ora history or AI Builder.
+                          </Text>
+                          {tasks.length ? (
+                            <ScrollView
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={{ gap: 8 }}
+                            >
+                              {tasks.map((task) => (
+                                <Pressable key={task.id} onPress={() => selectTask(task)}>
+                                  <View
+                                    style={{
+                                      width: 240,
+                                      minHeight: 92,
+                                      borderWidth: 1,
+                                      borderColor:
+                                        task.id === selectedTask?.id ? c.primary : c.border,
+                                      borderRadius: 8,
+                                      padding: 12,
+                                      gap: 6,
+                                      backgroundColor:
+                                        task.id === selectedTask?.id ? c.accent : c.muted,
+                                    }}
+                                  >
+                                    <Text
+                                      numberOfLines={2}
+                                      style={{
+                                        color: c.foreground,
+                                        fontFamily: "Inter_600SemiBold",
+                                        fontSize: 14,
+                                      }}
+                                    >
+                                      {task.title ?? task.prompt ?? "Orax task"}
+                                    </Text>
+                                    <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                                      #{task.id} - {task.kind} - {task.status}
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                              ))}
+                            </ScrollView>
+                          ) : null}
+                        </>
+                      )}
+                    </Card>
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Task shortcuts" icon={Bot} />
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        <Button
+                          label="Resume task"
+                          variant="secondary"
+                          onPress={() =>
+                            setThreadDraft(
+                              "Where are we right now, and what is the next approved step?",
+                            )
+                          }
+                        />
+                        <Button
+                          label="Explain approval"
+                          variant="secondary"
+                          onPress={() =>
+                            setThreadDraft(
+                              "Explain the current pending approval, its risk, and what will happen if I approve it.",
+                            )
+                          }
+                        />
+                        <Button
+                          label="Summarize result"
+                          variant="secondary"
+                          onPress={() =>
+                            setThreadDraft(
+                              "Summarize result: what changed, what checks ran, and what remains?",
+                            )
+                          }
+                        />
+                      </View>
+                    </Card>
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Context and actions" icon={Code2} />
+                      <InfoGrid
+                        items={[
+                          [
+                            "Repo",
+                            selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "none",
+                          ],
+                          [
+                            "Pending",
+                            String(
+                              approvals.filter((approval) => approval.status === "pending").length,
+                            ),
+                          ],
+                          ["Events", String(lifecycleItems.length)],
+                        ]}
+                      />
+                      <TextField
+                        label="Files to read"
+                        placeholder={"src/app.tsx\npackage.json"}
+                        autoCapitalize="none"
+                        value={approvalPaths}
+                        onChangeText={setApprovalPaths}
+                        multiline
+                        style={{ minHeight: 76, textAlignVertical: "top" }}
+                      />
+                      <TextField
+                        label="Reason"
+                        placeholder="Why Orax needs these files"
+                        value={approvalReason}
+                        onChangeText={setApprovalReason}
+                      />
+                      <Button
+                        label="Create approval request"
+                        icon={Lock}
+                        variant="secondary"
+                        onPress={submitReadApproval}
+                        loading={busyAction === "request-read"}
+                        disabled={!selectedTask || !approvalPaths.trim()}
+                        full
+                      />
+                      <TextField
+                        label="Draft patch instructions"
+                        placeholder="Optional implementation notes"
+                        value={draftInstructions}
+                        onChangeText={setDraftInstructions}
+                        multiline
+                        style={{ minHeight: 66, textAlignVertical: "top" }}
+                      />
+                      <Button
+                        label="Generate draft patch"
+                        icon={Code2}
+                        onPress={() =>
+                          void runAction("draft-patch", async () => {
+                            if (!selectedTask || !readApproval) return;
+                            await generateDraftPatch({
+                              taskId: selectedTask.id,
+                              approvalId: readApproval.id,
+                              instructions: draftInstructions.trim() || undefined,
+                            });
+                          })
+                        }
+                        loading={busyAction === "draft-patch"}
+                        disabled={!selectedTask || !readApproval}
+                        full
+                      />
+                      <Button
+                        label="Request sandbox approval"
+                        icon={ShieldCheck}
+                        variant="secondary"
+                        onPress={() =>
+                          void runAction("sandbox-approval", async () => {
+                            if (!selectedTask || !latestDraftPatch) return;
+                            await requestSandboxApproval({
+                              taskId: selectedTask.id,
+                              artifactId: latestDraftPatch.id,
+                            });
+                          })
+                        }
+                        loading={busyAction === "sandbox-approval"}
+                        disabled={!selectedTask || !latestDraftPatch}
+                        full
+                      />
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        {COMMAND_OPTIONS.map((command) => (
+                          <Pill
+                            key={command.id}
+                            label={command.label}
+                            active={selectedCommands.includes(command.id)}
+                            onPress={() => toggleCommand(command.id)}
+                          />
+                        ))}
+                      </View>
+                      <Button
+                        label="Request controlled checks"
+                        icon={TerminalSquare}
+                        variant="secondary"
+                        onPress={() =>
+                          void runAction("command-approval", async () => {
+                            if (!selectedTask || !latestSandbox) return;
+                            await requestCommandApproval({
+                              taskId: selectedTask.id,
+                              artifactId: latestSandbox.id,
+                              commands: selectedCommands,
+                            });
+                          })
+                        }
+                        loading={busyAction === "command-approval"}
+                        disabled={!selectedTask || !latestSandbox || selectedCommands.length === 0}
+                        full
+                      />
+                      <TextField
+                        label="Type CREATE PR"
+                        placeholder="CREATE PR"
+                        autoCapitalize="characters"
+                        value={prConfirm}
+                        onChangeText={setPrConfirm}
+                      />
+                      <Button
+                        label="Request PR approval"
+                        icon={GitPullRequest}
+                        variant="secondary"
+                        onPress={() =>
+                          void runAction("pr-approval", async () => {
+                            if (!selectedTask || !latestCommand) return;
+                            await requestGithubPrApproval({
+                              taskId: selectedTask.id,
+                              artifactId: latestCommand.id,
+                              title: prTitle.trim() || undefined,
+                            });
+                            setPrConfirm("");
+                          })
+                        }
+                        loading={busyAction === "pr-approval"}
+                        disabled={
+                          !selectedTask || !latestCommand || prConfirm.trim() !== "CREATE PR"
+                        }
+                        full
+                      />
+                    </Card>
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Approvals" icon={Lock} />
+                      {approvals.length === 0 ? (
+                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                          No approvals requested yet.
+                        </Text>
+                      ) : (
+                        approvals.map((approval) => (
+                          <ApprovalCard
+                            key={approval.id}
+                            approval={approval}
+                            busyAction={busyAction}
+                            onApprove={() =>
+                              void runAction(`approve-${approval.id}`, async () => {
+                                await decideApproval(approval.id, "approved");
+                              })
+                            }
+                            onDeny={() =>
+                              void runAction(`deny-${approval.id}`, async () => {
+                                await decideApproval(approval.id, "denied");
+                              })
+                            }
+                            onRun={() =>
+                              void runAction(`run-${approval.id}`, async () => {
+                                if (approval.action === "read_files") {
+                                  await runApprovedFileRead(approval.id);
+                                } else if (approval.action === "sandbox_run") {
+                                  await runApprovedSandbox(approval.id);
+                                } else if (approval.action === "safe_check") {
+                                  await runApprovedCommands(approval.id);
+                                } else if (approval.action === "github_pr") {
+                                  await createApprovedGithubPr(approval.id);
+                                }
+                              })
+                            }
+                          />
+                        ))
+                      )}
+                    </Card>
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Execution lifecycle" icon={ShieldCheck} />
+                      {lifecycleItems.length === 0 ? (
+                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                          No lifecycle activity yet.
+                        </Text>
+                      ) : (
+                        lifecycleItems.map((item) => <LifecycleRow key={item.id} item={item} />)
+                      )}
+                    </Card>
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Repository" icon={GitBranch} />
+                      <TextField
+                        label="Repository URL"
+                        placeholder="https://github.com/owner/repo"
+                        autoCapitalize="none"
+                        value={repoUrl}
+                        onChangeText={setRepoUrl}
+                      />
+                      <Button
+                        label="Connect repository"
+                        icon={Plus}
+                        onPress={submitRepository}
+                        loading={busyAction === "add-repo"}
+                        disabled={!repoUrl.trim()}
+                        full
+                      />
+                      {selectedRepo ? (
+                        <>
+                          <Text
+                            style={{
+                              color: c.foreground,
+                              fontFamily: "Inter_600SemiBold",
+                              fontSize: 14,
+                            }}
+                          >
+                            {selectedRepo.owner}/{selectedRepo.name}
+                          </Text>
+                          <Button
+                            label="Scan repository"
+                            icon={RefreshCw}
+                            variant="secondary"
+                            onPress={submitScan}
+                            loading={busyAction === "scan-repo"}
+                            full
+                          />
+                          {latestScan ? (
+                            <InfoGrid
+                              items={[
+                                ["Status", latestScan.status],
+                                ["Files", String(latestScan.fileCount ?? 0)],
+                                ["Branch", latestScan.branch],
+                              ]}
+                            />
+                          ) : null}
+                        </>
+                      ) : null}
+                    </Card>
+                  </>
+                ) : null}
               </>
             )}
           </ScrollView>
@@ -1220,24 +1401,50 @@ export default function OraxScreen() {
       )}
     </View>
   );
-
 }
 
 function OraxComposer({
   value,
   onChangeText,
   onSend,
+  attachments,
+  onAddAttachment,
+  onRemoveAttachment,
+  model,
+  reasoning,
+  permissionMode,
+  onChangeModel,
+  onChangeReasoning,
+  onCyclePermission,
+  onToggleVoice,
+  voiceActive,
+  voiceLoading,
   disabled,
   loading,
 }: {
   value: string;
   onChangeText: (value: string) => void;
   onSend: () => void;
+  attachments: OraxComposerAttachment[];
+  onAddAttachment: () => void;
+  onRemoveAttachment: (id?: string) => void;
+  model: (typeof ORAX_COMPOSER_MODELS)[number];
+  reasoning: OraxComposerReasoning;
+  permissionMode: OraxComposerPermissionMode;
+  onChangeModel: (value: (typeof ORAX_COMPOSER_MODELS)[number]) => void;
+  onChangeReasoning: (value: OraxComposerReasoning) => void;
+  onCyclePermission: () => void;
+  onToggleVoice: () => void;
+  voiceActive: boolean;
+  voiceLoading: boolean;
   disabled: boolean;
   loading: boolean;
 }) {
   const c = useColors();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const canSend = !disabled && !loading;
+  const reasoningLabel =
+    ORAX_REASONING_OPTIONS.find((option) => option.value === reasoning)?.label ?? "Extra High";
 
   return (
     <View
@@ -1255,6 +1462,37 @@ function OraxComposer({
         elevation: 5,
       }}
     >
+      {attachments.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {attachments.map((attachment) => (
+            <View
+              key={attachment.id ?? attachment.name}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                maxWidth: "100%",
+                borderRadius: 12,
+                backgroundColor: c.muted,
+                paddingHorizontal: 10,
+                paddingVertical: 7,
+              }}
+            >
+              <FileText size={16} color={c.mutedForeground} />
+              <Text numberOfLines={1} style={{ color: c.foreground, flexShrink: 1, fontSize: 13 }}>
+                {attachment.name}
+              </Text>
+              <Pressable
+                accessibilityLabel={`Remove ${attachment.name}`}
+                accessibilityRole="button"
+                onPress={() => onRemoveAttachment(attachment.id)}
+              >
+                <XCircle size={16} color={c.mutedForeground} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -1272,8 +1510,70 @@ function OraxComposer({
           textAlignVertical: "top",
         }}
       />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      {settingsOpen ? (
         <View
+          style={{
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 18,
+            padding: 10,
+            gap: 10,
+            backgroundColor: c.background,
+          }}
+        >
+          <Text style={{ color: c.mutedForeground, fontSize: 11, textTransform: "uppercase" }}>
+            Model
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {ORAX_COMPOSER_MODELS.map((option) => (
+              <Pressable
+                key={option}
+                onPress={() => onChangeModel(option)}
+                style={{
+                  borderWidth: 1,
+                  borderColor: model === option ? c.foreground : c.border,
+                  borderRadius: 999,
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                  backgroundColor: model === option ? c.foreground : c.card,
+                }}
+              >
+                <Text style={{ color: model === option ? c.background : c.foreground }}>
+                  {option}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={{ color: c.mutedForeground, fontSize: 11, textTransform: "uppercase" }}>
+            Reasoning
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {ORAX_REASONING_OPTIONS.map((option) => (
+              <Pressable
+                key={option.value}
+                onPress={() => onChangeReasoning(option.value)}
+                style={{
+                  borderWidth: 1,
+                  borderColor: reasoning === option.value ? c.foreground : c.border,
+                  borderRadius: 999,
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                  backgroundColor: reasoning === option.value ? c.foreground : c.card,
+                }}
+              >
+                <Text style={{ color: reasoning === option.value ? c.background : c.foreground }}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Pressable
+          accessibilityLabel="Attach files to Orax message"
+          accessibilityRole="button"
+          onPress={onAddAttachment}
           style={{
             height: 40,
             width: 40,
@@ -1282,8 +1582,11 @@ function OraxComposer({
           }}
         >
           <Plus size={30} color={c.foreground} />
-        </View>
-        <View
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`Orax permission mode: ${permissionMode}`}
+          accessibilityRole="button"
+          onPress={onCyclePermission}
           style={{
             height: 40,
             width: 40,
@@ -1292,27 +1595,44 @@ function OraxComposer({
           }}
         >
           <ShieldAlert size={28} color="#c2410c" />
-        </View>
+        </Pressable>
         <View style={{ flex: 1, alignItems: "center", minWidth: 0 }}>
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.82}
-            style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
+          <Pressable
+            accessibilityLabel="Choose Orax model and reasoning"
+            accessibilityRole="button"
+            onPress={() => setSettingsOpen((value) => !value)}
           >
-            5.5 <Text style={{ color: c.mutedForeground }}>Extra High</Text>
-          </Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
+            >
+              {model.replace("Orax ", "")}{" "}
+              <Text style={{ color: c.mutedForeground }}>{reasoningLabel}</Text>
+            </Text>
+          </Pressable>
         </View>
-        <View
+        <Pressable
+          accessibilityLabel={voiceActive ? "Stop Orax voice input" : "Start Orax voice input"}
+          accessibilityRole="button"
+          onPress={onToggleVoice}
           style={{
             height: 40,
             width: 40,
             alignItems: "center",
             justifyContent: "center",
+            borderRadius: 20,
+            backgroundColor: voiceActive ? c.muted : "transparent",
+            opacity: voiceLoading ? 0.5 : 1,
           }}
         >
-          <Mic size={30} color={c.foreground} />
-        </View>
+          {voiceLoading ? (
+            <ActivityIndicator color={c.foreground} />
+          ) : (
+            <Mic size={30} color={voiceActive ? c.primary : c.foreground} />
+          )}
+        </Pressable>
         <Pressable
           accessibilityLabel="Send Orax message"
           accessibilityRole="button"
@@ -1565,10 +1885,18 @@ function SuggestionCard({
   );
 }
 
+function getMessageComposerAttachments(message: OraxTaskMessage): OraxComposerAttachment[] {
+  const composer = message.metadata?.composer as
+    | { attachments?: OraxComposerAttachment[] }
+    | undefined;
+  return Array.isArray(composer?.attachments) ? composer.attachments : [];
+}
+
 function MessageBubble({ message }: { message: OraxTaskMessage }) {
   const c = useColors();
   const isUser = message.role === "user";
   const isSystem = message.role === "system" || message.role === "tool";
+  const attachments = getMessageComposerAttachments(message);
   return (
     <View
       style={{
@@ -1591,6 +1919,30 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
       >
         {message.content}
       </Text>
+      {attachments.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {attachments.map((attachment) => (
+            <View
+              key={attachment.id ?? attachment.name}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+              }}
+            >
+              <FileText size={14} color={c.mutedForeground} />
+              <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
+                {attachment.name}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }

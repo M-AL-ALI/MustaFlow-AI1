@@ -28,6 +28,7 @@ import type {
   OraxApprovalWithArtifact,
   OraxArtifact,
   OraxCapabilities,
+  OraxComposerMetadata,
   OraxDraftPatchResult,
   OraxGithubConnectResult,
   OraxReadFilesResult,
@@ -1153,10 +1154,14 @@ export async function listTaskMessages(taskId: number): Promise<OraxTaskMessage[
   return data.messages ?? [];
 }
 
-export async function sendTaskMessage(taskId: number, content: string): Promise<OraxTaskMessage[]> {
+export async function sendTaskMessage(
+  taskId: number,
+  content: string,
+  metadata?: OraxComposerMetadata,
+): Promise<OraxTaskMessage[]> {
   const data = await jsonRequest<{ messages: OraxTaskMessage[] }>(
     `/api/orax/tasks/${taskId}/messages`,
-    { method: "POST", body: JSON.stringify({ content }) },
+    { method: "POST", body: JSON.stringify(metadata ? { content, metadata } : { content }) },
   );
   return data.messages ?? [];
 }
@@ -1164,10 +1169,11 @@ export async function sendTaskMessage(taskId: number, content: string): Promise<
 export function appendTaskMessage(
   taskId: number,
   content: string,
+  metadata?: OraxComposerMetadata,
 ): Promise<{ messages: OraxTaskMessage[] }> {
   return jsonRequest(`/api/orax/tasks/${taskId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(metadata ? { content, metadata } : { content }),
   });
 }
 

@@ -157,6 +157,43 @@ type OraxTaskActionSuggestion = {
   requiresManualConfirmation?: boolean;
 };
 
+type OraxComposerReasoning = "low" | "medium" | "high" | "extra_high";
+type OraxComposerPermissionMode = "ask" | "auto" | "read_only";
+
+type OraxComposerAttachment = {
+  id: string;
+  name: string;
+  type?: string;
+  size?: number;
+  source: "web";
+};
+
+type OraxComposerMetadata = {
+  composer: {
+    model: string;
+    reasoning: OraxComposerReasoning;
+    permissionMode: OraxComposerPermissionMode;
+    inputMode: "text" | "voice";
+    attachments: OraxComposerAttachment[];
+  };
+};
+
+type OraxSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult:
+    | ((event: { resultIndex: number; results: ArrayLike<{ 0: { transcript: string } }> }) => void)
+    | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+type OraxSpeechRecognitionConstructor = new () => OraxSpeechRecognition;
+
 type OraxApproval = {
   id: number;
   repositoryId: number;
@@ -301,6 +338,19 @@ const _TASK_KINDS = [
   { value: "fix", label: "Fix" },
 ] as const;
 
+const ORAX_COMPOSER_MODELS = ["Orax 5.5", "Orax 5.1"] as const;
+const ORAX_REASONING_OPTIONS: Array<{ value: OraxComposerReasoning; label: string }> = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "extra_high", label: "Extra High" },
+];
+const ORAX_PERMISSION_OPTIONS: Array<{ value: OraxComposerPermissionMode; label: string }> = [
+  { value: "ask", label: "Ask" },
+  { value: "auto", label: "Auto" },
+  { value: "read_only", label: "Read" },
+];
+
 const ORAX_COMMAND_OPTIONS = [
   {
     id: "patch-static-checks",
@@ -341,6 +391,13 @@ const ORAX_COMMAND_OPTIONS = [
 
 const DEFAULT_ORAX_COMMAND_IDS = ["patch-static-checks", "json-syntax", "node-syntax"];
 
+function getMessageComposerAttachments(message: OraxTaskMessage): OraxComposerAttachment[] {
+  const composer = message.metadata?.composer as
+    | { attachments?: OraxComposerAttachment[] }
+    | undefined;
+  return Array.isArray(composer?.attachments) ? composer.attachments : [];
+}
+
 export default function OraxPage() {
   const [repositories, setRepositories] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
@@ -361,6 +418,17 @@ export default function OraxPage() {
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
   const [taskMessageDraft, setTaskMessageDraft] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const speechRecognitionRef = useRef<OraxSpeechRecognition | null>(null);
+  const [composerAttachments, setComposerAttachments] = useState<OraxComposerAttachment[]>([]);
+  const [composerModel, setComposerModel] =
+    useState<(typeof ORAX_COMPOSER_MODELS)[number]>("Orax 5.5");
+  const [composerReasoning, setComposerReasoning] = useState<OraxComposerReasoning>("extra_high");
+  const [composerPermissionMode, setComposerPermissionMode] =
+    useState<OraxComposerPermissionMode>("ask");
+  const [composerInputMode, setComposerInputMode] = useState<"text" | "voice">("text");
+  const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
   const [, setShowInspector] = useState(false);
   const [mobileTaskOpen, setMobileTaskOpen] = useState(false);
   const [, setMobileComposeOpen] = useState(false);
@@ -632,6 +700,9 @@ export default function OraxPage() {
       setSuggestionPrConfirmationText("");
       setPrConfirmationText("");
       setTaskMessageDraft("");
+      setComposerAttachments([]);
+      setComposerInputMode("text");
+      setComposerSettingsOpen(false);
       setLoadingApprovals(false);
       setLoadingArtifacts(false);
       setLoadingTaskMessages(false);
@@ -649,6 +720,9 @@ export default function OraxPage() {
       setSuggestionPrConfirmationText("");
       setPrConfirmationText("");
       setTaskMessageDraft("");
+      setComposerAttachments([]);
+      setComposerInputMode("text");
+      setComposerSettingsOpen(false);
     }
 
     void loadApprovals(selectedTask.id);
@@ -740,11 +814,104 @@ export default function OraxPage() {
     }
   }
 
-  async function appendTaskMessage(taskId: number, content: string): Promise<OraxTaskMessage[]> {
+  function addComposerFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const slots = Math.max(0, 6 - composerAttachments.length);
+    const selected = Array.from(files).slice(0, slots);
+    const attachments = selected.map((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      source: "web" as const,
+    }));
+    setComposerAttachments((prev) => [...prev, ...attachments]);
+    if (files.length > slots) {
+      setError("Orax can attach up to 6 files to one message.");
+    }
+  }
+
+  function removeComposerAttachment(id: string) {
+    setComposerAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  }
+
+  function cycleComposerPermissionMode() {
+    setComposerPermissionMode((current) => {
+      const index = ORAX_PERMISSION_OPTIONS.findIndex((option) => option.value === current);
+      return ORAX_PERMISSION_OPTIONS[(index + 1) % ORAX_PERMISSION_OPTIONS.length].value;
+    });
+  }
+
+  function buildComposerMetadata(
+    inputMode: "text" | "voice" = composerInputMode,
+  ): OraxComposerMetadata {
+    return {
+      composer: {
+        model: composerModel,
+        reasoning: composerReasoning,
+        permissionMode: composerPermissionMode,
+        inputMode,
+        attachments: composerAttachments,
+      },
+    };
+  }
+
+  function getSpeechRecognitionConstructor(): OraxSpeechRecognitionConstructor | null {
+    const win = window as unknown as {
+      SpeechRecognition?: OraxSpeechRecognitionConstructor;
+      webkitSpeechRecognition?: OraxSpeechRecognitionConstructor;
+    };
+    return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
+  }
+
+  function toggleComposerVoiceInput() {
+    if (voiceRecording) {
+      speechRecognitionRef.current?.stop();
+      setVoiceRecording(false);
+      return;
+    }
+    const SpeechRecognition = getSpeechRecognitionConstructor();
+    if (!SpeechRecognition) {
+      setError("Voice input is not supported in this browser.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      const text = Array.from(event.results)
+        .slice(event.resultIndex)
+        .map((result) => result[0]?.transcript ?? "")
+        .join(" ")
+        .trim();
+      if (text) {
+        setTaskMessageDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+        setComposerInputMode("voice");
+      }
+    };
+    recognition.onerror = () => {
+      setVoiceRecording(false);
+      setError("Could not capture voice input. Please try again.");
+    };
+    recognition.onend = () => {
+      setVoiceRecording(false);
+      speechRecognitionRef.current = null;
+    };
+    speechRecognitionRef.current = recognition;
+    setVoiceRecording(true);
+    recognition.start();
+  }
+
+  async function appendTaskMessage(
+    taskId: number,
+    content: string,
+    metadata?: OraxComposerMetadata,
+  ): Promise<OraxTaskMessage[]> {
     const res = await authFetch(`/api/orax/tasks/${taskId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(metadata ? { content, metadata } : { content }),
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -754,7 +921,13 @@ export default function OraxPage() {
     return body.messages;
   }
 
-  async function createTask(options: { startThread?: boolean; firstMessage?: string } = {}) {
+  async function createTask(
+    options: {
+      startThread?: boolean;
+      firstMessage?: string;
+      firstMessageMetadata?: OraxComposerMetadata;
+    } = {},
+  ) {
     const firstMessage = (options.firstMessage ?? prompt).trim();
     if (!selectedRepository || !firstMessage || submittingTask) return;
     setSubmittingTask(true);
@@ -788,10 +961,17 @@ export default function OraxPage() {
       setSuggestionPrConfirmationText("");
       setPrConfirmationText("");
       setTaskMessageDraft("");
+      setComposerAttachments([]);
+      setComposerInputMode("text");
+      setComposerSettingsOpen(false);
       setPrompt("");
       if (options.startThread) {
         try {
-          const messages = await appendTaskMessage(targetTaskId, firstMessage);
+          const messages = await appendTaskMessage(
+            targetTaskId,
+            firstMessage,
+            options.firstMessageMetadata,
+          );
           if (activeTaskIdRef.current !== targetTaskId) return;
           setTaskMessages(messages);
         } catch (messageErr) {
@@ -825,24 +1005,36 @@ export default function OraxPage() {
     setSuggestionPrConfirmationText("");
     setPrConfirmationText("");
     setTaskMessageDraft("");
+    setComposerAttachments([]);
+    setComposerInputMode("text");
+    setComposerSettingsOpen(false);
     setPrompt("");
   }
 
   async function sendTaskMessage() {
-    if (!taskMessageDraft.trim() || sendingTaskMessage) return;
-    const content = taskMessageDraft.trim();
+    if (sendingTaskMessage) return;
+    const content = taskMessageDraft.trim() || "Review the attached Orax context.";
+    if (!taskMessageDraft.trim() && composerAttachments.length === 0) return;
+    const metadata = buildComposerMetadata();
     if (!selectedTask) {
-      await createTask({ startThread: true, firstMessage: content });
+      await createTask({
+        startThread: true,
+        firstMessage: content,
+        firstMessageMetadata: metadata,
+      });
       return;
     }
     const targetTaskId = selectedTask.id;
     setSendingTaskMessage(true);
     setError(null);
     try {
-      const messages = await appendTaskMessage(targetTaskId, content);
+      const messages = await appendTaskMessage(targetTaskId, content, metadata);
       if (activeTaskIdRef.current !== targetTaskId) return;
       setTaskMessages((prev) => [...prev, ...messages]);
       setTaskMessageDraft("");
+      setComposerAttachments([]);
+      setComposerInputMode("text");
+      setComposerSettingsOpen(false);
     } catch (err) {
       if (activeTaskIdRef.current !== targetTaskId) return;
       setError(err instanceof Error ? err.message : "Could not save task message");
@@ -1242,7 +1434,7 @@ export default function OraxPage() {
   }
 
   const selectedTaskRepository = selectedTask
-    ? repositories.find((repo) => repo.id === selectedTask.repositoryId) ?? selectedRepository
+    ? (repositories.find((repo) => repo.id === selectedTask.repositoryId) ?? selectedRepository)
     : selectedRepository;
 
   return (
@@ -1316,9 +1508,7 @@ export default function OraxPage() {
                 onClick={() => setTaskSearch("")}
                 className={cn(
                   "shrink-0 rounded-full px-5 py-3 text-sm font-semibold",
-                  taskSearch.trim()
-                    ? "bg-muted text-foreground"
-                    : "bg-foreground text-background",
+                  taskSearch.trim() ? "bg-muted text-foreground" : "bg-foreground text-background",
                 )}
               >
                 All
@@ -1406,9 +1596,7 @@ export default function OraxPage() {
               </div>
             )}
             <div className="mt-12 space-y-5 lg:hidden">
-              <div className="flex items-center gap-2 text-xl font-semibold">
-                Chats
-              </div>
+              <div className="flex items-center gap-2 text-xl font-semibold">Chats</div>
               <button
                 type="button"
                 onClick={() => {
@@ -1429,31 +1617,31 @@ export default function OraxPage() {
             <details className="rounded-md border border-border bg-background">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Repository</summary>
               <div className="space-y-2 border-t border-border p-3">
-              <input
-                value={repositoryUrl}
-                onChange={(event) => setRepositoryUrl(event.target.value)}
-                placeholder="https://github.com/owner/repo"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-              <div className="flex gap-2">
                 <input
-                  value={defaultBranch}
-                  onChange={(event) => setDefaultBranch(event.target.value)}
-                  placeholder="main"
-                  className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  value={repositoryUrl}
+                  onChange={(event) => setRepositoryUrl(event.target.value)}
+                  placeholder="https://github.com/owner/repo"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
-                <button
-                  onClick={() => void addRepository()}
-                  disabled={submittingRepo || !repositoryUrl.trim()}
-                  className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
-                >
-                  {submittingRepo ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <GitBranch className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
+                <div className="flex gap-2">
+                  <input
+                    value={defaultBranch}
+                    onChange={(event) => setDefaultBranch(event.target.value)}
+                    placeholder="main"
+                    className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <button
+                    onClick={() => void addRepository()}
+                    disabled={submittingRepo || !repositoryUrl.trim()}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
+                  >
+                    {submittingRepo ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <GitBranch className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
             </details>
           </div>
@@ -1525,6 +1713,7 @@ export default function OraxPage() {
                 {taskMessages.map((message) => {
                   const isUser = message.role === "user";
                   const isTimeline = message.role === "system" || message.role === "tool";
+                  const messageAttachments = getMessageComposerAttachments(message);
                   const suggestions =
                     message.role === "assistant" ? (message.metadata?.actionSuggestions ?? []) : [];
                   return (
@@ -1552,6 +1741,19 @@ export default function OraxPage() {
                           : ""}
                       </div>
                       <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                      {messageAttachments.length ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {messageAttachments.map((attachment) => (
+                            <span
+                              key={attachment.id}
+                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground"
+                            >
+                              <FileText className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{attachment.name}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       {message.approvalId || message.artifactId ? (
                         <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
                           {message.approvalId ? (
@@ -1627,7 +1829,9 @@ export default function OraxPage() {
                   </section>
                 ) : null}
                 {approvals
-                  .filter((approval) => approval.status === "pending" || approval.status === "approved")
+                  .filter(
+                    (approval) => approval.status === "pending" || approval.status === "approved",
+                  )
                   .map((approval) => (
                     <section
                       key={approval.id}
@@ -1691,62 +1895,154 @@ export default function OraxPage() {
           <div className="shrink-0 border-t border-border bg-background p-3">
             <div className="mx-auto max-w-4xl">
               <div className="rounded-[2rem] border border-border bg-card p-3 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">
-              <textarea
-                value={taskMessageDraft}
-                onChange={(event) => setTaskMessageDraft(event.target.value)}
-                placeholder="Ask Orax"
-                className="min-h-[86px] w-full resize-none bg-transparent px-2 py-2 text-xl leading-7 outline-none placeholder:text-muted-foreground"
-              />
-              <div className="flex items-center gap-3 px-1 pb-1">
-                <div
-                  aria-hidden="true"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center text-foreground"
-                >
-                  <Plus className="h-7 w-7" />
+                {composerAttachments.length ? (
+                  <div className="mb-2 flex flex-wrap gap-2 px-1">
+                    {composerAttachments.map((attachment) => (
+                      <span
+                        key={attachment.id}
+                        className="inline-flex max-w-full items-center gap-2 rounded-xl bg-muted px-2 py-1 text-sm text-foreground"
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{attachment.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeComposerAttachment(attachment.id)}
+                          className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                          aria-label={`Remove ${attachment.name}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <textarea
+                  value={taskMessageDraft}
+                  onChange={(event) => setTaskMessageDraft(event.target.value)}
+                  placeholder="Ask Orax"
+                  className="min-h-[86px] w-full resize-none bg-transparent px-2 py-2 text-xl leading-7 outline-none placeholder:text-muted-foreground"
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    addComposerFiles(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+                <div className="flex items-center gap-3 px-1 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground hover:bg-muted"
+                    aria-label="Attach files to Orax message"
+                  >
+                    <Plus className="h-7 w-7" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cycleComposerPermissionMode}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30"
+                    aria-label={`Orax permission mode: ${composerPermissionMode}`}
+                    title={`Permission: ${composerPermissionMode.replace("_", " ")}`}
+                  >
+                    <ShieldAlert className="h-7 w-7" />
+                  </button>
+                  <div className="relative min-w-0 flex-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setComposerSettingsOpen((value) => !value)}
+                      className="max-w-full rounded-full px-3 py-1 text-lg font-semibold text-foreground hover:bg-muted"
+                      aria-label="Choose Orax model and reasoning"
+                    >
+                      <span>{composerModel.replace("Orax ", "")}</span>{" "}
+                      <span className="font-normal text-muted-foreground">
+                        {ORAX_REASONING_OPTIONS.find((option) => option.value === composerReasoning)
+                          ?.label ?? "Extra High"}
+                      </span>
+                    </button>
+                    {composerSettingsOpen ? (
+                      <div className="absolute bottom-11 left-1/2 z-20 w-64 -translate-x-1/2 rounded-2xl border border-border bg-popover p-3 text-left shadow-xl">
+                        <div className="text-xs font-semibold uppercase text-muted-foreground">
+                          Model
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {ORAX_COMPOSER_MODELS.map((model) => (
+                            <button
+                              key={model}
+                              type="button"
+                              onClick={() => setComposerModel(model)}
+                              className={cn(
+                                "rounded-full border px-3 py-1 text-sm",
+                                composerModel === model
+                                  ? "border-foreground bg-foreground text-background"
+                                  : "border-border hover:bg-muted",
+                              )}
+                            >
+                              {model}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mt-3 text-xs font-semibold uppercase text-muted-foreground">
+                          Reasoning
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {ORAX_REASONING_OPTIONS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => setComposerReasoning(option.value)}
+                              className={cn(
+                                "rounded-full border px-3 py-1 text-sm",
+                                composerReasoning === option.value
+                                  ? "border-foreground bg-foreground text-background"
+                                  : "border-border hover:bg-muted",
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleComposerVoiceInput}
+                    className={cn(
+                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground hover:bg-muted",
+                      voiceRecording && "bg-muted text-primary",
+                    )}
+                    aria-label={voiceRecording ? "Stop Orax voice input" : "Start Orax voice input"}
+                  >
+                    <Mic className="h-7 w-7" />
+                  </button>
+                  <button
+                    onClick={() => void sendTaskMessage()}
+                    disabled={
+                      (!taskMessageDraft.trim() && composerAttachments.length === 0) ||
+                      (!selectedTask && !selectedRepository) ||
+                      sendingTaskMessage ||
+                      submittingTask
+                    }
+                    aria-label="Send Orax message"
+                    className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {sendingTaskMessage || submittingTask ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowUp className="h-7 w-7" strokeWidth={3} />
+                    )}
+                  </button>
                 </div>
-                <div
-                  aria-hidden="true"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center text-orange-600"
-                >
-                  <ShieldAlert className="h-7 w-7" />
-                </div>
-                <div className="min-w-0 flex-1 text-center text-lg font-semibold text-foreground">
-                  <span>5.5</span>{" "}
-                  <span className="font-normal text-muted-foreground">Extra High</span>
-                </div>
-                <div
-                  aria-hidden="true"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center text-foreground"
-                >
-                  <Mic className="h-7 w-7" />
-                </div>
-              <button
-                onClick={() => void sendTaskMessage()}
-                disabled={
-                  !taskMessageDraft.trim() ||
-                  (!selectedTask && !selectedRepository) ||
-                  sendingTaskMessage ||
-                  submittingTask
-                }
-                  aria-label="Send Orax message"
-                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                {sendingTaskMessage || submittingTask ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                    <ArrowUp className="h-7 w-7" strokeWidth={3} />
-                )}
-              </button>
-              </div>
               </div>
             </div>
           </div>
         </section>
 
-        <aside
-          className="hidden"
-          aria-hidden="true"
-        >
+        <aside className="hidden" aria-hidden="true">
           <div className="p-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             <section className="rounded-md border border-border bg-card p-3">
               <div className="flex items-center justify-between gap-2">
@@ -1801,7 +2097,10 @@ export default function OraxPage() {
                   <p className="text-sm text-muted-foreground">No approvals requested yet.</p>
                 ) : (
                   approvals.slice(0, 5).map((approval) => (
-                    <div key={approval.id} className="rounded-md border border-border bg-background p-2">
+                    <div
+                      key={approval.id}
+                      className="rounded-md border border-border bg-background p-2"
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="text-sm font-medium">
@@ -1853,7 +2152,10 @@ export default function OraxPage() {
                   <p className="text-sm text-muted-foreground">No lifecycle events yet.</p>
                 ) : (
                   threadLifecycleItems.slice(0, 6).map((item) => (
-                    <div key={item.id} className="rounded-md border border-border bg-background p-2">
+                    <div
+                      key={item.id}
+                      className="rounded-md border border-border bg-background p-2"
+                    >
                       <div className="text-[11px] font-semibold uppercase text-muted-foreground">
                         {item.label}
                       </div>
@@ -1912,8 +2214,7 @@ export default function OraxPage() {
                       ? void generateDraftPatch(
                           approvals.find(
                             (approval) =>
-                              approval.action === "read_files" &&
-                              approval.status === "completed",
+                              approval.action === "read_files" && approval.status === "completed",
                           )?.id ?? 0,
                         )
                       : undefined
@@ -1943,7 +2244,9 @@ export default function OraxPage() {
               </div>
               <button
                 onClick={() =>
-                  latestSandboxResult ? void requestCommandApproval(latestSandboxResult.id) : undefined
+                  latestSandboxResult
+                    ? void requestCommandApproval(latestSandboxResult.id)
+                    : undefined
                 }
                 disabled={!latestSandboxResult || selectedCommandIds.length === 0}
                 className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
@@ -1962,7 +2265,9 @@ export default function OraxPage() {
               </p>
               <button
                 onClick={() =>
-                  latestCommandResult ? void requestGithubPrApproval(latestCommandResult.id) : undefined
+                  latestCommandResult
+                    ? void requestGithubPrApproval(latestCommandResult.id)
+                    : undefined
                 }
                 disabled={!readyForPrApproval || prConfirmationText.trim() !== "CREATE PR"}
                 className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
@@ -1989,7 +2294,9 @@ export default function OraxPage() {
             </section>
 
             <section className="mt-3 rounded-md border border-border bg-card p-3">
-              <div className="text-xs font-semibold uppercase text-muted-foreground">Repository</div>
+              <div className="text-xs font-semibold uppercase text-muted-foreground">
+                Repository
+              </div>
               {selectedRepository ? (
                 <div className="mt-2 text-sm">
                   <div className="font-medium">
@@ -2025,7 +2332,6 @@ export default function OraxPage() {
       </main>
     </div>
   );
-
 }
 
 function formatOraxApprovalAction(action: string): string {

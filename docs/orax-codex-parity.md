@@ -83,6 +83,12 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
 - The normal composer is one rounded input surface with the Orax placeholder,
   inline controls, model/reasoning label, and a circular up-arrow send control;
   it must not regress to a separate text field plus visible Send pill.
+- Composer controls must be functional on website and mobile: `+` attaches
+  files to the Orax task message, mic input dictates into the composer, the
+  model/reasoning control updates task-message metadata, and the permission
+  control updates the Orax approval mode indicator.
+- Composer control state must travel through ORAX-owned task-message metadata,
+  not Ora chat, project chat, credits, or AI Builder endpoints.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions
   remain available through inline thread suggestions and approval cards.
 - Messages should read like a chat thread, not a timestamped execution log.

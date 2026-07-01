@@ -50,8 +50,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/sandbox-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/command-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
-    expect(oraxPage).toContain("createTask({ startThread: true, firstMessage: content })");
-    expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content)");
+    expect(oraxPage).toContain(
+      "createTask({ startThread: true, firstMessage: content, firstMessageMetadata: metadata })",
+    );
+    expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content, metadata)");
     expect(oraxPage).toContain("Task created, but first message failed to save");
 
     expect(oraxPage).not.toContain("/api/public-ai/chat");
@@ -66,7 +68,7 @@ describe("ORAX product-surface wiring", () => {
 
   it("keeps ORAX MustaFlow-branded, thread-first, and list-first on website and mobile", () => {
     expect(oraxPage).toContain("const [mobileTaskOpen, setMobileTaskOpen] = useState(false)");
-    expect(oraxPage).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(oraxPage).toContain('const [taskSearch, setTaskSearch] = useState("")');
     expect(oraxPage).toContain("function startNewThread()");
     expect(oraxPage).toContain("setSelectedTaskId(null)");
     expect(oraxPage).toContain("visibleTasks");
@@ -83,9 +85,17 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("ArrowUp");
     expect(oraxPage).toContain("ShieldAlert");
     expect(oraxPage).toContain("Mic");
+    expect(oraxPage).toContain("fileInputRef");
+    expect(oraxPage).toContain('type="file"');
+    expect(oraxPage).toContain("addComposerFiles");
+    expect(oraxPage).toContain("SpeechRecognition");
+    expect(oraxPage).toContain("buildComposerMetadata");
+    expect(oraxPage).toContain("permissionMode: composerPermissionMode");
+    expect(oraxPage).toContain("attachments: composerAttachments");
+    expect(oraxPage).toContain("metadata ? { content, metadata } : { content }");
     expect(oraxPage).not.toContain(">Send</button>");
-    expect(oraxPage).toContain("mobileTaskOpen ? \"hidden lg:flex\" : \"flex\"");
-    expect(oraxPage).toContain("mobileTaskOpen ? \"flex\" : \"hidden\"");
+    expect(oraxPage).toContain('mobileTaskOpen ? "hidden lg:flex" : "flex"');
+    expect(oraxPage).toContain('mobileTaskOpen ? "flex" : "hidden"');
     expect(oraxPage).not.toContain("setMobileComposeOpen((value) => !value)");
     expect(oraxPage).not.toContain("Codex workspace for repository tasks");
     expect(oraxPage).not.toContain("ORAX task thread");
@@ -94,7 +104,7 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("const [threadOpen, setThreadOpen] = useState(false)");
     expect(mobileOraxScreen).toContain("const startNewThread = useCallback(() =>");
     expect(mobileOraxScreen).toContain("setSelectedTaskId(null)");
-    expect(mobileOraxScreen).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(mobileOraxScreen).toContain('const [taskSearch, setTaskSearch] = useState("")');
     expect(mobileOraxScreen).toContain("visibleTasks");
     expect(mobileOraxScreen).toContain("chatPreview");
     expect(mobileOraxScreen).toContain(
@@ -112,6 +122,13 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("ArrowUp");
     expect(mobileOraxScreen).toContain("ShieldAlert");
     expect(mobileOraxScreen).toContain("Mic");
+    expect(mobileOraxScreen).toContain("DocumentPicker.getDocumentAsync");
+    expect(mobileOraxScreen).toContain("AudioModule.requestRecordingPermissionsAsync");
+    expect(mobileOraxScreen).toContain('transcribeAudio(uri, "m4a")');
+    expect(mobileOraxScreen).toContain("buildComposerMetadata");
+    expect(mobileOraxScreen).toContain("permissionMode: composerPermissionMode");
+    expect(mobileOraxScreen).toContain("attachments={composerAttachments}");
+    expect(mobileOraxScreen).toContain("onAddAttachment={() => void pickComposerAttachments()}");
     expect(mobileOraxScreen).not.toContain('label="Send"');
     expect(mobileOraxScreen).not.toContain("setHomeComposeOpen((value) => !value)");
     expect(mobileOraxScreen).not.toContain("{homeComposeOpen ? (");
@@ -131,21 +148,30 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain('aria-hidden="true"');
     expect(oraxPage).not.toContain('showInspector ? "flex"');
     expect(oraxPage).not.toContain("setShowInspector((value) => !value)");
-    expect(oraxPage).not.toContain("label=\"Details\"");
+    expect(oraxPage).not.toContain('label="Details"');
 
-    expect(mobileOraxScreen).toContain("void runAction(\"request-read\"");
-    expect(mobileOraxScreen).toContain("void runAction(\"draft-patch\"");
-    expect(mobileOraxScreen).toContain("void runAction(\"sandbox-approval\"");
-    expect(mobileOraxScreen).toContain("void runAction(\"command-approval\"");
-    expect(mobileOraxScreen).toContain("void runAction(\"pr-approval\"");
-    expect(mobileOraxScreen).toContain("approval.status === \"pending\" || approval.status === \"approved\"");
+    expect(mobileOraxScreen).toContain('void runAction("request-read"');
+    expect(mobileOraxScreen).toContain('void runAction("draft-patch"');
+    expect(mobileOraxScreen).toContain('void runAction("sandbox-approval"');
+    expect(mobileOraxScreen).toContain('void runAction("command-approval"');
+    expect(mobileOraxScreen).toContain('void runAction("pr-approval"');
+    expect(mobileOraxScreen).toContain(
+      'approval.status === "pending" || approval.status === "approved"',
+    );
     expect(mobileOraxScreen).toContain("{false ? (");
     expect(mobileOraxScreen).not.toContain('label="Details"');
   });
 
   it("keeps normal assistant replies conversational instead of bookkeeping reports", () => {
-    expect(oraxApiRoute).toContain("\"I'll work from here.\"");
+    expect(oraxApiRoute).toContain('"I\'ll work from here."');
     expect(oraxApiRoute).toContain('title: "Inspect source files"');
+    expect(oraxApiRoute).toContain("composerMetadataSchema");
+    expect(oraxApiRoute).toContain('permissionMode: z.enum(["ask", "auto", "read_only"])');
+    expect(oraxApiRoute).toContain(
+      "attachments: z.array(composerAttachmentSchema).max(6).optional()",
+    );
+    expect(oraxApiRoute).toContain("...(parsed.data.metadata ?? {})");
+    expect(oraxApiRoute).toContain("composer: parsed.data.metadata?.composer ?? null");
     expect(oraxApiRoute).not.toContain("I saved this in the ORAX task thread");
     expect(oraxApiRoute).not.toContain("Current task status:");
     expect(oraxApiRoute).not.toContain("Approvals: 0. Artifacts: 0. Completed artifacts: 0.");
@@ -158,7 +184,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("const switchedTasks = activeTaskIdRef.current !== selectedTask.id");
     expect(oraxPage).toContain("activeTaskIdRef.current = selectedTask.id");
     expect(collapse(oraxPage)).toContain(
-      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setReadResult(null); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setPrConfirmationText(""); setTaskMessageDraft(""); }',
+      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setReadResult(null); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setPrConfirmationText(""); setTaskMessageDraft(""); setComposerAttachments([]); setComposerInputMode("text"); setComposerSettingsOpen(false); }',
     );
     expect(oraxPage).toContain("const targetTaskId = body.task.id;");
     expect(oraxPage).toContain("const targetTaskId = selectedTask.id;");
@@ -172,6 +198,9 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileTypes).toContain(
       'export type OraxTaskKind = "analyze" | "plan" | "review" | "fix"',
     );
+    expect(mobileTypes).toContain("export interface OraxComposerMetadata");
+    expect(mobileTypes).toContain("permissionMode: OraxComposerPermissionMode");
+    expect(mobileTypes).toContain("attachments: OraxComposerAttachment[]");
     expect(mobileTypes).not.toContain('"coding"');
 
     for (const route of [
@@ -195,5 +224,7 @@ describe("ORAX product-surface wiring", () => {
     ]) {
       expect(mobileApi).toContain(route);
     }
+    expect(mobileApi).toContain("metadata?: OraxComposerMetadata");
+    expect(mobileApi).toContain("metadata ? { content, metadata } : { content }");
   });
 });

@@ -56,8 +56,35 @@ const createTaskSchema = z.object({
   title: z.string().min(1).max(140).optional(),
 });
 
+const composerAttachmentSchema = z.object({
+  id: z.string().min(1).max(160).optional(),
+  name: z.string().min(1).max(300),
+  type: z.string().max(200).optional(),
+  size: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(25 * 1024 * 1024)
+    .optional(),
+  source: z.enum(["web", "mobile"]).optional(),
+});
+
+const composerMetadataSchema = z.object({
+  model: z.string().min(1).max(80).optional(),
+  reasoning: z.enum(["low", "medium", "high", "extra_high"]).optional(),
+  permissionMode: z.enum(["ask", "auto", "read_only"]).optional(),
+  inputMode: z.enum(["text", "voice"]).optional(),
+  attachments: z.array(composerAttachmentSchema).max(6).optional(),
+});
+
 const taskMessageSchema = z.object({
   content: z.string().trim().min(1).max(8000),
+  metadata: z
+    .object({
+      composer: composerMetadataSchema.optional(),
+    })
+    .passthrough()
+    .optional(),
 });
 
 const githubConnectSchema = z.object({
@@ -536,7 +563,10 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
         taskId: task.id,
         role: "user",
         content: parsed.data.content,
-        metadata: { source: "orax-task-thread" },
+        metadata: {
+          ...(parsed.data.metadata ?? {}),
+          source: "orax-task-thread",
+        },
         createdAt: now,
         updatedAt: now,
       })
@@ -572,6 +602,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
           approvalCount: approvals.length,
           artifactCount: artifacts.length,
           checkpoint,
+          composer: parsed.data.metadata?.composer ?? null,
           resumeMode: isOraxResumeQuestion(parsed.data.content),
           actionSuggestions,
         },
@@ -2709,10 +2740,7 @@ function buildOraxTaskThreadReply(input: {
           ? `${suggestion.title}. ${suggestion.description}`
           : "Tell me which files or behavior to inspect first.";
 
-  return [
-    "I'll work from here.",
-    nextStep,
-  ].join("\n");
+  return ["I'll work from here.", nextStep].join("\n");
 }
 
 function isOraxResumeQuestion(message: string): boolean {
@@ -2820,8 +2848,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "draft_patch",
       title: "Draft the change",
-      description:
-        "Approved files have been read. Continue here to draft the code change.",
+      description: "Approved files have been read. Continue here to draft the code change.",
       buttonLabel: "Draft change",
       approvalId: completedReadApproval.id,
       instructions: input.userMessage.slice(0, 2000),

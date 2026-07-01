@@ -451,6 +451,14 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("oraxTaskMessagesTable");
     expect(routeSource).toContain("buildOraxTaskThreadReply");
     expect(routeSource).toContain("I'll work from here.");
+    expect(routeSource).toContain("composerMetadataSchema");
+    expect(routeSource).toContain("composerAttachmentSchema");
+    expect(routeSource).toContain('permissionMode: z.enum(["ask", "auto", "read_only"])');
+    expect(routeSource).toContain(
+      "attachments: z.array(composerAttachmentSchema).max(6).optional()",
+    );
+    expect(routeSource).toContain("...(parsed.data.metadata ?? {})");
+    expect(routeSource).toContain("composer: parsed.data.metadata?.composer ?? null");
     expect(routeSource).not.toContain("Phase 4B is planning-only");
     expect(routeSource).not.toContain("I saved this in the ORAX task thread");
     expect(routeSource).toContain("buildOraxTaskActionSuggestions");

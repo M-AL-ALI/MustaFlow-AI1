@@ -540,6 +540,27 @@ export interface OraxTaskMessage {
   updatedAt?: string;
 }
 
+export type OraxComposerReasoning = "low" | "medium" | "high" | "extra_high";
+export type OraxComposerPermissionMode = "ask" | "auto" | "read_only";
+
+export interface OraxComposerAttachment {
+  id?: string;
+  name: string;
+  type?: string;
+  size?: number;
+  source?: "web" | "mobile";
+}
+
+export interface OraxComposerMetadata {
+  composer: {
+    model: string;
+    reasoning: OraxComposerReasoning;
+    permissionMode: OraxComposerPermissionMode;
+    inputMode: "text" | "voice";
+    attachments: OraxComposerAttachment[];
+  };
+}
+
 export interface OraxApproval {
   id: number;
   repositoryId: number;
