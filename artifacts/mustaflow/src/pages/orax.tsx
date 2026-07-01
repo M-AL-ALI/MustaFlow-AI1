@@ -8,13 +8,18 @@ import {
   Code2,
   FileSearch,
   FileText,
+  Folder,
   GitBranch,
   GitPullRequest,
   KeyRound,
   Loader2,
   LockKeyhole,
+  Menu,
+  MoreHorizontal,
+  PenLine,
   Play,
   RefreshCw,
+  Search,
   Send,
   ShieldCheck,
   Terminal,
@@ -359,6 +364,9 @@ export default function OraxPage() {
   const [draftInstructions, setDraftInstructions] = useState("");
   const [taskMessageDraft, setTaskMessageDraft] = useState("");
   const [showInspector, setShowInspector] = useState(false);
+  const [mobileTaskOpen, setMobileTaskOpen] = useState(false);
+  const [mobileComposeOpen, setMobileComposeOpen] = useState(false);
+  const [taskSearch, setTaskSearch] = useState("");
   const [pendingSuggestionConfirmation, setPendingSuggestionConfirmation] =
     useState<OraxTaskActionSuggestion | null>(null);
   const [suggestionPrConfirmationText, setSuggestionPrConfirmationText] = useState("");
@@ -407,6 +415,22 @@ export default function OraxPage() {
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
+  const visibleTasks = useMemo(() => {
+    const query = taskSearch.trim().toLowerCase();
+    if (!query) return tasks;
+    return tasks.filter((task) => {
+      const repo = repositories.find((item) => item.id === task.repositoryId);
+      return [task.title, task.prompt, task.kind, task.status, repo?.owner, repo?.name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [repositories, taskSearch, tasks]);
+  const chatPreview = useMemo(() => {
+    const latestUserMessage = [...taskMessages]
+      .reverse()
+      .find((message) => message.role === "user")?.content;
+    return latestUserMessage ?? selectedTask?.prompt ?? "Start a chat with Orax";
+  }, [selectedTask, taskMessages]);
   const currentCheckpoint = useMemo(() => {
     const checkpointMessage = [...taskMessages]
       .reverse()
@@ -756,6 +780,8 @@ export default function OraxPage() {
       setTasks((prev) => [body.task, ...prev]);
       activeTaskIdRef.current = targetTaskId;
       setSelectedTaskId(targetTaskId);
+      setMobileTaskOpen(true);
+      setMobileComposeOpen(false);
       setApprovals([]);
       setArtifacts([]);
       setTaskMessages([]);
@@ -1203,7 +1229,36 @@ export default function OraxPage() {
 
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
+      <header className="flex h-20 shrink-0 items-center justify-between bg-background px-5 lg:hidden">
+        <button
+          type="button"
+          onClick={() => (mobileTaskOpen ? setMobileTaskOpen(false) : undefined)}
+          className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground"
+          aria-label={mobileTaskOpen ? "Back to Orax tasks" : "Open menu"}
+        >
+          {mobileTaskOpen ? <ArrowLeft className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+        <div className="min-w-0 px-3 text-center">
+          <h1 className="truncate text-lg font-semibold">
+            {mobileTaskOpen ? (selectedTask?.title ?? "Orax") : "Orax"}
+          </h1>
+          {mobileTaskOpen && selectedTaskRepository ? (
+            <p className="truncate text-xs text-muted-foreground">
+              {selectedTaskRepository.owner}/{selectedTaskRepository.name}
+            </p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowInspector((value) => !value)}
+          className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground"
+          aria-label="Orax options"
+        >
+          <MoreHorizontal className="h-5 w-5" />
+        </button>
+      </header>
+
+      <header className="hidden h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:flex">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/mode-select"
@@ -1233,16 +1288,58 @@ export default function OraxPage() {
             : "lg:grid-cols-[280px_minmax(0,1fr)]",
         )}
       >
-        <aside className="order-2 flex flex-col border-y border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-y-0 lg:border-r">
-          <div className="border-b border-border p-3">
+        <aside
+          className={cn(
+            "order-1 flex flex-col bg-background lg:order-none lg:min-h-0 lg:border-r lg:border-border lg:bg-muted/20",
+            mobileTaskOpen ? "hidden lg:flex" : "flex",
+          )}
+        >
+          <div className="p-5 lg:border-b lg:border-border lg:p-3">
+            <div className="mb-10 flex gap-3 overflow-x-auto lg:hidden">
+              <button
+                type="button"
+                onClick={() => setTaskSearch("")}
+                className={cn(
+                  "shrink-0 rounded-full px-5 py-3 text-sm font-semibold",
+                  taskSearch.trim()
+                    ? "bg-muted text-foreground"
+                    : "bg-foreground text-background",
+                )}
+              >
+                All
+              </button>
+              {selectedRepository ? (
+                <button
+                  type="button"
+                  onClick={() => setTaskSearch(selectedRepository.name)}
+                  className="inline-flex max-w-[240px] shrink-0 items-center gap-2 rounded-full bg-muted px-4 py-3 text-sm font-medium text-foreground"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                  <Code2 className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{selectedRepository.name}</span>
+                </button>
+              ) : null}
+            </div>
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-semibold uppercase text-muted-foreground">Tasks</div>
-                <div className="text-sm font-semibold">Task history</div>
+              <div className="min-w-0">
+                <div className="text-xl font-semibold lg:text-xs lg:font-semibold lg:uppercase lg:text-muted-foreground">
+                  Projects
+                </div>
+                <div className="mt-8 flex items-center gap-3 text-lg font-medium lg:mt-0 lg:text-sm lg:font-semibold">
+                  <Folder className="h-5 w-5 text-muted-foreground lg:hidden" />
+                  <span className="truncate">
+                    {selectedRepository
+                      ? `${selectedRepository.owner}/${selectedRepository.name}`
+                      : "Task history"}
+                  </span>
+                </div>
               </div>
               {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </div>
-            <details open={tasks.length === 0} className="mt-3 rounded-md border border-border bg-background">
+            <details
+              open={tasks.length === 0}
+              className="mt-4 hidden rounded-md border border-border bg-background lg:mt-3 lg:block"
+            >
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium">New task</summary>
               <div className="border-t border-border p-3">
                 <textarea
@@ -1286,16 +1383,55 @@ export default function OraxPage() {
                 </p>
               </div>
             </details>
+            {mobileComposeOpen ? (
+              <div className="mt-6 space-y-3 lg:hidden">
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Ask ORAX to inspect, plan, review, or fix code..."
+                  className="min-h-24 w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring"
+                />
+                <div className="flex flex-wrap gap-2">
+                  {TASK_KINDS.map((kind) => (
+                    <button
+                      key={kind.value}
+                      type="button"
+                      onClick={() => setTaskKind(kind.value)}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-xs font-medium",
+                        taskKind === kind.value
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border bg-background text-muted-foreground",
+                      )}
+                    >
+                      {kind.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => void createTask({ startThread: true })}
+                  disabled={!selectedRepository || !prompt.trim() || submittingTask}
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 text-base font-semibold text-background disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submittingTask ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PenLine className="h-4 w-4" />
+                  )}
+                  Start chat
+                </button>
+              </div>
+            ) : null}
           </div>
 
-          <div className="p-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-            {tasks.length === 0 ? (
+          <div className="flex-1 px-5 pb-28 lg:min-h-0 lg:overflow-y-auto lg:p-2">
+            {visibleTasks.length === 0 ? (
               <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
                 No tasks yet. Start a chat to create a Codex-style ORAX thread.
               </div>
             ) : (
-              <div className="space-y-1.5">
-                {tasks.map((task) => {
+              <div className="space-y-5 lg:space-y-1.5">
+                {visibleTasks.map((task) => {
                   const repo = repositories.find((item) => item.id === task.repositoryId);
                   const active = task.id === selectedTask?.id;
                   return (
@@ -1305,24 +1441,25 @@ export default function OraxPage() {
                       onClick={() => {
                         setSelectedTaskId(task.id);
                         setSelectedRepoId(task.repositoryId);
+                        setMobileTaskOpen(true);
                       }}
                       className={cn(
-                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                        "w-full text-left transition-colors lg:rounded-md lg:border lg:px-3 lg:py-2",
                         active
-                          ? "border-primary bg-background shadow-sm"
-                          : "border-transparent hover:border-border hover:bg-background",
+                          ? "lg:border-primary lg:bg-background lg:shadow-sm"
+                          : "lg:border-transparent lg:hover:border-border lg:hover:bg-background",
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">
+                          <div className="truncate text-lg font-normal lg:text-sm lg:font-medium">
                             {task.title || task.prompt || `Task #${task.id}`}
                           </div>
-                          <div className="mt-1 truncate text-xs text-muted-foreground">
+                          <div className="mt-1 hidden truncate text-xs text-muted-foreground lg:block">
                             {repo ? `${repo.owner}/${repo.name}` : "repository"} - {task.status}
                           </div>
                         </div>
-                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                        <span className="hidden rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground lg:inline-flex">
                           {task.kind}
                         </span>
                       </div>
@@ -1331,9 +1468,27 @@ export default function OraxPage() {
                 })}
               </div>
             )}
+            <div className="mt-12 space-y-5 lg:hidden">
+              <div className="flex items-center gap-2 text-xl font-semibold">
+                Chats
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedTask) {
+                    setMobileTaskOpen(true);
+                    return;
+                  }
+                  setMobileComposeOpen(true);
+                }}
+                className="block max-w-full truncate text-left text-lg text-foreground"
+              >
+                {chatPreview}
+              </button>
+            </div>
           </div>
 
-          <div className="border-t border-border p-3">
+          <div className="hidden border-t border-border p-3 lg:block">
             <details className="rounded-md border border-border bg-background">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Repository</summary>
               <div className="space-y-2 border-t border-border p-3">
@@ -1365,16 +1520,46 @@ export default function OraxPage() {
               </div>
             </details>
           </div>
+          <div className="fixed inset-x-0 bottom-0 z-20 flex items-center gap-3 bg-background/95 px-6 py-4 backdrop-blur lg:hidden">
+            <label className="flex min-w-0 flex-1 items-center gap-3 rounded-full bg-muted px-4 py-3 text-muted-foreground shadow-sm">
+              <Search className="h-5 w-5 shrink-0" />
+              <input
+                value={taskSearch}
+                onChange={(event) => setTaskSearch(event.target.value)}
+                placeholder="Search Chats"
+                className="min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedTask) {
+                  setMobileTaskOpen(true);
+                  return;
+                }
+                setMobileComposeOpen((value) => !value);
+              }}
+              className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-foreground px-5 text-base font-semibold text-background"
+            >
+              <PenLine className="h-5 w-5" />
+              Chat
+            </button>
+          </div>
         </aside>
 
-        <section className="order-1 flex min-h-[calc(100dvh-3.5rem)] flex-col bg-background lg:order-none lg:min-h-0">
+        <section
+          className={cn(
+            "order-2 min-h-[calc(100dvh-5rem)] flex-col bg-background lg:order-none lg:flex lg:min-h-0",
+            mobileTaskOpen ? "flex" : "hidden",
+          )}
+        >
           {error ? (
             <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}
             </div>
           ) : null}
 
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="hidden shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 lg:flex">
             <div className="min-w-0">
               <div className="text-xs font-semibold uppercase text-muted-foreground">
                 ORAX task thread
@@ -1412,7 +1597,7 @@ export default function OraxPage() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 lg:px-4">
             {!selectedTask ? (
               <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
                 <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted">
@@ -1440,17 +1625,17 @@ export default function OraxPage() {
                     <article
                       key={message.id}
                       className={cn(
-                        "rounded-md border px-4 py-3 text-sm",
+                        "px-4 py-3 text-base lg:rounded-md lg:border lg:text-sm",
                         isUser
-                          ? "ml-auto max-w-[78%] border-border bg-muted/60 text-foreground"
+                          ? "ml-auto max-w-[78%] rounded-3xl bg-muted/70 text-foreground lg:border-border"
                           : isTimeline
                             ? "border-dashed border-border bg-muted/40 text-muted-foreground"
-                            : "border-border bg-card",
+                            : "bg-transparent lg:border-border lg:bg-card",
                       )}
                     >
                       <div
                         className={cn(
-                          "mb-1 text-[11px] font-semibold uppercase",
+                          "mb-1 text-[11px] font-semibold uppercase lg:text-[11px]",
                           "text-muted-foreground",
                         )}
                       >
@@ -1507,7 +1692,7 @@ export default function OraxPage() {
           </div>
 
           <div className="shrink-0 border-t border-border bg-background p-3">
-            <details className="mx-auto mb-2 max-w-4xl text-xs text-muted-foreground">
+            <details className="mx-auto mb-2 hidden max-w-4xl text-xs text-muted-foreground lg:block">
               <summary className="inline-flex cursor-pointer rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-muted">
                 Task conversation
               </summary>
@@ -1556,12 +1741,12 @@ export default function OraxPage() {
                     ? "Message ORAX about this task..."
                     : "Create a task from the left panel first..."
                 }
-                className="min-h-12 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                className="min-h-12 flex-1 resize-none rounded-3xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring lg:rounded-md lg:px-3 lg:py-2 lg:text-sm"
               />
               <button
                 onClick={() => void sendTaskMessage()}
                 disabled={!selectedTask || !taskMessageDraft.trim() || sendingTaskMessage}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60 lg:rounded-md lg:bg-primary lg:text-primary-foreground"
               >
                 {sendingTaskMessage ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

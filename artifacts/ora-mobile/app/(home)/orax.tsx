@@ -1,27 +1,40 @@
 import {
   AlertCircle,
+  ArrowLeft,
   Bot,
   CheckCircle2,
   Code2,
   FileText,
+  Folder,
   GitBranch,
   GitPullRequest,
   KeyRound,
   Lock,
+  Menu,
   MessageSquare,
+  MoreHorizontal,
   Play,
   Plus,
   RefreshCw,
+  Search,
   Send,
   ShieldCheck,
   TerminalSquare,
   XCircle,
 } from "lucide-react-native";
+import { useNavigation } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button, Card, EmptyState, Loading, Pill, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -90,6 +103,7 @@ const TASK_KINDS: Array<{ value: OraxTaskKind; label: string }> = [
 ];
 
 const DEFAULT_COMMANDS = ["patch-static-checks", "json-syntax", "node-syntax"];
+const ORAX_TAGLINE = "Codex-style coding agent for repositories";
 const COMMAND_OPTIONS = [
   { id: "patch-static-checks", label: "Static" },
   { id: "json-syntax", label: "JSON" },
@@ -103,7 +117,10 @@ const COMMAND_OPTIONS = [
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
+  const [threadOpen, setThreadOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [taskSearch, setTaskSearch] = useState("");
 
   const [caps, setCaps] = useState<OraxCapabilities | null>(null);
   const [repos, setRepos] = useState<OraxRepository[]>([]);
@@ -146,6 +163,22 @@ export default function OraxScreen() {
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
+  const visibleTasks = useMemo(() => {
+    const query = taskSearch.trim().toLowerCase();
+    if (!query) return tasks;
+    return tasks.filter((task) => {
+      const repo = repos.find((item) => item.id === task.repositoryId);
+      return [task.title, task.prompt, task.kind, task.status, repo?.owner, repo?.name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [repos, taskSearch, tasks]);
+  const chatPreview = useMemo(() => {
+    const latestUserMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "user")?.content;
+    return latestUserMessage ?? selectedTask?.prompt ?? "Start a chat with Orax";
+  }, [messages, selectedTask]);
   const latestScan = scans[0] ?? null;
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
   const latestSandbox = artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
@@ -345,6 +378,7 @@ export default function OraxScreen() {
       setTaskPrompt("");
       await appendTaskMessage(created.task.id, prompt);
       await loadTaskDetails(created.task.id);
+      setThreadOpen(true);
       setShowDetails(false);
     });
   }, [loadTaskDetails, runAction, selectedRepo?.id, taskKind, taskPrompt]);
@@ -357,6 +391,7 @@ export default function OraxScreen() {
       activeTaskIdRef.current = task.id;
       setSelectedTaskId(task.id);
       setSelectedRepoId(task.repositoryId);
+      setThreadOpen(true);
       setShowDetails(false);
     },
     [clearTaskScopedState],
@@ -422,7 +457,77 @@ export default function OraxScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader title="Orax" subtitle="Codex-style coding agent for repositories" />
+      <View
+        style={{
+          paddingTop: insets.top + 10,
+          paddingBottom: 14,
+          paddingHorizontal: 24,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          backgroundColor: c.background,
+        }}
+        accessibilityLabel={ORAX_TAGLINE}
+      >
+        <Pressable
+          onPress={() => {
+            if (threadOpen) {
+              setThreadOpen(false);
+              return;
+            }
+            (navigation as unknown as { openDrawer?: () => void }).openDrawer?.();
+          }}
+          hitSlop={10}
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 26,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: c.muted,
+          }}
+        >
+          {threadOpen ? (
+            <ArrowLeft size={25} color={c.foreground} />
+          ) : (
+            <Menu size={25} color={c.foreground} />
+          )}
+        </Pressable>
+        <View style={{ flex: 1, alignItems: "center", paddingHorizontal: 12 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: c.foreground,
+              fontFamily: "Inter_700Bold",
+              fontSize: 20,
+            }}
+          >
+            {threadOpen ? (selectedTask?.title ?? "Orax") : "Orax"}
+          </Text>
+          {threadOpen && selectedRepo ? (
+            <Text numberOfLines={1} style={{ color: c.mutedForeground, fontSize: 12 }}>
+              {selectedRepo.owner}/{selectedRepo.name}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable
+          onPress={() => {
+            setThreadOpen(true);
+            setShowDetails((value) => !value);
+          }}
+          hitSlop={10}
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 26,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: c.muted,
+          }}
+        >
+          <MoreHorizontal size={25} color={c.foreground} />
+        </Pressable>
+      </View>
       {loading ? (
         <Loading label="Loading Orax..." />
       ) : (
@@ -440,6 +545,144 @@ export default function OraxScreen() {
           >
             {error ? <Notice tone="error" title="Orax needs attention" body={error} /> : null}
 
+            {!threadOpen ? (
+              <>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  <Pill label="All" active={!taskSearch.trim()} onPress={() => setTaskSearch("")} />
+                  {selectedRepo ? (
+                    <Pill
+                      label={selectedRepo.name}
+                      active={false}
+                      onPress={() => setTaskSearch(selectedRepo.name)}
+                    />
+                  ) : null}
+                </View>
+
+                <View style={{ gap: 18, paddingTop: 22 }}>
+                  <Text
+                    style={{
+                      color: c.foreground,
+                      fontFamily: "Inter_700Bold",
+                      fontSize: 24,
+                    }}
+                  >
+                    Projects
+                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <Folder size={22} color={c.foreground} />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: c.foreground,
+                          fontFamily: "Inter_600SemiBold",
+                          fontSize: 18,
+                        }}
+                      >
+                        {selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "Orax"}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => {
+                        setThreadOpen(true);
+                        setShowDetails(true);
+                      }}
+                      hitSlop={10}
+                    >
+                      <Plus size={20} color={c.mutedForeground} />
+                    </Pressable>
+                  </View>
+
+                  <View style={{ gap: 22 }}>
+                    {visibleTasks.length === 0 ? (
+                      <Text style={{ color: c.mutedForeground, fontSize: 16 }}>
+                        No tasks yet. Tap Chat to start an Orax task.
+                      </Text>
+                    ) : (
+                      visibleTasks.map((task) => (
+                        <Pressable key={task.id} onPress={() => selectTask(task)}>
+                          <Text
+                            numberOfLines={1}
+                            style={{ color: c.foreground, fontSize: 18, lineHeight: 26 }}
+                          >
+                            {task.title ?? task.prompt ?? "ORAX task"}
+                          </Text>
+                        </Pressable>
+                      ))
+                    )}
+                  </View>
+
+                  <View style={{ gap: 18, paddingTop: 10 }}>
+                    <Text
+                      style={{
+                        color: c.foreground,
+                        fontFamily: "Inter_700Bold",
+                        fontSize: 18,
+                      }}
+                    >
+                      Chats
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        if (selectedTask) {
+                          selectTask(selectedTask);
+                        } else {
+                          setThreadOpen(true);
+                          setShowDetails(true);
+                        }
+                      }}
+                    >
+                      <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 18 }}>
+                        {chatPreview}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View
+                  style={{
+                    flexDirection: "row",
+                    gap: 12,
+                    alignItems: "center",
+                    paddingTop: 28,
+                    paddingBottom: 8,
+                  }}
+                >
+                  <View
+                    style={{
+                      flex: 1,
+                      minHeight: 50,
+                      borderRadius: 24,
+                      backgroundColor: c.card,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                      paddingHorizontal: 14,
+                    }}
+                  >
+                    <Search size={20} color={c.mutedForeground} />
+                    <TextInput
+                      value={taskSearch}
+                      onChangeText={setTaskSearch}
+                      placeholder="Search Chats"
+                      placeholderTextColor={c.mutedForeground}
+                      style={{ flex: 1, color: c.foreground, fontSize: 16 }}
+                    />
+                  </View>
+                  <Button
+                    label="Chat"
+                    icon={MessageSquare}
+                    onPress={() => {
+                      setThreadOpen(true);
+                      setShowDetails(!selectedTask);
+                    }}
+                  />
+                </View>
+              </>
+            ) : (
+              <>
             <Card style={{ gap: 12 }}>
               <SectionTitle title="Task thread" icon={Bot} />
               <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}>
@@ -449,13 +692,6 @@ export default function OraxScreen() {
                 {selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "Connect a repository"}
                 {selectedTask ? ` - ${selectedTask.status}` : ""}
               </Text>
-              <InfoGrid
-                items={[
-                  ["Pending", String(approvals.filter((approval) => approval.status === "pending").length)],
-                  ["Messages", String(messages.length)],
-                  ["Artifacts", String(artifacts.length)],
-                ]}
-              />
               {detailsLoading ? <Loading label="Loading thread..." /> : null}
               {latestAssistantSuggestion ? (
                 <SuggestionCard
@@ -478,7 +714,6 @@ export default function OraxScreen() {
                     )}
                   </View>
                   <TextField
-                    label="Message Orax"
                     placeholder="Resume, ask for next step, or name files to inspect..."
                     value={threadDraft}
                     onChangeText={setThreadDraft}
@@ -501,9 +736,34 @@ export default function OraxScreen() {
                   </View>
                 </>
               ) : (
-                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  Open Details to connect a repository or start an ORAX task.
-                </Text>
+                <>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    {TASK_KINDS.map((kind) => (
+                      <Pill
+                        key={kind.value}
+                        label={kind.label}
+                        active={taskKind === kind.value}
+                        onPress={() => setTaskKind(kind.value)}
+                      />
+                    ))}
+                  </View>
+                  <TextField
+                    label="Start Orax task"
+                    placeholder="Ask Orax to inspect, plan, review, or fix code..."
+                    value={taskPrompt}
+                    onChangeText={setTaskPrompt}
+                    multiline
+                    style={{ minHeight: 88, textAlignVertical: "top" }}
+                  />
+                  <Button
+                    label="Start ORAX chat"
+                    icon={Play}
+                    onPress={submitTask}
+                    loading={busyAction === "create-task"}
+                    disabled={!selectedRepo || !taskPrompt.trim()}
+                    full
+                  />
+                </>
               )}
             </Card>
 
@@ -858,6 +1118,8 @@ export default function OraxScreen() {
             </Card>
             </>
             ) : null}
+              </>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       )}
