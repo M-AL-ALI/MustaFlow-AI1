@@ -35,6 +35,7 @@ describe("ORAX product-surface wiring", () => {
       "/api/orax/repositories",
       "/api/orax/tasks",
       "/api/orax/tasks/${taskId}/messages",
+      "/api/orax/tasks/${taskId}/events",
       "/api/orax/tasks/${taskId}/approvals",
       "/api/orax/tasks/${taskId}/artifacts",
       "/api/orax/approvals/${approvalId}",
@@ -56,6 +57,11 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("firstMessageMetadata: metadata");
     expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content, metadata)");
     expect(oraxPage).toContain("Task created, but first message failed to save");
+    expect(oraxPage).toContain("connectOraxTaskEventStream");
+    expect(oraxPage).toContain("/api/orax/tasks/${taskId}/events");
+    expect(oraxPage).toContain('headers: { Accept: "text/event-stream" }');
+    expect(oraxPage).toContain("new TextDecoder()");
+    expect(oraxPage).toContain("mergeOraxTaskMessages");
 
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");
@@ -143,6 +149,10 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("permissionMode: composerPermissionMode");
     expect(mobileOraxScreen).toContain("attachments={composerAttachments}");
     expect(mobileOraxScreen).toContain("onAddAttachment={() => void pickComposerAttachments()}");
+    expect(mobileOraxScreen).toContain("refreshTaskTimeline");
+    expect(mobileOraxScreen).toContain("setInterval(() =>");
+    expect(mobileOraxScreen).toContain("listTaskMessages(taskId)");
+    expect(mobileOraxScreen).toContain("mergeOraxTaskMessages");
     expect(mobileOraxScreen).not.toContain('label="Send"');
     expect(mobileOraxScreen).not.toContain("setHomeComposeOpen((value) => !value)");
     expect(mobileOraxScreen).not.toContain("{homeComposeOpen ? (");
@@ -180,6 +190,9 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain('"I\'ll work from here."');
     expect(oraxApiRoute).toContain('"Inspect source files"');
     expect(oraxApiRoute).toContain('"Inspect related source files"');
+    expect(oraxApiRoute).toContain('router.get("/orax/tasks/:id/events"');
+    expect(oraxApiRoute).toContain('"Content-Type": "text/event-stream"');
+    expect(oraxApiRoute).toContain("loadOraxTaskMessagesAfter");
     expect(oraxApiRoute).toContain("composerMetadataSchema");
     expect(oraxApiRoute).toContain('permissionMode: z.enum(["ask", "auto", "read_only"])');
     expect(oraxApiRoute).toContain(

@@ -447,6 +447,11 @@ describe("ORAX task conversation isolation", () => {
     expect(migrationsSource).toContain("migrate-orax-messages");
     expect(allOutstandingSource).toContain('"migrate-orax-messages"');
     expect(routeSource).toContain('router.get("/orax/tasks/:id/messages"');
+    expect(routeSource).toContain('router.get("/orax/tasks/:id/events"');
+    expect(routeSource).toContain('"Content-Type": "text/event-stream"');
+    expect(routeSource).toContain("loadOraxTaskMessagesAfter");
+    expect(routeSource).toContain('writeEvent("message", { message }, message.id)');
+    expect(routeSource).toContain("orax-task-timeline");
     expect(routeSource).toContain('router.post("/orax/tasks/:id/messages"');
     expect(routeSource).toContain("oraxTaskMessagesTable");
     expect(routeSource).toContain("buildOraxTaskThreadReply");

@@ -547,6 +547,29 @@ function getMessageComposerAttachments(message: OraxTaskMessage): OraxComposerAt
   return Array.isArray(composer?.attachments) ? composer.attachments : [];
 }
 
+function mergeOraxTaskMessages(
+  current: OraxTaskMessage[],
+  incoming: OraxTaskMessage[],
+): OraxTaskMessage[] {
+  if (!incoming.length) return current;
+  const byId = new Map<number, OraxTaskMessage>();
+  for (const message of current) byId.set(message.id, message);
+  for (const message of incoming) byId.set(message.id, message);
+  return Array.from(byId.values()).sort((a, b) => {
+    const dateDelta = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    return dateDelta || a.id - b.id;
+  });
+}
+
+function shouldRefreshOraxTaskCollections(message: OraxTaskMessage): boolean {
+  const source = message.metadata?.source;
+  return (
+    source === "orax-task-timeline" ||
+    source === "orax-task-checkpoint" ||
+    Boolean(message.approvalId || message.artifactId)
+  );
+}
+
 export default function OraxPage() {
   const [repositories, setRepositories] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
@@ -559,6 +582,7 @@ export default function OraxPage() {
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const activeTaskIdRef = useRef<number | null>(null);
+  const taskEventStreamAbortRef = useRef<AbortController | null>(null);
   const [githubToken, setGithubToken] = useState("");
   const [scans, setScans] = useState<OraxScan[]>([]);
   const [_taskKind, _setTaskKind] = useState<(typeof _TASK_KINDS)[number]["value"]>("analyze");
@@ -841,6 +865,8 @@ export default function OraxPage() {
   useEffect(() => {
     if (!selectedTask) {
       activeTaskIdRef.current = null;
+      taskEventStreamAbortRef.current?.abort();
+      taskEventStreamAbortRef.current = null;
       setApprovals([]);
       setArtifacts([]);
       setTaskMessages([]);
@@ -878,6 +904,79 @@ export default function OraxPage() {
     void loadArtifacts(selectedTask.id);
     void loadTaskMessages(selectedTask.id);
   }, [loadApprovals, loadArtifacts, loadTaskMessages, selectedTask]);
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    const taskId = selectedTask.id;
+    const controller = new AbortController();
+    taskEventStreamAbortRef.current?.abort();
+    taskEventStreamAbortRef.current = controller;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function processOraxEventBlock(block: string) {
+      const lines = block.split("\n");
+      let eventName = "message";
+      const dataLines: string[] = [];
+      for (const line of lines) {
+        if (line.startsWith("event: ")) eventName = line.slice(7).trim();
+        if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+      }
+      if (!dataLines.length || eventName !== "message") return;
+      let parsed: { message?: OraxTaskMessage };
+      try {
+        parsed = JSON.parse(dataLines.join("\n")) as { message?: OraxTaskMessage };
+      } catch {
+        return;
+      }
+      const message = parsed.message;
+      if (!message || activeTaskIdRef.current !== taskId) return;
+      setTaskMessages((prev) => mergeOraxTaskMessages(prev, [message]));
+      if (shouldRefreshOraxTaskCollections(message)) {
+        void loadApprovals(taskId);
+        void loadArtifacts(taskId);
+      }
+    }
+
+    async function connectOraxTaskEventStream() {
+      try {
+        const response = await authFetch(`/api/orax/tasks/${taskId}/events`, {
+          headers: { Accept: "text/event-stream" },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop() ?? "";
+          for (const block of blocks) {
+            if (block.trim()) processOraxEventBlock(block);
+          }
+        }
+      } catch {
+        // Reconnect below unless the effect is being cleaned up.
+      }
+      if (!controller.signal.aborted) {
+        retryTimer = setTimeout(() => {
+          void connectOraxTaskEventStream();
+        }, 2_000);
+      }
+    }
+
+    void connectOraxTaskEventStream();
+
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      controller.abort();
+      if (taskEventStreamAbortRef.current === controller) {
+        taskEventStreamAbortRef.current = null;
+      }
+    };
+  }, [loadApprovals, loadArtifacts, selectedTask]);
 
   async function addRepository() {
     if (!repositoryUrl.trim() || submittingRepo) return;
@@ -1116,7 +1215,7 @@ export default function OraxPage() {
             options.firstMessageMetadata,
           );
           if (activeTaskIdRef.current !== targetTaskId) return;
-          setTaskMessages(messages);
+          setTaskMessages((prev) => mergeOraxTaskMessages(prev, messages));
         } catch (messageErr) {
           if (activeTaskIdRef.current !== targetTaskId) return;
           setTaskMessageDraft(firstMessage);
@@ -1173,7 +1272,7 @@ export default function OraxPage() {
     try {
       const messages = await appendTaskMessage(targetTaskId, content, metadata);
       if (activeTaskIdRef.current !== targetTaskId) return;
-      setTaskMessages((prev) => [...prev, ...messages]);
+      setTaskMessages((prev) => mergeOraxTaskMessages(prev, messages));
       setTaskMessageDraft("");
       setComposerAttachments([]);
       setComposerInputMode("text");

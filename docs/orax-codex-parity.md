@@ -104,6 +104,11 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   not Ora chat, project chat, credits, or AI Builder endpoints.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions
   remain available through inline thread suggestions and approval cards.
+- Orax workflow activity must appear inline in the task thread as it happens.
+  Website uses the Orax task event stream (`/api/orax/tasks/:id/events`) backed
+  by durable `orax_task_messages`; mobile keeps the same Orax timeline synced
+  through Orax-owned task-message polling. Neither platform may use Ora chat
+  streaming or Ora history for Orax task events.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.

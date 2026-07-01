@@ -279,6 +279,21 @@ async function readOraxMobileAttachment(asset: {
   };
 }
 
+function mergeOraxTaskMessages(
+  current: OraxTaskMessage[],
+  incoming: OraxTaskMessage[],
+): OraxTaskMessage[] {
+  if (!incoming.length) return current;
+  const byId = new Map<number, OraxTaskMessage>();
+  for (const message of current) byId.set(message.id, message);
+  for (const message of incoming) byId.set(message.id, message);
+  return Array.from(byId.values()).sort((a, b) => {
+    const left = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const right = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return left - right || a.id - b.id;
+  });
+}
+
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -458,6 +473,22 @@ export default function OraxScreen() {
     }
   }, []);
 
+  const refreshTaskTimeline = useCallback(async (taskId: number) => {
+    try {
+      const [nextApprovals, nextArtifacts, nextMessages] = await Promise.all([
+        listTaskApprovals(taskId),
+        listTaskArtifacts(taskId),
+        listTaskMessages(taskId),
+      ]);
+      if (activeTaskIdRef.current !== taskId) return;
+      setApprovals(nextApprovals);
+      setArtifacts(nextArtifacts);
+      setMessages((prev) => mergeOraxTaskMessages(prev, nextMessages));
+    } catch {
+      // Live sync is best-effort; manual refresh and action responses still load full state.
+    }
+  }, []);
+
   const loadScans = useCallback(async (repoId: number | null) => {
     if (!repoId) {
       setScans([]);
@@ -488,6 +519,16 @@ export default function OraxScreen() {
     }
     void loadTaskDetails(selectedTask.id);
   }, [clearTaskScopedState, loadTaskDetails, selectedTask]);
+
+  useEffect(() => {
+    if (!selectedTask || !threadOpen) return;
+    const taskId = selectedTask.id;
+    const timer = setInterval(() => {
+      void refreshTaskTimeline(taskId);
+    }, 4_000);
+    void refreshTaskTimeline(taskId);
+    return () => clearInterval(timer);
+  }, [refreshTaskTimeline, selectedTask, threadOpen]);
 
   useEffect(() => {
     void loadScans(selectedRepo?.id ?? null);

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import {
   db,
   oraxRepositoriesTable,
@@ -555,6 +555,74 @@ router.get("/orax/tasks/:id/messages", async (req, res) => {
     logger.error({ component: "orax", err, taskId }, "Failed to list ORAX task messages");
     res.status(500).json({ error: "Failed to load ORAX task messages" });
   }
+});
+
+router.get("/orax/tasks/:id/events", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  const task = await loadOwnedTask(userId, taskId);
+  if (!task) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders?.();
+
+  let closed = false;
+  let lastMessageId = Number(req.header("Last-Event-ID") ?? 0);
+  if (!Number.isFinite(lastMessageId) || lastMessageId < 0) lastMessageId = 0;
+
+  const writeEvent = (event: string, data: unknown, id?: number) => {
+    if (closed) return;
+    if (id) res.write(`id: ${id}\n`);
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const sendMessages = async () => {
+    try {
+      const messages = await loadOraxTaskMessagesAfter({
+        userId,
+        taskId,
+        afterId: lastMessageId,
+      });
+      for (const message of messages) {
+        lastMessageId = Math.max(lastMessageId, message.id);
+        writeEvent("message", { message }, message.id);
+      }
+    } catch (err) {
+      logger.warn({ component: "orax", err, taskId }, "Failed to stream ORAX task events");
+      writeEvent("error", { error: "Failed to load ORAX task events" });
+    }
+  };
+
+  writeEvent("ready", { taskId, lastMessageId });
+  await sendMessages();
+
+  const pollTimer = setInterval(() => {
+    void sendMessages();
+  }, 2_000);
+  const keepAliveTimer = setInterval(() => {
+    if (!closed) res.write(": keep-alive\n\n");
+  }, 25_000);
+
+  req.on("close", () => {
+    closed = true;
+    clearInterval(pollTimer);
+    clearInterval(keepAliveTimer);
+    res.end();
+  });
 });
 
 router.post("/orax/tasks/:id/messages", async (req, res) => {
@@ -3671,6 +3739,26 @@ async function loadOwnedTask(userId: string, taskId: number): Promise<OraxTask |
       ),
     );
   return task;
+}
+
+async function loadOraxTaskMessagesAfter(input: {
+  userId: string;
+  taskId: number;
+  afterId: number;
+}) {
+  return db
+    .select()
+    .from(oraxTaskMessagesTable)
+    .where(
+      and(
+        eq(oraxTaskMessagesTable.userId, input.userId),
+        eq(oraxTaskMessagesTable.taskId, input.taskId),
+        gt(oraxTaskMessagesTable.id, input.afterId),
+        isNull(oraxTaskMessagesTable.archivedAt),
+      ),
+    )
+    .orderBy(asc(oraxTaskMessagesTable.id))
+    .limit(100);
 }
 
 async function loadOwnedApproval(
