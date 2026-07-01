@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowUp,
   Bot,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   Code2,
   FileText,
@@ -107,6 +109,19 @@ type LifecycleItem =
       createdAt: string;
       description: string;
     };
+
+type OraxDiffLine = {
+  type: "add" | "remove" | "context" | "meta";
+  content: string;
+};
+
+type OraxFileDiff = {
+  path: string;
+  additions: number;
+  deletions: number;
+  lines: OraxDiffLine[];
+  truncated: boolean;
+};
 
 const TASK_KINDS: Array<{ value: OraxTaskKind; label: string }> = [
   { value: "analyze", label: "Analyze" },
@@ -2271,6 +2286,7 @@ function ArtifactCard({
   const changedFiles = artifact.payload.changedFiles ?? [];
   const patchedFiles = artifact.payload.patchedFiles ?? [];
   const rollbackFiles = artifact.payload.rollback?.sourceFiles ?? [];
+  const fileDiffs = parseOraxUnifiedDiffFiles(artifact.payload.unifiedDiff);
   return (
     <Card style={{ gap: 10 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
@@ -2294,7 +2310,9 @@ function ArtifactCard({
           {artifact.payload.explanation}
         </Text>
       ) : null}
-      {changedFiles.length ? (
+      {artifact.type === "workspace_change_set" ? (
+        <WorkspaceChangeSetDiffReview changedFiles={changedFiles} fileDiffs={fileDiffs} />
+      ) : changedFiles.length ? (
         <Text style={{ color: c.foreground, fontSize: 13 }}>
           Changed: {changedFiles.map((file) => file.path).join(", ")}
         </Text>
@@ -2324,6 +2342,152 @@ function ArtifactCard({
       ) : null}
     </Card>
   );
+}
+
+function WorkspaceChangeSetDiffReview({
+  changedFiles,
+  fileDiffs,
+}: {
+  changedFiles: NonNullable<OraxArtifact["payload"]["changedFiles"]>;
+  fileDiffs: OraxFileDiff[];
+}) {
+  const c = useColors();
+  if (!changedFiles.length && !fileDiffs.length) return null;
+
+  const diffByPath = new Map(fileDiffs.map((file) => [file.path, file]));
+  const ordered = changedFiles.length
+    ? changedFiles.map((file) => ({
+        path: file.path,
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+        diff: diffByPath.get(file.path),
+      }))
+    : fileDiffs.map((file) => ({
+        path: file.path,
+        additions: file.additions,
+        deletions: file.deletions,
+        diff: file,
+      }));
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>
+        Changed files
+      </Text>
+      {ordered.map((file) => (
+        <WorkspaceDiffFileRow
+          key={file.path}
+          path={file.path}
+          additions={file.additions}
+          deletions={file.deletions}
+          diff={file.diff}
+        />
+      ))}
+    </View>
+  );
+}
+
+function WorkspaceDiffFileRow({
+  path,
+  additions,
+  deletions,
+  diff,
+}: {
+  path: string;
+  additions: number;
+  deletions: number;
+  diff?: OraxFileDiff;
+}) {
+  const c = useColors();
+  const [open, setOpen] = useState(false);
+  const Icon = open ? ChevronDown : ChevronRight;
+
+  return (
+    <View
+      style={{
+        borderColor: c.border,
+        borderRadius: 8,
+        borderWidth: 1,
+        overflow: "hidden",
+      }}
+    >
+      <Pressable
+        onPress={() => setOpen((value) => !value)}
+        style={{
+          alignItems: "center",
+          backgroundColor: c.muted,
+          flexDirection: "row",
+          gap: 8,
+          justifyContent: "space-between",
+          paddingHorizontal: 10,
+          paddingVertical: 9,
+        }}
+      >
+        <View style={{ alignItems: "center", flex: 1, flexDirection: "row", gap: 8 }}>
+          <Icon size={14} color={c.mutedForeground} />
+          <Text
+            numberOfLines={1}
+            style={{ color: c.foreground, flex: 1, fontFamily: "Inter_600SemiBold", fontSize: 12 }}
+          >
+            {path}
+          </Text>
+        </View>
+        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+          +{additions} / -{deletions}
+        </Text>
+      </Pressable>
+      {open ? (
+        diff?.lines.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ minWidth: "100%", paddingVertical: 6 }}>
+              {diff.lines.map((line, index) => (
+                <Text
+                  key={`${path}-${index}`}
+                  style={{
+                    backgroundColor: backgroundForDiffLine(line.type),
+                    color: colorForDiffLine(line.type, c),
+                    fontFamily: Platform.select({
+                      ios: "Menlo",
+                      android: "monospace",
+                      default: "monospace",
+                    }),
+                    fontSize: 11,
+                    lineHeight: 17,
+                    paddingHorizontal: 10,
+                  }}
+                >
+                  {line.content || " "}
+                </Text>
+              ))}
+              {diff.truncated ? (
+                <Text style={{ color: c.mutedForeground, fontSize: 11, padding: 10 }}>
+                  Diff preview truncated.
+                </Text>
+              ) : null}
+            </View>
+          </ScrollView>
+        ) : (
+          <Text style={{ color: c.mutedForeground, fontSize: 12, padding: 10 }}>
+            Diff preview unavailable for this file.
+          </Text>
+        )
+      ) : null}
+    </View>
+  );
+}
+
+function backgroundForDiffLine(type: OraxDiffLine["type"]): string {
+  if (type === "add") return "rgba(16, 185, 129, 0.12)";
+  if (type === "remove") return "rgba(239, 68, 68, 0.12)";
+  if (type === "meta") return "rgba(148, 163, 184, 0.12)";
+  return "transparent";
+}
+
+function colorForDiffLine(type: OraxDiffLine["type"], c: ReturnType<typeof useColors>): string {
+  if (type === "add") return "#047857";
+  if (type === "remove") return "#b91c1c";
+  if (type === "meta") return c.mutedForeground;
+  return c.foreground;
 }
 
 function CapabilityRow({ text, available }: { text: string; available?: boolean }) {
@@ -2471,6 +2635,57 @@ function describeApproval(approval: OraxApproval): string {
       : "GitHub PR creation requires CREATE PR confirmation and explicit approval.";
   }
   return approval.riskSummary ?? "Approval-gated ORAX workflow step.";
+}
+
+function parseOraxUnifiedDiffFiles(diff?: string): OraxFileDiff[] {
+  if (!diff?.trim()) return [];
+  const files: OraxFileDiff[] = [];
+  let current: OraxFileDiff | null = null;
+
+  for (const rawLine of diff.replace(/\r\n/g, "\n").split("\n")) {
+    if (rawLine.startsWith("diff --git ")) {
+      if (current) files.push(current);
+      const match = rawLine.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      const path = match?.[2] ?? match?.[1] ?? "unknown file";
+      current = { path, additions: 0, deletions: 0, lines: [], truncated: false };
+      continue;
+    }
+
+    if (!current && rawLine.startsWith("+++ b/")) {
+      current = {
+        path: rawLine.replace("+++ b/", "").trim(),
+        additions: 0,
+        deletions: 0,
+        lines: [],
+        truncated: false,
+      };
+    }
+    if (!current) continue;
+
+    if (rawLine.startsWith("+++ b/")) {
+      current.path = rawLine.replace("+++ b/", "").trim() || current.path;
+      continue;
+    }
+    if (rawLine.startsWith("--- ")) continue;
+
+    const type: OraxDiffLine["type"] = rawLine.startsWith("@@")
+      ? "meta"
+      : rawLine.startsWith("+")
+        ? "add"
+        : rawLine.startsWith("-")
+          ? "remove"
+          : "context";
+    if (type === "add") current.additions += 1;
+    if (type === "remove") current.deletions += 1;
+    if (current.lines.length < 180) {
+      current.lines.push({ type, content: rawLine });
+    } else {
+      current.truncated = true;
+    }
+  }
+
+  if (current) files.push(current);
+  return files.filter((file) => file.path && file.path !== "/dev/null").slice(0, 12);
 }
 
 function formatArtifactLabel(type: string): string {

@@ -127,6 +127,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   the patched-file snapshots, changed-file summary, diff summary, rollback
   source metadata, and artifact lineage so website/mobile can review the exact
   workspace state that checks and PR creation will use.
+- Website and mobile must render each `workspace_change_set` inline as a
+  compact changed-file review: per-file additions/deletions, expandable diff
+  lines, and rollback/source metadata available without exposing a separate
+  dashboard panel.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.

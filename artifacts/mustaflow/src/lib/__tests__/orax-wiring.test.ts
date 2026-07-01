@@ -66,6 +66,9 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("latestWorkspaceChangeSet");
     expect(oraxPage).toContain("Workspace change set");
     expect(oraxPage).toContain("Workspace change-set details");
+    expect(oraxPage).toContain("WorkspaceChangeSetDiffReview");
+    expect(oraxPage).toContain("parseOraxUnifiedDiffFiles");
+    expect(oraxPage).toContain("Diff preview unavailable for this file.");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/events");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/continue");
     expect(oraxPage).toContain('headers: { Accept: "text/event-stream" }');
@@ -328,5 +331,8 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain('artifact.type === "workspace_change_set"');
     expect(mobileOraxScreen).toContain("latestWorkspaceChangeSet");
     expect(mobileOraxScreen).toContain("Workspace change set");
+    expect(mobileOraxScreen).toContain("WorkspaceChangeSetDiffReview");
+    expect(mobileOraxScreen).toContain("WorkspaceDiffFileRow");
+    expect(mobileOraxScreen).toContain("parseOraxUnifiedDiffFiles");
   });
 });

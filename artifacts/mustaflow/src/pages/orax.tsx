@@ -347,6 +347,19 @@ type OraxFailureInfo = {
   rawMessage?: string;
 };
 
+type OraxDiffLine = {
+  type: "add" | "remove" | "context" | "meta";
+  content: string;
+};
+
+type OraxFileDiff = {
+  path: string;
+  additions: number;
+  deletions: number;
+  lines: OraxDiffLine[];
+  truncated: boolean;
+};
+
 type OraxThreadLifecycleItem =
   | {
       id: string;
@@ -2886,6 +2899,7 @@ function _OraxThreadLifecycleDetails({ item }: { item: OraxThreadLifecycleItem }
     const patchedFiles = artifact.payload.patchedFiles ?? [];
     const rollbackFiles = artifact.payload.rollback?.sourceFiles ?? [];
     const diff = artifact.payload.diffSummary ?? summarizeUnifiedDiff(artifact.payload.unifiedDiff);
+    const fileDiffs = parseOraxUnifiedDiffFiles(artifact.payload.unifiedDiff);
 
     return (
       <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
@@ -2898,14 +2912,7 @@ function _OraxThreadLifecycleDetails({ item }: { item: OraxThreadLifecycleItem }
             value={diff ? `+${diff.additions ?? 0} / -${diff.deletions ?? 0}` : "none"}
           />
         </div>
-        {changedFiles.length ? (
-          <div className="mt-2">
-            Changed:{" "}
-            {changedFiles
-              .map((file) => `${file.path} (+${file.additions} / -${file.deletions})`)
-              .join(", ")}
-          </div>
-        ) : null}
+        <WorkspaceChangeSetDiffReview changedFiles={changedFiles} fileDiffs={fileDiffs} />
         {rollbackFiles.length ? (
           <div className="mt-1">
             Rollback snapshot:{" "}
@@ -2989,6 +2996,57 @@ function extractUnifiedDiffFileNames(diff?: string): string[] {
   return Array.from(new Set(paths)).slice(0, 12);
 }
 
+function parseOraxUnifiedDiffFiles(diff?: string): OraxFileDiff[] {
+  if (!diff?.trim()) return [];
+  const files: OraxFileDiff[] = [];
+  let current: OraxFileDiff | null = null;
+
+  for (const rawLine of diff.replace(/\r\n/g, "\n").split("\n")) {
+    if (rawLine.startsWith("diff --git ")) {
+      if (current) files.push(current);
+      const match = rawLine.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      const path = match?.[2] ?? match?.[1] ?? "unknown file";
+      current = { path, additions: 0, deletions: 0, lines: [], truncated: false };
+      continue;
+    }
+
+    if (!current && rawLine.startsWith("+++ b/")) {
+      current = {
+        path: rawLine.replace("+++ b/", "").trim(),
+        additions: 0,
+        deletions: 0,
+        lines: [],
+        truncated: false,
+      };
+    }
+    if (!current) continue;
+
+    if (rawLine.startsWith("+++ b/")) {
+      current.path = rawLine.replace("+++ b/", "").trim() || current.path;
+      continue;
+    }
+    if (rawLine.startsWith("--- ")) continue;
+
+    const type: OraxDiffLine["type"] = rawLine.startsWith("@@")
+      ? "meta"
+      : rawLine.startsWith("+")
+        ? "add"
+        : rawLine.startsWith("-")
+          ? "remove"
+          : "context";
+    if (type === "add") current.additions += 1;
+    if (type === "remove") current.deletions += 1;
+    if (current.lines.length < 220) {
+      current.lines.push({ type, content: rawLine });
+    } else {
+      current.truncated = true;
+    }
+  }
+
+  if (current) files.push(current);
+  return files.filter((file) => file.path && file.path !== "/dev/null").slice(0, 12);
+}
+
 function summarizeUnifiedDiff(diff?: string): { additions: number; deletions: number } | null {
   if (!diff?.trim()) return null;
   return diff.split("\n").reduce(
@@ -2998,6 +3056,73 @@ function summarizeUnifiedDiff(diff?: string): { additions: number; deletions: nu
       return summary;
     },
     { additions: 0, deletions: 0 },
+  );
+}
+
+function WorkspaceChangeSetDiffReview({
+  changedFiles,
+  fileDiffs,
+}: {
+  changedFiles: NonNullable<OraxArtifact["payload"]["changedFiles"]>;
+  fileDiffs: OraxFileDiff[];
+}) {
+  if (!changedFiles.length && !fileDiffs.length) return null;
+  const diffByPath = new Map(fileDiffs.map((file) => [file.path, file]));
+  const ordered = changedFiles.length
+    ? changedFiles.map((file) => ({
+        path: file.path,
+        additions: file.additions,
+        deletions: file.deletions,
+        diff: diffByPath.get(file.path),
+      }))
+    : fileDiffs.map((file) => ({
+        path: file.path,
+        additions: file.additions,
+        deletions: file.deletions,
+        diff: file,
+      }));
+
+  return (
+    <div className="mt-2 space-y-2">
+      {ordered.map((file) => (
+        <details key={file.path} className="group rounded-md border border-border bg-muted/20">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs text-foreground">
+            <span className="min-w-0 truncate font-medium">{file.path}</span>
+            <span className="shrink-0 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+              +{file.additions ?? file.diff?.additions ?? 0} / -
+              {file.deletions ?? file.diff?.deletions ?? 0}
+            </span>
+          </summary>
+          {file.diff?.lines.length ? (
+            <pre className="max-h-72 overflow-auto border-t border-border bg-background px-0 py-2 text-[11px] leading-5">
+              {file.diff.lines.map((line, index) => (
+                <div
+                  key={`${file.path}-${index}`}
+                  className={cn(
+                    "whitespace-pre px-3 font-mono",
+                    line.type === "add" &&
+                      "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                    line.type === "remove" && "bg-destructive/10 text-destructive",
+                    line.type === "meta" && "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {line.content || " "}
+                </div>
+              ))}
+              {file.diff.truncated ? (
+                <div className="px-3 py-1 text-[11px] text-muted-foreground">
+                  Diff preview truncated.
+                </div>
+              ) : null}
+            </pre>
+          ) : (
+            <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+              Diff preview unavailable for this file.
+            </div>
+          )}
+        </details>
+      ))}
+    </div>
   );
 }
 
