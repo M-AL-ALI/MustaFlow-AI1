@@ -532,6 +532,14 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("persistOraxExecutionProgress");
     expect(routeSource).toContain("executionSessionId");
     expect(routeSource).toContain("executionStep");
+    expect(routeSource).toContain("retry_failed_patch");
+    expect(routeSource).toContain("findLatestOraxRetryableFailure");
+    expect(routeSource).toContain("generateOraxRunnerRetryDraftPatch");
+    expect(routeSource).toContain("findOraxRetryDraftForFailure");
+    expect(routeSource).toContain("hasOraxValidationAfterDraft");
+    expect(routeSource).toContain("Reviewing the failed result and drafting a fix attempt");
+    expect(routeSource).toContain("retryOfArtifactId");
+    expect(routeSource).toContain("failureSummary");
     expect(routeSource).toContain("Orax started an execution session");
     expect(routeSource).toContain("Reading approved repository files...");
     expect(routeSource).toContain(

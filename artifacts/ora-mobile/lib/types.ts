@@ -653,6 +653,10 @@ export interface OraxArtifact {
     steps?: OraxExecutionStep[];
     startedAt?: string;
     updatedAt?: string;
+    retryOfArtifactId?: number;
+    retryOfArtifactType?: string;
+    retryAttempt?: number;
+    failureSummary?: string;
     error?: { code?: string; message?: string; hint?: string; rawMessage?: string };
     [key: string]: unknown;
   };

@@ -312,6 +312,10 @@ type OraxArtifact = {
     steps?: OraxExecutionStep[];
     startedAt?: string;
     updatedAt?: string;
+    retryOfArtifactId?: number;
+    retryOfArtifactType?: string;
+    retryAttempt?: number;
+    failureSummary?: string;
     error?: OraxFailureInfo;
     failedAt?: string;
   };
@@ -2738,6 +2742,12 @@ function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
     return `Execution session ${artifact.status}; ${steps} step${steps === 1 ? "" : "s"} recorded.`;
   }
   if (artifact.type === "draft_patch") {
+    if (artifact.payload.retryOfArtifactId) {
+      return (
+        artifact.summary ??
+        `Retry patch attempt ${artifact.payload.retryAttempt ?? 1} for failed artifact #${artifact.payload.retryOfArtifactId}.`
+      );
+    }
     return artifact.summary ?? "Review-only patch preview generated from approved source files.";
   }
   if (artifact.type === "sandbox_result") {

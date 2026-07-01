@@ -2473,6 +2473,12 @@ function describeArtifact(artifact: OraxArtifact): string {
   }
   if (artifact.type === "draft_patch") {
     const files = artifact.payload.filesRead?.length ?? 0;
+    if (artifact.payload.retryOfArtifactId) {
+      return (
+        artifact.summary ??
+        `Retry patch attempt ${artifact.payload.retryAttempt ?? 1} for failed artifact #${artifact.payload.retryOfArtifactId}.`
+      );
+    }
     return (
       artifact.summary ?? `Review-only patch preview generated from ${files} approved file(s).`
     );

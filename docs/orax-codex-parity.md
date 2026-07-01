@@ -117,6 +117,11 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   The session records ordered execution steps and mirrors each step into
   Orax-owned task-message metadata so website SSE and mobile polling show live
   progress inside the normal thread.
+- If sandbox validation or controlled checks fail, Continue should use the
+  failed artifact plus the original approved file context to draft a retry
+  patch in the same execution session. It must not duplicate retry drafts for
+  the same failed artifact, and it must still request approval before rerunning
+  sandbox validation or checks.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.

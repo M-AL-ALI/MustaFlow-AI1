@@ -213,6 +213,11 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("persistOraxExecutionProgress");
     expect(oraxApiRoute).toContain("executionSessionId");
     expect(oraxApiRoute).toContain("executionStep");
+    expect(oraxApiRoute).toContain("retry_failed_patch");
+    expect(oraxApiRoute).toContain("findLatestOraxRetryableFailure");
+    expect(oraxApiRoute).toContain("generateOraxRunnerRetryDraftPatch");
+    expect(oraxApiRoute).toContain("retryOfArtifactId");
+    expect(oraxApiRoute).toContain("failureSummary");
     expect(oraxApiRoute).toContain("runner_continue");
     expect(oraxApiRoute).toContain("runOraxRunnerApprovedFileRead");
     expect(oraxApiRoute).toContain("requestOraxRunnerCommandApproval");
@@ -274,6 +279,8 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileTypes).toContain("export interface OraxExecutionStep");
     expect(mobileTypes).toContain("executionStep?: OraxExecutionStep");
     expect(mobileTypes).toContain("steps?: OraxExecutionStep[]");
+    expect(mobileTypes).toContain("retryOfArtifactId?: number");
+    expect(mobileTypes).toContain("failureSummary?: string");
     expect(mobileTypes).toContain("permissionMode: OraxComposerPermissionMode");
     expect(mobileTypes).toContain("attachments: OraxComposerAttachment[]");
     expect(mobileTypes).toContain("contentText?: string");

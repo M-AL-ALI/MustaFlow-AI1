@@ -243,6 +243,7 @@ type OraxTaskRunnerResult = {
     | "draft_patch"
     | "request_sandbox_approval"
     | "request_check_approval"
+    | "retry_failed_patch"
     | "await_pr_confirmation"
     | "complete"
     | "blocked";
@@ -2787,6 +2788,30 @@ async function continueOraxTaskRunner(input: {
     });
   }
 
+  const latestRetryableFailure = findLatestOraxRetryableFailure(artifacts);
+  if (latestRetryableFailure) {
+    const retryDraft = findOraxRetryDraftForFailure(artifacts, latestRetryableFailure.id);
+    if (retryDraft) {
+      if (!hasOraxValidationAfterDraft(artifacts, retryDraft.id)) {
+        return requestOraxRunnerSandboxApproval({
+          userId: input.userId,
+          task: input.task,
+          session,
+          artifact: retryDraft,
+        });
+      }
+    } else {
+      return generateOraxRunnerRetryDraftPatch({
+        userId: input.userId,
+        task: input.task,
+        session,
+        artifacts,
+        failureArtifact: latestRetryableFailure,
+        instructions: latestOraxUserMessage(messages) ?? input.task.prompt,
+      });
+    }
+  }
+
   const latestSandboxResult = artifacts.find((artifact) => artifact.type === "sandbox_result");
   const latestSandboxPayload = asRecord(latestSandboxResult?.payload);
   if (latestSandboxResult?.status === "completed" && latestSandboxPayload.applied === true) {
@@ -2874,9 +2899,7 @@ async function ensureOraxExecutionSession(input: {
   artifacts: OraxTaskArtifact[];
 }): Promise<OraxTaskArtifact> {
   const existing = input.artifacts.find(
-    (artifact) =>
-      artifact.type === "execution_session" &&
-      !["completed", "failed", "blocked"].includes(artifact.status),
+    (artifact) => artifact.type === "execution_session" && artifact.status !== "completed",
   );
   if (existing) return existing;
 
@@ -3043,6 +3066,7 @@ function formatOraxExecutionStepLabel(action: OraxTaskRunnerResult["action"]): s
     draft_patch: "Draft change",
     request_sandbox_approval: "Request sandbox approval",
     request_check_approval: "Request checks approval",
+    retry_failed_patch: "Fix failure",
     await_pr_confirmation: "Wait for PR confirmation",
     complete: "Complete",
     blocked: "Blocked",
@@ -3391,6 +3415,177 @@ async function generateOraxRunnerDraftPatch(input: {
     action: "draft_patch",
     message: `Draft patch generated: ${generated.summary}`,
     approvalId: input.approval.id,
+    artifactId: artifact.id,
+    artifact,
+  });
+}
+
+async function generateOraxRunnerRetryDraftPatch(input: {
+  userId: string;
+  task: OraxTask;
+  session: OraxTaskArtifact;
+  artifacts: OraxTaskArtifact[];
+  failureArtifact: OraxTaskArtifact;
+  instructions: string;
+}): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "retry_failed_patch",
+    label: "Fix failure",
+    message: "Reviewing the failed result and drafting a fix attempt...",
+    artifactId: input.failureArtifact.id,
+  });
+
+  const retrySource = resolveOraxRetrySource(input.failureArtifact);
+  if (!retrySource) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "Orax could not find the draft and file-read source for the failed result.",
+      artifactId: input.failureArtifact.id,
+    });
+  }
+
+  const [repository, sourceApproval, previousDraft] = await Promise.all([
+    loadOwnedRepository(input.userId, input.task.repositoryId),
+    loadOwnedApproval(input.userId, retrySource.sourceApprovalId),
+    loadOwnedArtifact(input.userId, retrySource.draftArtifactId),
+  ]);
+  if (
+    !repository ||
+    !sourceApproval ||
+    sourceApproval.action !== "read_files" ||
+    !previousDraft ||
+    previousDraft.type !== "draft_patch"
+  ) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "Orax could not reload the approved file context for retry drafting.",
+      artifactId: input.failureArtifact.id,
+    });
+  }
+
+  const request = sourceApproval.request as { paths?: string[]; branch?: string };
+  const paths = normalizeOraxFileReadPaths(request.paths ?? []);
+  const branch = request.branch || repository.defaultBranch;
+  const token = repository.encryptedToken
+    ? encryptionService.decrypt(repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: repository.owner,
+    repo: repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+  if (!readResult.files.length) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "No approved files could be read for retry draft generation.",
+      artifactId: input.failureArtifact.id,
+    });
+  }
+
+  const previousPayload = asRecord(previousDraft.payload);
+  const previousDiff =
+    typeof previousPayload.unifiedDiff === "string" ? previousPayload.unifiedDiff : "";
+  const retryInstructions = buildOraxRetryDraftInstructions({
+    task: input.task,
+    userInstructions: input.instructions,
+    failureArtifact: input.failureArtifact,
+    previousDraft,
+    previousDiff,
+  });
+  const generated = await generateOraxDraftPatch({
+    repositoryLabel: `${repository.owner}/${repository.name}`,
+    taskPrompt: input.task.prompt,
+    instructions: retryInstructions,
+    branch,
+    files: readResult.files.map((file) => ({
+      path: file.path,
+      content: file.content,
+      size: file.size,
+      sha: file.sha,
+    })),
+  });
+  const retryAttempt = countOraxRetryDraftsForFailure(input.failureArtifact.id, input.artifacts);
+  const [artifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      approvalId: sourceApproval.id,
+      type: "draft_patch",
+      status: "draft",
+      title: `Retry draft patch for ${input.task.title}`,
+      summary: generated.summary,
+      payload: {
+        branch,
+        approvalId: sourceApproval.id,
+        model: process.env.ORAX_DRAFT_PATCH_MODEL || "gpt-5-mini",
+        generatedAt: new Date().toISOString(),
+        retryOfArtifactId: input.failureArtifact.id,
+        retryOfArtifactType: input.failureArtifact.type,
+        retrySourceDraftArtifactId: previousDraft.id,
+        retryAttempt: retryAttempt + 1,
+        failureSummary: summarizeOraxFailureArtifact(input.failureArtifact),
+        filesRead: readResult.files.map((file) => ({
+          path: file.path,
+          sha: file.sha,
+          size: file.size,
+        })),
+        skipped: readResult.skipped,
+        unifiedDiff: generated.unifiedDiff,
+        explanation: generated.explanation,
+        risks: generated.risks,
+        tests: generated.tests,
+      },
+    })
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      status: "awaiting_approval",
+      result: {
+        ...asRecord(input.task.result),
+        retryDraftPatch: {
+          artifactId: artifact.id,
+          retryOfArtifactId: input.failureArtifact.id,
+          summary: generated.summary,
+          hasDiff: Boolean(generated.unifiedDiff.trim()),
+        },
+        message:
+          "ORAX drafted a retry patch from the failed result. The next continue step can request sandbox approval.",
+      },
+      updatedAt: new Date(),
+      completedAt: null,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    status: "continued",
+    action: "retry_failed_patch",
+    message: `Retry draft generated from failed ${input.failureArtifact.type.replace(/_/g, " ")} artifact #${input.failureArtifact.id}: ${generated.summary}`,
     artifactId: artifact.id,
     artifact,
   });
@@ -3892,6 +4087,187 @@ function buildOraxRunnerReadPaths(
     "tsconfig.json",
   ]).slice(0, ORAX_FILE_READ_LIMITS.maxFiles);
   return normalizeOraxFileReadPaths(merged);
+}
+
+function findLatestOraxRetryableFailure(artifacts: OraxTaskArtifact[]): OraxTaskArtifact | null {
+  return artifacts.find((artifact) => isOraxRetryableFailureArtifact(artifact)) ?? null;
+}
+
+function isOraxRetryableFailureArtifact(artifact: OraxTaskArtifact): boolean {
+  const payload = asRecord(artifact.payload);
+  if (artifact.type === "sandbox_result") {
+    return artifact.status === "failed" || payload.applied === false;
+  }
+  if (artifact.type === "command_result") {
+    return artifact.status === "failed" || payload.passed === false;
+  }
+  return false;
+}
+
+function findOraxRetryDraftForFailure(
+  artifacts: OraxTaskArtifact[],
+  failureArtifactId: number,
+): OraxTaskArtifact | null {
+  return (
+    artifacts.find((artifact) => {
+      const payload = asRecord(artifact.payload);
+      const retryOfArtifactId =
+        typeof payload.retryOfArtifactId === "number"
+          ? payload.retryOfArtifactId
+          : Number(payload.retryOfArtifactId);
+      return (
+        artifact.type === "draft_patch" &&
+        artifact.status !== "rejected" &&
+        retryOfArtifactId === failureArtifactId
+      );
+    }) ?? null
+  );
+}
+
+function hasOraxValidationAfterDraft(
+  artifacts: OraxTaskArtifact[],
+  draftArtifactId: number,
+): boolean {
+  return artifacts.some((artifact) => {
+    const payload = asRecord(artifact.payload);
+    if (artifact.type === "sandbox_result") {
+      return numberFromOraxPayload(payload.sourceArtifactId) === draftArtifactId;
+    }
+    if (artifact.type === "command_result") {
+      return numberFromOraxPayload(payload.draftArtifactId) === draftArtifactId;
+    }
+    return false;
+  });
+}
+
+function countOraxRetryDraftsForFailure(
+  failureArtifactId: number,
+  artifacts: OraxTaskArtifact[],
+): number {
+  return artifacts.filter((artifact) => {
+    const payload = asRecord(artifact.payload);
+    const retryOfArtifactId =
+      typeof payload.retryOfArtifactId === "number"
+        ? payload.retryOfArtifactId
+        : Number(payload.retryOfArtifactId);
+    return artifact.type === "draft_patch" && retryOfArtifactId === failureArtifactId;
+  }).length;
+}
+
+function resolveOraxRetrySource(
+  failureArtifact: OraxTaskArtifact,
+): { draftArtifactId: number; sourceApprovalId: number } | null {
+  const payload = asRecord(failureArtifact.payload);
+  const draftArtifactId =
+    failureArtifact.type === "command_result"
+      ? numberFromOraxPayload(payload.draftArtifactId)
+      : numberFromOraxPayload(payload.sourceArtifactId);
+  const sourceApprovalId = numberFromOraxPayload(payload.sourceApprovalId);
+  if (!draftArtifactId || !sourceApprovalId) return null;
+  return { draftArtifactId, sourceApprovalId };
+}
+
+function numberFromOraxPayload(value: unknown): number | null {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function buildOraxRetryDraftInstructions(input: {
+  task: OraxTask;
+  userInstructions: string;
+  failureArtifact: OraxTaskArtifact;
+  previousDraft: OraxTaskArtifact;
+  previousDiff: string;
+}): string {
+  const failureDetails = summarizeOraxFailureArtifact(input.failureArtifact);
+  const previousPayload = asRecord(input.previousDraft.payload);
+  const previousSummary =
+    typeof input.previousDraft.summary === "string" && input.previousDraft.summary.trim()
+      ? input.previousDraft.summary.trim()
+      : typeof previousPayload.explanation === "string"
+        ? previousPayload.explanation
+        : "Previous draft patch";
+
+  return [
+    "Create a retry draft patch that fixes the failed ORAX validation or check result.",
+    "Keep the patch scoped to the same approved files. Do not add commands, pushes, deploy steps, or PR claims.",
+    `Task: ${input.task.prompt}`,
+    `User instructions: ${input.userInstructions}`,
+    `Previous draft artifact #${input.previousDraft.id}: ${previousSummary}`,
+    `Failure artifact #${input.failureArtifact.id} (${input.failureArtifact.type}):`,
+    failureDetails,
+    input.previousDiff
+      ? `Previous unified diff, for context only:\n${truncateOraxRunnerText(input.previousDiff, 1400)}`
+      : "No previous unified diff was available.",
+  ]
+    .join("\n\n")
+    .slice(0, 5000);
+}
+
+function summarizeOraxFailureArtifact(artifact: OraxTaskArtifact): string {
+  const payload = asRecord(artifact.payload);
+  if (artifact.type === "sandbox_result") {
+    const errors = Array.isArray(payload.errors)
+      ? payload.errors.filter((item): item is string => typeof item === "string")
+      : [];
+    const changedFiles = Array.isArray(payload.changedFiles)
+      ? payload.changedFiles
+          .map((item) => asRecord(item))
+          .map((item) => (typeof item.path === "string" ? item.path : null))
+          .filter((item): item is string => Boolean(item))
+      : [];
+    return truncateOraxRunnerText(
+      [
+        artifact.summary ?? "Sandbox validation failed.",
+        changedFiles.length ? `Changed files before failure: ${changedFiles.join(", ")}` : "",
+        errors.length ? `Errors: ${errors.join("\n")}` : "No sandbox error details were recorded.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      2400,
+    );
+  }
+
+  if (artifact.type === "command_result") {
+    const commands = Array.isArray(payload.commands)
+      ? payload.commands.map((item) => asRecord(item))
+      : [];
+    const failedCommands = commands.filter((command) => command.status !== "passed");
+    const details = failedCommands.length ? failedCommands : commands;
+    return truncateOraxRunnerText(
+      [
+        artifact.summary ?? "Controlled checks failed.",
+        ...details.map((command) => {
+          const label =
+            typeof command.label === "string"
+              ? command.label
+              : typeof command.id === "string"
+                ? command.id
+                : "unknown check";
+          const status = typeof command.status === "string" ? command.status : "unknown";
+          const message = typeof command.message === "string" ? command.message : "";
+          const stdout = typeof command.stdout === "string" ? command.stdout : "";
+          const stderr = typeof command.stderr === "string" ? command.stderr : "";
+          return [
+            `${label}: ${status}`,
+            message ? `message: ${message}` : "",
+            stdout ? `stdout:\n${truncateOraxRunnerText(stdout, 700)}` : "",
+            stderr ? `stderr:\n${truncateOraxRunnerText(stderr, 900)}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+        }),
+      ].join("\n\n"),
+      2800,
+    );
+  }
+
+  return artifact.summary ?? "ORAX failure artifact recorded.";
+}
+
+function truncateOraxRunnerText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 24))}\n...[truncated]`;
 }
 
 function latestOraxUserMessage(messages: Array<{ role: string; content: string }>): string | null {
