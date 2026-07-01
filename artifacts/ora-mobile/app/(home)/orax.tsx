@@ -66,9 +66,6 @@ import {
   requestFileReadApproval,
   requestGithubPrApproval,
   requestSandboxApproval,
-  runApprovedCommands,
-  runApprovedFileRead,
-  runApprovedSandbox,
   scanRepository,
   transcribeAudio,
 } from "@/lib/api";
@@ -790,6 +787,13 @@ export default function OraxScreen() {
     threadDraft,
   ]);
 
+  const continueCurrentTask = useCallback(async () => {
+    if (!selectedTask) return;
+    await runAction("continue-task", async () => {
+      await continueTask(selectedTask.id);
+    });
+  }, [runAction, selectedTask]);
+
   const submitReadApproval = useCallback(async () => {
     if (!selectedTask) return;
     const paths = approvalPaths
@@ -821,103 +825,27 @@ export default function OraxScreen() {
     (suggestion: OraxTaskActionSuggestion) => {
       if (!selectedTask) return;
 
-      if (suggestion.type === "read_files") {
-        const paths = suggestion.paths ?? [];
-        if (!paths.length) {
-          setThreadDraft("Which source files should Orax inspect next?");
-          return;
-        }
-        void runAction("request-read", async () => {
-          await requestFileReadApproval({
-            taskId: selectedTask.id,
-            paths,
-            branch: approvalBranch.trim() || selectedRepo?.defaultBranch,
-            reason: suggestion.reason,
-          });
-        });
+      if (suggestion.type !== "github_pr") {
+        void continueCurrentTask();
         return;
       }
 
-      if (suggestion.type === "draft_patch") {
-        if (!readApproval) {
-          setThreadDraft("Request file-read approval before generating a draft patch.");
-          return;
-        }
-        void runAction("draft-patch", async () => {
-          await generateDraftPatch({
-            taskId: selectedTask.id,
-            approvalId: readApproval.id,
-            instructions: suggestion.instructions,
-          });
-        });
+      const artifactId = suggestion.artifactId ?? latestCommand?.id;
+      if (!artifactId) {
+        setThreadDraft("Run controlled checks before asking Orax to prepare a pull request.");
         return;
       }
-
-      if (suggestion.type === "sandbox_run") {
-        const artifactId = suggestion.artifactId ?? latestDraftPatch?.id;
-        if (!artifactId) {
-          setThreadDraft("Generate a draft patch before requesting sandbox validation.");
-          return;
-        }
-        void runAction("sandbox-approval", async () => {
-          await requestSandboxApproval({ taskId: selectedTask.id, artifactId });
+      void runAction("pr-approval", async () => {
+        await requestGithubPrApproval({
+          taskId: selectedTask.id,
+          artifactId,
+          title: selectedTask.title ?? undefined,
+          reason: suggestion.reason ?? suggestion.description,
         });
-        return;
-      }
-
-      if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
-        const artifactId =
-          suggestion.artifactId ?? latestWorkspaceChangeSet?.id ?? latestSandbox?.id;
-        if (!artifactId) {
-          setThreadDraft("Run sandbox validation before requesting controlled checks.");
-          return;
-        }
-        setSelectedCommands(suggestion.commands);
-        void runAction("command-approval", async () => {
-          await requestCommandApproval({
-            taskId: selectedTask.id,
-            artifactId,
-            commands: suggestion.commands,
-          });
-        });
-        return;
-      }
-
-      if (suggestion.type === "github_pr") {
-        const artifactId = suggestion.artifactId ?? latestCommand?.id;
-        if (!artifactId) {
-          setThreadDraft("Run controlled checks before asking Orax to prepare a pull request.");
-          return;
-        }
-        void runAction("pr-approval", async () => {
-          await requestGithubPrApproval({
-            taskId: selectedTask.id,
-            artifactId,
-            title: selectedTask.title ?? undefined,
-            reason: suggestion.reason ?? suggestion.description,
-          });
-        });
-      }
+      });
     },
-    [
-      approvalBranch,
-      latestCommand?.id,
-      latestDraftPatch?.id,
-      latestWorkspaceChangeSet?.id,
-      latestSandbox?.id,
-      readApproval,
-      runAction,
-      selectedRepo?.defaultBranch,
-      selectedTask,
-    ],
+    [continueCurrentTask, latestCommand?.id, runAction, selectedTask],
   );
-
-  const continueCurrentTask = useCallback(async () => {
-    if (!selectedTask) return;
-    await runAction("continue-task", async () => {
-      await continueTask(selectedTask.id);
-    });
-  }, [runAction, selectedTask]);
 
   const toggleCommand = useCallback((id: string) => {
     setSelectedCommands((current) =>
@@ -1183,6 +1111,11 @@ export default function OraxScreen() {
                             onApprove={() =>
                               void runAction(`approve-${approval.id}`, async () => {
                                 await decideApproval(approval.id, "approved");
+                                if (approval.action === "github_pr") {
+                                  await createApprovedGithubPr(approval.id);
+                                } else {
+                                  await continueTask(approval.taskId);
+                                }
                               })
                             }
                             onDeny={() =>
@@ -1193,11 +1126,11 @@ export default function OraxScreen() {
                             onRun={() =>
                               void runAction(`run-${approval.id}`, async () => {
                                 if (approval.action === "read_files") {
-                                  await runApprovedFileRead(approval.id);
+                                  await continueTask(approval.taskId);
                                 } else if (approval.action === "sandbox_run") {
-                                  await runApprovedSandbox(approval.id);
+                                  await continueTask(approval.taskId);
                                 } else if (approval.action === "safe_check") {
-                                  await runApprovedCommands(approval.id);
+                                  await continueTask(approval.taskId);
                                 } else if (approval.action === "github_pr") {
                                   await createApprovedGithubPr(approval.id);
                                 }
@@ -1527,6 +1460,11 @@ export default function OraxScreen() {
                             onApprove={() =>
                               void runAction(`approve-${approval.id}`, async () => {
                                 await decideApproval(approval.id, "approved");
+                                if (approval.action === "github_pr") {
+                                  await createApprovedGithubPr(approval.id);
+                                } else {
+                                  await continueTask(approval.taskId);
+                                }
                               })
                             }
                             onDeny={() =>
@@ -1537,11 +1475,11 @@ export default function OraxScreen() {
                             onRun={() =>
                               void runAction(`run-${approval.id}`, async () => {
                                 if (approval.action === "read_files") {
-                                  await runApprovedFileRead(approval.id);
+                                  await continueTask(approval.taskId);
                                 } else if (approval.action === "sandbox_run") {
-                                  await runApprovedSandbox(approval.id);
+                                  await continueTask(approval.taskId);
                                 } else if (approval.action === "safe_check") {
-                                  await runApprovedCommands(approval.id);
+                                  await continueTask(approval.taskId);
                                 } else if (approval.action === "github_pr") {
                                   await createApprovedGithubPr(approval.id);
                                 }

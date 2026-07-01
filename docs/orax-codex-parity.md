@@ -158,6 +158,11 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   prompts.
 - Surface assistant action suggestions in the conversation and require explicit
   user continuation for code-changing work.
+- Default website/mobile inline suggestions must call the Orax Continue runner,
+  not hand-drive file-read, draft, sandbox, or controlled-check endpoints from
+  the UI. Approving an inline approval is the confirmation point; after approval,
+  the same runner should execute the approved step and write progress back into
+  the task thread.
 
 ## Quality Gate
 

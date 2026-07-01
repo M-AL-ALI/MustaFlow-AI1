@@ -40,9 +40,6 @@ describe("ORAX product-surface wiring", () => {
       "/api/orax/tasks/${taskId}/approvals",
       "/api/orax/tasks/${taskId}/artifacts",
       "/api/orax/approvals/${approvalId}",
-      "/api/orax/approvals/${approvalId}/read-files",
-      "/api/orax/approvals/${approvalId}/run-sandbox",
-      "/api/orax/approvals/${approvalId}/run-commands",
       "/api/orax/approvals/${approvalId}/create-github-pr",
     ]) {
       expect(oraxPage).toContain(route);
@@ -77,6 +74,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain('headers: { Accept: "text/event-stream" }');
     expect(oraxPage).toContain("new TextDecoder()");
     expect(oraxPage).toContain("mergeOraxTaskMessages");
+    expect(oraxApiRoute).toContain('router.post("/orax/approvals/:id/read-files"');
+    expect(oraxApiRoute).toContain('router.post("/orax/approvals/:id/run-sandbox"');
+    expect(oraxApiRoute).toContain('router.post("/orax/approvals/:id/run-commands"');
+    expect(oraxPage).not.toContain("/api/orax/approvals/${approvalId}/read-files");
+    expect(oraxPage).not.toContain("/api/orax/approvals/${approvalId}/run-sandbox");
+    expect(oraxPage).not.toContain("/api/orax/approvals/${approvalId}/run-commands");
 
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");
@@ -186,21 +189,28 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Confirm action");
     expect(oraxPage).toContain("pendingSuggestionConfirmation");
     expect(oraxPage).toContain("confirmTaskActionSuggestion");
-    expect(oraxPage).toContain("void readApprovedFiles(approval.id)");
-    expect(oraxPage).toContain("void runSandboxValidation(approval.id)");
-    expect(oraxPage).toContain("void runControlledChecks(approval.id)");
-    expect(oraxPage).toContain("void createGithubPr(approval.id)");
+    expect(oraxPage).toContain(
+      'if (suggestion.requiresManualConfirmation || suggestion.type === "github_pr")',
+    );
     expect(oraxPage).toContain("void continueSelectedTask()");
+    expect(oraxPage).toContain("continueTaskById(body.approval.taskId)");
+    expect(oraxPage).toContain("void continueTaskById(approval.taskId)");
+    expect(oraxPage).toContain("void createGithubPr(approval.id)");
+    expect(oraxPage).not.toContain("void readApprovedFiles(approval.id)");
+    expect(oraxPage).not.toContain("void runSandboxValidation(approval.id)");
+    expect(oraxPage).not.toContain("void runControlledChecks(approval.id)");
     expect(oraxPage).toContain('className="hidden"');
     expect(oraxPage).toContain('aria-hidden="true"');
     expect(oraxPage).not.toContain('showInspector ? "flex"');
     expect(oraxPage).not.toContain("setShowInspector((value) => !value)");
     expect(oraxPage).not.toContain('label="Details"');
 
-    expect(mobileOraxScreen).toContain('void runAction("request-read"');
-    expect(mobileOraxScreen).toContain('void runAction("draft-patch"');
-    expect(mobileOraxScreen).toContain('void runAction("sandbox-approval"');
-    expect(mobileOraxScreen).toContain('void runAction("command-approval"');
+    expect(mobileOraxScreen).toContain('if (suggestion.type !== "github_pr")');
+    expect(mobileOraxScreen).toContain("void continueCurrentTask();");
+    expect(mobileOraxScreen).toContain("await continueTask(approval.taskId)");
+    expect(mobileOraxScreen).not.toContain("runApprovedFileRead");
+    expect(mobileOraxScreen).not.toContain("runApprovedSandbox");
+    expect(mobileOraxScreen).not.toContain("runApprovedCommands");
     expect(mobileOraxScreen).toContain('void runAction("pr-approval"');
     expect(mobileOraxScreen).toContain('runAction("continue-task"');
     expect(mobileOraxScreen).toContain(
@@ -283,7 +293,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("const switchedTasks = activeTaskIdRef.current !== selectedTask.id");
     expect(oraxPage).toContain("activeTaskIdRef.current = selectedTask.id");
     expect(collapse(oraxPage)).toContain(
-      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setReadResult(null); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setPrConfirmationText(""); setTaskMessageDraft(""); setComposerAttachments([]); setComposerInputMode("text"); setComposerSettingsOpen(false); }',
+      'if (switchedTasks) { setApprovals([]); setArtifacts([]); setTaskMessages([]); setPendingSuggestionConfirmation(null); setSuggestionPrConfirmationText(""); setPrConfirmationText(""); setTaskMessageDraft(""); setComposerAttachments([]); setComposerInputMode("text"); setComposerSettingsOpen(false); }',
     );
     expect(oraxPage).toContain("const targetTaskId = body.task.id;");
     expect(oraxPage).toContain("const targetTaskId = selectedTask.id;");

@@ -242,18 +242,6 @@ type OraxApproval = {
   completedAt?: string | null;
 };
 
-type OraxReadResult = {
-  branch: string;
-  files: Array<{
-    path: string;
-    sha: string;
-    size: number;
-    content: string;
-    truncated: boolean;
-  }>;
-  skipped: Array<{ path: string; reason: string }>;
-};
-
 type OraxArtifact = {
   id: number;
   repositoryId: number;
@@ -669,7 +657,6 @@ export default function OraxPage() {
   const [suggestionPrConfirmationText, setSuggestionPrConfirmationText] = useState("");
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>(DEFAULT_ORAX_COMMAND_IDS);
   const [prConfirmationText, setPrConfirmationText] = useState("");
-  const [readResult, setReadResult] = useState<OraxReadResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [submittingRepo, setSubmittingRepo] = useState(false);
   const [connectingGithub, setConnectingGithub] = useState(false);
@@ -691,9 +678,6 @@ export default function OraxPage() {
     number | null
   >(null);
   const [decidingApprovalId, setDecidingApprovalId] = useState<number | null>(null);
-  const [readingApprovalId, setReadingApprovalId] = useState<number | null>(null);
-  const [runningSandboxApprovalId, setRunningSandboxApprovalId] = useState<number | null>(null);
-  const [runningCommandApprovalId, setRunningCommandApprovalId] = useState<number | null>(null);
   const [creatingPrApprovalId, setCreatingPrApprovalId] = useState<number | null>(null);
   const [continuingTask, setContinuingTask] = useState(false);
   const [generatingArtifactApprovalId, setGeneratingArtifactApprovalId] = useState<number | null>(
@@ -738,6 +722,10 @@ export default function OraxPage() {
     );
   }, [selectedTask, taskMessages]);
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
+  const completedReadApproval =
+    approvals.find(
+      (approval) => approval.action === "read_files" && approval.status === "completed",
+    ) ?? null;
   const latestSandboxResult =
     artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
   const latestWorkspaceChangeSet =
@@ -940,7 +928,6 @@ export default function OraxPage() {
       setApprovals([]);
       setArtifacts([]);
       setTaskMessages([]);
-      setReadResult(null);
       setPendingSuggestionConfirmation(null);
       setSuggestionPrConfirmationText("");
       setPrConfirmationText("");
@@ -960,7 +947,6 @@ export default function OraxPage() {
       setApprovals([]);
       setArtifacts([]);
       setTaskMessages([]);
-      setReadResult(null);
       setPendingSuggestionConfirmation(null);
       setSuggestionPrConfirmationText("");
       setPrConfirmationText("");
@@ -1273,7 +1259,6 @@ export default function OraxPage() {
       setApprovals([]);
       setArtifacts([]);
       setTaskMessages([]);
-      setReadResult(null);
       setPendingSuggestionConfirmation(null);
       setSuggestionPrConfirmationText("");
       setPrConfirmationText("");
@@ -1318,7 +1303,6 @@ export default function OraxPage() {
     setApprovals([]);
     setArtifacts([]);
     setTaskMessages([]);
-    setReadResult(null);
     setPendingSuggestionConfirmation(null);
     setSuggestionPrConfirmationText("");
     setPrConfirmationText("");
@@ -1365,38 +1349,12 @@ export default function OraxPage() {
     setPendingSuggestionConfirmation(null);
     setSuggestionPrConfirmationText("");
 
-    if (suggestion.type === "read_files") {
-      if (suggestion.paths?.length) {
-        setApprovalPaths(suggestion.paths.join("\n"));
-      }
-      if (suggestion.reason) {
-        setApprovalReason(suggestion.reason);
-      }
-      if (suggestion.paths?.length) {
-        setPendingSuggestionConfirmation(suggestion);
-      }
-      return;
-    }
-
-    if (suggestion.type === "draft_patch") {
-      setDraftInstructions(suggestion.instructions ?? "");
-      return;
-    }
-
-    if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
-      const allowed = suggestion.commands.filter((command) =>
-        ORAX_COMMAND_OPTIONS.some((option) => option.id === command),
-      );
-      if (allowed.length) {
-        setSelectedCommandIds(allowed);
-      }
+    if (suggestion.requiresManualConfirmation || suggestion.type === "github_pr") {
       setPendingSuggestionConfirmation(suggestion);
       return;
     }
 
-    if (suggestion.type === "sandbox_run" || suggestion.type === "github_pr") {
-      setPendingSuggestionConfirmation(suggestion);
-    }
+    void continueSelectedTask();
   }
 
   async function requestFileReadApproval(): Promise<boolean> {
@@ -1460,36 +1418,17 @@ export default function OraxPage() {
       );
       void load();
       void loadTaskMessages(body.approval.taskId);
+      if (decision === "approved") {
+        if (body.approval.action === "github_pr") {
+          void createGithubPr(body.approval.id);
+        } else {
+          void continueTaskById(body.approval.taskId);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update approval");
     } finally {
       setDecidingApprovalId(null);
-    }
-  }
-
-  async function readApprovedFiles(approvalId: number) {
-    if (readingApprovalId) return;
-    setReadingApprovalId(approvalId);
-    setError(null);
-    try {
-      const res = await authFetch(`/api/orax/approvals/${approvalId}/read-files`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Could not read approved files");
-      }
-      const body = (await res.json()) as OraxReadResult & { approval: OraxApproval };
-      setReadResult({ branch: body.branch, files: body.files, skipped: body.skipped });
-      setApprovals((prev) =>
-        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
-      );
-      void load();
-      void loadTaskMessages(body.approval.taskId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read approved files");
-    } finally {
-      setReadingApprovalId(null);
     }
   }
 
@@ -1599,64 +1538,6 @@ export default function OraxPage() {
     });
   }
 
-  async function runSandboxValidation(approvalId: number) {
-    if (runningSandboxApprovalId) return;
-    setRunningSandboxApprovalId(approvalId);
-    setError(null);
-    try {
-      const res = await authFetch(`/api/orax/approvals/${approvalId}/run-sandbox`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Could not run sandbox validation");
-      }
-      const body = (await res.json()) as { approval: OraxApproval; artifact: OraxArtifact };
-      setApprovals((prev) =>
-        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
-      );
-      setArtifacts((prev) => [
-        body.artifact,
-        ...prev.filter((artifact) => artifact.id !== body.artifact.id),
-      ]);
-      void load();
-      void loadTaskMessages(body.approval.taskId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not run sandbox validation");
-    } finally {
-      setRunningSandboxApprovalId(null);
-    }
-  }
-
-  async function runControlledChecks(approvalId: number) {
-    if (runningCommandApprovalId) return;
-    setRunningCommandApprovalId(approvalId);
-    setError(null);
-    try {
-      const res = await authFetch(`/api/orax/approvals/${approvalId}/run-commands`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Could not run controlled checks");
-      }
-      const body = (await res.json()) as { approval: OraxApproval; artifact: OraxArtifact };
-      setApprovals((prev) =>
-        prev.map((approval) => (approval.id === body.approval.id ? body.approval : approval)),
-      );
-      setArtifacts((prev) => [
-        body.artifact,
-        ...prev.filter((artifact) => artifact.id !== body.artifact.id),
-      ]);
-      void load();
-      void loadTaskMessages(body.approval.taskId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not run controlled checks");
-    } finally {
-      setRunningCommandApprovalId(null);
-    }
-  }
-
   async function requestGithubPrApproval(
     artifactId: number,
     confirmationText = prConfirmationText,
@@ -1701,25 +1582,20 @@ export default function OraxPage() {
     const suggestion = pendingSuggestionConfirmation;
     if (!suggestion) return;
 
-    let created = false;
-    if (suggestion.type === "read_files") {
-      created = await requestFileReadApproval();
-    } else if (suggestion.type === "sandbox_run" && suggestion.artifactId) {
-      created = await requestSandboxApproval(suggestion.artifactId);
-    } else if (suggestion.type === "controlled_checks" && suggestion.artifactId) {
-      created = await requestCommandApproval(suggestion.artifactId);
-    } else if (suggestion.type === "github_pr" && suggestion.artifactId) {
+    if (suggestion.type === "github_pr" && suggestion.artifactId) {
       if (suggestionPrConfirmationText.trim() !== "CREATE PR") {
         setError("Type CREATE PR to enable approval");
         return;
       }
-      created = await requestGithubPrApproval(suggestion.artifactId, suggestionPrConfirmationText);
+      const created = await requestGithubPrApproval(
+        suggestion.artifactId,
+        suggestionPrConfirmationText,
+      );
+      if (!created) return;
     }
 
-    if (created) {
-      setPendingSuggestionConfirmation(null);
-      setSuggestionPrConfirmationText("");
-    }
+    setPendingSuggestionConfirmation(null);
+    setSuggestionPrConfirmationText("");
   }
 
   async function createGithubPr(approvalId: number) {
@@ -1751,9 +1627,8 @@ export default function OraxPage() {
     }
   }
 
-  async function continueSelectedTask() {
-    if (!selectedTask || continuingTask) return;
-    const taskId = selectedTask.id;
+  async function continueTaskById(taskId: number) {
+    if (continuingTask) return;
     setContinuingTask(true);
     setError(null);
     try {
@@ -1786,6 +1661,11 @@ export default function OraxPage() {
     } finally {
       setContinuingTask(false);
     }
+  }
+
+  async function continueSelectedTask() {
+    if (!selectedTask) return;
+    await continueTaskById(selectedTask.id);
   }
 
   const selectedTaskRepository = selectedTask
@@ -2263,11 +2143,11 @@ export default function OraxPage() {
                             type="button"
                             onClick={() => {
                               if (approval.action === "read_files") {
-                                void readApprovedFiles(approval.id);
+                                void continueTaskById(approval.taskId);
                               } else if (approval.action === "sandbox_run") {
-                                void runSandboxValidation(approval.id);
+                                void continueTaskById(approval.taskId);
                               } else if (approval.action === "safe_check") {
-                                void runControlledChecks(approval.id);
+                                void continueTaskById(approval.taskId);
                               } else if (approval.action === "github_pr") {
                                 void createGithubPr(approval.id);
                               }
@@ -2605,16 +2485,11 @@ export default function OraxPage() {
                 onClick={() =>
                   latestDraftPatch
                     ? void requestSandboxApproval(latestDraftPatch.id)
-                    : readResult
-                      ? void generateDraftPatch(
-                          approvals.find(
-                            (approval) =>
-                              approval.action === "read_files" && approval.status === "completed",
-                          )?.id ?? 0,
-                        )
+                    : completedReadApproval
+                      ? void generateDraftPatch(completedReadApproval.id)
                       : undefined
                 }
-                disabled={!selectedTask || (!latestDraftPatch && !readResult)}
+                disabled={!selectedTask || (!latestDraftPatch && !completedReadApproval)}
                 className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
               >
                 <ShieldCheck className="h-4 w-4" />
