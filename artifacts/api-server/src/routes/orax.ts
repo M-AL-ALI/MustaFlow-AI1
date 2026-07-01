@@ -2297,7 +2297,7 @@ router.post("/orax/tasks", async (req, res) => {
   const userId = req.userId!;
   const parsed = createTaskSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: "Invalid ORAX task" });
+    res.status(400).json({ error: "Start a new Orax chat with a repository and message." });
     return;
   }
 
@@ -5620,12 +5620,12 @@ function buildOraxTaskThreadReply(input: {
     pendingApprovals.length > 0
       ? `There ${pendingApprovals.length === 1 ? "is" : "are"} ${pendingApprovals.length} pending approval${
           pendingApprovals.length === 1 ? "" : "s"
-        }. Review it inline to continue.`
+        }. Review the inline action when you are ready.`
       : latestArtifact
-        ? `Latest result: ${latestArtifact.title}. Continue from the inline action when you are ready.`
+        ? `Latest result is ready: ${latestArtifact.title}.`
         : suggestion
-          ? `${suggestion.title}. ${suggestion.description}`
-          : "Tell me which files or behavior to inspect first.";
+          ? "I'm ready to start from the inline action below."
+          : "Tell me what to inspect or change next.";
 
   return [
     "I'll work from here.",
@@ -5657,6 +5657,7 @@ function isOraxResumeQuestion(message: string): boolean {
   return [
     "where are we",
     "where we at",
+    "what happened",
     "what is next",
     "what's next",
     "next step",
@@ -5669,23 +5670,32 @@ function isOraxResumeQuestion(message: string): boolean {
 }
 
 function buildOraxCheckpointResumeReply(checkpoint: OraxCheckpointSummary): string {
-  const filesLine = checkpoint.filesReviewed.length
-    ? `Files reviewed: ${checkpoint.filesReviewed.join(", ")}.`
-    : "Files reviewed: none yet.";
+  const hasProgress =
+    checkpoint.filesReviewed.length > 0 ||
+    checkpoint.artifacts.total > 0 ||
+    checkpoint.approvals.completed > 0;
+  const progressLine = hasProgress
+    ? checkpoint.filesReviewed.length
+      ? `I've already reviewed ${checkpoint.filesReviewed.slice(0, 3).join(", ")}.`
+      : "I've started the workflow and have saved the latest task state."
+    : "Nothing has run yet.";
   const blockerLine = checkpoint.latestBlocker
-    ? `Latest blocker: ${checkpoint.latestBlocker}`
-    : "Latest blocker: none recorded.";
+    ? `Current blocker: ${checkpoint.latestBlocker}`
+    : null;
 
   return [
-    "Here is where this task stands.",
-    `Goal: ${checkpoint.goal}.`,
-    `Status: ${checkpoint.status}.`,
-    `Approvals: ${checkpoint.approvals.completed}/${checkpoint.approvals.total} completed, ${checkpoint.approvals.pending} pending, ${checkpoint.approvals.denied} denied, ${checkpoint.approvals.failed} failed.`,
-    `Artifacts: ${checkpoint.artifacts.total} total (${checkpoint.artifacts.draftPatches} draft patches, ${checkpoint.artifacts.sandboxResults} sandbox results, ${checkpoint.artifacts.commandResults} command results, ${checkpoint.artifacts.githubPrResults} PR results).`,
-    filesLine,
+    progressLine,
     blockerLine,
-    `Next: ${checkpoint.nextStep}`,
-  ].join("\n");
+    `Next, I need to ${formatOraxNextStepForChat(checkpoint.nextStep)}.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatOraxNextStepForChat(nextStep: string): string {
+  const normalized = nextStep.trim().replace(/\.$/, "");
+  if (!normalized) return "continue from the inline action";
+  return normalized.charAt(0).toLowerCase() + normalized.slice(1);
 }
 
 function buildOraxTaskActionSuggestions(input: {
@@ -5701,8 +5711,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "review_pending_approval",
       title: "Review pending approval",
-      description:
-        "This task already has a pending approval. Decide that approval before requesting another workflow step.",
+      description: "Approve or deny the pending step so Orax can continue.",
       approvalId: pendingApproval.id,
     });
     return suggestions;
@@ -5716,8 +5725,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "github_pr",
       title: "Prepare pull request",
-      description:
-        "Controlled checks passed. Continue here when you want Orax to prepare the pull request step.",
+      description: "Request pull request creation after the checks that already passed.",
       buttonLabel: "Prepare pull request",
       artifactId: latestCommandResult.id,
       requiresManualConfirmation: true,
@@ -5735,8 +5743,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "controlled_checks",
       title: "Run checks",
-      description:
-        "The workspace change set is ready. Continue here to request the default checks.",
+      description: "Request the default controlled checks for the prepared change set.",
       buttonLabel: "Use default checks",
       artifactId: latestWorkspaceChangeSet?.id ?? latestSandboxResult?.id,
       commands: [...ORAX_SANDBOX_COMMAND_IDS],
@@ -5748,7 +5755,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "sandbox_run",
       title: "Validate patch",
-      description: "A draft patch exists. Continue here to validate it in the sandbox.",
+      description: "Run the draft patch in an isolated sandbox.",
       buttonLabel: "Validate patch",
       artifactId: latestDraftPatch.id,
     });
@@ -5761,7 +5768,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "draft_patch",
       title: "Draft the change",
-      description: "Approved files have been read. Continue here to draft the code change.",
+      description: "Create a draft patch from the approved file context.",
       buttonLabel: "Draft change",
       approvalId: completedReadApproval.id,
       instructions: input.userMessage.slice(0, 2000),
@@ -5781,10 +5788,10 @@ function buildOraxTaskActionSuggestions(input: {
       title: analyzedAttachments ? "Inspect related source files" : "Inspect source files",
       description:
         extractedPaths.length > 0
-          ? "I found likely file paths in your message. Continue here to let Orax inspect them."
+          ? "Read the detected repository files before planning the change."
           : analyzedAttachments
-            ? "I analyzed the attached context. Continue here to inspect the source files that should drive the fix."
-            : "Continue here to let Orax inspect the relevant files before planning a code change.",
+            ? "Read the source files related to the attached context."
+            : "Read the relevant repository files before planning the change.",
       buttonLabel: extractedPaths.length > 0 ? "Use detected paths" : undefined,
       paths: extractedPaths,
       reason: (input.attachmentAnalysis?.suggestedFocus.length

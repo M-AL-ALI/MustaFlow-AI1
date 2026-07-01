@@ -57,7 +57,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("firstMessage: content");
     expect(oraxPage).toContain("firstMessageMetadata: metadata");
     expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content, metadata)");
-    expect(oraxPage).toContain("Task created, but first message failed to save");
+    expect(oraxPage).toContain("Task created, but the first message did not attach");
+    expect(oraxPage).toContain("normalizeOraxUiError");
+    expect(oraxPage).toContain("Start a new Orax chat, then send the message again.");
+    expect(oraxPage).toContain("latestAssistantSuggestionMessageId");
     expect(oraxPage).toContain("connectOraxTaskEventStream");
     expect(oraxPage).toContain("continueSelectedTask");
     expect(oraxPage).toContain("executionStep");
@@ -129,6 +132,8 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("const [threadOpen, setThreadOpen] = useState(false)");
     expect(mobileOraxScreen).toContain("const startNewThread = useCallback(() =>");
     expect(mobileOraxScreen).toContain("setSelectedTaskId(null)");
+    expect(mobileOraxScreen).toContain("Start a new Orax chat, then send the message again.");
+    expect(mobileOraxScreen).toContain("!latestAssistantSuggestion");
     expect(mobileOraxScreen).toContain('const [taskSearch, setTaskSearch] = useState("")');
     expect(mobileOraxScreen).toContain("visibleTasks");
     expect(mobileOraxScreen).toContain("chatPreview");
@@ -264,9 +269,13 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("composer: composerMetadata ?? null");
     expect(oraxApiRoute).not.toContain("I saved this in the ORAX task thread");
     expect(oraxApiRoute).not.toContain("Current task status:");
+    expect(oraxApiRoute).not.toContain("Here is where this task stands.");
     expect(oraxApiRoute).not.toContain("Approvals: 0. Artifacts: 0. Completed artifacts: 0.");
     expect(oraxApiRoute).not.toContain("Phase 4B is planning-only");
     expect(oraxApiRoute).not.toContain("Prepare file-read approval");
+    expect(oraxApiRoute).not.toContain("Invalid ORAX task");
+    expect(oraxApiRoute).toContain("Next, I need to");
+    expect(oraxApiRoute).toContain("what happened");
   });
 
   it("clears task-scoped state immediately on ORAX task switches", () => {

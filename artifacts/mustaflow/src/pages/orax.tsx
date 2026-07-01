@@ -620,6 +620,14 @@ function shouldRefreshOraxTaskCollections(message: OraxTaskMessage): boolean {
   );
 }
 
+function normalizeOraxUiError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  if (/invalid orax task/i.test(message)) {
+    return "Start a new Orax chat, then send the message again.";
+  }
+  return message || fallback;
+}
+
 export default function OraxPage() {
   const [repositories, setRepositories] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
@@ -750,6 +758,15 @@ export default function OraxPage() {
         (message) => message.role === "assistant" && message.metadata?.actionSuggestions?.length,
       );
     return assistantMessage?.metadata?.actionSuggestions ?? [];
+  }, [taskMessages]);
+  const latestAssistantSuggestionMessageId = useMemo(() => {
+    return (
+      [...taskMessages]
+        .reverse()
+        .find(
+          (message) => message.role === "assistant" && message.metadata?.actionSuggestions?.length,
+        )?.id ?? null
+    );
   }, [taskMessages]);
   const primaryThreadSuggestion = latestAssistantSuggestions[0] ?? null;
   const threadNextAction = pendingApprovals.length
@@ -1203,6 +1220,9 @@ export default function OraxPage() {
     content: string,
     metadata?: OraxComposerMetadata,
   ): Promise<OraxTaskMessage[]> {
+    if (!Number.isInteger(taskId) || taskId <= 0) {
+      throw new Error("Start a new Orax chat, then send the message again.");
+    }
     const res = await authFetch(`/api/orax/tasks/${taskId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1210,7 +1230,9 @@ export default function OraxPage() {
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? "Could not save task message");
+      throw new Error(
+        normalizeOraxUiError(new Error(body.error ?? ""), "Could not save task message"),
+      );
     }
     const body = (await res.json()) as { messages: OraxTaskMessage[] };
     return body.messages;
@@ -1273,9 +1295,10 @@ export default function OraxPage() {
           if (activeTaskIdRef.current !== targetTaskId) return;
           setTaskMessageDraft(firstMessage);
           setError(
-            messageErr instanceof Error
-              ? `Task created, but first message failed to save. Retry message: ${messageErr.message}`
-              : "Task created, but first message failed to save. Retry message.",
+            `Task created, but the first message did not attach. Retry it here: ${normalizeOraxUiError(
+              messageErr,
+              "Could not save task message",
+            )}`,
           );
           return;
         }
@@ -1332,7 +1355,7 @@ export default function OraxPage() {
       setComposerSettingsOpen(false);
     } catch (err) {
       if (activeTaskIdRef.current !== targetTaskId) return;
-      setError(err instanceof Error ? err.message : "Could not save task message");
+      setError(normalizeOraxUiError(err, "Could not save task message"));
     } finally {
       setSendingTaskMessage(false);
     }
@@ -1759,7 +1782,7 @@ export default function OraxPage() {
       void load();
       void loadTaskMessages(taskId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not continue Orax task");
+      setError(normalizeOraxUiError(err, "Could not continue Orax task"));
     } finally {
       setContinuingTask(false);
     }
@@ -2048,7 +2071,11 @@ export default function OraxPage() {
                   const messageAttachments = getMessageComposerAttachments(message);
                   const executionStep = message.metadata?.executionStep;
                   const suggestions =
-                    message.role === "assistant" ? (message.metadata?.actionSuggestions ?? []) : [];
+                    message.role === "assistant" &&
+                    message.id === latestAssistantSuggestionMessageId &&
+                    !pendingSuggestionConfirmation
+                      ? (message.metadata?.actionSuggestions ?? []).slice(0, 1)
+                      : [];
                   return (
                     <article
                       key={message.id}
@@ -2127,6 +2154,9 @@ export default function OraxPage() {
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {suggestion.description}
                               </div>
+                              <div className="mt-2 inline-flex h-7 items-center rounded-full bg-foreground px-3 text-xs font-medium text-background">
+                                {suggestion.buttonLabel ?? suggestion.title}
+                              </div>
                             </button>
                           ))}
                         </div>
@@ -2157,7 +2187,8 @@ export default function OraxPage() {
                         onClick={() => void confirmTaskActionSuggestion()}
                         className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
                       >
-                        Continue
+                        {pendingSuggestionConfirmation.buttonLabel ??
+                          pendingSuggestionConfirmation.title}
                       </button>
                       <button
                         type="button"
@@ -2172,7 +2203,7 @@ export default function OraxPage() {
                     </div>
                   </section>
                 ) : null}
-                {selectedTask ? (
+                {selectedTask && !primaryThreadSuggestion && !pendingSuggestionConfirmation ? (
                   <div className="flex justify-start">
                     <button
                       type="button"

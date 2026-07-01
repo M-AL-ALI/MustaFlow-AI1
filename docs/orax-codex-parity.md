@@ -134,6 +134,12 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.
+- Resume or "what happened" replies must stay natural and short: summarize
+  whether anything has run, name the immediate next action, and avoid visible
+  goal/status/approval/artifact dumps in normal chat.
+- Website and mobile should render only the latest inline action card for a
+  task message. Do not duplicate the same action as assistant prose, a card, and
+  a separate Continue button.
 - No visible workflow dashboard, PR control panel, checkpoint panel, or Details
   stack should appear in the default Orax task flow.
 - Repository setup, scans, patch generation, checks, and PR actions must not

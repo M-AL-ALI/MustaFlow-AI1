@@ -367,7 +367,7 @@ export default function OraxScreen() {
     [repos, selectedRepoId],
   );
   const selectedTask = useMemo(
-    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
+    () => (selectedTaskId ? (tasks.find((task) => task.id === selectedTaskId) ?? null) : null),
     [tasks, selectedTaskId],
   );
   const visibleTasks = useMemo(() => {
@@ -611,6 +611,7 @@ export default function OraxScreen() {
     await runAction("create-task", async () => {
       const created = await createTask({ repositoryId: repoId, kind: taskKind, prompt });
       activeTaskIdRef.current = created.task.id;
+      setTasks((prev) => [created.task, ...prev.filter((task) => task.id !== created.task.id)]);
       setSelectedTaskId(created.task.id);
       setTaskPrompt("");
       await appendTaskMessage(created.task.id, prompt);
@@ -757,6 +758,7 @@ export default function OraxScreen() {
       await runAction("create-task", async () => {
         const created = await createTask({ repositoryId: repoId, kind: taskKind, prompt: text });
         activeTaskIdRef.current = created.task.id;
+        setTasks((prev) => [created.task, ...prev.filter((task) => task.id !== created.task.id)]);
         setSelectedTaskId(created.task.id);
         setTaskPrompt("");
         setThreadDraft("");
@@ -1145,7 +1147,7 @@ export default function OraxScreen() {
                       onPress={() => applySuggestion(latestAssistantSuggestion)}
                     />
                   ) : null}
-                  {selectedTask ? (
+                  {selectedTask && !latestAssistantSuggestion ? (
                     <Button
                       label="Continue"
                       icon={RefreshCw}
@@ -2746,6 +2748,11 @@ function describeArtifact(artifact: OraxArtifact): string {
 }
 
 function messageFromError(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message) return err.message;
+  if (err instanceof Error && err.message) {
+    if (/invalid orax task/i.test(err.message)) {
+      return "Start a new Orax chat, then send the message again.";
+    }
+    return err.message;
+  }
   return fallback;
 }
