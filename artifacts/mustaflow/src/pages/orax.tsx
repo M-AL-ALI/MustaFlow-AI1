@@ -4,20 +4,15 @@ import {
   ArrowLeft,
   Bot,
   Check,
-  CheckCircle2,
   Code2,
-  FileSearch,
   FileText,
   Folder,
   GitBranch,
   GitPullRequest,
-  KeyRound,
   Loader2,
-  LockKeyhole,
   Menu,
   MoreHorizontal,
   PenLine,
-  Play,
   RefreshCw,
   Search,
   Send,
@@ -296,7 +291,7 @@ type OraxCapabilities = {
   lockedUntilApprovalLayer: string[];
 };
 
-const TASK_KINDS = [
+const _TASK_KINDS = [
   { value: "analyze", label: "Analyze" },
   { value: "plan", label: "Plan" },
   { value: "review", label: "Review" },
@@ -349,7 +344,7 @@ export default function OraxPage() {
   const [approvals, setApprovals] = useState<OraxApproval[]>([]);
   const [artifacts, setArtifacts] = useState<OraxArtifact[]>([]);
   const [taskMessages, setTaskMessages] = useState<OraxTaskMessage[]>([]);
-  const [capabilities, setCapabilities] = useState<OraxCapabilities | null>(null);
+  const [, setCapabilities] = useState<OraxCapabilities | null>(null);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
@@ -357,7 +352,7 @@ export default function OraxPage() {
   const activeTaskIdRef = useRef<number | null>(null);
   const [githubToken, setGithubToken] = useState("");
   const [scans, setScans] = useState<OraxScan[]>([]);
-  const [taskKind, setTaskKind] = useState<(typeof TASK_KINDS)[number]["value"]>("analyze");
+  const [_taskKind, _setTaskKind] = useState<(typeof _TASK_KINDS)[number]["value"]>("analyze");
   const [prompt, setPrompt] = useState("");
   const [approvalPaths, setApprovalPaths] = useState("");
   const [approvalReason, setApprovalReason] = useState("");
@@ -365,7 +360,7 @@ export default function OraxPage() {
   const [taskMessageDraft, setTaskMessageDraft] = useState("");
   const [, setShowInspector] = useState(false);
   const [mobileTaskOpen, setMobileTaskOpen] = useState(false);
-  const [mobileComposeOpen, setMobileComposeOpen] = useState(false);
+  const [, setMobileComposeOpen] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
   const [pendingSuggestionConfirmation, setPendingSuggestionConfirmation] =
     useState<OraxTaskActionSuggestion | null>(null);
@@ -377,10 +372,10 @@ export default function OraxPage() {
   const [submittingRepo, setSubmittingRepo] = useState(false);
   const [connectingGithub, setConnectingGithub] = useState(false);
   const [scanningRepository, setScanningRepository] = useState(false);
-  const [loadingScans, setLoadingScans] = useState(false);
-  const [loadingApprovals, setLoadingApprovals] = useState(false);
-  const [loadingArtifacts, setLoadingArtifacts] = useState(false);
-  const [loadingTaskMessages, setLoadingTaskMessages] = useState(false);
+  const [, setLoadingScans] = useState(false);
+  const [, setLoadingApprovals] = useState(false);
+  const [, setLoadingArtifacts] = useState(false);
+  const [, setLoadingTaskMessages] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [sendingTaskMessage, setSendingTaskMessage] = useState(false);
   const [requestingApproval, setRequestingApproval] = useState(false);
@@ -408,7 +403,7 @@ export default function OraxPage() {
     [repositories, selectedRepoId],
   );
   const latestScan = scans[0] ?? null;
-  const latestScanLanguages = Object.entries(latestScan?.summary?.languages ?? {})
+  const _latestScanLanguages = Object.entries(latestScan?.summary?.languages ?? {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
   const selectedTask = useMemo(
@@ -444,7 +439,7 @@ export default function OraxPage() {
     artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
   const latestCommandResult =
     artifacts.find((artifact) => artifact.type === "command_result") ?? null;
-  const latestGithubPrResult =
+  const _latestGithubPrResult =
     artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
   const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
   const latestArtifact = artifacts[0] ?? null;
@@ -684,7 +679,7 @@ export default function OraxPage() {
     }
   }
 
-  async function connectGithub() {
+  async function _connectGithub() {
     if (!selectedRepository || !githubToken.trim() || connectingGithub) return;
     setConnectingGithub(true);
     setError(null);
@@ -767,7 +762,7 @@ export default function OraxPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           repositoryId: selectedRepository.id,
-          kind: taskKind,
+          kind: _taskKind,
           prompt: firstMessage,
         }),
       });
@@ -2091,7 +2086,7 @@ function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
   return artifact.summary ?? "ORAX workflow artifact recorded.";
 }
 
-function OraxThreadLifecycleDetails({ item }: { item: OraxThreadLifecycleItem }) {
+function _OraxThreadLifecycleDetails({ item }: { item: OraxThreadLifecycleItem }) {
   if (item.source === "approval") {
     const { approval } = item;
     if (approval.action !== "read_files" || !approval.result) return null;
@@ -2289,7 +2284,7 @@ function FailureNotice({ failure }: { failure: OraxFailureInfo }) {
   );
 }
 
-function ArtifactTrace({ artifact }: { artifact: OraxArtifact }) {
+function _ArtifactTrace({ artifact }: { artifact: OraxArtifact }) {
   const payload = artifact.payload;
   const items = [
     { label: "Read approval", id: payload.sourceApprovalId, kind: "approval" },
