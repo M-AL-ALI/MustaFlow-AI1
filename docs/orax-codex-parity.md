@@ -1,11 +1,78 @@
-# Orax Codex Parity Contract
+# Orax Product Contract
 
-Orax must behave like a Codex-style coding-agent surface on both website and
-mobile. Ora remains separate.
+Orax is MustaFlow AI's coding and workflow agent inside the Ora ecosystem.
+The product goal is functional equivalence with Codex-level software
+engineering capability, delivered under MustaFlow AI branding, controls, data
+model, and architecture. Do not copy OpenAI branding or proprietary
+implementation details.
 
-## Product Contract
+Ora remains the main AI assistant experience. Orax remains the coding and
+workflow agent. Changes to Orax must not alter Ora chat, Ora history, AI
+Builder routing, public AI chat routes, credits routes, or project chat routes.
 
-- Orax opens to a simple task/chat list first.
+## Product Vision
+
+- Orax should operate like an AI software engineer, not a code-snippet chatbot.
+- Users should describe a goal naturally and Orax should inspect context, plan,
+  edit, run checks, debug, retry, summarize, and prepare reviewable changes.
+- Orax must support technical and non-technical users: developers can use Git,
+  terminal, branch, diff, and PR workflows; non-technical users can describe
+  desired outcomes in plain English.
+- Orax should work across connected GitHub repositories, cloud repositories,
+  local folders, terminals, project workspaces, and cloud development
+  environments as those surfaces become available.
+- Website and mobile must stay in sync: same task model, routes, approval
+  semantics, artifacts, checkpoints, and user-facing workflow.
+
+## Required Capabilities
+
+- Deep repository context: structure, framework, dependencies, frontend/backend
+  connection, database, configuration, tests, docs, deployment, issues, pull
+  requests, and prior changes.
+- Agentic task execution: break high-level goals into steps, inspect code, plan,
+  edit files, install packages when approved, run commands, execute tests, fix
+  failures, and produce a final result.
+- Long-running engineering tasks: features, bug fixes, refactors, UI
+  improvements, backend changes, migrations, documentation, PR review, error
+  resolution, and production-readiness work.
+- Visual feedback: users can point to or describe UI problems; Orax converts
+  that feedback into code changes and verifies the result when the environment
+  supports visual checks.
+- Pull requests: Orax can summarize changes, explain why they were made, show
+  modified files, include test results, and prepare a PR for user review.
+- Testing and verification: unit tests, linting, type checks, build commands,
+  preview checks, backend health checks, and application validation.
+- Checkpoints and rollback: Orax records task state before major changes so
+  users can compare versions or return to a prior working state.
+- Project workflow memory: Orax remembers the task goal, decisions, files
+  changed, failures, passing checks, pending approvals, and remaining work.
+
+## Safety And Control
+
+- Orax must show what it is doing: plan, files inspected, files edited, commands
+  run, tests executed, errors found, fixes attempted, and final output.
+- Orax must require approval before sensitive actions such as installing
+  packages, deleting files, changing production configuration, modifying
+  database migrations, pushing code, creating PRs, or deploying.
+- Orax must use isolated execution, permission controls, audit logs,
+  checkpoints, rollback options, and secure secret handling.
+- Orax must never expose private keys, tokens, or sensitive environment
+  variables in chat or logs.
+
+## Interface Contract
+
+- Orax App: dedicated local application for folders, projects, workflows,
+  approvals, and machine-level execution.
+- Orax CLI: terminal surface for scripted workflows, local diffs, command
+  execution, and developer automation.
+- Orax Web & Cloud: Ora-hosted interface for assigning coding tasks, connecting
+  repositories, monitoring progress, reviewing changes, and approving PRs.
+- Orax Mobile: Ora mobile surface for monitoring active tasks, reviewing
+  summaries, approving/rejecting actions, giving feedback, and steering work.
+
+## Website And Mobile UX
+
+- Orax opens to a simple project/chat list first.
 - Orax task rows open focused task threads.
 - New chat opens a blank thread with the normal composer. The first sent
   message creates the Orax task behind the scenes.
@@ -15,27 +82,14 @@ mobile. Ora remains separate.
   surface.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions
   remain available through inline thread suggestions and approval cards.
-- Orax never uses Ora chat, Ora history, AI Builder routing, public AI chat
-  routes, credits routes, or project chat routes.
-- Website and mobile use the same task kinds, Orax API routes, task-message
-  semantics, approval model, artifact model, and PR flow.
-
-## Layout Contract
-
-- Header: menu/back on the left, centered Orax/task title, options on the right.
-- Home: top chips, Projects, simple task rows, Chats, bottom Search/Chat.
-- Chat button opens a blank Orax thread.
-- Existing task rows and chat preview open existing Orax task threads.
-- Thread: title, repository subtitle, message list, inline action/approval
-  cards, and composer.
 - Messages should read like a chat thread, not a timestamped execution log.
 - No visible workflow dashboard, PR control panel, checkpoint panel, or Details
   stack should appear in the default Orax task flow.
 - Repository setup, scans, patch generation, checks, and PR actions must not
-  appear as standalone panels in the default UI; the assistant should surface
-  them inline only when the thread needs that action.
+  appear as standalone panels in the default UI; Orax should surface them inline
+  only when the thread needs that action.
 
-## Functionality Contract
+## Current Implementation Rules
 
 - Create task with first message persisted into the task thread.
 - Restore the first message draft when task creation succeeds but first-message
@@ -50,17 +104,20 @@ mobile. Ora remains separate.
 
 ## Quality Gate
 
-Before declaring Orax parity done:
+Before declaring an Orax parity change done:
 
 - `pnpm --filter @workspace/mustaflow run typecheck`
 - `pnpm --filter @workspace/ora-mobile run typecheck`
+- `pnpm --filter @workspace/api-server run typecheck`
 - `pnpm --filter @workspace/mustaflow test -- src/lib/__tests__/orax-wiring.test.ts`
-- Website visual check at phone width: home list, task thread, no workflow
-  dashboard or PR panel.
-- Mobile visual check: home list, task thread, no workflow dashboard or PR
-  panel.
-- Real smoke flow on website and mobile: create task, send follow-up, continue
-  an inline suggestion, approve inline, and verify actions remain Orax-owned.
+- API Orax tests when backend task-message behavior changes.
+- Website visual check at phone width: home list, blank new thread, normal
+  composer, no workflow dashboard or PR panel.
+- Mobile visual check: home list, blank new thread, normal composer, no task
+  mode pills, no large prompt form, no workflow dashboard or PR panel.
+- Real smoke flow on website and mobile: open new chat, send first message,
+  create Orax task, send follow-up, continue an inline suggestion, approve
+  inline, and verify actions remain Orax-owned.
 
 ## Wiring Guard
 

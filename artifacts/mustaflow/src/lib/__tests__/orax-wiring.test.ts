@@ -63,7 +63,7 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).not.toContain("/api/public-ai/chat");
   });
 
-  it("keeps ORAX Codex-like and list-first on website and mobile", () => {
+  it("keeps ORAX MustaFlow-branded, thread-first, and list-first on website and mobile", () => {
     expect(oraxPage).toContain("const [mobileTaskOpen, setMobileTaskOpen] = useState(false)");
     expect(oraxPage).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
     expect(oraxPage).toContain("function startNewThread()");
@@ -90,7 +90,10 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
     expect(mobileOraxScreen).toContain("visibleTasks");
     expect(mobileOraxScreen).toContain("chatPreview");
-    expect(mobileOraxScreen).toContain("ORAX_TAGLINE");
+    expect(mobileOraxScreen).toContain(
+      'const ORAX_TAGLINE = "MustaFlow AI coding agent for repositories"',
+    );
+    expect(mobileOraxScreen).not.toContain("Codex-style");
     expect(mobileOraxScreen).toContain("Projects");
     expect(mobileOraxScreen).toContain("Chats");
     expect(mobileOraxScreen).toContain("Search Chats");

@@ -103,7 +103,7 @@ const TASK_KINDS: Array<{ value: OraxTaskKind; label: string }> = [
 ];
 
 const DEFAULT_COMMANDS = ["patch-static-checks", "json-syntax", "node-syntax"];
-const ORAX_TAGLINE = "Codex-style coding agent for repositories";
+const ORAX_TAGLINE = "MustaFlow AI coding agent for repositories";
 const COMMAND_OPTIONS = [
   { id: "patch-static-checks", label: "Static" },
   { id: "json-syntax", label: "JSON" },
