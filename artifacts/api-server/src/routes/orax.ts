@@ -97,6 +97,13 @@ type OraxComposerAttachmentInput = z.infer<typeof composerAttachmentSchema>;
 
 type OraxComposerAttachmentAnalysis = {
   summary: string;
+  aiSummary?: string;
+  aiSuggestedFocus?: string[];
+  aiDetectedPaths?: string[];
+  aiProvider?: string;
+  aiModel?: string;
+  aiStatus?: "completed" | "unavailable" | "failed";
+  aiError?: string;
   attachments: Array<{
     name: string;
     contentKind: string;
@@ -599,7 +606,8 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
         }
       : undefined;
     const userMessageContext = buildOraxComposerAttachmentContext(composerMetadata?.attachments);
-    const attachmentAnalysis = buildOraxComposerAttachmentAnalysis(
+    const attachmentAnalysis = await enhanceOraxComposerAttachmentAnalysisWithAi(
+      buildOraxComposerAttachmentAnalysis(composerMetadata?.attachments, parsed.data.content),
       composerMetadata?.attachments,
       parsed.data.content,
     );
@@ -2925,6 +2933,208 @@ function buildOraxComposerAttachmentAnalysis(
   };
 }
 
+async function enhanceOraxComposerAttachmentAnalysisWithAi(
+  analysis: OraxComposerAttachmentAnalysis | null,
+  attachments: OraxComposerAttachmentInput[] | undefined,
+  userMessage: string,
+): Promise<OraxComposerAttachmentAnalysis | null> {
+  if (!analysis) return null;
+  const readableAttachments = (attachments ?? []).filter(
+    (attachment) => attachment.contentText?.trim() || attachment.dataUrl,
+  );
+  if (!readableAttachments.length) {
+    return { ...analysis, aiStatus: "unavailable" };
+  }
+
+  try {
+    const ai = await runOraxAiAttachmentAnalysis({
+      analysis,
+      attachments: readableAttachments,
+      userMessage,
+    });
+    if (!ai) return { ...analysis, aiStatus: "unavailable" };
+
+    return {
+      ...analysis,
+      aiSummary: ai.summary,
+      aiSuggestedFocus: ai.suggestedFocus,
+      aiDetectedPaths: ai.detectedPaths,
+      aiProvider: ai.provider,
+      aiModel: ai.model,
+      aiStatus: "completed",
+      detectedPaths: mergeOraxDetectedPaths([...analysis.detectedPaths, ...ai.detectedPaths]),
+      suggestedFocus: uniqueOraxSignals([...ai.suggestedFocus, ...analysis.suggestedFocus], 5),
+    };
+  } catch (err) {
+    logger.warn({ component: "orax", err }, "ORAX AI attachment analysis failed");
+    return {
+      ...analysis,
+      aiStatus: "failed",
+      aiError: err instanceof Error ? err.message : "AI attachment analysis failed",
+    };
+  }
+}
+
+async function runOraxAiAttachmentAnalysis(input: {
+  analysis: OraxComposerAttachmentAnalysis;
+  attachments: OraxComposerAttachmentInput[];
+  userMessage: string;
+}): Promise<{
+  summary: string;
+  suggestedFocus: string[];
+  detectedPaths: string[];
+  provider: string;
+  model: string;
+} | null> {
+  const { createChatCompletion, resolveStageProvider, VISION_MODEL } =
+    await import("../lib/ai-providers");
+  const hasImages = input.attachments.some((attachment) => attachment.dataUrl);
+  const { provider, model: routedModel } = resolveStageProvider("plan", "lite", "gpt-5-mini");
+  let effectiveProvider = provider;
+  let effectiveModel = routedModel;
+  if (hasImages) {
+    const visionModel = VISION_MODEL[provider];
+    if (visionModel) {
+      effectiveModel = visionModel;
+    } else {
+      effectiveProvider = "openai";
+      effectiveModel = VISION_MODEL.openai ?? "gpt-5.4";
+    }
+  }
+
+  const parts: Array<
+    { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+  > = [{ type: "text", text: buildOraxAiAttachmentAnalysisPrompt(input) }];
+  for (const attachment of input.attachments.filter((item) => item.dataUrl).slice(0, 2)) {
+    parts.push({ type: "image_url", image_url: { url: attachment.dataUrl! } });
+  }
+
+  const response = await createChatCompletion({
+    provider: effectiveProvider,
+    model: effectiveModel,
+    response_format: { type: "json_object" },
+    max_completion_tokens: 700,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are ORAX, MustaFlow AI's coding-agent attachment analyst. Analyze only the supplied attachment context. Return strict JSON. Do not claim files were edited, commands were run, or PRs were created.",
+      },
+      { role: "user", content: parts as unknown as string },
+    ],
+    signal: AbortSignal.timeout(45_000),
+  });
+
+  const raw = response.choices[0]?.message?.content?.trim() ?? "";
+  const parsed = parseOraxAiAttachmentAnalysisJson(raw);
+  if (!parsed.summary) return null;
+  return {
+    ...parsed,
+    provider: effectiveProvider,
+    model: effectiveModel,
+  };
+}
+
+function buildOraxAiAttachmentAnalysisPrompt(input: {
+  analysis: OraxComposerAttachmentAnalysis;
+  attachments: OraxComposerAttachmentInput[];
+  userMessage: string;
+}): string {
+  const excerpts = input.attachments
+    .filter((attachment) => attachment.contentText?.trim())
+    .slice(0, 4)
+    .map((attachment) => {
+      const text = attachment.contentText!.trim().slice(0, 6000);
+      return `--- ${attachment.name} (${attachment.contentKind ?? "text"}) ---\n${text}`;
+    })
+    .join("\n\n");
+  const imageBriefs = input.analysis.attachments
+    .filter((attachment) => attachment.image)
+    .map((attachment) => {
+      const image = attachment.image!;
+      const size =
+        image.width && image.height ? `${image.width}x${image.height}` : "unknown dimensions";
+      return `${attachment.name}: ${image.mimeType}, ${size}, ${
+        image.likelyScreenshot ? "likely screenshot/UI feedback" : "image context"
+      }`;
+    })
+    .join("\n");
+
+  return `User request:
+${input.userMessage}
+
+Deterministic attachment analysis:
+${JSON.stringify(
+  {
+    summary: input.analysis.summary,
+    detectedPaths: input.analysis.detectedPaths,
+    errors: input.analysis.errors,
+    commands: input.analysis.commands,
+    frameworks: input.analysis.frameworks,
+    languages: input.analysis.languages,
+    suggestedFocus: input.analysis.suggestedFocus,
+  },
+  null,
+  2,
+)}
+
+Image attachments:
+${imageBriefs || "None"}
+
+Readable text/code/log excerpts:
+${excerpts || "None"}
+
+Return strict JSON only:
+{
+  "summary": "one concise sentence about what the attachments show and how they affect the coding task",
+  "suggestedFocus": ["1-5 concrete engineering next steps or inspection targets"],
+  "detectedPaths": ["repository-relative file paths mentioned or strongly implied by the attachments"]
+}
+
+Rules:
+- Keep the summary factual and short.
+- If a screenshot is attached, describe the visible UI issue or target layout when clear.
+- If logs/errors are attached, identify the likely failure signal.
+- If code is attached, identify the likely component/module concern.
+- Do not invent repository file paths that are not present or strongly implied.
+- Do not claim execution, file edits, branch pushes, deployments, or pull requests happened.`;
+}
+
+function parseOraxAiAttachmentAnalysisJson(raw: string): {
+  summary: string;
+  suggestedFocus: string[];
+  detectedPaths: string[];
+} {
+  try {
+    const parsed = JSON.parse(stripOraxJsonFence(raw)) as Record<string, unknown>;
+    return {
+      summary:
+        typeof parsed.summary === "string"
+          ? parsed.summary.replace(/\s+/g, " ").trim().slice(0, 800)
+          : "",
+      suggestedFocus: Array.isArray(parsed.suggestedFocus)
+        ? uniqueOraxSignals(
+            parsed.suggestedFocus.filter((item): item is string => typeof item === "string"),
+            5,
+          )
+        : [],
+      detectedPaths: Array.isArray(parsed.detectedPaths)
+        ? mergeOraxDetectedPaths(
+            parsed.detectedPaths.filter((item): item is string => typeof item === "string"),
+          )
+        : [],
+    };
+  } catch {
+    return { summary: "", suggestedFocus: [], detectedPaths: [] };
+  }
+}
+
+function stripOraxJsonFence(raw: string): string {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return match?.[1]?.trim() ?? trimmed;
+}
+
 function analyzeOraxComposerAttachment(
   attachment: OraxComposerAttachmentInput,
   userMessage: string,
@@ -3191,8 +3401,12 @@ function summarizeOraxAttachmentAnalysis(input: {
 function buildOraxAttachmentAnalysisContext(analysis: OraxComposerAttachmentAnalysis): string {
   const lines = [
     `Orax attachment analysis: ${analysis.summary}`,
+    analysis.aiSummary ? `AI summary: ${analysis.aiSummary}` : null,
     analysis.detectedPaths.length
       ? `Detected paths: ${analysis.detectedPaths.slice(0, 12).join(", ")}`
+      : null,
+    analysis.aiDetectedPaths?.length
+      ? `AI detected paths: ${analysis.aiDetectedPaths.slice(0, 8).join(", ")}`
       : null,
     analysis.errors.length ? `Error signals: ${analysis.errors.slice(0, 5).join(" | ")}` : null,
     analysis.commands.length
@@ -3257,7 +3471,9 @@ function buildOraxTaskThreadReply(input: {
   return [
     "I'll work from here.",
     input.attachmentAnalysis
-      ? `I analyzed the attached context: ${input.attachmentAnalysis.summary}`
+      ? `I analyzed the attached context: ${
+          input.attachmentAnalysis.aiSummary ?? input.attachmentAnalysis.summary
+        }`
       : input.attachmentContext
         ? summarizeOraxAttachmentContext(input.attachmentContext)
         : null,

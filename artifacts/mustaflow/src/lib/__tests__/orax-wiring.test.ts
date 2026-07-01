@@ -191,6 +191,13 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("normalizeOraxComposerAttachments");
     expect(oraxApiRoute).toContain("buildOraxComposerAttachmentContext");
     expect(oraxApiRoute).toContain("buildOraxComposerAttachmentAnalysis");
+    expect(oraxApiRoute).toContain("enhanceOraxComposerAttachmentAnalysisWithAi");
+    expect(oraxApiRoute).toContain("runOraxAiAttachmentAnalysis");
+    expect(oraxApiRoute).toContain("resolveStageProvider");
+    expect(oraxApiRoute).toContain("VISION_MODEL");
+    expect(oraxApiRoute).toContain('type: "image_url"');
+    expect(oraxApiRoute).toContain("aiSummary");
+    expect(oraxApiRoute).toContain("aiStatus");
     expect(oraxApiRoute).toContain("buildOraxAttachmentAnalysisContext");
     expect(oraxApiRoute).toContain("extractOraxAttachmentErrorSignals");
     expect(oraxApiRoute).toContain("parseOraxImageDimensions");

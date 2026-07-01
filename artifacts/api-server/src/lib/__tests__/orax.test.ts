@@ -466,6 +466,13 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("normalizeOraxComposerAttachments");
     expect(routeSource).toContain("buildOraxComposerAttachmentContext");
     expect(routeSource).toContain("buildOraxComposerAttachmentAnalysis");
+    expect(routeSource).toContain("enhanceOraxComposerAttachmentAnalysisWithAi");
+    expect(routeSource).toContain("runOraxAiAttachmentAnalysis");
+    expect(routeSource).toContain("resolveStageProvider");
+    expect(routeSource).toContain("VISION_MODEL");
+    expect(routeSource).toContain('type: "image_url"');
+    expect(routeSource).toContain("aiSummary");
+    expect(routeSource).toContain("aiStatus");
     expect(routeSource).toContain("buildOraxAttachmentAnalysisContext");
     expect(routeSource).toContain("extractOraxAttachmentErrorSignals");
     expect(routeSource).toContain("parseOraxImageDimensions");

@@ -95,6 +95,11 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   detect likely file paths, error output, commands, framework/language signals,
   and screenshot/image dimensions when available, then use that analysis to
   shape the conversational reply and inline next action.
+- When readable attachments are present, Orax should attempt an optional
+  provider-backed AI analysis using existing model routing and vision-capable
+  models for screenshots/images. The result is stored as `aiSummary` /
+  `aiSuggestedFocus` / `aiDetectedPaths`; provider failure must fall back to
+  deterministic analysis without blocking the task thread.
 - Composer control state must travel through ORAX-owned task-message metadata,
   not Ora chat, project chat, credits, or AI Builder endpoints.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions
