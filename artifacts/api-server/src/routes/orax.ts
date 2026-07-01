@@ -231,6 +231,28 @@ type OraxCheckpointSummary = {
   updatedAt: string;
 };
 
+type OraxTaskRunnerResult = {
+  status: "continued" | "waiting" | "blocked";
+  action:
+    | "review_pending_approval"
+    | "run_approved_read"
+    | "run_approved_sandbox"
+    | "run_approved_checks"
+    | "run_approved_pr"
+    | "request_read_approval"
+    | "draft_patch"
+    | "request_sandbox_approval"
+    | "request_check_approval"
+    | "await_pr_confirmation"
+    | "complete"
+    | "blocked";
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+  approval?: OraxTaskApproval;
+  artifact?: OraxTaskArtifact;
+};
+
 router.get("/orax/capabilities", (_req, res) => {
   res.json({
     product: "ORAX",
@@ -1289,6 +1311,29 @@ router.post("/orax/tasks/:id/github-pr-approvals", async (req, res) => {
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to create ORAX GitHub PR approval");
     res.status(500).json({ error: "Failed to create ORAX GitHub PR approval" });
+  }
+});
+
+router.post("/orax/tasks/:id/continue", async (req, res) => {
+  const userId = req.userId!;
+  const taskId = Number(req.params.id);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    res.status(400).json({ error: "Invalid task id" });
+    return;
+  }
+
+  try {
+    const task = await loadOwnedTask(userId, taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const result = await continueOraxTaskRunner({ userId, task });
+    res.json(result);
+  } catch (err) {
+    logger.error({ component: "orax", err, taskId }, "Failed to continue ORAX task");
+    res.status(500).json({ error: "Failed to continue ORAX task" });
   }
 });
 
@@ -2629,6 +2674,933 @@ function buildOraxAuditTrail(input: {
     { label: "Workspace checks", id: input.commandArtifactId, kind: "artifact" },
     { label: "GitHub PR approval", id: input.githubApprovalId, kind: "approval" },
   ];
+}
+
+async function continueOraxTaskRunner(input: {
+  userId: string;
+  task: OraxTask;
+}): Promise<OraxTaskRunnerResult> {
+  const { approvals, artifacts, messages } = await loadOraxTaskRunnerState(
+    input.userId,
+    input.task.id,
+  );
+
+  const pendingApproval = approvals.find((approval) => approval.status === "pending");
+  if (pendingApproval) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "waiting",
+      action: "review_pending_approval",
+      message: `Review approval #${pendingApproval.id} before Orax continues.`,
+      approvalId: pendingApproval.id,
+    });
+  }
+
+  const approvedApproval = approvals.find((approval) => approval.status === "approved");
+  if (approvedApproval) {
+    if (approvedApproval.action === "read_files") {
+      return runOraxRunnerApprovedFileRead({
+        userId: input.userId,
+        task: input.task,
+        approval: approvedApproval,
+      });
+    }
+    if (approvedApproval.action === "sandbox_run") {
+      return runOraxRunnerApprovedSandbox({
+        userId: input.userId,
+        task: input.task,
+        approval: approvedApproval,
+      });
+    }
+    if (approvedApproval.action === "safe_check") {
+      return runOraxRunnerApprovedChecks({
+        userId: input.userId,
+        task: input.task,
+        approval: approvedApproval,
+      });
+    }
+    if (approvedApproval.action === "github_pr") {
+      return persistOraxRunnerResult({
+        userId: input.userId,
+        task: input.task,
+        status: "waiting",
+        action: "run_approved_pr",
+        message:
+          "GitHub PR approval is approved. Use the inline PR approval action to create the branch and pull request.",
+        approvalId: approvedApproval.id,
+      });
+    }
+  }
+
+  const latestGithubPrResult = artifacts.find(
+    (artifact) => artifact.type === "github_pr_result" && artifact.status === "completed",
+  );
+  if (latestGithubPrResult) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "waiting",
+      action: "complete",
+      message: "This task already has a completed GitHub PR result.",
+      artifactId: latestGithubPrResult.id,
+    });
+  }
+
+  const latestCommandResult = artifacts.find((artifact) => artifact.type === "command_result");
+  const latestCommandPayload = asRecord(latestCommandResult?.payload);
+  if (latestCommandResult?.status === "completed" && latestCommandPayload.passed === true) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "waiting",
+      action: "await_pr_confirmation",
+      message:
+        "Controlled checks passed. Type CREATE PR in the inline PR action when you want Orax to request pull request creation.",
+      artifactId: latestCommandResult.id,
+    });
+  }
+
+  const latestSandboxResult = artifacts.find((artifact) => artifact.type === "sandbox_result");
+  const latestSandboxPayload = asRecord(latestSandboxResult?.payload);
+  if (latestSandboxResult?.status === "completed" && latestSandboxPayload.applied === true) {
+    return requestOraxRunnerCommandApproval({
+      userId: input.userId,
+      task: input.task,
+      artifact: latestSandboxResult,
+    });
+  }
+
+  const latestDraftPatch = artifacts.find(
+    (artifact) => artifact.type === "draft_patch" && artifact.status !== "rejected",
+  );
+  if (latestDraftPatch) {
+    return requestOraxRunnerSandboxApproval({
+      userId: input.userId,
+      task: input.task,
+      artifact: latestDraftPatch,
+    });
+  }
+
+  const completedReadApproval = approvals.find(
+    (approval) => approval.action === "read_files" && approval.status === "completed",
+  );
+  if (completedReadApproval) {
+    return generateOraxRunnerDraftPatch({
+      userId: input.userId,
+      task: input.task,
+      approval: completedReadApproval,
+      instructions: latestOraxUserMessage(messages) ?? input.task.prompt,
+    });
+  }
+
+  return requestOraxRunnerFileReadApproval({
+    userId: input.userId,
+    task: input.task,
+    messages,
+  });
+}
+
+async function loadOraxTaskRunnerState(userId: string, taskId: number) {
+  const [approvals, artifacts, messages] = await Promise.all([
+    db
+      .select()
+      .from(oraxTaskApprovalsTable)
+      .where(
+        and(eq(oraxTaskApprovalsTable.userId, userId), eq(oraxTaskApprovalsTable.taskId, taskId)),
+      )
+      .orderBy(desc(oraxTaskApprovalsTable.createdAt)),
+    db
+      .select()
+      .from(oraxTaskArtifactsTable)
+      .where(
+        and(
+          eq(oraxTaskArtifactsTable.userId, userId),
+          eq(oraxTaskArtifactsTable.taskId, taskId),
+          isNull(oraxTaskArtifactsTable.archivedAt),
+        ),
+      )
+      .orderBy(desc(oraxTaskArtifactsTable.createdAt)),
+    db
+      .select()
+      .from(oraxTaskMessagesTable)
+      .where(
+        and(
+          eq(oraxTaskMessagesTable.userId, userId),
+          eq(oraxTaskMessagesTable.taskId, taskId),
+          isNull(oraxTaskMessagesTable.archivedAt),
+        ),
+      )
+      .orderBy(desc(oraxTaskMessagesTable.createdAt))
+      .limit(25),
+  ]);
+
+  return { approvals, artifacts, messages };
+}
+
+async function persistOraxRunnerResult(input: {
+  userId: string;
+  task: OraxTask;
+  status: OraxTaskRunnerResult["status"];
+  action: OraxTaskRunnerResult["action"];
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+  approval?: OraxTaskApproval;
+  artifact?: OraxTaskArtifact;
+}): Promise<OraxTaskRunnerResult> {
+  await persistOraxTimelineMessage({
+    userId: input.userId,
+    task: input.task,
+    role: input.status === "continued" ? "tool" : "system",
+    event: "runner_continue",
+    content: input.message,
+    approvalId: input.approvalId,
+    artifactId: input.artifactId,
+    metadata: {
+      runnerAction: input.action,
+      runnerStatus: input.status,
+    },
+  });
+
+  return {
+    status: input.status,
+    action: input.action,
+    message: input.message,
+    approvalId: input.approvalId,
+    artifactId: input.artifactId,
+    approval: input.approval,
+    artifact: input.artifact,
+  };
+}
+
+async function requestOraxRunnerFileReadApproval(input: {
+  userId: string;
+  task: OraxTask;
+  messages: Array<{ role: string; content: string; metadata?: unknown }>;
+}): Promise<OraxTaskRunnerResult> {
+  const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
+  if (!repository) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Connect an Orax repository before continuing this task.",
+    });
+  }
+  if (repository.provider !== "github") {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Orax file-read approvals currently support GitHub repositories.",
+    });
+  }
+
+  const paths = buildOraxRunnerReadPaths(input.task, input.messages);
+  const request = {
+    action: "read_files" as const,
+    paths,
+    branch: repository.defaultBranch,
+    reason: "Continue Orax task by inspecting the source files needed for the next step.",
+    limits: ORAX_FILE_READ_LIMITS,
+  };
+  const [approval] = await db
+    .insert(oraxTaskApprovalsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      action: "read_files",
+      status: "pending",
+      request,
+      riskSummary:
+        "ORAX will read selected repository files only. It will not edit files, run commands, push branches, open PRs, or deploy.",
+    })
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({ status: "awaiting_approval", updatedAt: new Date() })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: "waiting",
+    action: "request_read_approval",
+    message: `File-read approval requested for ${paths.length} path${paths.length === 1 ? "" : "s"}.`,
+    approvalId: approval.id,
+    approval,
+  });
+}
+
+async function runOraxRunnerApprovedFileRead(input: {
+  userId: string;
+  task: OraxTask;
+  approval: OraxTaskApproval;
+}): Promise<OraxTaskRunnerResult> {
+  const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
+  if (!repository || repository.provider !== "github") {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Approved file reads currently support GitHub repositories.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const request = input.approval.request as { paths?: string[]; branch?: string };
+  const paths = normalizeOraxFileReadPaths(request.paths ?? []);
+  const branch = request.branch || repository.defaultBranch;
+  const token = repository.encryptedToken
+    ? encryptionService.decrypt(repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: repository.owner,
+    repo: repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+  const auditResult = {
+    branch,
+    totalBytes: readResult.totalBytes,
+    files: readResult.files.map((file) => ({
+      path: file.path,
+      sha: file.sha,
+      size: file.size,
+      truncated: file.truncated,
+    })),
+    skipped: readResult.skipped,
+  };
+  const [updatedApproval] = await db
+    .update(oraxTaskApprovalsTable)
+    .set({
+      status: readResult.files.length ? "completed" : "failed",
+      result: auditResult,
+      completedAt: new Date(),
+    })
+    .where(eq(oraxTaskApprovalsTable.id, input.approval.id))
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      status: readResult.files.length ? "completed" : "blocked",
+      result: {
+        ...asRecord(input.task.result),
+        fileRead: auditResult,
+        message: readResult.files.length
+          ? "ORAX read the approved files. The next continue step can draft the change."
+          : "ORAX could not read the approved files.",
+      },
+      updatedAt: new Date(),
+      completedAt: readResult.files.length ? new Date() : null,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: readResult.files.length ? "continued" : "blocked",
+    action: "run_approved_read",
+    message: readResult.files.length
+      ? `Approved file read completed: ${readResult.files.length} file${readResult.files.length === 1 ? "" : "s"} read.`
+      : "Approved file read completed with no readable files.",
+    approvalId: updatedApproval.id,
+    approval: updatedApproval,
+  });
+}
+
+async function generateOraxRunnerDraftPatch(input: {
+  userId: string;
+  task: OraxTask;
+  approval: OraxTaskApproval;
+  instructions: string;
+}): Promise<OraxTaskRunnerResult> {
+  const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
+  if (!repository) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Repository not found for draft patch generation.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const request = input.approval.request as { paths?: string[]; branch?: string };
+  const paths = normalizeOraxFileReadPaths(request.paths ?? []);
+  const branch = request.branch || repository.defaultBranch;
+  const token = repository.encryptedToken
+    ? encryptionService.decrypt(repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: repository.owner,
+    repo: repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+  if (!readResult.files.length) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "No approved files could be read for draft patch generation.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const generated = await generateOraxDraftPatch({
+    repositoryLabel: `${repository.owner}/${repository.name}`,
+    taskPrompt: input.task.prompt,
+    instructions: input.instructions.slice(0, 2000),
+    branch,
+    files: readResult.files.map((file) => ({
+      path: file.path,
+      content: file.content,
+      size: file.size,
+      sha: file.sha,
+    })),
+  });
+  const [artifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      approvalId: input.approval.id,
+      type: "draft_patch",
+      status: "draft",
+      title: `Draft patch for ${input.task.title}`,
+      summary: generated.summary,
+      payload: {
+        branch,
+        approvalId: input.approval.id,
+        model: process.env.ORAX_DRAFT_PATCH_MODEL || "gpt-5-mini",
+        generatedAt: new Date().toISOString(),
+        filesRead: readResult.files.map((file) => ({
+          path: file.path,
+          sha: file.sha,
+          size: file.size,
+        })),
+        skipped: readResult.skipped,
+        unifiedDiff: generated.unifiedDiff,
+        explanation: generated.explanation,
+        risks: generated.risks,
+        tests: generated.tests,
+      },
+    })
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      status: "awaiting_approval",
+      result: {
+        ...asRecord(input.task.result),
+        draftPatch: {
+          artifactId: artifact.id,
+          summary: generated.summary,
+          hasDiff: Boolean(generated.unifiedDiff.trim()),
+        },
+        message:
+          "ORAX generated a draft patch preview. The next continue step can request sandbox approval.",
+      },
+      updatedAt: new Date(),
+      completedAt: null,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: "continued",
+    action: "draft_patch",
+    message: `Draft patch generated: ${generated.summary}`,
+    approvalId: input.approval.id,
+    artifactId: artifact.id,
+    artifact,
+  });
+}
+
+async function requestOraxRunnerSandboxApproval(input: {
+  userId: string;
+  task: OraxTask;
+  artifact: OraxTaskArtifact;
+}): Promise<OraxTaskRunnerResult> {
+  const payload = asRecord(input.artifact.payload);
+  const unifiedDiff = typeof payload.unifiedDiff === "string" ? payload.unifiedDiff : "";
+  if (!unifiedDiff.trim()) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Sandbox validation requires a draft patch diff.",
+      artifactId: input.artifact.id,
+    });
+  }
+
+  const [approval] = await db
+    .insert(oraxTaskApprovalsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: input.task.repositoryId,
+      taskId: input.task.id,
+      action: "sandbox_run",
+      status: "pending",
+      request: {
+        artifactId: input.artifact.id,
+        reason: "Validate this draft patch in an isolated sandbox.",
+        scope:
+          "Validate this draft patch inside an isolated in-memory sandbox. No repository files will be changed.",
+      },
+      riskSummary:
+        "ORAX will validate whether the draft patch applies to approved files. It will not write to the repository, run unrestricted commands, push, open a PR, or deploy.",
+    })
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({ status: "awaiting_approval", updatedAt: new Date() })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: "waiting",
+    action: "request_sandbox_approval",
+    message: `Sandbox validation approval requested for draft artifact #${input.artifact.id}.`,
+    approvalId: approval.id,
+    artifactId: input.artifact.id,
+    approval,
+  });
+}
+
+async function runOraxRunnerApprovedSandbox(input: {
+  userId: string;
+  task: OraxTask;
+  approval: OraxTaskApproval;
+}): Promise<OraxTaskRunnerResult> {
+  const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
+  const request = asRecord(input.approval.request);
+  const artifactId =
+    typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
+  const draftArtifact = Number.isInteger(artifactId)
+    ? await loadOwnedArtifact(input.userId, artifactId)
+    : undefined;
+  if (!repository || !draftArtifact || draftArtifact.taskId !== input.task.id) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Task, repository, or draft patch artifact not found.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const draftPayload = asRecord(draftArtifact.payload);
+  const unifiedDiff = typeof draftPayload.unifiedDiff === "string" ? draftPayload.unifiedDiff : "";
+  const sourceApprovalId =
+    typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
+  const sourceApproval = sourceApprovalId
+    ? await loadOwnedApproval(input.userId, sourceApprovalId)
+    : undefined;
+  if (!sourceApproval || sourceApproval.action !== "read_files") {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Draft patch is missing its approved file-read source.",
+      approvalId: input.approval.id,
+      artifactId: draftArtifact.id,
+    });
+  }
+
+  const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
+  const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+  const branch = sourceRequest.branch || repository.defaultBranch;
+  const token = repository.encryptedToken
+    ? encryptionService.decrypt(repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: repository.owner,
+    repo: repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+  const tests = Array.isArray(draftPayload.tests)
+    ? draftPayload.tests.filter((item): item is string => typeof item === "string")
+    : [];
+  const sandbox = runOraxSandboxValidation({
+    unifiedDiff,
+    files: readResult.files,
+    suggestedTests: tests,
+  });
+  const [sandboxArtifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      approvalId: input.approval.id,
+      type: "sandbox_result",
+      status: sandbox.applied ? "completed" : "failed",
+      title: `Sandbox validation for ${draftArtifact.title}`,
+      summary: sandbox.applied
+        ? `Sandbox validation passed for ${sandbox.changedFiles.length} file(s).`
+        : "Sandbox validation failed.",
+      payload: {
+        sourceArtifactId: draftArtifact.id,
+        sourceApprovalId: sourceApproval.id,
+        branch,
+        validatedAt: new Date().toISOString(),
+        filesRead: readResult.files.map((file) => ({
+          path: file.path,
+          sha: file.sha,
+          size: file.size,
+        })),
+        skipped: readResult.skipped,
+        ...sandbox,
+      },
+    })
+    .returning();
+  const [updatedApproval] = await db
+    .update(oraxTaskApprovalsTable)
+    .set({
+      status: sandbox.applied ? "completed" : "failed",
+      result: {
+        artifactId: sandboxArtifact.id,
+        applied: sandbox.applied,
+        changedFiles: sandbox.changedFiles,
+        errors: sandbox.errors,
+      },
+      completedAt: new Date(),
+    })
+    .where(eq(oraxTaskApprovalsTable.id, input.approval.id))
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      status: sandbox.applied ? "completed" : "blocked",
+      result: {
+        ...asRecord(input.task.result),
+        sandbox: {
+          artifactId: sandboxArtifact.id,
+          applied: sandbox.applied,
+          changedFiles: sandbox.changedFiles.length,
+          errors: sandbox.errors,
+        },
+        message: sandbox.applied
+          ? "ORAX validated the draft patch inside an isolated sandbox."
+          : "ORAX could not validate the draft patch inside the sandbox.",
+      },
+      updatedAt: new Date(),
+      completedAt: sandbox.applied ? new Date() : null,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: sandbox.applied ? "continued" : "blocked",
+    action: "run_approved_sandbox",
+    message: sandbox.applied
+      ? `Sandbox validation passed for ${sandbox.changedFiles.length} changed file${sandbox.changedFiles.length === 1 ? "" : "s"}.`
+      : "Sandbox validation failed.",
+    approvalId: updatedApproval.id,
+    artifactId: sandboxArtifact.id,
+    approval: updatedApproval,
+    artifact: sandboxArtifact,
+  });
+}
+
+async function requestOraxRunnerCommandApproval(input: {
+  userId: string;
+  task: OraxTask;
+  artifact: OraxTaskArtifact;
+}): Promise<OraxTaskRunnerResult> {
+  const commands = normalizeOraxSandboxCommandIds([...ORAX_SANDBOX_COMMAND_IDS]);
+  const [approval] = await db
+    .insert(oraxTaskApprovalsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: input.task.repositoryId,
+      taskId: input.task.id,
+      action: "safe_check",
+      status: "pending",
+      request: {
+        artifactId: input.artifact.id,
+        commands,
+        reason: "Run default Orax checks after sandbox validation.",
+        scope:
+          "Run fixed ORAX-controlled checks. Package checks are limited to allowlisted pnpm commands in a temporary workspace. No arbitrary shell text, deployment, or default-branch write is allowed.",
+      },
+      riskSummary:
+        "ORAX will run only fixed safe-check IDs. Allowlisted pnpm commands run in a temporary isolated workspace with a sanitized environment. It will not execute arbitrary shell commands, push, open a PR, or deploy.",
+    })
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({ status: "awaiting_approval", updatedAt: new Date() })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: "waiting",
+    action: "request_check_approval",
+    message: `Controlled-check approval requested for sandbox artifact #${input.artifact.id}.`,
+    approvalId: approval.id,
+    artifactId: input.artifact.id,
+    approval,
+  });
+}
+
+async function runOraxRunnerApprovedChecks(input: {
+  userId: string;
+  task: OraxTask;
+  approval: OraxTaskApproval;
+}): Promise<OraxTaskRunnerResult> {
+  const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
+  const request = asRecord(input.approval.request);
+  const sandboxArtifactId =
+    typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
+  const sandboxArtifact = Number.isInteger(sandboxArtifactId)
+    ? await loadOwnedArtifact(input.userId, sandboxArtifactId)
+    : undefined;
+  if (!repository || !sandboxArtifact || sandboxArtifact.taskId !== input.task.id) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Task, repository, or sandbox artifact not found.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const sandboxPayload = asRecord(sandboxArtifact.payload);
+  const draftArtifactId =
+    typeof sandboxPayload.sourceArtifactId === "number"
+      ? sandboxPayload.sourceArtifactId
+      : Number(sandboxPayload.sourceArtifactId);
+  const draftArtifact = Number.isInteger(draftArtifactId)
+    ? await loadOwnedArtifact(input.userId, draftArtifactId)
+    : undefined;
+  if (!draftArtifact || draftArtifact.type !== "draft_patch") {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Sandbox result is missing its draft patch source.",
+      approvalId: input.approval.id,
+      artifactId: sandboxArtifact.id,
+    });
+  }
+
+  const draftPayload = asRecord(draftArtifact.payload);
+  const unifiedDiff = typeof draftPayload.unifiedDiff === "string" ? draftPayload.unifiedDiff : "";
+  const sourceApprovalId =
+    typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
+  const sourceApproval = sourceApprovalId
+    ? await loadOwnedApproval(input.userId, sourceApprovalId)
+    : undefined;
+  if (!sourceApproval || sourceApproval.action !== "read_files") {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Draft patch is missing its approved file-read source.",
+      approvalId: input.approval.id,
+      artifactId: draftArtifact.id,
+    });
+  }
+
+  const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
+  const branch = sourceRequest.branch || repository.defaultBranch;
+  const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+  const token = repository.encryptedToken
+    ? encryptionService.decrypt(repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: repository.owner,
+    repo: repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+  const tests = Array.isArray(draftPayload.tests)
+    ? draftPayload.tests.filter((item): item is string => typeof item === "string")
+    : [];
+  const sandbox = buildOraxSandboxPatch({
+    unifiedDiff,
+    files: readResult.files,
+    suggestedTests: tests,
+  });
+  if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      status: "blocked",
+      action: "blocked",
+      message: "Sandbox patch no longer applies to the current branch.",
+      approvalId: input.approval.id,
+      artifactId: sandboxArtifact.id,
+    });
+  }
+
+  const requestCommands = Array.isArray(request.commands)
+    ? request.commands.filter((item): item is string => typeof item === "string")
+    : undefined;
+  const commands = normalizeOraxSandboxCommandIds(requestCommands);
+  const repositoryArchive = hasOraxWorkspaceCommandIds(commands)
+    ? await downloadGithubRepositoryTarball({
+        owner: repository.owner,
+        repo: repository.name,
+        branch,
+        token,
+      })
+    : null;
+  const commandResult = await runOraxIsolatedWorkspaceChecks({
+    commands,
+    patchedFiles: sandbox.patchedFiles,
+    staticChecks: sandbox.validation.checks,
+    repositoryArchive,
+  });
+  const [commandArtifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      approvalId: input.approval.id,
+      type: "command_result",
+      status: commandResult.passed ? "completed" : "failed",
+      title: `Controlled checks for ${sandboxArtifact.title}`,
+      summary: commandResult.summary,
+      payload: {
+        sourceArtifactId: sandboxArtifact.id,
+        draftArtifactId: draftArtifact.id,
+        sourceApprovalId: sourceApproval.id,
+        branch,
+        executedAt: new Date().toISOString(),
+        ...commandResult,
+        validation: {
+          applied: sandbox.validation.applied,
+          changedFiles: sandbox.validation.changedFiles,
+          errors: sandbox.validation.errors,
+        },
+      },
+    })
+    .returning();
+  const [updatedApproval] = await db
+    .update(oraxTaskApprovalsTable)
+    .set({
+      status: commandResult.passed ? "completed" : "failed",
+      result: {
+        artifactId: commandArtifact.id,
+        passed: commandResult.passed,
+        commands: commandResult.commands.map((command) => ({
+          id: command.id,
+          status: command.status,
+          exitCode: command.exitCode,
+        })),
+      },
+      completedAt: new Date(),
+    })
+    .where(eq(oraxTaskApprovalsTable.id, input.approval.id))
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      status: commandResult.passed ? "completed" : "blocked",
+      result: {
+        ...asRecord(input.task.result),
+        controlledChecks: {
+          artifactId: commandArtifact.id,
+          passed: commandResult.passed,
+          commands: commandResult.commands.length,
+        },
+        message: commandResult.passed
+          ? "ORAX ran approval-gated checks in an isolated temporary workspace."
+          : "ORAX approval-gated checks failed.",
+      },
+      updatedAt: new Date(),
+      completedAt: commandResult.passed ? new Date() : null,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    status: commandResult.passed ? "continued" : "blocked",
+    action: "run_approved_checks",
+    message: commandResult.passed
+      ? `Controlled checks passed: ${commandResult.commands.length} check${commandResult.commands.length === 1 ? "" : "s"} completed.`
+      : `Controlled checks failed: ${commandResult.commands.length} check${commandResult.commands.length === 1 ? "" : "s"} completed.`,
+    approvalId: updatedApproval.id,
+    artifactId: commandArtifact.id,
+    approval: updatedApproval,
+    artifact: commandArtifact,
+  });
+}
+
+function buildOraxRunnerReadPaths(
+  task: OraxTask,
+  messages: Array<{ role: string; content: string; metadata?: unknown }>,
+): string[] {
+  const suggestionPaths: string[] = [];
+  for (const message of messages) {
+    const metadata = asRecord(message.metadata);
+    const suggestions = Array.isArray(metadata.actionSuggestions) ? metadata.actionSuggestions : [];
+    for (const item of suggestions) {
+      const suggestion = asRecord(item);
+      if (suggestion.type !== "read_files" || !Array.isArray(suggestion.paths)) continue;
+      suggestionPaths.push(
+        ...suggestion.paths.filter((pathName): pathName is string => typeof pathName === "string"),
+      );
+    }
+  }
+
+  const merged = mergeOraxDetectedPaths([
+    ...suggestionPaths,
+    ...messages.flatMap((message) => extractOraxCandidatePaths(message.content)),
+    ...extractOraxCandidatePaths(task.prompt),
+    "README.md",
+    "package.json",
+    "tsconfig.json",
+  ]).slice(0, ORAX_FILE_READ_LIMITS.maxFiles);
+  return normalizeOraxFileReadPaths(merged);
+}
+
+function latestOraxUserMessage(messages: Array<{ role: string; content: string }>): string | null {
+  return messages.find((message) => message.role === "user")?.content ?? null;
 }
 
 async function persistOraxTimelineMessage(input: OraxTimelineMessageInput): Promise<void> {

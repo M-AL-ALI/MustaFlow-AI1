@@ -109,6 +109,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   by durable `orax_task_messages`; mobile keeps the same Orax timeline synced
   through Orax-owned task-message polling. Neither platform may use Ora chat
   streaming or Ora history for Orax task events.
+- Website and mobile expose the same inline Continue action. Continue advances
+  the Orax-only approval-gated runner: it requests the next required approval,
+  runs already approved safe steps, drafts from approved reads, validates in
+  sandbox after approval, and writes each result back into the task thread.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.

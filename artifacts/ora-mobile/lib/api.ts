@@ -38,6 +38,7 @@ import type {
   OraxTaskApproval,
   OraxTaskKind,
   OraxTaskMessage,
+  OraxTaskRunnerResult,
   PaymentMethodInfo,
   RealtimeDiagnostics,
   RealtimeHeartbeatResult,
@@ -1189,6 +1190,12 @@ export async function listTaskArtifacts(taskId: number): Promise<OraxArtifact[]>
     `/api/orax/tasks/${taskId}/artifacts`,
   );
   return data.artifacts ?? [];
+}
+
+export function continueTask(taskId: number): Promise<OraxTaskRunnerResult> {
+  return jsonRequest(`/api/orax/tasks/${taskId}/continue`, {
+    method: "POST",
+  });
 }
 
 export function requestFileReadApproval(input: {

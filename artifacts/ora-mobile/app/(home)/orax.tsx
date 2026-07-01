@@ -48,6 +48,7 @@ import {
   addRepository,
   appendTaskMessage,
   connectRepositoryGithubToken,
+  continueTask,
   createApprovedGithubPr,
   createTask,
   decideApproval,
@@ -890,6 +891,13 @@ export default function OraxScreen() {
     ],
   );
 
+  const continueCurrentTask = useCallback(async () => {
+    if (!selectedTask) return;
+    await runAction("continue-task", async () => {
+      await continueTask(selectedTask.id);
+    });
+  }, [runAction, selectedTask]);
+
   const toggleCommand = useCallback((id: string) => {
     setSelectedCommands((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
@@ -1116,6 +1124,15 @@ export default function OraxScreen() {
                     <SuggestionCard
                       suggestion={latestAssistantSuggestion}
                       onPress={() => applySuggestion(latestAssistantSuggestion)}
+                    />
+                  ) : null}
+                  {selectedTask ? (
+                    <Button
+                      label="Continue"
+                      icon={RefreshCw}
+                      variant="secondary"
+                      loading={busyAction === "continue-task"}
+                      onPress={() => void continueCurrentTask()}
                     />
                   ) : null}
                   {selectedTask ? (

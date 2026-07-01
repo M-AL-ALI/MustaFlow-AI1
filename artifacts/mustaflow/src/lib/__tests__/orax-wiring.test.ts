@@ -36,6 +36,7 @@ describe("ORAX product-surface wiring", () => {
       "/api/orax/tasks",
       "/api/orax/tasks/${taskId}/messages",
       "/api/orax/tasks/${taskId}/events",
+      "/api/orax/tasks/${taskId}/continue",
       "/api/orax/tasks/${taskId}/approvals",
       "/api/orax/tasks/${taskId}/artifacts",
       "/api/orax/approvals/${approvalId}",
@@ -58,7 +59,9 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content, metadata)");
     expect(oraxPage).toContain("Task created, but first message failed to save");
     expect(oraxPage).toContain("connectOraxTaskEventStream");
+    expect(oraxPage).toContain("continueSelectedTask");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/events");
+    expect(oraxPage).toContain("/api/orax/tasks/${taskId}/continue");
     expect(oraxPage).toContain('headers: { Accept: "text/event-stream" }');
     expect(oraxPage).toContain("new TextDecoder()");
     expect(oraxPage).toContain("mergeOraxTaskMessages");
@@ -153,6 +156,9 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("setInterval(() =>");
     expect(mobileOraxScreen).toContain("listTaskMessages(taskId)");
     expect(mobileOraxScreen).toContain("mergeOraxTaskMessages");
+    expect(mobileOraxScreen).toContain("continueCurrentTask");
+    expect(mobileApi).toContain("continueTask(taskId: number)");
+    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/continue");
     expect(mobileOraxScreen).not.toContain('label="Send"');
     expect(mobileOraxScreen).not.toContain("setHomeComposeOpen((value) => !value)");
     expect(mobileOraxScreen).not.toContain("{homeComposeOpen ? (");
@@ -168,6 +174,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("void runSandboxValidation(approval.id)");
     expect(oraxPage).toContain("void runControlledChecks(approval.id)");
     expect(oraxPage).toContain("void createGithubPr(approval.id)");
+    expect(oraxPage).toContain("void continueSelectedTask()");
     expect(oraxPage).toContain('className="hidden"');
     expect(oraxPage).toContain('aria-hidden="true"');
     expect(oraxPage).not.toContain('showInspector ? "flex"');
@@ -179,6 +186,7 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain('void runAction("sandbox-approval"');
     expect(mobileOraxScreen).toContain('void runAction("command-approval"');
     expect(mobileOraxScreen).toContain('void runAction("pr-approval"');
+    expect(mobileOraxScreen).toContain('runAction("continue-task"');
     expect(mobileOraxScreen).toContain(
       'approval.status === "pending" || approval.status === "approved"',
     );
@@ -193,6 +201,11 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain('router.get("/orax/tasks/:id/events"');
     expect(oraxApiRoute).toContain('"Content-Type": "text/event-stream"');
     expect(oraxApiRoute).toContain("loadOraxTaskMessagesAfter");
+    expect(oraxApiRoute).toContain('router.post("/orax/tasks/:id/continue"');
+    expect(oraxApiRoute).toContain("continueOraxTaskRunner");
+    expect(oraxApiRoute).toContain("runner_continue");
+    expect(oraxApiRoute).toContain("runOraxRunnerApprovedFileRead");
+    expect(oraxApiRoute).toContain("requestOraxRunnerCommandApproval");
     expect(oraxApiRoute).toContain("composerMetadataSchema");
     expect(oraxApiRoute).toContain('permissionMode: z.enum(["ask", "auto", "read_only"])');
     expect(oraxApiRoute).toContain(

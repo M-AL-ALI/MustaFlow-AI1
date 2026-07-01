@@ -523,6 +523,16 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain('event: "checks_completed"');
     expect(routeSource).toContain('event: "pr_created"');
     expect(routeSource).toContain('event: "pr_failed"');
+    expect(routeSource).toContain('router.post("/orax/tasks/:id/continue"');
+    expect(routeSource).toContain("continueOraxTaskRunner");
+    expect(routeSource).toContain("runner_continue");
+    expect(routeSource).toContain("runOraxRunnerApprovedFileRead");
+    expect(routeSource).toContain("runOraxRunnerApprovedSandbox");
+    expect(routeSource).toContain("runOraxRunnerApprovedChecks");
+    expect(routeSource).toContain("requestOraxRunnerFileReadApproval");
+    expect(routeSource).toContain("requestOraxRunnerCommandApproval");
+    expect(routeSource).toContain("Review approval #");
+    expect(routeSource).toContain("Type CREATE PR");
     expect(routeSource).not.toContain("/public-ai/chat");
     expect(routeSource).not.toContain("/projects/");
     expect(routeSource).not.toContain("deductCredits");

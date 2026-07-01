@@ -303,6 +303,16 @@ type OraxArtifact = {
   updatedAt: string;
 };
 
+type OraxTaskRunnerResult = {
+  status: "continued" | "waiting" | "blocked";
+  action: string;
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+  approval?: OraxApproval;
+  artifact?: OraxArtifact;
+};
+
 type OraxFailureInfo = {
   code?: string;
   message?: string;
@@ -637,6 +647,7 @@ export default function OraxPage() {
   const [runningSandboxApprovalId, setRunningSandboxApprovalId] = useState<number | null>(null);
   const [runningCommandApprovalId, setRunningCommandApprovalId] = useState<number | null>(null);
   const [creatingPrApprovalId, setCreatingPrApprovalId] = useState<number | null>(null);
+  const [continuingTask, setContinuingTask] = useState(false);
   const [generatingArtifactApprovalId, setGeneratingArtifactApprovalId] = useState<number | null>(
     null,
   );
@@ -1675,6 +1686,43 @@ export default function OraxPage() {
     }
   }
 
+  async function continueSelectedTask() {
+    if (!selectedTask || continuingTask) return;
+    const taskId = selectedTask.id;
+    setContinuingTask(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/orax/tasks/${taskId}/continue`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not continue Orax task");
+      }
+      const body = (await res.json()) as OraxTaskRunnerResult;
+      if (body.approval) {
+        setApprovals((prev) => [
+          body.approval!,
+          ...prev.filter((approval) => approval.id !== body.approval!.id),
+        ]);
+      }
+      if (body.artifact) {
+        setArtifacts((prev) => [
+          body.artifact!,
+          ...prev.filter((artifact) => artifact.id !== body.artifact!.id),
+        ]);
+      }
+      setPendingSuggestionConfirmation(null);
+      setSuggestionPrConfirmationText("");
+      void load();
+      void loadTaskMessages(taskId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not continue Orax task");
+    } finally {
+      setContinuingTask(false);
+    }
+  }
+
   const selectedTaskRepository = selectedTask
     ? (repositories.find((repo) => repo.id === selectedTask.repositoryId) ?? selectedRepository)
     : selectedRepository;
@@ -2069,6 +2117,23 @@ export default function OraxPage() {
                       </button>
                     </div>
                   </section>
+                ) : null}
+                {selectedTask ? (
+                  <div className="flex justify-start">
+                    <button
+                      type="button"
+                      onClick={() => void continueSelectedTask()}
+                      disabled={continuingTask}
+                      className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
+                    >
+                      {continuingTask ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      Continue
+                    </button>
+                  </div>
                 ) : null}
                 {approvals
                   .filter(

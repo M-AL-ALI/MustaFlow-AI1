@@ -792,6 +792,16 @@ export interface OraxApprovalWithArtifact {
   reused?: boolean;
 }
 
+export interface OraxTaskRunnerResult {
+  status: "continued" | "waiting" | "blocked";
+  action: string;
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+  approval?: OraxTaskApproval;
+  artifact?: OraxTaskArtifact;
+}
+
 export type OraxSandboxResult = OraxApprovalWithArtifact;
 export type OraxCommandResult = OraxApprovalWithArtifact;
 export type OraxPRResult = OraxApprovalWithArtifact;
