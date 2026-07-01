@@ -1154,6 +1154,10 @@ export default function OraxPage() {
     } else if (suggestion.type === "controlled_checks" && suggestion.artifactId) {
       created = await requestCommandApproval(suggestion.artifactId);
     } else if (suggestion.type === "github_pr" && suggestion.artifactId) {
+      if (suggestionPrConfirmationText.trim() !== "CREATE PR") {
+        setError("Type CREATE PR to enable approval");
+        return;
+      }
       created = await requestGithubPrApproval(suggestion.artifactId, suggestionPrConfirmationText);
     }
 
@@ -1192,1777 +1196,631 @@ export default function OraxPage() {
     }
   }
 
+  const selectedTaskRepository = selectedTask
+    ? repositories.find((repo) => repo.id === selectedTask.repositoryId) ?? selectedRepository
+    : selectedRepository;
+
   return (
-    <div className="min-h-[100dvh] bg-background text-foreground">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/mode-select"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Back to mode select"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Code2 className="h-4 w-4" />
-            </div>
-            <div>
-              <h1 className="text-sm font-semibold">ORAX</h1>
-              <p className="text-xs text-muted-foreground">Coding agent foundation</p>
-            </div>
+    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link
+            href="/mode-select"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Back to mode select"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted">
+            <Code2 className="h-4 w-4 text-foreground" />
           </div>
-          <ThemeToggle />
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-semibold">ORAX</h1>
+            <p className="truncate text-xs text-muted-foreground">
+              Codex workspace for repository tasks
+            </p>
+          </div>
         </div>
+        <ThemeToggle />
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[360px_1fr]">
-        <aside className="space-y-4">
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center gap-2">
-              <GitBranch className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">Repositories</h2>
+      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)_360px]">
+        <aside className="hidden min-h-0 flex-col border-r border-border bg-muted/20 lg:flex">
+          <div className="border-b border-border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold uppercase text-muted-foreground">Tasks</div>
+                <div className="text-sm font-semibold">Task history</div>
+              </div>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </div>
-            <div className="mt-4 space-y-2">
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Ask ORAX to inspect, plan, review, or fix code..."
+              className="mt-3 min-h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {TASK_KINDS.map((kind) => (
+                <button
+                  key={kind.value}
+                  type="button"
+                  onClick={() => setTaskKind(kind.value)}
+                  className={cn(
+                    "rounded-md border px-2 py-1 text-[11px] font-medium",
+                    taskKind === kind.value
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {kind.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => void createTask({ startThread: true })}
+              disabled={!selectedRepository || !prompt.trim() || submittingTask}
+              className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submittingTask ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              Start ORAX chat
+            </button>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              The first message becomes the task prompt, stored separately from Ora chat and
+              normal Ora history or AI Builder. Orax is not Ora and not AI Builder.
+            </p>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {tasks.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
+                No tasks yet. Start a chat to create a Codex-style ORAX thread.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {tasks.map((task) => {
+                  const repo = repositories.find((item) => item.id === task.repositoryId);
+                  const active = task.id === selectedTask?.id;
+                  return (
+                    <button
+                      key={task.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTaskId(task.id);
+                        setSelectedRepoId(task.repositoryId);
+                      }}
+                      className={cn(
+                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                        active
+                          ? "border-primary bg-background shadow-sm"
+                          : "border-transparent hover:border-border hover:bg-background",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">
+                            {task.title || task.prompt || `Task #${task.id}`}
+                          </div>
+                          <div className="mt-1 truncate text-xs text-muted-foreground">
+                            {repo ? `${repo.owner}/${repo.name}` : "repository"} - {task.status}
+                          </div>
+                        </div>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {task.kind}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border p-3">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">Repository</div>
+            <div className="mt-2 space-y-2">
               <input
                 value={repositoryUrl}
                 onChange={(event) => setRepositoryUrl(event.target.value)}
                 placeholder="https://github.com/owner/repo"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
               />
-              <input
-                value={defaultBranch}
-                onChange={(event) => setDefaultBranch(event.target.value)}
-                placeholder="main"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-              <button
-                onClick={() => void addRepository()}
-                disabled={submittingRepo || !repositoryUrl.trim()}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submittingRepo ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <GitBranch className="h-4 w-4" />
-                )}
-                Add repository
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-2">
-              {repositories.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                  Add a repository URL to create the first ORAX workspace target.
-                </p>
-              ) : (
-                repositories.map((repo) => (
-                  <button
-                    key={repo.id}
-                    onClick={() => setSelectedRepoId(repo.id)}
-                    className={cn(
-                      "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
-                      selectedRepository?.id === repo.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-muted",
-                    )}
-                  >
-                    <div className="font-medium">
-                      {repo.owner}/{repo.name}
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {repo.provider} - {repo.defaultBranch} - {repo.connectionStatus}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">Read-only GitHub access</h2>
-            </div>
-            {selectedRepository ? (
-              <div className="mt-4 space-y-3">
-                <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                  {selectedRepository.githubAccountName ? (
-                    <>
-                      Connected as{" "}
-                      <span className="font-medium text-foreground">
-                        {selectedRepository.githubAccountName}
-                      </span>
-                      {selectedRepository.tokenScopes ? (
-                        <span> with scopes: {selectedRepository.tokenScopes}</span>
-                      ) : null}
-                    </>
-                  ) : (
-                    "Public repositories can scan without a token. Private repositories need a read-only GitHub token."
-                  )}
-                </div>
+              <div className="flex gap-2">
                 <input
-                  value={githubToken}
-                  onChange={(event) => setGithubToken(event.target.value)}
-                  type="password"
-                  autoComplete="off"
-                  placeholder="GitHub token for read-only access"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  value={defaultBranch}
+                  onChange={(event) => setDefaultBranch(event.target.value)}
+                  placeholder="main"
+                  className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
                 <button
-                  onClick={() => void connectGithub()}
-                  disabled={connectingGithub || !githubToken.trim()}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => void addRepository()}
+                  disabled={submittingRepo || !repositoryUrl.trim()}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
                 >
-                  {connectingGithub ? (
+                  {submittingRepo ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <KeyRound className="h-4 w-4" />
+                    <GitBranch className="h-4 w-4" />
                   )}
-                  Connect read-only token
                 </button>
-                <button
-                  onClick={() => void scanRepository()}
-                  disabled={scanningRepository}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {scanningRepository ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  Scan repository
-                </button>
-                <div className="text-xs text-muted-foreground">
-                  Last scan:{" "}
-                  {selectedRepository.lastScanAt
-                    ? new Date(selectedRepository.lastScanAt).toLocaleString()
-                    : "Not scanned yet"}
-                  {selectedRepository.scanStatus ? ` - ${selectedRepository.scanStatus}` : null}
-                </div>
               </div>
-            ) : (
-              <p className="mt-4 rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                Add a repository before connecting GitHub access.
-              </p>
-            )}
-          </section>
-
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">Current capabilities</h2>
             </div>
-            <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
-              {(capabilities?.available ?? []).map((item) => (
-                <li key={item} className="flex gap-2">
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-4 rounded-md border border-yellow-500/20 bg-yellow-500/10 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-yellow-700 dark:text-yellow-400">
-                <LockKeyhole className="h-3.5 w-3.5" />
-                Locked until approval layer
-              </div>
-              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                {(capabilities?.lockedUntilApprovalLayer ?? []).map((item) => (
-                  <li key={item}>- {item}</li>
-                ))}
-              </ul>
-            </div>
-          </section>
+          </div>
         </aside>
 
-        <section className="space-y-4">
+        <section className="flex min-h-0 flex-col bg-background">
           {error ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}
             </div>
           ) : null}
 
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <FileSearch className="h-4 w-4 text-primary" />
-                  <h2 className="text-sm font-semibold">Repository scan</h2>
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">
+                ORAX task thread
+              </div>
+              <h2 className="truncate text-base font-semibold">
+                {selectedTask?.title || selectedTask?.prompt || "Start an ORAX task"}
+              </h2>
+              <p className="truncate text-xs text-muted-foreground">
+                {selectedTaskRepository
+                  ? `${selectedTaskRepository.owner}/${selectedTaskRepository.name}`
+                  : "Connect a repository to begin"}
+                {selectedTask ? ` - task #${selectedTask.id} - ${selectedTask.status}` : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full border border-border px-2 py-1">
+                Thread status: {selectedTask?.status ?? "idle"}
+              </span>
+              <span className="rounded-full border border-border px-2 py-1">
+                {taskMessages.length} messages
+              </span>
+              <span className="rounded-full border border-border px-2 py-1">
+                Pending approval: {pendingApprovals.length}
+              </span>
+              <span className="rounded-full border border-border px-2 py-1">
+                {artifacts.length} artifacts
+              </span>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            {!selectedTask ? (
+              <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted">
+                  <Bot className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Read-only repository metadata and file-tree summary. Source editing and terminal
-                  execution remain locked.
+                <h3 className="mt-4 text-lg font-semibold">Create a Codex-style ORAX thread</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Pick a repository, describe the work, and ORAX will keep the task conversation,
+                  approvals, artifacts, and pull request flow in one isolated workspace.
                 </p>
               </div>
-              {loadingScans ? (
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              ) : null}
-            </div>
-
-            {latestScan ? (
-              <div className="mt-4 space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <Metric label="Status" value={latestScan.status} />
-                  <Metric label="Branch" value={latestScan.branch} />
-                  <Metric
-                    label="Commit"
-                    value={latestScan.commitSha ? latestScan.commitSha.slice(0, 10) : "Unknown"}
-                  />
-                  <Metric label="Size" value={formatBytes(latestScan.totalBytes)} />
-                  <Metric label="Files" value={String(latestScan.fileCount)} />
-                  <Metric label="Folders" value={String(latestScan.directoryCount)} />
-                  <Metric
-                    label="Scanned"
-                    value={new Date(latestScan.createdAt).toLocaleString()}
-                    wide
-                  />
-                </div>
-
-                {latestScan.error ? (
-                  <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    {latestScan.error}
-                  </div>
-                ) : null}
-
-                {latestScanLanguages.length ? (
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase text-muted-foreground">
-                      Languages
-                    </h3>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {latestScanLanguages.map(([language, count]) => (
-                        <span
-                          key={language}
-                          className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground"
-                        >
-                          {language}: {count}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {latestScan.summary?.sampleFiles?.length ? (
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase text-muted-foreground">
-                      Sample files
-                    </h3>
-                    <div className="mt-2 grid gap-1 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground sm:grid-cols-2">
-                      {latestScan.summary.sampleFiles.slice(0, 20).map((file) => (
-                        <div key={file} className="truncate">
-                          {file}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+            ) : taskMessages.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
+                No messages yet. Ask ORAX to inspect files, explain pending approvals, or continue
+                from the current checkpoint.
               </div>
             ) : (
-              <p className="mt-4 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                No scans yet. Add a GitHub repository, then run a read-only scan.
-              </p>
-            )}
-          </section>
-
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-primary" />
-                  <h2 className="text-sm font-semibold">Start ORAX chat</h2>
-                </div>
-                <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                  Start by describing the coding work. ORAX will create a task from this message,
-                  save it in the task thread, and continue with approval-gated next steps.
-                </p>
+              <div className="mx-auto flex max-w-4xl flex-col gap-3">
+                {taskMessages.map((message) => {
+                  const isUser = message.role === "user";
+                  const isTimeline = message.role === "system" || message.role === "tool";
+                  const suggestions =
+                    message.role === "assistant" ? (message.metadata?.actionSuggestions ?? []) : [];
+                  return (
+                    <article
+                      key={message.id}
+                      className={cn(
+                        "rounded-md border px-4 py-3 text-sm",
+                        isUser
+                          ? "ml-auto max-w-[78%] border-primary bg-primary text-primary-foreground"
+                          : isTimeline
+                            ? "border-dashed border-border bg-muted/40 text-muted-foreground"
+                            : "border-border bg-card",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "mb-1 text-[11px] font-semibold uppercase",
+                          isUser ? "text-primary-foreground/80" : "text-muted-foreground",
+                        )}
+                      >
+                        {isUser
+                          ? "You"
+                          : message.role === "tool"
+                            ? "Tool result"
+                            : isTimeline
+                              ? "Timeline"
+                              : "ORAX"}
+                        {message.createdAt
+                          ? ` - ${new Date(message.createdAt).toLocaleString()}`
+                          : ""}
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                      {message.approvalId || message.artifactId ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                          {message.approvalId ? (
+                            <span className="rounded-full border border-border px-2 py-0.5">
+                              Approval #{message.approvalId}
+                            </span>
+                          ) : null}
+                          {message.artifactId ? (
+                            <span className="rounded-full border border-border px-2 py-0.5">
+                              Artifact #{message.artifactId}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {suggestions.length ? (
+                        <div className="mt-3 grid gap-2">
+                          {suggestions.map((suggestion, index) => (
+                            <button
+                              key={`${suggestion.type}-${suggestion.artifactId ?? suggestion.approvalId ?? index}`}
+                              type="button"
+                              onClick={() => applyTaskActionSuggestion(suggestion)}
+                              className="rounded-md border border-border bg-background px-3 py-2 text-left hover:bg-muted"
+                            >
+                              <div className="text-xs font-semibold text-foreground">
+                                {suggestion.title}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {suggestion.description}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
               </div>
-              <div className="flex rounded-md border border-border p-1">
-                {TASK_KINDS.map((kind) => (
+            )}
+          </div>
+
+          <div className="shrink-0 border-t border-border bg-background p-3">
+            <div className="mx-auto mb-2 flex max-w-4xl flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase text-muted-foreground">
+                Task conversation
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setTaskMessageDraft("Where are we right now, and what is the next approved step?")
+                }
+                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+              >
+                Resume task
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setTaskMessageDraft(
+                    "Explain approval: what is pending, what is the risk, and what happens if I approve it?",
+                  )
+                }
+                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+              >
+                Explain approval
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setTaskMessageDraft(
+                    "Summarize result: what changed, what checks ran, and what remains?",
+                  )
+                }
+                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+              >
+                Summarize result
+              </button>
+            </div>
+            <div className="mx-auto flex max-w-4xl gap-2">
+              <textarea
+                value={taskMessageDraft}
+                onChange={(event) => setTaskMessageDraft(event.target.value)}
+                placeholder={
+                  selectedTask
+                    ? "Message ORAX about this task..."
+                    : "Create a task from the left panel first..."
+                }
+                className="min-h-12 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={() => void sendTaskMessage()}
+                disabled={!selectedTask || !taskMessageDraft.trim() || sendingTaskMessage}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {sendingTaskMessage ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <aside className="hidden min-h-0 flex-col border-l border-border bg-muted/20 lg:flex">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <section className="rounded-md border border-border bg-card p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">
+                    Current checkpoint
+                  </div>
+                  <div className="text-sm font-semibold">Current state</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskMessageDraft(
+                      "Where are we right now, and what is the next approved step?",
+                    )
+                  }
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs hover:bg-muted"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Resume
+                </button>
+              </div>
+              <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                Next action in this thread: {threadNextAction}
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {currentCheckpoint?.nextStep ??
+                  threadNextAction ??
+                  "ORAX is isolated from Ora and only uses task-scoped repository context."}
+              </p>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <Metric label="Pending" value={String(pendingApprovals.length)} />
+                <Metric label="Timeline" value={String(timelineMessageCount)} />
+                <Metric
+                  label="Checks"
+                  value={`${commandPassedCount}/${commandPassedCount + commandFailureCount}`}
+                />
+              </div>
+            </section>
+
+            <section className="mt-3 rounded-md border border-border bg-card p-3">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">Approvals</div>
+              <div className="mt-3 space-y-2">
+                {approvals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No approvals requested yet.</p>
+                ) : (
+                  approvals.slice(0, 5).map((approval) => (
+                    <div key={approval.id} className="rounded-md border border-border bg-background p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium">
+                            {formatOraxApprovalAction(approval.action)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            #{approval.id} - {approval.status}
+                          </div>
+                        </div>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {approval.status}
+                        </span>
+                      </div>
+                      {approval.status === "pending" ? (
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => void decideApproval(approval.id, "approved")}
+                            disabled={decidingApprovalId === approval.id}
+                            className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => void decideApproval(approval.id, "denied")}
+                            disabled={decidingApprovalId === approval.id}
+                            className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Deny
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="mt-3 rounded-md border border-border bg-card p-3">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">
+                Execution lifecycle
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Every lifecycle action still uses the existing explicit approval buttons.
+              </p>
+              <div className="mt-3 space-y-2">
+                {threadLifecycleItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No lifecycle events yet.</p>
+                ) : (
+                  threadLifecycleItems.slice(0, 6).map((item) => (
+                    <div key={item.id} className="rounded-md border border-border bg-background p-2">
+                      <div className="text-[11px] font-semibold uppercase text-muted-foreground">
+                        {item.label}
+                      </div>
+                      <div className="mt-1 text-sm font-medium">{item.title}</div>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                        {item.description}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="mt-3 rounded-md border border-border bg-card p-3">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">
+                Workflow controls
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Execution still requires explicit approval controls.
+              </p>
+              <textarea
+                value={approvalPaths}
+                onChange={(event) => setApprovalPaths(event.target.value)}
+                placeholder="Files to read, one per line"
+                className="mt-3 min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <input
+                value={approvalReason}
+                onChange={(event) => setApprovalReason(event.target.value)}
+                placeholder="Why ORAX needs these files"
+                className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={() => void requestFileReadApproval()}
+                disabled={!selectedTask || requestingApproval || !approvalPaths.trim()}
+                className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
+              >
+                {requestingApproval ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="h-4 w-4" />
+                )}
+                Create approval request
+              </button>
+              <textarea
+                value={draftInstructions}
+                onChange={(event) => setDraftInstructions(event.target.value)}
+                placeholder="Draft patch instructions"
+                className="mt-3 min-h-16 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={() =>
+                  latestDraftPatch
+                    ? void requestSandboxApproval(latestDraftPatch.id)
+                    : readResult
+                      ? void generateDraftPatch(
+                          approvals.find(
+                            (approval) =>
+                              approval.action === "read_files" &&
+                              approval.status === "completed",
+                          )?.id ?? 0,
+                        )
+                      : undefined
+                }
+                disabled={!selectedTask || (!latestDraftPatch && !readResult)}
+                className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                {latestDraftPatch ? "Request sandbox approval" : "Generate draft patch"}
+              </button>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {ORAX_COMMAND_OPTIONS.map((option) => (
                   <button
-                    key={kind.value}
-                    onClick={() => setTaskKind(kind.value)}
+                    key={option.id}
+                    type="button"
+                    onClick={() => toggleCommandId(option.id)}
                     className={cn(
-                      "rounded px-2.5 py-1 text-xs font-medium",
-                      taskKind === kind.value
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      "rounded-md border px-2 py-1 text-[11px]",
+                      selectedCommandIds.includes(option.id)
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background text-muted-foreground hover:bg-muted",
                     )}
                   >
-                    {kind.label}
+                    {option.id.replace("pnpm-", "")}
                   </button>
                 ))}
               </div>
-            </div>
-
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Chat with ORAX. Example: review this repository and prepare a safe fix for the login bug..."
-              className="mt-4 min-h-32 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                Target:{" "}
-                {selectedRepository ? (
-                  <span className="font-medium text-foreground">
-                    {selectedRepository.owner}/{selectedRepository.name}
-                  </span>
-                ) : (
-                  "Add a repository first"
-                )}
+              <button
+                onClick={() =>
+                  latestSandboxResult ? void requestCommandApproval(latestSandboxResult.id) : undefined
+                }
+                disabled={!latestSandboxResult || selectedCommandIds.length === 0}
+                className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
+              >
+                <Terminal className="h-4 w-4" />
+                Request controlled checks
+              </button>
+              <input
+                value={prConfirmationText}
+                onChange={(event) => setPrConfirmationText(event.target.value)}
+                placeholder="Type CREATE PR"
+                className="mt-3 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Type CREATE PR in Workflow controls to request PR approval.
               </p>
               <button
-                onClick={() => void createTask({ startThread: true })}
-                disabled={!selectedRepository || !prompt.trim() || submittingTask}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() =>
+                  latestCommandResult ? void requestGithubPrApproval(latestCommandResult.id) : undefined
+                }
+                disabled={!readyForPrApproval || prConfirmationText.trim() !== "CREATE PR"}
+                className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
               >
-                {submittingTask ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-                Start chat
+                <GitPullRequest className="h-4 w-4" />
+                Request PR approval
               </button>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              The first message becomes the task prompt and the first message in the ORAX-only task
-              conversation. It never enters normal Ora history or AI Builder.
-            </p>
-          </section>
+            </section>
 
-          <section className="rounded-lg border border-border bg-card p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-primary" />
-                  <h2 className="text-sm font-semibold">ORAX task thread</h2>
-                </div>
-                <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                  Chat with ORAX inside one coding task. Checkpoints, timeline events, pending
-                  approvals, and workflow results stay in this ORAX-only thread.
-                </p>
+            <section className="mt-3 rounded-md border border-border bg-card p-3">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">
+                Latest execution result
               </div>
-              {loadingApprovals ? (
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              ) : null}
-            </div>
-
-            {selectedTask ? (
-              <div className="mt-4 space-y-4">
-                <select
-                  value={selectedTask.id}
-                  onChange={(event) => setSelectedTaskId(Number(event.target.value))}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {tasks.map((task) => (
-                    <option key={task.id} value={task.id}>
-                      #{task.id} - {task.title}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">Thread status</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Live task context for this ORAX conversation. These counts are task-scoped
-                        and never enter normal Ora history or AI Builder.
-                      </p>
-                    </div>
-                    <span className="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
-                      Task #{selectedTask.id}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-5">
-                    <Metric label="Messages" value={String(taskMessages.length)} />
-                    <Metric label="Timeline" value={String(timelineMessageCount)} />
-                    <Metric label="Pending approvals" value={String(pendingApprovals.length)} />
-                    <Metric label="Artifacts" value={String(artifacts.length)} />
-                    <Metric label="Latest artifact" value={latestArtifact?.type ?? "none"} />
+              {latestArtifact ? (
+                <div className="mt-2 rounded-md border border-border bg-background p-2 text-sm">
+                  <div className="font-medium">{latestArtifact.title}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {latestArtifact.type.replace(/_/g, " ")} - {latestArtifact.status}
                   </div>
                 </div>
-
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-primary" />
-                        <h3 className="text-sm font-semibold">Current checkpoint</h3>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        ORAX summarizes this task state inside the ORAX thread only. It is not Ora
-                        memory and it is not AI Builder context.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {currentCheckpoint ? (
-                        <span className="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
-                          {new Date(currentCheckpoint.updatedAt).toLocaleString()}
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setTaskMessageDraft(
-                            "Where are we right now, and what is the next approved step?",
-                          )
-                        }
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Resume
-                      </button>
-                    </div>
-                  </div>
-
-                  {currentCheckpoint ? (
-                    <div className="mt-3 space-y-3">
-                      <div>
-                        <div className="text-xs font-semibold uppercase text-muted-foreground">
-                          Goal
-                        </div>
-                        <p className="mt-1 text-sm text-foreground">{currentCheckpoint.goal}</p>
-                      </div>
-                      <div className="grid gap-2 text-xs sm:grid-cols-4">
-                        <div className="rounded-md border border-border bg-background px-3 py-2">
-                          <div className="text-muted-foreground">Status</div>
-                          <div className="mt-1 font-medium text-foreground">
-                            {currentCheckpoint.status}
-                          </div>
-                        </div>
-                        <div className="rounded-md border border-border bg-background px-3 py-2">
-                          <div className="text-muted-foreground">Approvals</div>
-                          <div className="mt-1 font-medium text-foreground">
-                            {currentCheckpoint.approvals.completed}/
-                            {currentCheckpoint.approvals.total} complete
-                          </div>
-                        </div>
-                        <div className="rounded-md border border-border bg-background px-3 py-2">
-                          <div className="text-muted-foreground">Pending</div>
-                          <div className="mt-1 font-medium text-foreground">
-                            {currentCheckpoint.approvals.pending}
-                          </div>
-                        </div>
-                        <div className="rounded-md border border-border bg-background px-3 py-2">
-                          <div className="text-muted-foreground">Artifacts</div>
-                          <div className="mt-1 font-medium text-foreground">
-                            {currentCheckpoint.artifacts.total}
-                          </div>
-                        </div>
-                      </div>
-                      {currentCheckpoint.filesReviewed.length ? (
-                        <div>
-                          <div className="text-xs font-semibold uppercase text-muted-foreground">
-                            Files reviewed
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {currentCheckpoint.filesReviewed.map((file) => (
-                              <span
-                                key={file}
-                                className="rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
-                              >
-                                {file}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {currentCheckpoint.latestBlocker ? (
-                        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                          {currentCheckpoint.latestBlocker}
-                        </div>
-                      ) : null}
-                      <div className="rounded-md border border-primary/25 bg-primary/10 px-3 py-2 text-xs text-primary">
-                        Next: {currentCheckpoint.nextStep}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No checkpoint yet. Create a task milestone, approval, or workflow result to
-                      generate the first checkpoint.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-4 w-4 text-primary" />
-                        <h3 className="text-sm font-semibold">Task conversation</h3>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Discuss this ORAX task. This thread is stored separately from Ora chat and
-                        AI Builder.
-                      </p>
-                    </div>
-                    {loadingTaskMessages ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    ) : null}
-                  </div>
-
-                  <div className="mt-3 rounded-md border border-primary/25 bg-primary/10 p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-semibold uppercase text-primary">
-                          Next action in this thread
-                        </div>
-                        <p className="mt-1 text-sm font-medium text-foreground">
-                          {threadNextAction}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          ORAX can discuss, prepare approval requests, and summarize results here.
-                          Execution still requires explicit approval controls.
-                        </p>
-                      </div>
-                      {primaryThreadSuggestion?.buttonLabel ? (
-                        <button
-                          type="button"
-                          onClick={() => applyTaskActionSuggestion(primaryThreadSuggestion)}
-                          className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-foreground hover:bg-muted"
-                        >
-                          {primaryThreadSuggestion.buttonLabel}
-                        </button>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setTaskMessageDraft(
-                            "Where are we right now, and what is the next approved step?",
-                          )
-                        }
-                        className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        Resume task
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setTaskMessageDraft("What should I approve next, and why is it safe?")
-                        }
-                        className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        Explain approval
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setTaskMessageDraft(
-                            "Summarize the latest result, blocker, and safest next step.",
-                          )
-                        }
-                        className="inline-flex h-8 items-center rounded-md border border-primary/30 bg-background px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        Summarize result
-                      </button>
-                    </div>
-                  </div>
-
-                  {pendingApprovals.length ? (
-                    <div className="mt-3 space-y-2">
-                      {pendingApprovals.map((approval) => (
-                        <article
-                          key={`thread-pending-${approval.id}`}
-                          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-xs font-semibold uppercase">
-                                Pending approval
-                              </div>
-                              <div className="mt-1 font-medium">
-                                {approval.action} request #{approval.id}
-                              </div>
-                              <p className="mt-1 text-xs">
-                                {approval.action === "read_files"
-                                  ? (approval.request.paths ?? []).join(", ")
-                                  : (approval.request.scope ??
-                                    `Artifact #${approval.request.artifactId ?? "unknown"}`)}
-                              </p>
-                              {approval.riskSummary ? (
-                                <p className="mt-1 text-xs">{approval.riskSummary}</p>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={() => void decideApproval(approval.id, "approved")}
-                                disabled={decidingApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-amber-300 bg-background px-2 text-xs font-medium text-foreground hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:hover:bg-amber-900/30"
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => void decideApproval(approval.id, "denied")}
-                                disabled={decidingApprovalId === approval.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-amber-300 bg-background px-2 text-xs font-medium text-foreground hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:hover:bg-amber-900/30"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                                Deny
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {threadLifecycleItems.length ? (
-                    <div className="mt-3 rounded-md border border-border bg-background p-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="text-xs font-semibold uppercase text-muted-foreground">
-                            Execution lifecycle
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Follow suggestions, approvals, file reads, patches, sandbox runs,
-                            checks, and PR results in the task thread. Every lifecycle action still
-                            uses the existing explicit approval buttons.
-                          </p>
-                        </div>
-                        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                          {threadLifecycleItems.length} recent
-                        </span>
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        {threadLifecycleItems.map((item) => (
-                          <article
-                            key={item.id}
-                            className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="text-xs font-semibold uppercase text-muted-foreground">
-                                  {item.label}
-                                </div>
-                                <div className="mt-1 font-medium text-foreground">{item.title}</div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              </div>
-                              <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
-                                {item.status}
-                              </span>
-                            </div>
-                            <OraxThreadLifecycleDetails item={item} />
-                            {item.source === "approval" ? (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {item.approval.status === "pending" ? (
-                                  <>
-                                    <button
-                                      onClick={() =>
-                                        void decideApproval(item.approval.id, "approved")
-                                      }
-                                      disabled={decidingApprovalId === item.approval.id}
-                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                    >
-                                      <Check className="h-3.5 w-3.5" />
-                                      Approve
-                                    </button>
-                                    <button
-                                      onClick={() =>
-                                        void decideApproval(item.approval.id, "denied")
-                                      }
-                                      disabled={decidingApprovalId === item.approval.id}
-                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                      Deny
-                                    </button>
-                                  </>
-                                ) : null}
-                                {item.approval.action === "read_files" &&
-                                item.approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void readApprovedFiles(item.approval.id)}
-                                    disabled={readingApprovalId === item.approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {readingApprovalId === item.approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <FileSearch className="h-3.5 w-3.5" />
-                                    )}
-                                    Read files
-                                  </button>
-                                ) : null}
-                                {item.approval.action === "read_files" &&
-                                ["approved", "completed"].includes(item.approval.status) ? (
-                                  <button
-                                    onClick={() => void generateDraftPatch(item.approval.id)}
-                                    disabled={generatingArtifactApprovalId === item.approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                  >
-                                    {generatingArtifactApprovalId === item.approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Code2 className="h-3.5 w-3.5" />
-                                    )}
-                                    Generate draft patch
-                                  </button>
-                                ) : null}
-                                {item.approval.action === "sandbox_run" &&
-                                item.approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void runSandboxValidation(item.approval.id)}
-                                    disabled={runningSandboxApprovalId === item.approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {runningSandboxApprovalId === item.approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Play className="h-3.5 w-3.5" />
-                                    )}
-                                    Run sandbox
-                                  </button>
-                                ) : null}
-                                {item.approval.action === "safe_check" &&
-                                item.approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void runControlledChecks(item.approval.id)}
-                                    disabled={runningCommandApprovalId === item.approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {runningCommandApprovalId === item.approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Terminal className="h-3.5 w-3.5" />
-                                    )}
-                                    Run checks
-                                  </button>
-                                ) : null}
-                                {item.approval.action === "github_pr" &&
-                                item.approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void createGithubPr(item.approval.id)}
-                                    disabled={creatingPrApprovalId === item.approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {creatingPrApprovalId === item.approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <GitPullRequest className="h-3.5 w-3.5" />
-                                    )}
-                                    Create PR
-                                  </button>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {item.artifact.type === "draft_patch" &&
-                                item.artifact.payload.unifiedDiff?.trim() ? (
-                                  <button
-                                    onClick={() => void requestSandboxApproval(item.artifact.id)}
-                                    disabled={
-                                      requestingSandboxApprovalArtifactId === item.artifact.id
-                                    }
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                  >
-                                    {requestingSandboxApprovalArtifactId === item.artifact.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <ShieldCheck className="h-3.5 w-3.5" />
-                                    )}
-                                    Request sandbox approval
-                                  </button>
-                                ) : null}
-                                {item.artifact.type === "sandbox_result" &&
-                                item.artifact.payload.applied ? (
-                                  <button
-                                    onClick={() => void requestCommandApproval(item.artifact.id)}
-                                    disabled={
-                                      requestingCommandApprovalArtifactId === item.artifact.id ||
-                                      selectedCommandIds.length === 0
-                                    }
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                  >
-                                    {requestingCommandApprovalArtifactId === item.artifact.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Terminal className="h-3.5 w-3.5" />
-                                    )}
-                                    Request checks
-                                  </button>
-                                ) : null}
-                                {item.artifact.type === "command_result" &&
-                                item.artifact.payload.passed === true ? (
-                                  <span className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                    Type CREATE PR in Workflow controls to request PR approval.
-                                  </span>
-                                ) : null}
-                                {item.artifact.payload.pullRequestUrl ? (
-                                  <a
-                                    href={item.artifact.payload.pullRequestUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted"
-                                  >
-                                    <GitPullRequest className="h-3.5 w-3.5" />
-                                    Open PR
-                                  </a>
-                                ) : null}
-                              </div>
-                            )}
-                          </article>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 max-h-72 space-y-2 overflow-auto rounded-md border border-border bg-background p-3">
-                    {taskMessages.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No messages yet. Ask ORAX how to approach this task, what is pending, or
-                        what the next approved step should be.
-                      </p>
-                    ) : (
-                      taskMessages.map((message) => {
-                        const isAssistant = message.role === "assistant";
-                        const isTimeline = message.role === "system" || message.role === "tool";
-                        const timelineLabel =
-                          message.metadata?.source === "orax-task-checkpoint"
-                            ? "Checkpoint"
-                            : message.role === "tool"
-                              ? "Tool result"
-                              : "Timeline";
-                        const suggestions = isAssistant
-                          ? (message.metadata?.actionSuggestions ?? [])
-                          : [];
-                        return (
-                          <div
-                            key={message.id}
-                            className={cn(
-                              "rounded-md px-3 py-2 text-sm",
-                              isAssistant
-                                ? "border border-border bg-muted/40"
-                                : isTimeline
-                                  ? "border border-dashed border-border bg-muted/30 text-muted-foreground"
-                                  : "ml-auto max-w-[88%] bg-primary text-primary-foreground",
-                            )}
-                          >
-                            <div
-                              className={cn(
-                                "mb-1 text-[11px] font-medium uppercase",
-                                isAssistant || isTimeline
-                                  ? "text-muted-foreground"
-                                  : "text-primary-foreground/80",
-                              )}
-                            >
-                              {isAssistant ? "ORAX" : isTimeline ? timelineLabel : "You"} -{" "}
-                              {new Date(message.createdAt).toLocaleString()}
-                            </div>
-                            {isTimeline ? (
-                              <div className="mb-2 flex flex-wrap gap-1.5">
-                                {message.approvalId ? (
-                                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                                    Approval #{message.approvalId}
-                                  </span>
-                                ) : null}
-                                {message.artifactId ? (
-                                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                                    Artifact #{message.artifactId}
-                                  </span>
-                                ) : null}
-                              </div>
-                            ) : null}
-                            <div className="whitespace-pre-wrap leading-relaxed">
-                              {message.content}
-                            </div>
-                            {suggestions.length ? (
-                              <div className="mt-3 space-y-2">
-                                {suggestions.map((suggestion, index) => {
-                                  const canApply = Boolean(suggestion.buttonLabel);
-                                  return (
-                                    <div
-                                      key={`${suggestion.type}-${suggestion.artifactId ?? suggestion.approvalId ?? index}`}
-                                      className="rounded-md border border-border bg-background px-3 py-2"
-                                    >
-                                      <div className="text-xs font-semibold text-foreground">
-                                        {suggestion.title}
-                                      </div>
-                                      <p className="mt-1 text-xs text-muted-foreground">
-                                        {suggestion.description}
-                                      </p>
-                                      {suggestion.paths?.length ? (
-                                        <div className="mt-2 text-xs text-muted-foreground">
-                                          Files: {suggestion.paths.join(", ")}
-                                        </div>
-                                      ) : null}
-                                      {suggestion.commands?.length ? (
-                                        <div className="mt-2 text-xs text-muted-foreground">
-                                          Checks: {suggestion.commands.join(", ")}
-                                        </div>
-                                      ) : null}
-                                      {suggestion.requiresManualConfirmation ? (
-                                        <div className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-300">
-                                          Manual confirmation is required in the PR section.
-                                        </div>
-                                      ) : null}
-                                      {canApply ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => applyTaskActionSuggestion(suggestion)}
-                                          className="mt-2 inline-flex h-8 items-center rounded-md border border-border px-2 text-xs font-medium hover:bg-muted"
-                                        >
-                                          {suggestion.buttonLabel}
-                                        </button>
-                                      ) : null}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  {latestArtifact ? (
-                    <div className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <div className="text-xs font-semibold uppercase text-muted-foreground">
-                            Latest execution result
-                          </div>
-                          <div className="mt-1 font-medium text-foreground">
-                            {latestArtifact.title}
-                          </div>
-                        </div>
-                        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                          {latestArtifact.type} - {latestArtifact.status}
-                        </span>
-                      </div>
-                      {latestArtifact.summary ? (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {latestArtifact.summary}
-                        </p>
-                      ) : null}
-                      {latestArtifact.payload.error ? (
-                        <FailureNotice failure={latestArtifact.payload.error} />
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {pendingSuggestionConfirmation ? (
-                    <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100">
-                      <div className="font-semibold">Confirm approval request</div>
-                      <p className="mt-1 text-xs">
-                        ORAX will create an approval request for:{" "}
-                        <span className="font-medium">{pendingSuggestionConfirmation.title}</span>.
-                        It will not execute the approval, run commands, push branches, or open a PR.
-                      </p>
-                      {pendingSuggestionConfirmation.type === "read_files" &&
-                      pendingSuggestionConfirmation.paths?.length ? (
-                        <div className="mt-2 text-xs">
-                          Files: {pendingSuggestionConfirmation.paths.join(", ")}
-                        </div>
-                      ) : null}
-                      {pendingSuggestionConfirmation.type === "controlled_checks" &&
-                      pendingSuggestionConfirmation.commands?.length ? (
-                        <div className="mt-2 text-xs">
-                          Checks: {pendingSuggestionConfirmation.commands.join(", ")}
-                        </div>
-                      ) : null}
-                      {pendingSuggestionConfirmation.type === "github_pr" ? (
-                        <input
-                          value={suggestionPrConfirmationText}
-                          onChange={(event) => setSuggestionPrConfirmationText(event.target.value)}
-                          placeholder="Type CREATE PR to confirm"
-                          className="mt-3 h-9 w-full rounded-md border border-amber-300 bg-background px-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring dark:border-amber-700"
-                        />
-                      ) : null}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void confirmTaskActionSuggestion()}
-                          disabled={
-                            pendingSuggestionConfirmation.type === "github_pr" &&
-                            suggestionPrConfirmationText.trim() !== "CREATE PR"
-                          }
-                          className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Create approval request
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPendingSuggestionConfirmation(null);
-                            setSuggestionPrConfirmationText("");
-                          }}
-                          className="inline-flex h-8 items-center rounded-md border border-amber-300 px-3 text-xs font-medium hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/30"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                    <textarea
-                      value={taskMessageDraft}
-                      onChange={(event) => setTaskMessageDraft(event.target.value)}
-                      placeholder="Discuss this task with ORAX..."
-                      className="min-h-16 flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <button
-                      onClick={() => void sendTaskMessage()}
-                      disabled={!taskMessageDraft.trim() || sendingTaskMessage}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {sendingTaskMessage ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                      Send
-                    </button>
-                  </div>
-                </div>
-
-                <details className="rounded-md border border-border bg-muted/20 p-3">
-                  <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 text-sm font-semibold">
-                    <span className="inline-flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-primary" />
-                      Advanced workflow controls
-                    </span>
-                    <span className="rounded-full border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground">
-                      approval-gated details
-                    </span>
-                  </summary>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    The task thread is the primary workspace. Use these controls when you need the
-                    full approval details for file reads, draft patches, sandbox validation,
-                    controlled checks, or PR creation. ORAX still cannot edit, execute arbitrary
-                    commands, push, open PRs, or deploy without explicit approval.
-                  </p>
-
-                  <div className="mt-4 space-y-4">
-                    <textarea
-                      value={approvalPaths}
-                      onChange={(event) => setApprovalPaths(event.target.value)}
-                      placeholder="src/main.ts&#10;package.json&#10;README.md"
-                      className="min-h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <input
-                      value={approvalReason}
-                      onChange={(event) => setApprovalReason(event.target.value)}
-                      placeholder="Reason for reading these files"
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <button
-                      onClick={() => void requestFileReadApproval()}
-                      disabled={requestingApproval || !approvalPaths.trim()}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {requestingApproval ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ShieldCheck className="h-4 w-4" />
-                      )}
-                      Request approval
-                    </button>
-
-                    <textarea
-                      value={draftInstructions}
-                      onChange={(event) => setDraftInstructions(event.target.value)}
-                      placeholder="Optional draft patch instructions. Example: keep the fix small and avoid changing public API."
-                      className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
-
-                    <div className="space-y-2">
-                      {approvals.length === 0 ? (
-                        <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          No approval requests for this task yet.
-                        </p>
-                      ) : (
-                        approvals.map((approval) => (
-                          <article
-                            key={approval.id}
-                            className="rounded-md border border-border bg-muted/20 px-3 py-3"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium">
-                                  {approval.action} - {approval.status}
-                                </div>
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {approval.action === "read_files"
-                                    ? (approval.request.paths ?? []).join(", ")
-                                    : `Draft artifact #${approval.request.artifactId ?? "unknown"}`}
-                                </div>
-                                {approval.request.scope ? (
-                                  <div className="mt-2 text-xs text-muted-foreground">
-                                    {approval.request.scope}
-                                  </div>
-                                ) : null}
-                                {approval.riskSummary ? (
-                                  <div className="mt-2 text-xs text-muted-foreground">
-                                    {approval.riskSummary}
-                                  </div>
-                                ) : null}
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {approval.status === "pending" ? (
-                                  <>
-                                    <button
-                                      onClick={() => void decideApproval(approval.id, "approved")}
-                                      disabled={decidingApprovalId === approval.id}
-                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                    >
-                                      <Check className="h-3.5 w-3.5" />
-                                      Approve
-                                    </button>
-                                    <button
-                                      onClick={() => void decideApproval(approval.id, "denied")}
-                                      disabled={decidingApprovalId === approval.id}
-                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                      Deny
-                                    </button>
-                                  </>
-                                ) : null}
-                                {approval.action === "read_files" &&
-                                approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void readApprovedFiles(approval.id)}
-                                    disabled={readingApprovalId === approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {readingApprovalId === approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <FileSearch className="h-3.5 w-3.5" />
-                                    )}
-                                    Read files
-                                  </button>
-                                ) : null}
-                                {approval.action === "read_files" &&
-                                ["approved", "completed"].includes(approval.status) ? (
-                                  <button
-                                    onClick={() => void generateDraftPatch(approval.id)}
-                                    disabled={generatingArtifactApprovalId === approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
-                                  >
-                                    {generatingArtifactApprovalId === approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Code2 className="h-3.5 w-3.5" />
-                                    )}
-                                    Generate draft patch
-                                  </button>
-                                ) : null}
-                                {approval.action === "sandbox_run" &&
-                                approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void runSandboxValidation(approval.id)}
-                                    disabled={runningSandboxApprovalId === approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {runningSandboxApprovalId === approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Play className="h-3.5 w-3.5" />
-                                    )}
-                                    Run sandbox
-                                  </button>
-                                ) : null}
-                                {approval.action === "safe_check" &&
-                                approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void runControlledChecks(approval.id)}
-                                    disabled={runningCommandApprovalId === approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {runningCommandApprovalId === approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <Terminal className="h-3.5 w-3.5" />
-                                    )}
-                                    Run checks
-                                  </button>
-                                ) : null}
-                                {approval.action === "github_pr" &&
-                                approval.status === "approved" ? (
-                                  <button
-                                    onClick={() => void createGithubPr(approval.id)}
-                                    disabled={creatingPrApprovalId === approval.id}
-                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                                  >
-                                    {creatingPrApprovalId === approval.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <GitPullRequest className="h-3.5 w-3.5" />
-                                    )}
-                                    Create PR
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                            {approval.result?.files?.length ? (
-                              <div className="mt-2 text-xs text-muted-foreground">
-                                Read {approval.result.files.length} file(s),{" "}
-                                {formatBytes(approval.result.totalBytes ?? 0)}
-                              </div>
-                            ) : null}
-                            {approval.action === "github_pr" && approval.result?.pullRequestUrl ? (
-                              <a
-                                href={approval.result.pullRequestUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
-                              >
-                                Open created pull request
-                              </a>
-                            ) : null}
-                            {approval.action === "github_pr" && approval.result?.error ? (
-                              <FailureNotice failure={approval.result.error} />
-                            ) : null}
-                          </article>
-                        ))
-                      )}
-                    </div>
-
-                    {readResult ? (
-                      <div className="rounded-md border border-border bg-muted/20 p-3">
-                        <div className="text-sm font-semibold">
-                          Approved file read result - {readResult.branch}
-                        </div>
-                        {readResult.skipped.length ? (
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            Skipped:{" "}
-                            {readResult.skipped
-                              .map((item) => `${item.path} (${item.reason})`)
-                              .join(", ")}
-                          </div>
-                        ) : null}
-                        <div className="mt-3 space-y-3">
-                          {readResult.files.map((file) => (
-                            <div
-                              key={file.path}
-                              className="rounded-md border border-border bg-card"
-                            >
-                              <div className="border-b border-border px-3 py-2 text-xs font-medium">
-                                {file.path} - {formatBytes(file.size)}
-                              </div>
-                              <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 py-2 text-xs text-muted-foreground">
-                                {file.content}
-                              </pre>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold">Draft patch preview</div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Generated artifacts are review-only. ORAX still cannot apply files, run
-                            terminal commands, push branches, open PRs, or deploy.
-                          </p>
-                        </div>
-                        {loadingArtifacts ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                        ) : null}
-                      </div>
-
-                      {latestDraftPatch ? (
-                        <div className="mt-3 space-y-3">
-                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                            <Metric label="Status" value={latestDraftPatch.status} />
-                            <Metric
-                              label="Branch"
-                              value={latestDraftPatch.payload.branch ?? "unknown"}
-                            />
-                            <Metric
-                              label="Model"
-                              value={latestDraftPatch.payload.model ?? "unknown"}
-                            />
-                            <Metric
-                              label="Generated"
-                              value={new Date(latestDraftPatch.createdAt).toLocaleString()}
-                            />
-                          </div>
-                          {latestDraftPatch.summary ? (
-                            <p className="text-sm text-foreground">{latestDraftPatch.summary}</p>
-                          ) : null}
-                          {latestDraftPatch.payload.explanation ? (
-                            <p className="text-sm text-muted-foreground">
-                              {latestDraftPatch.payload.explanation}
-                            </p>
-                          ) : null}
-                          {latestDraftPatch.payload.filesRead?.length ? (
-                            <div className="text-xs text-muted-foreground">
-                              Files used:{" "}
-                              {latestDraftPatch.payload.filesRead
-                                .map((file) => `${file.path} (${formatBytes(file.size)})`)
-                                .join(", ")}
-                            </div>
-                          ) : null}
-                          {latestDraftPatch.payload.skipped?.length ? (
-                            <div className="text-xs text-muted-foreground">
-                              Skipped:{" "}
-                              {latestDraftPatch.payload.skipped
-                                .map((item) => `${item.path} (${item.reason})`)
-                                .join(", ")}
-                            </div>
-                          ) : null}
-                          {latestDraftPatch.payload.risks?.length ? (
-                            <div>
-                              <div className="text-xs font-medium uppercase text-muted-foreground">
-                                Risks
-                              </div>
-                              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                                {latestDraftPatch.payload.risks.map((risk) => (
-                                  <li key={risk}>{risk}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-                          {latestDraftPatch.payload.tests?.length ? (
-                            <div>
-                              <div className="text-xs font-medium uppercase text-muted-foreground">
-                                Suggested checks
-                              </div>
-                              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                                {latestDraftPatch.payload.tests.map((test) => (
-                                  <li key={test}>{test}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-                          {latestDraftPatch.payload.unifiedDiff?.trim() ? (
-                            <pre className="max-h-96 overflow-auto rounded-md border border-border bg-background px-3 py-3 text-xs text-muted-foreground">
-                              {latestDraftPatch.payload.unifiedDiff}
-                            </pre>
-                          ) : (
-                            <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                              No diff was generated. Approve more relevant files, then generate a
-                              new draft patch.
-                            </p>
-                          )}
-                          {latestDraftPatch.payload.unifiedDiff?.trim() ? (
-                            <button
-                              onClick={() => void requestSandboxApproval(latestDraftPatch.id)}
-                              disabled={requestingSandboxApprovalArtifactId === latestDraftPatch.id}
-                              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                            >
-                              {requestingSandboxApprovalArtifactId === latestDraftPatch.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <ShieldCheck className="h-3.5 w-3.5" />
-                              )}
-                              Request sandbox approval
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          No draft patch yet. Generate one from an approved file-read request.
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
-                      <div className="text-sm font-semibold">Sandbox validation</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Sandbox validation applies the draft patch to approved file contents only.
-                        It does not modify the repository, run unrestricted terminal commands, push,
-                        open PRs, or deploy.
-                      </p>
-
-                      {latestSandboxResult ? (
-                        <div className="mt-3 space-y-3">
-                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                            <Metric label="Status" value={latestSandboxResult.status} />
-                            <Metric
-                              label="Applied"
-                              value={latestSandboxResult.payload.applied ? "yes" : "no"}
-                            />
-                            <Metric
-                              label="Changed files"
-                              value={String(latestSandboxResult.payload.changedFiles?.length ?? 0)}
-                            />
-                            <Metric
-                              label="Validated"
-                              value={new Date(latestSandboxResult.createdAt).toLocaleString()}
-                            />
-                          </div>
-
-                          {latestSandboxResult.payload.changedFiles?.length ? (
-                            <div>
-                              <div className="text-xs font-medium uppercase text-muted-foreground">
-                                Changed files
-                              </div>
-                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                                {latestSandboxResult.payload.changedFiles.map((file) => (
-                                  <li key={file.path}>
-                                    {file.path}: +{file.additions} / -{file.deletions},{" "}
-                                    {formatBytes(file.beforeBytes)} to{" "}
-                                    {formatBytes(file.afterBytes)}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-
-                          {latestSandboxResult.payload.checks?.length ? (
-                            <div>
-                              <div className="text-xs font-medium uppercase text-muted-foreground">
-                                Sandbox checks
-                              </div>
-                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                                {latestSandboxResult.payload.checks.map((check) => (
-                                  <li key={`${check.name}-${check.status}`}>
-                                    {check.status}: {check.name} - {check.message}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-
-                          {latestSandboxResult.payload.testPreview?.length ? (
-                            <div>
-                              <div className="text-xs font-medium uppercase text-muted-foreground">
-                                Suggested tests
-                              </div>
-                              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                                {latestSandboxResult.payload.testPreview.map((check) => (
-                                  <li key={check.name}>
-                                    {check.status}: {check.name} - {check.message}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-
-                          {latestSandboxResult.payload.errors?.length ? (
-                            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                              {latestSandboxResult.payload.errors.join(" ")}
-                            </div>
-                          ) : null}
-
-                          {latestSandboxResult.payload.applied ? (
-                            <div className="space-y-3">
-                              <div>
-                                <div className="text-xs font-medium uppercase text-muted-foreground">
-                                  Checks to request
-                                </div>
-                                <div className="mt-2 grid gap-2 md:grid-cols-2">
-                                  {ORAX_COMMAND_OPTIONS.map((option) => (
-                                    <label
-                                      key={option.id}
-                                      className="flex min-h-16 cursor-pointer items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs hover:bg-muted/50"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedCommandIds.includes(option.id)}
-                                        onChange={() => toggleCommandId(option.id)}
-                                        className="mt-0.5 h-4 w-4 rounded border-border"
-                                      />
-                                      <span>
-                                        <span className="block font-medium text-foreground">
-                                          {option.label}
-                                        </span>
-                                        <span className="mt-0.5 block text-muted-foreground">
-                                          {option.description}
-                                        </span>
-                                      </span>
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => void requestCommandApproval(latestSandboxResult.id)}
-                                disabled={
-                                  requestingCommandApprovalArtifactId === latestSandboxResult.id ||
-                                  selectedCommandIds.length === 0
-                                }
-                                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                              >
-                                {requestingCommandApprovalArtifactId === latestSandboxResult.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Terminal className="h-3.5 w-3.5" />
-                                )}
-                                Request selected checks
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          No sandbox validation yet. Request approval from a draft patch, approve
-                          it, then run the sandbox.
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
-                      <div className="text-sm font-semibold">Controlled checks</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Controlled checks run fixed ORAX validators and selected pnpm scripts in a
-                        temporary workspace. They do not accept arbitrary shell text, deployment
-                        commands, or default-branch writes.
-                      </p>
-
-                      {latestCommandResult ? (
-                        <div className="mt-3 space-y-3">
-                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                            <Metric label="Status" value={latestCommandResult.status} />
-                            <Metric
-                              label="Passed"
-                              value={latestCommandResult.payload.passed ? "yes" : "no"}
-                            />
-                            <Metric
-                              label="Commands"
-                              value={String(latestCommandResult.payload.commands?.length ?? 0)}
-                            />
-                            <Metric
-                              label="Executed"
-                              value={new Date(latestCommandResult.createdAt).toLocaleString()}
-                            />
-                          </div>
-
-                          {latestCommandResult.summary ? (
-                            <p className="text-sm text-foreground">{latestCommandResult.summary}</p>
-                          ) : null}
-
-                          <div className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-                            Command summary: {commandPassedCount} passed, {commandFailureCount}{" "}
-                            failed.
-                          </div>
-
-                          {latestCommandResult.payload.commands?.length ? (
-                            <div className="space-y-2">
-                              {latestCommandResult.payload.commands.map((command) => (
-                                <div
-                                  key={`${command.id}-${command.status}`}
-                                  className="rounded-md border border-border bg-card px-3 py-2"
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                                    <span className="font-medium text-foreground">
-                                      {command.label || command.id}
-                                    </span>
-                                    <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
-                                      {command.status}
-                                      {typeof command.exitCode === "number"
-                                        ? ` / exit ${command.exitCode}`
-                                        : ""}
-                                    </span>
-                                  </div>
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {command.message}
-                                  </p>
-                                  {command.stdout ? (
-                                    <pre className="mt-2 max-h-32 overflow-auto rounded bg-background px-2 py-2 text-[11px] text-muted-foreground">
-                                      {command.stdout}
-                                    </pre>
-                                  ) : null}
-                                  {command.stderr ? (
-                                    <pre className="mt-2 max-h-32 overflow-auto rounded border border-destructive/30 bg-destructive/10 px-2 py-2 text-[11px] text-destructive">
-                                      {command.stderr}
-                                    </pre>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-
-                          {latestCommandResult.payload.passed === false ? (
-                            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                              GitHub PR approval is blocked until every selected check passes.
-                              Review the failed command output, update the draft patch, then rerun
-                              the approval-gated checks.
-                            </div>
-                          ) : null}
-
-                          {readyForPrApproval ? (
-                            <div className="space-y-3 rounded-md border border-border bg-background px-3 py-3">
-                              <div>
-                                <div className="text-xs font-medium uppercase text-muted-foreground">
-                                  PR approval review
-                                </div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  This creates a new branch and pull request only. It does not push
-                                  to the default branch or deploy.
-                                </p>
-                              </div>
-                              <ArtifactTrace artifact={latestCommandResult} />
-                              <label className="block text-xs">
-                                <span className="font-medium text-foreground">
-                                  Type CREATE PR to enable approval
-                                </span>
-                                <input
-                                  value={prConfirmationText}
-                                  onChange={(event) => setPrConfirmationText(event.target.value)}
-                                  className="mt-1 h-9 w-full rounded-md border border-border bg-card px-3 text-sm outline-none focus:border-primary"
-                                  placeholder="CREATE PR"
-                                />
-                              </label>
-                              <button
-                                onClick={() => void requestGithubPrApproval(latestCommandResult.id)}
-                                disabled={
-                                  requestingPrApprovalArtifactId === latestCommandResult.id ||
-                                  prConfirmationText.trim() !== "CREATE PR"
-                                }
-                                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                              >
-                                {requestingPrApprovalArtifactId === latestCommandResult.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <GitPullRequest className="h-3.5 w-3.5" />
-                                )}
-                                Request GitHub PR approval
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          No controlled checks yet. Request approval from a passed sandbox result,
-                          approve it, then run the checks.
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="rounded-md border border-border bg-muted/20 p-3">
-                      <div className="text-sm font-semibold">GitHub pull request</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        ORAX can create a new branch and pull request only after controlled checks
-                        pass and you explicitly approve the GitHub action. It never pushes directly
-                        to the default branch.
-                      </p>
-
-                      {latestGithubPrResult ? (
-                        <div className="mt-3 space-y-3">
-                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                            <Metric label="Status" value={latestGithubPrResult.status} />
-                            <Metric
-                              label="Branch"
-                              value={latestGithubPrResult.payload.branchName ?? "unknown"}
-                            />
-                            <Metric
-                              label="Base"
-                              value={latestGithubPrResult.payload.baseBranch ?? "unknown"}
-                            />
-                            <Metric
-                              label="PR"
-                              value={
-                                latestGithubPrResult.payload.pullRequestNumber
-                                  ? `#${latestGithubPrResult.payload.pullRequestNumber}`
-                                  : "unknown"
-                              }
-                            />
-                          </div>
-                          {latestGithubPrResult.summary ? (
-                            <p className="text-sm text-foreground">
-                              {latestGithubPrResult.summary}
-                            </p>
-                          ) : null}
-                          {latestGithubPrResult.status === "failed" &&
-                          latestGithubPrResult.payload.error ? (
-                            <FailureNotice failure={latestGithubPrResult.payload.error} />
-                          ) : null}
-                          {latestGithubPrResult.payload.pullRequestUrl ? (
-                            <a
-                              href={latestGithubPrResult.payload.pullRequestUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-muted"
-                            >
-                              <GitPullRequest className="h-3.5 w-3.5" />
-                              Open pull request
-                            </a>
-                          ) : null}
-                          {latestGithubPrResult.payload.filesChanged?.length ? (
-                            <div className="text-xs text-muted-foreground">
-                              Files in PR: {latestGithubPrResult.payload.filesChanged.join(", ")}
-                            </div>
-                          ) : null}
-                          <ArtifactTrace artifact={latestGithubPrResult} />
-                          {latestGithubPrResult.payload.commitSha ? (
-                            <div className="text-xs text-muted-foreground">
-                              Commit: {latestGithubPrResult.payload.commitSha}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                          No GitHub pull request yet. Run controlled checks, request GitHub PR
-                          approval, approve it, then create the PR.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </details>
-              </div>
-            ) : (
-              <p className="mt-4 rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                Create an ORAX task before requesting file-read approval.
-              </p>
-            )}
-          </section>
-
-          <section className="rounded-lg border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Terminal className="h-4 w-4 text-primary" />
-                <h2 className="text-sm font-semibold">Task history</h2>
-              </div>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-            </div>
-            <div className="divide-y divide-border">
-              {tasks.length === 0 ? (
-                <p className="px-4 py-8 text-sm text-muted-foreground">
-                  No ORAX tasks yet. Create a safe plan to start the coding-agent history.
-                </p>
               ) : (
-                tasks.map((task) => (
-                  <article key={task.id} className="px-4 py-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <GitPullRequest className="h-4 w-4 text-muted-foreground" />
-                          <h3 className="text-sm font-semibold">{task.title}</h3>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {task.kind} - {task.status} - {new Date(task.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                      <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        approval-gated
-                      </span>
-                    </div>
-                    {task.result?.message ? (
-                      <p className="mt-3 text-sm text-muted-foreground">{task.result.message}</p>
-                    ) : null}
-                    {task.plan?.steps?.length ? (
-                      <ol className="mt-3 space-y-1 text-sm text-foreground">
-                        {task.plan.steps.map((step, index) => (
-                          <li key={`${task.id}-${step}`} className="flex gap-2">
-                            <span className="text-xs text-muted-foreground">{index + 1}.</span>
-                            <span>{step}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
-                  </article>
-                ))
+                <p className="mt-2 text-sm text-muted-foreground">No execution result yet.</p>
               )}
-            </div>
-          </section>
-        </section>
+            </section>
+
+            <section className="mt-3 rounded-md border border-border bg-card p-3">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">Repository</div>
+              {selectedRepository ? (
+                <div className="mt-2 text-sm">
+                  <div className="font-medium">
+                    {selectedRepository.owner}/{selectedRepository.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {selectedRepository.defaultBranch} - {selectedRepository.connectionStatus}
+                  </div>
+                  <button
+                    onClick={() => void scanRepository()}
+                    disabled={scanningRepository}
+                    className="mt-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                  >
+                    {scanningRepository ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    Scan repository
+                  </button>
+                  {latestScan ? (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Last scan: {latestScan.status} - {latestScan.fileCount} files
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">No repository connected.</p>
+              )}
+            </section>
+          </div>
+        </aside>
       </main>
     </div>
   );
+
 }
 
 function formatOraxApprovalAction(action: string): string {
