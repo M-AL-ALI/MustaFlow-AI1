@@ -407,75 +407,218 @@ export interface OraxCapabilities {
   lockedUntilApprovalLayer: string[];
 }
 
+export type OraxTaskKind = "analyze" | "plan" | "review" | "fix";
+
 export interface OraxRepository {
   id: number;
+  provider?: string;
   owner: string;
   name: string;
-  connectionStatus: "metadata_only" | "read_only";
+  connectionStatus: "metadata_only" | "read_only" | string;
   repositoryUrl?: string;
   defaultBranch?: string;
+  githubAccountName?: string | null;
+  tokenScopes?: string | null;
+  connectedAt?: string | null;
   scanStatus?: string;
   lastScanAt?: string | null;
-}
-
-export interface OraxTask {
-  id: number;
-  repositoryId?: number;
-  kind?: "analyze" | "coding";
-  title?: string;
-  prompt?: string;
-  status: string;
-  result?: unknown;
-  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface OraxScan {
   id: number;
   repositoryId: number;
   status: string;
-  branch?: string | null;
-  summary?: unknown;
+  branch: string;
+  commitSha?: string | null;
+  fileCount?: number;
+  directoryCount?: number;
+  totalBytes?: number;
+  summary?: {
+    repo?: {
+      fullName?: string;
+      htmlUrl?: string;
+      defaultBranch?: string;
+      private?: boolean;
+      language?: string | null;
+    };
+    branch?: string;
+    commitSha?: string;
+    fileCount?: number;
+    directoryCount?: number;
+    totalBytes?: number;
+    languages?: Record<string, number>;
+    sampleFiles?: string[];
+    truncated?: boolean;
+  };
   error?: string | null;
   createdAt?: string;
   completedAt?: string | null;
 }
 
+export interface OraxCheckpointSummary {
+  goal: string;
+  status: string;
+  filesReviewed: string[];
+  approvals: {
+    pending: number;
+    completed: number;
+    failed: number;
+    denied: number;
+    total: number;
+  };
+  artifacts: {
+    draftPatches: number;
+    sandboxResults: number;
+    commandResults: number;
+    githubPrResults: number;
+    total: number;
+  };
+  latestBlocker: string | null;
+  nextStep: string;
+  updatedAt: string;
+}
+
+export interface OraxTaskActionSuggestion {
+  type:
+    | "read_files"
+    | "draft_patch"
+    | "sandbox_run"
+    | "controlled_checks"
+    | "github_pr"
+    | "review_pending_approval";
+  title: string;
+  description: string;
+  buttonLabel?: string;
+  paths?: string[];
+  reason?: string;
+  instructions?: string;
+  artifactId?: number;
+  approvalId?: number;
+  commands?: string[];
+  requiresManualConfirmation?: boolean;
+}
+
+export interface OraxTask {
+  id: number;
+  repositoryId: number;
+  kind: OraxTaskKind;
+  title?: string;
+  prompt?: string;
+  status: string;
+  plan?: {
+    mode?: string;
+    objective?: string;
+    steps?: string[];
+    guardrails?: string[];
+    unavailableUntilApproved?: string[];
+  };
+  result?: {
+    message?: string;
+    currentCheckpoint?: OraxCheckpointSummary;
+    [key: string]: unknown;
+  };
+  createdAt?: string;
+}
+
 export interface OraxTaskMessage {
   id: number;
+  repositoryId: number;
   taskId: number;
-  role: "user" | "assistant" | "system" | "tool";
+  role: "user" | "assistant" | "system" | "tool" | string;
   content: string;
-  event?: string | null;
-  approvalId?: number | null;
+  metadata?: {
+    actionSuggestions?: OraxTaskActionSuggestion[];
+    checkpoint?: OraxCheckpointSummary;
+    event?: string;
+    source?: string;
+    [key: string]: unknown;
+  };
   artifactId?: number | null;
-  metadata?: Record<string, unknown> | null;
-  createdAt?: string;
-}
-
-export interface OraxTaskApproval {
-  id: number;
-  taskId: number;
-  action: string;
-  status: string;
-  request?: Record<string, unknown> | null;
-  result?: Record<string, unknown> | null;
+  approvalId?: number | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
-export interface OraxTaskArtifact {
+export interface OraxApproval {
   id: number;
+  repositoryId: number;
+  taskId: number;
+  action: "read_files" | "sandbox_run" | "safe_check" | "github_pr" | string;
+  status: "pending" | "approved" | "denied" | "completed" | "failed" | string;
+  request: {
+    paths?: string[];
+    branch?: string;
+    reason?: string | null;
+    artifactId?: number;
+    commands?: string[];
+    title?: string;
+    scope?: string;
+    [key: string]: unknown;
+  };
+  result?: {
+    artifactId?: number;
+    branch?: string;
+    totalBytes?: number;
+    files?: Array<{ path: string; sha?: string; size?: number; truncated?: boolean }>;
+    skipped?: Array<{ path: string; reason: string }>;
+    pullRequestUrl?: string;
+    [key: string]: unknown;
+  };
+  riskSummary?: string | null;
+  createdAt?: string;
+  decidedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface OraxArtifact {
+  id: number;
+  repositoryId: number;
   taskId: number;
   approvalId?: number | null;
-  type: string;
-  status: string;
-  title?: string | null;
+  type: "draft_patch" | "sandbox_result" | "command_result" | "github_pr_result" | string;
+  status: "completed" | "failed" | string;
+  title: string;
   summary?: string | null;
-  payload?: Record<string, unknown> | null;
-  content?: unknown;
+  payload: {
+    branch?: string;
+    unifiedDiff?: string;
+    explanation?: string;
+    risks?: string[];
+    tests?: string[];
+    filesRead?: Array<{ path: string; sha?: string; size?: number }>;
+    skipped?: Array<{ path: string; reason: string }>;
+    sourceArtifactId?: number;
+    sourceApprovalId?: number;
+    applied?: boolean;
+    changedFiles?: Array<{
+      path: string;
+      additions?: number;
+      deletions?: number;
+      beforeBytes?: number;
+      afterBytes?: number;
+    }>;
+    commands?: Array<{
+      id: string;
+      label?: string;
+      status: string;
+      exitCode?: number | null;
+      message?: string;
+    }>;
+    passed?: boolean;
+    branchName?: string;
+    pullRequestNumber?: number;
+    pullRequestUrl?: string;
+    filesChanged?: string[];
+    error?: { code?: string; message?: string; hint?: string; rawMessage?: string };
+    [key: string]: unknown;
+  };
   createdAt?: string;
   updatedAt?: string;
 }
+
+export type OraxTaskApproval = OraxApproval;
+export type OraxTaskArtifact = OraxArtifact;
 
 export interface UserPreferences {
   userId?: string;

@@ -12,6 +12,9 @@ describe("ORAX product-surface wiring", () => {
   const modeSelect = read("../../pages/mode-select.tsx");
   const oraxPage = read("../../pages/orax.tsx");
   const routesIndex = read("../../../../api-server/src/routes/index.ts");
+  const mobileOraxScreen = read("../../../../ora-mobile/app/(home)/orax.tsx");
+  const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+  const mobileTypes = read("../../../../ora-mobile/lib/types.ts");
 
   it("registers /orax as a protected route outside AI Builder guard", () => {
     expect(app).toContain('path="/orax"');
@@ -64,9 +67,6 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Thread status");
     expect(oraxPage).toContain("Pending approval");
     expect(oraxPage).toContain("Workflow controls");
-    expect(oraxPage).toContain("Advanced workflow controls");
-    expect(oraxPage).toContain("The task thread is the primary workspace");
-    expect(oraxPage).toContain("approval-gated details");
     expect(oraxPage).toContain("Task conversation");
     expect(oraxPage).toContain("latestAssistantSuggestions");
     expect(oraxPage).toContain("primaryThreadSuggestion");
@@ -145,45 +145,55 @@ describe("ORAX product-surface wiring", () => {
     expect(routesIndex).toContain('"/orax"');
     expect(routesIndex).toContain("router.use(oraxRouter)");
   });
-});
 
-describe("ORAX mobile parity guard", () => {
-  const mobilePage = read("../../../../ora-mobile/app/(home)/orax.tsx");
-  // Route ownership lives in api.ts (imported fns); component guards are on mobilePage.
-  const mobileApi = read("../../../../ora-mobile/lib/api.ts");
-
-  it("uses ORAX-owned workflow routes and avoids Ora chat endpoints", () => {
-    // Routes are defined in api.ts, not in the component directly.
-    expect(mobileApi).toContain("/api/orax/");
-    // Component must never reach into Ora chat or AI Builder.
-    expect(mobilePage).not.toContain("/api/public-ai/chat");
-    expect(mobilePage).not.toContain("useOraChat");
-    expect(mobilePage).not.toContain("/api/projects/");
-    expect(mobilePage).not.toContain("/api/credits");
-  });
-
-  it("exposes Start ORAX chat first-message thread semantics", () => {
-    expect(mobilePage).toContain("Start ORAX chat");
-    expect(mobilePage).toContain("startThread: true");
-    expect(mobilePage).toContain("The first message becomes the task prompt");
-    expect(mobilePage).toContain("stored separately from Ora chat and");
-    expect(mobilePage).toContain("not Ora");
-    expect(mobilePage).toContain("Task created, but first message failed to save");
-    expect(mobilePage).toContain("setTaskMessageDraft(");
-  });
-
-  it("clears task-scoped state immediately on task switches", () => {
-    expect(mobilePage).toContain("const activeTaskIdRef = useRef<number | null>(null)");
-    expect(mobilePage).toContain("activeTaskIdRef.current !== selectedTask.id");
-    expect(mobilePage).toContain("activeTaskIdRef.current = selectedTask.id");
-    expect(mobilePage).toContain("if (activeTaskIdRef.current !== taskId) return");
-  });
-
-  it("renders an execution lifecycle section from task artifacts", () => {
-    expect(mobilePage).toContain("Execution lifecycle");
-    expect(mobilePage).toContain("Draft patch generated");
-    expect(mobilePage).toContain("Sandbox result");
-    expect(mobilePage).toContain("Controlled checks result");
-    expect(mobilePage).toContain("Pull request result");
+  it("exposes the same ORAX-owned workflow on mobile without using Ora chat", () => {
+    expect(mobileTypes).toContain(
+      'export type OraxTaskKind = "analyze" | "plan" | "review" | "fix"',
+    );
+    expect(mobileTypes).not.toContain('"coding"');
+    expect(mobileApi).toContain("/api/orax/capabilities");
+    expect(mobileApi).toContain("/api/orax/repositories");
+    expect(mobileApi).toContain("/api/orax/repositories/${repositoryId}/github/connect");
+    expect(mobileApi).toContain("/api/orax/repositories/${repositoryId}/scan");
+    expect(mobileApi).toContain("/api/orax/tasks");
+    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/messages");
+    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/approvals");
+    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/artifacts");
+    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/draft-patch");
+    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/sandbox-approvals");
+    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/command-approvals");
+    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/github-pr-approvals");
+    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}");
+    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/read-files");
+    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/run-sandbox");
+    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/run-commands");
+    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
+    expect(mobileOraxScreen).toContain("Codex-style coding agent for repositories");
+    expect(mobileOraxScreen).toContain("Start ORAX chat");
+    expect(mobileOraxScreen).toContain("The first message becomes the task prompt");
+    expect(mobileOraxScreen).toContain("normal Ora history or AI Builder");
+    expect(mobileOraxScreen).toContain("Start Orax task");
+    expect(mobileOraxScreen).toContain("Task thread");
+    expect(mobileOraxScreen).toContain("Task history");
+    expect(mobileOraxScreen).toContain("Execution lifecycle");
+    expect(mobileOraxScreen).toContain("Resume task");
+    expect(mobileOraxScreen).toContain("Explain approval");
+    expect(mobileOraxScreen).toContain("Summarize result");
+    expect(mobileOraxScreen).toContain("Create approval request");
+    expect(mobileOraxScreen).toContain("Generate draft patch");
+    expect(mobileOraxScreen).toContain("Request sandbox approval");
+    expect(mobileOraxScreen).toContain("Request controlled checks");
+    expect(mobileOraxScreen).toContain("Type CREATE PR");
+    expect(mobileOraxScreen).toContain("Request PR approval");
+    expect(mobileOraxScreen).toContain("Orax is isolated from Ora");
+    expect(mobileOraxScreen).toContain("activeTaskIdRef");
+    expect(mobileOraxScreen).toContain("clearTaskScopedState");
+    expect(mobileOraxScreen).toContain("buildLifecycleItems");
+    expect(mobileOraxScreen).toContain("TaskHistoryRow");
+    expect(mobileOraxScreen).toContain("LifecycleRow");
+    expect(mobileOraxScreen).not.toContain("sendChat");
+    expect(mobileOraxScreen).not.toContain("streamChatNative");
+    expect(mobileOraxScreen).not.toContain("useOraChat");
+    expect(mobileOraxScreen).not.toContain("/api/public-ai/chat");
   });
 });

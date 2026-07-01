@@ -1,587 +1,469 @@
-import { useAuth } from "@clerk/expo";
 import {
-  Check,
+  AlertCircle,
+  Bot,
   CheckCircle2,
+  Code2,
   FileText,
   GitBranch,
   GitPullRequest,
-  Key,
+  KeyRound,
   Lock,
-  MessageCircle,
+  MessageSquare,
   Play,
   Plus,
-  Sparkles,
+  RefreshCw,
+  Send,
+  ShieldCheck,
   TerminalSquare,
-  X,
+  XCircle,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { SignInWall } from "@/components/SignInWall";
 import { Button, Card, EmptyState, Loading, Pill, TextField } from "@/components/ui";
 import { useColors } from "@/hooks/useColors";
 import {
   addRepository,
-  connectGithubToken,
-  createGithubPR,
+  appendTaskMessage,
+  connectRepositoryGithubToken,
+  createApprovedGithubPr,
   createTask,
+  decideApproval,
   generateDraftPatch,
   getOraxCapabilities,
+  listRepositories,
+  listRepositoryScans,
   listTaskApprovals,
   listTaskArtifacts,
   listTaskMessages,
-  listRepositories,
   listTasks,
-  patchApproval,
-  readApprovedFiles,
   requestCommandApproval,
+  requestFileReadApproval,
   requestGithubPrApproval,
   requestSandboxApproval,
-  runCommands,
-  runSandbox,
+  runApprovedCommands,
+  runApprovedFileRead,
+  runApprovedSandbox,
   scanRepository,
-  sendTaskMessage,
 } from "@/lib/api";
 import type {
+  OraxApproval,
+  OraxArtifact,
   OraxCapabilities,
   OraxRepository,
+  OraxScan,
   OraxTask,
-  OraxTaskApproval,
-  OraxTaskArtifact,
+  OraxTaskActionSuggestion,
+  OraxTaskKind,
   OraxTaskMessage,
 } from "@/lib/types";
 
-type Tab = "repos" | "tasks" | "capabilities";
+type Tab = "workspace" | "repos" | "approvals" | "artifacts" | "capabilities";
 
-const DEFAULT_ORAX_COMMAND_IDS = ["patch-static-checks", "json-syntax", "node-syntax"];
+type LifecycleItem =
+  | {
+      id: string;
+      kind: "approval";
+      title: string;
+      label: string;
+      status: string;
+      createdAt: string;
+      description: string;
+    }
+  | {
+      id: string;
+      kind: "artifact";
+      title: string;
+      label: string;
+      status: string;
+      createdAt: string;
+      description: string;
+    };
 
-function artifactPayload(artifact: OraxTaskArtifact): Record<string, unknown> {
-  return artifact.payload && typeof artifact.payload === "object" ? artifact.payload : {};
-}
+const TASK_KINDS: Array<{ value: OraxTaskKind; label: string }> = [
+  { value: "analyze", label: "Analyze" },
+  { value: "plan", label: "Plan" },
+  { value: "review", label: "Review" },
+  { value: "fix", label: "Fix" },
+];
 
-function artifactFlag(artifact: OraxTaskArtifact, key: string): boolean {
-  return artifactPayload(artifact)[key] === true;
-}
-
-function artifactText(artifact: OraxTaskArtifact, key: string): string | null {
-  const value = artifactPayload(artifact)[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
+const DEFAULT_COMMANDS = ["patch-static-checks", "json-syntax", "node-syntax"];
+const COMMAND_OPTIONS = [
+  { id: "patch-static-checks", label: "Static" },
+  { id: "json-syntax", label: "JSON" },
+  { id: "node-syntax", label: "Node" },
+  { id: "pnpm-typecheck", label: "Typecheck" },
+  { id: "pnpm-lint", label: "Lint" },
+  { id: "pnpm-test", label: "Test" },
+  { id: "pnpm-build", label: "Build" },
+];
 
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const { isSignedIn } = useAuth();
-  const [tab, setTab] = useState<Tab>("repos");
+  const [tab, setTab] = useState<Tab>("workspace");
 
   const [caps, setCaps] = useState<OraxCapabilities | null>(null);
   const [repos, setRepos] = useState<OraxRepository[]>([]);
   const [tasks, setTasks] = useState<OraxTask[]>([]);
+  const [scans, setScans] = useState<OraxScan[]>([]);
+  const [approvals, setApprovals] = useState<OraxApproval[]>([]);
+  const [artifacts, setArtifacts] = useState<OraxArtifact[]>([]);
+  const [messages, setMessages] = useState<OraxTaskMessage[]>([]);
+
+  const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const activeTaskIdRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [repoUrl, setRepoUrl] = useState("");
-  const [addingRepo, setAddingRepo] = useState(false);
+  const [repoBranch, setRepoBranch] = useState("main");
+  const [githubToken, setGithubToken] = useState("");
+  const [scanBranch, setScanBranch] = useState("");
 
-  const [taskRepoId, setTaskRepoId] = useState<number | null>(null);
   const [taskPrompt, setTaskPrompt] = useState("");
-  const [taskKind, setTaskKind] = useState<"analyze" | "coding">("analyze");
-  const [creatingTask, setCreatingTask] = useState(false);
-  const [scanningRepoId, setScanningRepoId] = useState<number | null>(null);
-  const [selectedTask, setSelectedTask] = useState<OraxTask | null>(null);
-  const [taskMessages, setTaskMessages] = useState<OraxTaskMessage[]>([]);
-  const [taskApprovals, setTaskApprovals] = useState<OraxTaskApproval[]>([]);
-  const [taskArtifacts, setTaskArtifacts] = useState<OraxTaskArtifact[]>([]);
-  const [taskChatInput, setTaskChatInput] = useState("");
-  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
-  const [sendingTaskMessage, setSendingTaskMessage] = useState(false);
+  const [taskKind, setTaskKind] = useState<OraxTaskKind>("analyze");
+  const [threadDraft, setThreadDraft] = useState("");
 
-  const [githubTokenByRepo, setGithubTokenByRepo] = useState<Record<number, string>>({});
-  const [connectingGithubRepoId, setConnectingGithubRepoId] = useState<number | null>(null);
-  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [approvalPaths, setApprovalPaths] = useState("");
+  const [approvalReason, setApprovalReason] = useState("");
+  const [approvalBranch, setApprovalBranch] = useState("");
+  const [draftInstructions, setDraftInstructions] = useState("");
+  const [selectedCommands, setSelectedCommands] = useState<string[]>(DEFAULT_COMMANDS);
+  const [prTitle, setPrTitle] = useState("");
+  const [prConfirm, setPrConfirm] = useState("");
 
-  // Task-switch guard — cleared state that is scoped to a single ORAX task so
-  // stale async callbacks from a previous task never overwrite the active task's data.
-  const activeTaskIdRef = useRef<number | null>(null);
-  const [taskMessageDraft, setTaskMessageDraft] = useState("");
-  // "Start ORAX chat" — first-message thread creation mode
-  const [startingThread, setStartingThread] = useState(false);
-  const [threadFirstMessage, setThreadFirstMessage] = useState("");
+  const selectedRepo = useMemo(
+    () => repos.find((repo) => repo.id === selectedRepoId) ?? repos[0] ?? null,
+    [repos, selectedRepoId],
+  );
+  const selectedTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
+    [tasks, selectedTaskId],
+  );
+  const latestScan = scans[0] ?? null;
+  const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
+  const latestSandbox = artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
+  const latestCommand = artifacts.find((artifact) => artifact.type === "command_result") ?? null;
+  const latestPr = artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
+  const readApproval =
+    approvals.find(
+      (approval) =>
+        approval.action === "read_files" &&
+        (approval.status === "completed" || approval.status === "approved"),
+    ) ?? null;
+  const latestAssistantSuggestion = useMemo(() => {
+    const assistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.metadata?.actionSuggestions);
+    return assistant?.metadata?.actionSuggestions?.[0] ?? null;
+  }, [messages]);
+  const latestCheckpoint = useMemo(() => {
+    const checkpointMessage = [...messages]
+      .reverse()
+      .find((message) => message.metadata?.checkpoint);
+    return (
+      checkpointMessage?.metadata?.checkpoint ?? selectedTask?.result?.currentCheckpoint ?? null
+    );
+  }, [messages, selectedTask]);
+  const lifecycleItems = useMemo(
+    () =>
+      buildLifecycleItems(approvals, artifacts)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 10),
+    [approvals, artifacts],
+  );
 
-  const reload = useCallback(async () => {
+  const clearTaskScopedState = useCallback(() => {
+    setApprovals([]);
+    setArtifacts([]);
+    setMessages([]);
+    setThreadDraft("");
+    setDraftInstructions("");
+    setPrTitle("");
+    setPrConfirm("");
+  }, []);
+
+  const loadRoot = useCallback(async () => {
     setLoading(true);
-    const [capRes, repoRes, taskRes] = await Promise.allSettled([
-      getOraxCapabilities(),
-      listRepositories(),
-      listTasks(),
-    ]);
-    if (capRes.status === "fulfilled") setCaps(capRes.value);
-    if (repoRes.status === "fulfilled") setRepos(repoRes.value);
-    if (taskRes.status === "fulfilled") setTasks(taskRes.value);
-    setLoading(false);
+    setError(null);
+    try {
+      const [nextCaps, nextRepos, nextTasks] = await Promise.all([
+        getOraxCapabilities(),
+        listRepositories(),
+        listTasks(),
+      ]);
+      setCaps(nextCaps);
+      setRepos(nextRepos);
+      setTasks(nextTasks);
+      setSelectedRepoId((current) =>
+        current && nextRepos.some((repo) => repo.id === current)
+          ? current
+          : (nextRepos[0]?.id ?? null),
+      );
+      setSelectedTaskId((current) =>
+        current && nextTasks.some((task) => task.id === current)
+          ? current
+          : (nextTasks[0]?.id ?? null),
+      );
+    } catch (err) {
+      setError(messageFromError(err, "Could not load Orax"));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadTaskDetails = useCallback(async (taskId: number | null) => {
+    if (!taskId) {
+      setApprovals([]);
+      setArtifacts([]);
+      setMessages([]);
+      return;
+    }
+    setDetailsLoading(true);
+    try {
+      const [nextApprovals, nextArtifacts, nextMessages] = await Promise.all([
+        listTaskApprovals(taskId),
+        listTaskArtifacts(taskId),
+        listTaskMessages(taskId),
+      ]);
+      if (activeTaskIdRef.current !== taskId) return;
+      setApprovals(nextApprovals);
+      setArtifacts(nextArtifacts);
+      setMessages(nextMessages);
+    } catch (err) {
+      if (activeTaskIdRef.current !== taskId) return;
+      setError(messageFromError(err, "Could not load Orax task details"));
+      setApprovals([]);
+      setArtifacts([]);
+      setMessages([]);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, []);
+
+  const loadScans = useCallback(async (repoId: number | null) => {
+    if (!repoId) {
+      setScans([]);
+      return;
+    }
+    try {
+      setScans(await listRepositoryScans(repoId));
+    } catch {
+      setScans([]);
+    }
   }, []);
 
   useEffect(() => {
-    if (!isSignedIn) return;
-    void reload();
-  }, [reload, isSignedIn]);
+    void loadRoot();
+  }, [loadRoot]);
 
-  const submitRepo = useCallback(async () => {
-    if (!repoUrl.trim()) return;
-    setAddingRepo(true);
-    try {
-      await addRepository(repoUrl.trim());
-      setRepoUrl("");
-      setRepos(await listRepositories());
-    } catch {
-      /* ignore */
-    } finally {
-      setAddingRepo(false);
-    }
-  }, [repoUrl]);
-
-  const submitTask = useCallback(async () => {
-    if (!taskRepoId || !taskPrompt.trim()) return;
-    setCreatingTask(true);
-    try {
-      await createTask({
-        repositoryId: taskRepoId,
-        kind: taskKind,
-        prompt: taskPrompt.trim(),
-      });
-      setTaskPrompt("");
-      setTasks(await listTasks());
-      setTab("tasks");
-    } catch {
-      /* ignore */
-    } finally {
-      setCreatingTask(false);
-    }
-  }, [taskRepoId, taskPrompt, taskKind]);
-
-  const runScan = useCallback(async (repository: OraxRepository) => {
-    setScanningRepoId(repository.id);
-    try {
-      await scanRepository(repository.id);
-      setRepos(await listRepositories());
-    } catch (err) {
-      Alert.alert("Scan failed", err instanceof Error ? err.message : "Please try again.");
-    } finally {
-      setScanningRepoId(null);
-    }
-  }, []);
-
-  const loadTaskDetail = useCallback(async (task: OraxTask) => {
-    setSelectedTask(task);
-    setTaskDetailLoading(true);
-    try {
-      const [messagesRes, approvalsRes, artifactsRes] = await Promise.allSettled([
-        listTaskMessages(task.id),
-        listTaskApprovals(task.id),
-        listTaskArtifacts(task.id),
-      ]);
-      setTaskMessages(messagesRes.status === "fulfilled" ? messagesRes.value : []);
-      setTaskApprovals(approvalsRes.status === "fulfilled" ? approvalsRes.value : []);
-      setTaskArtifacts(artifactsRes.status === "fulfilled" ? artifactsRes.value : []);
-    } catch {
-      /* individual promises are handled above */
-    } finally {
-      setTaskDetailLoading(false);
-    }
-  }, []);
-
-  const submitTaskMessage = useCallback(async () => {
-    const task = selectedTask;
-    const text = taskChatInput.trim();
-    if (!task || !text || sendingTaskMessage) return;
-    const taskId = task.id;
-    // Guard: prevent a message that was staged for task A from sending if the
-    // user has already switched to task B. Not Ora — task threads are ORAX-only.
-    if (activeTaskIdRef.current !== taskId) return;
-    setTaskChatInput("");
-    setSendingTaskMessage(true);
-    try {
-      const newMessages = await sendTaskMessage(task.id, text);
-      setTaskMessages((prev) => [...prev, ...newMessages]);
-      const [approvals, artifacts] = await Promise.allSettled([
-        listTaskApprovals(task.id),
-        listTaskArtifacts(task.id),
-      ]);
-      if (approvals.status === "fulfilled") setTaskApprovals(approvals.value);
-      if (artifacts.status === "fulfilled") setTaskArtifacts(artifacts.value);
-    } catch (err) {
-      Alert.alert("Could not send ORAX message", err instanceof Error ? err.message : "Try again.");
-    } finally {
-      setSendingTaskMessage(false);
-    }
-  }, [selectedTask, sendingTaskMessage, taskChatInput]);
-
-  // Clear task-scoped state immediately when the user switches to a different task.
-  // Thread messages, approvals, and artifacts are stored separately from Ora chat and
-  // AI Builder history — this is not Ora history and not AI Builder state.
   useEffect(() => {
-    if (!selectedTask) return;
+    if (!selectedTask) {
+      activeTaskIdRef.current = null;
+      clearTaskScopedState();
+      return;
+    }
+
     const switchedTasks = activeTaskIdRef.current !== selectedTask.id;
     activeTaskIdRef.current = selectedTask.id;
     if (switchedTasks) {
-      setTaskMessages([]);
-      setTaskApprovals([]);
-      setTaskArtifacts([]);
-      setTaskMessageDraft("");
+      clearTaskScopedState();
     }
-    // Only re-run when task id changes — ref mutation is intentionally excluded.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTask?.id]);
+    void loadTaskDetails(selectedTask.id);
+  }, [clearTaskScopedState, loadTaskDetails, selectedTask]);
 
-  // When a task is created but the first-message send failed, pre-fill the chat input
-  // so the user can retry without re-typing.
   useEffect(() => {
-    if (taskMessageDraft) {
-      setTaskChatInput(taskMessageDraft);
-      setTaskMessageDraft("");
+    void loadScans(selectedRepo?.id ?? null);
+    if (selectedRepo?.defaultBranch) {
+      setApprovalBranch(selectedRepo.defaultBranch);
+      setScanBranch(selectedRepo.defaultBranch);
     }
-  }, [taskMessageDraft]);
+  }, [loadScans, selectedRepo?.defaultBranch, selectedRepo?.id]);
 
-  // Create a task and immediately open its thread ("Start ORAX chat").
-  // The first message becomes the task prompt and also seeds the thread.
-  const createTaskWithThread = useCallback(async () => {
-    const firstMessage = threadFirstMessage.trim();
-    if (!taskRepoId || !firstMessage) return;
-    setCreatingTask(true);
-    let createdTask: (typeof tasks)[number] | null = null;
-    try {
-      const body = await createTask({
-        repositoryId: taskRepoId,
-        kind: taskKind,
-        prompt: firstMessage,
-        startThread: true,
+  const refreshCurrent = useCallback(async () => {
+    await loadRoot();
+    await loadTaskDetails(selectedTask?.id ?? null);
+    await loadScans(selectedRepo?.id ?? null);
+  }, [loadRoot, loadScans, loadTaskDetails, selectedRepo?.id, selectedTask?.id]);
+
+  const runAction = useCallback(
+    async (key: string, action: () => Promise<void>) => {
+      setBusyAction(key);
+      setError(null);
+      try {
+        await action();
+        await refreshCurrent();
+      } catch (err) {
+        setError(messageFromError(err, "Orax action failed"));
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [refreshCurrent],
+  );
+
+  const submitRepository = useCallback(async () => {
+    if (!repoUrl.trim()) return;
+    await runAction("add-repo", async () => {
+      const created = await addRepository(repoUrl.trim(), repoBranch.trim() || "main");
+      setSelectedRepoId(created.repository.id);
+      setRepoUrl("");
+      setRepoBranch("main");
+      setTab("workspace");
+    });
+  }, [repoBranch, repoUrl, runAction]);
+
+  const connectGithub = useCallback(async () => {
+    if (!selectedRepo || !githubToken.trim()) return;
+    await runAction("connect-github", async () => {
+      await connectRepositoryGithubToken(selectedRepo.id, githubToken.trim());
+      setGithubToken("");
+    });
+  }, [githubToken, runAction, selectedRepo]);
+
+  const submitScan = useCallback(async () => {
+    if (!selectedRepo) return;
+    await runAction("scan-repo", async () => {
+      await scanRepository(selectedRepo.id, scanBranch.trim() || selectedRepo.defaultBranch);
+    });
+  }, [runAction, scanBranch, selectedRepo]);
+
+  const submitTask = useCallback(async () => {
+    const repoId = selectedRepo?.id;
+    const prompt = taskPrompt.trim();
+    if (!repoId || !prompt) return;
+    await runAction("create-task", async () => {
+      const created = await createTask({ repositoryId: repoId, kind: taskKind, prompt });
+      activeTaskIdRef.current = created.task.id;
+      setSelectedTaskId(created.task.id);
+      setTaskPrompt("");
+      await appendTaskMessage(created.task.id, prompt);
+      await loadTaskDetails(created.task.id);
+      setTab("workspace");
+    });
+  }, [loadTaskDetails, runAction, selectedRepo?.id, taskKind, taskPrompt]);
+
+  const selectTask = useCallback(
+    (task: OraxTask) => {
+      if (task.id !== activeTaskIdRef.current) {
+        clearTaskScopedState();
+      }
+      activeTaskIdRef.current = task.id;
+      setSelectedTaskId(task.id);
+      setSelectedRepoId(task.repositoryId);
+      setTab("workspace");
+    },
+    [clearTaskScopedState],
+  );
+
+  const sendThreadMessage = useCallback(async () => {
+    const text = threadDraft.trim();
+    if (!selectedTask || !text) return;
+    await runAction("send-thread", async () => {
+      await appendTaskMessage(selectedTask.id, text);
+      setThreadDraft("");
+    });
+  }, [runAction, selectedTask, threadDraft]);
+
+  const submitReadApproval = useCallback(async () => {
+    if (!selectedTask) return;
+    const paths = approvalPaths
+      .split(/[\n,]+/)
+      .map((path) => path.trim())
+      .filter(Boolean);
+    if (!paths.length) return;
+    await runAction("request-read", async () => {
+      await requestFileReadApproval({
+        taskId: selectedTask.id,
+        paths,
+        branch: approvalBranch.trim() || selectedRepo?.defaultBranch,
+        reason: approvalReason.trim() || undefined,
       });
-      createdTask = body.task;
-      activeTaskIdRef.current = body.task.id;
-      const refreshed = await listTasks();
-      setTasks(refreshed);
-      setStartingThread(false);
-      setThreadFirstMessage("");
-      setTab("tasks");
-      void loadTaskDetail(body.task);
-    } catch (err) {
-      if (createdTask) {
-        // Task created, but first message failed to save — pre-fill the draft.
-        setTaskMessageDraft(firstMessage);
-        void loadTaskDetail(createdTask);
-      } else {
-        Alert.alert("Could not create task", err instanceof Error ? err.message : "Try again.");
-      }
-    } finally {
-      setCreatingTask(false);
+      setApprovalPaths("");
+      setApprovalReason("");
+      setTab("approvals");
+    });
+  }, [
+    approvalBranch,
+    approvalPaths,
+    approvalReason,
+    runAction,
+    selectedRepo?.defaultBranch,
+    selectedTask,
+  ]);
+
+  const applySuggestion = useCallback((suggestion: OraxTaskActionSuggestion) => {
+    if (suggestion.type === "read_files") {
+      setApprovalPaths((suggestion.paths ?? []).join("\n"));
+      setApprovalReason(suggestion.reason ?? "");
+      setTab("approvals");
+    } else if (suggestion.type === "draft_patch") {
+      setDraftInstructions(suggestion.instructions ?? "");
+      setTab("artifacts");
+    } else if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
+      setSelectedCommands(suggestion.commands);
+      setTab("artifacts");
+    } else {
+      setTab(suggestion.type === "review_pending_approval" ? "approvals" : "artifacts");
     }
-  }, [taskRepoId, taskKind, threadFirstMessage, loadTaskDetail]);
+  }, []);
 
-  const handleConnectGithub = useCallback(
-    async (repoId: number) => {
-      const token = (githubTokenByRepo[repoId] ?? "").trim();
-      if (!token) return;
-      setConnectingGithubRepoId(repoId);
-      try {
-        const res = await connectGithubToken(repoId, token);
-        Alert.alert(
-          "GitHub connected",
-          `Connected to ${res.repository.owner}/${res.repository.name}.`,
-        );
-        setGithubTokenByRepo((prev) => ({ ...prev, [repoId]: "" }));
-        setRepos(await listRepositories());
-      } catch (err) {
-        Alert.alert("Connect failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setConnectingGithubRepoId(null);
-      }
-    },
-    [githubTokenByRepo],
-  );
-
-  const handleApprovalDecision = useCallback(
-    async (approvalId: number, decision: "approved" | "denied") => {
-      setActionBusy(`decision-${approvalId}`);
-      try {
-        await patchApproval(approvalId, decision);
-        if (selectedTask) setTaskApprovals(await listTaskApprovals(selectedTask.id));
-      } catch (err) {
-        Alert.alert("Action failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [selectedTask],
-  );
-
-  const handleReadFiles = useCallback(
-    async (approvalId: number) => {
-      setActionBusy(`read-${approvalId}`);
-      try {
-        const res = await readApprovedFiles(approvalId);
-        const summary =
-          res.files.length > 0
-            ? `${res.files.length} file(s) on branch "${res.branch}"${
-                res.skipped.length
-                  ? `\nSkipped: ${res.skipped.map((item) => `${item.path}: ${item.reason}`).join(", ")}`
-                  : ""
-              }`
-            : "No files could be read.";
-        Alert.alert("Files read", summary);
-        if (selectedTask) {
-          const [appr, arts] = await Promise.allSettled([
-            listTaskApprovals(selectedTask.id),
-            listTaskArtifacts(selectedTask.id),
-          ]);
-          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
-          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
-        }
-      } catch (err) {
-        Alert.alert("Read failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [selectedTask],
-  );
-
-  const handleDraftPatch = useCallback(
-    async (taskId: number, approvalId: number) => {
-      const readApproval = taskApprovals.find((a) => a.id === approvalId);
-      if (
-        !readApproval ||
-        readApproval.action !== "read_files" ||
-        !["approved", "completed"].includes(readApproval.status)
-      ) {
-        Alert.alert(
-          "No approved file read",
-          "An approved file-read request is required before generating a draft patch.",
-        );
-        return;
-      }
-      setActionBusy(`patch-${approvalId}`);
-      try {
-        const res = await generateDraftPatch(taskId, approvalId);
-        Alert.alert("Draft patch ready", res.artifact.summary ?? "Artifact created.");
-        if (selectedTask) {
-          const [appr, arts] = await Promise.allSettled([
-            listTaskApprovals(selectedTask.id),
-            listTaskArtifacts(selectedTask.id),
-          ]);
-          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
-          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
-        }
-      } catch (err) {
-        Alert.alert("Patch failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [selectedTask, taskApprovals],
-  );
-
-  const handleRequestApproval = useCallback(
-    async (kind: "sandbox" | "commands" | "pr", task: OraxTask, artifact: OraxTaskArtifact) => {
-      if (kind === "sandbox") {
-        if (artifact.type !== "draft_patch" || !artifactText(artifact, "unifiedDiff")) {
-          Alert.alert(
-            "No draft patch",
-            "Generate a draft patch before requesting sandbox validation.",
-          );
-          return;
-        }
-      } else if (kind === "commands") {
-        if (artifact.type !== "sandbox_result" || !artifactFlag(artifact, "applied")) {
-          Alert.alert("No sandbox result", "A passed sandbox validation is required first.");
-          return;
-        }
-      } else {
-        if (artifact.type !== "command_result" || !artifactFlag(artifact, "passed")) {
-          Alert.alert("No command result", "Passed controlled checks are required first.");
-          return;
-        }
-        const confirmed = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            "Create GitHub PR",
-            "ORAX will create a branch and open a pull request. No direct push or deploy will occur.",
-            [
-              { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-              { text: "Request PR approval", onPress: () => resolve(true) },
-            ],
-          );
-        });
-        if (!confirmed) return;
-      }
-      setActionBusy(`req-${kind}-${artifact.id}`);
-      try {
-        if (kind === "sandbox") {
-          await requestSandboxApproval(
-            task.id,
-            artifact.id,
-            "Validate the draft patch in an isolated sandbox before any GitHub action.",
-          );
-        } else if (kind === "commands") {
-          await requestCommandApproval(
-            task.id,
-            artifact.id,
-            DEFAULT_ORAX_COMMAND_IDS,
-            "Run approval-gated ORAX checks before any GitHub pull request approval.",
-          );
-        } else {
-          await requestGithubPrApproval(task.id, artifact.id, {
-            title: `ORAX: ${task.title || "Mobile task"}`,
-            reason: "Create a GitHub branch and pull request from the sandbox-passed patch.",
-          });
-        }
-        setTaskApprovals(await listTaskApprovals(task.id));
-        Alert.alert("Approval requested", "The approval request has been queued.");
-      } catch (err) {
-        Alert.alert("Request failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [],
-  );
-
-  const handleRunSandbox = useCallback(
-    async (approvalId: number) => {
-      setActionBusy(`sandbox-${approvalId}`);
-      try {
-        const res = await runSandbox(approvalId);
-        const applied = artifactFlag(res.artifact, "applied");
-        Alert.alert(
-          applied ? "Sandbox passed" : "Sandbox result recorded",
-          res.artifact.summary ?? "Sandbox artifact created.",
-        );
-        if (selectedTask) {
-          const [appr, arts] = await Promise.allSettled([
-            listTaskApprovals(selectedTask.id),
-            listTaskArtifacts(selectedTask.id),
-          ]);
-          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
-          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
-        }
-      } catch (err) {
-        Alert.alert("Sandbox failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [selectedTask],
-  );
-
-  const handleRunCommands = useCallback(
-    async (approvalId: number) => {
-      setActionBusy(`commands-${approvalId}`);
-      try {
-        const res = await runCommands(approvalId);
-        const passed = artifactFlag(res.artifact, "passed");
-        Alert.alert(
-          passed ? "Checks passed" : "Check result recorded",
-          res.artifact.summary ?? "Controlled-check artifact created.",
-        );
-        if (selectedTask) {
-          const [appr, arts] = await Promise.allSettled([
-            listTaskApprovals(selectedTask.id),
-            listTaskArtifacts(selectedTask.id),
-          ]);
-          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
-          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
-        }
-      } catch (err) {
-        Alert.alert("Checks failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [selectedTask],
-  );
-
-  const handleCreatePR = useCallback(
-    async (approvalId: number) => {
-      setActionBusy(`pr-${approvalId}`);
-      try {
-        const res = await createGithubPR(approvalId);
-        const url = artifactText(res.artifact, "pullRequestUrl");
-        const number = artifactPayload(res.artifact).pullRequestNumber;
-        Alert.alert(
-          res.reused ? "PR reused" : "PR created",
-          url
-            ? `Pull request ${typeof number === "number" ? `#${number}` : ""}\n${url}`
-            : (res.artifact.summary ?? "GitHub PR artifact recorded."),
-        );
-        if (selectedTask) {
-          const [appr, arts] = await Promise.allSettled([
-            listTaskApprovals(selectedTask.id),
-            listTaskArtifacts(selectedTask.id),
-          ]);
-          if (appr.status === "fulfilled") setTaskApprovals(appr.value);
-          if (arts.status === "fulfilled") setTaskArtifacts(arts.value);
-        }
-      } catch (err) {
-        Alert.alert("PR creation failed", err instanceof Error ? err.message : "Please try again.");
-      } finally {
-        setActionBusy(null);
-      }
-    },
-    [selectedTask],
-  );
-
-  if (!isSignedIn) {
-    return (
-      <View style={{ flex: 1, backgroundColor: c.background }}>
-        <ScreenHeader title="Orax" subtitle="Connect repositories & run agentic tasks" />
-        <SignInWall
-          title="Sign in for Orax"
-          description="Orax connects to your repositories and runs agentic coding tasks with your account."
-        />
-      </View>
+  const toggleCommand = useCallback((id: string) => {
+    setSelectedCommands((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
-  }
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      <ScreenHeader title="Orax" subtitle="Connect repositories & run agentic tasks" />
-      <View
-        style={{
-          flexDirection: "row",
-          gap: 8,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-        }}
-      >
-        <Pill
-          label="Repositories"
-          icon={GitBranch}
-          active={tab === "repos"}
-          onPress={() => setTab("repos")}
-        />
-        <Pill
-          label="Tasks"
-          icon={TerminalSquare}
-          active={tab === "tasks"}
-          onPress={() => setTab("tasks")}
-        />
-        <Pill
-          label="Capabilities"
-          icon={Sparkles}
-          active={tab === "capabilities"}
-          onPress={() => setTab("capabilities")}
-        />
+      <ScreenHeader title="Orax" subtitle="Codex-style coding agent for repositories" />
+      <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 8 }}
+        >
+          <Pill
+            label="Workspace"
+            icon={MessageSquare}
+            active={tab === "workspace"}
+            onPress={() => setTab("workspace")}
+          />
+          <Pill
+            label="Repos"
+            icon={GitBranch}
+            active={tab === "repos"}
+            onPress={() => setTab("repos")}
+          />
+          <Pill
+            label="Approvals"
+            icon={Lock}
+            active={tab === "approvals"}
+            onPress={() => setTab("approvals")}
+          />
+          <Pill
+            label="Artifacts"
+            icon={Code2}
+            active={tab === "artifacts"}
+            onPress={() => setTab("artifacts")}
+          />
+          <Pill
+            label="Caps"
+            icon={ShieldCheck}
+            active={tab === "capabilities"}
+            onPress={() => setTab("capabilities")}
+          />
+        </ScrollView>
       </View>
 
       {loading ? (
-        <Loading label="Loading Orax…" />
+        <Loading label="Loading Orax..." />
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -595,9 +477,157 @@ export default function OraxScreen() {
             }}
             keyboardShouldPersistTaps="handled"
           >
-            {tab === "repos" && (
+            {error ? <Notice tone="error" title="Orax needs attention" body={error} /> : null}
+
+            {tab === "workspace" ? (
+              <>
+                <TaskFocusCard
+                  task={selectedTask}
+                  repo={selectedRepo}
+                  checkpointNextStep={latestCheckpoint?.nextStep}
+                  pendingApprovals={
+                    approvals.filter((approval) => approval.status === "pending").length
+                  }
+                  artifactCount={artifacts.length}
+                  onRefresh={() => void refreshCurrent()}
+                  refreshing={busyAction === "refresh"}
+                />
+
+                {repos.length === 0 ? (
+                  <EmptyState
+                    icon={GitBranch}
+                    title="Connect a repository"
+                    subtitle="Orax starts with a GitHub repository, then keeps code work isolated behind approvals."
+                  />
+                ) : (
+                  <Card style={{ gap: 12 }}>
+                    <SectionTitle title="Start ORAX chat" icon={TerminalSquare} />
+                    <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                      The first message becomes the task prompt and the first message in the
+                      ORAX-only task conversation. It never enters normal Ora history or AI Builder.
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {TASK_KINDS.map((kind) => (
+                        <Pill
+                          key={kind.value}
+                          label={kind.label}
+                          active={taskKind === kind.value}
+                          onPress={() => setTaskKind(kind.value)}
+                        />
+                      ))}
+                    </View>
+                    <TextField
+                      label="Request"
+                      placeholder="Ask Orax to inspect, plan, review, or fix code..."
+                      value={taskPrompt}
+                      onChangeText={setTaskPrompt}
+                      multiline
+                      style={{ minHeight: 96, textAlignVertical: "top" }}
+                    />
+                    <Button
+                      label="Start Orax task"
+                      icon={Play}
+                      onPress={submitTask}
+                      loading={busyAction === "create-task"}
+                      disabled={!selectedRepo || !taskPrompt.trim()}
+                      full
+                    />
+                  </Card>
+                )}
+
+                {selectedTask ? (
+                  <Card style={{ gap: 12 }}>
+                    <SectionTitle title="Task thread" icon={Bot} />
+                    {detailsLoading ? <Loading label="Loading thread..." /> : null}
+                    {latestAssistantSuggestion ? (
+                      <SuggestionCard
+                        suggestion={latestAssistantSuggestion}
+                        onPress={() => applySuggestion(latestAssistantSuggestion)}
+                      />
+                    ) : null}
+                    <View style={{ gap: 10 }}>
+                      {messages.length === 0 ? (
+                        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                          No thread messages yet. Send a status or instruction update to Orax.
+                        </Text>
+                      ) : (
+                        messages
+                          .slice(-8)
+                          .map((message) => <MessageBubble key={message.id} message={message} />)
+                      )}
+                    </View>
+                    <TextField
+                      label="Message Orax"
+                      placeholder="Resume, ask for next step, or name files to inspect..."
+                      value={threadDraft}
+                      onChangeText={setThreadDraft}
+                      multiline
+                      style={{ minHeight: 72, textAlignVertical: "top" }}
+                    />
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      <Button
+                        label="Resume task"
+                        variant="secondary"
+                        onPress={() =>
+                          setThreadDraft(
+                            "Where are we right now, and what is the next approved step?",
+                          )
+                        }
+                      />
+                      <Button
+                        label="Explain approval"
+                        variant="secondary"
+                        onPress={() =>
+                          setThreadDraft(
+                            "Explain the current pending approval, its risk, and what will happen if I approve it.",
+                          )
+                        }
+                      />
+                      <Button
+                        label="Summarize result"
+                        variant="secondary"
+                        onPress={() =>
+                          setThreadDraft(
+                            "Summarize the latest execution result and tell me the next safe step.",
+                          )
+                        }
+                      />
+                      <Button
+                        label="Send"
+                        icon={Send}
+                        onPress={sendThreadMessage}
+                        loading={busyAction === "send-thread"}
+                        disabled={!threadDraft.trim()}
+                      />
+                    </View>
+                  </Card>
+                ) : null}
+
+                <Card style={{ gap: 12 }}>
+                  <SectionTitle title="Task history" icon={TerminalSquare} />
+                  {tasks.length === 0 ? (
+                    <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                      No ORAX tasks yet. Start a chat to create the first task.
+                    </Text>
+                  ) : (
+                    tasks.map((task) => (
+                      <TaskHistoryRow
+                        key={task.id}
+                        task={task}
+                        repo={repos.find((repo) => repo.id === task.repositoryId) ?? null}
+                        active={task.id === selectedTask?.id}
+                        onPress={() => selectTask(task)}
+                      />
+                    ))
+                  )}
+                </Card>
+              </>
+            ) : null}
+
+            {tab === "repos" ? (
               <>
                 <Card style={{ gap: 12 }}>
+                  <SectionTitle title="Repository" icon={GitBranch} />
                   <TextField
                     label="Repository URL"
                     placeholder="https://github.com/owner/repo"
@@ -605,623 +635,928 @@ export default function OraxScreen() {
                     value={repoUrl}
                     onChangeText={setRepoUrl}
                   />
+                  <TextField
+                    label="Default branch"
+                    placeholder="main"
+                    autoCapitalize="none"
+                    value={repoBranch}
+                    onChangeText={setRepoBranch}
+                  />
                   <Button
                     label="Connect repository"
                     icon={Plus}
-                    onPress={submitRepo}
-                    loading={addingRepo}
+                    onPress={submitRepository}
+                    loading={busyAction === "add-repo"}
+                    disabled={!repoUrl.trim()}
                     full
                   />
                 </Card>
+
+                {selectedRepo ? (
+                  <>
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="GitHub access" icon={KeyRound} />
+                      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                        Read-only scans and PR creation use this Orax repository token. Ora chat
+                        history and memory are not used here.
+                      </Text>
+                      <TextField
+                        label="Token"
+                        placeholder="GitHub fine-grained token"
+                        secureTextEntry
+                        autoCapitalize="none"
+                        value={githubToken}
+                        onChangeText={setGithubToken}
+                      />
+                      <Button
+                        label="Connect GitHub token"
+                        icon={KeyRound}
+                        onPress={connectGithub}
+                        loading={busyAction === "connect-github"}
+                        disabled={!githubToken.trim()}
+                        full
+                      />
+                    </Card>
+
+                    <Card style={{ gap: 12 }}>
+                      <SectionTitle title="Scan" icon={RefreshCw} />
+                      <TextField
+                        label="Branch"
+                        placeholder={selectedRepo.defaultBranch ?? "main"}
+                        autoCapitalize="none"
+                        value={scanBranch}
+                        onChangeText={setScanBranch}
+                      />
+                      <Button
+                        label="Scan repository"
+                        icon={RefreshCw}
+                        onPress={submitScan}
+                        loading={busyAction === "scan-repo"}
+                        full
+                      />
+                      {latestScan ? (
+                        <InfoGrid
+                          items={[
+                            ["Status", latestScan.status],
+                            ["Files", String(latestScan.fileCount ?? 0)],
+                            ["Branch", latestScan.branch],
+                          ]}
+                        />
+                      ) : null}
+                    </Card>
+                  </>
+                ) : null}
+
                 {repos.length === 0 ? (
                   <EmptyState
                     icon={GitBranch}
                     title="No repositories yet"
-                    subtitle="Connect a GitHub repository so Orax can analyze and work on it."
+                    subtitle="Connect a GitHub repository before starting Orax tasks."
                   />
                 ) : (
-                  repos.map((r) => (
-                    <Card key={r.id} style={{ gap: 4 }}>
-                      <Text
-                        style={{
-                          color: c.foreground,
-                          fontFamily: "Inter_600SemiBold",
-                          fontSize: 15,
-                        }}
-                      >
-                        {r.owner}/{r.name}
-                      </Text>
-                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                        {r.connectionStatus.replace(/_/g, " ")}
-                        {r.scanStatus ? ` · scan ${r.scanStatus}` : ""}
-                      </Text>
-                      <Button
-                        label="Scan repository"
-                        variant="secondary"
-                        icon={GitBranch}
-                        onPress={() => void runScan(r)}
-                        loading={scanningRepoId === r.id}
-                        style={{ marginTop: 6 }}
-                      />
-                      <Button
-                        label="New task on this repo"
-                        variant="ghost"
-                        onPress={() => {
-                          setTaskRepoId(r.id);
-                          setTab("tasks");
-                        }}
-                        style={{ marginTop: 6 }}
-                      />
-                      <View
-                        style={{
-                          borderTopWidth: 1,
-                          borderTopColor: c.border,
-                          marginTop: 8,
-                          paddingTop: 10,
-                          gap: 8,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: c.mutedForeground,
-                            fontSize: 12,
-                            fontFamily: "Inter_600SemiBold",
-                          }}
-                        >
-                          GitHub token (private repos)
-                        </Text>
-                        <TextField
-                          label=""
-                          placeholder="github_pat_..."
-                          autoCapitalize="none"
-                          secureTextEntry
-                          value={githubTokenByRepo[r.id] ?? ""}
-                          onChangeText={(v) =>
-                            setGithubTokenByRepo((prev) => ({ ...prev, [r.id]: v }))
-                          }
-                        />
-                        <Button
-                          label="Connect GitHub token"
-                          icon={Key}
-                          variant="secondary"
-                          disabled={!(githubTokenByRepo[r.id] ?? "").trim()}
-                          loading={connectingGithubRepoId === r.id}
-                          onPress={() => void handleConnectGithub(r.id)}
-                        />
-                      </View>
-                    </Card>
+                  repos.map((repo) => (
+                    <RepositoryCard
+                      key={repo.id}
+                      repo={repo}
+                      active={repo.id === selectedRepo?.id}
+                      onPress={() => {
+                        setSelectedRepoId(repo.id);
+                        setTab("workspace");
+                      }}
+                    />
                   ))
                 )}
               </>
-            )}
+            ) : null}
 
-            {tab === "tasks" && (
+            {tab === "approvals" ? (
               <>
                 <Card style={{ gap: 12 }}>
-                  <Text
-                    style={{
-                      color: c.foreground,
-                      fontFamily: "Inter_600SemiBold",
-                      fontSize: 15,
-                    }}
-                  >
-                    New task
-                  </Text>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    <Pill
-                      label="Analyze"
-                      active={taskKind === "analyze"}
-                      onPress={() => setTaskKind("analyze")}
-                    />
-                    <Pill
-                      label="Coding"
-                      active={taskKind === "coding"}
-                      onPress={() => setTaskKind("coding")}
-                    />
-                  </View>
-                  {repos.length > 0 && (
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                      {repos.map((r) => (
-                        <Pill
-                          key={r.id}
-                          label={`${r.owner}/${r.name}`}
-                          active={taskRepoId === r.id}
-                          onPress={() => setTaskRepoId(r.id)}
-                        />
-                      ))}
-                    </View>
-                  )}
+                  <SectionTitle title="Request file read" icon={FileText} />
                   <TextField
-                    label="Prompt"
-                    placeholder="Describe what Orax should do…"
-                    value={taskPrompt}
-                    onChangeText={setTaskPrompt}
+                    label="Repository-relative paths"
+                    placeholder={"src/app.tsx\npackage.json"}
+                    autoCapitalize="none"
+                    value={approvalPaths}
+                    onChangeText={setApprovalPaths}
                     multiline
                     style={{ minHeight: 80, textAlignVertical: "top" }}
                   />
-                  <Button
-                    label="Run task"
-                    onPress={submitTask}
-                    loading={creatingTask}
-                    disabled={!taskRepoId || !taskPrompt.trim()}
-                    full
+                  <TextField
+                    label="Branch"
+                    placeholder={selectedRepo?.defaultBranch ?? "main"}
+                    autoCapitalize="none"
+                    value={approvalBranch}
+                    onChangeText={setApprovalBranch}
+                  />
+                  <TextField
+                    label="Reason"
+                    placeholder="Why Orax needs these files"
+                    value={approvalReason}
+                    onChangeText={setApprovalReason}
                   />
                   <Button
-                    label="Start ORAX chat"
-                    icon={MessageCircle}
-                    variant="secondary"
-                    onPress={() => setStartingThread((v) => !v)}
-                    disabled={!taskRepoId}
+                    label="Create approval request"
+                    icon={Lock}
+                    onPress={submitReadApproval}
+                    loading={busyAction === "request-read"}
+                    disabled={!selectedTask || !approvalPaths.trim()}
                     full
                   />
-                  {startingThread && (
-                    <View style={{ gap: 8 }}>
-                      <TextField
-                        label="First message"
-                        placeholder="What should Orax do first?"
-                        value={threadFirstMessage}
-                        onChangeText={setThreadFirstMessage}
-                        multiline
-                        style={{ minHeight: 60, textAlignVertical: "top" }}
-                      />
-                      <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                        The first message becomes the task prompt and opens a live ORAX thread.
-                      </Text>
-                      <Button
-                        label="Create task + open thread"
-                        onPress={createTaskWithThread}
-                        loading={creatingTask}
-                        disabled={!taskRepoId || !threadFirstMessage.trim()}
-                        full
-                      />
-                    </View>
-                  )}
                 </Card>
-                {tasks.length === 0 ? (
+
+                {approvals.length === 0 ? (
                   <EmptyState
-                    icon={TerminalSquare}
-                    title="No tasks yet"
-                    subtitle="Run an analyze or coding task against a connected repository."
+                    icon={Lock}
+                    title="No approvals yet"
+                    subtitle="Orax cannot read files, run checks, or open pull requests until you approve each step."
                   />
                 ) : (
-                  tasks.map((t) => (
-                    <Card key={t.id} style={{ gap: 6 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: c.foreground,
-                            fontFamily: "Inter_600SemiBold",
-                            fontSize: 15,
-                          }}
-                        >
-                          {t.title || t.kind || "Task"}
-                        </Text>
-                        <View
-                          style={{
-                            backgroundColor: c.muted,
-                            borderRadius: 999,
-                            paddingHorizontal: 10,
-                            paddingVertical: 3,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: c.accentForeground,
-                              fontSize: 12,
-                            }}
-                          >
-                            {t.status}
-                          </Text>
-                        </View>
-                      </View>
-                      {t.prompt ? (
-                        <Text numberOfLines={3} style={{ color: c.mutedForeground, fontSize: 13 }}>
-                          {t.prompt}
-                        </Text>
-                      ) : null}
-                      <Button
-                        label="Open ORAX thread"
-                        icon={MessageCircle}
-                        variant="ghost"
-                        onPress={() => void loadTaskDetail(t)}
-                      />
-                    </Card>
+                  approvals.map((approval) => (
+                    <ApprovalCard
+                      key={approval.id}
+                      approval={approval}
+                      busyAction={busyAction}
+                      onApprove={() =>
+                        void runAction(`approve-${approval.id}`, async () => {
+                          await decideApproval(approval.id, "approved");
+                        })
+                      }
+                      onDeny={() =>
+                        void runAction(`deny-${approval.id}`, async () => {
+                          await decideApproval(approval.id, "denied");
+                        })
+                      }
+                      onRun={() =>
+                        void runAction(`run-${approval.id}`, async () => {
+                          if (approval.action === "read_files") {
+                            await runApprovedFileRead(approval.id);
+                          } else if (approval.action === "sandbox_run") {
+                            await runApprovedSandbox(approval.id);
+                          } else if (approval.action === "safe_check") {
+                            await runApprovedCommands(approval.id);
+                          } else if (approval.action === "github_pr") {
+                            await createApprovedGithubPr(approval.id);
+                          }
+                        })
+                      }
+                    />
                   ))
                 )}
-                {selectedTask && (
-                  <Card style={{ gap: 12 }}>
-                    <View style={{ gap: 4 }}>
-                      <Text
-                        style={{
-                          color: c.foreground,
-                          fontFamily: "Inter_700Bold",
-                          fontSize: 16,
-                        }}
-                      >
-                        {selectedTask.title || "ORAX task"}
-                      </Text>
-                      <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                        Thread messages, approvals, and artifacts are stored separately from Ora chat and
-                        project knowledge — not Ora history, not AI Builder data.
-                      </Text>
-                    </View>
-
-                    {taskDetailLoading ? (
-                      <Loading label="Loading task detail..." />
-                    ) : (
-                      <>
-                        <Text
-                          style={{
-                            color: c.foreground,
-                            fontFamily: "Inter_600SemiBold",
-                            fontSize: 14,
-                          }}
-                        >
-                          Task thread
-                        </Text>
-                        {taskMessages.length === 0 ? (
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                            No ORAX messages yet.
-                          </Text>
-                        ) : (
-                          taskMessages.map((m) => (
-                            <View
-                              key={m.id}
-                              style={{
-                                backgroundColor: c.muted,
-                                borderRadius: 12,
-                                paddingHorizontal: 12,
-                                paddingVertical: 9,
-                                gap: 3,
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  color: c.accentForeground,
-                                  fontFamily: "Inter_600SemiBold",
-                                  fontSize: 12,
-                                  textTransform: "uppercase",
-                                }}
-                              >
-                                {m.role}
-                                {m.event ? ` · ${m.event}` : ""}
-                              </Text>
-                              <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 19 }}>
-                                {m.content}
-                              </Text>
-                            </View>
-                          ))
-                        )}
-
-                        <TextField
-                          label="Message ORAX"
-                          placeholder="Ask about the task, approvals, files, or next step..."
-                          value={taskChatInput}
-                          onChangeText={setTaskChatInput}
-                          multiline
-                          style={{ minHeight: 70, textAlignVertical: "top" }}
-                        />
-                        <Button
-                          label="Send to ORAX"
-                          icon={MessageCircle}
-                          onPress={submitTaskMessage}
-                          loading={sendingTaskMessage}
-                          disabled={!taskChatInput.trim()}
-                          full
-                        />
-
-                        <Text
-                          style={{
-                            color: c.foreground,
-                            fontFamily: "Inter_600SemiBold",
-                            fontSize: 14,
-                          }}
-                        >
-                          Execution lifecycle
-                        </Text>
-                        {taskArtifacts.length === 0 ? (
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                            No execution events yet.
-                          </Text>
-                        ) : (
-                          taskArtifacts
-                            .filter((a) =>
-                              ["draft_patch", "sandbox_result", "command_result", "github_pr_result"].includes(
-                                a.type,
-                              ),
-                            )
-                            .map((a) => {
-                              const LIFECYCLE_LABELS: Record<string, string> = {
-                                draft_patch: "Draft patch generated",
-                                sandbox_result: "Sandbox result",
-                                command_result: "Controlled checks result",
-                                github_pr_result: "Pull request result",
-                              };
-                              return (
-                                <Text
-                                  key={a.id}
-                                  style={{ color: c.mutedForeground, fontSize: 13 }}
-                                >
-                                  • {LIFECYCLE_LABELS[a.type] ?? a.type}
-                                </Text>
-                              );
-                            })
-                        )}
-
-                        <Text
-                          style={{
-                            color: c.foreground,
-                            fontFamily: "Inter_600SemiBold",
-                            fontSize: 14,
-                          }}
-                        >
-                          Approvals
-                        </Text>
-                        {taskApprovals.length === 0 ? (
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                            No approvals requested yet.
-                          </Text>
-                        ) : (
-                          taskApprovals.map((a) => (
-                            <View
-                              key={a.id}
-                              style={{
-                                backgroundColor: c.muted,
-                                borderRadius: 10,
-                                padding: 10,
-                                gap: 8,
-                              }}
-                            >
-                              <View
-                                style={{
-                                  flexDirection: "row",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  gap: 8,
-                                }}
-                              >
-                                <Text style={{ color: c.foreground, flex: 1, fontSize: 13 }}>
-                                  {a.action.replace(/_/g, " ")}
-                                </Text>
-                                <Text style={{ color: c.accentForeground, fontSize: 12 }}>
-                                  {a.status}
-                                </Text>
-                              </View>
-                              {a.status === "pending" && (
-                                <View style={{ flexDirection: "row", gap: 8 }}>
-                                  <Button
-                                    label="Approve"
-                                    icon={Check}
-                                    variant="secondary"
-                                    loading={actionBusy === `decision-${a.id}`}
-                                    onPress={() => void handleApprovalDecision(a.id, "approved")}
-                                    style={{ flex: 1 }}
-                                  />
-                                  <Button
-                                    label="Deny"
-                                    icon={X}
-                                    variant="ghost"
-                                    loading={actionBusy === `decision-${a.id}`}
-                                    onPress={() => void handleApprovalDecision(a.id, "denied")}
-                                    style={{ flex: 1 }}
-                                  />
-                                </View>
-                              )}
-                              {a.status === "approved" && /read.?file/i.test(a.action) && (
-                                <Button
-                                  label="Read files"
-                                  icon={FileText}
-                                  variant="secondary"
-                                  loading={actionBusy === `read-${a.id}`}
-                                  onPress={() => void handleReadFiles(a.id)}
-                                />
-                              )}
-                              {["approved", "completed"].includes(a.status) &&
-                                /read.?file/i.test(a.action) && (
-                                  <Button
-                                    label="Generate draft patch"
-                                    icon={FileText}
-                                    variant="secondary"
-                                    loading={actionBusy === `patch-${a.id}`}
-                                    onPress={() => void handleDraftPatch(selectedTask.id, a.id)}
-                                  />
-                                )}
-                              {a.status === "approved" && /sandbox/i.test(a.action) && (
-                                <Button
-                                  label="Run sandbox"
-                                  icon={Play}
-                                  variant="secondary"
-                                  loading={actionBusy === `sandbox-${a.id}`}
-                                  onPress={() => void handleRunSandbox(a.id)}
-                                />
-                              )}
-                              {a.status === "approved" && /command/i.test(a.action) && (
-                                <Button
-                                  label="Run commands"
-                                  icon={Play}
-                                  variant="secondary"
-                                  loading={actionBusy === `commands-${a.id}`}
-                                  onPress={() => void handleRunCommands(a.id)}
-                                />
-                              )}
-                              {a.status === "approved" &&
-                                /github.?pr|pull.?request/i.test(a.action) && (
-                                  <Button
-                                    label="Create GitHub PR"
-                                    icon={GitPullRequest}
-                                    variant="secondary"
-                                    loading={actionBusy === `pr-${a.id}`}
-                                    onPress={() => void handleCreatePR(a.id)}
-                                  />
-                                )}
-                            </View>
-                          ))
-                        )}
-
-                        <Text
-                          style={{
-                            color: c.foreground,
-                            fontFamily: "Inter_600SemiBold",
-                            fontSize: 14,
-                          }}
-                        >
-                          Artifacts
-                        </Text>
-                        {taskArtifacts.length === 0 ? (
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                            No artifacts generated yet.
-                          </Text>
-                        ) : (
-                          taskArtifacts.map((a) => (
-                            <View
-                              key={a.id}
-                              style={{
-                                backgroundColor: c.muted,
-                                borderRadius: 10,
-                                padding: 10,
-                                gap: 4,
-                              }}
-                            >
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                                <FileText size={16} color={c.accentForeground} />
-                                <Text
-                                  style={{
-                                    color: c.foreground,
-                                    fontFamily: "Inter_600SemiBold",
-                                    flex: 1,
-                                  }}
-                                >
-                                  {a.title ?? a.type}
-                                </Text>
-                                <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-                                  {a.status}
-                                </Text>
-                              </View>
-                              {a.summary ? (
-                                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                                  {a.summary}
-                                </Text>
-                              ) : null}
-                              {a.type === "draft_patch" && !!artifactText(a, "unifiedDiff") && (
-                                <Button
-                                  label="Request sandbox approval"
-                                  icon={Play}
-                                  variant="secondary"
-                                  loading={actionBusy === `req-sandbox-${a.id}`}
-                                  onPress={() =>
-                                    void handleRequestApproval("sandbox", selectedTask, a)
-                                  }
-                                />
-                              )}
-                              {a.type === "sandbox_result" && artifactFlag(a, "applied") && (
-                                <Button
-                                  label="Request controlled checks"
-                                  icon={TerminalSquare}
-                                  variant="secondary"
-                                  loading={actionBusy === `req-commands-${a.id}`}
-                                  onPress={() =>
-                                    void handleRequestApproval("commands", selectedTask, a)
-                                  }
-                                />
-                              )}
-                              {a.type === "command_result" && artifactFlag(a, "passed") && (
-                                <Button
-                                  label="Request GitHub PR approval"
-                                  icon={GitPullRequest}
-                                  variant="secondary"
-                                  loading={actionBusy === `req-pr-${a.id}`}
-                                  onPress={() => void handleRequestApproval("pr", selectedTask, a)}
-                                />
-                              )}
-                              {a.type === "github_pr_result" &&
-                                artifactText(a, "pullRequestUrl") && (
-                                  <Text style={{ color: c.accentForeground, fontSize: 12 }}>
-                                    {artifactText(a, "pullRequestUrl")}
-                                  </Text>
-                                )}
-                            </View>
-                          ))
-                        )}
-                      </>
-                    )}
-                  </Card>
-                )}
               </>
-            )}
+            ) : null}
 
-            {tab === "capabilities" && (
+            {tab === "artifacts" ? (
               <>
-                <Card style={{ gap: 10 }}>
-                  <Text
-                    style={{
-                      color: c.foreground,
-                      fontFamily: "Inter_600SemiBold",
-                      fontSize: 15,
-                    }}
-                  >
-                    Available now
+                <Card style={{ gap: 12 }}>
+                  <SectionTitle title="Execution lifecycle" icon={ShieldCheck} />
+                  <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                    Follow suggestions, approvals, file reads, patches, sandbox runs, controlled
+                    checks, and pull request results from the same task timeline.
                   </Text>
-                  {(caps?.available ?? []).length === 0 ? (
+                  {lifecycleItems.length === 0 ? (
                     <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                      No capabilities reported.
+                      No lifecycle activity yet.
                     </Text>
                   ) : (
-                    caps?.available.map((cap) => (
-                      <View
-                        key={cap}
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <CheckCircle2 size={16} color={c.accentForeground} />
-                        <Text style={{ color: c.foreground, fontSize: 14 }}>
-                          {cap.replace(/_/g, " ")}
-                        </Text>
-                      </View>
-                    ))
+                    lifecycleItems.map((item) => <LifecycleRow key={item.id} item={item} />)
                   )}
                 </Card>
-                {(caps?.lockedUntilApprovalLayer ?? []).length > 0 && (
-                  <Card style={{ gap: 10 }}>
-                    <Text
-                      style={{
-                        color: c.foreground,
-                        fontFamily: "Inter_600SemiBold",
-                        fontSize: 15,
-                      }}
-                    >
-                      Requires approval
-                    </Text>
-                    {caps?.lockedUntilApprovalLayer.map((cap) => (
-                      <View
-                        key={cap}
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <Lock size={16} color={c.mutedForeground} />
-                        <Text style={{ color: c.mutedForeground, fontSize: 14 }}>
-                          {cap.replace(/_/g, " ")}
-                        </Text>
-                      </View>
+
+                <Card style={{ gap: 12 }}>
+                  <SectionTitle title="Workflow controls" icon={Code2} />
+                  <TextField
+                    label="Draft instructions"
+                    placeholder="Optional implementation notes for the draft patch"
+                    value={draftInstructions}
+                    onChangeText={setDraftInstructions}
+                    multiline
+                    style={{ minHeight: 72, textAlignVertical: "top" }}
+                  />
+                  <Button
+                    label="Generate draft patch"
+                    icon={Code2}
+                    onPress={() =>
+                      void runAction("draft-patch", async () => {
+                        if (!selectedTask || !readApproval) return;
+                        await generateDraftPatch({
+                          taskId: selectedTask.id,
+                          approvalId: readApproval.id,
+                          instructions: draftInstructions.trim() || undefined,
+                        });
+                      })
+                    }
+                    loading={busyAction === "draft-patch"}
+                    disabled={!selectedTask || !readApproval}
+                    full
+                  />
+                  <Button
+                    label="Request sandbox approval"
+                    icon={ShieldCheck}
+                    variant="secondary"
+                    onPress={() =>
+                      void runAction("sandbox-approval", async () => {
+                        if (!selectedTask || !latestDraftPatch) return;
+                        await requestSandboxApproval({
+                          taskId: selectedTask.id,
+                          artifactId: latestDraftPatch.id,
+                        });
+                      })
+                    }
+                    loading={busyAction === "sandbox-approval"}
+                    disabled={!selectedTask || !latestDraftPatch}
+                    full
+                  />
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    {COMMAND_OPTIONS.map((command) => (
+                      <Pill
+                        key={command.id}
+                        label={command.label}
+                        active={selectedCommands.includes(command.id)}
+                        onPress={() => toggleCommand(command.id)}
+                      />
                     ))}
-                  </Card>
+                  </View>
+                  <Button
+                    label="Request controlled checks"
+                    icon={TerminalSquare}
+                    variant="secondary"
+                    onPress={() =>
+                      void runAction("command-approval", async () => {
+                        if (!selectedTask || !latestSandbox) return;
+                        await requestCommandApproval({
+                          taskId: selectedTask.id,
+                          artifactId: latestSandbox.id,
+                          commands: selectedCommands,
+                        });
+                      })
+                    }
+                    loading={busyAction === "command-approval"}
+                    disabled={!selectedTask || !latestSandbox || selectedCommands.length === 0}
+                    full
+                  />
+                  <TextField
+                    label="PR title"
+                    placeholder={selectedTask ? `Orax: ${selectedTask.title}` : "Orax PR title"}
+                    value={prTitle}
+                    onChangeText={setPrTitle}
+                  />
+                  <TextField
+                    label="Type CREATE PR"
+                    placeholder="CREATE PR"
+                    autoCapitalize="characters"
+                    value={prConfirm}
+                    onChangeText={setPrConfirm}
+                  />
+                  <Button
+                    label="Request PR approval"
+                    icon={GitPullRequest}
+                    variant="secondary"
+                    onPress={() =>
+                      void runAction("pr-approval", async () => {
+                        if (!selectedTask || !latestCommand) return;
+                        await requestGithubPrApproval({
+                          taskId: selectedTask.id,
+                          artifactId: latestCommand.id,
+                          title: prTitle.trim() || undefined,
+                        });
+                        setPrConfirm("");
+                      })
+                    }
+                    loading={busyAction === "pr-approval"}
+                    disabled={!selectedTask || !latestCommand || prConfirm.trim() !== "CREATE PR"}
+                    full
+                  />
+                </Card>
+
+                {artifacts.length === 0 ? (
+                  <EmptyState
+                    icon={Code2}
+                    title="No artifacts yet"
+                    subtitle="Generate a draft patch after an approved file read, then validate it before PR work."
+                  />
+                ) : (
+                  artifacts.map((artifact) => (
+                    <ArtifactCard key={artifact.id} artifact={artifact} latestPr={latestPr} />
+                  ))
                 )}
               </>
-            )}
+            ) : null}
+
+            {tab === "capabilities" ? (
+              <>
+                <Card style={{ gap: 10 }}>
+                  <SectionTitle title="Available now" icon={CheckCircle2} />
+                  {(caps?.available ?? []).map((cap) => (
+                    <CapabilityRow key={cap} text={cap} available />
+                  ))}
+                </Card>
+                <Card style={{ gap: 10 }}>
+                  <SectionTitle title="Locked by approval" icon={Lock} />
+                  {(caps?.lockedUntilApprovalLayer ?? []).map((cap) => (
+                    <CapabilityRow key={cap} text={cap} />
+                  ))}
+                </Card>
+              </>
+            ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
       )}
     </View>
   );
+}
+
+function SectionTitle({
+  title,
+  icon: Icon,
+}: {
+  title: string;
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+}) {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <Icon size={18} color={c.accentForeground} />
+      <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 16 }}>
+        {title}
+      </Text>
+    </View>
+  );
+}
+
+function TaskFocusCard({
+  task,
+  repo,
+  checkpointNextStep,
+  pendingApprovals,
+  artifactCount,
+  onRefresh,
+  refreshing,
+}: {
+  task: OraxTask | null;
+  repo: OraxRepository | null;
+  checkpointNextStep?: string;
+  pendingApprovals: number;
+  artifactCount: number;
+  onRefresh: () => void;
+  refreshing: boolean;
+}) {
+  const c = useColors();
+  return (
+    <Card style={{ gap: 12 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={{ color: c.mutedForeground, fontSize: 12, textTransform: "uppercase" }}>
+            Active Orax workspace
+          </Text>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}>
+            {task?.title ?? "No task selected"}
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+            {repo ? `${repo.owner}/${repo.name}` : "Connect a repository to begin"}
+          </Text>
+        </View>
+        <Pressable
+          onPress={onRefresh}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: c.secondary,
+          }}
+        >
+          <RefreshCw size={18} color={refreshing ? c.primary : c.foreground} />
+        </Pressable>
+      </View>
+      <InfoGrid
+        items={[
+          ["Status", task?.status ?? "idle"],
+          ["Approvals", String(pendingApprovals)],
+          ["Artifacts", String(artifactCount)],
+        ]}
+      />
+      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+        {checkpointNextStep ??
+          "Orax is isolated from Ora. It works through repository-scoped tasks, approvals, artifacts, and pull requests."}
+      </Text>
+    </Card>
+  );
+}
+
+function TaskHistoryRow({
+  task,
+  repo,
+  active,
+  onPress,
+}: {
+  task: OraxTask;
+  repo: OraxRepository | null;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const c = useColors();
+  return (
+    <Pressable onPress={onPress}>
+      <View
+        style={{
+          borderWidth: 1,
+          borderColor: active ? c.primary : c.border,
+          borderRadius: c.radius,
+          padding: 12,
+          gap: 8,
+          backgroundColor: active ? c.accent : c.muted,
+        }}
+      >
+        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+              {task.title ?? task.prompt ?? "ORAX task"}
+            </Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+              {task.kind} - {task.status}
+              {repo ? ` - ${repo.owner}/${repo.name}` : ""}
+            </Text>
+          </View>
+          {active ? <CheckCircle2 size={18} color={c.accentForeground} /> : null}
+        </View>
+        {task.result?.message ? (
+          <Text numberOfLines={2} style={{ color: c.mutedForeground, fontSize: 12 }}>
+            {task.result.message}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
+function RepositoryCard({
+  repo,
+  active,
+  onPress,
+}: {
+  repo: OraxRepository;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const c = useColors();
+  return (
+    <Pressable onPress={onPress}>
+      <Card style={{ gap: 8, borderColor: active ? c.primary : c.cardBorder }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+              {repo.owner}/{repo.name}
+            </Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+              {repo.connectionStatus.replace(/_/g, " ")}
+            </Text>
+          </View>
+          {active ? <CheckCircle2 size={18} color={c.accentForeground} /> : null}
+        </View>
+        <InfoGrid
+          items={[
+            ["Provider", repo.provider ?? "github"],
+            ["Branch", repo.defaultBranch ?? "main"],
+            ["Scan", repo.scanStatus ?? "idle"],
+          ]}
+        />
+      </Card>
+    </Pressable>
+  );
+}
+
+function LifecycleRow({ item }: { item: LifecycleItem }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: c.radius,
+        padding: 12,
+        gap: 6,
+        backgroundColor: c.muted,
+      }}
+    >
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: c.mutedForeground, fontSize: 11, textTransform: "uppercase" }}>
+            {item.label}
+          </Text>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+            {item.title}
+          </Text>
+        </View>
+        <StatusIcon status={item.status} />
+      </View>
+      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
+        {item.description}
+      </Text>
+    </View>
+  );
+}
+
+function SuggestionCard({
+  suggestion,
+  onPress,
+}: {
+  suggestion: OraxTaskActionSuggestion;
+  onPress: () => void;
+}) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: c.radius,
+        padding: 12,
+        gap: 8,
+        backgroundColor: c.muted,
+      }}
+    >
+      <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+        {suggestion.title}
+      </Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
+        {suggestion.description}
+      </Text>
+      <Button
+        label={suggestion.buttonLabel ?? "Prepare action"}
+        variant="secondary"
+        onPress={onPress}
+      />
+    </View>
+  );
+}
+
+function MessageBubble({ message }: { message: OraxTaskMessage }) {
+  const c = useColors();
+  const isUser = message.role === "user";
+  const isSystem = message.role === "system" || message.role === "tool";
+  return (
+    <View
+      style={{
+        alignSelf: isUser ? "flex-end" : "stretch",
+        maxWidth: isUser ? "88%" : "100%",
+        borderWidth: 1,
+        borderColor: isSystem ? c.border : isUser ? c.primary : c.cardBorder,
+        borderRadius: c.radius,
+        padding: 12,
+        backgroundColor: isUser ? c.primary : isSystem ? c.muted : c.card,
+        gap: 6,
+      }}
+    >
+      <Text
+        style={{
+          color: isUser ? c.primaryForeground : c.mutedForeground,
+          fontSize: 11,
+          textTransform: "uppercase",
+        }}
+      >
+        {isSystem ? "Timeline" : message.role}
+      </Text>
+      <Text
+        style={{
+          color: isUser ? c.primaryForeground : c.foreground,
+          fontSize: 14,
+          lineHeight: 20,
+        }}
+      >
+        {message.content}
+      </Text>
+    </View>
+  );
+}
+
+function ApprovalCard({
+  approval,
+  busyAction,
+  onApprove,
+  onDeny,
+  onRun,
+}: {
+  approval: OraxApproval;
+  busyAction: string | null;
+  onApprove: () => void;
+  onDeny: () => void;
+  onRun: () => void;
+}) {
+  const c = useColors();
+  const canDecide = approval.status === "pending";
+  const canRun = approval.status === "approved";
+  return (
+    <Card style={{ gap: 10 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+            {formatApprovalAction(approval.action)}
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+            Approval #{approval.id} - {approval.status}
+          </Text>
+        </View>
+        <StatusIcon status={approval.status} />
+      </View>
+      {approval.riskSummary ? (
+        <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+          {approval.riskSummary}
+        </Text>
+      ) : null}
+      {approval.request.paths?.length ? (
+        <Text style={{ color: c.foreground, fontSize: 13 }}>
+          Files: {approval.request.paths.join(", ")}
+        </Text>
+      ) : null}
+      {approval.request.commands?.length ? (
+        <Text style={{ color: c.foreground, fontSize: 13 }}>
+          Checks: {approval.request.commands.join(", ")}
+        </Text>
+      ) : null}
+      {canDecide ? (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            label="Approve"
+            icon={CheckCircle2}
+            onPress={onApprove}
+            loading={busyAction === `approve-${approval.id}`}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label="Deny"
+            icon={XCircle}
+            variant="destructive"
+            onPress={onDeny}
+            loading={busyAction === `deny-${approval.id}`}
+            style={{ flex: 1 }}
+          />
+        </View>
+      ) : null}
+      {canRun ? (
+        <Button
+          label={runLabelForApproval(approval.action)}
+          icon={Play}
+          variant="secondary"
+          onPress={onRun}
+          loading={busyAction === `run-${approval.id}`}
+          full
+        />
+      ) : null}
+      {approval.result?.pullRequestUrl ? (
+        <Text style={{ color: c.accentForeground, fontSize: 13 }}>
+          PR: {approval.result.pullRequestUrl}
+        </Text>
+      ) : null}
+    </Card>
+  );
+}
+
+function ArtifactCard({
+  artifact,
+  latestPr,
+}: {
+  artifact: OraxArtifact;
+  latestPr: OraxArtifact | null;
+}) {
+  const c = useColors();
+  const commands = artifact.payload.commands ?? [];
+  const changedFiles = artifact.payload.changedFiles ?? [];
+  return (
+    <Card style={{ gap: 10 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+            {artifact.title}
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+            {artifact.type.replace(/_/g, " ")} - {artifact.status}
+          </Text>
+        </View>
+        <StatusIcon status={artifact.status} />
+      </View>
+      {artifact.summary ? (
+        <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+          {artifact.summary}
+        </Text>
+      ) : null}
+      {artifact.payload.explanation ? (
+        <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 19 }}>
+          {artifact.payload.explanation}
+        </Text>
+      ) : null}
+      {changedFiles.length ? (
+        <Text style={{ color: c.foreground, fontSize: 13 }}>
+          Changed: {changedFiles.map((file) => file.path).join(", ")}
+        </Text>
+      ) : null}
+      {commands.length ? (
+        <View style={{ gap: 6 }}>
+          {commands.map((command) => (
+            <Text key={command.id} style={{ color: c.mutedForeground, fontSize: 12 }}>
+              {command.label ?? command.id}: {command.status}
+              {command.message ? ` - ${command.message}` : ""}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      {(artifact.payload.pullRequestUrl ?? latestPr?.payload.pullRequestUrl) ? (
+        <Text style={{ color: c.accentForeground, fontSize: 13 }}>
+          PR: {artifact.payload.pullRequestUrl ?? latestPr?.payload.pullRequestUrl}
+        </Text>
+      ) : null}
+      {artifact.payload.error?.message ? (
+        <Notice tone="error" title="Artifact error" body={artifact.payload.error.message} />
+      ) : null}
+    </Card>
+  );
+}
+
+function CapabilityRow({ text, available }: { text: string; available?: boolean }) {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      {available ? (
+        <CheckCircle2 size={16} color={c.accentForeground} />
+      ) : (
+        <Lock size={16} color={c.mutedForeground} />
+      )}
+      <Text style={{ color: available ? c.foreground : c.mutedForeground, fontSize: 14, flex: 1 }}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+function Notice({ tone, title, body }: { tone: "error" | "info"; title: string; body: string }) {
+  const c = useColors();
+  const color = tone === "error" ? c.destructive : c.accentForeground;
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: color,
+        borderRadius: c.radius,
+        padding: 12,
+        gap: 6,
+        backgroundColor: c.card,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <AlertCircle size={16} color={color} />
+        <Text style={{ color, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>{title}</Text>
+      </View>
+      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>{body}</Text>
+    </View>
+  );
+}
+
+function InfoGrid({ items }: { items: Array<[string, string]> }) {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: "row", gap: 8 }}>
+      {items.map(([label, value]) => (
+        <View
+          key={label}
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 10,
+            padding: 10,
+            backgroundColor: c.muted,
+          }}
+        >
+          <Text style={{ color: c.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>
+            {label}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 13 }}
+          >
+            {value || "none"}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function StatusIcon({ status }: { status: string }) {
+  const c = useColors();
+  if (status === "completed" || status === "approved") {
+    return <CheckCircle2 size={18} color={c.accentForeground} />;
+  }
+  if (status === "failed" || status === "denied") {
+    return <XCircle size={18} color={c.destructive} />;
+  }
+  return <Lock size={18} color={c.mutedForeground} />;
+}
+
+function formatApprovalAction(action: string): string {
+  if (action === "read_files") return "File read";
+  if (action === "sandbox_run") return "Sandbox validation";
+  if (action === "safe_check") return "Controlled checks";
+  if (action === "github_pr") return "GitHub pull request";
+  return action.replace(/_/g, " ");
+}
+
+function runLabelForApproval(action: string): string {
+  if (action === "read_files") return "Read approved files";
+  if (action === "sandbox_run") return "Run sandbox";
+  if (action === "safe_check") return "Run checks";
+  if (action === "github_pr") return "Create pull request";
+  return "Run approved action";
+}
+
+function buildLifecycleItems(
+  approvals: OraxApproval[],
+  artifacts: OraxArtifact[],
+): LifecycleItem[] {
+  const approvalItems: LifecycleItem[] = approvals.map((approval) => ({
+    id: `approval-${approval.id}`,
+    kind: "approval",
+    label: approval.status === "pending" ? "Approval requested" : "Approval decision",
+    title: formatApprovalAction(approval.action),
+    status: approval.status,
+    createdAt: approval.decidedAt ?? approval.completedAt ?? approval.createdAt ?? "",
+    description: describeApproval(approval),
+  }));
+  const artifactItems: LifecycleItem[] = artifacts.map((artifact) => ({
+    id: `artifact-${artifact.id}`,
+    kind: "artifact",
+    label: formatArtifactLabel(artifact.type),
+    title: artifact.title,
+    status: artifact.status,
+    createdAt: artifact.updatedAt ?? artifact.createdAt ?? "",
+    description: describeArtifact(artifact),
+  }));
+  return [...approvalItems, ...artifactItems];
+}
+
+function describeApproval(approval: OraxApproval): string {
+  if (approval.action === "read_files") {
+    const files = approval.request.paths?.join(", ") || "selected files";
+    if (approval.status === "completed") {
+      const count = approval.result?.files?.length ?? 0;
+      return `Files read: ${count}.`;
+    }
+    return `Requested source access for ${files}.`;
+  }
+  if (approval.action === "sandbox_run") {
+    return `Sandbox validation request for artifact #${approval.request.artifactId ?? "unknown"}.`;
+  }
+  if (approval.action === "safe_check") {
+    return approval.request.commands?.length
+      ? `Controlled checks: ${approval.request.commands.join(", ")}.`
+      : "Controlled workspace checks require explicit approval.";
+  }
+  if (approval.action === "github_pr") {
+    return approval.result?.pullRequestUrl
+      ? `Pull request created: ${approval.result.pullRequestUrl}`
+      : "GitHub PR creation requires CREATE PR confirmation and explicit approval.";
+  }
+  return approval.riskSummary ?? "Approval-gated ORAX workflow step.";
+}
+
+function formatArtifactLabel(type: string): string {
+  if (type === "draft_patch") return "Draft patch generated";
+  if (type === "sandbox_result") return "Sandbox result";
+  if (type === "command_result") return "Controlled checks result";
+  if (type === "github_pr_result") return "Pull request result";
+  return "Workflow result";
+}
+
+function describeArtifact(artifact: OraxArtifact): string {
+  if (artifact.type === "draft_patch") {
+    const files = artifact.payload.filesRead?.length ?? 0;
+    return (
+      artifact.summary ?? `Review-only patch preview generated from ${files} approved file(s).`
+    );
+  }
+  if (artifact.type === "sandbox_result") {
+    const changedFiles = artifact.payload.changedFiles?.length ?? 0;
+    return artifact.payload.applied
+      ? `Sandbox applied the patch preview to ${changedFiles} file(s).`
+      : "Sandbox could not apply the patch preview.";
+  }
+  if (artifact.type === "command_result") {
+    const passed =
+      artifact.payload.commands?.filter((command) => command.status === "passed").length ?? 0;
+    const failed =
+      artifact.payload.commands?.filter((command) => command.status === "failed").length ?? 0;
+    return `Controlled checks completed: ${passed} passed, ${failed} failed.`;
+  }
+  if (artifact.type === "github_pr_result") {
+    return artifact.payload.pullRequestUrl
+      ? `Pull request created on ${artifact.payload.branchName ?? "the ORAX branch"}.`
+      : (artifact.payload.error?.message ?? "GitHub PR result recorded.");
+  }
+  return artifact.summary ?? "ORAX workflow artifact recorded.";
+}
+
+function messageFromError(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
