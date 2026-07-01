@@ -435,21 +435,98 @@ export default function OraxScreen() {
     selectedTask,
   ]);
 
-  const applySuggestion = useCallback((suggestion: OraxTaskActionSuggestion) => {
-    if (suggestion.type === "read_files") {
-      setApprovalPaths((suggestion.paths ?? []).join("\n"));
-      setApprovalReason(suggestion.reason ?? "");
-      setShowDetails(true);
-    } else if (suggestion.type === "draft_patch") {
-      setDraftInstructions(suggestion.instructions ?? "");
-      setShowDetails(true);
-    } else if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
-      setSelectedCommands(suggestion.commands);
-      setShowDetails(true);
-    } else {
-      setShowDetails(true);
-    }
-  }, []);
+  const applySuggestion = useCallback(
+    (suggestion: OraxTaskActionSuggestion) => {
+      if (!selectedTask) return;
+
+      if (suggestion.type === "read_files") {
+        const paths = suggestion.paths ?? [];
+        if (!paths.length) {
+          setThreadDraft("Which source files should Orax inspect next?");
+          return;
+        }
+        void runAction("request-read", async () => {
+          await requestFileReadApproval({
+            taskId: selectedTask.id,
+            paths,
+            branch: approvalBranch.trim() || selectedRepo?.defaultBranch,
+            reason: suggestion.reason,
+          });
+        });
+        return;
+      }
+
+      if (suggestion.type === "draft_patch") {
+        if (!readApproval) {
+          setThreadDraft("Request file-read approval before generating a draft patch.");
+          return;
+        }
+        void runAction("draft-patch", async () => {
+          await generateDraftPatch({
+            taskId: selectedTask.id,
+            approvalId: readApproval.id,
+            instructions: suggestion.instructions,
+          });
+        });
+        return;
+      }
+
+      if (suggestion.type === "sandbox_run") {
+        const artifactId = suggestion.artifactId ?? latestDraftPatch?.id;
+        if (!artifactId) {
+          setThreadDraft("Generate a draft patch before requesting sandbox validation.");
+          return;
+        }
+        void runAction("sandbox-approval", async () => {
+          await requestSandboxApproval({ taskId: selectedTask.id, artifactId });
+        });
+        return;
+      }
+
+      if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
+        const artifactId = suggestion.artifactId ?? latestSandbox?.id;
+        if (!artifactId) {
+          setThreadDraft("Run sandbox validation before requesting controlled checks.");
+          return;
+        }
+        setSelectedCommands(suggestion.commands);
+        void runAction("command-approval", async () => {
+          await requestCommandApproval({
+            taskId: selectedTask.id,
+            artifactId,
+            commands: suggestion.commands,
+          });
+        });
+        return;
+      }
+
+      if (suggestion.type === "github_pr") {
+        const artifactId = suggestion.artifactId ?? latestCommand?.id;
+        if (!artifactId) {
+          setThreadDraft("Run controlled checks before asking Orax to prepare a pull request.");
+          return;
+        }
+        void runAction("pr-approval", async () => {
+          await requestGithubPrApproval({
+            taskId: selectedTask.id,
+            artifactId,
+            title: selectedTask.title ?? undefined,
+            reason: suggestion.reason ?? suggestion.description,
+          });
+        });
+      }
+    },
+    [
+      approvalBranch,
+      latestCommand?.id,
+      latestDraftPatch?.id,
+      latestSandbox?.id,
+      readApproval,
+      runAction,
+      selectedRepo?.defaultBranch,
+      selectedTask,
+    ],
+  );
 
   const toggleCommand = useCallback((id: string) => {
     setSelectedCommands((current) =>
@@ -515,7 +592,7 @@ export default function OraxScreen() {
         <Pressable
           onPress={() => {
             setThreadOpen(true);
-            setShowDetails((value) => !value);
+            setThreadDraft("/status");
           }}
           hitSlop={10}
           style={{
@@ -615,7 +692,7 @@ export default function OraxScreen() {
                         style={{ minHeight: 88, textAlignVertical: "top" }}
                       />
                       <Button
-                        label="Start ORAX chat"
+                        label="Start chat"
                         icon={Play}
                         onPress={submitTask}
                         loading={busyAction === "create-task"}
@@ -637,7 +714,7 @@ export default function OraxScreen() {
                             numberOfLines={1}
                             style={{ color: c.foreground, fontSize: 18, lineHeight: 26 }}
                           >
-                            {task.title ?? task.prompt ?? "ORAX task"}
+                            {task.title ?? task.prompt ?? "Orax task"}
                           </Text>
                         </Pressable>
                       ))
@@ -659,8 +736,7 @@ export default function OraxScreen() {
                         if (selectedTask) {
                           selectTask(selectedTask);
                         } else {
-                          setThreadOpen(true);
-                          setShowDetails(true);
+                          setHomeComposeOpen(true);
                         }
                       }}
                     >
@@ -714,15 +790,7 @@ export default function OraxScreen() {
               </>
             ) : (
               <>
-            <Card style={{ gap: 12 }}>
-              <SectionTitle title="Task thread" icon={Bot} />
-              <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}>
-                {selectedTask?.title ?? selectedTask?.prompt ?? "Start an Orax task"}
-              </Text>
-              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                {selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "Connect a repository"}
-                {selectedTask ? ` - ${selectedTask.status}` : ""}
-              </Text>
+            <View style={{ gap: 12 }}>
               {detailsLoading ? <Loading label="Loading thread..." /> : null}
               {latestAssistantSuggestion ? (
                 <SuggestionCard
@@ -744,6 +812,40 @@ export default function OraxScreen() {
                         .map((message) => <MessageBubble key={message.id} message={message} />)
                     )}
                   </View>
+                  {approvals
+                    .filter(
+                      (approval) => approval.status === "pending" || approval.status === "approved",
+                    )
+                    .map((approval) => (
+                      <ApprovalCard
+                        key={approval.id}
+                        approval={approval}
+                        busyAction={busyAction}
+                        onApprove={() =>
+                          void runAction(`approve-${approval.id}`, async () => {
+                            await decideApproval(approval.id, "approved");
+                          })
+                        }
+                        onDeny={() =>
+                          void runAction(`deny-${approval.id}`, async () => {
+                            await decideApproval(approval.id, "denied");
+                          })
+                        }
+                        onRun={() =>
+                          void runAction(`run-${approval.id}`, async () => {
+                            if (approval.action === "read_files") {
+                              await runApprovedFileRead(approval.id);
+                            } else if (approval.action === "sandbox_run") {
+                              await runApprovedSandbox(approval.id);
+                            } else if (approval.action === "safe_check") {
+                              await runApprovedCommands(approval.id);
+                            } else if (approval.action === "github_pr") {
+                              await createApprovedGithubPr(approval.id);
+                            }
+                          })
+                        }
+                      />
+                    ))}
                   <TextField
                     placeholder="Resume, ask for next step, or name files to inspect..."
                     value={threadDraft}
@@ -752,11 +854,6 @@ export default function OraxScreen() {
                     style={{ minHeight: 72, textAlignVertical: "top" }}
                   />
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    <Button
-                      label="Details"
-                      variant="secondary"
-                      onPress={() => setShowDetails((value) => !value)}
-                    />
                     <Button
                       label="Send"
                       icon={Send}
@@ -787,7 +884,7 @@ export default function OraxScreen() {
                     style={{ minHeight: 88, textAlignVertical: "top" }}
                   />
                   <Button
-                    label="Start ORAX chat"
+                    label="Start chat"
                     icon={Play}
                     onPress={submitTask}
                     loading={busyAction === "create-task"}
@@ -796,9 +893,9 @@ export default function OraxScreen() {
                   />
                 </>
               )}
-            </Card>
+            </View>
 
-            {showDetails ? (
+            {false ? (
               <>
             <TaskFocusCard
               task={selectedTask}
@@ -839,7 +936,7 @@ export default function OraxScreen() {
                     style={{ minHeight: 88, textAlignVertical: "top" }}
                   />
                   <Button
-                    label="Start ORAX chat"
+                    label="Start chat"
                     icon={Play}
                     onPress={submitTask}
                     loading={busyAction === "create-task"}
@@ -847,7 +944,7 @@ export default function OraxScreen() {
                     full
                   />
                   <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
-                    The first message becomes the task prompt and stays in the ORAX task thread, not
+                    The first message becomes the task prompt and stays in the Orax task thread, not
                     normal Ora history or AI Builder.
                   </Text>
                   {tasks.length ? (
@@ -878,7 +975,7 @@ export default function OraxScreen() {
                                 fontSize: 14,
                               }}
                             >
-                              {task.title ?? task.prompt ?? "ORAX task"}
+                              {task.title ?? task.prompt ?? "Orax task"}
                             </Text>
                             <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
                               #{task.id} - {task.kind} - {task.status}
@@ -1265,7 +1362,7 @@ function TaskHistoryRow({
         <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
-              {task.title ?? task.prompt ?? "ORAX task"}
+              {task.title ?? task.prompt ?? "Orax task"}
             </Text>
             <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
               {task.kind} - {task.status}
@@ -1402,15 +1499,6 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
         gap: 6,
       }}
     >
-      <Text
-        style={{
-          color: c.mutedForeground,
-          fontSize: 11,
-          textTransform: "uppercase",
-        }}
-      >
-        {isSystem ? "Timeline" : message.role}
-      </Text>
       <Text
         style={{
           color: c.foreground,

@@ -363,7 +363,7 @@ export default function OraxPage() {
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
   const [taskMessageDraft, setTaskMessageDraft] = useState("");
-  const [showInspector, setShowInspector] = useState(false);
+  const [, setShowInspector] = useState(false);
   const [mobileTaskOpen, setMobileTaskOpen] = useState(false);
   const [mobileComposeOpen, setMobileComposeOpen] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
@@ -1250,7 +1250,13 @@ export default function OraxPage() {
         </div>
         <button
           type="button"
-          onClick={() => setShowInspector((value) => !value)}
+          onClick={() => {
+            if (mobileTaskOpen && selectedTask) {
+              setTaskMessageDraft("/status");
+              return;
+            }
+            setMobileComposeOpen((value) => !value);
+          }}
           className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground"
           aria-label="Orax options"
         >
@@ -1267,14 +1273,8 @@ export default function OraxPage() {
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted">
-            <Code2 className="h-4 w-4 text-foreground" />
-          </div>
           <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold">ORAX</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Codex workspace for repository tasks
-            </p>
+            <h1 className="truncate text-base font-semibold">Orax</h1>
           </div>
         </div>
         <ThemeToggle />
@@ -1282,10 +1282,7 @@ export default function OraxPage() {
 
       <main
         className={cn(
-          "grid flex-1 grid-cols-1 lg:min-h-0 lg:overflow-hidden",
-          showInspector
-            ? "lg:grid-cols-[280px_minmax(0,1fr)_320px]"
-            : "lg:grid-cols-[280px_minmax(0,1fr)]",
+          "grid flex-1 grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] lg:min-h-0 lg:overflow-hidden",
         )}
       >
         <aside
@@ -1322,7 +1319,7 @@ export default function OraxPage() {
             </div>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xl font-semibold lg:text-xs lg:font-semibold lg:uppercase lg:text-muted-foreground">
+                <div className="text-xl font-semibold lg:text-base lg:font-semibold lg:text-foreground">
                   Projects
                 </div>
                 <div className="mt-8 flex items-center gap-3 text-lg font-medium lg:mt-0 lg:text-sm lg:font-semibold">
@@ -1340,12 +1337,12 @@ export default function OraxPage() {
               open={tasks.length === 0}
               className="mt-4 hidden rounded-md border border-border bg-background lg:mt-3 lg:block"
             >
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">New task</summary>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">New chat</summary>
               <div className="border-t border-border p-3">
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Ask ORAX to inspect, plan, review, or fix code..."
+                  placeholder="Ask Orax to inspect, plan, review, or fix code..."
                   className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1375,12 +1372,8 @@ export default function OraxPage() {
                   ) : (
                     <Play className="h-4 w-4" />
                   )}
-                  Start ORAX chat
+                  Start chat
                 </button>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  The first message becomes the task prompt, stored separately from Ora chat and
-                  normal Ora history or AI Builder. Orax is not Ora and not AI Builder.
-                </p>
               </div>
             </details>
             {mobileComposeOpen ? (
@@ -1388,7 +1381,7 @@ export default function OraxPage() {
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Ask ORAX to inspect, plan, review, or fix code..."
+                  placeholder="Ask Orax to inspect, plan, review, or fix code..."
                   className="min-h-24 w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -1427,7 +1420,7 @@ export default function OraxPage() {
           <div className="flex-1 px-5 pb-28 lg:min-h-0 lg:overflow-y-auto lg:p-2">
             {visibleTasks.length === 0 ? (
               <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
-                No tasks yet. Start a chat to create a Codex-style ORAX thread.
+                No tasks yet. Start a chat to create an Orax thread.
               </div>
             ) : (
               <div className="space-y-5 lg:space-y-1.5">
@@ -1488,7 +1481,7 @@ export default function OraxPage() {
             </div>
           </div>
 
-          <div className="hidden border-t border-border p-3 lg:block">
+          <div className="hidden" aria-hidden="true">
             <details className="rounded-md border border-border bg-background">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Repository</summary>
               <div className="space-y-2 border-t border-border p-3">
@@ -1557,11 +1550,8 @@ export default function OraxPage() {
 
           <div className="hidden shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 lg:flex">
             <div className="min-w-0">
-              <div className="text-xs font-semibold uppercase text-muted-foreground">
-                ORAX task thread
-              </div>
               <h2 className="truncate text-base font-semibold">
-                {selectedTask?.title || selectedTask?.prompt || "Start an ORAX task"}
+                {selectedTask?.title || selectedTask?.prompt || "Start an Orax task"}
               </h2>
               <p className="truncate text-xs text-muted-foreground">
                 {selectedTaskRepository
@@ -1569,27 +1559,6 @@ export default function OraxPage() {
                   : "Connect a repository to begin"}
                 {selectedTask ? ` - task #${selectedTask.id} - ${selectedTask.status}` : ""}
               </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="rounded-full border border-border px-2 py-1">
-                Thread status: {selectedTask?.status ?? "idle"}
-              </span>
-              <span className="rounded-full border border-border px-2 py-1">
-                {taskMessages.length} messages
-              </span>
-              <span className="rounded-full border border-border px-2 py-1">
-                Pending approval: {pendingApprovals.length}
-              </span>
-              <span className="rounded-full border border-border px-2 py-1">
-                {artifacts.length} artifacts
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowInspector((value) => !value)}
-                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
-              >
-                {showInspector ? "Hide details" : "Details"}
-              </button>
             </div>
           </div>
 
@@ -1599,15 +1568,14 @@ export default function OraxPage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted">
                   <Bot className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <h3 className="mt-4 text-lg font-semibold">Create a Codex-style ORAX thread</h3>
+                <h3 className="mt-4 text-lg font-semibold">Start an Orax thread</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Pick a repository, describe the work, and ORAX will keep the task conversation,
-                  approvals, artifacts, and pull request flow in one isolated workspace.
+                  Pick a project, describe the work, and Orax will keep the task conversation inline.
                 </p>
               </div>
             ) : taskMessages.length === 0 ? (
               <div className="rounded-md border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
-                No messages yet. Ask ORAX to inspect files, explain pending approvals, or continue
+                No messages yet. Ask Orax to inspect files, explain pending approvals, or continue
                 from the current checkpoint.
               </div>
             ) : (
@@ -1629,19 +1597,14 @@ export default function OraxPage() {
                             : "bg-transparent lg:border-border lg:bg-card",
                       )}
                     >
-                      <div
-                        className={cn(
-                          "mb-1 text-[11px] font-semibold uppercase lg:text-[11px]",
-                          "text-muted-foreground",
-                        )}
-                      >
+                      <div className="hidden">
                         {isUser
                           ? "You"
                           : message.role === "tool"
                             ? "Tool result"
                             : isTimeline
                               ? "Timeline"
-                              : "ORAX"}
+                              : "Orax"}
                         {message.createdAt
                           ? ` - ${new Date(message.createdAt).toLocaleString()}`
                           : ""}
@@ -1683,58 +1646,114 @@ export default function OraxPage() {
                     </article>
                   );
                 })}
+                {pendingSuggestionConfirmation ? (
+                  <section className="rounded-md border border-border bg-card px-4 py-3 text-sm">
+                    <div className="text-[11px] font-semibold uppercase text-muted-foreground">
+                      Confirm action
+                    </div>
+                    <div className="mt-1 font-medium">{pendingSuggestionConfirmation.title}</div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {pendingSuggestionConfirmation.description}
+                    </p>
+                    {pendingSuggestionConfirmation.type === "github_pr" ? (
+                      <input
+                        value={suggestionPrConfirmationText}
+                        onChange={(event) => setSuggestionPrConfirmationText(event.target.value)}
+                        placeholder="Type CREATE PR"
+                        className="mt-3 h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    ) : null}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void confirmTaskActionSuggestion()}
+                        className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
+                      >
+                        Continue
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingSuggestionConfirmation(null);
+                          setSuggestionPrConfirmationText("");
+                        }}
+                        className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+                {approvals
+                  .filter((approval) => approval.status === "pending" || approval.status === "approved")
+                  .map((approval) => (
+                    <section
+                      key={approval.id}
+                      className="rounded-md border border-border bg-card px-4 py-3 text-sm"
+                    >
+                      <div className="text-[11px] font-semibold uppercase text-muted-foreground">
+                        Approval
+                      </div>
+                      <div className="mt-1 font-medium">
+                        {formatOraxApprovalAction(approval.action)}
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {describeOraxApprovalLifecycle(approval)}
+                      </p>
+                      {approval.status === "pending" ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void decideApproval(approval.id, "approved")}
+                            disabled={decidingApprovalId === approval.id}
+                            className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void decideApproval(approval.id, "denied")}
+                            disabled={decidingApprovalId === approval.id}
+                            className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (approval.action === "read_files") {
+                                void readApprovedFiles(approval.id);
+                              } else if (approval.action === "sandbox_run") {
+                                void runSandboxValidation(approval.id);
+                              } else if (approval.action === "safe_check") {
+                                void runControlledChecks(approval.id);
+                              } else if (approval.action === "github_pr") {
+                                void createGithubPr(approval.id);
+                              }
+                            }}
+                            className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
+                          >
+                            Continue
+                          </button>
+                        </div>
+                      )}
+                    </section>
+                  ))}
               </div>
             )}
           </div>
 
           <div className="shrink-0 border-t border-border bg-background p-3">
-            <details className="mx-auto mb-2 hidden max-w-4xl text-xs text-muted-foreground lg:block">
-              <summary className="inline-flex cursor-pointer rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-muted">
-                Task conversation
-              </summary>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTaskMessageDraft(
-                      "Where are we right now, and what is the next approved step?",
-                    )
-                  }
-                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
-                >
-                  Resume task
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTaskMessageDraft(
-                      "Explain approval: what is pending, what is the risk, and what happens if I approve it?",
-                    )
-                  }
-                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
-                >
-                  Explain approval
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setTaskMessageDraft(
-                      "Summarize result: what changed, what checks ran, and what remains?",
-                    )
-                  }
-                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
-                >
-                  Summarize result
-                </button>
-              </div>
-            </details>
             <div className="mx-auto flex max-w-4xl gap-2">
               <textarea
                 value={taskMessageDraft}
                 onChange={(event) => setTaskMessageDraft(event.target.value)}
                 placeholder={
                   selectedTask
-                    ? "Message ORAX about this task..."
+                    ? "Message Orax about this task..."
                     : "Create a task from the left panel first..."
                 }
                 className="min-h-12 flex-1 resize-none rounded-3xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring lg:rounded-md lg:px-3 lg:py-2 lg:text-sm"
@@ -1756,10 +1775,8 @@ export default function OraxPage() {
         </section>
 
         <aside
-          className={cn(
-            "order-3 flex-col border-t border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-l lg:border-t-0",
-            showInspector ? "flex" : "hidden",
-          )}
+          className="hidden"
+          aria-hidden="true"
         >
           <div className="p-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             <section className="rounded-md border border-border bg-card p-3">

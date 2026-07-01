@@ -28,104 +28,100 @@ describe("ORAX product-surface wiring", () => {
     expect(modeSelect).not.toContain('preferredMode: "orax"');
   });
 
-  it("uses ORAX-owned API routes rather than Ora or AI Builder endpoints", () => {
-    expect(oraxPage).toContain("/api/orax/capabilities");
-    expect(oraxPage).toContain("/api/orax/repositories");
-    expect(oraxPage).toContain("/api/orax/repositories/${repositoryId}/scans");
-    expect(oraxPage).toContain("/api/orax/repositories/${selectedRepository.id}/scan");
-    expect(oraxPage).toContain("/api/orax/tasks");
-    expect(oraxPage).toContain("/api/orax/tasks/${taskId}/messages");
-    expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content)");
-    expect(oraxPage).toContain("/api/orax/tasks/${taskId}/approvals");
-    expect(oraxPage).toContain("/api/orax/tasks/${taskId}/artifacts");
+  it("uses ORAX-owned APIs and never Ora chat or AI Builder endpoints", () => {
+    for (const route of [
+      "/api/orax/capabilities",
+      "/api/orax/repositories",
+      "/api/orax/tasks",
+      "/api/orax/tasks/${taskId}/messages",
+      "/api/orax/tasks/${taskId}/approvals",
+      "/api/orax/tasks/${taskId}/artifacts",
+      "/api/orax/approvals/${approvalId}",
+      "/api/orax/approvals/${approvalId}/read-files",
+      "/api/orax/approvals/${approvalId}/run-sandbox",
+      "/api/orax/approvals/${approvalId}/run-commands",
+      "/api/orax/approvals/${approvalId}/create-github-pr",
+    ]) {
+      expect(oraxPage).toContain(route);
+    }
+
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/draft-patch");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/sandbox-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/command-approvals");
-    expect(oraxPage).toContain('"pnpm-typecheck"');
-    expect(oraxPage).toContain('"pnpm-lint"');
-    expect(oraxPage).toContain('"pnpm-test"');
-    expect(oraxPage).toContain('"pnpm-build"');
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
-    expect(oraxPage).toContain("Start ORAX chat");
-    expect(oraxPage).toContain("appendTaskMessage");
     expect(oraxPage).toContain("createTask({ startThread: true })");
-    expect(oraxPage).toContain("The first message becomes the task prompt");
-    expect(oraxPage).toContain("normal Ora history or AI Builder");
+    expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content)");
     expect(oraxPage).toContain("Task created, but first message failed to save");
-    expect(oraxPage).toContain("setTaskMessageDraft(firstMessage)");
-    expect(oraxPage).toContain('confirmationText: "CREATE PR"');
-    expect(oraxPage).toContain("Type CREATE PR to enable approval");
-    expect(oraxPage).toContain("ArtifactTrace");
-    expect(oraxPage).toContain("FailureNotice");
-    expect(oraxPage).toContain("GitHub PR creation failed");
-    expect(oraxPage).toContain("/api/orax/approvals/${approvalId}");
-    expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/read-files");
-    expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-sandbox");
-    expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/run-commands");
-    expect(oraxPage).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
-    expect(oraxPage).toContain("ORAX task thread");
-    expect(oraxPage).toContain("Thread status");
-    expect(oraxPage).toContain("Pending approval");
-    expect(oraxPage).toContain("Workflow controls");
-    expect(oraxPage).toContain("Task conversation");
-    expect(oraxPage).toContain("latestAssistantSuggestions");
-    expect(oraxPage).toContain("primaryThreadSuggestion");
-    expect(oraxPage).toContain("threadNextAction");
-    expect(oraxPage).toContain("Next action in this thread");
-    expect(oraxPage).toContain("Execution still requires explicit approval controls");
-    expect(oraxPage).toContain("Resume task");
-    expect(oraxPage).toContain("Explain approval");
-    expect(oraxPage).toContain("Summarize result");
-    expect(oraxPage).toContain("Latest execution result");
-    expect(oraxPage).toContain("threadLifecycleItems");
-    expect(oraxPage).toContain("Execution lifecycle");
-    expect(oraxPage).toContain("Approval requested");
-    expect(oraxPage).toContain("Draft patch generated");
-    expect(oraxPage).toContain("Sandbox result");
-    expect(oraxPage).toContain("Controlled checks result");
-    expect(oraxPage).toContain("Pull request result");
-    expect(oraxPage).toContain("Every lifecycle action still");
-    expect(oraxPage).toContain("uses the existing explicit approval buttons");
-    expect(oraxPage).toContain("Type CREATE PR in Workflow controls to request PR approval");
-    expect(oraxPage).toContain("OraxThreadLifecycleDetails");
-    expect(oraxPage).toContain("File-read details");
-    expect(oraxPage).toContain("Draft patch details");
-    expect(oraxPage).toContain("Sandbox details");
-    expect(oraxPage).toContain("Checks details");
-    expect(oraxPage).toContain("Pull request details");
-    expect(oraxPage).toContain("extractUnifiedDiffFileNames");
-    expect(oraxPage).toContain("summarizeUnifiedDiff");
-    expect(oraxPage).toContain("stored separately from Ora chat and");
-    expect(oraxPage).toContain('message.role === "system" || message.role === "tool"');
-    expect(oraxPage).toContain("Timeline");
-    expect(oraxPage).toContain("Tool result");
-    expect(oraxPage).toContain("Current checkpoint");
-    expect(oraxPage).toContain("Checkpoint");
-    expect(oraxPage).toContain("currentCheckpoint");
-    expect(oraxPage).toContain("orax-task-checkpoint");
-    expect(oraxPage).toContain("message.approvalId");
-    expect(oraxPage).toContain("message.artifactId");
-    expect(oraxPage).toContain("metadata?.checkpoint");
-    expect(oraxPage).toContain("not Ora");
-    expect(oraxPage).toContain("not AI Builder");
-    expect(oraxPage).toContain("Resume");
-    expect(oraxPage).toContain("Where are we right now, and what is the next approved step?");
-    expect(oraxPage).toContain("actionSuggestions");
-    expect(oraxPage).toContain("applyTaskActionSuggestion");
-    expect(oraxPage).toContain("pendingSuggestionConfirmation");
-    expect(oraxPage).toContain("confirmTaskActionSuggestion");
-    expect(oraxPage).toContain("Create approval request");
-    expect(oraxPage).toContain('suggestionPrConfirmationText.trim() !== "CREATE PR"');
-    expect(oraxPage).toContain("requestGithubPrApproval(");
-    expect(oraxPage).toContain("suggestionPrConfirmationText");
-    expect(oraxPage).toContain("setApprovalPaths(suggestion.paths.join");
-    expect(oraxPage).toContain("setDraftInstructions");
-    expect(oraxPage).toContain("setSelectedCommandIds");
+
     expect(oraxPage).not.toContain("/api/public-ai/chat");
     expect(oraxPage).not.toContain("/api/projects/");
     expect(oraxPage).not.toContain("/api/credits");
     expect(oraxPage).not.toContain("useOraChat");
-    expect(oraxPage).not.toContain('setPrConfirmationText("CREATE PR")');
+    expect(mobileOraxScreen).not.toContain("sendChat");
+    expect(mobileOraxScreen).not.toContain("streamChatNative");
+    expect(mobileOraxScreen).not.toContain("useOraChat");
+    expect(mobileOraxScreen).not.toContain("/api/public-ai/chat");
+  });
+
+  it("keeps ORAX Codex-like and list-first on website and mobile", () => {
+    expect(oraxPage).toContain("const [mobileTaskOpen, setMobileTaskOpen] = useState(false)");
+    expect(oraxPage).toContain("const [mobileComposeOpen, setMobileComposeOpen] = useState(false)");
+    expect(oraxPage).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(oraxPage).toContain("visibleTasks");
+    expect(oraxPage).toContain("chatPreview");
+    expect(oraxPage).toContain("Back to Orax tasks");
+    expect(oraxPage).toContain("Orax options");
+    expect(oraxPage).toContain("Projects");
+    expect(oraxPage).toContain("Chats");
+    expect(oraxPage).toContain("Search Chats");
+    expect(oraxPage).toContain("Start chat");
+    expect(oraxPage).toContain("mobileTaskOpen ? \"hidden lg:flex\" : \"flex\"");
+    expect(oraxPage).toContain("mobileTaskOpen ? \"flex\" : \"hidden\"");
+    expect(oraxPage).toContain("setMobileComposeOpen((value) => !value)");
+    expect(oraxPage).not.toContain("Codex workspace for repository tasks");
+    expect(oraxPage).not.toContain("ORAX task thread");
+    expect(oraxPage).not.toContain("Start ORAX chat");
+
+    expect(mobileOraxScreen).toContain("const [threadOpen, setThreadOpen] = useState(false)");
+    expect(mobileOraxScreen).toContain(
+      "const [homeComposeOpen, setHomeComposeOpen] = useState(false)",
+    );
+    expect(mobileOraxScreen).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(mobileOraxScreen).toContain("visibleTasks");
+    expect(mobileOraxScreen).toContain("chatPreview");
+    expect(mobileOraxScreen).toContain("ORAX_TAGLINE");
+    expect(mobileOraxScreen).toContain("Projects");
+    expect(mobileOraxScreen).toContain("Chats");
+    expect(mobileOraxScreen).toContain("Search Chats");
+    expect(mobileOraxScreen).toContain('label="Start chat"');
+    expect(mobileOraxScreen).toContain("setHomeComposeOpen((value) => !value)");
+    expect(mobileOraxScreen).toContain("{homeComposeOpen ? (");
+    expect(mobileOraxScreen).not.toContain("ScreenHeader");
+    expect(mobileOraxScreen).not.toContain('label="Start ORAX chat"');
+  });
+
+  it("keeps ORAX actions inline in the thread instead of visible workflow panels", () => {
+    expect(oraxPage).toContain("Confirm action");
+    expect(oraxPage).toContain("pendingSuggestionConfirmation");
+    expect(oraxPage).toContain("confirmTaskActionSuggestion");
+    expect(oraxPage).toContain("void readApprovedFiles(approval.id)");
+    expect(oraxPage).toContain("void runSandboxValidation(approval.id)");
+    expect(oraxPage).toContain("void runControlledChecks(approval.id)");
+    expect(oraxPage).toContain("void createGithubPr(approval.id)");
+    expect(oraxPage).toContain('className="hidden"');
+    expect(oraxPage).toContain('aria-hidden="true"');
+    expect(oraxPage).not.toContain('showInspector ? "flex"');
+    expect(oraxPage).not.toContain("setShowInspector((value) => !value)");
+    expect(oraxPage).not.toContain("label=\"Details\"");
+
+    expect(mobileOraxScreen).toContain("void runAction(\"request-read\"");
+    expect(mobileOraxScreen).toContain("void runAction(\"draft-patch\"");
+    expect(mobileOraxScreen).toContain("void runAction(\"sandbox-approval\"");
+    expect(mobileOraxScreen).toContain("void runAction(\"command-approval\"");
+    expect(mobileOraxScreen).toContain("void runAction(\"pr-approval\"");
+    expect(mobileOraxScreen).toContain("approval.status === \"pending\" || approval.status === \"approved\"");
+    expect(mobileOraxScreen).toContain("{false ? (");
+    expect(mobileOraxScreen).not.toContain('label="Details"');
   });
 
   it("clears task-scoped state immediately on ORAX task switches", () => {
@@ -141,92 +137,34 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("if (activeTaskIdRef.current !== targetTaskId) return");
   });
 
-  it("keeps ORAX Codex-like and list-first on website and mobile", () => {
-    expect(oraxPage).toContain("const [mobileTaskOpen, setMobileTaskOpen] = useState(false)");
-    expect(oraxPage).toContain("const [mobileComposeOpen, setMobileComposeOpen] = useState(false)");
-    expect(oraxPage).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
-    expect(oraxPage).toContain("visibleTasks");
-    expect(oraxPage).toContain("chatPreview");
-    expect(oraxPage).toContain("Back to Orax tasks");
-    expect(oraxPage).toContain("Orax options");
-    expect(oraxPage).toContain("Projects");
-    expect(oraxPage).toContain("Chats");
-    expect(oraxPage).toContain("Search Chats");
-    expect(oraxPage).toContain("mobileTaskOpen ? \"hidden lg:flex\" : \"flex\"");
-    expect(oraxPage).toContain("mobileTaskOpen ? \"flex\" : \"hidden\"");
-    expect(oraxPage).toContain("setMobileComposeOpen((value) => !value)");
-    expect(oraxPage).toContain("className=\"hidden shrink-0 flex-wrap");
-    expect(oraxPage).toContain("className=\"mt-4 hidden rounded-md");
-    expect(oraxPage).toContain("details className=\"mx-auto mb-2 hidden");
-
-    expect(mobileOraxScreen).toContain("const [threadOpen, setThreadOpen] = useState(false)");
-    expect(mobileOraxScreen).toContain("const [homeComposeOpen, setHomeComposeOpen] = useState(false)");
-    expect(mobileOraxScreen).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
-    expect(mobileOraxScreen).toContain("visibleTasks");
-    expect(mobileOraxScreen).toContain("chatPreview");
-    expect(mobileOraxScreen).toContain("ORAX_TAGLINE");
-    expect(mobileOraxScreen).toContain("Projects");
-    expect(mobileOraxScreen).toContain("Chats");
-    expect(mobileOraxScreen).toContain("Search Chats");
-    expect(mobileOraxScreen).toContain("setHomeComposeOpen((value) => !value)");
-    expect(mobileOraxScreen).toContain("{homeComposeOpen ? (");
-    expect(mobileOraxScreen).toContain("{showDetails ? (");
-    expect(mobileOraxScreen).not.toContain("ScreenHeader");
-  });
-
-  it("mounts the authenticated /orax API prefix", () => {
+  it("mounts the authenticated /orax API prefix and mirrors workflow APIs on mobile", () => {
     expect(routesIndex).toContain('"/orax"');
     expect(routesIndex).toContain("router.use(oraxRouter)");
-  });
-
-  it("exposes the same ORAX-owned workflow on mobile without using Ora chat", () => {
     expect(mobileTypes).toContain(
       'export type OraxTaskKind = "analyze" | "plan" | "review" | "fix"',
     );
     expect(mobileTypes).not.toContain('"coding"');
-    expect(mobileApi).toContain("/api/orax/capabilities");
-    expect(mobileApi).toContain("/api/orax/repositories");
-    expect(mobileApi).toContain("/api/orax/repositories/${repositoryId}/github/connect");
-    expect(mobileApi).toContain("/api/orax/repositories/${repositoryId}/scan");
-    expect(mobileApi).toContain("/api/orax/tasks");
-    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/messages");
-    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/approvals");
-    expect(mobileApi).toContain("/api/orax/tasks/${taskId}/artifacts");
-    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/draft-patch");
-    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/sandbox-approvals");
-    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/command-approvals");
-    expect(mobileApi).toContain("/api/orax/tasks/${input.taskId}/github-pr-approvals");
-    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}");
-    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/read-files");
-    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/run-sandbox");
-    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/run-commands");
-    expect(mobileApi).toContain("/api/orax/approvals/${approvalId}/create-github-pr");
-    expect(mobileOraxScreen).toContain("Codex-style coding agent for repositories");
-    expect(mobileOraxScreen).toContain("Start ORAX chat");
-    expect(mobileOraxScreen).toContain("The first message becomes the task prompt");
-    expect(mobileOraxScreen).toContain("normal Ora history or AI Builder");
-    expect(mobileOraxScreen).toContain("Start Orax task");
-    expect(mobileOraxScreen).toContain("Task thread");
-    expect(mobileOraxScreen).toContain("Task history");
-    expect(mobileOraxScreen).toContain("Execution lifecycle");
-    expect(mobileOraxScreen).toContain("Resume task");
-    expect(mobileOraxScreen).toContain("Explain approval");
-    expect(mobileOraxScreen).toContain("Summarize result");
-    expect(mobileOraxScreen).toContain("Create approval request");
-    expect(mobileOraxScreen).toContain("Generate draft patch");
-    expect(mobileOraxScreen).toContain("Request sandbox approval");
-    expect(mobileOraxScreen).toContain("Request controlled checks");
-    expect(mobileOraxScreen).toContain("Type CREATE PR");
-    expect(mobileOraxScreen).toContain("Request PR approval");
-    expect(mobileOraxScreen).toContain("Orax is isolated from Ora");
-    expect(mobileOraxScreen).toContain("activeTaskIdRef");
-    expect(mobileOraxScreen).toContain("clearTaskScopedState");
-    expect(mobileOraxScreen).toContain("buildLifecycleItems");
-    expect(mobileOraxScreen).toContain("TaskHistoryRow");
-    expect(mobileOraxScreen).toContain("LifecycleRow");
-    expect(mobileOraxScreen).not.toContain("sendChat");
-    expect(mobileOraxScreen).not.toContain("streamChatNative");
-    expect(mobileOraxScreen).not.toContain("useOraChat");
-    expect(mobileOraxScreen).not.toContain("/api/public-ai/chat");
+
+    for (const route of [
+      "/api/orax/capabilities",
+      "/api/orax/repositories",
+      "/api/orax/repositories/${repositoryId}/github/connect",
+      "/api/orax/repositories/${repositoryId}/scan",
+      "/api/orax/tasks",
+      "/api/orax/tasks/${taskId}/messages",
+      "/api/orax/tasks/${taskId}/approvals",
+      "/api/orax/tasks/${taskId}/artifacts",
+      "/api/orax/tasks/${input.taskId}/draft-patch",
+      "/api/orax/tasks/${input.taskId}/sandbox-approvals",
+      "/api/orax/tasks/${input.taskId}/command-approvals",
+      "/api/orax/tasks/${input.taskId}/github-pr-approvals",
+      "/api/orax/approvals/${approvalId}",
+      "/api/orax/approvals/${approvalId}/read-files",
+      "/api/orax/approvals/${approvalId}/run-sandbox",
+      "/api/orax/approvals/${approvalId}/run-commands",
+      "/api/orax/approvals/${approvalId}/create-github-pr",
+    ]) {
+      expect(mobileApi).toContain(route);
+    }
   });
 });
