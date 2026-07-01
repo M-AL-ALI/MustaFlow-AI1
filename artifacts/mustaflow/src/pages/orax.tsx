@@ -358,6 +358,7 @@ export default function OraxPage() {
   const [approvalReason, setApprovalReason] = useState("");
   const [draftInstructions, setDraftInstructions] = useState("");
   const [taskMessageDraft, setTaskMessageDraft] = useState("");
+  const [showInspector, setShowInspector] = useState(false);
   const [pendingSuggestionConfirmation, setPendingSuggestionConfirmation] =
     useState<OraxTaskActionSuggestion | null>(null);
   const [suggestionPrConfirmationText, setSuggestionPrConfirmationText] = useState("");
@@ -1224,7 +1225,14 @@ export default function OraxPage() {
         <ThemeToggle />
       </header>
 
-      <main className="grid flex-1 grid-cols-1 lg:min-h-0 lg:overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)_360px]">
+      <main
+        className={cn(
+          "grid flex-1 grid-cols-1 lg:min-h-0 lg:overflow-hidden",
+          showInspector
+            ? "lg:grid-cols-[280px_minmax(0,1fr)_320px]"
+            : "lg:grid-cols-[280px_minmax(0,1fr)]",
+        )}
+      >
         <aside className="order-2 flex flex-col border-y border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-y-0 lg:border-r">
           <div className="border-b border-border p-3">
             <div className="flex items-center justify-between gap-2">
@@ -1234,45 +1242,50 @@ export default function OraxPage() {
               </div>
               {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </div>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Ask ORAX to inspect, plan, review, or fix code..."
-              className="mt-3 min-h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {TASK_KINDS.map((kind) => (
+            <details open={tasks.length === 0} className="mt-3 rounded-md border border-border bg-background">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">New task</summary>
+              <div className="border-t border-border p-3">
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Ask ORAX to inspect, plan, review, or fix code..."
+                  className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {TASK_KINDS.map((kind) => (
+                    <button
+                      key={kind.value}
+                      type="button"
+                      onClick={() => setTaskKind(kind.value)}
+                      className={cn(
+                        "rounded-md border px-2 py-1 text-[11px] font-medium",
+                        taskKind === kind.value
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      {kind.label}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={kind.value}
-                  type="button"
-                  onClick={() => setTaskKind(kind.value)}
-                  className={cn(
-                    "rounded-md border px-2 py-1 text-[11px] font-medium",
-                    taskKind === kind.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
+                  onClick={() => void createTask({ startThread: true })}
+                  disabled={!selectedRepository || !prompt.trim() || submittingTask}
+                  className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {kind.label}
+                  {submittingTask ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  Start ORAX chat
                 </button>
-              ))}
-            </div>
-            <button
-              onClick={() => void createTask({ startThread: true })}
-              disabled={!selectedRepository || !prompt.trim() || submittingTask}
-              className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {submittingTask ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              Start ORAX chat
-            </button>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              The first message becomes the task prompt, stored separately from Ora chat and
-              normal Ora history or AI Builder. Orax is not Ora and not AI Builder.
-            </p>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  The first message becomes the task prompt, stored separately from Ora chat and
+                  normal Ora history or AI Builder. Orax is not Ora and not AI Builder.
+                </p>
+              </div>
+            </details>
           </div>
 
           <div className="p-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
@@ -1321,8 +1334,9 @@ export default function OraxPage() {
           </div>
 
           <div className="border-t border-border p-3">
-            <div className="text-xs font-semibold uppercase text-muted-foreground">Repository</div>
-            <div className="mt-2 space-y-2">
+            <details className="rounded-md border border-border bg-background">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Repository</summary>
+              <div className="space-y-2 border-t border-border p-3">
               <input
                 value={repositoryUrl}
                 onChange={(event) => setRepositoryUrl(event.target.value)}
@@ -1348,7 +1362,8 @@ export default function OraxPage() {
                   )}
                 </button>
               </div>
-            </div>
+              </div>
+            </details>
           </div>
         </aside>
 
@@ -1387,6 +1402,13 @@ export default function OraxPage() {
               <span className="rounded-full border border-border px-2 py-1">
                 {artifacts.length} artifacts
               </span>
+              <button
+                type="button"
+                onClick={() => setShowInspector((value) => !value)}
+                className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                {showInspector ? "Hide details" : "Details"}
+              </button>
             </div>
           </div>
 
@@ -1485,42 +1507,46 @@ export default function OraxPage() {
           </div>
 
           <div className="shrink-0 border-t border-border bg-background p-3">
-            <div className="mx-auto mb-2 flex max-w-4xl flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase text-muted-foreground">
+            <details className="mx-auto mb-2 max-w-4xl text-xs text-muted-foreground">
+              <summary className="inline-flex cursor-pointer rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-muted">
                 Task conversation
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  setTaskMessageDraft("Where are we right now, and what is the next approved step?")
-                }
-                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
-              >
-                Resume task
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setTaskMessageDraft(
-                    "Explain approval: what is pending, what is the risk, and what happens if I approve it?",
-                  )
-                }
-                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
-              >
-                Explain approval
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setTaskMessageDraft(
-                    "Summarize result: what changed, what checks ran, and what remains?",
-                  )
-                }
-                className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
-              >
-                Summarize result
-              </button>
-            </div>
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskMessageDraft(
+                      "Where are we right now, and what is the next approved step?",
+                    )
+                  }
+                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+                >
+                  Resume task
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskMessageDraft(
+                      "Explain approval: what is pending, what is the risk, and what happens if I approve it?",
+                    )
+                  }
+                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+                >
+                  Explain approval
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskMessageDraft(
+                      "Summarize result: what changed, what checks ran, and what remains?",
+                    )
+                  }
+                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+                >
+                  Summarize result
+                </button>
+              </div>
+            </details>
             <div className="mx-auto flex max-w-4xl gap-2">
               <textarea
                 value={taskMessageDraft}
@@ -1548,7 +1574,12 @@ export default function OraxPage() {
           </div>
         </section>
 
-        <aside className="order-3 flex flex-col border-t border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-l lg:border-t-0">
+        <aside
+          className={cn(
+            "order-3 flex-col border-t border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-l lg:border-t-0",
+            showInspector ? "flex" : "hidden",
+          )}
+        >
           <div className="p-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             <section className="rounded-md border border-border bg-card p-3">
               <div className="flex items-center justify-between gap-2">
@@ -1558,6 +1589,13 @@ export default function OraxPage() {
                   </div>
                   <div className="text-sm font-semibold">Current state</div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowInspector(false)}
+                  className="inline-flex h-8 items-center rounded-md border border-border px-2 text-xs hover:bg-muted"
+                >
+                  Close
+                </button>
                 <button
                   type="button"
                   onClick={() =>

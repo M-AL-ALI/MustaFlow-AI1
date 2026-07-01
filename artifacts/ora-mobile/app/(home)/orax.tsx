@@ -103,7 +103,7 @@ const COMMAND_OPTIONS = [
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<Tab>("workspace");
+  const [showDetails, setShowDetails] = useState(false);
 
   const [caps, setCaps] = useState<OraxCapabilities | null>(null);
   const [repos, setRepos] = useState<OraxRepository[]>([]);
@@ -315,7 +315,7 @@ export default function OraxScreen() {
       setSelectedRepoId(created.repository.id);
       setRepoUrl("");
       setRepoBranch("main");
-      setTab("workspace");
+      setShowDetails(false);
     });
   }, [repoBranch, repoUrl, runAction]);
 
@@ -345,7 +345,7 @@ export default function OraxScreen() {
       setTaskPrompt("");
       await appendTaskMessage(created.task.id, prompt);
       await loadTaskDetails(created.task.id);
-      setTab("workspace");
+      setShowDetails(false);
     });
   }, [loadTaskDetails, runAction, selectedRepo?.id, taskKind, taskPrompt]);
 
@@ -357,7 +357,7 @@ export default function OraxScreen() {
       activeTaskIdRef.current = task.id;
       setSelectedTaskId(task.id);
       setSelectedRepoId(task.repositoryId);
-      setTab("workspace");
+      setShowDetails(false);
     },
     [clearTaskScopedState],
   );
@@ -387,7 +387,7 @@ export default function OraxScreen() {
       });
       setApprovalPaths("");
       setApprovalReason("");
-      setTab("approvals");
+      setShowDetails(true);
     });
   }, [
     approvalBranch,
@@ -402,15 +402,15 @@ export default function OraxScreen() {
     if (suggestion.type === "read_files") {
       setApprovalPaths((suggestion.paths ?? []).join("\n"));
       setApprovalReason(suggestion.reason ?? "");
-      setTab("approvals");
+      setShowDetails(true);
     } else if (suggestion.type === "draft_patch") {
       setDraftInstructions(suggestion.instructions ?? "");
-      setTab("artifacts");
+      setShowDetails(true);
     } else if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
       setSelectedCommands(suggestion.commands);
-      setTab("artifacts");
+      setShowDetails(true);
     } else {
-      setTab(suggestion.type === "review_pending_approval" ? "approvals" : "artifacts");
+      setShowDetails(true);
     }
   }, []);
 
@@ -440,6 +440,75 @@ export default function OraxScreen() {
           >
             {error ? <Notice tone="error" title="Orax needs attention" body={error} /> : null}
 
+            <Card style={{ gap: 12 }}>
+              <SectionTitle title="Task thread" icon={Bot} />
+              <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}>
+                {selectedTask?.title ?? selectedTask?.prompt ?? "Start an Orax task"}
+              </Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                {selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "Connect a repository"}
+                {selectedTask ? ` - ${selectedTask.status}` : ""}
+              </Text>
+              <InfoGrid
+                items={[
+                  ["Pending", String(approvals.filter((approval) => approval.status === "pending").length)],
+                  ["Messages", String(messages.length)],
+                  ["Artifacts", String(artifacts.length)],
+                ]}
+              />
+              {detailsLoading ? <Loading label="Loading thread..." /> : null}
+              {latestAssistantSuggestion ? (
+                <SuggestionCard
+                  suggestion={latestAssistantSuggestion}
+                  onPress={() => applySuggestion(latestAssistantSuggestion)}
+                />
+              ) : null}
+              {selectedTask ? (
+                <>
+                  <View style={{ gap: 10 }}>
+                    {messages.length === 0 ? (
+                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                        No thread messages yet. Ask Orax to resume, explain approval, or inspect
+                        files.
+                      </Text>
+                    ) : (
+                      messages
+                        .slice(-10)
+                        .map((message) => <MessageBubble key={message.id} message={message} />)
+                    )}
+                  </View>
+                  <TextField
+                    label="Message Orax"
+                    placeholder="Resume, ask for next step, or name files to inspect..."
+                    value={threadDraft}
+                    onChangeText={setThreadDraft}
+                    multiline
+                    style={{ minHeight: 72, textAlignVertical: "top" }}
+                  />
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    <Button
+                      label="Details"
+                      variant="secondary"
+                      onPress={() => setShowDetails((value) => !value)}
+                    />
+                    <Button
+                      label="Send"
+                      icon={Send}
+                      onPress={sendThreadMessage}
+                      loading={busyAction === "send-thread"}
+                      disabled={!threadDraft.trim()}
+                    />
+                  </View>
+                </>
+              ) : (
+                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+                  Open Details to connect a repository or start an ORAX task.
+                </Text>
+              )}
+            </Card>
+
+            {showDetails ? (
+              <>
             <TaskFocusCard
               task={selectedTask}
               repo={selectedRepo}
@@ -533,78 +602,34 @@ export default function OraxScreen() {
             </Card>
 
             <Card style={{ gap: 12 }}>
-              <SectionTitle title="Task thread" icon={Bot} />
-              {detailsLoading ? <Loading label="Loading thread..." /> : null}
-              {latestAssistantSuggestion ? (
-                <SuggestionCard
-                  suggestion={latestAssistantSuggestion}
-                  onPress={() => applySuggestion(latestAssistantSuggestion)}
+              <SectionTitle title="Task shortcuts" icon={Bot} />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <Button
+                  label="Resume task"
+                  variant="secondary"
+                  onPress={() =>
+                    setThreadDraft("Where are we right now, and what is the next approved step?")
+                  }
                 />
-              ) : null}
-              {selectedTask ? (
-                <>
-                  <View style={{ gap: 10 }}>
-                    {messages.length === 0 ? (
-                      <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                        No thread messages yet. Ask Orax to resume, explain approval, or inspect
-                        files.
-                      </Text>
-                    ) : (
-                      messages
-                        .slice(-10)
-                        .map((message) => <MessageBubble key={message.id} message={message} />)
-                    )}
-                  </View>
-                  <TextField
-                    label="Message Orax"
-                    placeholder="Resume, ask for next step, or name files to inspect..."
-                    value={threadDraft}
-                    onChangeText={setThreadDraft}
-                    multiline
-                    style={{ minHeight: 72, textAlignVertical: "top" }}
-                  />
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    <Button
-                      label="Resume task"
-                      variant="secondary"
-                      onPress={() =>
-                        setThreadDraft(
-                          "Where are we right now, and what is the next approved step?",
-                        )
-                      }
-                    />
-                    <Button
-                      label="Explain approval"
-                      variant="secondary"
-                      onPress={() =>
-                        setThreadDraft(
-                          "Explain the current pending approval, its risk, and what will happen if I approve it.",
-                        )
-                      }
-                    />
-                    <Button
-                      label="Summarize result"
-                      variant="secondary"
-                      onPress={() =>
-                        setThreadDraft(
-                          "Summarize result: what changed, what checks ran, and what remains?",
-                        )
-                      }
-                    />
-                    <Button
-                      label="Send"
-                      icon={Send}
-                      onPress={sendThreadMessage}
-                      loading={busyAction === "send-thread"}
-                      disabled={!threadDraft.trim()}
-                    />
-                  </View>
-                </>
-              ) : (
-                <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                  Start or select an ORAX task to open the thread.
-                </Text>
-              )}
+                <Button
+                  label="Explain approval"
+                  variant="secondary"
+                  onPress={() =>
+                    setThreadDraft(
+                      "Explain the current pending approval, its risk, and what will happen if I approve it.",
+                    )
+                  }
+                />
+                <Button
+                  label="Summarize result"
+                  variant="secondary"
+                  onPress={() =>
+                    setThreadDraft(
+                      "Summarize result: what changed, what checks ran, and what remains?",
+                    )
+                  }
+                />
+              </View>
             </Card>
 
             <Card style={{ gap: 12 }}>
@@ -831,6 +856,8 @@ export default function OraxScreen() {
                 </>
               ) : null}
             </Card>
+            </>
+            ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
       )}
