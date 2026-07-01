@@ -1073,18 +1073,18 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
     <View
       style={{
         alignSelf: isUser ? "flex-end" : "stretch",
-        maxWidth: isUser ? "88%" : "100%",
-        borderWidth: 1,
-        borderColor: isSystem ? c.border : isUser ? c.primary : c.cardBorder,
-        borderRadius: c.radius,
-        padding: 12,
-        backgroundColor: isUser ? c.primary : isSystem ? c.muted : c.card,
-        gap: 6,
-      }}
-    >
+         maxWidth: isUser ? "88%" : "100%",
+         borderWidth: 1,
+         borderColor: isSystem ? c.border : isUser ? c.border : c.cardBorder,
+         borderRadius: c.radius,
+         padding: 12,
+         backgroundColor: isUser ? c.muted : isSystem ? c.muted : c.card,
+         gap: 6,
+       }}
+     >
       <Text
-        style={{
-          color: isUser ? c.primaryForeground : c.mutedForeground,
+       style={{
+          color: c.mutedForeground,
           fontSize: 11,
           textTransform: "uppercase",
         }}
@@ -1092,8 +1092,8 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
         {isSystem ? "Timeline" : message.role}
       </Text>
       <Text
-        style={{
-          color: isUser ? c.primaryForeground : c.foreground,
+       style={{
+          color: c.foreground,
           fontSize: 14,
           lineHeight: 20,
         }}

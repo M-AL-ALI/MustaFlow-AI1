@@ -1201,7 +1201,7 @@ export default function OraxPage() {
     : selectedRepository;
 
   return (
-    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
         <div className="flex min-w-0 items-center gap-3">
           <Link
@@ -1224,8 +1224,8 @@ export default function OraxPage() {
         <ThemeToggle />
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)_360px]">
-        <aside className="hidden min-h-0 flex-col border-r border-border bg-muted/20 lg:flex">
+      <main className="grid flex-1 grid-cols-1 lg:min-h-0 lg:overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)_360px]">
+        <aside className="order-2 flex flex-col border-y border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-y-0 lg:border-r">
           <div className="border-b border-border p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -1275,7 +1275,7 @@ export default function OraxPage() {
             </p>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <div className="p-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             {tasks.length === 0 ? (
               <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
                 No tasks yet. Start a chat to create a Codex-style ORAX thread.
@@ -1352,7 +1352,7 @@ export default function OraxPage() {
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-col bg-background">
+        <section className="order-1 flex min-h-[calc(100dvh-3.5rem)] flex-col bg-background lg:order-none lg:min-h-0">
           {error ? (
             <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}
@@ -1420,7 +1420,7 @@ export default function OraxPage() {
                       className={cn(
                         "rounded-md border px-4 py-3 text-sm",
                         isUser
-                          ? "ml-auto max-w-[78%] border-primary bg-primary text-primary-foreground"
+                          ? "ml-auto max-w-[78%] border-border bg-muted/60 text-foreground"
                           : isTimeline
                             ? "border-dashed border-border bg-muted/40 text-muted-foreground"
                             : "border-border bg-card",
@@ -1429,7 +1429,7 @@ export default function OraxPage() {
                       <div
                         className={cn(
                           "mb-1 text-[11px] font-semibold uppercase",
-                          isUser ? "text-primary-foreground/80" : "text-muted-foreground",
+                          "text-muted-foreground",
                         )}
                       >
                         {isUser
@@ -1548,8 +1548,8 @@ export default function OraxPage() {
           </div>
         </section>
 
-        <aside className="hidden min-h-0 flex-col border-l border-border bg-muted/20 lg:flex">
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <aside className="order-3 flex flex-col border-t border-border bg-muted/20 lg:order-none lg:min-h-0 lg:border-l lg:border-t-0">
+          <div className="p-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             <section className="rounded-md border border-border bg-card p-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
