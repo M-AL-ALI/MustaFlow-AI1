@@ -50,9 +50,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/sandbox-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/command-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
-    expect(oraxPage).toContain(
-      "createTask({ startThread: true, firstMessage: content, firstMessageMetadata: metadata })",
-    );
+    expect(oraxPage).toContain("await createTask({");
+    expect(oraxPage).toContain("startThread: true");
+    expect(oraxPage).toContain("firstMessage: content");
+    expect(oraxPage).toContain("firstMessageMetadata: metadata");
     expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content, metadata)");
     expect(oraxPage).toContain("Task created, but first message failed to save");
 
@@ -88,6 +89,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("fileInputRef");
     expect(oraxPage).toContain('type="file"');
     expect(oraxPage).toContain("addComposerFiles");
+    expect(oraxPage).toContain("readOraxWebAttachment");
+    expect(oraxPage).toContain("readFileAsText");
+    expect(oraxPage).toContain("readFileAsDataUrl");
+    expect(oraxPage).toContain("contentText");
+    expect(oraxPage).toContain("dataUrl");
+    expect(oraxPage).toContain("ingestionStatus");
     expect(oraxPage).toContain("SpeechRecognition");
     expect(oraxPage).toContain("buildComposerMetadata");
     expect(oraxPage).toContain("permissionMode: composerPermissionMode");
@@ -123,6 +130,13 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("ShieldAlert");
     expect(mobileOraxScreen).toContain("Mic");
     expect(mobileOraxScreen).toContain("DocumentPicker.getDocumentAsync");
+    expect(mobileOraxScreen).toContain('import * as FileSystem from "expo-file-system/legacy"');
+    expect(mobileOraxScreen).toContain("readOraxMobileAttachment");
+    expect(mobileOraxScreen).toContain("FileSystem.readAsStringAsync");
+    expect(mobileOraxScreen).toContain("FileSystem.EncodingType.Base64");
+    expect(mobileOraxScreen).toContain("contentText");
+    expect(mobileOraxScreen).toContain("dataUrl");
+    expect(mobileOraxScreen).toContain("ingestionStatus");
     expect(mobileOraxScreen).toContain("AudioModule.requestRecordingPermissionsAsync");
     expect(mobileOraxScreen).toContain('transcribeAudio(uri, "m4a")');
     expect(mobileOraxScreen).toContain("buildComposerMetadata");
@@ -170,8 +184,15 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain(
       "attachments: z.array(composerAttachmentSchema).max(6).optional()",
     );
+    expect(oraxApiRoute).toContain("contentText: z.string().max(120_000).optional()");
+    expect(oraxApiRoute).toContain("dataUrl: z.string().max(1_500_000).optional()");
+    expect(oraxApiRoute).toContain('ingestionStatus: z.enum(["ready", "unsupported", "error"])');
+    expect(oraxApiRoute).toContain("normalizeOraxComposerAttachments");
+    expect(oraxApiRoute).toContain("buildOraxComposerAttachmentContext");
+    expect(oraxApiRoute).toContain("const effectiveUserMessage = userMessageContext");
+    expect(oraxApiRoute).toContain("attachmentContext: userMessageContext");
     expect(oraxApiRoute).toContain("...(parsed.data.metadata ?? {})");
-    expect(oraxApiRoute).toContain("composer: parsed.data.metadata?.composer ?? null");
+    expect(oraxApiRoute).toContain("composer: composerMetadata ?? null");
     expect(oraxApiRoute).not.toContain("I saved this in the ORAX task thread");
     expect(oraxApiRoute).not.toContain("Current task status:");
     expect(oraxApiRoute).not.toContain("Approvals: 0. Artifacts: 0. Completed artifacts: 0.");
@@ -201,6 +222,9 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileTypes).toContain("export interface OraxComposerMetadata");
     expect(mobileTypes).toContain("permissionMode: OraxComposerPermissionMode");
     expect(mobileTypes).toContain("attachments: OraxComposerAttachment[]");
+    expect(mobileTypes).toContain("contentText?: string");
+    expect(mobileTypes).toContain("dataUrl?: string");
+    expect(mobileTypes).toContain('ingestionStatus?: "ready" | "unsupported" | "error"');
     expect(mobileTypes).not.toContain('"coding"');
 
     for (const route of [

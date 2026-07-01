@@ -166,6 +166,12 @@ type OraxComposerAttachment = {
   type?: string;
   size?: number;
   source: "web";
+  contentKind?: "text" | "image" | "binary" | "unsupported";
+  contentText?: string;
+  dataUrl?: string;
+  preview?: string;
+  truncated?: boolean;
+  ingestionStatus?: "ready" | "unsupported" | "error";
 };
 
 type OraxComposerMetadata = {
@@ -350,6 +356,43 @@ const ORAX_PERMISSION_OPTIONS: Array<{ value: OraxComposerPermissionMode; label:
   { value: "auto", label: "Auto" },
   { value: "read_only", label: "Read" },
 ];
+const ORAX_ATTACHMENT_TEXT_LIMIT = 120_000;
+const ORAX_ATTACHMENT_DATA_URL_LIMIT = 1_500_000;
+const ORAX_TEXT_ATTACHMENT_EXTENSIONS = [
+  ".c",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".csv",
+  ".env",
+  ".go",
+  ".graphql",
+  ".h",
+  ".html",
+  ".java",
+  ".js",
+  ".json",
+  ".jsx",
+  ".kt",
+  ".log",
+  ".md",
+  ".mdx",
+  ".php",
+  ".py",
+  ".rb",
+  ".rs",
+  ".sh",
+  ".sql",
+  ".swift",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".vue",
+  ".xml",
+  ".yaml",
+  ".yml",
+] as const;
 
 const ORAX_COMMAND_OPTIONS = [
   {
@@ -390,6 +433,112 @@ const ORAX_COMMAND_OPTIONS = [
 ] as const;
 
 const DEFAULT_ORAX_COMMAND_IDS = ["patch-static-checks", "json-syntax", "node-syntax"];
+
+function isOraxTextAttachment(name: string, type?: string): boolean {
+  const mime = (type ?? "").toLowerCase();
+  if (mime.startsWith("text/")) return true;
+  if (
+    [
+      "application/json",
+      "application/javascript",
+      "application/typescript",
+      "application/xml",
+      "application/x-javascript",
+      "application/x-typescript",
+      "application/x-yaml",
+    ].includes(mime)
+  ) {
+    return true;
+  }
+  const lowerName = name.toLowerCase();
+  return ORAX_TEXT_ATTACHMENT_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
+}
+
+function isOraxImageAttachment(type?: string): boolean {
+  return (type ?? "").toLowerCase().startsWith("image/");
+}
+
+function buildOraxAttachmentTextPreview(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > 240 ? `${collapsed.slice(0, 237)}...` : collapsed;
+}
+
+async function readFileAsText(file: File): Promise<string> {
+  return file.text();
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read attachment"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function readOraxWebAttachment(file: File): Promise<OraxComposerAttachment> {
+  const base = {
+    id: `${file.name}-${file.size}-${file.lastModified}`,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    source: "web" as const,
+  };
+
+  if (isOraxTextAttachment(file.name, file.type)) {
+    try {
+      const text = await readFileAsText(file);
+      const truncated = text.length > ORAX_ATTACHMENT_TEXT_LIMIT;
+      const contentText = truncated ? text.slice(0, ORAX_ATTACHMENT_TEXT_LIMIT) : text;
+      return {
+        ...base,
+        contentKind: "text",
+        contentText,
+        preview: buildOraxAttachmentTextPreview(contentText),
+        truncated,
+        ingestionStatus: "ready",
+      };
+    } catch {
+      return {
+        ...base,
+        contentKind: "unsupported",
+        preview: "Orax could not read this text attachment.",
+        ingestionStatus: "error",
+      };
+    }
+  }
+
+  if (isOraxImageAttachment(file.type)) {
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const tooLarge = dataUrl.length > ORAX_ATTACHMENT_DATA_URL_LIMIT;
+      return {
+        ...base,
+        contentKind: tooLarge ? "unsupported" : "image",
+        dataUrl: tooLarge ? undefined : dataUrl,
+        preview: tooLarge
+          ? "Image is too large for Orax inline context."
+          : "Image data attached for visual/UI context.",
+        truncated: tooLarge,
+        ingestionStatus: tooLarge ? "unsupported" : "ready",
+      };
+    } catch {
+      return {
+        ...base,
+        contentKind: "unsupported",
+        preview: "Orax could not read this image attachment.",
+        ingestionStatus: "error",
+      };
+    }
+  }
+
+  return {
+    ...base,
+    contentKind: "unsupported",
+    preview: "No readable text or image data was extracted.",
+    ingestionStatus: "unsupported",
+  };
+}
 
 function getMessageComposerAttachments(message: OraxTaskMessage): OraxComposerAttachment[] {
   const composer = message.metadata?.composer as
@@ -814,17 +963,11 @@ export default function OraxPage() {
     }
   }
 
-  function addComposerFiles(files: FileList | null) {
+  async function addComposerFiles(files: FileList | null) {
     if (!files?.length) return;
     const slots = Math.max(0, 6 - composerAttachments.length);
     const selected = Array.from(files).slice(0, slots);
-    const attachments = selected.map((file) => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      name: file.name,
-      type: file.type || "application/octet-stream",
-      size: file.size,
-      source: "web" as const,
-    }));
+    const attachments = await Promise.all(selected.map((file) => readOraxWebAttachment(file)));
     setComposerAttachments((prev) => [...prev, ...attachments]);
     if (files.length > slots) {
       setError("Orax can attach up to 6 files to one message.");
@@ -1904,6 +2047,9 @@ export default function OraxPage() {
                       >
                         <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <span className="truncate">{attachment.name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {attachment.ingestionStatus === "ready" ? "read" : "not read"}
+                        </span>
                         <button
                           type="button"
                           onClick={() => removeComposerAttachment(attachment.id)}
@@ -1928,7 +2074,7 @@ export default function OraxPage() {
                   multiple
                   className="hidden"
                   onChange={(event) => {
-                    addComposerFiles(event.currentTarget.files);
+                    void addComposerFiles(event.currentTarget.files);
                     event.currentTarget.value = "";
                   }}
                 />

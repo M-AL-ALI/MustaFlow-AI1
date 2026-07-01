@@ -67,6 +67,12 @@ const composerAttachmentSchema = z.object({
     .max(25 * 1024 * 1024)
     .optional(),
   source: z.enum(["web", "mobile"]).optional(),
+  contentKind: z.enum(["text", "image", "binary", "unsupported"]).optional(),
+  contentText: z.string().max(120_000).optional(),
+  dataUrl: z.string().max(1_500_000).optional(),
+  preview: z.string().max(1200).optional(),
+  truncated: z.boolean().optional(),
+  ingestionStatus: z.enum(["ready", "unsupported", "error"]).optional(),
 });
 
 const composerMetadataSchema = z.object({
@@ -86,6 +92,8 @@ const taskMessageSchema = z.object({
     .passthrough()
     .optional(),
 });
+
+type OraxComposerAttachmentInput = z.infer<typeof composerAttachmentSchema>;
 
 const githubConnectSchema = z.object({
   token: z.string().min(8).max(5000),
@@ -554,6 +562,18 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       )
       .orderBy(desc(oraxTaskArtifactsTable.createdAt));
 
+    const composerMetadata = parsed.data.metadata?.composer
+      ? {
+          ...parsed.data.metadata.composer,
+          attachments: normalizeOraxComposerAttachments(
+            parsed.data.metadata.composer.attachments ?? [],
+          ),
+        }
+      : undefined;
+    const userMessageContext = buildOraxComposerAttachmentContext(composerMetadata?.attachments);
+    const effectiveUserMessage = userMessageContext
+      ? `${parsed.data.content}\n\n${userMessageContext}`
+      : parsed.data.content;
     const now = new Date();
     const [message] = await db
       .insert(oraxTaskMessagesTable)
@@ -565,6 +585,12 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
         content: parsed.data.content,
         metadata: {
           ...(parsed.data.metadata ?? {}),
+          ...(composerMetadata
+            ? {
+                composer: composerMetadata,
+                attachmentContext: userMessageContext,
+              }
+            : {}),
           source: "orax-task-thread",
         },
         createdAt: now,
@@ -576,7 +602,7 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       task,
       approvals,
       artifacts,
-      userMessage: parsed.data.content,
+      userMessage: effectiveUserMessage,
     });
     const checkpoint = buildOraxCheckpointSummary({ task, approvals, artifacts });
     const assistantContent = buildOraxTaskThreadReply({
@@ -585,7 +611,8 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       artifacts,
       actionSuggestions,
       checkpoint,
-      userMessage: parsed.data.content,
+      userMessage: effectiveUserMessage,
+      attachmentContext: userMessageContext,
     });
     const [assistantMessage] = await db
       .insert(oraxTaskMessagesTable)
@@ -602,8 +629,9 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
           approvalCount: approvals.length,
           artifactCount: artifacts.length,
           checkpoint,
-          composer: parsed.data.metadata?.composer ?? null,
-          resumeMode: isOraxResumeQuestion(parsed.data.content),
+          composer: composerMetadata ?? null,
+          attachmentContext: userMessageContext,
+          resumeMode: isOraxResumeQuestion(effectiveUserMessage),
           actionSuggestions,
         },
         createdAt: new Date(),
@@ -2714,6 +2742,88 @@ function buildOraxCheckpointNextStep(input: {
   return "Request approval to read the relevant repository files.";
 }
 
+function normalizeOraxComposerAttachments(
+  attachments: OraxComposerAttachmentInput[],
+): OraxComposerAttachmentInput[] {
+  return attachments.map((attachment) => {
+    const contentText =
+      typeof attachment.contentText === "string"
+        ? truncateOraxAttachmentText(attachment.contentText, 120_000)
+        : undefined;
+    const dataUrl =
+      typeof attachment.dataUrl === "string" && attachment.dataUrl.length <= 1_500_000
+        ? attachment.dataUrl
+        : undefined;
+    const contentKind =
+      attachment.contentKind ?? (contentText ? "text" : dataUrl ? "image" : "unsupported");
+    const ingestionStatus =
+      attachment.ingestionStatus ?? (contentText || dataUrl ? "ready" : "unsupported");
+    const truncated =
+      attachment.truncated ||
+      (typeof attachment.contentText === "string" && attachment.contentText.length > 120_000) ||
+      (typeof attachment.dataUrl === "string" && attachment.dataUrl.length > 1_500_000);
+
+    return {
+      ...attachment,
+      contentKind,
+      contentText,
+      dataUrl,
+      truncated,
+      ingestionStatus,
+      preview:
+        attachment.preview ??
+        buildOraxAttachmentPreview({
+          ...attachment,
+          contentKind,
+          contentText,
+          dataUrl,
+          truncated,
+          ingestionStatus,
+        }),
+    };
+  });
+}
+
+function buildOraxAttachmentPreview(attachment: OraxComposerAttachmentInput): string | undefined {
+  if (attachment.contentText?.trim()) {
+    const text = attachment.contentText.replace(/\s+/g, " ").trim();
+    return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+  }
+  if (attachment.dataUrl && attachment.type?.startsWith("image/")) {
+    return `Image data attached for ${attachment.name}.`;
+  }
+  if (attachment.ingestionStatus === "unsupported") {
+    return `No readable text or image data was extracted from ${attachment.name}.`;
+  }
+  return undefined;
+}
+
+function buildOraxComposerAttachmentContext(
+  attachments: OraxComposerAttachmentInput[] | undefined,
+): string | null {
+  const usable = (attachments ?? []).filter(
+    (attachment) => attachment.contentText?.trim() || attachment.dataUrl,
+  );
+  if (!usable.length) return null;
+
+  const blocks = usable.map((attachment) => {
+    const header = `Attachment: ${attachment.name} (${attachment.contentKind ?? "unknown"}${
+      attachment.truncated ? ", truncated" : ""
+    })`;
+    if (attachment.contentText?.trim()) {
+      return `${header}\n${attachment.contentText.trim()}`;
+    }
+    return `${header}\nImage data URL for visual/UI context:\n${attachment.dataUrl}`;
+  });
+
+  return `Orax attachment context:\n${blocks.join("\n\n")}`;
+}
+
+function truncateOraxAttachmentText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max);
+}
+
 function buildOraxTaskThreadReply(input: {
   task: OraxTask;
   approvals: OraxTaskApproval[];
@@ -2721,6 +2831,7 @@ function buildOraxTaskThreadReply(input: {
   actionSuggestions: OraxTaskActionSuggestion[];
   checkpoint: OraxCheckpointSummary;
   userMessage: string;
+  attachmentContext?: string | null;
 }): string {
   if (isOraxResumeQuestion(input.userMessage)) {
     return buildOraxCheckpointResumeReply(input.checkpoint);
@@ -2740,7 +2851,23 @@ function buildOraxTaskThreadReply(input: {
           ? `${suggestion.title}. ${suggestion.description}`
           : "Tell me which files or behavior to inspect first.";
 
-  return ["I'll work from here.", nextStep].join("\n");
+  return [
+    "I'll work from here.",
+    input.attachmentContext ? summarizeOraxAttachmentContext(input.attachmentContext) : null,
+    nextStep,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function summarizeOraxAttachmentContext(context: string): string {
+  const names = context
+    .split("\n")
+    .filter((line) => line.startsWith("Attachment: "))
+    .map((line) => line.replace("Attachment: ", "").replace(/\s+\(.+\)$/, ""))
+    .slice(0, 4);
+  if (!names.length) return "I can use the attached context in this task.";
+  return `I can use the attached context: ${names.join(", ")}.`;
 }
 
 function isOraxResumeQuestion(message: string): boolean {

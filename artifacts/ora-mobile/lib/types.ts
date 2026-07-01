@@ -549,6 +549,12 @@ export interface OraxComposerAttachment {
   type?: string;
   size?: number;
   source?: "web" | "mobile";
+  contentKind?: "text" | "image" | "binary" | "unsupported";
+  contentText?: string;
+  dataUrl?: string;
+  preview?: string;
+  truncated?: boolean;
+  ingestionStatus?: "ready" | "unsupported" | "error";
 }
 
 export interface OraxComposerMetadata {

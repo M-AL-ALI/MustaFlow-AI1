@@ -87,6 +87,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   files to the Orax task message, mic input dictates into the composer, the
   model/reasoning control updates task-message metadata, and the permission
   control updates the Orax approval mode indicator.
+- Attachments must be ingested as task context when possible, not stored as
+  filenames only. Text/code files are read into bounded `contentText`, small
+  screenshots/images are attached as bounded data URLs for visual/UI context,
+  and unsupported or oversized binaries are explicitly marked as unreadable.
 - Composer control state must travel through ORAX-owned task-message metadata,
   not Ora chat, project chat, credits, or AI Builder endpoints.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions

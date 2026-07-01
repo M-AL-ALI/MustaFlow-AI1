@@ -26,6 +26,7 @@ import {
 } from "lucide-react-native";
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { useNavigation } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -125,6 +126,43 @@ const ORAX_PERMISSION_OPTIONS: Array<{ value: OraxComposerPermissionMode; label:
   { value: "auto", label: "Auto" },
   { value: "read_only", label: "Read" },
 ];
+const ORAX_ATTACHMENT_TEXT_LIMIT = 120_000;
+const ORAX_ATTACHMENT_DATA_URL_LIMIT = 1_500_000;
+const ORAX_TEXT_ATTACHMENT_EXTENSIONS = [
+  ".c",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".csv",
+  ".env",
+  ".go",
+  ".graphql",
+  ".h",
+  ".html",
+  ".java",
+  ".js",
+  ".json",
+  ".jsx",
+  ".kt",
+  ".log",
+  ".md",
+  ".mdx",
+  ".php",
+  ".py",
+  ".rb",
+  ".rs",
+  ".sh",
+  ".sql",
+  ".swift",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".vue",
+  ".xml",
+  ".yaml",
+  ".yml",
+] as const;
 
 const DEFAULT_COMMANDS = ["patch-static-checks", "json-syntax", "node-syntax"];
 const ORAX_TAGLINE = "MustaFlow AI coding agent for repositories";
@@ -137,6 +175,109 @@ const COMMAND_OPTIONS = [
   { id: "pnpm-test", label: "Test" },
   { id: "pnpm-build", label: "Build" },
 ];
+
+function isOraxTextAttachment(name: string, type?: string): boolean {
+  const mime = (type ?? "").toLowerCase();
+  if (mime.startsWith("text/")) return true;
+  if (
+    [
+      "application/json",
+      "application/javascript",
+      "application/typescript",
+      "application/xml",
+      "application/x-javascript",
+      "application/x-typescript",
+      "application/x-yaml",
+    ].includes(mime)
+  ) {
+    return true;
+  }
+  const lowerName = name.toLowerCase();
+  return ORAX_TEXT_ATTACHMENT_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
+}
+
+function isOraxImageAttachment(type?: string): boolean {
+  return (type ?? "").toLowerCase().startsWith("image/");
+}
+
+function buildOraxAttachmentTextPreview(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > 240 ? `${collapsed.slice(0, 237)}...` : collapsed;
+}
+
+async function readOraxMobileAttachment(asset: {
+  uri: string;
+  name: string;
+  mimeType?: string | null;
+  size?: number | null;
+}): Promise<OraxComposerAttachment> {
+  const base = {
+    id: `${asset.name}-${asset.size ?? 0}-${asset.uri}`,
+    name: asset.name,
+    type: asset.mimeType ?? "application/octet-stream",
+    size: asset.size ?? undefined,
+    source: "mobile" as const,
+  };
+
+  if (isOraxTextAttachment(asset.name, asset.mimeType ?? undefined)) {
+    try {
+      const text = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const truncated = text.length > ORAX_ATTACHMENT_TEXT_LIMIT;
+      const contentText = truncated ? text.slice(0, ORAX_ATTACHMENT_TEXT_LIMIT) : text;
+      return {
+        ...base,
+        contentKind: "text",
+        contentText,
+        preview: buildOraxAttachmentTextPreview(contentText),
+        truncated,
+        ingestionStatus: "ready",
+      };
+    } catch {
+      return {
+        ...base,
+        contentKind: "unsupported",
+        preview: "Orax could not read this text attachment.",
+        ingestionStatus: "error",
+      };
+    }
+  }
+
+  if (isOraxImageAttachment(asset.mimeType ?? undefined)) {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const dataUrl = `data:${base.type};base64,${base64}`;
+      const tooLarge = dataUrl.length > ORAX_ATTACHMENT_DATA_URL_LIMIT;
+      return {
+        ...base,
+        contentKind: tooLarge ? "unsupported" : "image",
+        dataUrl: tooLarge ? undefined : dataUrl,
+        preview: tooLarge
+          ? "Image is too large for Orax inline context."
+          : "Image data attached for visual/UI context.",
+        truncated: tooLarge,
+        ingestionStatus: tooLarge ? "unsupported" : "ready",
+      };
+    } catch {
+      return {
+        ...base,
+        contentKind: "unsupported",
+        preview: "Orax could not read this image attachment.",
+        ingestionStatus: "error",
+      };
+    }
+  }
+
+  return {
+    ...base,
+    contentKind: "unsupported",
+    preview: "No readable text or image data was extracted.",
+    ingestionStatus: "unsupported",
+  };
+}
 
 export default function OraxScreen() {
   const c = useColors();
@@ -477,13 +618,7 @@ export default function OraxScreen() {
     });
     if (result.canceled) return;
     const assets = result.assets.slice(0, slots);
-    const attachments = assets.map((asset) => ({
-      id: `${asset.name}-${asset.size ?? 0}-${asset.uri}`,
-      name: asset.name,
-      type: asset.mimeType ?? "application/octet-stream",
-      size: asset.size,
-      source: "mobile" as const,
-    }));
+    const attachments = await Promise.all(assets.map((asset) => readOraxMobileAttachment(asset)));
     setComposerAttachments((prev) => [...prev, ...attachments]);
     if (result.assets.length > slots) {
       Alert.alert("Attachment limit", "Only the first 6 attachments were added.");
@@ -1481,6 +1616,9 @@ function OraxComposer({
               <FileText size={16} color={c.mutedForeground} />
               <Text numberOfLines={1} style={{ color: c.foreground, flexShrink: 1, fontSize: 13 }}>
                 {attachment.name}
+              </Text>
+              <Text style={{ color: c.mutedForeground, fontSize: 11 }}>
+                {attachment.ingestionStatus === "ready" ? "read" : "not read"}
               </Text>
               <Pressable
                 accessibilityLabel={`Remove ${attachment.name}`}

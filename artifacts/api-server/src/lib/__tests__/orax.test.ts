@@ -457,8 +457,19 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain(
       "attachments: z.array(composerAttachmentSchema).max(6).optional()",
     );
+    expect(routeSource).toContain(
+      'contentKind: z.enum(["text", "image", "binary", "unsupported"])',
+    );
+    expect(routeSource).toContain("contentText: z.string().max(120_000).optional()");
+    expect(routeSource).toContain("dataUrl: z.string().max(1_500_000).optional()");
+    expect(routeSource).toContain('ingestionStatus: z.enum(["ready", "unsupported", "error"])');
+    expect(routeSource).toContain("normalizeOraxComposerAttachments");
+    expect(routeSource).toContain("buildOraxComposerAttachmentContext");
+    expect(routeSource).toContain("const effectiveUserMessage = userMessageContext");
+    expect(routeSource).toContain("attachmentContext: userMessageContext");
+    expect(routeSource).toContain("Image data URL for visual/UI context:");
     expect(routeSource).toContain("...(parsed.data.metadata ?? {})");
-    expect(routeSource).toContain("composer: parsed.data.metadata?.composer ?? null");
+    expect(routeSource).toContain("composer: composerMetadata ?? null");
     expect(routeSource).not.toContain("Phase 4B is planning-only");
     expect(routeSource).not.toContain("I saved this in the ORAX task thread");
     expect(routeSource).toContain("buildOraxTaskActionSuggestions");
