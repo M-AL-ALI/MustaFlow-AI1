@@ -1533,10 +1533,6 @@ export default function OraxPage() {
             <button
               type="button"
               onClick={() => {
-                if (selectedTask) {
-                  setMobileTaskOpen(true);
-                  return;
-                }
                 setMobileComposeOpen((value) => !value);
               }}
               className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-foreground px-5 text-base font-semibold text-background"

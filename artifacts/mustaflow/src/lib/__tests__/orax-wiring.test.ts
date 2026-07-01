@@ -141,6 +141,39 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("if (activeTaskIdRef.current !== targetTaskId) return");
   });
 
+  it("keeps ORAX Codex-like and list-first on website and mobile", () => {
+    expect(oraxPage).toContain("const [mobileTaskOpen, setMobileTaskOpen] = useState(false)");
+    expect(oraxPage).toContain("const [mobileComposeOpen, setMobileComposeOpen] = useState(false)");
+    expect(oraxPage).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(oraxPage).toContain("visibleTasks");
+    expect(oraxPage).toContain("chatPreview");
+    expect(oraxPage).toContain("Back to Orax tasks");
+    expect(oraxPage).toContain("Orax options");
+    expect(oraxPage).toContain("Projects");
+    expect(oraxPage).toContain("Chats");
+    expect(oraxPage).toContain("Search Chats");
+    expect(oraxPage).toContain("mobileTaskOpen ? \"hidden lg:flex\" : \"flex\"");
+    expect(oraxPage).toContain("mobileTaskOpen ? \"flex\" : \"hidden\"");
+    expect(oraxPage).toContain("setMobileComposeOpen((value) => !value)");
+    expect(oraxPage).toContain("className=\"hidden shrink-0 flex-wrap");
+    expect(oraxPage).toContain("className=\"mt-4 hidden rounded-md");
+    expect(oraxPage).toContain("details className=\"mx-auto mb-2 hidden");
+
+    expect(mobileOraxScreen).toContain("const [threadOpen, setThreadOpen] = useState(false)");
+    expect(mobileOraxScreen).toContain("const [homeComposeOpen, setHomeComposeOpen] = useState(false)");
+    expect(mobileOraxScreen).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(mobileOraxScreen).toContain("visibleTasks");
+    expect(mobileOraxScreen).toContain("chatPreview");
+    expect(mobileOraxScreen).toContain("ORAX_TAGLINE");
+    expect(mobileOraxScreen).toContain("Projects");
+    expect(mobileOraxScreen).toContain("Chats");
+    expect(mobileOraxScreen).toContain("Search Chats");
+    expect(mobileOraxScreen).toContain("setHomeComposeOpen((value) => !value)");
+    expect(mobileOraxScreen).toContain("{homeComposeOpen ? (");
+    expect(mobileOraxScreen).toContain("{showDetails ? (");
+    expect(mobileOraxScreen).not.toContain("ScreenHeader");
+  });
+
   it("mounts the authenticated /orax API prefix", () => {
     expect(routesIndex).toContain('"/orax"');
     expect(routesIndex).toContain("router.use(oraxRouter)");

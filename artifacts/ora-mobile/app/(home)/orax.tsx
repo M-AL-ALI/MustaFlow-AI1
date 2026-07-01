@@ -120,6 +120,7 @@ export default function OraxScreen() {
   const navigation = useNavigation();
   const [threadOpen, setThreadOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [homeComposeOpen, setHomeComposeOpen] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
 
   const [caps, setCaps] = useState<OraxCapabilities | null>(null);
@@ -379,6 +380,7 @@ export default function OraxScreen() {
       await appendTaskMessage(created.task.id, prompt);
       await loadTaskDetails(created.task.id);
       setThreadOpen(true);
+      setHomeComposeOpen(false);
       setShowDetails(false);
     });
   }, [loadTaskDetails, runAction, selectedRepo?.id, taskKind, taskPrompt]);
@@ -584,14 +586,44 @@ export default function OraxScreen() {
                     </View>
                     <Pressable
                       onPress={() => {
-                        setThreadOpen(true);
-                        setShowDetails(true);
+                        setHomeComposeOpen((value) => !value);
                       }}
                       hitSlop={10}
                     >
                       <Plus size={20} color={c.mutedForeground} />
                     </Pressable>
                   </View>
+
+                  {homeComposeOpen ? (
+                    <Card style={{ gap: 12 }}>
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        {TASK_KINDS.map((kind) => (
+                          <Pill
+                            key={kind.value}
+                            label={kind.label}
+                            active={taskKind === kind.value}
+                            onPress={() => setTaskKind(kind.value)}
+                          />
+                        ))}
+                      </View>
+                      <TextField
+                        label="Start Orax task"
+                        placeholder="Ask Orax to inspect, plan, review, or fix code..."
+                        value={taskPrompt}
+                        onChangeText={setTaskPrompt}
+                        multiline
+                        style={{ minHeight: 88, textAlignVertical: "top" }}
+                      />
+                      <Button
+                        label="Start ORAX chat"
+                        icon={Play}
+                        onPress={submitTask}
+                        loading={busyAction === "create-task"}
+                        disabled={!selectedRepo || !taskPrompt.trim()}
+                        full
+                      />
+                    </Card>
+                  ) : null}
 
                   <View style={{ gap: 22 }}>
                     {visibleTasks.length === 0 ? (
@@ -675,8 +707,7 @@ export default function OraxScreen() {
                     label="Chat"
                     icon={MessageSquare}
                     onPress={() => {
-                      setThreadOpen(true);
-                      setShowDetails(!selectedTask);
+                      setHomeComposeOpen((value) => !value);
                     }}
                   />
                 </View>
