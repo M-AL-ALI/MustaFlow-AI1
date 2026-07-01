@@ -3,7 +3,6 @@ import { Link } from "wouter";
 import {
   ArrowUp,
   ArrowLeft,
-  Bot,
   Check,
   Code2,
   FileText,
@@ -608,6 +607,35 @@ function shouldRefreshOraxTaskCollections(message: OraxTaskMessage): boolean {
   );
 }
 
+function isOraxVisibleThreadMessage(message: OraxTaskMessage): boolean {
+  if (message.role === "user" || message.role === "assistant") return true;
+  const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
+  if (
+    [
+      "checkpoint_updated",
+      "execution_session_started",
+      "execution_step",
+      "approval_requested",
+      "approval_decided",
+    ].includes(event)
+  ) {
+    return false;
+  }
+  return message.role === "tool";
+}
+
+function formatOraxVisibleThreadContent(message: OraxTaskMessage): string {
+  const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
+  if (event === "runner_continue") {
+    return message.content
+      .replace(/^Approved file read completed:/i, "Read")
+      .replace(/^Draft patch generated:/i, "Drafted")
+      .replace(/^Controlled checks passed:/i, "Checks passed:")
+      .replace(/^Controlled checks failed:/i, "Checks failed:");
+  }
+  return message.content;
+}
+
 function normalizeOraxUiError(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : fallback;
   if (/invalid orax task/i.test(message)) {
@@ -757,6 +785,10 @@ export default function OraxPage() {
     );
   }, [taskMessages]);
   const primaryThreadSuggestion = latestAssistantSuggestions[0] ?? null;
+  const visibleTaskMessages = useMemo(
+    () => taskMessages.filter(isOraxVisibleThreadMessage),
+    [taskMessages],
+  );
   const threadNextAction = pendingApprovals.length
     ? `Review ${pendingApprovals.length} pending approval${
         pendingApprovals.length === 1 ? "" : "s"
@@ -1929,27 +1961,14 @@ export default function OraxPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 lg:px-4">
             {!selectedTask ? (
-              <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted">
-                  <Bot className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <h3 className="mt-4 text-lg font-semibold">New chat</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Ask Orax what to work on. The first message starts the task thread.
-                </p>
-              </div>
-            ) : taskMessages.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
-                No messages yet. Ask Orax to inspect files, explain pending approvals, or continue
-                from the current checkpoint.
-              </div>
+              <div className="h-full" aria-label="New Orax chat" />
+            ) : visibleTaskMessages.length === 0 ? (
+              <div className="h-full" aria-label="Empty Orax thread" />
             ) : (
               <div className="mx-auto flex max-w-4xl flex-col gap-3">
-                {taskMessages.map((message) => {
+                {visibleTaskMessages.map((message) => {
                   const isUser = message.role === "user";
-                  const isTimeline = message.role === "system" || message.role === "tool";
                   const messageAttachments = getMessageComposerAttachments(message);
-                  const executionStep = message.metadata?.executionStep;
                   const suggestions =
                     message.role === "assistant" &&
                     message.id === latestAssistantSuggestionMessageId &&
@@ -1963,35 +1982,18 @@ export default function OraxPage() {
                         "px-4 py-3 text-base lg:rounded-md lg:border lg:text-sm",
                         isUser
                           ? "ml-auto max-w-[78%] rounded-3xl bg-muted/70 text-foreground lg:border-border"
-                          : isTimeline
-                            ? "border-dashed border-border bg-muted/40 text-muted-foreground"
-                            : "bg-transparent lg:border-border lg:bg-card",
+                          : "bg-transparent lg:border-transparent lg:bg-transparent",
                       )}
                     >
                       <div className="hidden">
-                        {isUser
-                          ? "You"
-                          : message.role === "tool"
-                            ? "Tool result"
-                            : isTimeline
-                              ? "Timeline"
-                              : "Orax"}
+                        {isUser ? "You" : message.role === "tool" ? "Tool result" : "Orax"}
                         {message.createdAt
                           ? ` - ${new Date(message.createdAt).toLocaleString()}`
                           : ""}
                       </div>
-                      <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-                      {executionStep ? (
-                        <div className="mt-2 inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] text-muted-foreground">
-                          <Terminal className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate font-medium text-foreground">
-                            {executionStep.label ?? "Orax step"}
-                          </span>
-                          <span className="shrink-0 capitalize">
-                            {executionStep.status ?? "running"}
-                          </span>
-                        </div>
-                      ) : null}
+                      <div className="whitespace-pre-wrap leading-relaxed">
+                        {formatOraxVisibleThreadContent(message)}
+                      </div>
                       {messageAttachments.length ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {messageAttachments.map((attachment) => (
@@ -2003,20 +2005,6 @@ export default function OraxPage() {
                               <span className="truncate">{attachment.name}</span>
                             </span>
                           ))}
-                        </div>
-                      ) : null}
-                      {message.approvalId || message.artifactId ? (
-                        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-                          {message.approvalId ? (
-                            <span className="rounded-full border border-border px-2 py-0.5">
-                              Approval #{message.approvalId}
-                            </span>
-                          ) : null}
-                          {message.artifactId ? (
-                            <span className="rounded-full border border-border px-2 py-0.5">
-                              Artifact #{message.artifactId}
-                            </span>
-                          ) : null}
                         </div>
                       ) : null}
                       {suggestions.length ? (

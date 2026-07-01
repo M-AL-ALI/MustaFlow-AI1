@@ -59,7 +59,7 @@ const repositorySchema = z.object({
 const createTaskSchema = z.object({
   repositoryId: z.number().int().positive(),
   kind: z.enum(ORAX_TASK_KINDS).default("analyze"),
-  prompt: z.string().min(3).max(8000),
+  prompt: z.string().trim().min(1).max(8000),
   title: z.string().min(1).max(140).optional(),
 });
 
@@ -4795,18 +4795,10 @@ async function persistOraxCheckpoint(input: { userId: string; taskId: number }):
       })
       .where(eq(oraxTasksTable.id, task.id));
 
-    await db.insert(oraxTaskMessagesTable).values({
-      userId: input.userId,
-      repositoryId: task.repositoryId,
-      taskId: task.id,
-      role: "system",
-      content: `Checkpoint updated: ${checkpoint.nextStep}`,
-      metadata: {
-        source: "orax-task-checkpoint",
-        event: "checkpoint_updated",
-        checkpoint,
-      },
-    });
+    logger.debug(
+      { component: "orax", taskId: task.id, nextStep: checkpoint.nextStep },
+      "Updated ORAX checkpoint",
+    );
   } catch (err) {
     logger.warn(
       { component: "orax", err, taskId: input.taskId },

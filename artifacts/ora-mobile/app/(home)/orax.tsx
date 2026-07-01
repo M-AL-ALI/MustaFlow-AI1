@@ -417,6 +417,7 @@ export default function OraxScreen() {
         .slice(0, 10),
     [approvals, artifacts],
   );
+  const visibleMessages = useMemo(() => messages.filter(isOraxVisibleThreadMessage), [messages]);
 
   const clearTaskScopedState = useCallback(() => {
     setApprovals([]);
@@ -1087,13 +1088,10 @@ export default function OraxScreen() {
                   {selectedTask ? (
                     <>
                       <View style={{ gap: 10 }}>
-                        {messages.length === 0 ? (
-                          <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-                            No thread messages yet. Ask Orax to resume, explain approval, or inspect
-                            files.
-                          </Text>
+                        {visibleMessages.length === 0 ? (
+                          <View style={{ minHeight: 180 }} />
                         ) : (
-                          messages
+                          visibleMessages
                             .slice(-10)
                             .map((message) => <MessageBubble key={message.id} message={message} />)
                         )}
@@ -1139,11 +1137,7 @@ export default function OraxScreen() {
                           />
                         ))}
                     </>
-                  ) : (
-                    <Text style={{ color: c.mutedForeground, fontSize: 15, lineHeight: 22 }}>
-                      Ask Orax what to work on.
-                    </Text>
-                  )}
+                  ) : null}
                   <OraxComposer
                     value={threadDraft}
                     onChangeText={setThreadDraft}
@@ -2052,22 +2046,49 @@ function getMessageComposerAttachments(message: OraxTaskMessage): OraxComposerAt
   return Array.isArray(composer?.attachments) ? composer.attachments : [];
 }
 
+function isOraxVisibleThreadMessage(message: OraxTaskMessage): boolean {
+  if (message.role === "user" || message.role === "assistant") return true;
+  const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
+  if (
+    [
+      "checkpoint_updated",
+      "execution_session_started",
+      "execution_step",
+      "approval_requested",
+      "approval_decided",
+    ].includes(event)
+  ) {
+    return false;
+  }
+  return message.role === "tool";
+}
+
+function formatOraxVisibleThreadContent(message: OraxTaskMessage): string {
+  const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
+  if (event === "runner_continue") {
+    return message.content
+      .replace(/^Approved file read completed:/i, "Read")
+      .replace(/^Draft patch generated:/i, "Drafted")
+      .replace(/^Controlled checks passed:/i, "Checks passed:")
+      .replace(/^Controlled checks failed:/i, "Checks failed:");
+  }
+  return message.content;
+}
+
 function MessageBubble({ message }: { message: OraxTaskMessage }) {
   const c = useColors();
   const isUser = message.role === "user";
-  const isSystem = message.role === "system" || message.role === "tool";
   const attachments = getMessageComposerAttachments(message);
-  const executionStep = message.metadata?.executionStep;
   return (
     <View
       style={{
         alignSelf: isUser ? "flex-end" : "stretch",
         maxWidth: isUser ? "88%" : "100%",
-        borderWidth: 1,
-        borderColor: isSystem ? c.border : isUser ? c.border : c.cardBorder,
-        borderRadius: c.radius,
+        borderWidth: isUser ? 1 : 0,
+        borderColor: isUser ? c.border : "transparent",
+        borderRadius: isUser ? 24 : 0,
         padding: 12,
-        backgroundColor: isUser ? c.muted : isSystem ? c.muted : c.card,
+        backgroundColor: isUser ? c.muted : "transparent",
         gap: 6,
       }}
     >
@@ -2078,32 +2099,8 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
           lineHeight: 20,
         }}
       >
-        {message.content}
+        {formatOraxVisibleThreadContent(message)}
       </Text>
-      {executionStep ? (
-        <View
-          style={{
-            alignSelf: "flex-start",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            borderWidth: 1,
-            borderColor: c.border,
-            borderRadius: 999,
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-            backgroundColor: c.background,
-          }}
-        >
-          <TerminalSquare size={14} color={c.mutedForeground} />
-          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 12 }}>
-            {executionStep.label ?? "Orax step"}
-          </Text>
-          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-            {executionStep.status ?? "running"}
-          </Text>
-        </View>
-      ) : null}
       {attachments.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {attachments.map((attachment) => (
@@ -2156,7 +2153,7 @@ function ApprovalCard({
             {formatApprovalAction(approval.action)}
           </Text>
           <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
-            Approval #{approval.id} - {approval.status}
+            {approval.status === "pending" ? "Waiting for your approval" : "Ready to continue"}
           </Text>
         </View>
         <StatusIcon status={approval.status} />

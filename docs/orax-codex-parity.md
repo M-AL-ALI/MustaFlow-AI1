@@ -132,6 +132,9 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   lines, and rollback/source metadata available without exposing a separate
   dashboard panel.
 - Messages should read like a chat thread, not a timestamped execution log.
+- Checkpoint updates, execution-session starts, running-step markers, approval
+  IDs, and artifact IDs must stay out of the default chat transcript. They may
+  remain in Orax-owned metadata/state for recovery and auditing.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.
 - Resume or "what happened" replies must stay natural and short: summarize

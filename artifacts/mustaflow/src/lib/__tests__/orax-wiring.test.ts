@@ -60,7 +60,11 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("latestAssistantSuggestionMessageId");
     expect(oraxPage).toContain("connectOraxTaskEventStream");
     expect(oraxPage).toContain("continueSelectedTask");
-    expect(oraxPage).toContain("executionStep");
+    expect(oraxPage).toContain("isOraxVisibleThreadMessage");
+    expect(oraxPage).toContain("formatOraxVisibleThreadContent");
+    expect(oraxPage).toContain('"checkpoint_updated"');
+    expect(oraxPage).toContain('"execution_session_started"');
+    expect(oraxPage).toContain('"execution_step"');
     expect(oraxPage).toContain('artifact.type === "execution_session"');
     expect(oraxPage).toContain('artifact.type === "workspace_change_set"');
     expect(oraxPage).toContain("latestWorkspaceChangeSet");
@@ -147,7 +151,7 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("Projects");
     expect(mobileOraxScreen).toContain("Chats");
     expect(mobileOraxScreen).toContain("Search Chats");
-    expect(mobileOraxScreen).toContain("Ask Orax what to work on.");
+    expect(mobileOraxScreen).not.toContain("Ask Orax what to work on.");
     expect(mobileOraxScreen).toContain("function OraxComposer");
     expect(mobileOraxScreen).toContain('placeholder="Ask Orax"');
     expect(mobileOraxScreen).toContain("5.5");
@@ -174,8 +178,14 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("listTaskMessages(taskId)");
     expect(mobileOraxScreen).toContain("mergeOraxTaskMessages");
     expect(mobileOraxScreen).toContain("continueCurrentTask");
-    expect(mobileOraxScreen).toContain("executionStep");
+    expect(mobileOraxScreen).toContain("isOraxVisibleThreadMessage");
+    expect(mobileOraxScreen).toContain("formatOraxVisibleThreadContent");
+    expect(mobileOraxScreen).toContain('"checkpoint_updated"');
+    expect(mobileOraxScreen).toContain('"execution_session_started"');
+    expect(mobileOraxScreen).toContain('"execution_step"');
     expect(mobileOraxScreen).toContain('artifact.type === "execution_session"');
+    expect(mobileOraxScreen).toContain("Waiting for your approval");
+    expect(mobileOraxScreen).not.toContain("Approval #{approval.id} - {approval.status}");
     expect(mobileApi).toContain("continueTask(taskId: number)");
     expect(mobileApi).toContain("/api/orax/tasks/${taskId}/continue");
     expect(mobileOraxScreen).not.toContain('label="Send"');
@@ -284,6 +294,9 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).not.toContain("Phase 4B is planning-only");
     expect(oraxApiRoute).not.toContain("Prepare file-read approval");
     expect(oraxApiRoute).not.toContain("Invalid ORAX task");
+    expect(oraxApiRoute).not.toContain("Checkpoint updated:");
+    expect(oraxApiRoute).toContain("prompt: z.string().trim().min(1).max(8000)");
+    expect(oraxApiRoute).toContain("Updated ORAX checkpoint");
     expect(oraxApiRoute).toContain("Next, I need to");
     expect(oraxApiRoute).toContain("what happened");
   });
