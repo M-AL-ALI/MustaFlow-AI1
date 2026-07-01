@@ -60,6 +60,8 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Task created, but first message failed to save");
     expect(oraxPage).toContain("connectOraxTaskEventStream");
     expect(oraxPage).toContain("continueSelectedTask");
+    expect(oraxPage).toContain("executionStep");
+    expect(oraxPage).toContain('artifact.type === "execution_session"');
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/events");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/continue");
     expect(oraxPage).toContain('headers: { Accept: "text/event-stream" }');
@@ -157,6 +159,8 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("listTaskMessages(taskId)");
     expect(mobileOraxScreen).toContain("mergeOraxTaskMessages");
     expect(mobileOraxScreen).toContain("continueCurrentTask");
+    expect(mobileOraxScreen).toContain("executionStep");
+    expect(mobileOraxScreen).toContain('artifact.type === "execution_session"');
     expect(mobileApi).toContain("continueTask(taskId: number)");
     expect(mobileApi).toContain("/api/orax/tasks/${taskId}/continue");
     expect(mobileOraxScreen).not.toContain('label="Send"');
@@ -203,6 +207,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("loadOraxTaskMessagesAfter");
     expect(oraxApiRoute).toContain('router.post("/orax/tasks/:id/continue"');
     expect(oraxApiRoute).toContain("continueOraxTaskRunner");
+    expect(oraxApiRoute).toContain('type: "execution_session"');
+    expect(oraxApiRoute).toContain("ensureOraxExecutionSession");
+    expect(oraxApiRoute).toContain("appendOraxExecutionSessionStep");
+    expect(oraxApiRoute).toContain("persistOraxExecutionProgress");
+    expect(oraxApiRoute).toContain("executionSessionId");
+    expect(oraxApiRoute).toContain("executionStep");
     expect(oraxApiRoute).toContain("runner_continue");
     expect(oraxApiRoute).toContain("runOraxRunnerApprovedFileRead");
     expect(oraxApiRoute).toContain("requestOraxRunnerCommandApproval");
@@ -261,6 +271,9 @@ describe("ORAX product-surface wiring", () => {
       'export type OraxTaskKind = "analyze" | "plan" | "review" | "fix"',
     );
     expect(mobileTypes).toContain("export interface OraxComposerMetadata");
+    expect(mobileTypes).toContain("export interface OraxExecutionStep");
+    expect(mobileTypes).toContain("executionStep?: OraxExecutionStep");
+    expect(mobileTypes).toContain("steps?: OraxExecutionStep[]");
     expect(mobileTypes).toContain("permissionMode: OraxComposerPermissionMode");
     expect(mobileTypes).toContain("attachments: OraxComposerAttachment[]");
     expect(mobileTypes).toContain("contentText?: string");
@@ -275,6 +288,7 @@ describe("ORAX product-surface wiring", () => {
       "/api/orax/repositories/${repositoryId}/scan",
       "/api/orax/tasks",
       "/api/orax/tasks/${taskId}/messages",
+      "/api/orax/tasks/${taskId}/continue",
       "/api/orax/tasks/${taskId}/approvals",
       "/api/orax/tasks/${taskId}/artifacts",
       "/api/orax/tasks/${input.taskId}/draft-patch",

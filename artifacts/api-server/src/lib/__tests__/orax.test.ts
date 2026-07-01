@@ -526,6 +526,17 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain('router.post("/orax/tasks/:id/continue"');
     expect(routeSource).toContain("continueOraxTaskRunner");
     expect(routeSource).toContain("runner_continue");
+    expect(routeSource).toContain('type: "execution_session"');
+    expect(routeSource).toContain("ensureOraxExecutionSession");
+    expect(routeSource).toContain("appendOraxExecutionSessionStep");
+    expect(routeSource).toContain("persistOraxExecutionProgress");
+    expect(routeSource).toContain("executionSessionId");
+    expect(routeSource).toContain("executionStep");
+    expect(routeSource).toContain("Orax started an execution session");
+    expect(routeSource).toContain("Reading approved repository files...");
+    expect(routeSource).toContain(
+      "Running approved controlled checks in the isolated workspace...",
+    );
     expect(routeSource).toContain("runOraxRunnerApprovedFileRead");
     expect(routeSource).toContain("runOraxRunnerApprovedSandbox");
     expect(routeSource).toContain("runOraxRunnerApprovedChecks");

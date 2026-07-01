@@ -113,6 +113,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   the Orax-only approval-gated runner: it requests the next required approval,
   runs already approved safe steps, drafts from approved reads, validates in
   sandbox after approval, and writes each result back into the task thread.
+- Each Continue run must create or reuse an Orax `execution_session` artifact.
+  The session records ordered execution steps and mirrors each step into
+  Orax-owned task-message metadata so website SSE and mobile polling show live
+  progress inside the normal thread.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.

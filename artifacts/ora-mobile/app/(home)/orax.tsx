@@ -2093,6 +2093,7 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system" || message.role === "tool";
   const attachments = getMessageComposerAttachments(message);
+  const executionStep = message.metadata?.executionStep;
   return (
     <View
       style={{
@@ -2115,6 +2116,30 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
       >
         {message.content}
       </Text>
+      {executionStep ? (
+        <View
+          style={{
+            alignSelf: "flex-start",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 999,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            backgroundColor: c.background,
+          }}
+        >
+          <TerminalSquare size={14} color={c.mutedForeground} />
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 12 }}>
+            {executionStep.label ?? "Orax step"}
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+            {executionStep.status ?? "running"}
+          </Text>
+        </View>
+      ) : null}
       {attachments.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {attachments.map((attachment) => (
@@ -2433,6 +2458,7 @@ function describeApproval(approval: OraxApproval): string {
 }
 
 function formatArtifactLabel(type: string): string {
+  if (type === "execution_session") return "Execution session";
   if (type === "draft_patch") return "Draft patch generated";
   if (type === "sandbox_result") return "Sandbox result";
   if (type === "command_result") return "Controlled checks result";
@@ -2441,6 +2467,10 @@ function formatArtifactLabel(type: string): string {
 }
 
 function describeArtifact(artifact: OraxArtifact): string {
+  if (artifact.type === "execution_session") {
+    const steps = artifact.payload.steps?.length ?? 0;
+    return `Execution session ${artifact.status}; ${steps} step${steps === 1 ? "" : "s"} recorded.`;
+  }
   if (artifact.type === "draft_patch") {
     const files = artifact.payload.filesRead?.length ?? 0;
     return (

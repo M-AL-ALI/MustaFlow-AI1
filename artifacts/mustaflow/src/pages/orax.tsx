@@ -128,6 +128,8 @@ type OraxTaskMessage = {
     actionSuggestions?: OraxTaskActionSuggestion[];
     checkpoint?: OraxCheckpointSummary;
     event?: string;
+    executionSessionId?: number;
+    executionStep?: OraxExecutionStep;
     source?: string;
     [key: string]: unknown;
   };
@@ -135,6 +137,17 @@ type OraxTaskMessage = {
   approvalId?: number | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type OraxExecutionStep = {
+  id?: string;
+  action?: string;
+  label?: string;
+  status?: string;
+  message?: string;
+  approvalId?: number;
+  artifactId?: number;
+  createdAt?: string;
 };
 
 type OraxTaskActionSuggestion = {
@@ -296,6 +309,9 @@ type OraxArtifact = {
     pullRequestState?: string;
     filesChanged?: string[];
     auditTrail?: Array<{ label: string; id: number; kind: string }>;
+    steps?: OraxExecutionStep[];
+    startedAt?: string;
+    updatedAt?: string;
     error?: OraxFailureInfo;
     failedAt?: string;
   };
@@ -309,6 +325,7 @@ type OraxTaskRunnerResult = {
   message: string;
   approvalId?: number;
   artifactId?: number;
+  sessionArtifactId?: number;
   approval?: OraxApproval;
   artifact?: OraxArtifact;
 };
@@ -2004,6 +2021,7 @@ export default function OraxPage() {
                   const isUser = message.role === "user";
                   const isTimeline = message.role === "system" || message.role === "tool";
                   const messageAttachments = getMessageComposerAttachments(message);
+                  const executionStep = message.metadata?.executionStep;
                   const suggestions =
                     message.role === "assistant" ? (message.metadata?.actionSuggestions ?? []) : [];
                   return (
@@ -2031,6 +2049,17 @@ export default function OraxPage() {
                           : ""}
                       </div>
                       <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                      {executionStep ? (
+                        <div className="mt-2 inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] text-muted-foreground">
+                          <Terminal className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate font-medium text-foreground">
+                            {executionStep.label ?? "Orax step"}
+                          </span>
+                          <span className="shrink-0 capitalize">
+                            {executionStep.status ?? "running"}
+                          </span>
+                        </div>
+                      ) : null}
                       {messageAttachments.length ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {messageAttachments.map((attachment) => (
@@ -2661,6 +2690,8 @@ function formatOraxApprovalAction(action: string): string {
 
 function formatOraxArtifactLifecycleLabel(type: string): string {
   switch (type) {
+    case "execution_session":
+      return "Execution session";
     case "draft_patch":
       return "Draft patch generated";
     case "sandbox_result":
@@ -2702,6 +2733,10 @@ function describeOraxApprovalLifecycle(approval: OraxApproval): string {
 }
 
 function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
+  if (artifact.type === "execution_session") {
+    const steps = artifact.payload.steps?.length ?? 0;
+    return `Execution session ${artifact.status}; ${steps} step${steps === 1 ? "" : "s"} recorded.`;
+  }
   if (artifact.type === "draft_patch") {
     return artifact.summary ?? "Review-only patch preview generated from approved source files.";
   }

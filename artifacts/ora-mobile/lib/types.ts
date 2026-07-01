@@ -531,6 +531,8 @@ export interface OraxTaskMessage {
     actionSuggestions?: OraxTaskActionSuggestion[];
     checkpoint?: OraxCheckpointSummary;
     event?: string;
+    executionSessionId?: number;
+    executionStep?: OraxExecutionStep;
     source?: string;
     [key: string]: unknown;
   };
@@ -538,6 +540,17 @@ export interface OraxTaskMessage {
   approvalId?: number | null;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface OraxExecutionStep {
+  id?: string;
+  action?: string;
+  label?: string;
+  status?: string;
+  message?: string;
+  approvalId?: number;
+  artifactId?: number;
+  createdAt?: string;
 }
 
 export type OraxComposerReasoning = "low" | "medium" | "high" | "extra_high";
@@ -637,6 +650,9 @@ export interface OraxArtifact {
     pullRequestNumber?: number;
     pullRequestUrl?: string;
     filesChanged?: string[];
+    steps?: OraxExecutionStep[];
+    startedAt?: string;
+    updatedAt?: string;
     error?: { code?: string; message?: string; hint?: string; rawMessage?: string };
     [key: string]: unknown;
   };
@@ -798,6 +814,7 @@ export interface OraxTaskRunnerResult {
   message: string;
   approvalId?: number;
   artifactId?: number;
+  sessionArtifactId?: number;
   approval?: OraxTaskApproval;
   artifact?: OraxTaskArtifact;
 }

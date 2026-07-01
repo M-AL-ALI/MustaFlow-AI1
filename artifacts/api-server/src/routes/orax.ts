@@ -249,8 +249,22 @@ type OraxTaskRunnerResult = {
   message: string;
   approvalId?: number;
   artifactId?: number;
+  sessionArtifactId?: number;
   approval?: OraxTaskApproval;
   artifact?: OraxTaskArtifact;
+};
+
+type OraxExecutionStepStatus = "running" | "completed" | "waiting" | "blocked" | "failed";
+
+type OraxExecutionSessionStep = {
+  id: string;
+  action: OraxTaskRunnerResult["action"];
+  label: string;
+  status: OraxExecutionStepStatus;
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+  createdAt: string;
 };
 
 router.get("/orax/capabilities", (_req, res) => {
@@ -2684,12 +2698,18 @@ async function continueOraxTaskRunner(input: {
     input.userId,
     input.task.id,
   );
+  const session = await ensureOraxExecutionSession({
+    userId: input.userId,
+    task: input.task,
+    artifacts,
+  });
 
   const pendingApproval = approvals.find((approval) => approval.status === "pending");
   if (pendingApproval) {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session,
       status: "waiting",
       action: "review_pending_approval",
       message: `Review approval #${pendingApproval.id} before Orax continues.`,
@@ -2703,6 +2723,7 @@ async function continueOraxTaskRunner(input: {
       return runOraxRunnerApprovedFileRead({
         userId: input.userId,
         task: input.task,
+        session,
         approval: approvedApproval,
       });
     }
@@ -2710,6 +2731,7 @@ async function continueOraxTaskRunner(input: {
       return runOraxRunnerApprovedSandbox({
         userId: input.userId,
         task: input.task,
+        session,
         approval: approvedApproval,
       });
     }
@@ -2717,6 +2739,7 @@ async function continueOraxTaskRunner(input: {
       return runOraxRunnerApprovedChecks({
         userId: input.userId,
         task: input.task,
+        session,
         approval: approvedApproval,
       });
     }
@@ -2724,6 +2747,7 @@ async function continueOraxTaskRunner(input: {
       return persistOraxRunnerResult({
         userId: input.userId,
         task: input.task,
+        session,
         status: "waiting",
         action: "run_approved_pr",
         message:
@@ -2740,6 +2764,7 @@ async function continueOraxTaskRunner(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session,
       status: "waiting",
       action: "complete",
       message: "This task already has a completed GitHub PR result.",
@@ -2753,6 +2778,7 @@ async function continueOraxTaskRunner(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session,
       status: "waiting",
       action: "await_pr_confirmation",
       message:
@@ -2767,6 +2793,7 @@ async function continueOraxTaskRunner(input: {
     return requestOraxRunnerCommandApproval({
       userId: input.userId,
       task: input.task,
+      session,
       artifact: latestSandboxResult,
     });
   }
@@ -2778,6 +2805,7 @@ async function continueOraxTaskRunner(input: {
     return requestOraxRunnerSandboxApproval({
       userId: input.userId,
       task: input.task,
+      session,
       artifact: latestDraftPatch,
     });
   }
@@ -2789,6 +2817,7 @@ async function continueOraxTaskRunner(input: {
     return generateOraxRunnerDraftPatch({
       userId: input.userId,
       task: input.task,
+      session,
       approval: completedReadApproval,
       instructions: latestOraxUserMessage(messages) ?? input.task.prompt,
     });
@@ -2797,6 +2826,7 @@ async function continueOraxTaskRunner(input: {
   return requestOraxRunnerFileReadApproval({
     userId: input.userId,
     task: input.task,
+    session,
     messages,
   });
 }
@@ -2838,9 +2868,192 @@ async function loadOraxTaskRunnerState(userId: string, taskId: number) {
   return { approvals, artifacts, messages };
 }
 
+async function ensureOraxExecutionSession(input: {
+  userId: string;
+  task: OraxTask;
+  artifacts: OraxTaskArtifact[];
+}): Promise<OraxTaskArtifact> {
+  const existing = input.artifacts.find(
+    (artifact) =>
+      artifact.type === "execution_session" &&
+      !["completed", "failed", "blocked"].includes(artifact.status),
+  );
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const [session] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: input.task.repositoryId,
+      taskId: input.task.id,
+      type: "execution_session",
+      status: "running",
+      title: `Execution session for ${input.task.title}`,
+      summary: "Orax is working through this task inline.",
+      payload: {
+        taskId: input.task.id,
+        status: "running",
+        startedAt: now,
+        updatedAt: now,
+        steps: [],
+      },
+    })
+    .returning();
+
+  await persistOraxTimelineMessage({
+    userId: input.userId,
+    task: input.task,
+    role: "system",
+    event: "execution_session_started",
+    content: "Orax started an execution session for this task.",
+    artifactId: session.id,
+    metadata: {
+      executionSessionId: session.id,
+      executionStep: {
+        id: `session-${session.id}-start`,
+        action: "request_read_approval",
+        label: "Start execution session",
+        status: "running",
+        message: "Orax started an execution session for this task.",
+        artifactId: session.id,
+        createdAt: now,
+      },
+    },
+  });
+
+  return session;
+}
+
+async function appendOraxExecutionSessionStep(input: {
+  userId: string;
+  session: OraxTaskArtifact;
+  action: OraxTaskRunnerResult["action"];
+  status: OraxExecutionStepStatus;
+  label: string;
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+}): Promise<OraxExecutionSessionStep> {
+  const currentSession = (await loadOwnedArtifact(input.userId, input.session.id)) ?? input.session;
+  const payload = asRecord(currentSession.payload);
+  const steps = Array.isArray(payload.steps)
+    ? payload.steps.filter((step): step is OraxExecutionSessionStep => {
+        const record = asRecord(step);
+        return (
+          typeof record.id === "string" &&
+          typeof record.action === "string" &&
+          typeof record.label === "string" &&
+          typeof record.status === "string" &&
+          typeof record.message === "string" &&
+          typeof record.createdAt === "string"
+        );
+      })
+    : [];
+  const createdAt = new Date().toISOString();
+  const step: OraxExecutionSessionStep = {
+    id: `session-${input.session.id}-step-${steps.length + 1}-${Date.now()}`,
+    action: input.action,
+    label: input.label,
+    status: input.status,
+    message: input.message,
+    approvalId: input.approvalId,
+    artifactId: input.artifactId,
+    createdAt,
+  };
+  const sessionStatus = toOraxExecutionSessionStatus(input.action, input.status);
+
+  await db
+    .update(oraxTaskArtifactsTable)
+    .set({
+      status: sessionStatus,
+      summary: `${step.label}: ${step.status}`,
+      payload: {
+        ...payload,
+        taskId: input.session.taskId,
+        status: sessionStatus,
+        updatedAt: createdAt,
+        steps: [...steps, step].slice(-80),
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(oraxTaskArtifactsTable.id, input.session.id));
+
+  return step;
+}
+
+async function persistOraxExecutionProgress(input: {
+  userId: string;
+  task: OraxTask;
+  session: OraxTaskArtifact;
+  action: OraxTaskRunnerResult["action"];
+  label: string;
+  message: string;
+  approvalId?: number;
+  artifactId?: number;
+}): Promise<void> {
+  const executionStep = await appendOraxExecutionSessionStep({
+    ...input,
+    status: "running",
+  });
+
+  await persistOraxTimelineMessage({
+    userId: input.userId,
+    task: input.task,
+    role: "system",
+    event: "execution_step",
+    content: input.message,
+    approvalId: input.approvalId,
+    artifactId: input.artifactId,
+    metadata: {
+      runnerAction: input.action,
+      runnerStatus: "running",
+      executionSessionId: input.session.id,
+      executionStep,
+    },
+  });
+}
+
+function toOraxExecutionStepStatus(
+  status: OraxTaskRunnerResult["status"],
+): OraxExecutionStepStatus {
+  if (status === "continued") return "completed";
+  if (status === "blocked") return "blocked";
+  return "waiting";
+}
+
+function toOraxExecutionSessionStatus(
+  action: OraxTaskRunnerResult["action"],
+  status: OraxExecutionStepStatus,
+): string {
+  if (status === "failed" || status === "blocked") return "blocked";
+  if (action === "complete" && status === "waiting") return "completed";
+  if (status === "waiting") return "waiting";
+  return "running";
+}
+
+function formatOraxExecutionStepLabel(action: OraxTaskRunnerResult["action"]): string {
+  const labels: Record<OraxTaskRunnerResult["action"], string> = {
+    review_pending_approval: "Review approval",
+    run_approved_read: "Read approved files",
+    run_approved_sandbox: "Validate patch",
+    run_approved_checks: "Run checks",
+    run_approved_pr: "Create pull request",
+    request_read_approval: "Request file access",
+    draft_patch: "Draft change",
+    request_sandbox_approval: "Request sandbox approval",
+    request_check_approval: "Request checks approval",
+    await_pr_confirmation: "Wait for PR confirmation",
+    complete: "Complete",
+    blocked: "Blocked",
+  };
+  return labels[action];
+}
+
 async function persistOraxRunnerResult(input: {
   userId: string;
   task: OraxTask;
+  session?: OraxTaskArtifact;
   status: OraxTaskRunnerResult["status"];
   action: OraxTaskRunnerResult["action"];
   message: string;
@@ -2849,6 +3062,19 @@ async function persistOraxRunnerResult(input: {
   approval?: OraxTaskApproval;
   artifact?: OraxTaskArtifact;
 }): Promise<OraxTaskRunnerResult> {
+  const executionStep = input.session
+    ? await appendOraxExecutionSessionStep({
+        userId: input.userId,
+        session: input.session,
+        action: input.action,
+        status: toOraxExecutionStepStatus(input.status),
+        label: formatOraxExecutionStepLabel(input.action),
+        message: input.message,
+        approvalId: input.approvalId,
+        artifactId: input.artifactId,
+      })
+    : undefined;
+
   await persistOraxTimelineMessage({
     userId: input.userId,
     task: input.task,
@@ -2860,6 +3086,8 @@ async function persistOraxRunnerResult(input: {
     metadata: {
       runnerAction: input.action,
       runnerStatus: input.status,
+      executionSessionId: input.session?.id,
+      executionStep,
     },
   });
 
@@ -2869,6 +3097,7 @@ async function persistOraxRunnerResult(input: {
     message: input.message,
     approvalId: input.approvalId,
     artifactId: input.artifactId,
+    sessionArtifactId: input.session?.id,
     approval: input.approval,
     artifact: input.artifact,
   };
@@ -2877,6 +3106,7 @@ async function persistOraxRunnerResult(input: {
 async function requestOraxRunnerFileReadApproval(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   messages: Array<{ role: string; content: string; metadata?: unknown }>;
 }): Promise<OraxTaskRunnerResult> {
   const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
@@ -2884,6 +3114,7 @@ async function requestOraxRunnerFileReadApproval(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Connect an Orax repository before continuing this task.",
@@ -2893,6 +3124,7 @@ async function requestOraxRunnerFileReadApproval(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Orax file-read approvals currently support GitHub repositories.",
@@ -2929,6 +3161,7 @@ async function requestOraxRunnerFileReadApproval(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: "waiting",
     action: "request_read_approval",
     message: `File-read approval requested for ${paths.length} path${paths.length === 1 ? "" : "s"}.`,
@@ -2940,13 +3173,25 @@ async function requestOraxRunnerFileReadApproval(input: {
 async function runOraxRunnerApprovedFileRead(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   approval: OraxTaskApproval;
 }): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "run_approved_read",
+    label: "Read approved files",
+    message: "Reading approved repository files...",
+    approvalId: input.approval.id,
+  });
+
   const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
   if (!repository || repository.provider !== "github") {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Approved file reads currently support GitHub repositories.",
@@ -3009,6 +3254,7 @@ async function runOraxRunnerApprovedFileRead(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: readResult.files.length ? "continued" : "blocked",
     action: "run_approved_read",
     message: readResult.files.length
@@ -3022,14 +3268,26 @@ async function runOraxRunnerApprovedFileRead(input: {
 async function generateOraxRunnerDraftPatch(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   approval: OraxTaskApproval;
   instructions: string;
 }): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "draft_patch",
+    label: "Draft change",
+    message: "Drafting the code change from approved files...",
+    approvalId: input.approval.id,
+  });
+
   const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
   if (!repository) {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Repository not found for draft patch generation.",
@@ -3056,6 +3314,7 @@ async function generateOraxRunnerDraftPatch(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "No approved files could be read for draft patch generation.",
@@ -3127,6 +3386,7 @@ async function generateOraxRunnerDraftPatch(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: "continued",
     action: "draft_patch",
     message: `Draft patch generated: ${generated.summary}`,
@@ -3139,6 +3399,7 @@ async function generateOraxRunnerDraftPatch(input: {
 async function requestOraxRunnerSandboxApproval(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   artifact: OraxTaskArtifact;
 }): Promise<OraxTaskRunnerResult> {
   const payload = asRecord(input.artifact.payload);
@@ -3147,6 +3408,7 @@ async function requestOraxRunnerSandboxApproval(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Sandbox validation requires a draft patch diff.",
@@ -3181,6 +3443,7 @@ async function requestOraxRunnerSandboxApproval(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: "waiting",
     action: "request_sandbox_approval",
     message: `Sandbox validation approval requested for draft artifact #${input.artifact.id}.`,
@@ -3193,8 +3456,19 @@ async function requestOraxRunnerSandboxApproval(input: {
 async function runOraxRunnerApprovedSandbox(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   approval: OraxTaskApproval;
 }): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "run_approved_sandbox",
+    label: "Validate patch",
+    message: "Validating the draft patch in the isolated sandbox...",
+    approvalId: input.approval.id,
+  });
+
   const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
   const request = asRecord(input.approval.request);
   const artifactId =
@@ -3206,6 +3480,7 @@ async function runOraxRunnerApprovedSandbox(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Task, repository, or draft patch artifact not found.",
@@ -3224,6 +3499,7 @@ async function runOraxRunnerApprovedSandbox(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Draft patch is missing its approved file-read source.",
@@ -3322,6 +3598,7 @@ async function runOraxRunnerApprovedSandbox(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: sandbox.applied ? "continued" : "blocked",
     action: "run_approved_sandbox",
     message: sandbox.applied
@@ -3337,6 +3614,7 @@ async function runOraxRunnerApprovedSandbox(input: {
 async function requestOraxRunnerCommandApproval(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   artifact: OraxTaskArtifact;
 }): Promise<OraxTaskRunnerResult> {
   const commands = normalizeOraxSandboxCommandIds([...ORAX_SANDBOX_COMMAND_IDS]);
@@ -3368,6 +3646,7 @@ async function requestOraxRunnerCommandApproval(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: "waiting",
     action: "request_check_approval",
     message: `Controlled-check approval requested for sandbox artifact #${input.artifact.id}.`,
@@ -3380,8 +3659,19 @@ async function requestOraxRunnerCommandApproval(input: {
 async function runOraxRunnerApprovedChecks(input: {
   userId: string;
   task: OraxTask;
+  session: OraxTaskArtifact;
   approval: OraxTaskApproval;
 }): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "run_approved_checks",
+    label: "Run checks",
+    message: "Running approved controlled checks in the isolated workspace...",
+    approvalId: input.approval.id,
+  });
+
   const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
   const request = asRecord(input.approval.request);
   const sandboxArtifactId =
@@ -3393,6 +3683,7 @@ async function runOraxRunnerApprovedChecks(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Task, repository, or sandbox artifact not found.",
@@ -3412,6 +3703,7 @@ async function runOraxRunnerApprovedChecks(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Sandbox result is missing its draft patch source.",
@@ -3431,6 +3723,7 @@ async function runOraxRunnerApprovedChecks(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Draft patch is missing its approved file-read source.",
@@ -3466,6 +3759,7 @@ async function runOraxRunnerApprovedChecks(input: {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
+      session: input.session,
       status: "blocked",
       action: "blocked",
       message: "Sandbox patch no longer applies to the current branch.",
@@ -3559,6 +3853,7 @@ async function runOraxRunnerApprovedChecks(input: {
   return persistOraxRunnerResult({
     userId: input.userId,
     task: input.task,
+    session: input.session,
     status: commandResult.passed ? "continued" : "blocked",
     action: "run_approved_checks",
     message: commandResult.passed
