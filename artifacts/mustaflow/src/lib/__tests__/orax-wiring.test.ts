@@ -62,6 +62,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("continueSelectedTask");
     expect(oraxPage).toContain("executionStep");
     expect(oraxPage).toContain('artifact.type === "execution_session"');
+    expect(oraxPage).toContain('artifact.type === "workspace_change_set"');
+    expect(oraxPage).toContain("latestWorkspaceChangeSet");
+    expect(oraxPage).toContain("Workspace change set");
+    expect(oraxPage).toContain("Workspace change-set details");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/events");
     expect(oraxPage).toContain("/api/orax/tasks/${taskId}/continue");
     expect(oraxPage).toContain('headers: { Accept: "text/event-stream" }');
@@ -211,6 +215,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("ensureOraxExecutionSession");
     expect(oraxApiRoute).toContain("appendOraxExecutionSessionStep");
     expect(oraxApiRoute).toContain("persistOraxExecutionProgress");
+    expect(oraxApiRoute).toContain('type: "workspace_change_set"');
+    expect(oraxApiRoute).toContain("createOraxRunnerWorkspaceChangeSet");
+    expect(oraxApiRoute).toContain("findOraxWorkspaceChangeSetForSandbox");
+    expect(oraxApiRoute).toContain("buildOraxWorkspacePatchContext");
+    expect(oraxApiRoute).toContain("workspaceChangeSetArtifactId");
+    expect(oraxApiRoute).toContain("rollback");
     expect(oraxApiRoute).toContain("executionSessionId");
     expect(oraxApiRoute).toContain("executionStep");
     expect(oraxApiRoute).toContain("retry_failed_patch");
@@ -279,6 +289,9 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileTypes).toContain("export interface OraxExecutionStep");
     expect(mobileTypes).toContain("executionStep?: OraxExecutionStep");
     expect(mobileTypes).toContain("steps?: OraxExecutionStep[]");
+    expect(mobileTypes).toContain("workspaceChangeSetArtifactId?: number");
+    expect(mobileTypes).toContain("patchedFiles?: Array");
+    expect(mobileTypes).toContain("rollback?:");
     expect(mobileTypes).toContain("retryOfArtifactId?: number");
     expect(mobileTypes).toContain("failureSummary?: string");
     expect(mobileTypes).toContain("permissionMode: OraxComposerPermissionMode");
@@ -312,5 +325,8 @@ describe("ORAX product-surface wiring", () => {
     }
     expect(mobileApi).toContain("metadata?: OraxComposerMetadata");
     expect(mobileApi).toContain("metadata ? { content, metadata } : { content }");
+    expect(mobileOraxScreen).toContain('artifact.type === "workspace_change_set"');
+    expect(mobileOraxScreen).toContain("latestWorkspaceChangeSet");
+    expect(mobileOraxScreen).toContain("Workspace change set");
   });
 });

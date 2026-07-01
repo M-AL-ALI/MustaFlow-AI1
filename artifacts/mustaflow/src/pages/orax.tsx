@@ -274,9 +274,11 @@ type OraxArtifact = {
     model?: string;
     generatedAt?: string;
     sourceArtifactId?: number;
+    workspaceChangeSetArtifactId?: number;
     sourceApprovalId?: number;
     validatedAt?: string;
     applied?: boolean;
+    diffSummary?: { additions?: number; deletions?: number };
     changedFiles?: Array<{
       path: string;
       beforeBytes: number;
@@ -284,6 +286,10 @@ type OraxArtifact = {
       additions: number;
       deletions: number;
     }>;
+    patchedFiles?: Array<{ path: string; size?: number; sourceSha?: string }>;
+    rollback?: {
+      sourceFiles?: Array<{ path: string; sha?: string; size?: number; truncated?: boolean }>;
+    };
     checks?: Array<{ name: string; status: string; message: string }>;
     errors?: string[];
     testPreview?: Array<{ name: string; status: string; message: string }>;
@@ -713,6 +719,8 @@ export default function OraxPage() {
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
   const latestSandboxResult =
     artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
+  const latestWorkspaceChangeSet =
+    artifacts.find((artifact) => artifact.type === "workspace_change_set") ?? null;
   const latestCommandResult =
     artifacts.find((artifact) => artifact.type === "command_result") ?? null;
   const _latestGithubPrResult =
@@ -2587,11 +2595,16 @@ export default function OraxPage() {
               </div>
               <button
                 onClick={() =>
-                  latestSandboxResult
-                    ? void requestCommandApproval(latestSandboxResult.id)
+                  latestWorkspaceChangeSet || latestSandboxResult
+                    ? void requestCommandApproval(
+                        (latestWorkspaceChangeSet ?? latestSandboxResult)!.id,
+                      )
                     : undefined
                 }
-                disabled={!latestSandboxResult || selectedCommandIds.length === 0}
+                disabled={
+                  (!latestWorkspaceChangeSet && !latestSandboxResult) ||
+                  selectedCommandIds.length === 0
+                }
                 className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"
               >
                 <Terminal className="h-4 w-4" />
@@ -2700,6 +2713,8 @@ function formatOraxArtifactLifecycleLabel(type: string): string {
       return "Draft patch generated";
     case "sandbox_result":
       return "Sandbox result";
+    case "workspace_change_set":
+      return "Workspace change set";
     case "command_result":
       return "Controlled checks result";
     case "github_pr_result":
@@ -2755,6 +2770,15 @@ function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {
     return artifact.payload.applied
       ? `Sandbox applied the patch preview to ${changedFiles} file${changedFiles === 1 ? "" : "s"}.`
       : "Sandbox could not apply the patch preview. Review the blocker before continuing.";
+  }
+  if (artifact.type === "workspace_change_set") {
+    const changedFiles = artifact.payload.changedFiles?.length ?? 0;
+    const diff = artifact.payload.diffSummary;
+    const diffText =
+      diff && (diff.additions || diff.deletions)
+        ? ` (+${diff.additions ?? 0} / -${diff.deletions ?? 0})`
+        : "";
+    return `Workspace change set ready for ${changedFiles} file${changedFiles === 1 ? "" : "s"}${diffText}.`;
   }
   if (artifact.type === "command_result") {
     const passed =
@@ -2853,6 +2877,44 @@ function _OraxThreadLifecycleDetails({ item }: { item: OraxThreadLifecycleItem }
         {errors.length ? (
           <div className="mt-1 text-destructive">Errors: {errors.join(" ")}</div>
         ) : null}
+      </div>
+    );
+  }
+
+  if (artifact.type === "workspace_change_set") {
+    const changedFiles = artifact.payload.changedFiles ?? [];
+    const patchedFiles = artifact.payload.patchedFiles ?? [];
+    const rollbackFiles = artifact.payload.rollback?.sourceFiles ?? [];
+    const diff = artifact.payload.diffSummary ?? summarizeUnifiedDiff(artifact.payload.unifiedDiff);
+
+    return (
+      <div className="mt-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+        <div className="font-medium uppercase text-foreground">Workspace change-set details</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Metric label="Changed files" value={String(changedFiles.length)} />
+          <Metric label="Snapshots" value={String(patchedFiles.length)} />
+          <Metric
+            label="Diff"
+            value={diff ? `+${diff.additions ?? 0} / -${diff.deletions ?? 0}` : "none"}
+          />
+        </div>
+        {changedFiles.length ? (
+          <div className="mt-2">
+            Changed:{" "}
+            {changedFiles
+              .map((file) => `${file.path} (+${file.additions} / -${file.deletions})`)
+              .join(", ")}
+          </div>
+        ) : null}
+        {rollbackFiles.length ? (
+          <div className="mt-1">
+            Rollback snapshot:{" "}
+            {rollbackFiles
+              .map((file) => `${file.path}${file.sha ? ` @ ${file.sha.slice(0, 7)}` : ""}`)
+              .join(", ")}
+          </div>
+        ) : null}
+        <_ArtifactTrace artifact={artifact} />
       </div>
     );
   }
@@ -2976,7 +3038,19 @@ function _ArtifactTrace({ artifact }: { artifact: OraxArtifact }) {
     { label: "Read approval", id: payload.sourceApprovalId, kind: "approval" },
     { label: "Draft patch", id: payload.draftArtifactId, kind: "artifact" },
     { label: "Sandbox validation", id: payload.sourceArtifactId, kind: "artifact" },
-    { label: "Workspace checks", id: payload.commandArtifactId ?? artifact.id, kind: "artifact" },
+    {
+      label: "Workspace change set",
+      id:
+        payload.workspaceChangeSetArtifactId ??
+        (artifact.type === "workspace_change_set" ? artifact.id : undefined),
+      kind: "artifact",
+    },
+    {
+      label: "Workspace checks",
+      id:
+        artifact.type === "command_result" ? (payload.commandArtifactId ?? artifact.id) : undefined,
+      kind: "artifact",
+    },
     ...(payload.auditTrail ?? []),
   ]
     .filter((item): item is { label: string; id: number; kind: string } =>

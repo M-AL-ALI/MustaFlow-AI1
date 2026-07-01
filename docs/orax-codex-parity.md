@@ -122,6 +122,11 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   patch in the same execution session. It must not duplicate retry drafts for
   the same failed artifact, and it must still request approval before rerunning
   sandbox validation or checks.
+- After sandbox validation passes, Orax should create a durable
+  `workspace_change_set` artifact before controlled checks. The change set owns
+  the patched-file snapshots, changed-file summary, diff summary, rollback
+  source metadata, and artifact lineage so website/mobile can review the exact
+  workspace state that checks and PR creation will use.
 - Messages should read like a chat thread, not a timestamped execution log.
 - First-turn assistant copy must not report internal task bookkeeping such as
   saved-thread text, artifact counts, approval counts, or phase labels.

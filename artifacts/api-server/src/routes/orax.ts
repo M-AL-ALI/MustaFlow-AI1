@@ -30,7 +30,14 @@ import {
   scanGithubRepository,
   verifyGithubReadOnlyToken,
 } from "../lib/orax-github";
-import { buildOraxSandboxPatch, runOraxSandboxValidation } from "../lib/orax-sandbox";
+import {
+  buildOraxSandboxPatch,
+  runOraxSandboxValidation,
+  type OraxSandboxChangedFile,
+  type OraxSandboxCheck,
+  type OraxSandboxPatchedFile,
+  type OraxSandboxValidation,
+} from "../lib/orax-sandbox";
 import {
   hasOraxWorkspaceCommandIds,
   normalizeOraxSandboxCommandIds,
@@ -222,6 +229,7 @@ type OraxCheckpointSummary = {
   artifacts: {
     draftPatches: number;
     sandboxResults: number;
+    workspaceChangeSets: number;
     commandResults: number;
     githubPrResults: number;
     total: number;
@@ -241,6 +249,7 @@ type OraxTaskRunnerResult = {
     | "run_approved_pr"
     | "request_read_approval"
     | "draft_patch"
+    | "create_workspace_change_set"
     | "request_sandbox_approval"
     | "request_check_approval"
     | "retry_failed_patch"
@@ -1196,14 +1205,19 @@ router.post("/orax/tasks/:id/command-approvals", async (req, res) => {
   try {
     const task = await loadOwnedTask(userId, taskId);
     const artifact = await loadOwnedArtifact(userId, parsed.data.artifactId);
-    if (!task || !artifact || artifact.taskId !== task.id || artifact.type !== "sandbox_result") {
-      res.status(404).json({ error: "Task or sandbox result artifact not found" });
+    if (
+      !task ||
+      !artifact ||
+      artifact.taskId !== task.id ||
+      !["sandbox_result", "workspace_change_set"].includes(artifact.type)
+    ) {
+      res.status(404).json({ error: "Task or workspace artifact not found" });
       return;
     }
 
     const payload = asRecord(artifact.payload);
     if (artifact.status !== "completed" || payload.applied !== true) {
-      res.status(409).json({ error: "Controlled checks require a passed sandbox result" });
+      res.status(409).json({ error: "Controlled checks require a prepared workspace change set" });
       return;
     }
 
@@ -1237,7 +1251,7 @@ router.post("/orax/tasks/:id/command-approvals", async (req, res) => {
       task,
       role: "system",
       event: "approval_requested",
-      content: `Controlled-check approval requested for sandbox artifact #${artifact.id}.`,
+      content: `Controlled-check approval requested for workspace artifact #${artifact.id}.`,
       approvalId: approval.id,
       artifactId: artifact.id,
       metadata: {
@@ -1728,75 +1742,39 @@ router.post("/orax/approvals/:id/run-commands", async (req, res) => {
     const task = await loadOwnedTask(userId, approval.taskId);
     const repository = await loadOwnedRepository(userId, approval.repositoryId);
     const request = asRecord(approval.request);
-    const sandboxArtifactId =
+    const sourceArtifactId =
       typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
-    const sandboxArtifact = Number.isInteger(sandboxArtifactId)
-      ? await loadOwnedArtifact(userId, sandboxArtifactId)
+    const sourceArtifact = Number.isInteger(sourceArtifactId)
+      ? await loadOwnedArtifact(userId, sourceArtifactId)
       : undefined;
-    if (!task || !repository || !sandboxArtifact || sandboxArtifact.taskId !== task.id) {
-      res.status(404).json({ error: "Task, repository, or sandbox artifact not found" });
+    if (!task || !repository || !sourceArtifact || sourceArtifact.taskId !== task.id) {
+      res.status(404).json({ error: "Task, repository, or workspace artifact not found" });
       return;
     }
-    if (sandboxArtifact.type !== "sandbox_result" || sandboxArtifact.status !== "completed") {
-      res.status(409).json({ error: "Controlled checks require a completed sandbox result" });
+    let context: OraxWorkspacePatchContext;
+    try {
+      context = await buildOraxWorkspacePatchContext({
+        userId,
+        task,
+        repository,
+        sourceArtifact,
+      });
+    } catch (err) {
+      res.status(409).json({
+        error: err instanceof Error ? err.message : "Could not prepare workspace changes",
+      });
+      return;
+    }
+    if (!context.validation.applied || !context.patchedFiles.length) {
+      res
+        .status(409)
+        .json({ error: "Workspace change set no longer applies to the current branch" });
       return;
     }
 
-    const sandboxPayload = asRecord(sandboxArtifact.payload);
-    const draftArtifactId =
-      typeof sandboxPayload.sourceArtifactId === "number"
-        ? sandboxPayload.sourceArtifactId
-        : Number(sandboxPayload.sourceArtifactId);
-    const draftArtifact = Number.isInteger(draftArtifactId)
-      ? await loadOwnedArtifact(userId, draftArtifactId)
-      : undefined;
-    if (!draftArtifact || draftArtifact.type !== "draft_patch") {
-      res.status(409).json({ error: "Sandbox result is missing its draft patch source" });
-      return;
-    }
-
-    const draftPayload = asRecord(draftArtifact.payload);
-    const unifiedDiff =
-      typeof draftPayload.unifiedDiff === "string" ? draftPayload.unifiedDiff : "";
-    const sourceApprovalId =
-      typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
-    const sourceApproval = sourceApprovalId
-      ? await loadOwnedApproval(userId, sourceApprovalId)
-      : undefined;
-    if (!sourceApproval || sourceApproval.action !== "read_files") {
-      res.status(409).json({ error: "Draft patch is missing its approved file-read source" });
-      return;
-    }
-
-    const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
-    const branch = sourceRequest.branch || repository.defaultBranch;
-    const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
     const token = repository.encryptedToken
       ? encryptionService.decrypt(repository.encryptedToken)
       : undefined;
-    const readResult = await readGithubRepositoryFiles({
-      owner: repository.owner,
-      repo: repository.name,
-      branch,
-      paths,
-      token,
-      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
-      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
-    });
-
-    const tests = Array.isArray(draftPayload.tests)
-      ? draftPayload.tests.filter((item): item is string => typeof item === "string")
-      : [];
-    const sandbox = buildOraxSandboxPatch({
-      unifiedDiff,
-      files: readResult.files,
-      suggestedTests: tests,
-    });
-    if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
-      res.status(409).json({ error: "Sandbox patch no longer applies to the current branch" });
-      return;
-    }
-
     const requestCommands = Array.isArray(request.commands)
       ? request.commands.filter((item): item is string => typeof item === "string")
       : undefined;
@@ -1805,27 +1783,28 @@ router.post("/orax/approvals/:id/run-commands", async (req, res) => {
       ? await downloadGithubRepositoryTarball({
           owner: repository.owner,
           repo: repository.name,
-          branch,
+          branch: context.branch,
           token,
         })
       : null;
     const commandResult = await runOraxIsolatedWorkspaceChecks({
       commands,
-      patchedFiles: sandbox.patchedFiles,
-      staticChecks: sandbox.validation.checks,
+      patchedFiles: context.patchedFiles,
+      staticChecks: context.validation.checks,
       repositoryArchive,
     });
     const commandPayload = {
-      sourceArtifactId: sandboxArtifact.id,
-      draftArtifactId: draftArtifact.id,
-      sourceApprovalId: sourceApproval.id,
-      branch,
+      sourceArtifactId: context.sandboxArtifact.id,
+      workspaceChangeSetArtifactId: context.workspaceChangeSetArtifact?.id,
+      draftArtifactId: context.draftArtifact.id,
+      sourceApprovalId: context.sourceApproval.id,
+      branch: context.branch,
       executedAt: new Date().toISOString(),
       ...commandResult,
       validation: {
-        applied: sandbox.validation.applied,
-        changedFiles: sandbox.validation.changedFiles,
-        errors: sandbox.validation.errors,
+        applied: context.validation.applied,
+        changedFiles: context.validation.changedFiles,
+        errors: context.validation.errors,
       },
     };
 
@@ -1838,7 +1817,7 @@ router.post("/orax/approvals/:id/run-commands", async (req, res) => {
         approvalId: approval.id,
         type: "command_result",
         status: commandResult.passed ? "completed" : "failed",
-        title: `Controlled checks for ${sandboxArtifact.title}`,
+        title: `Controlled checks for ${sourceArtifact.title}`,
         summary: commandResult.summary,
         payload: commandPayload,
       })
@@ -2058,27 +2037,53 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
     }
 
     const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
-    const branch = sourceRequest.branch || repository.defaultBranch;
-    const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+    let branch = sourceRequest.branch || repository.defaultBranch;
     const token = encryptionService.decrypt(repository.encryptedToken);
-    const readResult = await readGithubRepositoryFiles({
-      owner: repository.owner,
-      repo: repository.name,
-      branch,
-      paths,
-      token,
-      maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
-      maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
-    });
+    const workspaceChangeSetArtifactId = numberFromOraxPayload(
+      commandPayload.workspaceChangeSetArtifactId,
+    );
+    const workspaceChangeSetArtifact = workspaceChangeSetArtifactId
+      ? await loadOwnedArtifact(userId, workspaceChangeSetArtifactId)
+      : undefined;
+    const workspacePayload =
+      workspaceChangeSetArtifact?.type === "workspace_change_set" &&
+      workspaceChangeSetArtifact.taskId === task.id
+        ? asRecord(workspaceChangeSetArtifact.payload)
+        : {};
+    const workspaceValidation = normalizeOraxWorkspaceValidation(workspacePayload);
+    const workspacePatchedFiles = normalizeOraxPatchedFiles(workspacePayload.patchedFiles);
+    let sandbox: {
+      validation: OraxSandboxValidation;
+      patchedFiles: OraxSandboxPatchedFile[];
+    } | null = null;
+    if (workspaceValidation?.applied && workspacePatchedFiles.length) {
+      branch = stringFromOraxPayload(workspacePayload.branch) || branch;
+      sandbox = {
+        validation: workspaceValidation,
+        patchedFiles: workspacePatchedFiles,
+      };
+    }
+    if (!sandbox) {
+      const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+      const readResult = await readGithubRepositoryFiles({
+        owner: repository.owner,
+        repo: repository.name,
+        branch,
+        paths,
+        token,
+        maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+        maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+      });
 
-    const tests = Array.isArray(draftPayload.tests)
-      ? draftPayload.tests.filter((item): item is string => typeof item === "string")
-      : [];
-    const sandbox = buildOraxSandboxPatch({
-      unifiedDiff,
-      files: readResult.files,
-      suggestedTests: tests,
-    });
+      const tests = Array.isArray(draftPayload.tests)
+        ? draftPayload.tests.filter((item): item is string => typeof item === "string")
+        : [];
+      sandbox = buildOraxSandboxPatch({
+        unifiedDiff,
+        files: readResult.files,
+        suggestedTests: tests,
+      });
+    }
     const branchName = buildOraxBranchName(task.id, commandArtifact.id);
     if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
       const failure = normalizeGithubPrFailure(
@@ -2197,6 +2202,7 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
 
     const prPayload = {
       sourceArtifactId: sandboxArtifact.id,
+      workspaceChangeSetArtifactId: workspaceChangeSetArtifact?.id,
       commandArtifactId: commandArtifact.id,
       draftArtifactId: draftArtifact.id,
       branchName: pullRequest.branchName,
@@ -2216,6 +2222,7 @@ router.post("/orax/approvals/:id/create-github-pr", async (req, res) => {
         readApprovalId: sourceApproval.id,
         draftArtifactId: draftArtifact.id,
         sandboxArtifactId: sandboxArtifact.id,
+        workspaceChangeSetArtifactId: workspaceChangeSetArtifact?.id,
         commandArtifactId: commandArtifact.id,
         githubApprovalId: approval.id,
       }),
@@ -2679,6 +2686,7 @@ function buildOraxAuditTrail(input: {
   readApprovalId: number;
   draftArtifactId: number;
   sandboxArtifactId: number;
+  workspaceChangeSetArtifactId?: number;
   commandArtifactId: number;
   githubApprovalId: number;
 }) {
@@ -2686,9 +2694,12 @@ function buildOraxAuditTrail(input: {
     { label: "Read approval", id: input.readApprovalId, kind: "approval" },
     { label: "Draft patch", id: input.draftArtifactId, kind: "artifact" },
     { label: "Sandbox validation", id: input.sandboxArtifactId, kind: "artifact" },
+    input.workspaceChangeSetArtifactId
+      ? { label: "Workspace change set", id: input.workspaceChangeSetArtifactId, kind: "artifact" }
+      : null,
     { label: "Workspace checks", id: input.commandArtifactId, kind: "artifact" },
     { label: "GitHub PR approval", id: input.githubApprovalId, kind: "approval" },
-  ];
+  ].filter((item): item is { label: string; id: number; kind: string } => Boolean(item));
 }
 
 async function continueOraxTaskRunner(input: {
@@ -2815,11 +2826,23 @@ async function continueOraxTaskRunner(input: {
   const latestSandboxResult = artifacts.find((artifact) => artifact.type === "sandbox_result");
   const latestSandboxPayload = asRecord(latestSandboxResult?.payload);
   if (latestSandboxResult?.status === "completed" && latestSandboxPayload.applied === true) {
+    const workspaceChangeSet = findOraxWorkspaceChangeSetForSandbox(
+      artifacts,
+      latestSandboxResult.id,
+    );
+    if (!workspaceChangeSet) {
+      return createOraxRunnerWorkspaceChangeSet({
+        userId: input.userId,
+        task: input.task,
+        session,
+        sandboxArtifact: latestSandboxResult,
+      });
+    }
     return requestOraxRunnerCommandApproval({
       userId: input.userId,
       task: input.task,
       session,
-      artifact: latestSandboxResult,
+      artifact: workspaceChangeSet,
     });
   }
 
@@ -3064,6 +3087,7 @@ function formatOraxExecutionStepLabel(action: OraxTaskRunnerResult["action"]): s
     run_approved_pr: "Create pull request",
     request_read_approval: "Request file access",
     draft_patch: "Draft change",
+    create_workspace_change_set: "Prepare workspace changes",
     request_sandbox_approval: "Request sandbox approval",
     request_check_approval: "Request checks approval",
     retry_failed_patch: "Fix failure",
@@ -3806,6 +3830,176 @@ async function runOraxRunnerApprovedSandbox(input: {
   });
 }
 
+type OraxWorkspacePatchContext = {
+  sandboxArtifact: OraxTaskArtifact;
+  workspaceChangeSetArtifact?: OraxTaskArtifact;
+  draftArtifact: OraxTaskArtifact;
+  sourceApproval: OraxTaskApproval;
+  branch: string;
+  unifiedDiff: string;
+  validation: OraxSandboxValidation;
+  patchedFiles: OraxSandboxPatchedFile[];
+  filesRead: Array<{ path: string; sha?: string; size?: number; truncated?: boolean }>;
+  skipped: Array<{ path: string; reason: string }>;
+};
+
+async function createOraxRunnerWorkspaceChangeSet(input: {
+  userId: string;
+  task: OraxTask;
+  session: OraxTaskArtifact;
+  sandboxArtifact: OraxTaskArtifact;
+}): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "create_workspace_change_set",
+    label: "Prepare workspace changes",
+    message: "Preparing a reviewable workspace change set from the validated patch...",
+    artifactId: input.sandboxArtifact.id,
+  });
+
+  const existing = await findPersistedOraxWorkspaceChangeSetForSandbox({
+    userId: input.userId,
+    taskId: input.task.id,
+    sandboxArtifactId: input.sandboxArtifact.id,
+  });
+  if (existing) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "continued",
+      action: "create_workspace_change_set",
+      message: `Workspace change set already ready for artifact #${input.sandboxArtifact.id}.`,
+      artifactId: existing.id,
+      artifact: existing,
+    });
+  }
+
+  const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
+  if (!repository) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "Repository not found while preparing workspace changes.",
+      artifactId: input.sandboxArtifact.id,
+    });
+  }
+
+  let context: OraxWorkspacePatchContext;
+  try {
+    context = await buildOraxWorkspacePatchContext({
+      userId: input.userId,
+      task: input.task,
+      repository,
+      sourceArtifact: input.sandboxArtifact,
+    });
+  } catch (err) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: err instanceof Error ? err.message : "Could not prepare workspace changes.",
+      artifactId: input.sandboxArtifact.id,
+    });
+  }
+  if (!context.validation.applied || !context.patchedFiles.length) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "The validated patch no longer applies to the approved file snapshot.",
+      artifactId: input.sandboxArtifact.id,
+    });
+  }
+
+  const diffSummary = summarizeOraxUnifiedDiff(context.unifiedDiff);
+  const changedFiles = context.validation.changedFiles;
+  const [workspaceArtifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      approvalId: input.sandboxArtifact.approvalId,
+      type: "workspace_change_set",
+      status: "completed",
+      title: `Workspace change set for ${input.task.title}`,
+      summary: `Workspace change set ready for ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`,
+      payload: {
+        sourceArtifactId: context.sandboxArtifact.id,
+        draftArtifactId: context.draftArtifact.id,
+        sourceApprovalId: context.sourceApproval.id,
+        branch: context.branch,
+        createdAt: new Date().toISOString(),
+        applied: true,
+        unifiedDiff: context.unifiedDiff,
+        diffSummary,
+        changedFiles,
+        filesChanged: changedFiles.map((file) => file.path),
+        filesRead: context.filesRead,
+        skipped: context.skipped,
+        validation: {
+          applied: context.validation.applied,
+          changedFiles: context.validation.changedFiles,
+          checks: context.validation.checks,
+          errors: context.validation.errors,
+          testPreview: context.validation.testPreview,
+        },
+        patchedFiles: context.patchedFiles.map((file) => ({
+          path: file.path,
+          content: file.content,
+          sourceSha: file.sourceSha,
+          size: Buffer.byteLength(file.content, "utf8"),
+        })),
+        rollback: {
+          sourceFiles: context.filesRead.map((file) => ({
+            path: file.path,
+            sha: file.sha,
+            size: file.size,
+            truncated: file.truncated,
+          })),
+        },
+      },
+    })
+    .returning();
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      result: {
+        ...asRecord(input.task.result),
+        workspaceChangeSet: {
+          artifactId: workspaceArtifact.id,
+          changedFiles: changedFiles.length,
+          sourceArtifactId: input.sandboxArtifact.id,
+        },
+        message: "ORAX prepared a reviewable workspace change set from the validated patch.",
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    status: "continued",
+    action: "create_workspace_change_set",
+    message: `Workspace change set ready: ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"} changed.`,
+    artifactId: workspaceArtifact.id,
+    artifact: workspaceArtifact,
+  });
+}
+
 async function requestOraxRunnerCommandApproval(input: {
   userId: string;
   task: OraxTask;
@@ -3824,7 +4018,7 @@ async function requestOraxRunnerCommandApproval(input: {
       request: {
         artifactId: input.artifact.id,
         commands,
-        reason: "Run default Orax checks after sandbox validation.",
+        reason: "Run default Orax checks against the prepared workspace change set.",
         scope:
           "Run fixed ORAX-controlled checks. Package checks are limited to allowlisted pnpm commands in a temporary workspace. No arbitrary shell text, deployment, or default-branch write is allowed.",
       },
@@ -3844,11 +4038,259 @@ async function requestOraxRunnerCommandApproval(input: {
     session: input.session,
     status: "waiting",
     action: "request_check_approval",
-    message: `Controlled-check approval requested for sandbox artifact #${input.artifact.id}.`,
+    message: `Controlled-check approval requested for workspace artifact #${input.artifact.id}.`,
     approvalId: approval.id,
     artifactId: input.artifact.id,
     approval,
   });
+}
+
+async function buildOraxWorkspacePatchContext(input: {
+  userId: string;
+  task: OraxTask;
+  repository: OraxRepository;
+  sourceArtifact: OraxTaskArtifact;
+}): Promise<OraxWorkspacePatchContext> {
+  const sourcePayload = asRecord(input.sourceArtifact.payload);
+  const workspaceChangeSetArtifact =
+    input.sourceArtifact.type === "workspace_change_set" ? input.sourceArtifact : undefined;
+
+  const sandboxArtifactId =
+    input.sourceArtifact.type === "workspace_change_set"
+      ? numberFromOraxPayload(sourcePayload.sourceArtifactId)
+      : input.sourceArtifact.id;
+  const sandboxArtifact =
+    input.sourceArtifact.type === "sandbox_result"
+      ? input.sourceArtifact
+      : sandboxArtifactId
+        ? await loadOwnedArtifact(input.userId, sandboxArtifactId)
+        : undefined;
+  if (!sandboxArtifact || sandboxArtifact.taskId !== input.task.id) {
+    throw new Error("Workspace change set is missing its sandbox source");
+  }
+  if (sandboxArtifact.type !== "sandbox_result" || sandboxArtifact.status !== "completed") {
+    throw new Error("Workspace checks require a completed sandbox source");
+  }
+
+  const sandboxPayload = asRecord(sandboxArtifact.payload);
+  const draftArtifactId =
+    input.sourceArtifact.type === "workspace_change_set"
+      ? numberFromOraxPayload(sourcePayload.draftArtifactId)
+      : numberFromOraxPayload(sandboxPayload.sourceArtifactId);
+  const draftArtifact = draftArtifactId
+    ? await loadOwnedArtifact(input.userId, draftArtifactId)
+    : undefined;
+  if (
+    !draftArtifact ||
+    draftArtifact.taskId !== input.task.id ||
+    draftArtifact.type !== "draft_patch"
+  ) {
+    throw new Error("Workspace change set is missing its draft patch source");
+  }
+
+  const sourceApprovalId =
+    numberFromOraxPayload(sourcePayload.sourceApprovalId) ??
+    numberFromOraxPayload(sandboxPayload.sourceApprovalId) ??
+    (typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : null);
+  const sourceApproval = sourceApprovalId
+    ? await loadOwnedApproval(input.userId, sourceApprovalId)
+    : undefined;
+  if (!sourceApproval || sourceApproval.action !== "read_files") {
+    throw new Error("Workspace change set is missing its approved file-read source");
+  }
+
+  const draftPayload = asRecord(draftArtifact.payload);
+  const unifiedDiff = stringFromOraxPayload(sourcePayload.unifiedDiff)
+    ? stringFromOraxPayload(sourcePayload.unifiedDiff)!
+    : typeof draftPayload.unifiedDiff === "string"
+      ? draftPayload.unifiedDiff
+      : "";
+  const branch =
+    stringFromOraxPayload(sourcePayload.branch) ||
+    stringFromOraxPayload(sandboxPayload.branch) ||
+    (sourceApproval.request as { branch?: string }).branch ||
+    input.repository.defaultBranch;
+
+  const storedValidation = normalizeOraxWorkspaceValidation(sourcePayload);
+  const storedPatchedFiles = normalizeOraxPatchedFiles(sourcePayload.patchedFiles);
+  if (storedValidation?.applied && storedPatchedFiles.length) {
+    return {
+      sandboxArtifact,
+      workspaceChangeSetArtifact,
+      draftArtifact,
+      sourceApproval,
+      branch,
+      unifiedDiff,
+      validation: storedValidation,
+      patchedFiles: storedPatchedFiles,
+      filesRead: normalizeOraxFilesRead(sourcePayload.filesRead),
+      skipped: normalizeOraxSkippedFiles(sourcePayload.skipped),
+    };
+  }
+
+  const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
+  const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
+  const token = input.repository.encryptedToken
+    ? encryptionService.decrypt(input.repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: input.repository.owner,
+    repo: input.repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+  const tests = Array.isArray(draftPayload.tests)
+    ? draftPayload.tests.filter((item): item is string => typeof item === "string")
+    : [];
+  const sandbox = buildOraxSandboxPatch({
+    unifiedDiff,
+    files: readResult.files,
+    suggestedTests: tests,
+  });
+
+  return {
+    sandboxArtifact,
+    workspaceChangeSetArtifact,
+    draftArtifact,
+    sourceApproval,
+    branch,
+    unifiedDiff,
+    validation: sandbox.validation,
+    patchedFiles: sandbox.patchedFiles,
+    filesRead: readResult.files.map((file) => ({
+      path: file.path,
+      sha: file.sha,
+      size: file.size,
+      truncated: file.truncated,
+    })),
+    skipped: readResult.skipped,
+  };
+}
+
+function normalizeOraxWorkspaceValidation(
+  payload: Record<string, unknown>,
+): OraxSandboxValidation | null {
+  const validation = asRecord(payload.validation);
+  const source = Object.keys(validation).length ? validation : payload;
+  const changedFiles = normalizeOraxChangedFiles(source.changedFiles);
+  const applied = source.applied === true || payload.applied === true;
+  if (!applied && !changedFiles.length) return null;
+  return {
+    mode: "in_memory_patch_sandbox",
+    applied,
+    changedFiles,
+    checks: normalizeOraxSandboxChecks(source.checks),
+    errors: normalizeOraxStringList(source.errors),
+    testPreview: normalizeOraxSandboxChecks(source.testPreview),
+  };
+}
+
+function normalizeOraxPatchedFiles(value: unknown): OraxSandboxPatchedFile[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .map((item) => {
+      const path = stringFromOraxPayload(item.path);
+      const content = typeof item.content === "string" ? item.content : null;
+      if (!path || content === null) return null;
+      return {
+        path,
+        content,
+        sourceSha: stringFromOraxPayload(item.sourceSha) ?? "",
+      };
+    })
+    .filter((item): item is OraxSandboxPatchedFile => Boolean(item))
+    .slice(0, ORAX_FILE_READ_LIMITS.maxFiles);
+}
+
+function normalizeOraxChangedFiles(value: unknown): OraxSandboxChangedFile[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .map((item) => {
+      const path = stringFromOraxPayload(item.path);
+      if (!path) return null;
+      return {
+        path,
+        beforeBytes: numberFromOraxPayload(item.beforeBytes) ?? 0,
+        afterBytes: numberFromOraxPayload(item.afterBytes) ?? 0,
+        additions: numberFromOraxPayload(item.additions) ?? 0,
+        deletions: numberFromOraxPayload(item.deletions) ?? 0,
+      };
+    })
+    .filter((item): item is OraxSandboxChangedFile => Boolean(item))
+    .slice(0, ORAX_FILE_READ_LIMITS.maxFiles);
+}
+
+function normalizeOraxSandboxChecks(value: unknown): OraxSandboxCheck[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .map((item) => {
+      const name = stringFromOraxPayload(item.name);
+      const status = stringFromOraxPayload(item.status);
+      if (!name || !["passed", "failed", "not_run"].includes(status ?? "")) return null;
+      return {
+        name,
+        status: status as OraxSandboxCheck["status"],
+        message: stringFromOraxPayload(item.message) ?? "",
+      };
+    })
+    .filter((item): item is OraxSandboxCheck => Boolean(item))
+    .slice(0, 24);
+}
+
+function normalizeOraxFilesRead(
+  value: unknown,
+): Array<{ path: string; sha?: string; size?: number; truncated?: boolean }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .map((item) => {
+      const path = stringFromOraxPayload(item.path);
+      if (!path) return null;
+      const file: { path: string; sha?: string; size?: number; truncated?: boolean } = {
+        path,
+        sha: stringFromOraxPayload(item.sha) ?? undefined,
+        size: numberFromOraxPayload(item.size) ?? undefined,
+        truncated: typeof item.truncated === "boolean" ? item.truncated : undefined,
+      };
+      return file;
+    })
+    .filter((item): item is { path: string; sha?: string; size?: number; truncated?: boolean } =>
+      Boolean(item),
+    );
+}
+
+function normalizeOraxSkippedFiles(value: unknown): Array<{ path: string; reason: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .map((item) => {
+      const path = stringFromOraxPayload(item.path);
+      if (!path) return null;
+      return { path, reason: stringFromOraxPayload(item.reason) ?? "skipped" };
+    })
+    .filter((item): item is { path: string; reason: string } => Boolean(item));
+}
+
+function normalizeOraxStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string").slice(0, 24);
+}
+
+function summarizeOraxUnifiedDiff(diff: string): { additions: number; deletions: number } {
+  return diff.split("\n").reduce(
+    (summary, line) => {
+      if (line.startsWith("+") && !line.startsWith("+++")) summary.additions += 1;
+      if (line.startsWith("-") && !line.startsWith("---")) summary.deletions += 1;
+      return summary;
+    },
+    { additions: 0, deletions: 0 },
+  );
 }
 
 async function runOraxRunnerApprovedChecks(input: {
@@ -3869,100 +4311,59 @@ async function runOraxRunnerApprovedChecks(input: {
 
   const repository = await loadOwnedRepository(input.userId, input.approval.repositoryId);
   const request = asRecord(input.approval.request);
-  const sandboxArtifactId =
+  const sourceArtifactId =
     typeof request.artifactId === "number" ? request.artifactId : Number(request.artifactId);
-  const sandboxArtifact = Number.isInteger(sandboxArtifactId)
-    ? await loadOwnedArtifact(input.userId, sandboxArtifactId)
+  const sourceArtifact = Number.isInteger(sourceArtifactId)
+    ? await loadOwnedArtifact(input.userId, sourceArtifactId)
     : undefined;
-  if (!repository || !sandboxArtifact || sandboxArtifact.taskId !== input.task.id) {
+  if (!repository || !sourceArtifact || sourceArtifact.taskId !== input.task.id) {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
       session: input.session,
       status: "blocked",
       action: "blocked",
-      message: "Task, repository, or sandbox artifact not found.",
+      message: "Task, repository, or workspace artifact not found.",
       approvalId: input.approval.id,
     });
   }
 
-  const sandboxPayload = asRecord(sandboxArtifact.payload);
-  const draftArtifactId =
-    typeof sandboxPayload.sourceArtifactId === "number"
-      ? sandboxPayload.sourceArtifactId
-      : Number(sandboxPayload.sourceArtifactId);
-  const draftArtifact = Number.isInteger(draftArtifactId)
-    ? await loadOwnedArtifact(input.userId, draftArtifactId)
-    : undefined;
-  if (!draftArtifact || draftArtifact.type !== "draft_patch") {
+  let context: OraxWorkspacePatchContext;
+  try {
+    context = await buildOraxWorkspacePatchContext({
+      userId: input.userId,
+      task: input.task,
+      repository,
+      sourceArtifact,
+    });
+  } catch (err) {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
       session: input.session,
       status: "blocked",
       action: "blocked",
-      message: "Sandbox result is missing its draft patch source.",
+      message: err instanceof Error ? err.message : "Could not resolve workspace changes.",
       approvalId: input.approval.id,
-      artifactId: sandboxArtifact.id,
+      artifactId: sourceArtifact.id,
     });
   }
-
-  const draftPayload = asRecord(draftArtifact.payload);
-  const unifiedDiff = typeof draftPayload.unifiedDiff === "string" ? draftPayload.unifiedDiff : "";
-  const sourceApprovalId =
-    typeof draftArtifact.approvalId === "number" ? draftArtifact.approvalId : undefined;
-  const sourceApproval = sourceApprovalId
-    ? await loadOwnedApproval(input.userId, sourceApprovalId)
-    : undefined;
-  if (!sourceApproval || sourceApproval.action !== "read_files") {
+  if (!context.validation.applied || !context.patchedFiles.length) {
     return persistOraxRunnerResult({
       userId: input.userId,
       task: input.task,
       session: input.session,
       status: "blocked",
       action: "blocked",
-      message: "Draft patch is missing its approved file-read source.",
+      message: "Workspace change set no longer applies to the current branch.",
       approvalId: input.approval.id,
-      artifactId: draftArtifact.id,
+      artifactId: sourceArtifact.id,
     });
   }
 
-  const sourceRequest = sourceApproval.request as { paths?: string[]; branch?: string };
-  const branch = sourceRequest.branch || repository.defaultBranch;
-  const paths = normalizeOraxFileReadPaths(sourceRequest.paths ?? []);
   const token = repository.encryptedToken
     ? encryptionService.decrypt(repository.encryptedToken)
     : undefined;
-  const readResult = await readGithubRepositoryFiles({
-    owner: repository.owner,
-    repo: repository.name,
-    branch,
-    paths,
-    token,
-    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
-    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
-  });
-  const tests = Array.isArray(draftPayload.tests)
-    ? draftPayload.tests.filter((item): item is string => typeof item === "string")
-    : [];
-  const sandbox = buildOraxSandboxPatch({
-    unifiedDiff,
-    files: readResult.files,
-    suggestedTests: tests,
-  });
-  if (!sandbox.validation.applied || !sandbox.patchedFiles.length) {
-    return persistOraxRunnerResult({
-      userId: input.userId,
-      task: input.task,
-      session: input.session,
-      status: "blocked",
-      action: "blocked",
-      message: "Sandbox patch no longer applies to the current branch.",
-      approvalId: input.approval.id,
-      artifactId: sandboxArtifact.id,
-    });
-  }
-
   const requestCommands = Array.isArray(request.commands)
     ? request.commands.filter((item): item is string => typeof item === "string")
     : undefined;
@@ -3971,14 +4372,14 @@ async function runOraxRunnerApprovedChecks(input: {
     ? await downloadGithubRepositoryTarball({
         owner: repository.owner,
         repo: repository.name,
-        branch,
+        branch: context.branch,
         token,
       })
     : null;
   const commandResult = await runOraxIsolatedWorkspaceChecks({
     commands,
-    patchedFiles: sandbox.patchedFiles,
-    staticChecks: sandbox.validation.checks,
+    patchedFiles: context.patchedFiles,
+    staticChecks: context.validation.checks,
     repositoryArchive,
   });
   const [commandArtifact] = await db
@@ -3990,19 +4391,20 @@ async function runOraxRunnerApprovedChecks(input: {
       approvalId: input.approval.id,
       type: "command_result",
       status: commandResult.passed ? "completed" : "failed",
-      title: `Controlled checks for ${sandboxArtifact.title}`,
+      title: `Controlled checks for ${sourceArtifact.title}`,
       summary: commandResult.summary,
       payload: {
-        sourceArtifactId: sandboxArtifact.id,
-        draftArtifactId: draftArtifact.id,
-        sourceApprovalId: sourceApproval.id,
-        branch,
+        sourceArtifactId: context.sandboxArtifact.id,
+        workspaceChangeSetArtifactId: context.workspaceChangeSetArtifact?.id,
+        draftArtifactId: context.draftArtifact.id,
+        sourceApprovalId: context.sourceApproval.id,
+        branch: context.branch,
         executedAt: new Date().toISOString(),
         ...commandResult,
         validation: {
-          applied: sandbox.validation.applied,
-          changedFiles: sandbox.validation.changedFiles,
-          errors: sandbox.validation.errors,
+          applied: context.validation.applied,
+          changedFiles: context.validation.changedFiles,
+          errors: context.validation.errors,
         },
       },
     })
@@ -4133,11 +4535,50 @@ function hasOraxValidationAfterDraft(
     if (artifact.type === "sandbox_result") {
       return numberFromOraxPayload(payload.sourceArtifactId) === draftArtifactId;
     }
+    if (artifact.type === "workspace_change_set") {
+      return numberFromOraxPayload(payload.draftArtifactId) === draftArtifactId;
+    }
     if (artifact.type === "command_result") {
       return numberFromOraxPayload(payload.draftArtifactId) === draftArtifactId;
     }
     return false;
   });
+}
+
+function findOraxWorkspaceChangeSetForSandbox(
+  artifacts: OraxTaskArtifact[],
+  sandboxArtifactId: number,
+): OraxTaskArtifact | null {
+  return (
+    artifacts.find((artifact) => {
+      if (artifact.type !== "workspace_change_set" || artifact.status !== "completed") return false;
+      const payload = asRecord(artifact.payload);
+      return numberFromOraxPayload(payload.sourceArtifactId) === sandboxArtifactId;
+    }) ?? null
+  );
+}
+
+async function findPersistedOraxWorkspaceChangeSetForSandbox(input: {
+  userId: string;
+  taskId: number;
+  sandboxArtifactId: number;
+}): Promise<OraxTaskArtifact | null> {
+  const artifacts = await db
+    .select()
+    .from(oraxTaskArtifactsTable)
+    .where(
+      and(
+        eq(oraxTaskArtifactsTable.userId, input.userId),
+        eq(oraxTaskArtifactsTable.taskId, input.taskId),
+        eq(oraxTaskArtifactsTable.type, "workspace_change_set"),
+        eq(oraxTaskArtifactsTable.status, "completed"),
+        isNull(oraxTaskArtifactsTable.archivedAt),
+      ),
+    )
+    .orderBy(desc(oraxTaskArtifactsTable.createdAt))
+    .limit(25);
+
+  return findOraxWorkspaceChangeSetForSandbox(artifacts, input.sandboxArtifactId);
 }
 
 function countOraxRetryDraftsForFailure(
@@ -4170,6 +4611,10 @@ function resolveOraxRetrySource(
 function numberFromOraxPayload(value: unknown): number | null {
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function stringFromOraxPayload(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function buildOraxRetryDraftInstructions(input: {
@@ -4385,6 +4830,9 @@ function buildOraxCheckpointSummary(input: {
   const artifacts = {
     draftPatches: input.artifacts.filter((artifact) => artifact.type === "draft_patch").length,
     sandboxResults: input.artifacts.filter((artifact) => artifact.type === "sandbox_result").length,
+    workspaceChangeSets: input.artifacts.filter(
+      (artifact) => artifact.type === "workspace_change_set",
+    ).length,
     commandResults: input.artifacts.filter((artifact) => artifact.type === "command_result").length,
     githubPrResults: input.artifacts.filter((artifact) => artifact.type === "github_pr_result")
       .length,
@@ -5279,15 +5727,18 @@ function buildOraxTaskActionSuggestions(input: {
   const latestSandboxResult = input.artifacts.find(
     (artifact) => artifact.type === "sandbox_result",
   );
+  const latestWorkspaceChangeSet =
+    latestSandboxResult &&
+    findOraxWorkspaceChangeSetForSandbox(input.artifacts, latestSandboxResult.id);
   const latestSandboxPayload = asRecord(latestSandboxResult?.payload);
-  if (latestSandboxResult && latestSandboxPayload.applied === true) {
+  if (latestWorkspaceChangeSet || (latestSandboxResult && latestSandboxPayload.applied === true)) {
     suggestions.push({
       type: "controlled_checks",
       title: "Run checks",
       description:
-        "The draft patch applied in the sandbox. Continue here to request the default checks.",
+        "The workspace change set is ready. Continue here to request the default checks.",
       buttonLabel: "Use default checks",
-      artifactId: latestSandboxResult.id,
+      artifactId: latestWorkspaceChangeSet?.id ?? latestSandboxResult?.id,
       commands: [...ORAX_SANDBOX_COMMAND_IDS],
     });
   }

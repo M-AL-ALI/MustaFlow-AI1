@@ -374,6 +374,8 @@ export default function OraxScreen() {
   const latestScan = scans[0] ?? null;
   const latestDraftPatch = artifacts.find((artifact) => artifact.type === "draft_patch") ?? null;
   const latestSandbox = artifacts.find((artifact) => artifact.type === "sandbox_result") ?? null;
+  const latestWorkspaceChangeSet =
+    artifacts.find((artifact) => artifact.type === "workspace_change_set") ?? null;
   const latestCommand = artifacts.find((artifact) => artifact.type === "command_result") ?? null;
   const latestPr = artifacts.find((artifact) => artifact.type === "github_pr_result") ?? null;
   const readApproval =
@@ -847,7 +849,8 @@ export default function OraxScreen() {
       }
 
       if (suggestion.type === "controlled_checks" && suggestion.commands?.length) {
-        const artifactId = suggestion.artifactId ?? latestSandbox?.id;
+        const artifactId =
+          suggestion.artifactId ?? latestWorkspaceChangeSet?.id ?? latestSandbox?.id;
         if (!artifactId) {
           setThreadDraft("Run sandbox validation before requesting controlled checks.");
           return;
@@ -883,6 +886,7 @@ export default function OraxScreen() {
       approvalBranch,
       latestCommand?.id,
       latestDraftPatch?.id,
+      latestWorkspaceChangeSet?.id,
       latestSandbox?.id,
       readApproval,
       runAction,
@@ -1444,16 +1448,21 @@ export default function OraxScreen() {
                         variant="secondary"
                         onPress={() =>
                           void runAction("command-approval", async () => {
-                            if (!selectedTask || !latestSandbox) return;
+                            const targetArtifact = latestWorkspaceChangeSet ?? latestSandbox;
+                            if (!selectedTask || !targetArtifact) return;
                             await requestCommandApproval({
                               taskId: selectedTask.id,
-                              artifactId: latestSandbox.id,
+                              artifactId: targetArtifact.id,
                               commands: selectedCommands,
                             });
                           })
                         }
                         loading={busyAction === "command-approval"}
-                        disabled={!selectedTask || !latestSandbox || selectedCommands.length === 0}
+                        disabled={
+                          !selectedTask ||
+                          (!latestWorkspaceChangeSet && !latestSandbox) ||
+                          selectedCommands.length === 0
+                        }
                         full
                       />
                       <TextField
@@ -2260,6 +2269,8 @@ function ArtifactCard({
   const c = useColors();
   const commands = artifact.payload.commands ?? [];
   const changedFiles = artifact.payload.changedFiles ?? [];
+  const patchedFiles = artifact.payload.patchedFiles ?? [];
+  const rollbackFiles = artifact.payload.rollback?.sourceFiles ?? [];
   return (
     <Card style={{ gap: 10 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
@@ -2286,6 +2297,11 @@ function ArtifactCard({
       {changedFiles.length ? (
         <Text style={{ color: c.foreground, fontSize: 13 }}>
           Changed: {changedFiles.map((file) => file.path).join(", ")}
+        </Text>
+      ) : null}
+      {artifact.type === "workspace_change_set" && (patchedFiles.length || rollbackFiles.length) ? (
+        <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 17 }}>
+          Snapshots: {patchedFiles.length}. Rollback sources: {rollbackFiles.length}.
         </Text>
       ) : null}
       {commands.length ? (
@@ -2461,6 +2477,7 @@ function formatArtifactLabel(type: string): string {
   if (type === "execution_session") return "Execution session";
   if (type === "draft_patch") return "Draft patch generated";
   if (type === "sandbox_result") return "Sandbox result";
+  if (type === "workspace_change_set") return "Workspace change set";
   if (type === "command_result") return "Controlled checks result";
   if (type === "github_pr_result") return "Pull request result";
   return "Workflow result";
@@ -2488,6 +2505,15 @@ function describeArtifact(artifact: OraxArtifact): string {
     return artifact.payload.applied
       ? `Sandbox applied the patch preview to ${changedFiles} file(s).`
       : "Sandbox could not apply the patch preview.";
+  }
+  if (artifact.type === "workspace_change_set") {
+    const changedFiles = artifact.payload.changedFiles?.length ?? 0;
+    const diff = artifact.payload.diffSummary;
+    const diffText =
+      diff && (diff.additions || diff.deletions)
+        ? ` (+${diff.additions ?? 0} / -${diff.deletions ?? 0})`
+        : "";
+    return `Workspace change set ready for ${changedFiles} file${changedFiles === 1 ? "" : "s"}${diffText}.`;
   }
   if (artifact.type === "command_result") {
     const passed =

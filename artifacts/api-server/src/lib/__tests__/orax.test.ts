@@ -537,6 +537,14 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("generateOraxRunnerRetryDraftPatch");
     expect(routeSource).toContain("findOraxRetryDraftForFailure");
     expect(routeSource).toContain("hasOraxValidationAfterDraft");
+    expect(routeSource).toContain('type: "workspace_change_set"');
+    expect(routeSource).toContain("createOraxRunnerWorkspaceChangeSet");
+    expect(routeSource).toContain("findOraxWorkspaceChangeSetForSandbox");
+    expect(routeSource).toContain("findPersistedOraxWorkspaceChangeSetForSandbox");
+    expect(routeSource).toContain("buildOraxWorkspacePatchContext");
+    expect(routeSource).toContain("workspaceChangeSetArtifactId");
+    expect(routeSource).toContain("Preparing a reviewable workspace change set");
+    expect(routeSource).toContain("Workspace change set ready");
     expect(routeSource).toContain("Reviewing the failed result and drafting a fix attempt");
     expect(routeSource).toContain("retryOfArtifactId");
     expect(routeSource).toContain("failureSummary");

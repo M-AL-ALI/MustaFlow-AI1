@@ -629,8 +629,10 @@ export interface OraxArtifact {
     filesRead?: Array<{ path: string; sha?: string; size?: number }>;
     skipped?: Array<{ path: string; reason: string }>;
     sourceArtifactId?: number;
+    workspaceChangeSetArtifactId?: number;
     sourceApprovalId?: number;
     applied?: boolean;
+    diffSummary?: { additions?: number; deletions?: number };
     changedFiles?: Array<{
       path: string;
       additions?: number;
@@ -638,6 +640,10 @@ export interface OraxArtifact {
       beforeBytes?: number;
       afterBytes?: number;
     }>;
+    patchedFiles?: Array<{ path: string; size?: number; sourceSha?: string }>;
+    rollback?: {
+      sourceFiles?: Array<{ path: string; sha?: string; size?: number; truncated?: boolean }>;
+    };
     commands?: Array<{
       id: string;
       label?: string;
