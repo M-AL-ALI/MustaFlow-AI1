@@ -80,9 +80,14 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   or a Start chat button.
 - The primary thread is conversation-first: messages and composer are the main
   surface.
+- The normal composer is one rounded input surface with the Orax placeholder,
+  inline controls, model/reasoning label, and a circular up-arrow send control;
+  it must not regress to a separate text field plus visible Send pill.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions
   remain available through inline thread suggestions and approval cards.
 - Messages should read like a chat thread, not a timestamped execution log.
+- First-turn assistant copy must not report internal task bookkeeping such as
+  saved-thread text, artifact counts, approval counts, or phase labels.
 - No visible workflow dashboard, PR control panel, checkpoint panel, or Details
   stack should appear in the default Orax task flow.
 - Repository setup, scans, patch generation, checks, and PR actions must not

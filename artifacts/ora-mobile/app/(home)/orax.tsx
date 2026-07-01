@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  ArrowUp,
   ArrowLeft,
   Bot,
   CheckCircle2,
@@ -12,12 +13,13 @@ import {
   Lock,
   Menu,
   MessageSquare,
+  Mic,
   MoreHorizontal,
   Play,
   Plus,
   RefreshCw,
   Search,
-  Send,
+  ShieldAlert,
   ShieldCheck,
   TerminalSquare,
   XCircle,
@@ -25,6 +27,7 @@ import {
 import { useNavigation } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -850,26 +853,13 @@ export default function OraxScreen() {
                   Ask Orax what to work on.
                 </Text>
               )}
-              <TextField
-                placeholder={
-                  selectedTask
-                    ? "Message Orax about this task..."
-                    : "Ask Orax to inspect, fix, or explain code..."
-                }
+              <OraxComposer
                 value={threadDraft}
                 onChangeText={setThreadDraft}
-                multiline
-                style={{ minHeight: 72, textAlignVertical: "top" }}
+                onSend={sendThreadMessage}
+                loading={busyAction === "send-thread" || busyAction === "create-task"}
+                disabled={!threadDraft.trim() || (!selectedTask && !selectedRepo)}
               />
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                <Button
-                  label="Send"
-                  icon={Send}
-                  onPress={sendThreadMessage}
-                  loading={busyAction === "send-thread" || busyAction === "create-task"}
-                  disabled={!threadDraft.trim() || (!selectedTask && !selectedRepo)}
-                />
-              </View>
             </View>
 
             {false ? (
@@ -1231,6 +1221,122 @@ export default function OraxScreen() {
     </View>
   );
 
+}
+
+function OraxComposer({
+  value,
+  onChangeText,
+  onSend,
+  disabled,
+  loading,
+}: {
+  value: string;
+  onChangeText: (value: string) => void;
+  onSend: () => void;
+  disabled: boolean;
+  loading: boolean;
+}) {
+  const c = useColors();
+  const canSend = !disabled && !loading;
+
+  return (
+    <View
+      style={{
+        backgroundColor: c.card,
+        borderColor: c.border,
+        borderRadius: 30,
+        borderWidth: 1,
+        gap: 12,
+        padding: 12,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 22,
+        elevation: 5,
+      }}
+    >
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder="Ask Orax"
+        placeholderTextColor={c.mutedForeground}
+        multiline
+        style={{
+          color: c.foreground,
+          fontFamily: "Inter_400Regular",
+          fontSize: 20,
+          lineHeight: 27,
+          minHeight: 78,
+          paddingHorizontal: 8,
+          paddingTop: 8,
+          textAlignVertical: "top",
+        }}
+      />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View
+          style={{
+            height: 40,
+            width: 40,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Plus size={30} color={c.foreground} />
+        </View>
+        <View
+          style={{
+            height: 40,
+            width: 40,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <ShieldAlert size={28} color="#c2410c" />
+        </View>
+        <View style={{ flex: 1, alignItems: "center", minWidth: 0 }}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 18 }}
+          >
+            5.5 <Text style={{ color: c.mutedForeground }}>Extra High</Text>
+          </Text>
+        </View>
+        <View
+          style={{
+            height: 40,
+            width: 40,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Mic size={30} color={c.foreground} />
+        </View>
+        <Pressable
+          accessibilityLabel="Send Orax message"
+          accessibilityRole="button"
+          disabled={!canSend}
+          onPress={onSend}
+          style={{
+            height: 50,
+            width: 50,
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: 25,
+            backgroundColor: c.foreground,
+            opacity: canSend ? 1 : 0.45,
+          }}
+        >
+          {loading ? (
+            <ActivityIndicator color={c.background} />
+          ) : (
+            <ArrowUp size={30} color={c.background} strokeWidth={3} />
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
 }
 
 function SectionTitle({

@@ -11,6 +11,7 @@ describe("ORAX product-surface wiring", () => {
   const app = read("../../App.tsx");
   const modeSelect = read("../../pages/mode-select.tsx");
   const oraxPage = read("../../pages/orax.tsx");
+  const oraxApiRoute = read("../../../../api-server/src/routes/orax.ts");
   const routesIndex = read("../../../../api-server/src/routes/index.ts");
   const mobileOraxScreen = read("../../../../ora-mobile/app/(home)/orax.tsx");
   const mobileApi = read("../../../../ora-mobile/lib/api.ts");
@@ -76,7 +77,13 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Chats");
     expect(oraxPage).toContain("Search Chats");
     expect(oraxPage).toContain("New chat");
-    expect(oraxPage).toContain("Ask Orax to inspect, fix, or explain code...");
+    expect(oraxPage).toContain('placeholder="Ask Orax"');
+    expect(oraxPage).toContain("5.5");
+    expect(oraxPage).toContain("Extra High");
+    expect(oraxPage).toContain("ArrowUp");
+    expect(oraxPage).toContain("ShieldAlert");
+    expect(oraxPage).toContain("Mic");
+    expect(oraxPage).not.toContain(">Send</button>");
     expect(oraxPage).toContain("mobileTaskOpen ? \"hidden lg:flex\" : \"flex\"");
     expect(oraxPage).toContain("mobileTaskOpen ? \"flex\" : \"hidden\"");
     expect(oraxPage).not.toContain("setMobileComposeOpen((value) => !value)");
@@ -98,7 +105,14 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("Chats");
     expect(mobileOraxScreen).toContain("Search Chats");
     expect(mobileOraxScreen).toContain("Ask Orax what to work on.");
-    expect(mobileOraxScreen).toContain("Ask Orax to inspect, fix, or explain code...");
+    expect(mobileOraxScreen).toContain("function OraxComposer");
+    expect(mobileOraxScreen).toContain('placeholder="Ask Orax"');
+    expect(mobileOraxScreen).toContain("5.5");
+    expect(mobileOraxScreen).toContain("Extra High");
+    expect(mobileOraxScreen).toContain("ArrowUp");
+    expect(mobileOraxScreen).toContain("ShieldAlert");
+    expect(mobileOraxScreen).toContain("Mic");
+    expect(mobileOraxScreen).not.toContain('label="Send"');
     expect(mobileOraxScreen).not.toContain("setHomeComposeOpen((value) => !value)");
     expect(mobileOraxScreen).not.toContain("{homeComposeOpen ? (");
     expect(mobileOraxScreen).not.toContain("ScreenHeader");
@@ -127,6 +141,16 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("approval.status === \"pending\" || approval.status === \"approved\"");
     expect(mobileOraxScreen).toContain("{false ? (");
     expect(mobileOraxScreen).not.toContain('label="Details"');
+  });
+
+  it("keeps normal assistant replies conversational instead of bookkeeping reports", () => {
+    expect(oraxApiRoute).toContain("\"I'll work from here.\"");
+    expect(oraxApiRoute).toContain('title: "Inspect source files"');
+    expect(oraxApiRoute).not.toContain("I saved this in the ORAX task thread");
+    expect(oraxApiRoute).not.toContain("Current task status:");
+    expect(oraxApiRoute).not.toContain("Approvals: 0. Artifacts: 0. Completed artifacts: 0.");
+    expect(oraxApiRoute).not.toContain("Phase 4B is planning-only");
+    expect(oraxApiRoute).not.toContain("Prepare file-read approval");
   });
 
   it("clears task-scoped state immediately on ORAX task switches", () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import {
+  ArrowUp,
   ArrowLeft,
   Bot,
   Check,
@@ -11,11 +12,13 @@ import {
   GitPullRequest,
   Loader2,
   Menu,
+  Mic,
   MoreHorizontal,
   PenLine,
+  Plus,
   RefreshCw,
   Search,
-  Send,
+  ShieldAlert,
   ShieldCheck,
   Terminal,
   X,
@@ -1686,17 +1689,37 @@ export default function OraxPage() {
           </div>
 
           <div className="shrink-0 border-t border-border bg-background p-3">
-            <div className="mx-auto flex max-w-4xl gap-2">
+            <div className="mx-auto max-w-4xl">
+              <div className="rounded-[2rem] border border-border bg-card p-3 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">
               <textarea
                 value={taskMessageDraft}
                 onChange={(event) => setTaskMessageDraft(event.target.value)}
-                placeholder={
-                  selectedTask
-                    ? "Message Orax about this task..."
-                    : "Ask Orax to inspect, fix, or explain code..."
-                }
-                className="min-h-12 flex-1 resize-none rounded-3xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring lg:rounded-md lg:px-3 lg:py-2 lg:text-sm"
+                placeholder="Ask Orax"
+                className="min-h-[86px] w-full resize-none bg-transparent px-2 py-2 text-xl leading-7 outline-none placeholder:text-muted-foreground"
               />
+              <div className="flex items-center gap-3 px-1 pb-1">
+                <div
+                  aria-hidden="true"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center text-foreground"
+                >
+                  <Plus className="h-7 w-7" />
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center text-orange-600"
+                >
+                  <ShieldAlert className="h-7 w-7" />
+                </div>
+                <div className="min-w-0 flex-1 text-center text-lg font-semibold text-foreground">
+                  <span>5.5</span>{" "}
+                  <span className="font-normal text-muted-foreground">Extra High</span>
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center text-foreground"
+                >
+                  <Mic className="h-7 w-7" />
+                </div>
               <button
                 onClick={() => void sendTaskMessage()}
                 disabled={
@@ -1705,15 +1728,17 @@ export default function OraxPage() {
                   sendingTaskMessage ||
                   submittingTask
                 }
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60 lg:rounded-md lg:bg-primary lg:text-primary-foreground"
+                  aria-label="Send Orax message"
+                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {sendingTaskMessage || submittingTask ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
+                    <ArrowUp className="h-7 w-7" strokeWidth={3} />
                 )}
-                Send
               </button>
+              </div>
+              </div>
             </div>
           </div>
         </section>
