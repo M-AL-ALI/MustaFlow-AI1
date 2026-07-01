@@ -628,8 +628,10 @@ function formatOraxVisibleThreadContent(message: OraxTaskMessage): string {
   const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
   if (event === "runner_continue") {
     return message.content
-      .replace(/^Approved file read completed:/i, "Read")
-      .replace(/^Draft patch generated:/i, "Drafted")
+      .replace(/^Approved file read completed:/i, "Inspected")
+      .replace(/^Draft patch generated:/i, "Prepared changes")
+      .replace(/^Sandbox validation passed/i, "Checked changes")
+      .replace(/^Sandbox validation failed/i, "Change check failed")
       .replace(/^Controlled checks passed:/i, "Checks passed:")
       .replace(/^Controlled checks failed:/i, "Checks failed:");
   }
@@ -2008,23 +2010,16 @@ export default function OraxPage() {
                         </div>
                       ) : null}
                       {suggestions.length ? (
-                        <div className="mt-3 grid gap-2">
+                        <div className="mt-3 flex flex-wrap gap-2">
                           {suggestions.map((suggestion, index) => (
                             <button
                               key={`${suggestion.type}-${suggestion.artifactId ?? suggestion.approvalId ?? index}`}
                               type="button"
+                              title={suggestion.description}
                               onClick={() => applyTaskActionSuggestion(suggestion)}
-                              className="rounded-md border border-border bg-background px-3 py-2 text-left hover:bg-muted"
+                              className="inline-flex h-9 items-center rounded-full bg-foreground px-4 text-sm font-medium text-background transition hover:opacity-90"
                             >
-                              <div className="text-xs font-semibold text-foreground">
-                                {suggestion.title}
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {suggestion.description}
-                              </div>
-                              <div className="mt-2 inline-flex h-7 items-center rounded-full bg-foreground px-3 text-xs font-medium text-background">
-                                {suggestion.buttonLabel ?? suggestion.title}
-                              </div>
+                              {suggestion.buttonLabel ?? suggestion.title}
                             </button>
                           ))}
                         </div>
@@ -2600,13 +2595,13 @@ export default function OraxPage() {
 function formatOraxApprovalAction(action: string): string {
   switch (action) {
     case "read_files":
-      return "File-read approval";
+      return "Inspect files";
     case "sandbox_run":
-      return "Sandbox approval";
+      return "Check changes";
     case "safe_check":
-      return "Controlled-check approval";
+      return "Run checks";
     case "github_pr":
-      return "GitHub PR approval";
+      return "Prepare pull request";
     default:
       return action.replace(/_/g, " ");
   }
@@ -2637,25 +2632,25 @@ function describeOraxApprovalLifecycle(approval: OraxApproval): string {
       ? approval.request.paths.join(", ")
       : "selected files";
     if (approval.status === "completed" && approval.result?.files?.length) {
-      return `Files read: ${approval.result.files.length}; total ${formatBytes(
-        approval.result.totalBytes ?? 0,
-      )}.`;
+      return `Inspected ${approval.result.files.length} file${
+        approval.result.files.length === 1 ? "" : "s"
+      }; total ${formatBytes(approval.result.totalBytes ?? 0)}.`;
     }
-    return `Requested source access for ${files}.`;
+    return `Review ${files}.`;
   }
   if (approval.action === "sandbox_run") {
-    return `Sandbox validation request for artifact #${approval.request.artifactId ?? "unknown"}.`;
+    return "Check the prepared change before moving on.";
   }
   if (approval.action === "safe_check") {
-    return approval.request.scope ?? "Controlled workspace checks require explicit approval.";
+    return approval.request.scope ?? "Run the selected checks.";
   }
   if (approval.action === "github_pr") {
     if (approval.result?.pullRequestUrl) {
       return `Pull request created: ${approval.result.pullRequestUrl}`;
     }
-    return "GitHub PR creation requires completed checks and explicit CREATE PR confirmation.";
+    return "Prepare the pull request after checks pass.";
   }
-  return approval.riskSummary ?? "Approval-gated ORAX workflow step.";
+  return approval.riskSummary ?? "Confirm the next step.";
 }
 
 function describeOraxArtifactLifecycle(artifact: OraxArtifact): string {

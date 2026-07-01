@@ -497,8 +497,12 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("Prepare approval requests from task-chat suggestions");
     expect(routeSource).toContain("persistent ORAX-only task conversation");
     expect(routeSource).toContain("requiresManualConfirmation");
-    expect(routeSource).toContain('buttonLabel: "Validate patch"');
+    expect(routeSource).toContain('buttonLabel: "Check changes"');
     expect(routeSource).toContain('buttonLabel: "Prepare pull request"');
+    expect(routeSource).toContain("formatOraxLatestResultForChat");
+    expect(routeSource).toContain('"I prepared the change. I can check it next."');
+    expect(routeSource).not.toContain("Latest result is ready:");
+    expect(routeSource).not.toContain("Run the draft patch in an isolated sandbox.");
     expect(routeSource).toContain("extractOraxCandidatePaths");
     expect(routeSource).toContain("persistOraxTimelineMessage");
     expect(routeSource).toContain("orax-task-timeline");
@@ -509,7 +513,7 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).not.toContain("Checkpoint updated:");
     expect(routeSource).toContain("prompt: z.string().trim().min(1).max(8000)");
     expect(routeSource).toContain("currentCheckpoint");
-    expect(routeSource).toContain("Request approval to read the relevant repository files.");
+    expect(routeSource).toContain("inspect the relevant files.");
     expect(routeSource).toContain("isOraxResumeQuestion");
     expect(routeSource).toContain("buildOraxCheckpointResumeReply");
     expect(routeSource).toContain("resumeMode");

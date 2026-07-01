@@ -3081,15 +3081,15 @@ function toOraxExecutionSessionStatus(
 function formatOraxExecutionStepLabel(action: OraxTaskRunnerResult["action"]): string {
   const labels: Record<OraxTaskRunnerResult["action"], string> = {
     review_pending_approval: "Review approval",
-    run_approved_read: "Read approved files",
-    run_approved_sandbox: "Validate patch",
+    run_approved_read: "Inspect files",
+    run_approved_sandbox: "Check changes",
     run_approved_checks: "Run checks",
     run_approved_pr: "Create pull request",
-    request_read_approval: "Request file access",
-    draft_patch: "Draft change",
-    create_workspace_change_set: "Prepare workspace changes",
-    request_sandbox_approval: "Request sandbox approval",
-    request_check_approval: "Request checks approval",
+    request_read_approval: "Inspect files",
+    draft_patch: "Make changes",
+    create_workspace_change_set: "Prepare changes",
+    request_sandbox_approval: "Check changes",
+    request_check_approval: "Run checks",
     retry_failed_patch: "Fix failure",
     await_pr_confirmation: "Wait for PR confirmation",
     complete: "Complete",
@@ -3630,7 +3630,7 @@ async function requestOraxRunnerSandboxApproval(input: {
       session: input.session,
       status: "blocked",
       action: "blocked",
-      message: "Sandbox validation requires a draft patch diff.",
+      message: "The change is not ready to check yet.",
       artifactId: input.artifact.id,
     });
   }
@@ -3645,12 +3645,11 @@ async function requestOraxRunnerSandboxApproval(input: {
       status: "pending",
       request: {
         artifactId: input.artifact.id,
-        reason: "Validate this draft patch in an isolated sandbox.",
-        scope:
-          "Validate this draft patch inside an isolated in-memory sandbox. No repository files will be changed.",
+        reason: "Check this change safely before moving on.",
+        scope: "Check the prepared change without writing to the repository.",
       },
       riskSummary:
-        "ORAX will validate whether the draft patch applies to approved files. It will not write to the repository, run unrestricted commands, push, open a PR, or deploy.",
+        "ORAX will check whether the prepared change applies cleanly. It will not write to the repository, run unrestricted commands, push, open a PR, or deploy.",
     })
     .returning();
 
@@ -3665,7 +3664,7 @@ async function requestOraxRunnerSandboxApproval(input: {
     session: input.session,
     status: "waiting",
     action: "request_sandbox_approval",
-    message: `Sandbox validation approval requested for draft artifact #${input.artifact.id}.`,
+    message: "Ready to check the prepared change.",
     approvalId: approval.id,
     artifactId: input.artifact.id,
     approval,
@@ -3683,8 +3682,8 @@ async function runOraxRunnerApprovedSandbox(input: {
     task: input.task,
     session: input.session,
     action: "run_approved_sandbox",
-    label: "Validate patch",
-    message: "Validating the draft patch in the isolated sandbox...",
+    label: "Check changes",
+    message: "Checking the prepared change...",
     approvalId: input.approval.id,
   });
 
@@ -3702,7 +3701,7 @@ async function runOraxRunnerApprovedSandbox(input: {
       session: input.session,
       status: "blocked",
       action: "blocked",
-      message: "Task, repository, or draft patch artifact not found.",
+      message: "I could not find the prepared change for this task.",
       approvalId: input.approval.id,
     });
   }
@@ -3721,7 +3720,7 @@ async function runOraxRunnerApprovedSandbox(input: {
       session: input.session,
       status: "blocked",
       action: "blocked",
-      message: "Draft patch is missing its approved file-read source.",
+      message: "I need the inspected files before I can check this change.",
       approvalId: input.approval.id,
       artifactId: draftArtifact.id,
     });
@@ -3759,10 +3758,10 @@ async function runOraxRunnerApprovedSandbox(input: {
       approvalId: input.approval.id,
       type: "sandbox_result",
       status: sandbox.applied ? "completed" : "failed",
-      title: `Sandbox validation for ${draftArtifact.title}`,
+      title: `Checked change for ${input.task.title}`,
       summary: sandbox.applied
-        ? `Sandbox validation passed for ${sandbox.changedFiles.length} file(s).`
-        : "Sandbox validation failed.",
+        ? `Change checked for ${sandbox.changedFiles.length} file(s).`
+        : "The change did not apply cleanly.",
       payload: {
         sourceArtifactId: draftArtifact.id,
         sourceApprovalId: sourceApproval.id,
@@ -3806,8 +3805,8 @@ async function runOraxRunnerApprovedSandbox(input: {
           errors: sandbox.errors,
         },
         message: sandbox.applied
-          ? "ORAX validated the draft patch inside an isolated sandbox."
-          : "ORAX could not validate the draft patch inside the sandbox.",
+          ? "ORAX checked the prepared change successfully."
+          : "ORAX could not check the prepared change successfully.",
       },
       updatedAt: new Date(),
       completedAt: sandbox.applied ? new Date() : null,
@@ -3821,8 +3820,8 @@ async function runOraxRunnerApprovedSandbox(input: {
     status: sandbox.applied ? "continued" : "blocked",
     action: "run_approved_sandbox",
     message: sandbox.applied
-      ? `Sandbox validation passed for ${sandbox.changedFiles.length} changed file${sandbox.changedFiles.length === 1 ? "" : "s"}.`
-      : "Sandbox validation failed.",
+      ? `Checked ${sandbox.changedFiles.length} changed file${sandbox.changedFiles.length === 1 ? "" : "s"}.`
+      : "The change did not apply cleanly.",
     approvalId: updatedApproval.id,
     artifactId: sandboxArtifact.id,
     approval: updatedApproval,
@@ -4919,29 +4918,27 @@ function buildOraxCheckpointNextStep(input: {
   hasCompletedPr: boolean;
 }): string {
   if (input.hasBlocker) {
-    return "Resolve the latest blocker before requesting another approval.";
+    return "fix the latest issue before continuing.";
   }
   if (input.approvals.pending > 0) {
-    return `Review ${input.approvals.pending} pending approval${
-      input.approvals.pending === 1 ? "" : "s"
-    }.`;
+    return `review the pending approval${input.approvals.pending === 1 ? "" : "s"}.`;
   }
   if (input.hasCompletedPr) {
-    return "Review the created pull request and keep the task thread updated.";
+    return "review the pull request and keep the task thread updated.";
   }
   if (input.artifacts.commandResults > 0) {
-    return "If controlled checks passed, request GitHub PR approval with CREATE PR.";
+    return "prepare the pull request if the checks passed.";
   }
   if (input.artifacts.sandboxResults > 0) {
-    return "Request controlled workspace checks for the sandbox-validated patch.";
+    return "run checks on the change.";
   }
   if (input.artifacts.draftPatches > 0) {
-    return "Request sandbox validation for the draft patch.";
+    return "check the change.";
   }
   if (input.hasCompletedReadApproval) {
-    return "Generate a draft patch preview from the approved file read.";
+    return "make the change from the inspected files.";
   }
-  return "Request approval to read the relevant repository files.";
+  return "inspect the relevant files.";
 }
 
 function normalizeOraxComposerAttachments(
@@ -5614,7 +5611,7 @@ function buildOraxTaskThreadReply(input: {
           pendingApprovals.length === 1 ? "" : "s"
         }. Review the inline action when you are ready.`
       : latestArtifact
-        ? `Latest result is ready: ${latestArtifact.title}.`
+        ? formatOraxLatestResultForChat(latestArtifact)
         : suggestion
           ? "I'm ready to start from the inline action below."
           : "Tell me what to inspect or change next.";
@@ -5632,6 +5629,27 @@ function buildOraxTaskThreadReply(input: {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatOraxLatestResultForChat(artifact: OraxTaskArtifact): string {
+  if (artifact.type === "draft_patch") {
+    return "I prepared the change. I can check it next.";
+  }
+  if (artifact.type === "sandbox_result" || artifact.type === "workspace_change_set") {
+    return artifact.status === "failed"
+      ? "The change needs another pass. I can adjust it next."
+      : "The change is ready for checks.";
+  }
+  if (artifact.type === "command_result") {
+    const payload = asRecord(artifact.payload);
+    return payload.passed === false
+      ? "The checks found something. I can fix it next."
+      : "The checks passed. I can prepare the pull request next.";
+  }
+  if (artifact.type === "github_pr_result") {
+    return "The pull request is ready.";
+  }
+  return "I have the next result ready.";
 }
 
 function summarizeOraxAttachmentContext(context: string): string {
@@ -5702,8 +5720,9 @@ function buildOraxTaskActionSuggestions(input: {
   if (pendingApproval) {
     suggestions.push({
       type: "review_pending_approval",
-      title: "Review pending approval",
-      description: "Approve or deny the pending step so Orax can continue.",
+      title: "Review approval",
+      description: "Confirm the next step so I can keep going.",
+      buttonLabel: "Review approval",
       approvalId: pendingApproval.id,
     });
     return suggestions;
@@ -5717,7 +5736,7 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "github_pr",
       title: "Prepare pull request",
-      description: "Request pull request creation after the checks that already passed.",
+      description: "Prepare the pull request for review.",
       buttonLabel: "Prepare pull request",
       artifactId: latestCommandResult.id,
       requiresManualConfirmation: true,
@@ -5735,8 +5754,8 @@ function buildOraxTaskActionSuggestions(input: {
     suggestions.push({
       type: "controlled_checks",
       title: "Run checks",
-      description: "Request the default controlled checks for the prepared change set.",
-      buttonLabel: "Use default checks",
+      description: "Run the usual checks on the change.",
+      buttonLabel: "Run checks",
       artifactId: latestWorkspaceChangeSet?.id ?? latestSandboxResult?.id,
       commands: [...ORAX_SANDBOX_COMMAND_IDS],
     });
@@ -5746,9 +5765,9 @@ function buildOraxTaskActionSuggestions(input: {
   if (latestDraftPatch && latestDraftPatch.status !== "rejected") {
     suggestions.push({
       type: "sandbox_run",
-      title: "Validate patch",
-      description: "Run the draft patch in an isolated sandbox.",
-      buttonLabel: "Validate patch",
+      title: "Check changes",
+      description: "Check the change before moving on.",
+      buttonLabel: "Check changes",
       artifactId: latestDraftPatch.id,
     });
   }
@@ -5759,9 +5778,9 @@ function buildOraxTaskActionSuggestions(input: {
   if (completedReadApproval) {
     suggestions.push({
       type: "draft_patch",
-      title: "Draft the change",
-      description: "Create a draft patch from the approved file context.",
-      buttonLabel: "Draft change",
+      title: "Make changes",
+      description: "Use the inspected files to make the change.",
+      buttonLabel: "Make changes",
       approvalId: completedReadApproval.id,
       instructions: input.userMessage.slice(0, 2000),
     });
@@ -5777,14 +5796,14 @@ function buildOraxTaskActionSuggestions(input: {
   if (extractedPaths.length > 0 || suggestions.length === 0) {
     suggestions.push({
       type: "read_files",
-      title: analyzedAttachments ? "Inspect related source files" : "Inspect source files",
+      title: analyzedAttachments ? "Inspect related files" : "Inspect files",
       description:
         extractedPaths.length > 0
-          ? "Read the detected repository files before planning the change."
+          ? "Review the detected files before changing anything."
           : analyzedAttachments
-            ? "Read the source files related to the attached context."
-            : "Read the relevant repository files before planning the change.",
-      buttonLabel: extractedPaths.length > 0 ? "Use detected paths" : undefined,
+            ? "Review the files related to the attached context."
+            : "Review the relevant files before changing anything.",
+      buttonLabel: extractedPaths.length > 0 ? "Inspect files" : undefined,
       paths: extractedPaths,
       reason: (input.attachmentAnalysis?.suggestedFocus.length
         ? `Attachment analysis: ${input.attachmentAnalysis.suggestedFocus.join("; ")}`

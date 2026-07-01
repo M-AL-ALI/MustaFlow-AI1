@@ -2014,28 +2014,22 @@ function SuggestionCard({
 }) {
   const c = useColors();
   return (
-    <View
+    <Pressable
+      onPress={onPress}
       style={{
-        borderWidth: 1,
-        borderColor: c.border,
-        borderRadius: c.radius,
-        padding: 12,
-        gap: 8,
-        backgroundColor: c.muted,
+        alignSelf: "flex-start",
+        minHeight: 38,
+        borderRadius: 19,
+        paddingHorizontal: 16,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: c.foreground,
       }}
     >
-      <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
-        {suggestion.title}
+      <Text style={{ color: c.background, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+        {suggestion.buttonLabel ?? suggestion.title}
       </Text>
-      <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 18 }}>
-        {suggestion.description}
-      </Text>
-      <Button
-        label={suggestion.buttonLabel ?? "Prepare action"}
-        variant="secondary"
-        onPress={onPress}
-      />
-    </View>
+    </Pressable>
   );
 }
 
@@ -2067,8 +2061,10 @@ function formatOraxVisibleThreadContent(message: OraxTaskMessage): string {
   const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
   if (event === "runner_continue") {
     return message.content
-      .replace(/^Approved file read completed:/i, "Read")
-      .replace(/^Draft patch generated:/i, "Drafted")
+      .replace(/^Approved file read completed:/i, "Inspected")
+      .replace(/^Draft patch generated:/i, "Prepared changes")
+      .replace(/^Sandbox validation passed/i, "Checked changes")
+      .replace(/^Sandbox validation failed/i, "Change check failed")
       .replace(/^Controlled checks passed:/i, "Checks passed:")
       .replace(/^Controlled checks failed:/i, "Checks failed:");
   }
@@ -2509,16 +2505,16 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function formatApprovalAction(action: string): string {
-  if (action === "read_files") return "File read";
-  if (action === "sandbox_run") return "Sandbox validation";
-  if (action === "safe_check") return "Controlled checks";
-  if (action === "github_pr") return "GitHub pull request";
+  if (action === "read_files") return "Inspect files";
+  if (action === "sandbox_run") return "Check changes";
+  if (action === "safe_check") return "Run checks";
+  if (action === "github_pr") return "Prepare pull request";
   return action.replace(/_/g, " ");
 }
 
 function runLabelForApproval(action: string): string {
-  if (action === "read_files") return "Read approved files";
-  if (action === "sandbox_run") return "Run sandbox";
+  if (action === "read_files") return "Inspect files";
+  if (action === "sandbox_run") return "Check changes";
   if (action === "safe_check") return "Run checks";
   if (action === "github_pr") return "Create pull request";
   return "Run approved action";
@@ -2554,24 +2550,24 @@ function describeApproval(approval: OraxApproval): string {
     const files = approval.request.paths?.join(", ") || "selected files";
     if (approval.status === "completed") {
       const count = approval.result?.files?.length ?? 0;
-      return `Files read: ${count}.`;
+      return `Inspected ${count} file${count === 1 ? "" : "s"}.`;
     }
-    return `Requested source access for ${files}.`;
+    return `Review ${files}.`;
   }
   if (approval.action === "sandbox_run") {
-    return `Sandbox validation request for artifact #${approval.request.artifactId ?? "unknown"}.`;
+    return "Check the prepared change before moving on.";
   }
   if (approval.action === "safe_check") {
     return approval.request.commands?.length
-      ? `Controlled checks: ${approval.request.commands.join(", ")}.`
-      : "Controlled workspace checks require explicit approval.";
+      ? `Checks: ${approval.request.commands.join(", ")}.`
+      : "Run the selected checks.";
   }
   if (approval.action === "github_pr") {
     return approval.result?.pullRequestUrl
       ? `Pull request created: ${approval.result.pullRequestUrl}`
-      : "GitHub PR creation requires CREATE PR confirmation and explicit approval.";
+      : "Prepare the pull request after checks pass.";
   }
-  return approval.riskSummary ?? "Approval-gated ORAX workflow step.";
+  return approval.riskSummary ?? "Confirm the next step.";
 }
 
 function parseOraxUnifiedDiffFiles(diff?: string): OraxFileDiff[] {

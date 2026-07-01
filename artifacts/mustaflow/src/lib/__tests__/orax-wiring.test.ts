@@ -232,8 +232,23 @@ describe("ORAX product-surface wiring", () => {
 
   it("keeps normal assistant replies conversational instead of bookkeeping reports", () => {
     expect(oraxApiRoute).toContain('"I\'ll work from here."');
-    expect(oraxApiRoute).toContain('"Inspect source files"');
-    expect(oraxApiRoute).toContain('"Inspect related source files"');
+    expect(oraxApiRoute).toContain('"Inspect files"');
+    expect(oraxApiRoute).toContain('"Inspect related files"');
+    expect(oraxApiRoute).toContain('"Make changes"');
+    expect(oraxApiRoute).toContain('"Check changes"');
+    expect(oraxApiRoute).toContain("formatOraxLatestResultForChat");
+    expect(oraxApiRoute).toContain('"I prepared the change. I can check it next."');
+    expect(oraxApiRoute).not.toContain("Latest result is ready:");
+    expect(oraxApiRoute).not.toContain("Run the draft patch in an isolated sandbox.");
+    expect(oraxPage).toContain("title={suggestion.description}");
+    expect(oraxPage).toContain(
+      '"inline-flex h-9 items-center rounded-full bg-foreground px-4 text-sm font-medium text-background transition hover:opacity-90"',
+    );
+    expect(oraxPage).not.toContain(
+      '"rounded-md border border-border bg-background px-3 py-2 text-left hover:bg-muted"',
+    );
+    expect(mobileOraxScreen).toContain("backgroundColor: c.foreground");
+    expect(mobileOraxScreen).not.toContain('label={suggestion.buttonLabel ?? "Prepare action"}');
     expect(oraxApiRoute).toContain('router.get("/orax/tasks/:id/events"');
     expect(oraxApiRoute).toContain('"Content-Type": "text/event-stream"');
     expect(oraxApiRoute).toContain("loadOraxTaskMessagesAfter");

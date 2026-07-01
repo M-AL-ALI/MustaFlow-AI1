@@ -161,6 +161,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   prompts.
 - Surface assistant action suggestions in the conversation and require explicit
   user continuation for code-changing work.
+- Render default action suggestions as compact inline chat controls. Normal
+  chat must not expose internal pipeline wording like draft patch, sandbox
+  validation, artifact, checkpoint, or workflow dashboard language unless the
+  user opens a technical details surface.
 - Default website/mobile inline suggestions must call the Orax Continue runner,
   not hand-drive file-read, draft, sandbox, or controlled-check endpoints from
   the UI. Approving an inline approval is the confirmation point; after approval,
