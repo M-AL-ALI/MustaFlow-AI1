@@ -2696,28 +2696,22 @@ function buildOraxTaskThreadReply(input: {
   }
 
   const pendingApprovals = input.approvals.filter((approval) => approval.status === "pending");
-  const completedArtifacts = input.artifacts.filter((artifact) => artifact.status === "completed");
   const latestArtifact = input.artifacts[0];
-  const suggestionLine = input.actionSuggestions.length
-    ? `Suggested next action: ${input.actionSuggestions[0].title}.`
-    : "Suggested next action: clarify the target files or behavior before requesting approval.";
+  const suggestion = input.actionSuggestions[0];
   const nextStep =
     pendingApprovals.length > 0
       ? `There ${pendingApprovals.length === 1 ? "is" : "are"} ${pendingApprovals.length} pending approval${
           pendingApprovals.length === 1 ? "" : "s"
-        }. Review the approval card before ORAX continues.`
+        }. Review it inline to continue.`
       : latestArtifact
-        ? `The latest artifact is "${latestArtifact.title}" with status "${latestArtifact.status}". Review the artifact panel for the next available action.`
-        : "No execution artifact exists yet. Start with a read-files approval or draft-patch request when you are ready.";
+        ? `Latest result: ${latestArtifact.title}. Continue from the inline action when you are ready.`
+        : suggestion
+          ? `${suggestion.title}. ${suggestion.description}`
+          : "Tell me which files or behavior to inspect first.";
 
   return [
-    `I saved this in the ORAX task thread for "${input.task.title}".`,
-    `Current task status: ${input.task.status}.`,
-    `Approvals: ${input.approvals.length}. Artifacts: ${input.artifacts.length}. Completed artifacts: ${completedArtifacts.length}.`,
-    `Checkpoint next step: ${input.checkpoint.nextStep}`,
-    suggestionLine,
+    "I'll work from here.",
     nextStep,
-    "Phase 4B is planning-only: this chat can suggest approval-ready next steps, but it cannot run commands, edit files, push branches, or open PRs without the existing approval controls.",
   ].join("\n");
 }
 
@@ -2746,15 +2740,14 @@ function buildOraxCheckpointResumeReply(checkpoint: OraxCheckpointSummary): stri
     : "Latest blocker: none recorded.";
 
   return [
-    "Here is the current ORAX checkpoint for this task.",
-    `Goal: ${checkpoint.goal}`,
+    "Here is where this task stands.",
+    `Goal: ${checkpoint.goal}.`,
     `Status: ${checkpoint.status}.`,
     `Approvals: ${checkpoint.approvals.completed}/${checkpoint.approvals.total} completed, ${checkpoint.approvals.pending} pending, ${checkpoint.approvals.denied} denied, ${checkpoint.approvals.failed} failed.`,
     `Artifacts: ${checkpoint.artifacts.total} total (${checkpoint.artifacts.draftPatches} draft patches, ${checkpoint.artifacts.sandboxResults} sandbox results, ${checkpoint.artifacts.commandResults} command results, ${checkpoint.artifacts.githubPrResults} PR results).`,
     filesLine,
     blockerLine,
-    `Next recommended step: ${checkpoint.nextStep}`,
-    "Safety boundary: ORAX will not read files, run checks, create branches, push code, or open a PR unless you explicitly approve the matching action.",
+    `Next: ${checkpoint.nextStep}`,
   ].join("\n");
 }
 
@@ -2784,10 +2777,10 @@ function buildOraxTaskActionSuggestions(input: {
   if (latestCommandResult?.status === "completed" && latestCommandPayload.passed === true) {
     suggestions.push({
       type: "github_pr",
-      title: "Prepare PR approval",
+      title: "Prepare pull request",
       description:
-        "Controlled checks passed. Review the PR section and type CREATE PR manually if you want ORAX to request PR creation approval.",
-      buttonLabel: "Prepare PR approval",
+        "Controlled checks passed. Continue here when you want Orax to prepare the pull request step.",
+      buttonLabel: "Prepare pull request",
       artifactId: latestCommandResult.id,
       requiresManualConfirmation: true,
     });
@@ -2800,9 +2793,9 @@ function buildOraxTaskActionSuggestions(input: {
   if (latestSandboxResult && latestSandboxPayload.applied === true) {
     suggestions.push({
       type: "controlled_checks",
-      title: "Prepare controlled checks",
+      title: "Run checks",
       description:
-        "The draft patch applied in the sandbox. Select the allowlisted checks you want to request next.",
+        "The draft patch applied in the sandbox. Continue here to request the default checks.",
       buttonLabel: "Use default checks",
       artifactId: latestSandboxResult.id,
       commands: [...ORAX_SANDBOX_COMMAND_IDS],
@@ -2813,10 +2806,9 @@ function buildOraxTaskActionSuggestions(input: {
   if (latestDraftPatch && latestDraftPatch.status !== "rejected") {
     suggestions.push({
       type: "sandbox_run",
-      title: "Request sandbox validation",
-      description:
-        "A draft patch exists. Use the existing sandbox approval button when you are ready to validate it.",
-      buttonLabel: "Prepare sandbox approval",
+      title: "Validate patch",
+      description: "A draft patch exists. Continue here to validate it in the sandbox.",
+      buttonLabel: "Validate patch",
       artifactId: latestDraftPatch.id,
     });
   }
@@ -2827,10 +2819,10 @@ function buildOraxTaskActionSuggestions(input: {
   if (completedReadApproval) {
     suggestions.push({
       type: "draft_patch",
-      title: "Prepare draft patch instructions",
+      title: "Draft the change",
       description:
-        "Approved files have been read. Use this message as draft-patch guidance, then generate a preview from the completed read approval.",
-      buttonLabel: "Use as draft instructions",
+        "Approved files have been read. Continue here to draft the code change.",
+      buttonLabel: "Draft change",
       approvalId: completedReadApproval.id,
       instructions: input.userMessage.slice(0, 2000),
     });
@@ -2840,11 +2832,11 @@ function buildOraxTaskActionSuggestions(input: {
   if (extractedPaths.length > 0 || suggestions.length === 0) {
     suggestions.push({
       type: "read_files",
-      title: "Prepare file-read approval",
+      title: "Inspect source files",
       description:
         extractedPaths.length > 0
-          ? "I found likely file paths in your message. Use them to prepare a read-files approval request."
-          : "Start by identifying the source files ORAX should read before planning a code change.",
+          ? "I found likely file paths in your message. Continue here to let Orax inspect them."
+          : "Continue here to let Orax inspect the relevant files before planning a code change.",
       buttonLabel: extractedPaths.length > 0 ? "Use detected paths" : undefined,
       paths: extractedPaths,
       reason: `Task discussion: ${input.task.title}`.slice(0, 1000),

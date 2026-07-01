@@ -399,14 +399,47 @@ export default function OraxScreen() {
     [clearTaskScopedState],
   );
 
+  const startNewThread = useCallback(() => {
+    clearTaskScopedState();
+    activeTaskIdRef.current = null;
+    setSelectedTaskId(null);
+    setThreadDraft("");
+    setTaskPrompt("");
+    setThreadOpen(true);
+    setHomeComposeOpen(false);
+    setShowDetails(false);
+  }, [clearTaskScopedState]);
+
   const sendThreadMessage = useCallback(async () => {
     const text = threadDraft.trim();
-    if (!selectedTask || !text) return;
+    if (!text) return;
+
+    if (!selectedTask) {
+      const repoId = selectedRepo?.id;
+      if (!repoId) {
+        setError("Connect a repository before starting an Orax thread.");
+        return;
+      }
+      await runAction("create-task", async () => {
+        const created = await createTask({ repositoryId: repoId, kind: taskKind, prompt: text });
+        activeTaskIdRef.current = created.task.id;
+        setSelectedTaskId(created.task.id);
+        setTaskPrompt("");
+        setThreadDraft("");
+        await appendTaskMessage(created.task.id, text);
+        await loadTaskDetails(created.task.id);
+        setThreadOpen(true);
+        setHomeComposeOpen(false);
+        setShowDetails(false);
+      });
+      return;
+    }
+
     await runAction("send-thread", async () => {
       await appendTaskMessage(selectedTask.id, text);
       setThreadDraft("");
     });
-  }, [runAction, selectedTask, threadDraft]);
+  }, [loadTaskDetails, runAction, selectedRepo?.id, selectedTask, taskKind, threadDraft]);
 
   const submitReadApproval = useCallback(async () => {
     if (!selectedTask) return;
@@ -662,45 +695,12 @@ export default function OraxScreen() {
                       </Text>
                     </View>
                     <Pressable
-                      onPress={() => {
-                        setHomeComposeOpen((value) => !value);
-                      }}
+                      onPress={startNewThread}
                       hitSlop={10}
                     >
                       <Plus size={20} color={c.mutedForeground} />
                     </Pressable>
                   </View>
-
-                  {homeComposeOpen ? (
-                    <Card style={{ gap: 12 }}>
-                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                        {TASK_KINDS.map((kind) => (
-                          <Pill
-                            key={kind.value}
-                            label={kind.label}
-                            active={taskKind === kind.value}
-                            onPress={() => setTaskKind(kind.value)}
-                          />
-                        ))}
-                      </View>
-                      <TextField
-                        label="Start Orax task"
-                        placeholder="Ask Orax to inspect, plan, review, or fix code..."
-                        value={taskPrompt}
-                        onChangeText={setTaskPrompt}
-                        multiline
-                        style={{ minHeight: 88, textAlignVertical: "top" }}
-                      />
-                      <Button
-                        label="Start chat"
-                        icon={Play}
-                        onPress={submitTask}
-                        loading={busyAction === "create-task"}
-                        disabled={!selectedRepo || !taskPrompt.trim()}
-                        full
-                      />
-                    </Card>
-                  ) : null}
 
                   <View style={{ gap: 22 }}>
                     {visibleTasks.length === 0 ? (
@@ -736,7 +736,7 @@ export default function OraxScreen() {
                         if (selectedTask) {
                           selectTask(selectedTask);
                         } else {
-                          setHomeComposeOpen(true);
+                          startNewThread();
                         }
                       }}
                     >
@@ -782,9 +782,7 @@ export default function OraxScreen() {
                   <Button
                     label="Chat"
                     icon={MessageSquare}
-                    onPress={() => {
-                      setHomeComposeOpen((value) => !value);
-                    }}
+                    onPress={startNewThread}
                   />
                 </View>
               </>
@@ -846,53 +844,32 @@ export default function OraxScreen() {
                         }
                       />
                     ))}
-                  <TextField
-                    placeholder="Resume, ask for next step, or name files to inspect..."
-                    value={threadDraft}
-                    onChangeText={setThreadDraft}
-                    multiline
-                    style={{ minHeight: 72, textAlignVertical: "top" }}
-                  />
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    <Button
-                      label="Send"
-                      icon={Send}
-                      onPress={sendThreadMessage}
-                      loading={busyAction === "send-thread"}
-                      disabled={!threadDraft.trim()}
-                    />
-                  </View>
                 </>
               ) : (
-                <>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    {TASK_KINDS.map((kind) => (
-                      <Pill
-                        key={kind.value}
-                        label={kind.label}
-                        active={taskKind === kind.value}
-                        onPress={() => setTaskKind(kind.value)}
-                      />
-                    ))}
-                  </View>
-                  <TextField
-                    label="Start Orax task"
-                    placeholder="Ask Orax to inspect, plan, review, or fix code..."
-                    value={taskPrompt}
-                    onChangeText={setTaskPrompt}
-                    multiline
-                    style={{ minHeight: 88, textAlignVertical: "top" }}
-                  />
-                  <Button
-                    label="Start chat"
-                    icon={Play}
-                    onPress={submitTask}
-                    loading={busyAction === "create-task"}
-                    disabled={!selectedRepo || !taskPrompt.trim()}
-                    full
-                  />
-                </>
+                <Text style={{ color: c.mutedForeground, fontSize: 15, lineHeight: 22 }}>
+                  Ask Orax what to work on.
+                </Text>
               )}
+              <TextField
+                placeholder={
+                  selectedTask
+                    ? "Message Orax about this task..."
+                    : "Ask Orax to inspect, fix, or explain code..."
+                }
+                value={threadDraft}
+                onChangeText={setThreadDraft}
+                multiline
+                style={{ minHeight: 72, textAlignVertical: "top" }}
+              />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <Button
+                  label="Send"
+                  icon={Send}
+                  onPress={sendThreadMessage}
+                  loading={busyAction === "send-thread" || busyAction === "create-task"}
+                  disabled={!threadDraft.trim() || (!selectedTask && !selectedRepo)}
+                />
+              </View>
             </View>
 
             {false ? (

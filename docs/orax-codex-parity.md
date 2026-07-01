@@ -7,6 +7,10 @@ mobile. Ora remains separate.
 
 - Orax opens to a simple task/chat list first.
 - Orax task rows open focused task threads.
+- New chat opens a blank thread with the normal composer. The first sent
+  message creates the Orax task behind the scenes.
+- The Projects screen must not show task-mode pills, a large task prompt form,
+  or a Start chat button.
 - The primary thread is conversation-first: messages and composer are the main
   surface.
 - Repository, checkpoint, approval, patch, check, artifact, and PR actions
@@ -20,7 +24,7 @@ mobile. Ora remains separate.
 
 - Header: menu/back on the left, centered Orax/task title, options on the right.
 - Home: top chips, Projects, simple task rows, Chats, bottom Search/Chat.
-- Chat button starts a new Orax task compose flow.
+- Chat button opens a blank Orax thread.
 - Existing task rows and chat preview open existing Orax task threads.
 - Thread: title, repository subtitle, message list, inline action/approval
   cards, and composer.

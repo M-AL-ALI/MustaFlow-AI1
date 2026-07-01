@@ -49,7 +49,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/sandbox-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/command-approvals");
     expect(oraxPage).toContain("/api/orax/tasks/${selectedTask.id}/github-pr-approvals");
-    expect(oraxPage).toContain("createTask({ startThread: true })");
+    expect(oraxPage).toContain("createTask({ startThread: true, firstMessage: content })");
     expect(oraxPage).toContain("appendTaskMessage(targetTaskId, content)");
     expect(oraxPage).toContain("Task created, but first message failed to save");
 
@@ -65,8 +65,9 @@ describe("ORAX product-surface wiring", () => {
 
   it("keeps ORAX Codex-like and list-first on website and mobile", () => {
     expect(oraxPage).toContain("const [mobileTaskOpen, setMobileTaskOpen] = useState(false)");
-    expect(oraxPage).toContain("const [mobileComposeOpen, setMobileComposeOpen] = useState(false)");
     expect(oraxPage).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
+    expect(oraxPage).toContain("function startNewThread()");
+    expect(oraxPage).toContain("setSelectedTaskId(null)");
     expect(oraxPage).toContain("visibleTasks");
     expect(oraxPage).toContain("chatPreview");
     expect(oraxPage).toContain("Back to Orax tasks");
@@ -74,18 +75,18 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Projects");
     expect(oraxPage).toContain("Chats");
     expect(oraxPage).toContain("Search Chats");
-    expect(oraxPage).toContain("Start chat");
+    expect(oraxPage).toContain("New chat");
+    expect(oraxPage).toContain("Ask Orax to inspect, fix, or explain code...");
     expect(oraxPage).toContain("mobileTaskOpen ? \"hidden lg:flex\" : \"flex\"");
     expect(oraxPage).toContain("mobileTaskOpen ? \"flex\" : \"hidden\"");
-    expect(oraxPage).toContain("setMobileComposeOpen((value) => !value)");
+    expect(oraxPage).not.toContain("setMobileComposeOpen((value) => !value)");
     expect(oraxPage).not.toContain("Codex workspace for repository tasks");
     expect(oraxPage).not.toContain("ORAX task thread");
     expect(oraxPage).not.toContain("Start ORAX chat");
 
     expect(mobileOraxScreen).toContain("const [threadOpen, setThreadOpen] = useState(false)");
-    expect(mobileOraxScreen).toContain(
-      "const [homeComposeOpen, setHomeComposeOpen] = useState(false)",
-    );
+    expect(mobileOraxScreen).toContain("const startNewThread = useCallback(() =>");
+    expect(mobileOraxScreen).toContain("setSelectedTaskId(null)");
     expect(mobileOraxScreen).toContain("const [taskSearch, setTaskSearch] = useState(\"\")");
     expect(mobileOraxScreen).toContain("visibleTasks");
     expect(mobileOraxScreen).toContain("chatPreview");
@@ -93,9 +94,10 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("Projects");
     expect(mobileOraxScreen).toContain("Chats");
     expect(mobileOraxScreen).toContain("Search Chats");
-    expect(mobileOraxScreen).toContain('label="Start chat"');
-    expect(mobileOraxScreen).toContain("setHomeComposeOpen((value) => !value)");
-    expect(mobileOraxScreen).toContain("{homeComposeOpen ? (");
+    expect(mobileOraxScreen).toContain("Ask Orax what to work on.");
+    expect(mobileOraxScreen).toContain("Ask Orax to inspect, fix, or explain code...");
+    expect(mobileOraxScreen).not.toContain("setHomeComposeOpen((value) => !value)");
+    expect(mobileOraxScreen).not.toContain("{homeComposeOpen ? (");
     expect(mobileOraxScreen).not.toContain("ScreenHeader");
     expect(mobileOraxScreen).not.toContain('label="Start ORAX chat"');
   });

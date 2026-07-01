@@ -412,7 +412,7 @@ export default function OraxPage() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
   const selectedTask = useMemo(
-    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
+    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
     [tasks, selectedTaskId],
   );
   const visibleTasks = useMemo(() => {
@@ -756,8 +756,8 @@ export default function OraxPage() {
     return body.messages;
   }
 
-  async function createTask(options: { startThread?: boolean } = {}) {
-    const firstMessage = prompt.trim();
+  async function createTask(options: { startThread?: boolean; firstMessage?: string } = {}) {
+    const firstMessage = (options.firstMessage ?? prompt).trim();
     if (!selectedRepository || !firstMessage || submittingTask) return;
     setSubmittingTask(true);
     setError(null);
@@ -814,10 +814,30 @@ export default function OraxPage() {
     }
   }
 
+  function startNewThread() {
+    activeTaskIdRef.current = null;
+    setSelectedTaskId(null);
+    setMobileTaskOpen(true);
+    setMobileComposeOpen(false);
+    setApprovals([]);
+    setArtifacts([]);
+    setTaskMessages([]);
+    setReadResult(null);
+    setPendingSuggestionConfirmation(null);
+    setSuggestionPrConfirmationText("");
+    setPrConfirmationText("");
+    setTaskMessageDraft("");
+    setPrompt("");
+  }
+
   async function sendTaskMessage() {
-    if (!selectedTask || !taskMessageDraft.trim() || sendingTaskMessage) return;
-    const targetTaskId = selectedTask.id;
+    if (!taskMessageDraft.trim() || sendingTaskMessage) return;
     const content = taskMessageDraft.trim();
+    if (!selectedTask) {
+      await createTask({ startThread: true, firstMessage: content });
+      return;
+    }
+    const targetTaskId = selectedTask.id;
     setSendingTaskMessage(true);
     setError(null);
     try {
@@ -1240,7 +1260,7 @@ export default function OraxPage() {
         </button>
         <div className="min-w-0 px-3 text-center">
           <h1 className="truncate text-lg font-semibold">
-            {mobileTaskOpen ? (selectedTask?.title ?? "Orax") : "Orax"}
+            {mobileTaskOpen ? (selectedTask?.title ?? "New chat") : "Orax"}
           </h1>
           {mobileTaskOpen && selectedTaskRepository ? (
             <p className="truncate text-xs text-muted-foreground">
@@ -1255,7 +1275,7 @@ export default function OraxPage() {
               setTaskMessageDraft("/status");
               return;
             }
-            setMobileComposeOpen((value) => !value);
+            if (!mobileTaskOpen) startNewThread();
           }}
           className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground"
           aria-label="Orax options"
@@ -1333,88 +1353,14 @@ export default function OraxPage() {
               </div>
               {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </div>
-            <details
-              open={tasks.length === 0}
-              className="mt-4 hidden rounded-md border border-border bg-background lg:mt-3 lg:block"
+            <button
+              type="button"
+              onClick={startNewThread}
+              className="mt-4 hidden h-10 w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted lg:inline-flex"
             >
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">New chat</summary>
-              <div className="border-t border-border p-3">
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Ask Orax to inspect, plan, review, or fix code..."
-                  className="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {TASK_KINDS.map((kind) => (
-                    <button
-                      key={kind.value}
-                      type="button"
-                      onClick={() => setTaskKind(kind.value)}
-                      className={cn(
-                        "rounded-md border px-2 py-1 text-[11px] font-medium",
-                        taskKind === kind.value
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                    >
-                      {kind.label}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => void createTask({ startThread: true })}
-                  disabled={!selectedRepository || !prompt.trim() || submittingTask}
-                  className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submittingTask ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                  Start chat
-                </button>
-              </div>
-            </details>
-            {mobileComposeOpen ? (
-              <div className="mt-6 space-y-3 lg:hidden">
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Ask Orax to inspect, plan, review, or fix code..."
-                  className="min-h-24 w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring"
-                />
-                <div className="flex flex-wrap gap-2">
-                  {TASK_KINDS.map((kind) => (
-                    <button
-                      key={kind.value}
-                      type="button"
-                      onClick={() => setTaskKind(kind.value)}
-                      className={cn(
-                        "rounded-full border px-3 py-1.5 text-xs font-medium",
-                        taskKind === kind.value
-                          ? "border-foreground bg-foreground text-background"
-                          : "border-border bg-background text-muted-foreground",
-                      )}
-                    >
-                      {kind.label}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => void createTask({ startThread: true })}
-                  disabled={!selectedRepository || !prompt.trim() || submittingTask}
-                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 text-base font-semibold text-background disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submittingTask ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <PenLine className="h-4 w-4" />
-                  )}
-                  Start chat
-                </button>
-              </div>
-            ) : null}
+              <PenLine className="h-4 w-4" />
+              New chat
+            </button>
           </div>
 
           <div className="flex-1 px-5 pb-28 lg:min-h-0 lg:overflow-y-auto lg:p-2">
@@ -1472,7 +1418,7 @@ export default function OraxPage() {
                     setMobileTaskOpen(true);
                     return;
                   }
-                  setMobileComposeOpen(true);
+                  startNewThread();
                 }}
                 className="block max-w-full truncate text-left text-lg text-foreground"
               >
@@ -1525,9 +1471,7 @@ export default function OraxPage() {
             </label>
             <button
               type="button"
-              onClick={() => {
-                setMobileComposeOpen((value) => !value);
-              }}
+              onClick={startNewThread}
               className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-foreground px-5 text-base font-semibold text-background"
             >
               <PenLine className="h-5 w-5" />
@@ -1568,9 +1512,9 @@ export default function OraxPage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-muted">
                   <Bot className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <h3 className="mt-4 text-lg font-semibold">Start an Orax thread</h3>
+                <h3 className="mt-4 text-lg font-semibold">New chat</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Pick a project, describe the work, and Orax will keep the task conversation inline.
+                  Ask Orax what to work on. The first message starts the task thread.
                 </p>
               </div>
             ) : taskMessages.length === 0 ? (
@@ -1754,16 +1698,21 @@ export default function OraxPage() {
                 placeholder={
                   selectedTask
                     ? "Message Orax about this task..."
-                    : "Create a task from the left panel first..."
+                    : "Ask Orax to inspect, fix, or explain code..."
                 }
                 className="min-h-12 flex-1 resize-none rounded-3xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-2 focus:ring-ring lg:rounded-md lg:px-3 lg:py-2 lg:text-sm"
               />
               <button
                 onClick={() => void sendTaskMessage()}
-                disabled={!selectedTask || !taskMessageDraft.trim() || sendingTaskMessage}
+                disabled={
+                  !taskMessageDraft.trim() ||
+                  (!selectedTask && !selectedRepository) ||
+                  sendingTaskMessage ||
+                  submittingTask
+                }
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60 lg:rounded-md lg:bg-primary lg:text-primary-foreground"
               >
-                {sendingTaskMessage ? (
+                {sendingTaskMessage || submittingTask ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Send className="h-4 w-4" />
