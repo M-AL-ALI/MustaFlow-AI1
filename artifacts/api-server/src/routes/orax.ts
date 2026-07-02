@@ -29,7 +29,9 @@ import {
   readGithubRepositoryFiles,
   scanGithubRepository,
   verifyGithubReadOnlyToken,
+  type OraxGithubScanSummary,
 } from "../lib/orax-github";
+import { inferOraxDomainPaths, isNlPlanModeMessage } from "../lib/orax-context";
 import {
   buildOraxSandboxPatch,
   runOraxSandboxValidation,
@@ -2793,9 +2795,17 @@ function buildOraxAuditTrail(input: {
   ].filter((item): item is { label: string; id: number; kind: string } => Boolean(item));
 }
 
-function isPlanModeTask(task: OraxTask): boolean {
+function isPlanModeTask(
+  task: OraxTask,
+  messages?: Array<{ role: string; content: string }>,
+): boolean {
   if (task.kind === "plan") return true;
-  return Boolean(asRecord(task.result).activePlan);
+  if (Boolean(asRecord(task.result).activePlan)) return true;
+  if (messages) {
+    const latestUserMsg = messages.find((m) => m.role === "user")?.content ?? "";
+    if (isNlPlanModeMessage(latestUserMsg)) return true;
+  }
+  return false;
 }
 
 function isOraxContinueImplementationTrigger(message: string): boolean {
@@ -2965,7 +2975,7 @@ async function continueOraxTaskRunner(input: {
     (approval) => approval.action === "read_files" && approval.status === "completed",
   );
   if (completedReadApproval) {
-    if (isPlanModeTask(input.task)) {
+    if (isPlanModeTask(input.task, messages)) {
       const planReadySummaryAt = asRecord(input.task.result).planReadySummaryAt;
       if (!planReadySummaryAt) {
         return generateOraxRunnerPlanSummary({
@@ -3377,7 +3387,12 @@ async function requestOraxRunnerFileReadApproval(input: {
     });
   }
 
-  const paths = buildOraxRunnerReadPaths(input.task, input.messages);
+  const latestScan = await loadLatestOraxRepositoryScan(input.userId, repository.id);
+  const paths = buildOraxRunnerReadPaths(
+    input.task,
+    input.messages,
+    (latestScan?.summary as OraxGithubScanSummary | null) ?? null,
+  );
   const request = {
     action: "read_files" as const,
     paths,
@@ -4846,6 +4861,7 @@ async function runOraxRunnerApprovedChecks(input: {
 function buildOraxRunnerReadPaths(
   task: OraxTask,
   messages: Array<{ role: string; content: string; metadata?: unknown }>,
+  scan: OraxGithubScanSummary | null,
 ): string[] {
   const suggestionPaths: string[] = [];
   for (const message of messages) {
@@ -4860,8 +4876,14 @@ function buildOraxRunnerReadPaths(
     }
   }
 
+  const prompt = [task.prompt, ...messages.map((m) => m.content)].join(" ");
+  const domainPaths = scan
+    ? inferOraxDomainPaths(prompt, scan.sampleFiles ?? [], scan.topLevelEntries ?? [])
+    : [];
+
   const merged = mergeOraxDetectedPaths([
     ...suggestionPaths,
+    ...domainPaths,
     ...messages.flatMap((message) => extractOraxCandidatePaths(message.content)),
     ...extractOraxCandidatePaths(task.prompt),
     "README.md",
@@ -6442,6 +6464,22 @@ function extractOraxCandidatePaths(message: string): string[] {
   return Array.from(new Set(matches))
     .filter((pathName) => !pathName.startsWith("http"))
     .slice(0, ORAX_FILE_READ_LIMITS.maxFiles);
+}
+
+async function loadLatestOraxRepositoryScan(userId: string, repositoryId: number) {
+  const [scan] = await db
+    .select()
+    .from(oraxRepositoryScansTable)
+    .where(
+      and(
+        eq(oraxRepositoryScansTable.userId, userId),
+        eq(oraxRepositoryScansTable.repositoryId, repositoryId),
+        eq(oraxRepositoryScansTable.status, "completed"),
+      ),
+    )
+    .orderBy(desc(oraxRepositoryScansTable.createdAt))
+    .limit(1);
+  return scan ?? null;
 }
 
 async function loadOwnedRepository(userId: string, repositoryId: number) {

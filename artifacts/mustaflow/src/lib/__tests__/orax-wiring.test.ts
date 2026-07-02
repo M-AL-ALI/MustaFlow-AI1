@@ -492,6 +492,18 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).not.toContain("deductCredits");
   });
 
+  it("wires domain-aware file inference and NL plan mode into the API route", () => {
+    expect(oraxApiRoute).toContain('from "../lib/orax-context"');
+    expect(oraxApiRoute).toContain("inferOraxDomainPaths");
+    expect(oraxApiRoute).toContain("isNlPlanModeMessage");
+    expect(oraxApiRoute).toContain("loadLatestOraxRepositoryScan");
+    expect(oraxApiRoute).toContain("buildOraxRunnerReadPaths(\n    input.task,\n    input.messages,");
+    expect(oraxApiRoute).toContain("scan.sampleFiles");
+    expect(oraxApiRoute).toContain("scan.topLevelEntries");
+    expect(oraxApiRoute).toContain("isNlPlanModeMessage(latestUserMsg)");
+    expect(oraxApiRoute).toContain("isPlanModeTask(input.task, messages)");
+  });
+
   it("shows compact active goal/plan strip above the composer on website and mobile", () => {
     expect(oraxPage).toContain("OraxActiveThreadStateStrip");
     expect(oraxPage).toContain("getOraxActiveThreadState");

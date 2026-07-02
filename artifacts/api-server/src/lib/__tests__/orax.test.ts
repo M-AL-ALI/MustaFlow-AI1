@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildOraxTaskPlan, normalizeOraxFileReadPaths, parseRepositoryLocator } from "../orax";
+import { inferOraxDomainPaths, isNlPlanModeMessage } from "../orax-context";
 import {
   hasOraxWorkspaceCommandIds,
   normalizeOraxSandboxCommandIds,
@@ -637,5 +638,144 @@ describe("ORAX plan mode runner gate", () => {
     expect(planPromptFn).toContain("do not mention Ora or AI Builder");
     expect(planPromptFn).not.toContain("/public-ai/chat");
     expect(planPromptFn).not.toContain("deductCredits");
+  });
+
+  it("accepts optional messages param and calls isNlPlanModeMessage for NL plan detection", () => {
+    expect(routeSource).toContain(
+      "function isPlanModeTask(\n  task: OraxTask,\n  messages?: Array<{ role: string; content: string }>,\n): boolean",
+    );
+    expect(routeSource).toContain("isNlPlanModeMessage(latestUserMsg)");
+  });
+});
+
+describe("ORAX domain-aware file heuristics", () => {
+  it("returns top-ranked auth files for a login-related prompt", () => {
+    const files = [
+      "src/routes/auth.ts",
+      "src/middleware/session.ts",
+      "src/pages/Login.tsx",
+      "src/utils/format.ts",
+      "src/db/schema.ts",
+    ];
+    const result = inferOraxDomainPaths("fix the login form validation error", files, []);
+    expect(result).toContain("src/routes/auth.ts");
+    expect(result).toContain("src/middleware/session.ts");
+    expect(result).toContain("src/pages/Login.tsx");
+    expect(result).not.toContain("src/utils/format.ts");
+  });
+
+  it("returns mobile screen and navigation files for a mobile layout prompt", () => {
+    const files = [
+      "app/(home)/settings.tsx",
+      "components/NavBar.tsx",
+      "lib/api.ts",
+      "db/schema.sql",
+      "app/(home)/styles.ts",
+    ];
+    const result = inferOraxDomainPaths("the bottom navigation layout is broken on mobile", files, []);
+    expect(result).toContain("app/(home)/settings.tsx");
+    expect(result).toContain("components/NavBar.tsx");
+    expect(result).toContain("app/(home)/styles.ts");
+  });
+
+  it("returns config and package files for a build failure prompt", () => {
+    const files = [
+      "package.json",
+      "tsconfig.json",
+      "vite.config.ts",
+      "src/components/Button.tsx",
+      "src/db/schema.ts",
+    ];
+    const result = inferOraxDomainPaths("typecheck is failing with a type error in build", files, []);
+    expect(result).toContain("package.json");
+    expect(result).toContain("tsconfig.json");
+    expect(result).toContain("vite.config.ts");
+  });
+
+  it("returns README, package.json, and entry points for an explanation prompt", () => {
+    const files = [
+      "README.md",
+      "package.json",
+      "src/index.ts",
+      "db/schema.ts",
+      "src/components/Footer.tsx",
+    ];
+    const result = inferOraxDomainPaths("explain how this repository works", files, []);
+    expect(result).toContain("README.md");
+    expect(result).toContain("package.json");
+    expect(result).toContain("src/index.ts");
+    expect(result).toContain("db/schema.ts");
+  });
+
+  it("returns test files for a failing test prompt", () => {
+    const files = [
+      "src/__tests__/auth.test.ts",
+      "vitest.config.ts",
+      "src/routes/api.ts",
+      "src/components/Header.tsx",
+    ];
+    const result = inferOraxDomainPaths("the unit test for auth is failing", files, []);
+    expect(result).toContain("src/__tests__/auth.test.ts");
+    expect(result).toContain("vitest.config.ts");
+  });
+
+  it("returns an empty array when sampleFiles and topLevelEntries are both empty", () => {
+    const result = inferOraxDomainPaths("fix the login bug", [], []);
+    expect(result).toEqual([]);
+  });
+
+  it("caps results at the domain file limit", () => {
+    const files = Array.from({ length: 20 }, (_, i) => `src/routes/auth-${i}.ts`);
+    const result = inferOraxDomainPaths("fix the auth login session issue", files, []);
+    expect(result.length).toBeLessThanOrEqual(8);
+  });
+
+  it("deduplicates paths from sampleFiles and topLevelEntries", () => {
+    const files = ["package.json", "tsconfig.json"];
+    const topLevel = [
+      { path: "package.json", type: "blob" },
+      { path: "README.md", type: "blob" },
+    ];
+    const result = inferOraxDomainPaths("explain the repo", files, topLevel);
+    const unique = new Set(result);
+    expect(unique.size).toBe(result.length);
+  });
+});
+
+describe("ORAX NL plan mode detection", () => {
+  it.each([
+    "plan this first",
+    "make a plan first",
+    "think before implementing",
+    "think before you implement",
+    "outline the approach",
+    "show me the plan",
+    "plan only",
+    "no changes yet",
+    "analyze before changing",
+    "review first then plan",
+    "plan first",
+    "create a plan first",
+    "step by step plan",
+  ])('recognizes "%s" as a plan mode request', (phrase) => {
+    expect(isNlPlanModeMessage(phrase)).toBe(true);
+  });
+
+  it.each([
+    "fix the bug",
+    "change the button color",
+    "run the tests",
+    "update the README",
+    "refactor the auth module",
+    "add a new endpoint",
+    "deploy to production",
+  ])('does not flag "%s" as plan mode', (phrase) => {
+    expect(isNlPlanModeMessage(phrase)).toBe(false);
+  });
+
+  it("is case-insensitive and normalizes whitespace", () => {
+    expect(isNlPlanModeMessage("PLAN THIS FIRST")).toBe(true);
+    expect(isNlPlanModeMessage("  think  before  implementing  ")).toBe(true);
+    expect(isNlPlanModeMessage("Plan First")).toBe(true);
   });
 });
