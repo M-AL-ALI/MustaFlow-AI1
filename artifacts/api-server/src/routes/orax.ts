@@ -2800,7 +2800,7 @@ function isPlanModeTask(
   messages?: Array<{ role: string; content: string }>,
 ): boolean {
   if (task.kind === "plan") return true;
-  if (Boolean(asRecord(task.result).activePlan)) return true;
+  if (asRecord(task.result).activePlan) return true;
   if (messages) {
     const latestUserMsg = messages.find((m) => m.role === "user")?.content ?? "";
     if (isNlPlanModeMessage(latestUserMsg)) return true;
