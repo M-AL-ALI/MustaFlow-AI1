@@ -113,7 +113,12 @@ type OraxTask = {
     guardrails?: string[];
     unavailableUntilApproved?: string[];
   };
-  result?: { message?: string; currentCheckpoint?: OraxCheckpointSummary };
+  result?: {
+    message?: string;
+    currentCheckpoint?: OraxCheckpointSummary;
+    activeGoal?: { objective?: string; status?: string; updatedAt?: string };
+    [key: string]: unknown;
+  };
   createdAt: string;
 };
 
@@ -628,6 +633,64 @@ function shouldRefreshOraxTaskCollections(message: OraxTaskMessage): boolean {
     source === "orax-task-timeline" ||
     source === "orax-task-checkpoint" ||
     Boolean(message.approvalId || message.artifactId)
+  );
+}
+
+type OraxActiveThreadState = {
+  label: string;
+  objective: string;
+  nextStep?: string;
+} | null;
+
+function getOraxActiveThreadState(
+  selectedTask: OraxTask | null,
+  currentCheckpoint: OraxCheckpointSummary | null,
+): OraxActiveThreadState {
+  const activeGoal = selectedTask?.result?.activeGoal;
+  const plan = selectedTask?.plan;
+  const goalObjective =
+    typeof activeGoal?.objective === "string" ? activeGoal.objective.trim() : "";
+  const planObjective =
+    typeof plan?.objective === "string" ? plan.objective.trim() : "";
+  if (!goalObjective && !planObjective) return null;
+  return {
+    label: goalObjective ? "Goal" : "Plan mode",
+    objective: goalObjective || planObjective,
+    nextStep: currentCheckpoint?.nextStep,
+  };
+}
+
+function OraxActiveThreadStateStrip({
+  state,
+  continuing,
+  onContinue,
+}: {
+  state: NonNullable<OraxActiveThreadState>;
+  continuing: boolean;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-b border-border bg-muted/30 px-4 py-2">
+      <div className="mx-auto flex max-w-4xl items-center gap-3">
+        <span className="shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-foreground/60">
+          {state.label}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{state.objective}</span>
+        {state.nextStep ? (
+          <span className="hidden max-w-[240px] shrink-0 truncate text-xs text-muted-foreground sm:block">
+            {state.nextStep}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={onContinue}
+          disabled={continuing}
+          className="shrink-0 rounded-md bg-foreground/10 px-3 py-1 text-xs font-medium text-foreground hover:bg-foreground/15 disabled:opacity-50"
+        >
+          {continuing ? "Working…" : "Continue"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2739,6 +2802,16 @@ export default function OraxPage() {
             )}
           </div>
 
+          {(() => {
+            const activeThreadState = getOraxActiveThreadState(selectedTask, currentCheckpoint);
+            return activeThreadState ? (
+              <OraxActiveThreadStateStrip
+                state={activeThreadState}
+                continuing={continuingTask}
+                onContinue={() => void continueSelectedTask()}
+              />
+            ) : null;
+          })()}
           <div className="shrink-0 border-t border-border bg-background p-3">
             <div className="mx-auto max-w-4xl">
               <div className="rounded-[2rem] border border-border bg-card p-3 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">

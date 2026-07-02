@@ -1,0 +1,96 @@
+Next Orax parity task: add a compact active goal/plan progress strip above the Orax composer on both website and mobile.
+
+Goal:
+Orax should feel more like Codex when `/goal` or `/plan` is active. The command already persists backend state in `orax_tasks.result.activeGoal` and `orax_tasks.plan`. Now surface that state in the normal Orax thread UI.
+
+Scope:
+- Orax only.
+- Website Orax: `artifacts/mustaflow/src/pages/orax.tsx`
+- Mobile Orax: `artifacts/ora-mobile/app/(home)/orax.tsx`
+- Shared/mobile types if needed: `artifacts/ora-mobile/lib/types.ts`
+- Wiring guard: `artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts`
+- Do not touch Ora chat, public AI chat, AI Builder, projects, credits, or normal Ora history.
+
+Requirements:
+1. Read active Orax state from the selected task:
+   - `selectedTask.result.activeGoal`
+   - `selectedTask.plan`
+   - `selectedTask.result.currentCheckpoint`
+
+2. Add a small progress strip directly above the composer, not a dashboard panel.
+   It should show only when there is an active goal or active plan.
+
+3. Website strip should include:
+   - label like `Goal` or `Plan`
+   - one-line objective text
+   - optional next-step text from `currentCheckpoint.nextStep`
+   - compact action button:
+     - `Continue` if a task is selected
+     - `Clear` or `Done` only if there is a simple safe local way to hide/clear the UI state
+   - Keep it visually minimal and Codex-like.
+
+4. Mobile strip should mirror website:
+   - same active goal/plan state
+   - same compact copy
+   - same placement above mobile `OraxComposer`
+   - no separate Details/Workflow dashboard
+
+5. The strip must not show:
+   - approval counts
+   - artifact counts
+   - raw task IDs
+   - internal checkpoint dumps
+   - “Phase 4B”
+   - “ORAX task thread”
+   - PR/control dashboard language
+
+6. Add helper functions if useful:
+   - `getOraxActiveThreadState(selectedTask, currentCheckpoint)`
+   - `OraxActiveThreadStateStrip` for web
+   - `ActiveThreadStateStrip` for mobile
+
+7. If `/goal` is active:
+   - display the goal objective from `activeGoal.objective`
+   - if `activeGoal.status` exists, keep it subtle
+
+8. If `/plan` is active but no goal:
+   - display `plan.objective`
+   - show “Plan mode” as the label
+
+9. If both exist:
+   - prefer active goal as the main label
+   - optionally mention plan mode subtly
+
+10. Continue button behavior:
+   - Website: call existing `continueSelectedTask()`
+   - Mobile: call existing `continueCurrentTask()`
+   - Disable while continuing/loading
+
+11. Add wiring guards:
+   - web contains `OraxActiveThreadStateStrip`
+   - mobile contains `ActiveThreadStateStrip`
+   - web/mobile contain `activeGoal`
+   - web/mobile contain `Plan mode`
+   - web/mobile do NOT contain old dashboard phrases in the normal flow
+   - API route remains Orax-only and no Ora route usage is introduced
+
+Verification:
+Run:
+- `pnpm --filter @workspace/mustaflow run lint -- --max-warnings 0`
+- `pnpm --filter @workspace/mustaflow run typecheck`
+- `pnpm --filter @workspace/ora-mobile run typecheck`
+- `pnpm --filter @workspace/api-server run typecheck`
+- `cd artifacts/mustaflow && pnpm vitest run src/lib/__tests__/orax-wiring.test.ts`
+- If backend code changes, run API Orax test too.
+
+Also do a boundary scan:
+- Make sure this diff does not introduce:
+  - `public-ai`
+  - `useOraChat`
+  - `sendChat`
+  - `streamChatNative`
+  - `/api/projects`
+  - `/api/credits`
+
+Expected result:
+After user sends `/goal Build the dashboard` or `/plan`, Orax shows a compact state strip above the composer on website and mobile. It should feel like a lightweight Codex goal/progress indicator, not a workflow dashboard.

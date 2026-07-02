@@ -477,4 +477,29 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("WorkspaceDiffFileRow");
     expect(mobileOraxScreen).toContain("parseOraxUnifiedDiffFiles");
   });
+
+  it("shows compact active goal/plan strip above the composer on website and mobile", () => {
+    expect(oraxPage).toContain("OraxActiveThreadStateStrip");
+    expect(oraxPage).toContain("getOraxActiveThreadState");
+    expect(oraxPage).toContain("activeGoal");
+    expect(oraxPage).toContain('"Plan mode"');
+    expect(oraxPage).toContain("activeThreadState");
+    expect(oraxPage).toContain("continuing={continuingTask}");
+
+    expect(mobileOraxScreen).toContain("ActiveThreadStateStrip");
+    expect(mobileOraxScreen).toContain("getOraxActiveThreadState");
+    expect(mobileOraxScreen).toContain("activeGoal");
+    expect(mobileOraxScreen).toContain('"Plan mode"');
+    expect(mobileOraxScreen).toContain("activeThreadState");
+    expect(mobileOraxScreen).toContain('busyAction === "continue-task"');
+
+    expect(oraxPage).not.toContain("public-ai");
+    expect(oraxPage).not.toContain("useOraChat");
+    expect(oraxPage).not.toContain("sendChat");
+    expect(oraxPage).not.toContain("/api/projects");
+    expect(oraxPage).not.toContain("/api/credits");
+    expect(mobileOraxScreen).not.toContain("useOraChat");
+    expect(mobileOraxScreen).not.toContain("streamChatNative");
+    expect(mobileOraxScreen).not.toContain("/api/credits");
+  });
 });

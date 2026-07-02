@@ -306,6 +306,32 @@ async function readOraxMobileAttachment(asset: {
   };
 }
 
+type OraxActiveThreadState = {
+  label: string;
+  objective: string;
+  nextStep?: string;
+} | null;
+
+function getOraxActiveThreadState(
+  selectedTask: OraxTask | null,
+  latestCheckpoint: { nextStep?: string } | null,
+): OraxActiveThreadState {
+  const activeGoal = selectedTask?.result?.activeGoal as
+    | { objective?: string; status?: string }
+    | undefined;
+  const plan = selectedTask?.plan;
+  const goalObjective =
+    typeof activeGoal?.objective === "string" ? activeGoal.objective.trim() : "";
+  const planObjective =
+    typeof plan?.objective === "string" ? plan.objective.trim() : "";
+  if (!goalObjective && !planObjective) return null;
+  return {
+    label: goalObjective ? "Goal" : "Plan mode",
+    objective: goalObjective || planObjective,
+    nextStep: latestCheckpoint?.nextStep,
+  };
+}
+
 function mergeOraxTaskMessages(
   current: OraxTaskMessage[],
   incoming: OraxTaskMessage[],
@@ -1290,6 +1316,19 @@ export default function OraxScreen() {
                         ))}
                     </>
                   ) : null}
+                  {(() => {
+                    const activeThreadState = getOraxActiveThreadState(
+                      selectedTask,
+                      latestCheckpoint,
+                    );
+                    return activeThreadState ? (
+                      <ActiveThreadStateStrip
+                        state={activeThreadState}
+                        continuing={busyAction === "continue-task"}
+                        onContinue={() => void continueCurrentTask()}
+                      />
+                    ) : null;
+                  })()}
                   <OraxComposer
                     value={threadDraft}
                     onChangeText={setThreadDraft}
@@ -2121,6 +2160,80 @@ function WorkspaceChips({
         </View>
       </Pressable>
     </ScrollView>
+  );
+}
+
+function ActiveThreadStateStrip({
+  state,
+  continuing,
+  onContinue,
+}: {
+  state: NonNullable<OraxActiveThreadState>;
+  continuing: boolean;
+  onContinue: () => void;
+}) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: c.border,
+        backgroundColor: c.card,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+      }}
+    >
+      <View
+        style={{
+          backgroundColor: c.muted,
+          borderRadius: 99,
+          paddingHorizontal: 8,
+          paddingVertical: 2,
+        }}
+      >
+        <Text
+          style={{
+            color: c.mutedForeground,
+            fontSize: 10,
+            fontFamily: "Inter_600SemiBold",
+            textTransform: "uppercase",
+            letterSpacing: 0.8,
+          }}
+        >
+          {state.label}
+        </Text>
+      </View>
+      <Text
+        style={{ color: c.foreground, fontSize: 13, flex: 1 }}
+        numberOfLines={1}
+      >
+        {state.objective}
+      </Text>
+      <Pressable
+        onPress={onContinue}
+        disabled={continuing}
+        style={{
+          backgroundColor: c.muted,
+          borderRadius: 6,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          opacity: continuing ? 0.5 : 1,
+        }}
+      >
+        <Text
+          style={{
+            color: c.foreground,
+            fontSize: 12,
+            fontFamily: "Inter_500Medium",
+          }}
+        >
+          {continuing ? "Working…" : "Continue"}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
