@@ -919,8 +919,14 @@ export default function OraxPage() {
         authFetch("/api/orax/repositories"),
         authFetch("/api/orax/tasks"),
       ]);
-      if (!capRes.ok || !repoRes.ok || !taskRes.ok) {
-        throw new Error("Could not load ORAX workspace");
+      if (!capRes.ok) {
+        throw new Error("Could not load Orax connection settings");
+      }
+      if (!repoRes.ok) {
+        throw new Error("Could not load Orax repositories");
+      }
+      if (!taskRes.ok) {
+        throw new Error("Could not load Orax task history");
       }
       const capData = (await capRes.json()) as OraxCapabilities;
       const repoData = (await repoRes.json()) as { repositories: OraxRepository[] };
@@ -1158,8 +1164,13 @@ export default function OraxPage() {
         throw new Error(body.error ?? "Could not save repository");
       }
       const body = (await res.json()) as { repository: OraxRepository };
-      setRepositories((prev) => [body.repository, ...prev]);
-      setSelectedRepoId(body.repository.id);
+      let nextRepository = body.repository;
+      if (githubToken.trim()) {
+        nextRepository = await connectGithubRepository(body.repository.id, githubToken.trim());
+        setGithubToken("");
+      }
+      setRepositories((prev) => [nextRepository, ...prev]);
+      setSelectedRepoId(nextRepository.id);
       setRepositoryUrl("");
       setDefaultBranch("main");
     } catch (err) {
@@ -1169,26 +1180,28 @@ export default function OraxPage() {
     }
   }
 
+  async function connectGithubRepository(repositoryId: number, token: string) {
+    const res = await authFetch(`/api/orax/repositories/${repositoryId}/github/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? "Could not connect GitHub repository");
+    }
+    const body = (await res.json()) as { repository: OraxRepository };
+    return body.repository;
+  }
+
   async function _connectGithub() {
     if (!selectedRepository || !githubToken.trim() || connectingGithub) return;
     setConnectingGithub(true);
     setError(null);
     try {
-      const res = await authFetch(
-        `/api/orax/repositories/${selectedRepository.id}/github/connect`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: githubToken }),
-        },
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Could not connect GitHub repository");
-      }
-      const body = (await res.json()) as { repository: OraxRepository };
+      const repository = await connectGithubRepository(selectedRepository.id, githubToken.trim());
       setRepositories((prev) =>
-        prev.map((repo) => (repo.id === body.repository.id ? body.repository : repo)),
+        prev.map((repo) => (repo.id === repository.id ? repository : repo)),
       );
       setGithubToken("");
     } catch (err) {
@@ -1437,7 +1450,7 @@ export default function OraxPage() {
   function startNewThread() {
     activeTaskIdRef.current = null;
     setSelectedTaskId(null);
-    setMobileTaskOpen(true);
+    setMobileTaskOpen(Boolean(selectedRepository));
     setMobileComposeOpen(false);
     setApprovals([]);
     setArtifacts([]);
@@ -1450,6 +1463,9 @@ export default function OraxPage() {
     setComposerInputMode("text");
     setComposerSettingsOpen(false);
     setPrompt("");
+    if (!selectedRepository) {
+      setError(null);
+    }
   }
 
   async function sendTaskMessage() {
@@ -1457,6 +1473,11 @@ export default function OraxPage() {
     const content = taskMessageDraft.trim() || "Review the attached Orax context.";
     if (!taskMessageDraft.trim() && composerAttachments.length === 0) return;
     const metadata = buildComposerMetadata();
+    if (!selectedTask && !selectedRepository) {
+      setError("Connect a GitHub repository before starting an Orax chat.");
+      setMobileTaskOpen(false);
+      return;
+    }
     if (!selectedTask) {
       await createTask({
         startThread: true,
@@ -1800,6 +1821,68 @@ export default function OraxPage() {
     ? (repositories.find((repo) => repo.id === selectedTask.repositoryId) ?? selectedRepository)
     : selectedRepository;
 
+  function renderRepositoryConnectionPanel(compact = false) {
+    return (
+      <section
+        className={cn(
+          "rounded-3xl border border-border bg-card p-4 shadow-sm",
+          compact ? "space-y-3" : "mx-auto max-w-xl space-y-4",
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted">
+            <GitBranch className="h-5 w-5 text-foreground" />
+          </div>
+          <div className="min-w-0">
+            <div className="font-semibold">Connect GitHub repository</div>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
+              Orax needs a repository before it can inspect files, run checks, or prepare code
+              changes.
+            </p>
+          </div>
+        </div>
+        <input
+          value={repositoryUrl}
+          onChange={(event) => setRepositoryUrl(event.target.value)}
+          placeholder="https://github.com/owner/repo"
+          className="h-11 w-full rounded-2xl border border-input bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+        />
+        <div className={cn("grid gap-2", compact ? "grid-cols-1" : "sm:grid-cols-[1fr_1.6fr]")}>
+          <input
+            value={defaultBranch}
+            onChange={(event) => setDefaultBranch(event.target.value)}
+            placeholder="main"
+            className="h-11 min-w-0 rounded-2xl border border-input bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          <input
+            type="password"
+            value={githubToken}
+            onChange={(event) => setGithubToken(event.target.value)}
+            placeholder="GitHub token for private repos (optional)"
+            className="h-11 min-w-0 rounded-2xl border border-input bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => void addRepository()}
+          disabled={submittingRepo || !repositoryUrl.trim()}
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submittingRepo ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <GitBranch className="h-4 w-4" />
+          )}
+          Connect repository
+        </button>
+        <p className="text-xs leading-5 text-muted-foreground">
+          Public GitHub repositories can be scanned from the URL. Private repositories need a token
+          with read access; Orax keeps repository work separate from Ora chat.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
       <header className="flex h-20 shrink-0 items-center justify-between bg-background px-5 lg:hidden">
@@ -1898,7 +1981,7 @@ export default function OraxPage() {
                   <span className="truncate">
                     {selectedRepository
                       ? `${selectedRepository.owner}/${selectedRepository.name}`
-                      : "Task history"}
+                      : "Connect a repository"}
                   </span>
                 </div>
               </div>
@@ -1915,47 +1998,102 @@ export default function OraxPage() {
           </div>
 
           <div className="flex-1 px-5 pb-28 lg:min-h-0 lg:overflow-y-auto lg:p-2">
-            {visibleTasks.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
-                No tasks yet. Start a chat to create an Orax thread.
-              </div>
+            {!selectedRepository ? (
+              renderRepositoryConnectionPanel(true)
             ) : (
-              <div className="space-y-5 lg:space-y-1.5">
-                {visibleTasks.map((task) => {
-                  const repo = repositories.find((item) => item.id === task.repositoryId);
-                  const active = task.id === selectedTask?.id;
-                  return (
-                    <button
-                      key={task.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedTaskId(task.id);
-                        setSelectedRepoId(task.repositoryId);
-                        setMobileTaskOpen(true);
-                      }}
-                      className={cn(
-                        "w-full text-left transition-colors lg:rounded-md lg:border lg:px-3 lg:py-2",
-                        active
-                          ? "lg:border-primary lg:bg-background lg:shadow-sm"
-                          : "lg:border-transparent lg:hover:border-border lg:hover:bg-background",
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-lg font-normal lg:text-sm lg:font-medium">
-                            {task.title || task.prompt || `Task #${task.id}`}
-                          </div>
-                          <div className="mt-1 hidden truncate text-xs text-muted-foreground lg:block">
-                            {repo ? `${repo.owner}/${repo.name}` : "repository"} - {task.status}
-                          </div>
-                        </div>
-                        <span className="hidden rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground lg:inline-flex">
-                          {task.kind}
-                        </span>
+              <div className="space-y-5 lg:space-y-2">
+                {selectedRepository.connectionStatus !== "read_only" ? (
+                  <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold">GitHub access</div>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          Add a token for private repositories, or scan now if this repository is
+                          public.
+                        </p>
                       </div>
-                    </button>
-                  );
-                })}
+                    </div>
+                    <input
+                      type="password"
+                      value={githubToken}
+                      onChange={(event) => setGithubToken(event.target.value)}
+                      placeholder="Optional read token"
+                      className="mt-3 h-10 w-full rounded-2xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void _connectGithub()}
+                        disabled={connectingGithub || !githubToken.trim()}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-foreground px-3 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {connectingGithub ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                        Connect
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void scanRepository()}
+                        disabled={scanningRepository}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {scanningRepository ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        Scan
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {visibleTasks.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
+                    No tasks yet. Start a chat to create an Orax thread.
+                  </div>
+                ) : (
+                  <div className="space-y-5 lg:space-y-1.5">
+                    {visibleTasks.map((task) => {
+                      const repo = repositories.find((item) => item.id === task.repositoryId);
+                      const active = task.id === selectedTask?.id;
+                      return (
+                        <button
+                          key={task.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedTaskId(task.id);
+                            setSelectedRepoId(task.repositoryId);
+                            setMobileTaskOpen(true);
+                          }}
+                          className={cn(
+                            "w-full text-left transition-colors lg:rounded-md lg:border lg:px-3 lg:py-2",
+                            active
+                              ? "lg:border-primary lg:bg-background lg:shadow-sm"
+                              : "lg:border-transparent lg:hover:border-border lg:hover:bg-background",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-lg font-normal lg:text-sm lg:font-medium">
+                                {task.title || task.prompt || `Task #${task.id}`}
+                              </div>
+                              <div className="mt-1 hidden truncate text-xs text-muted-foreground lg:block">
+                                {repo ? `${repo.owner}/${repo.name}` : "repository"} - {task.status}
+                              </div>
+                            </div>
+                            <span className="hidden rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground lg:inline-flex">
+                              {task.kind}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
             <div className="mt-12 space-y-5 lg:hidden">
@@ -1971,7 +2109,7 @@ export default function OraxPage() {
                 }}
                 className="block max-w-full truncate text-left text-lg text-foreground"
               >
-                {chatPreview}
+                {selectedRepository ? chatPreview : "Connect GitHub repository"}
               </button>
             </div>
           </div>
@@ -2020,11 +2158,15 @@ export default function OraxPage() {
             </label>
             <button
               type="button"
-              onClick={startNewThread}
+              onClick={selectedRepository ? startNewThread : () => setMobileTaskOpen(false)}
               className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-foreground px-5 text-base font-semibold text-background"
             >
-              <PenLine className="h-5 w-5" />
-              Chat
+              {selectedRepository ? (
+                <PenLine className="h-5 w-5" />
+              ) : (
+                <GitBranch className="h-5 w-5" />
+              )}
+              {selectedRepository ? "Chat" : "Connect"}
             </button>
           </div>
         </aside>
@@ -2056,7 +2198,11 @@ export default function OraxPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 lg:px-4">
-            {!selectedTask ? (
+            {!selectedRepository ? (
+              <div className="flex h-full items-center justify-center py-10">
+                {renderRepositoryConnectionPanel(false)}
+              </div>
+            ) : !selectedTask ? (
               <div className="h-full" aria-label="New Orax chat" />
             ) : visibleTaskMessages.length === 0 ? (
               <div className="h-full" aria-label="Empty Orax thread" />

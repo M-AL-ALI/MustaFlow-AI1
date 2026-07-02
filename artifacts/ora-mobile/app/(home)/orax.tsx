@@ -586,12 +586,21 @@ export default function OraxScreen() {
     if (!repoUrl.trim()) return;
     await runAction("add-repo", async () => {
       const created = await addRepository(repoUrl.trim(), repoBranch.trim() || "main");
-      setSelectedRepoId(created.repository.id);
+      let nextRepository = created.repository;
+      if (githubToken.trim()) {
+        const connected = await connectRepositoryGithubToken(
+          created.repository.id,
+          githubToken.trim(),
+        );
+        nextRepository = connected.repository;
+        setGithubToken("");
+      }
+      setSelectedRepoId(nextRepository.id);
       setRepoUrl("");
       setRepoBranch("main");
       setShowDetails(false);
     });
-  }, [repoBranch, repoUrl, runAction]);
+  }, [githubToken, repoBranch, repoUrl, runAction]);
 
   const connectGithub = useCallback(async () => {
     if (!selectedRepo || !githubToken.trim()) return;
@@ -641,6 +650,16 @@ export default function OraxScreen() {
   );
 
   const startNewThread = useCallback(() => {
+    if (!selectedRepo) {
+      clearTaskScopedState();
+      activeTaskIdRef.current = null;
+      setSelectedTaskId(null);
+      setThreadOpen(false);
+      setHomeComposeOpen(false);
+      setShowDetails(false);
+      setError(null);
+      return;
+    }
     clearTaskScopedState();
     activeTaskIdRef.current = null;
     setSelectedTaskId(null);
@@ -649,7 +668,7 @@ export default function OraxScreen() {
     setThreadOpen(true);
     setHomeComposeOpen(false);
     setShowDetails(false);
-  }, [clearTaskScopedState]);
+  }, [clearTaskScopedState, selectedRepo]);
 
   const buildComposerMetadata = useCallback(
     (inputMode: "text" | "voice" = composerInputMode): OraxComposerMetadata => ({
@@ -756,7 +775,8 @@ export default function OraxScreen() {
     if (!selectedTask) {
       const repoId = selectedRepo?.id;
       if (!repoId) {
-        setError("Connect a repository before starting an Orax thread.");
+        setError("Connect a GitHub repository before starting an Orax chat.");
+        setThreadOpen(false);
         return;
       }
       await runAction("create-task", async () => {
@@ -984,16 +1004,99 @@ export default function OraxScreen() {
                           fontSize: 18,
                         }}
                       >
-                        {selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "Orax"}
+                        {selectedRepo
+                          ? `${selectedRepo.owner}/${selectedRepo.name}`
+                          : "Connect a repository"}
                       </Text>
                     </View>
-                    <Pressable onPress={startNewThread} hitSlop={10}>
-                      <Plus size={20} color={c.mutedForeground} />
+                    <Pressable
+                      onPress={selectedRepo ? startNewThread : () => setThreadOpen(false)}
+                      hitSlop={10}
+                    >
+                      {selectedRepo ? (
+                        <Plus size={20} color={c.mutedForeground} />
+                      ) : (
+                        <GitBranch size={20} color={c.mutedForeground} />
+                      )}
                     </Pressable>
                   </View>
 
                   <View style={{ gap: 22 }}>
-                    {visibleTasks.length === 0 ? (
+                    {!selectedRepo ? (
+                      <Card style={{ gap: 12, borderStyle: "dashed" }}>
+                        <SectionTitle title="Connect GitHub repository" icon={GitBranch} />
+                        <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+                          Orax needs a repository before it can inspect files, run checks, or
+                          prepare code changes.
+                        </Text>
+                        <TextField
+                          label="Repository URL"
+                          placeholder="https://github.com/owner/repo"
+                          autoCapitalize="none"
+                          value={repoUrl}
+                          onChangeText={setRepoUrl}
+                        />
+                        <TextField
+                          label="Branch"
+                          placeholder="main"
+                          autoCapitalize="none"
+                          value={repoBranch}
+                          onChangeText={setRepoBranch}
+                        />
+                        <TextField
+                          label="GitHub token"
+                          placeholder="Optional for private repositories"
+                          autoCapitalize="none"
+                          value={githubToken}
+                          onChangeText={setGithubToken}
+                        />
+                        <Button
+                          label="Connect repository"
+                          icon={GitBranch}
+                          onPress={submitRepository}
+                          loading={busyAction === "add-repo"}
+                          disabled={!repoUrl.trim()}
+                          full
+                        />
+                        <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
+                          Public GitHub repositories can be scanned from the URL. Private
+                          repositories need a token with read access.
+                        </Text>
+                      </Card>
+                    ) : selectedRepo.connectionStatus !== "read_only" ? (
+                      <Card style={{ gap: 12 }}>
+                        <SectionTitle title="GitHub access" icon={ShieldCheck} />
+                        <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
+                          Add a token for private repositories, or scan now if this repository is
+                          public.
+                        </Text>
+                        <TextField
+                          label="GitHub token"
+                          placeholder="Optional read token"
+                          autoCapitalize="none"
+                          value={githubToken}
+                          onChangeText={setGithubToken}
+                        />
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <Button
+                            label="Connect"
+                            icon={ShieldCheck}
+                            onPress={connectGithub}
+                            loading={busyAction === "connect-github"}
+                            disabled={!githubToken.trim()}
+                            style={{ flex: 1 }}
+                          />
+                          <Button
+                            label="Scan"
+                            icon={RefreshCw}
+                            variant="secondary"
+                            onPress={submitScan}
+                            loading={busyAction === "scan-repo"}
+                            style={{ flex: 1 }}
+                          />
+                        </View>
+                      </Card>
+                    ) : visibleTasks.length === 0 ? (
                       <Text style={{ color: c.mutedForeground, fontSize: 16 }}>
                         No tasks yet. Tap Chat to start an Orax task.
                       </Text>
@@ -1031,7 +1134,7 @@ export default function OraxScreen() {
                       }}
                     >
                       <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 18 }}>
-                        {chatPreview}
+                        {selectedRepo ? chatPreview : "Connect GitHub repository"}
                       </Text>
                     </Pressable>
                   </View>
@@ -1069,7 +1172,11 @@ export default function OraxScreen() {
                       style={{ flex: 1, color: c.foreground, fontSize: 16 }}
                     />
                   </View>
-                  <Button label="Chat" icon={MessageSquare} onPress={startNewThread} />
+                  <Button
+                    label={selectedRepo ? "Chat" : "Connect"}
+                    icon={selectedRepo ? MessageSquare : GitBranch}
+                    onPress={startNewThread}
+                  />
                 </View>
               </>
             ) : (
