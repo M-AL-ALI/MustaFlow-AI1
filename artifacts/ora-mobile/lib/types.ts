@@ -827,6 +827,16 @@ export interface OraxTaskRunnerResult {
   sessionArtifactId?: number;
   approval?: OraxTaskApproval;
   artifact?: OraxTaskArtifact;
+  approvals?: OraxTaskApproval[];
+  artifacts?: OraxTaskArtifact[];
+  runnerResults?: Array<{
+    status: "continued" | "waiting" | "blocked";
+    action: string;
+    message: string;
+    approvalId?: number;
+    artifactId?: number;
+    sessionArtifactId?: number;
+  }>;
 }
 
 export type OraxSandboxResult = OraxApprovalWithArtifact;

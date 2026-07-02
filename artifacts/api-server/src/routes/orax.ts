@@ -262,6 +262,16 @@ type OraxTaskRunnerResult = {
   sessionArtifactId?: number;
   approval?: OraxTaskApproval;
   artifact?: OraxTaskArtifact;
+  approvals?: OraxTaskApproval[];
+  artifacts?: OraxTaskArtifact[];
+  runnerResults?: Array<{
+    status: "continued" | "waiting" | "blocked";
+    action: string;
+    message: string;
+    approvalId?: number;
+    artifactId?: number;
+    sessionArtifactId?: number;
+  }>;
 };
 
 type OraxExecutionStepStatus = "running" | "completed" | "waiting" | "blocked" | "failed";
@@ -692,25 +702,6 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       return;
     }
 
-    const approvals = await db
-      .select()
-      .from(oraxTaskApprovalsTable)
-      .where(
-        and(eq(oraxTaskApprovalsTable.userId, userId), eq(oraxTaskApprovalsTable.taskId, taskId)),
-      )
-      .orderBy(desc(oraxTaskApprovalsTable.createdAt));
-    const artifacts = await db
-      .select()
-      .from(oraxTaskArtifactsTable)
-      .where(
-        and(
-          eq(oraxTaskArtifactsTable.userId, userId),
-          eq(oraxTaskArtifactsTable.taskId, taskId),
-          isNull(oraxTaskArtifactsTable.archivedAt),
-        ),
-      )
-      .orderBy(desc(oraxTaskArtifactsTable.createdAt));
-
     const composerMetadata = parsed.data.metadata?.composer
       ? {
           ...parsed.data.metadata.composer,
@@ -760,18 +751,31 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       })
       .returning();
 
+    const shouldAutoRun = shouldAutoRunOraxTaskFromMessage(
+      parsed.data.content,
+      composerMetadata?.attachments,
+    );
+    const runnerResult = shouldAutoRun
+      ? await continueOraxTaskRunnerUntilStop({ userId, task })
+      : undefined;
+    const latestTask = (await loadOwnedTask(userId, task.id)) ?? task;
+    const latestState = await loadOraxTaskRunnerState(userId, task.id);
     const actionSuggestions = buildOraxTaskActionSuggestions({
-      task,
-      approvals,
-      artifacts,
+      task: latestTask,
+      approvals: latestState.approvals,
+      artifacts: latestState.artifacts,
       userMessage: effectiveUserMessage,
       attachmentAnalysis,
     });
-    const checkpoint = buildOraxCheckpointSummary({ task, approvals, artifacts });
+    const checkpoint = buildOraxCheckpointSummary({
+      task: latestTask,
+      approvals: latestState.approvals,
+      artifacts: latestState.artifacts,
+    });
     const assistantContent = buildOraxTaskThreadReply({
-      task,
-      approvals,
-      artifacts,
+      task: latestTask,
+      approvals: latestState.approvals,
+      artifacts: latestState.artifacts,
       actionSuggestions,
       checkpoint,
       userMessage: effectiveUserMessage,
@@ -789,15 +793,25 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
         metadata: {
           source: "orax-task-thread",
           mode: "status_discussion",
-          taskStatus: task.status,
-          approvalCount: approvals.length,
-          artifactCount: artifacts.length,
+          taskStatus: latestTask.status,
+          approvalCount: latestState.approvals.length,
+          artifactCount: latestState.artifacts.length,
           checkpoint,
           composer: composerMetadata ?? null,
           attachmentContext: userMessageContext,
           attachmentAnalysis,
           resumeMode: isOraxResumeQuestion(effectiveUserMessage),
           actionSuggestions,
+          runnerAutoStarted: shouldAutoRun,
+          runnerResult: runnerResult
+            ? {
+                status: runnerResult.status,
+                action: runnerResult.action,
+                approvalId: runnerResult.approvalId,
+                artifactId: runnerResult.artifactId,
+                runnerResults: runnerResult.runnerResults,
+              }
+            : null,
         },
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -808,14 +822,14 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
       .update(oraxTasksTable)
       .set({
         result: {
-          ...asRecord(task.result),
+          ...asRecord(latestTask.result),
           currentCheckpoint: checkpoint,
         },
         updatedAt: new Date(),
       })
       .where(eq(oraxTasksTable.id, task.id));
 
-    res.status(201).json({ messages: [message, assistantMessage] });
+    res.status(201).json({ messages: [message, assistantMessage], runnerResult });
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to append ORAX task message");
     res.status(500).json({ error: "Failed to save ORAX task message" });
@@ -1358,7 +1372,7 @@ router.post("/orax/tasks/:id/continue", async (req, res) => {
       return;
     }
 
-    const result = await continueOraxTaskRunner({ userId, task });
+    const result = await continueOraxTaskRunnerUntilStop({ userId, task });
     res.json(result);
   } catch (err) {
     logger.error({ component: "orax", err, taskId }, "Failed to continue ORAX task");
@@ -2335,8 +2349,7 @@ router.post("/orax/tasks", async (req, res) => {
         prompt: parsed.data.prompt,
         plan,
         result: {
-          message:
-            "ORAX Phase 1 created a safe coding-agent plan. File writes, terminal execution, and Git pushes are locked until the approval-gated execution layer is implemented.",
+          message: "Orax created the task and is ready to work in the thread.",
         },
         approvalRequired: "write_and_push",
       })
@@ -2879,6 +2892,74 @@ async function continueOraxTaskRunner(input: {
   });
 }
 
+const ORAX_RUNNER_AUTOPILOT_MAX_STEPS = 6;
+
+async function continueOraxTaskRunnerUntilStop(input: {
+  userId: string;
+  task: OraxTask;
+}): Promise<OraxTaskRunnerResult> {
+  const results: OraxTaskRunnerResult[] = [];
+  let task: OraxTask | undefined = input.task;
+
+  for (let step = 0; step < ORAX_RUNNER_AUTOPILOT_MAX_STEPS; step += 1) {
+    if (step > 0) {
+      task = await loadOwnedTask(input.userId, input.task.id);
+    }
+    if (!task) {
+      const blocked: OraxTaskRunnerResult = {
+        status: "blocked",
+        action: "blocked",
+        message: "I could not find this Orax task.",
+      };
+      return withOraxRunnerBatchResult(blocked, [...results, blocked]);
+    }
+
+    const result = await continueOraxTaskRunner({ userId: input.userId, task });
+    results.push(result);
+    if (result.status !== "continued") {
+      return withOraxRunnerBatchResult(result, results);
+    }
+  }
+
+  const finalResult: OraxTaskRunnerResult = results[results.length - 1] ?? {
+    status: "blocked",
+    action: "blocked",
+    message: "Orax could not find the next step.",
+  };
+  return withOraxRunnerBatchResult(finalResult, results);
+}
+
+function withOraxRunnerBatchResult(
+  result: OraxTaskRunnerResult,
+  results: OraxTaskRunnerResult[],
+): OraxTaskRunnerResult {
+  const approvals = uniqueOraxRunnerItems(
+    results.flatMap((item) => (item.approval ? [item.approval] : (item.approvals ?? []))),
+  );
+  const artifacts = uniqueOraxRunnerItems(
+    results.flatMap((item) => (item.artifact ? [item.artifact] : (item.artifacts ?? []))),
+  );
+  return {
+    ...result,
+    approvals,
+    artifacts,
+    runnerResults: results.map((item) => ({
+      status: item.status,
+      action: item.action,
+      message: item.message,
+      approvalId: item.approvalId,
+      artifactId: item.artifactId,
+      sessionArtifactId: item.sessionArtifactId,
+    })),
+  };
+}
+
+function uniqueOraxRunnerItems<T extends { id: number }>(items: T[]): T[] {
+  const byId = new Map<number, T>();
+  for (const item of items) byId.set(item.id, item);
+  return Array.from(byId.values());
+}
+
 async function loadOraxTaskRunnerState(userId: string, taskId: number) {
   const [approvals, artifacts, messages] = await Promise.all([
     db
@@ -3229,8 +3310,8 @@ async function runOraxRunnerApprovedFileRead(input: {
     task: input.task,
     session: input.session,
     action: "run_approved_read",
-    label: "Read approved files",
-    message: "Reading approved repository files...",
+    label: "Inspect files",
+    message: "Inspecting the approved files...",
     approvalId: input.approval.id,
   });
 
@@ -3291,8 +3372,8 @@ async function runOraxRunnerApprovedFileRead(input: {
         ...asRecord(input.task.result),
         fileRead: auditResult,
         message: readResult.files.length
-          ? "ORAX read the approved files. The next continue step can draft the change."
-          : "ORAX could not read the approved files.",
+          ? "ORAX inspected the approved files and can make the change next."
+          : "ORAX could not inspect the approved files.",
       },
       updatedAt: new Date(),
       completedAt: readResult.files.length ? new Date() : null,
@@ -3306,8 +3387,8 @@ async function runOraxRunnerApprovedFileRead(input: {
     status: readResult.files.length ? "continued" : "blocked",
     action: "run_approved_read",
     message: readResult.files.length
-      ? `Approved file read completed: ${readResult.files.length} file${readResult.files.length === 1 ? "" : "s"} read.`
-      : "Approved file read completed with no readable files.",
+      ? `Inspected ${readResult.files.length} file${readResult.files.length === 1 ? "" : "s"}.`
+      : "No readable files were found.",
     approvalId: updatedApproval.id,
     approval: updatedApproval,
   });
@@ -3325,8 +3406,8 @@ async function generateOraxRunnerDraftPatch(input: {
     task: input.task,
     session: input.session,
     action: "draft_patch",
-    label: "Draft change",
-    message: "Drafting the code change from approved files...",
+    label: "Make changes",
+    message: "Preparing the change from the inspected files...",
     approvalId: input.approval.id,
   });
 
@@ -5677,6 +5758,31 @@ function isOraxResumeQuestion(message: string): boolean {
     "status",
     "checkpoint",
   ].some((phrase) => normalized.includes(phrase));
+}
+
+function shouldAutoRunOraxTaskFromMessage(
+  message: string,
+  attachments?: OraxComposerAttachmentInput[],
+): boolean {
+  if (attachments?.some((attachment) => attachment.ingestionStatus === "ready")) return true;
+  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (/^(hi|hello|hey|yo|test)[!. ]*$/.test(normalized)) return false;
+  if (
+    /\b(go ahead|continue|do it|start|run|fix|review|inspect|build|add|create|change|update|test|debug|check)\b/.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(what happened|what is next|what's next|next step|what should|where are we|where we at|status|checkpoint|catch me up)\b/.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  return normalized.length >= 8;
 }
 
 function buildOraxCheckpointResumeReply(checkpoint: OraxCheckpointSummary): string {

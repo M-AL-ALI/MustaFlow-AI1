@@ -535,6 +535,12 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain('event: "pr_created"');
     expect(routeSource).toContain('event: "pr_failed"');
     expect(routeSource).toContain('router.post("/orax/tasks/:id/continue"');
+    expect(routeSource).toContain("continueOraxTaskRunnerUntilStop");
+    expect(routeSource).toContain("ORAX_RUNNER_AUTOPILOT_MAX_STEPS");
+    expect(routeSource).toContain("shouldAutoRunOraxTaskFromMessage");
+    expect(routeSource).toContain("runnerResult");
+    expect(routeSource).toContain("runnerResults");
+    expect(routeSource).toContain("runnerAutoStarted");
     expect(routeSource).toContain("continueOraxTaskRunner");
     expect(routeSource).toContain("runner_continue");
     expect(routeSource).toContain('type: "execution_session"');
@@ -560,7 +566,7 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).toContain("retryOfArtifactId");
     expect(routeSource).toContain("failureSummary");
     expect(routeSource).toContain("Orax started an execution session");
-    expect(routeSource).toContain("Reading approved repository files...");
+    expect(routeSource).toContain("Inspecting the approved files...");
     expect(routeSource).toContain(
       "Running approved controlled checks in the isolated workspace...",
     );

@@ -325,6 +325,16 @@ type OraxTaskRunnerResult = {
   sessionArtifactId?: number;
   approval?: OraxApproval;
   artifact?: OraxArtifact;
+  approvals?: OraxApproval[];
+  artifacts?: OraxArtifact[];
+  runnerResults?: Array<{
+    status: "continued" | "waiting" | "blocked";
+    action: string;
+    message: string;
+    approvalId?: number;
+    artifactId?: number;
+    sessionArtifactId?: number;
+  }>;
 };
 
 type OraxFailureInfo = {
@@ -1235,6 +1245,32 @@ export default function OraxPage() {
     recognition.start();
   }
 
+  function mergeRunnerResultCollections(result?: OraxTaskRunnerResult) {
+    if (!result) return;
+    const nextApprovals = [
+      ...(result.approvals ?? []),
+      ...(result.approval ? [result.approval] : []),
+    ];
+    if (nextApprovals.length) {
+      setApprovals((prev) => {
+        const byId = new Map(prev.map((approval) => [approval.id, approval]));
+        for (const approval of nextApprovals) byId.set(approval.id, approval);
+        return Array.from(byId.values()).sort((a, b) => b.id - a.id);
+      });
+    }
+    const nextArtifacts = [
+      ...(result.artifacts ?? []),
+      ...(result.artifact ? [result.artifact] : []),
+    ];
+    if (nextArtifacts.length) {
+      setArtifacts((prev) => {
+        const byId = new Map(prev.map((artifact) => [artifact.id, artifact]));
+        for (const artifact of nextArtifacts) byId.set(artifact.id, artifact);
+        return Array.from(byId.values()).sort((a, b) => b.id - a.id);
+      });
+    }
+  }
+
   async function appendTaskMessage(
     taskId: number,
     content: string,
@@ -1254,7 +1290,11 @@ export default function OraxPage() {
         normalizeOraxUiError(new Error(body.error ?? ""), "Could not save task message"),
       );
     }
-    const body = (await res.json()) as { messages: OraxTaskMessage[] };
+    const body = (await res.json()) as {
+      messages: OraxTaskMessage[];
+      runnerResult?: OraxTaskRunnerResult;
+    };
+    mergeRunnerResultCollections(body.runnerResult);
     return body.messages;
   }
 
@@ -1674,18 +1714,7 @@ export default function OraxPage() {
         throw new Error(body.error ?? "Could not continue Orax task");
       }
       const body = (await res.json()) as OraxTaskRunnerResult;
-      if (body.approval) {
-        setApprovals((prev) => [
-          body.approval!,
-          ...prev.filter((approval) => approval.id !== body.approval!.id),
-        ]);
-      }
-      if (body.artifact) {
-        setArtifacts((prev) => [
-          body.artifact!,
-          ...prev.filter((artifact) => artifact.id !== body.artifact!.id),
-        ]);
-      }
+      mergeRunnerResultCollections(body);
       setPendingSuggestionConfirmation(null);
       setSuggestionPrConfirmationText("");
       void load();

@@ -170,6 +170,10 @@ Builder routing, public AI chat routes, credits routes, or project chat routes.
   the UI. Approving an inline approval is the confirmation point; after approval,
   the same runner should execute the approved step and write progress back into
   the task thread.
+- A normal task chat turn should auto-start the bounded Orax runner and keep
+  advancing until it reaches a real stop point: pending approval, PR
+  confirmation, blocker, completion, or the max-step guard. Tiny greetings and
+  status-only questions should remain conversational.
 
 ## Quality Gate
 
