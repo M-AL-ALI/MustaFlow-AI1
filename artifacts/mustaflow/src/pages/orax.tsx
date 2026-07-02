@@ -172,6 +172,11 @@ type OraxTaskActionSuggestion = {
 type OraxComposerReasoning = "low" | "medium" | "high" | "extra_high";
 type OraxComposerPermissionMode = "ask" | "auto" | "read_only";
 
+type OraxRunnerActivity = {
+  label: string;
+  status: "running" | "completed" | "waiting" | "failed" | "blocked";
+};
+
 type OraxComposerAttachment = {
   id: string;
   name: string;
@@ -646,6 +651,66 @@ function formatOraxVisibleThreadContent(message: OraxTaskMessage): string {
       .replace(/^Controlled checks failed:/i, "Checks failed:");
   }
   return message.content;
+}
+
+function getOraxRunnerActivity(message: OraxTaskMessage): OraxRunnerActivity | null {
+  const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
+  if (event !== "runner_continue") return null;
+  const action =
+    typeof message.metadata?.runnerAction === "string" ? message.metadata.runnerAction : "";
+  const executionStep = message.metadata?.executionStep;
+  const rawStatus =
+    typeof executionStep?.status === "string"
+      ? executionStep.status
+      : typeof message.metadata?.runnerStatus === "string"
+        ? message.metadata.runnerStatus
+        : "";
+  const content = message.content.toLowerCase();
+  const status: OraxRunnerActivity["status"] =
+    /failed|error/.test(content) || rawStatus === "failed"
+      ? "failed"
+      : rawStatus === "blocked"
+        ? "blocked"
+        : rawStatus === "waiting"
+          ? "waiting"
+          : rawStatus === "running"
+            ? "running"
+            : "completed";
+  return {
+    label: formatOraxRunnerActivityLabel(action, content, status),
+    status,
+  };
+}
+
+function formatOraxRunnerActivityLabel(
+  action: string,
+  content: string,
+  status: OraxRunnerActivity["status"],
+): string {
+  if (status === "failed" && content.includes("sandbox")) return "Change check failed";
+  if (status === "failed" && content.includes("check")) return "Checks failed";
+  if (status === "blocked") return "Needs attention";
+  switch (action) {
+    case "run_approved_read":
+    case "request_read_approval":
+      return "Inspected files";
+    case "draft_patch":
+    case "create_workspace_change_set":
+      return "Prepared changes";
+    case "run_approved_sandbox":
+    case "request_sandbox_approval":
+      return "Checked changes";
+    case "run_approved_checks":
+    case "request_command_approval":
+      return "Ran checks";
+    case "retry_failed_patch":
+      return "Prepared a fix";
+    case "run_approved_pr":
+    case "request_pr_approval":
+      return "Prepared pull request";
+    default:
+      return status === "running" ? "Working" : "Updated task";
+  }
 }
 
 function normalizeOraxUiError(error: unknown, fallback: string): string {
@@ -1999,6 +2064,7 @@ export default function OraxPage() {
               <div className="mx-auto flex max-w-4xl flex-col gap-3">
                 {visibleTaskMessages.map((message) => {
                   const isUser = message.role === "user";
+                  const runnerActivity = getOraxRunnerActivity(message);
                   const messageAttachments = getMessageComposerAttachments(message);
                   const suggestions =
                     message.role === "assistant" &&
@@ -2022,9 +2088,13 @@ export default function OraxPage() {
                           ? ` - ${new Date(message.createdAt).toLocaleString()}`
                           : ""}
                       </div>
-                      <div className="whitespace-pre-wrap leading-relaxed">
-                        {formatOraxVisibleThreadContent(message)}
-                      </div>
+                      {runnerActivity ? (
+                        <OraxRunnerActivityRow activity={runnerActivity} />
+                      ) : (
+                        <div className="whitespace-pre-wrap leading-relaxed">
+                          {formatOraxVisibleThreadContent(message)}
+                        </div>
+                      )}
                       {messageAttachments.length ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {messageAttachments.map((attachment) => (
@@ -2095,7 +2165,10 @@ export default function OraxPage() {
                     </div>
                   </section>
                 ) : null}
-                {selectedTask && !primaryThreadSuggestion && !pendingSuggestionConfirmation ? (
+                {selectedTask &&
+                !primaryThreadSuggestion &&
+                !pendingSuggestionConfirmation &&
+                pendingApprovals.length === 0 ? (
                   <div className="flex justify-start">
                     <button
                       type="button"
@@ -2119,15 +2192,22 @@ export default function OraxPage() {
                   .map((approval) => (
                     <section
                       key={approval.id}
-                      className="rounded-md border border-border bg-card px-4 py-3 text-sm"
+                      className="max-w-xl rounded-3xl border border-border bg-card px-4 py-3 text-sm shadow-sm"
                     >
-                      <div className="text-[11px] font-semibold uppercase text-muted-foreground">
-                        Approval
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium">
+                            {formatOraxApprovalAction(approval.action)}
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {approval.status === "pending"
+                              ? "Waiting for your approval"
+                              : "Ready to continue"}
+                          </p>
+                        </div>
+                        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                       </div>
-                      <div className="mt-1 font-medium">
-                        {formatOraxApprovalAction(approval.action)}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <p className="mt-2 text-sm text-muted-foreground">
                         {describeOraxApprovalLifecycle(approval)}
                       </p>
                       {approval.status === "pending" ? (
@@ -2621,6 +2701,30 @@ export default function OraxPage() {
   );
 }
 
+function OraxRunnerActivityRow({ activity }: { activity: OraxRunnerActivity }) {
+  const isRunning = activity.status === "running" || activity.status === "waiting";
+  const isProblem = activity.status === "failed" || activity.status === "blocked";
+  return (
+    <div
+      className={cn(
+        "inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-sm",
+        isProblem
+          ? "border-destructive/30 bg-destructive/10 text-destructive"
+          : "border-border bg-muted/60 text-muted-foreground",
+      )}
+    >
+      {isRunning ? (
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+      ) : isProblem ? (
+        <ShieldAlert className="h-4 w-4 shrink-0" />
+      ) : (
+        <Check className="h-4 w-4 shrink-0" />
+      )}
+      <span className="truncate font-medium">{activity.label}</span>
+    </div>
+  );
+}
+
 function formatOraxApprovalAction(action: string): string {
   switch (action) {
     case "read_files":
@@ -2657,27 +2761,27 @@ function formatOraxArtifactLifecycleLabel(type: string): string {
 
 function describeOraxApprovalLifecycle(approval: OraxApproval): string {
   if (approval.action === "read_files") {
-    const files = approval.request.paths?.length
-      ? approval.request.paths.join(", ")
-      : "selected files";
     if (approval.status === "completed" && approval.result?.files?.length) {
       return `Inspected ${approval.result.files.length} file${
         approval.result.files.length === 1 ? "" : "s"
       }; total ${formatBytes(approval.result.totalBytes ?? 0)}.`;
     }
-    return `Review ${files}.`;
+    const fileCount = approval.request.paths?.length ?? 0;
+    return fileCount
+      ? `Will inspect ${fileCount} file${fileCount === 1 ? "" : "s"}.`
+      : "Will inspect selected files.";
   }
   if (approval.action === "sandbox_run") {
-    return "Check the prepared change before moving on.";
+    return "Will check the prepared change.";
   }
   if (approval.action === "safe_check") {
-    return approval.request.scope ?? "Run the selected checks.";
+    return approval.request.scope ? `Will run ${approval.request.scope}.` : "Will run checks.";
   }
   if (approval.action === "github_pr") {
     if (approval.result?.pullRequestUrl) {
       return `Pull request created: ${approval.result.pullRequestUrl}`;
     }
-    return "Prepare the pull request after checks pass.";
+    return "Will prepare the pull request.";
   }
   return approval.riskSummary ?? "Confirm the next step.";
 }

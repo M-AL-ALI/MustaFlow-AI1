@@ -120,6 +120,11 @@ type OraxFileDiff = {
   truncated: boolean;
 };
 
+type OraxRunnerActivity = {
+  label: string;
+  status: "running" | "completed" | "waiting" | "failed" | "blocked";
+};
+
 const TASK_KINDS: Array<{ value: OraxTaskKind; label: string }> = [
   { value: "analyze", label: "Analyze" },
   { value: "plan", label: "Plan" },
@@ -402,6 +407,7 @@ export default function OraxScreen() {
       .find((message) => message.role === "assistant" && message.metadata?.actionSuggestions);
     return assistant?.metadata?.actionSuggestions?.[0] ?? null;
   }, [messages]);
+  const pendingThreadApprovals = approvals.filter((approval) => approval.status === "pending");
   const latestCheckpoint = useMemo(() => {
     const checkpointMessage = [...messages]
       .reverse()
@@ -1070,21 +1076,6 @@ export default function OraxScreen() {
               <>
                 <View style={{ gap: 12 }}>
                   {detailsLoading ? <Loading label="Loading thread..." /> : null}
-                  {latestAssistantSuggestion ? (
-                    <SuggestionCard
-                      suggestion={latestAssistantSuggestion}
-                      onPress={() => applySuggestion(latestAssistantSuggestion)}
-                    />
-                  ) : null}
-                  {selectedTask && !latestAssistantSuggestion ? (
-                    <Button
-                      label="Continue"
-                      icon={RefreshCw}
-                      variant="secondary"
-                      loading={busyAction === "continue-task"}
-                      onPress={() => void continueCurrentTask()}
-                    />
-                  ) : null}
                   {selectedTask ? (
                     <>
                       <View style={{ gap: 10 }}>
@@ -1096,6 +1087,21 @@ export default function OraxScreen() {
                             .map((message) => <MessageBubble key={message.id} message={message} />)
                         )}
                       </View>
+                      {latestAssistantSuggestion ? (
+                        <SuggestionCard
+                          suggestion={latestAssistantSuggestion}
+                          onPress={() => applySuggestion(latestAssistantSuggestion)}
+                        />
+                      ) : null}
+                      {!latestAssistantSuggestion && pendingThreadApprovals.length === 0 ? (
+                        <Button
+                          label="Continue"
+                          icon={RefreshCw}
+                          variant="secondary"
+                          loading={busyAction === "continue-task"}
+                          onPress={() => void continueCurrentTask()}
+                        />
+                      ) : null}
                       {approvals
                         .filter(
                           (approval) =>
@@ -2071,10 +2077,72 @@ function formatOraxVisibleThreadContent(message: OraxTaskMessage): string {
   return message.content;
 }
 
+function getOraxRunnerActivity(message: OraxTaskMessage): OraxRunnerActivity | null {
+  const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";
+  if (event !== "runner_continue") return null;
+  const action =
+    typeof message.metadata?.runnerAction === "string" ? message.metadata.runnerAction : "";
+  const executionStep = message.metadata?.executionStep;
+  const rawStatus =
+    typeof executionStep?.status === "string"
+      ? executionStep.status
+      : typeof message.metadata?.runnerStatus === "string"
+        ? message.metadata.runnerStatus
+        : "";
+  const content = message.content.toLowerCase();
+  const status: OraxRunnerActivity["status"] =
+    /failed|error/.test(content) || rawStatus === "failed"
+      ? "failed"
+      : rawStatus === "blocked"
+        ? "blocked"
+        : rawStatus === "waiting"
+          ? "waiting"
+          : rawStatus === "running"
+            ? "running"
+            : "completed";
+  return {
+    label: formatOraxRunnerActivityLabel(action, content, status),
+    status,
+  };
+}
+
+function formatOraxRunnerActivityLabel(
+  action: string,
+  content: string,
+  status: OraxRunnerActivity["status"],
+): string {
+  if (status === "failed" && content.includes("sandbox")) return "Change check failed";
+  if (status === "failed" && content.includes("check")) return "Checks failed";
+  if (status === "blocked") return "Needs attention";
+  switch (action) {
+    case "run_approved_read":
+    case "request_read_approval":
+      return "Inspected files";
+    case "draft_patch":
+    case "create_workspace_change_set":
+      return "Prepared changes";
+    case "run_approved_sandbox":
+    case "request_sandbox_approval":
+      return "Checked changes";
+    case "run_approved_checks":
+    case "request_command_approval":
+      return "Ran checks";
+    case "retry_failed_patch":
+      return "Prepared a fix";
+    case "run_approved_pr":
+    case "request_pr_approval":
+      return "Prepared pull request";
+    default:
+      return status === "running" ? "Working" : "Updated task";
+  }
+}
+
 function MessageBubble({ message }: { message: OraxTaskMessage }) {
   const c = useColors();
   const isUser = message.role === "user";
+  const activity = getOraxRunnerActivity(message);
   const attachments = getMessageComposerAttachments(message);
+  if (activity) return <RunnerActivityRow activity={activity} />;
   return (
     <View
       style={{
@@ -2125,6 +2193,47 @@ function MessageBubble({ message }: { message: OraxTaskMessage }) {
   );
 }
 
+function RunnerActivityRow({ activity }: { activity: OraxRunnerActivity }) {
+  const c = useColors();
+  const isRunning = activity.status === "running" || activity.status === "waiting";
+  const isProblem = activity.status === "failed" || activity.status === "blocked";
+  return (
+    <View
+      style={{
+        alignSelf: "flex-start",
+        maxWidth: "92%",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        borderWidth: 1,
+        borderColor: isProblem ? c.destructive : c.border,
+        borderRadius: 999,
+        backgroundColor: isProblem ? c.card : c.muted,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+      }}
+    >
+      {isRunning ? (
+        <ActivityIndicator size="small" color={c.mutedForeground} />
+      ) : isProblem ? (
+        <AlertCircle size={16} color={c.destructive} />
+      ) : (
+        <CheckCircle2 size={16} color={c.mutedForeground} />
+      )}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: isProblem ? c.destructive : c.foreground,
+          fontFamily: "Inter_600SemiBold",
+          fontSize: 13,
+        }}
+      >
+        {activity.label}
+      </Text>
+    </View>
+  );
+}
+
 function ApprovalCard({
   approval,
   busyAction,
@@ -2142,7 +2251,16 @@ function ApprovalCard({
   const canDecide = approval.status === "pending";
   const canRun = approval.status === "approved";
   return (
-    <Card style={{ gap: 10 }}>
+    <View
+      style={{
+        gap: 10,
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 24,
+        backgroundColor: c.card,
+        padding: 14,
+      }}
+    >
       <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
@@ -2160,13 +2278,15 @@ function ApprovalCard({
         </Text>
       ) : null}
       {approval.request.paths?.length ? (
-        <Text style={{ color: c.foreground, fontSize: 13 }}>
-          Files: {approval.request.paths.join(", ")}
+        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+          Will inspect {approval.request.paths.length} file
+          {approval.request.paths.length === 1 ? "" : "s"}.
         </Text>
       ) : null}
       {approval.request.commands?.length ? (
-        <Text style={{ color: c.foreground, fontSize: 13 }}>
-          Checks: {approval.request.commands.join(", ")}
+        <Text style={{ color: c.mutedForeground, fontSize: 13 }}>
+          Will run {approval.request.commands.length} check
+          {approval.request.commands.length === 1 ? "" : "s"}.
         </Text>
       ) : null}
       {canDecide ? (
@@ -2190,8 +2310,8 @@ function ApprovalCard({
       ) : null}
       {canRun ? (
         <Button
-          label={runLabelForApproval(approval.action)}
-          icon={Play}
+          label="Continue"
+          icon={RefreshCw}
           variant="secondary"
           onPress={onRun}
           loading={busyAction === `run-${approval.id}`}
@@ -2203,7 +2323,7 @@ function ApprovalCard({
           PR: {approval.result.pullRequestUrl}
         </Text>
       ) : null}
-    </Card>
+    </View>
   );
 }
 
@@ -2510,14 +2630,6 @@ function formatApprovalAction(action: string): string {
   if (action === "safe_check") return "Run checks";
   if (action === "github_pr") return "Prepare pull request";
   return action.replace(/_/g, " ");
-}
-
-function runLabelForApproval(action: string): string {
-  if (action === "read_files") return "Inspect files";
-  if (action === "sandbox_run") return "Check changes";
-  if (action === "safe_check") return "Run checks";
-  if (action === "github_pr") return "Create pull request";
-  return "Run approved action";
 }
 
 function buildLifecycleItems(

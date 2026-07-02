@@ -206,6 +206,10 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("continueTaskById(body.approval.taskId)");
     expect(oraxPage).toContain("void continueTaskById(approval.taskId)");
     expect(oraxPage).toContain("void createGithubPr(approval.id)");
+    expect(oraxPage).toContain("pendingApprovals.length === 0");
+    expect(oraxPage).toContain("getOraxRunnerActivity");
+    expect(oraxPage).toContain("OraxRunnerActivityRow");
+    expect(oraxPage).toContain('event !== "runner_continue"');
     expect(oraxPage).not.toContain("void readApprovedFiles(approval.id)");
     expect(oraxPage).not.toContain("void runSandboxValidation(approval.id)");
     expect(oraxPage).not.toContain("void runControlledChecks(approval.id)");
@@ -218,6 +222,10 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain('if (suggestion.type !== "github_pr")');
     expect(mobileOraxScreen).toContain("void continueCurrentTask();");
     expect(mobileOraxScreen).toContain("await continueTask(approval.taskId)");
+    expect(mobileOraxScreen).toContain("pendingThreadApprovals.length === 0");
+    expect(mobileOraxScreen).toContain("getOraxRunnerActivity");
+    expect(mobileOraxScreen).toContain("RunnerActivityRow");
+    expect(mobileOraxScreen).toContain('event !== "runner_continue"');
     expect(mobileOraxScreen).not.toContain("runApprovedFileRead");
     expect(mobileOraxScreen).not.toContain("runApprovedSandbox");
     expect(mobileOraxScreen).not.toContain("runApprovedCommands");
@@ -249,6 +257,7 @@ describe("ORAX product-surface wiring", () => {
     );
     expect(mobileOraxScreen).toContain("backgroundColor: c.foreground");
     expect(mobileOraxScreen).not.toContain('label={suggestion.buttonLabel ?? "Prepare action"}');
+    expect(mobileOraxScreen).not.toContain("Approval #{approval.id}");
     expect(oraxPage).toContain("mergeRunnerResultCollections");
     expect(oraxPage).toContain("runnerResult?: OraxTaskRunnerResult");
     expect(oraxPage).toContain("result.approvals ?? []");
