@@ -111,8 +111,13 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("renderRepositoryConnectionPanel");
     expect(oraxPage).toContain("renderRepositoryStatusPanel");
     expect(oraxPage).toContain("workspaceMenuOpen");
+    expect(oraxPage).toContain("renderWorkspaceChips");
+    expect(oraxPage).toContain("data-orax-workspace-chips");
     expect(oraxPage).toContain("renderOraxCommandCenter");
     expect(oraxPage).toContain("Orax Command Center");
+    expect(oraxPage).toContain("primaryWorkspaceActionLabel");
+    expect(oraxPage).toContain("Connect GitHub");
+    expect(oraxPage).toContain("Scan files");
     expect(oraxPage).toContain("Switch workspace");
     expect(oraxPage).toContain("Recent tasks");
     expect(oraxPage).toContain("selectRepositoryFromMenu");
@@ -173,8 +178,12 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("Connect GitHub repository");
     expect(mobileOraxScreen).toContain("RepositoryWorkspaceCard");
     expect(mobileOraxScreen).toContain("workspaceMenuOpen");
+    expect(mobileOraxScreen).toContain("WorkspaceChips");
     expect(mobileOraxScreen).toContain("OraxCommandCenter");
     expect(mobileOraxScreen).toContain("Orax Command Center");
+    expect(mobileOraxScreen).toContain("primaryWorkspaceActionLabel");
+    expect(mobileOraxScreen).toContain("Connect GitHub");
+    expect(mobileOraxScreen).toContain("Scan files");
     expect(mobileOraxScreen).toContain("Switch workspace");
     expect(mobileOraxScreen).toContain("Recent tasks");
     expect(mobileOraxScreen).toContain("selectRepositoryFromMenu");

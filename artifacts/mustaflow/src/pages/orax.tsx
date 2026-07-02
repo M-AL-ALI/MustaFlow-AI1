@@ -2030,7 +2030,88 @@ export default function OraxPage() {
     );
   }
 
+  function renderWorkspaceChips() {
+    return (
+      <div data-orax-workspace-chips className="mb-6 flex gap-2 overflow-x-auto lg:mb-3">
+        <button
+          type="button"
+          onClick={() => setTaskSearch("")}
+          className={cn(
+            "shrink-0 rounded-full px-4 py-2 text-sm font-semibold",
+            taskSearch.trim() ? "bg-muted text-foreground" : "bg-foreground text-background",
+          )}
+        >
+          All
+        </button>
+        {repositories.slice(0, 6).map((repo) => {
+          const active = repo.id === selectedRepository?.id;
+          return (
+            <button
+              key={repo.id}
+              type="button"
+              onClick={() => {
+                setSelectedRepoId(repo.id);
+                setTaskSearch(repo.name);
+                setMobileTaskOpen(false);
+              }}
+              className={cn(
+                "inline-flex max-w-[240px] shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-medium",
+                active ? "bg-muted text-foreground" : "border border-border text-muted-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  repo.connectionStatus === "read_only" ? "bg-emerald-500" : "bg-amber-500",
+                )}
+              />
+              <Code2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">{repo.name}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setWorkspaceMenuOpen(true)}
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Open workspace menu"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
   function renderOraxCommandCenter() {
+    const workspaceScanned =
+      latestScan?.status === "completed" || Boolean(selectedRepository?.lastScanAt);
+    const primaryWorkspaceActionLabel = !selectedRepository
+      ? "Connect GitHub"
+      : !workspaceScanned
+        ? "Scan files"
+        : "New chat";
+    const primaryWorkspaceActionIcon = !selectedRepository ? (
+      <GitBranch className="h-4 w-4" />
+    ) : !workspaceScanned ? (
+      <RefreshCw className={cn("h-4 w-4", scanningRepository ? "animate-spin" : "")} />
+    ) : (
+      <PenLine className="h-4 w-4" />
+    );
+
+    function runPrimaryWorkspaceAction() {
+      if (!selectedRepository) {
+        setWorkspaceMenuOpen(false);
+        setMobileTaskOpen(false);
+        return;
+      }
+      if (!workspaceScanned) {
+        void scanRepository();
+        return;
+      }
+      setWorkspaceMenuOpen(false);
+      startNewThread();
+    }
+
     return (
       <div
         className="fixed inset-0 z-50 bg-background/55 backdrop-blur-sm"
@@ -2077,43 +2158,42 @@ export default function OraxPage() {
                 {latestScan ? `${latestScan.fileCount} files` : "not scanned"}
               </span>
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="mt-3 space-y-2">
               <button
                 type="button"
-                onClick={() => {
-                  setWorkspaceMenuOpen(false);
-                  startNewThread();
-                }}
-                disabled={!selectedRepository}
-                className="inline-flex h-9 items-center justify-center gap-1 rounded-full bg-foreground px-2 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={runPrimaryWorkspaceAction}
+                disabled={scanningRepository}
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-foreground px-3 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <PenLine className="h-3.5 w-3.5" />
-                Chat
+                {primaryWorkspaceActionIcon}
+                {primaryWorkspaceActionLabel}
               </button>
-              <button
-                type="button"
-                onClick={() => void scanRepository()}
-                disabled={!selectedRepository || scanningRepository}
-                className="inline-flex h-9 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {scanningRepository ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
-                )}
-                Scan
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setWorkspaceMenuOpen(false);
-                  setMobileTaskOpen(false);
-                }}
-                className="inline-flex h-9 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-semibold hover:bg-muted"
-              >
-                <GitBranch className="h-3.5 w-3.5" />
-                Connect
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void scanRepository()}
+                  disabled={!selectedRepository || scanningRepository}
+                  className="inline-flex h-9 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {scanningRepository ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Scan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkspaceMenuOpen(false);
+                    setMobileTaskOpen(false);
+                  }}
+                  className="inline-flex h-9 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-semibold hover:bg-muted"
+                >
+                  <GitBranch className="h-3.5 w-3.5" />
+                  Connect
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2256,29 +2336,7 @@ export default function OraxPage() {
           )}
         >
           <div className="p-5 lg:border-b lg:border-border lg:p-3">
-            <div className="mb-10 flex gap-3 overflow-x-auto lg:hidden">
-              <button
-                type="button"
-                onClick={() => setTaskSearch("")}
-                className={cn(
-                  "shrink-0 rounded-full px-5 py-3 text-sm font-semibold",
-                  taskSearch.trim() ? "bg-muted text-foreground" : "bg-foreground text-background",
-                )}
-              >
-                All
-              </button>
-              {selectedRepository ? (
-                <button
-                  type="button"
-                  onClick={() => setTaskSearch(selectedRepository.name)}
-                  className="inline-flex max-w-[240px] shrink-0 items-center gap-2 rounded-full bg-muted px-4 py-3 text-sm font-medium text-foreground"
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                  <Code2 className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{selectedRepository.name}</span>
-                </button>
-              ) : null}
-            </div>
+            {renderWorkspaceChips()}
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-xl font-semibold lg:text-base lg:font-semibold lg:text-foreground">
