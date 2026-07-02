@@ -756,6 +756,7 @@ export default function OraxPage() {
   const [, setShowInspector] = useState(false);
   const [mobileTaskOpen, setMobileTaskOpen] = useState(false);
   const [, setMobileComposeOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
   const [pendingSuggestionConfirmation, setPendingSuggestionConfirmation] =
     useState<OraxTaskActionSuggestion | null>(null);
@@ -865,6 +866,14 @@ export default function OraxPage() {
   const visibleTaskMessages = useMemo(
     () => taskMessages.filter(isOraxVisibleThreadMessage),
     [taskMessages],
+  );
+  const menuTasks = useMemo(
+    () =>
+      (selectedRepository
+        ? tasks.filter((task) => task.repositoryId === selectedRepository.id)
+        : tasks
+      ).slice(0, 5),
+    [selectedRepository, tasks],
   );
   const threadNextAction = pendingApprovals.length
     ? `Review ${pendingApprovals.length} pending approval${
@@ -1812,6 +1821,22 @@ export default function OraxPage() {
     await continueTaskById(selectedTask.id);
   }
 
+  function selectRepositoryFromMenu(repo: OraxRepository) {
+    const nextTask = tasks.find((task) => task.repositoryId === repo.id) ?? null;
+    setSelectedRepoId(repo.id);
+    setSelectedTaskId(nextTask?.id ?? null);
+    setTaskSearch(repo.name);
+    setMobileTaskOpen(Boolean(nextTask));
+    setWorkspaceMenuOpen(false);
+  }
+
+  function selectTaskFromMenu(task: OraxTask) {
+    setSelectedTaskId(task.id);
+    setSelectedRepoId(task.repositoryId);
+    setMobileTaskOpen(true);
+    setWorkspaceMenuOpen(false);
+  }
+
   const selectedTaskRepository = selectedTask
     ? (repositories.find((repo) => repo.id === selectedTask.repositoryId) ?? selectedRepository)
     : selectedRepository;
@@ -2005,12 +2030,167 @@ export default function OraxPage() {
     );
   }
 
+  function renderOraxCommandCenter() {
+    return (
+      <div
+        className="fixed inset-0 z-50 bg-background/55 backdrop-blur-sm"
+        onClick={() => setWorkspaceMenuOpen(false)}
+      >
+        <div
+          className="absolute inset-x-4 top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto rounded-3xl border border-border bg-card p-4 shadow-2xl lg:left-auto lg:right-4 lg:top-16 lg:w-[420px]"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-base font-semibold">Orax Command Center</div>
+              <div className="text-xs text-muted-foreground">Workspace, repos, and next moves</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setWorkspaceMenuOpen(false)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted"
+              aria-label="Close Orax menu"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-border bg-background p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold">
+                  {selectedRepository
+                    ? `${selectedRepository.owner}/${selectedRepository.name}`
+                    : "No repository connected"}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {selectedRepository
+                    ? `${selectedRepository.defaultBranch || "main"} - ${
+                        selectedRepository.connectionStatus === "read_only"
+                          ? "GitHub connected"
+                          : "metadata only"
+                      }`
+                    : "Connect a repository to start Orax work."}
+                </div>
+              </div>
+              <span className="shrink-0 rounded-full border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+                {latestScan ? `${latestScan.fileCount} files` : "not scanned"}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceMenuOpen(false);
+                  startNewThread();
+                }}
+                disabled={!selectedRepository}
+                className="inline-flex h-9 items-center justify-center gap-1 rounded-full bg-foreground px-2 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <PenLine className="h-3.5 w-3.5" />
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => void scanRepository()}
+                disabled={!selectedRepository || scanningRepository}
+                className="inline-flex h-9 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {scanningRepository ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                Scan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceMenuOpen(false);
+                  setMobileTaskOpen(false);
+                }}
+                className="inline-flex h-9 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-semibold hover:bg-muted"
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                Connect
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
+              Switch workspace
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {repositories.length ? (
+                repositories.slice(0, 6).map((repo) => (
+                  <button
+                    key={repo.id}
+                    type="button"
+                    onClick={() => selectRepositoryFromMenu(repo)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-2 text-left text-sm",
+                      repo.id === selectedRepository?.id
+                        ? "border-foreground bg-muted"
+                        : "border-border hover:bg-muted",
+                    )}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">
+                        {repo.owner}/{repo.name}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {repo.connectionStatus === "read_only" ? "GitHub connected" : "metadata"}
+                      </span>
+                    </span>
+                    {repo.id === selectedRepository?.id ? <Check className="h-4 w-4" /> : null}
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border px-3 py-5 text-sm text-muted-foreground">
+                  No repositories yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
+              Recent tasks
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {menuTasks.length ? (
+                menuTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => selectTaskFromMenu(task)}
+                    className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <span className="min-w-0 truncate">{task.title || task.prompt}</span>
+                    <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                      {task.status}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border px-3 py-5 text-sm text-muted-foreground">
+                  No Orax tasks in this workspace yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
       <header className="flex h-20 shrink-0 items-center justify-between bg-background px-5 lg:hidden">
         <button
           type="button"
-          onClick={() => (mobileTaskOpen ? setMobileTaskOpen(false) : undefined)}
+          onClick={() => (mobileTaskOpen ? setMobileTaskOpen(false) : setWorkspaceMenuOpen(true))}
           className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground"
           aria-label={mobileTaskOpen ? "Back to Orax tasks" : "Open menu"}
         >
@@ -2028,13 +2208,7 @@ export default function OraxPage() {
         </div>
         <button
           type="button"
-          onClick={() => {
-            if (mobileTaskOpen && selectedTask) {
-              setTaskMessageDraft("/status");
-              return;
-            }
-            if (!mobileTaskOpen) startNewThread();
-          }}
+          onClick={() => setWorkspaceMenuOpen(true)}
           className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground"
           aria-label="Orax options"
         >
@@ -2055,8 +2229,20 @@ export default function OraxPage() {
             <h1 className="truncate text-base font-semibold">Orax</h1>
           </div>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setWorkspaceMenuOpen(true)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Open Orax menu"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+          <ThemeToggle />
+        </div>
       </header>
+
+      {workspaceMenuOpen ? renderOraxCommandCenter() : null}
 
       <main
         className={cn(

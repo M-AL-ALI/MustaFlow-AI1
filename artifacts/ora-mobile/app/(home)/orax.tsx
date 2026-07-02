@@ -29,7 +29,6 @@ import {
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { useNavigation } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -315,9 +314,9 @@ function mergeOraxTaskMessages(
 export default function OraxScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY });
   const [threadOpen, setThreadOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [homeComposeOpen, setHomeComposeOpen] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
@@ -382,6 +381,14 @@ export default function OraxScreen() {
         .some((value) => String(value).toLowerCase().includes(query));
     });
   }, [repos, taskSearch, tasks]);
+  const menuTasks = useMemo(
+    () =>
+      (selectedRepo ? tasks.filter((task) => task.repositoryId === selectedRepo.id) : tasks).slice(
+        0,
+        5,
+      ),
+    [selectedRepo, tasks],
+  );
   const chatPreview = useMemo(() => {
     const latestUserMessage = [...messages]
       .reverse()
@@ -682,6 +689,26 @@ export default function OraxScreen() {
     setShowDetails(false);
   }, [clearTaskScopedState, selectedRepo]);
 
+  const selectRepositoryFromMenu = useCallback(
+    (repo: OraxRepository) => {
+      const nextTask = tasks.find((task) => task.repositoryId === repo.id) ?? null;
+      setSelectedRepoId(repo.id);
+      setSelectedTaskId(nextTask?.id ?? null);
+      setTaskSearch(repo.name);
+      setThreadOpen(Boolean(nextTask));
+      setWorkspaceMenuOpen(false);
+    },
+    [tasks],
+  );
+
+  const selectTaskFromMenu = useCallback(
+    (task: OraxTask) => {
+      selectTask(task);
+      setWorkspaceMenuOpen(false);
+    },
+    [selectTask],
+  );
+
   const buildComposerMetadata = useCallback(
     (inputMode: "text" | "voice" = composerInputMode): OraxComposerMetadata => ({
       composer: {
@@ -912,7 +939,7 @@ export default function OraxScreen() {
               setThreadOpen(false);
               return;
             }
-            (navigation as unknown as { openDrawer?: () => void }).openDrawer?.();
+            setWorkspaceMenuOpen(true);
           }}
           hitSlop={10}
           style={{
@@ -948,15 +975,7 @@ export default function OraxScreen() {
           ) : null}
         </View>
         <Pressable
-          onPress={() => {
-            if (!selectedRepo) {
-              setThreadOpen(false);
-              setError(null);
-              return;
-            }
-            setThreadOpen(true);
-            setThreadDraft("/status");
-          }}
+          onPress={() => setWorkspaceMenuOpen(true)}
           hitSlop={10}
           style={{
             width: 52,
@@ -1661,6 +1680,316 @@ export default function OraxScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       )}
+      {workspaceMenuOpen ? (
+        <OraxCommandCenter
+          repos={repos}
+          tasks={menuTasks}
+          selectedRepo={selectedRepo}
+          selectedTaskId={selectedTaskId}
+          latestScan={latestScan}
+          busyAction={busyAction}
+          onClose={() => setWorkspaceMenuOpen(false)}
+          onStartChat={() => {
+            setWorkspaceMenuOpen(false);
+            startNewThread();
+          }}
+          onScan={() => void submitScan()}
+          onShowConnect={() => {
+            setWorkspaceMenuOpen(false);
+            setThreadOpen(false);
+          }}
+          onSelectRepo={selectRepositoryFromMenu}
+          onSelectTask={selectTaskFromMenu}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function OraxCommandCenter({
+  repos,
+  tasks,
+  selectedRepo,
+  selectedTaskId,
+  latestScan,
+  busyAction,
+  onClose,
+  onStartChat,
+  onScan,
+  onShowConnect,
+  onSelectRepo,
+  onSelectTask,
+}: {
+  repos: OraxRepository[];
+  tasks: OraxTask[];
+  selectedRepo: OraxRepository | null;
+  selectedTaskId: number | null;
+  latestScan: OraxScan | null;
+  busyAction: string | null;
+  onClose: () => void;
+  onStartChat: () => void;
+  onScan: () => void;
+  onShowConnect: () => void;
+  onSelectRepo: (repo: OraxRepository) => void;
+  onSelectTask: (task: OraxTask) => void;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        zIndex: 50,
+      }}
+    >
+      <Pressable
+        onPress={onClose}
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          backgroundColor: "rgba(15, 23, 42, 0.24)",
+        }}
+      />
+      <Card
+        style={{
+          position: "absolute",
+          top: insets.top + 72,
+          left: 14,
+          right: 14,
+          maxHeight: "78%",
+          gap: 14,
+          shadowColor: "#000",
+          shadowOpacity: 0.16,
+          shadowRadius: 22,
+          shadowOffset: { width: 0, height: 12 },
+          elevation: 8,
+        }}
+      >
+        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 17 }}>
+              Orax Command Center
+            </Text>
+            <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+              Workspace, repos, and next moves
+            </Text>
+          </View>
+          <Pressable
+            onPress={onClose}
+            hitSlop={10}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: c.muted,
+            }}
+          >
+            <XCircle size={20} color={c.foreground} />
+          </Pressable>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 14 }}>
+          <View
+            style={{
+              gap: 10,
+              borderWidth: 1,
+              borderColor: c.border,
+              borderRadius: 18,
+              backgroundColor: c.background,
+              padding: 12,
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text
+                  numberOfLines={1}
+                  style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}
+                >
+                  {selectedRepo
+                    ? `${selectedRepo.owner}/${selectedRepo.name}`
+                    : "No repository connected"}
+                </Text>
+                <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                  {selectedRepo
+                    ? `${selectedRepo.defaultBranch || "main"} - ${
+                        selectedRepo.connectionStatus === "read_only"
+                          ? "GitHub connected"
+                          : "metadata only"
+                      }`
+                    : "Connect a repository to start Orax work."}
+                </Text>
+              </View>
+              <Pill label={latestScan ? `${latestScan.fileCount} files` : "not scanned"} />
+            </View>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Button
+                label="Chat"
+                icon={MessageSquare}
+                onPress={onStartChat}
+                disabled={!selectedRepo}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Scan"
+                icon={RefreshCw}
+                variant="secondary"
+                onPress={onScan}
+                loading={busyAction === "scan-repo"}
+                disabled={!selectedRepo}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Connect"
+                icon={GitBranch}
+                variant="secondary"
+                onPress={onShowConnect}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+
+          <View style={{ gap: 8 }}>
+            <Text
+              style={{
+                color: c.mutedForeground,
+                fontFamily: "Inter_700Bold",
+                fontSize: 11,
+                letterSpacing: 0,
+                textTransform: "uppercase",
+              }}
+            >
+              Switch workspace
+            </Text>
+            {repos.length ? (
+              repos.slice(0, 6).map((repo) => {
+                const active = repo.id === selectedRepo?.id;
+                return (
+                  <Pressable key={repo.id} onPress={() => onSelectRepo(repo)}>
+                    <View
+                      style={{
+                        borderWidth: 1,
+                        borderColor: active ? c.foreground : c.border,
+                        backgroundColor: active ? c.muted : c.card,
+                        borderRadius: 18,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            color: c.foreground,
+                            fontFamily: "Inter_600SemiBold",
+                            fontSize: 14,
+                          }}
+                        >
+                          {repo.owner}/{repo.name}
+                        </Text>
+                        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                          {repo.connectionStatus === "read_only" ? "GitHub connected" : "metadata"}
+                        </Text>
+                      </View>
+                      {active ? <CheckCircle2 size={18} color={c.foreground} /> : null}
+                    </View>
+                  </Pressable>
+                );
+              })
+            ) : (
+              <View
+                style={{
+                  borderWidth: 1,
+                  borderStyle: "dashed",
+                  borderColor: c.border,
+                  borderRadius: 18,
+                  padding: 16,
+                }}
+              >
+                <Text style={{ color: c.mutedForeground, fontSize: 14 }}>No repositories yet.</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={{ gap: 8 }}>
+            <Text
+              style={{
+                color: c.mutedForeground,
+                fontFamily: "Inter_700Bold",
+                fontSize: 11,
+                letterSpacing: 0,
+                textTransform: "uppercase",
+              }}
+            >
+              Recent tasks
+            </Text>
+            {tasks.length ? (
+              tasks.map((task) => {
+                const active = task.id === selectedTaskId;
+                return (
+                  <Pressable key={task.id} onPress={() => onSelectTask(task)}>
+                    <View
+                      style={{
+                        borderWidth: 1,
+                        borderColor: active ? c.foreground : c.border,
+                        backgroundColor: active ? c.muted : c.card,
+                        borderRadius: 18,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          flex: 1,
+                          color: c.foreground,
+                          fontFamily: "Inter_600SemiBold",
+                          fontSize: 14,
+                        }}
+                      >
+                        {task.title ?? task.prompt ?? "Orax task"}
+                      </Text>
+                      <Pill label={task.status} active={active} />
+                    </View>
+                  </Pressable>
+                );
+              })
+            ) : (
+              <View
+                style={{
+                  borderWidth: 1,
+                  borderStyle: "dashed",
+                  borderColor: c.border,
+                  borderRadius: 18,
+                  padding: 16,
+                }}
+              >
+                <Text style={{ color: c.mutedForeground, fontSize: 14 }}>
+                  No Orax tasks in this workspace yet.
+                </Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </Card>
     </View>
   );
 }
