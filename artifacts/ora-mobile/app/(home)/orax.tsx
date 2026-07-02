@@ -143,6 +143,16 @@ const ORAX_PERMISSION_OPTIONS: Array<{ value: OraxComposerPermissionMode; label:
   { value: "auto", label: "Auto" },
   { value: "read_only", label: "Read" },
 ];
+const ORAX_SLASH_COMMANDS = [
+  { command: "/plan", label: "Plan mode", description: "Shape the next implementation plan." },
+  { command: "/goal", label: "Set goal", description: "Define what done means for this task." },
+  { command: "/review", label: "Review mode", description: "Inspect first, then report findings." },
+  { command: "/status", label: "Status", description: "Summarize the current task state." },
+  { command: "/scan", label: "Scan files", description: "Refresh repository context." },
+  { command: "/connect", label: "Connect", description: "Update repository access." },
+  { command: "/help", label: "Help", description: "Show Orax commands." },
+] as const;
+type OraxSlashCommandOption = (typeof ORAX_SLASH_COMMANDS)[number];
 const ORAX_ATTACHMENT_TEXT_LIMIT = 120_000;
 const ORAX_ATTACHMENT_DATA_URL_LIMIT = 1_500_000;
 const ORAX_TEXT_ATTACHMENT_EXTENSIONS = [
@@ -431,6 +441,14 @@ export default function OraxScreen() {
     [approvals, artifacts],
   );
   const visibleMessages = useMemo(() => messages.filter(isOraxVisibleThreadMessage), [messages]);
+  const visibleSlashCommands = useMemo(() => {
+    const draft = threadDraft.trimStart();
+    if (!draft.startsWith("/") || /\s/.test(draft)) return [];
+    const query = draft.slice(1).toLowerCase();
+    return ORAX_SLASH_COMMANDS.filter((command) =>
+      command.command.slice(1).startsWith(query),
+    ).slice(0, 7);
+  }, [threadDraft]);
 
   const clearTaskScopedState = useCallback(() => {
     setApprovals([]);
@@ -1288,6 +1306,8 @@ export default function OraxScreen() {
                     onToggleVoice={() => void toggleComposerVoiceInput()}
                     voiceActive={recordingVoice}
                     voiceLoading={transcribingVoice}
+                    slashCommands={visibleSlashCommands}
+                    onSelectSlashCommand={(command) => setThreadDraft(`${command} `)}
                     loading={busyAction === "send-thread" || busyAction === "create-task"}
                     disabled={
                       (!threadDraft.trim() && composerAttachments.length === 0) ||
@@ -2120,6 +2140,8 @@ function OraxComposer({
   onToggleVoice,
   voiceActive,
   voiceLoading,
+  slashCommands,
+  onSelectSlashCommand,
   disabled,
   loading,
 }: {
@@ -2138,6 +2160,8 @@ function OraxComposer({
   onToggleVoice: () => void;
   voiceActive: boolean;
   voiceLoading: boolean;
+  slashCommands: OraxSlashCommandOption[];
+  onSelectSlashCommand: (command: string) => void;
   disabled: boolean;
   loading: boolean;
 }) {
@@ -2194,6 +2218,44 @@ function OraxComposer({
                 <XCircle size={16} color={c.mutedForeground} />
               </Pressable>
             </View>
+          ))}
+        </View>
+      ) : null}
+      {slashCommands.length ? (
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 18,
+            backgroundColor: c.background,
+            padding: 6,
+            gap: 2,
+          }}
+        >
+          {slashCommands.map((command) => (
+            <Pressable
+              key={command.command}
+              onPress={() => onSelectSlashCommand(command.command)}
+              style={{
+                borderRadius: 14,
+                paddingHorizontal: 10,
+                paddingVertical: 8,
+                flexDirection: "row",
+                gap: 10,
+              }}
+            >
+              <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", minWidth: 68 }}>
+                {command.command}
+              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
+                  {command.label}
+                </Text>
+                <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                  {command.description}
+                </Text>
+              </View>
+            </Pressable>
           ))}
         </View>
       ) : null}

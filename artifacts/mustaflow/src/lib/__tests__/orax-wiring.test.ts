@@ -151,6 +151,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("buildComposerMetadata");
     expect(oraxPage).toContain("permissionMode: composerPermissionMode");
     expect(oraxPage).toContain("attachments: composerAttachments");
+    expect(oraxPage).toContain("ORAX_SLASH_COMMANDS");
+    expect(oraxPage).toContain("visibleSlashCommands");
+    expect(oraxPage).toContain("data-orax-slash-command-menu");
+    expect(oraxPage).toContain("/plan");
+    expect(oraxPage).toContain("/goal");
+    expect(oraxPage).toContain("/review");
     expect(oraxPage).toContain("metadata ? { content, metadata } : { content }");
     expect(oraxPage).not.toContain(">Send</button>");
     expect(oraxPage).toContain('mobileTaskOpen ? "hidden lg:flex" : "flex"');
@@ -221,6 +227,12 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("permissionMode: composerPermissionMode");
     expect(mobileOraxScreen).toContain("attachments={composerAttachments}");
     expect(mobileOraxScreen).toContain("onAddAttachment={() => void pickComposerAttachments()}");
+    expect(mobileOraxScreen).toContain("ORAX_SLASH_COMMANDS");
+    expect(mobileOraxScreen).toContain("visibleSlashCommands");
+    expect(mobileOraxScreen).toContain("slashCommands={visibleSlashCommands}");
+    expect(mobileOraxScreen).toContain("/plan");
+    expect(mobileOraxScreen).toContain("/goal");
+    expect(mobileOraxScreen).toContain("/review");
     expect(mobileOraxScreen).toContain("refreshTaskTimeline");
     expect(mobileOraxScreen).toContain("setInterval(() =>");
     expect(mobileOraxScreen).toContain("listTaskMessages(taskId)");
@@ -241,6 +253,19 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).not.toContain("{homeComposeOpen ? (");
     expect(mobileOraxScreen).not.toContain("ScreenHeader");
     expect(mobileOraxScreen).not.toContain('label="Start ORAX chat"');
+  });
+
+  it("keeps ORAX slash commands thread-owned and separate from Ora", () => {
+    expect(oraxApiRoute).toContain("parseOraxSlashCommand");
+    expect(oraxApiRoute).toContain("handleOraxSlashCommand");
+    expect(oraxApiRoute).toContain("slashCommand: slashCommand.name");
+    expect(oraxApiRoute).toContain('mode: "slash_command"');
+    expect(oraxApiRoute).toContain("slashCommandPlan");
+    expect(oraxApiRoute).toContain("slashCommandGoal");
+    expect(oraxApiRoute).toContain("buildOraxTaskPlan");
+    expect(oraxApiRoute).toContain("activeGoal");
+    expect(oraxApiRoute).toContain("runnerAutoStarted: false");
+    expect(oraxApiRoute).not.toContain("/api/public-ai/chat");
   });
 
   it("keeps ORAX actions inline in the thread instead of visible workflow panels", () => {

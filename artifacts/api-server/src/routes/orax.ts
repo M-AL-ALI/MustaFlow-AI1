@@ -204,6 +204,21 @@ type OraxTaskActionSuggestion = {
   requiresManualConfirmation?: boolean;
 };
 
+type OraxSlashCommandName = "help" | "plan" | "goal" | "review" | "status" | "scan" | "connect";
+
+type OraxSlashCommand = {
+  name: OraxSlashCommandName;
+  args: string;
+  raw: string;
+};
+
+type OraxSlashCommandResult = {
+  task: OraxTask;
+  content: string;
+  actionSuggestions: OraxTaskActionSuggestion[];
+  metadata: Record<string, unknown>;
+};
+
 type OraxTimelineMessageInput = {
   userId: string;
   task: OraxTask;
@@ -750,6 +765,67 @@ router.post("/orax/tasks/:id/messages", async (req, res) => {
         updatedAt: now,
       })
       .returning();
+
+    const slashCommand = parseOraxSlashCommand(parsed.data.content);
+    if (slashCommand) {
+      const latestState = await loadOraxTaskRunnerState(userId, task.id);
+      const checkpoint = buildOraxCheckpointSummary({
+        task,
+        approvals: latestState.approvals,
+        artifacts: latestState.artifacts,
+      });
+      const slashResult = await handleOraxSlashCommand({
+        userId,
+        task,
+        command: slashCommand,
+        checkpoint,
+        approvals: latestState.approvals,
+        artifacts: latestState.artifacts,
+        userMessage: effectiveUserMessage,
+      });
+      const slashCheckpoint = buildOraxCheckpointSummary({
+        task: slashResult.task,
+        approvals: latestState.approvals,
+        artifacts: latestState.artifacts,
+      });
+      const [assistantMessage] = await db
+        .insert(oraxTaskMessagesTable)
+        .values({
+          userId,
+          repositoryId: task.repositoryId,
+          taskId: task.id,
+          role: "assistant",
+          content: slashResult.content,
+          metadata: {
+            source: "orax-task-thread",
+            mode: "slash_command",
+            slashCommand: slashCommand.name,
+            slashCommandArgs: slashCommand.args,
+            checkpoint: slashCheckpoint,
+            actionSuggestions: slashResult.actionSuggestions,
+            runnerAutoStarted: false,
+            runnerResult: null,
+            ...slashResult.metadata,
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      await db
+        .update(oraxTasksTable)
+        .set({
+          result: {
+            ...asRecord(slashResult.task.result),
+            currentCheckpoint: slashCheckpoint,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(oraxTasksTable.id, task.id));
+
+      res.status(201).json({ messages: [message, assistantMessage] });
+      return;
+    }
 
     const shouldAutoRun = shouldAutoRunOraxTaskFromMessage(
       parsed.data.content,
@@ -5667,6 +5743,219 @@ function uniqueOraxSignals(values: string[], max: number): string[] {
     if (unique.length >= max) break;
   }
   return unique;
+}
+
+function parseOraxSlashCommand(content: string): OraxSlashCommand | null {
+  const trimmed = content.trim();
+  const match = trimmed.match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  if (!isOraxSlashCommandName(name)) return null;
+  return {
+    name,
+    args: (match[2] ?? "").trim(),
+    raw: trimmed,
+  };
+}
+
+function isOraxSlashCommandName(value: string): value is OraxSlashCommandName {
+  return ["help", "plan", "goal", "review", "status", "scan", "connect"].includes(value);
+}
+
+async function handleOraxSlashCommand(input: {
+  userId: string;
+  task: OraxTask;
+  command: OraxSlashCommand;
+  checkpoint: OraxCheckpointSummary;
+  approvals: OraxTaskApproval[];
+  artifacts: OraxTaskArtifact[];
+  userMessage: string;
+}): Promise<OraxSlashCommandResult> {
+  if (input.command.name === "help") {
+    return {
+      task: input.task,
+      content: [
+        "Orax commands:",
+        "/plan - shape the next implementation plan.",
+        "/goal <goal> - set the active task goal.",
+        "/review - start a review-focused pass.",
+        "/status - summarize where the task stands.",
+        "/scan - show the next repository scan step.",
+        "/connect - show the repository connection step.",
+      ].join("\n"),
+      actionSuggestions: [],
+      metadata: { slashCommandHelp: true },
+    };
+  }
+
+  if (input.command.name === "status") {
+    return {
+      task: input.task,
+      content: buildOraxCheckpointResumeReply(input.checkpoint),
+      actionSuggestions: [],
+      metadata: { slashCommandStatus: true },
+    };
+  }
+
+  if (input.command.name === "goal") {
+    const currentGoal = asRecord(asRecord(input.task.result).activeGoal);
+    if (!input.command.args) {
+      const objective =
+        typeof currentGoal.objective === "string" && currentGoal.objective.trim()
+          ? currentGoal.objective.trim()
+          : null;
+      return {
+        task: input.task,
+        content: objective
+          ? `Current goal: ${objective}\nSend /goal followed by a new goal to update it.`
+          : "No active goal yet. Send /goal followed by what done should mean for this task.",
+        actionSuggestions: [],
+        metadata: { slashCommandGoal: currentGoal },
+      };
+    }
+
+    const activeGoal = {
+      objective: input.command.args.slice(0, 2000),
+      status: "active",
+      updatedAt: new Date().toISOString(),
+    };
+    const [updatedTask] = await db
+      .update(oraxTasksTable)
+      .set({
+        result: {
+          ...asRecord(input.task.result),
+          activeGoal,
+          message: `Active goal set: ${activeGoal.objective}`,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(oraxTasksTable.id, input.task.id))
+      .returning();
+
+    return {
+      task: updatedTask ?? input.task,
+      content: `Goal set: ${activeGoal.objective}\nI’ll use that as the definition of done for this Orax task.`,
+      actionSuggestions: [
+        buildOraxReadFilesSuggestion({
+          task: updatedTask ?? input.task,
+          userMessage: input.command.args,
+          title: "Inspect files",
+          description: "Inspect the relevant files for this goal.",
+        }),
+      ],
+      metadata: { slashCommandGoal: activeGoal },
+    };
+  }
+
+  if (input.command.name === "plan") {
+    const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
+    const objective = input.command.args || input.task.prompt;
+    const plan = repository
+      ? buildOraxTaskPlan({
+          kind: "plan",
+          repository,
+          prompt: objective,
+        })
+      : {
+          mode: "read_only_foundation",
+          objective,
+          steps: [
+            "Confirm the repository target.",
+            "Inspect the relevant files before changing anything.",
+            "Draft a focused implementation plan.",
+            "Ask for approval before edits, checks, pushes, or PRs.",
+          ],
+          guardrails: ["Keep Orax isolated from Ora chat and AI Builder."],
+          unavailableUntilApproved: ["File changes", "Command execution", "Pull requests"],
+        };
+    const [updatedTask] = await db
+      .update(oraxTasksTable)
+      .set({
+        kind: "plan",
+        plan,
+        result: {
+          ...asRecord(input.task.result),
+          activePlan: {
+            objective,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(oraxTasksTable.id, input.task.id))
+      .returning();
+
+    return {
+      task: updatedTask ?? input.task,
+      content: [
+        "Plan mode is on.",
+        `Goal: ${plan.objective}`,
+        ...plan.steps.slice(0, 4).map((step, index) => `${index + 1}. ${step}`),
+        "I’ll inspect relevant files before making changes.",
+      ].join("\n"),
+      actionSuggestions: [
+        buildOraxReadFilesSuggestion({
+          task: updatedTask ?? input.task,
+          userMessage: objective,
+          title: "Inspect files",
+          description: "Inspect the files needed for this plan.",
+        }),
+      ],
+      metadata: { slashCommandPlan: plan },
+    };
+  }
+
+  if (input.command.name === "review") {
+    return {
+      task: input.task,
+      content:
+        "Review mode is ready. I’ll inspect the relevant files first, then report findings before suggesting changes.",
+      actionSuggestions: [
+        buildOraxReadFilesSuggestion({
+          task: input.task,
+          userMessage: input.command.args || input.task.prompt,
+          title: "Inspect for review",
+          description: "Read the relevant files before reviewing.",
+        }),
+      ],
+      metadata: { slashCommandReview: true },
+    };
+  }
+
+  if (input.command.name === "scan") {
+    return {
+      task: input.task,
+      content:
+        "Use Scan files from the workspace controls to refresh repository context. After the scan, send your task and I’ll work from the updated file map.",
+      actionSuggestions: [],
+      metadata: { slashCommandScan: true },
+    };
+  }
+
+  return {
+    task: input.task,
+    content:
+      "Use Connect GitHub from the workspace controls to add or update repository access. Orax keeps this separate from Ora chat.",
+    actionSuggestions: [],
+    metadata: { slashCommandConnect: true },
+  };
+}
+
+function buildOraxReadFilesSuggestion(input: {
+  task: OraxTask;
+  userMessage: string;
+  title: string;
+  description: string;
+}): OraxTaskActionSuggestion {
+  const paths = mergeOraxDetectedPaths(extractOraxCandidatePaths(input.userMessage));
+  return {
+    type: "read_files",
+    title: input.title,
+    description: input.description,
+    buttonLabel: "Inspect files",
+    paths,
+    reason: `Slash command for ${input.task.title}`.slice(0, 1000),
+  };
 }
 
 function buildOraxTaskThreadReply(input: {

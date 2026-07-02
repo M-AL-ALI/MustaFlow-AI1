@@ -408,6 +408,15 @@ const ORAX_PERMISSION_OPTIONS: Array<{ value: OraxComposerPermissionMode; label:
   { value: "auto", label: "Auto" },
   { value: "read_only", label: "Read" },
 ];
+const ORAX_SLASH_COMMANDS = [
+  { command: "/plan", label: "Plan mode", description: "Shape the next implementation plan." },
+  { command: "/goal", label: "Set goal", description: "Define what done means for this task." },
+  { command: "/review", label: "Review mode", description: "Inspect first, then report findings." },
+  { command: "/status", label: "Status", description: "Summarize the current task state." },
+  { command: "/scan", label: "Scan files", description: "Refresh repository context." },
+  { command: "/connect", label: "Connect", description: "Update repository access." },
+  { command: "/help", label: "Help", description: "Show Orax commands." },
+] as const;
 const ORAX_ATTACHMENT_TEXT_LIMIT = 120_000;
 const ORAX_ATTACHMENT_DATA_URL_LIMIT = 1_500_000;
 const ORAX_TEXT_ATTACHMENT_EXTENSIONS = [
@@ -862,6 +871,14 @@ export default function OraxPage() {
         )?.id ?? null
     );
   }, [taskMessages]);
+  const visibleSlashCommands = useMemo(() => {
+    const draft = taskMessageDraft.trimStart();
+    if (!draft.startsWith("/") || /\s/.test(draft)) return [];
+    const query = draft.slice(1).toLowerCase();
+    return ORAX_SLASH_COMMANDS.filter((command) =>
+      command.command.slice(1).startsWith(query),
+    ).slice(0, 7);
+  }, [taskMessageDraft]);
   const primaryThreadSuggestion = latestAssistantSuggestions[0] ?? null;
   const visibleTaskMessages = useMemo(
     () => taskMessages.filter(isOraxVisibleThreadMessage),
@@ -2746,6 +2763,29 @@ export default function OraxPage() {
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </span>
+                    ))}
+                  </div>
+                ) : null}
+                {visibleSlashCommands.length ? (
+                  <div
+                    data-orax-slash-command-menu
+                    className="mb-2 grid gap-1 rounded-2xl border border-border bg-background p-2"
+                  >
+                    {visibleSlashCommands.map((command) => (
+                      <button
+                        key={command.command}
+                        type="button"
+                        onClick={() => setTaskMessageDraft(`${command.command} `)}
+                        className="flex items-start gap-3 rounded-xl px-3 py-2 text-left hover:bg-muted"
+                      >
+                        <span className="shrink-0 font-semibold text-foreground">
+                          {command.command}
+                        </span>
+                        <span className="min-w-0 text-sm">
+                          <span className="block font-medium">{command.label}</span>
+                          <span className="block text-muted-foreground">{command.description}</span>
+                        </span>
+                      </button>
                     ))}
                   </div>
                 ) : null}
