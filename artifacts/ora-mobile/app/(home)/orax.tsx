@@ -1080,55 +1080,36 @@ export default function OraxScreen() {
                           repositories need a token with read access.
                         </Text>
                       </Card>
-                    ) : selectedRepo.connectionStatus !== "read_only" ? (
-                      <Card style={{ gap: 12 }}>
-                        <SectionTitle title="GitHub access" icon={ShieldCheck} />
-                        <Text style={{ color: c.mutedForeground, fontSize: 13, lineHeight: 19 }}>
-                          Add a token for private repositories, or scan now if this repository is
-                          public.
-                        </Text>
-                        <TextField
-                          label="GitHub token"
-                          placeholder="Optional read token"
-                          autoCapitalize="none"
-                          value={githubToken}
-                          onChangeText={setGithubToken}
-                        />
-                        <View style={{ flexDirection: "row", gap: 8 }}>
-                          <Button
-                            label="Connect"
-                            icon={ShieldCheck}
-                            onPress={connectGithub}
-                            loading={busyAction === "connect-github"}
-                            disabled={!githubToken.trim()}
-                            style={{ flex: 1 }}
-                          />
-                          <Button
-                            label="Scan"
-                            icon={RefreshCw}
-                            variant="secondary"
-                            onPress={submitScan}
-                            loading={busyAction === "scan-repo"}
-                            style={{ flex: 1 }}
-                          />
-                        </View>
-                      </Card>
-                    ) : visibleTasks.length === 0 ? (
-                      <Text style={{ color: c.mutedForeground, fontSize: 16 }}>
-                        No tasks yet. Tap Chat to start an Orax task.
-                      </Text>
                     ) : (
-                      visibleTasks.map((task) => (
-                        <Pressable key={task.id} onPress={() => selectTask(task)}>
-                          <Text
-                            numberOfLines={1}
-                            style={{ color: c.foreground, fontSize: 18, lineHeight: 26 }}
-                          >
-                            {task.title ?? task.prompt ?? "Orax task"}
-                          </Text>
-                        </Pressable>
-                      ))
+                      <RepositoryWorkspaceCard
+                        repo={selectedRepo}
+                        latestScan={latestScan}
+                        githubToken={githubToken}
+                        onChangeGithubToken={setGithubToken}
+                        onConnect={connectGithub}
+                        onScan={submitScan}
+                        onStartChat={startNewThread}
+                        busyAction={busyAction}
+                      />
                     )}
+                    {selectedRepo ? (
+                      visibleTasks.length === 0 ? (
+                        <Text style={{ color: c.mutedForeground, fontSize: 16 }}>
+                          No tasks yet. Tap Chat to start an Orax task.
+                        </Text>
+                      ) : (
+                        visibleTasks.map((task) => (
+                          <Pressable key={task.id} onPress={() => selectTask(task)}>
+                            <Text
+                              numberOfLines={1}
+                              style={{ color: c.foreground, fontSize: 18, lineHeight: 26 }}
+                            >
+                              {task.title ?? task.prompt ?? "Orax task"}
+                            </Text>
+                          </Pressable>
+                        ))
+                      )
+                    ) : null}
                   </View>
 
                   <View style={{ gap: 18, paddingTop: 10 }}>
@@ -2101,6 +2082,112 @@ function RepositoryCard({
         />
       </Card>
     </Pressable>
+  );
+}
+
+function RepositoryWorkspaceCard({
+  repo,
+  latestScan,
+  githubToken,
+  onChangeGithubToken,
+  onConnect,
+  onScan,
+  onStartChat,
+  busyAction,
+}: {
+  repo: OraxRepository;
+  latestScan: OraxScan | null;
+  githubToken: string;
+  onChangeGithubToken: (value: string) => void;
+  onConnect: () => void;
+  onScan: () => void;
+  onStartChat: () => void;
+  busyAction: string | null;
+}) {
+  const c = useColors();
+  const connected = repo.connectionStatus === "read_only";
+  const scanned = latestScan?.status === "completed" || Boolean(repo.lastScanAt);
+  const nextAction = !connected
+    ? "Connect token or scan public repo"
+    : !scanned
+      ? "Scan repository"
+      : "Start chat";
+
+  return (
+    <Card style={{ gap: 12 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 16 }}>
+            Workspace ready
+          </Text>
+          <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 15 }}>
+            {repo.owner}/{repo.name}
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 17 }}>
+            {connected
+              ? repo.githubAccountName
+                ? `Connected as ${repo.githubAccountName}`
+                : "GitHub access connected"
+              : "Public scan available; add a token for private repository access."}
+          </Text>
+        </View>
+        <Pill label={connected ? "Connected" : "Metadata"} active={connected} />
+      </View>
+      <InfoGrid
+        items={[
+          ["Branch", repo.defaultBranch ?? "main"],
+          ["Scan", latestScan?.status ?? repo.scanStatus ?? "idle"],
+          ["Files", latestScan?.fileCount ? String(latestScan.fileCount) : "not scanned"],
+          ["Next", nextAction],
+        ]}
+      />
+      {!connected ? (
+        <>
+          <TextField
+            label="GitHub token"
+            placeholder="Optional GitHub token for private repos"
+            autoCapitalize="none"
+            value={githubToken}
+            onChangeText={onChangeGithubToken}
+          />
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Button
+              label="Connect"
+              icon={ShieldCheck}
+              onPress={onConnect}
+              loading={busyAction === "connect-github"}
+              disabled={!githubToken.trim()}
+              style={{ flex: 1 }}
+            />
+            <Button
+              label="Scan"
+              icon={RefreshCw}
+              variant="secondary"
+              onPress={onScan}
+              loading={busyAction === "scan-repo"}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </>
+      ) : (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            label="Scan"
+            icon={RefreshCw}
+            variant="secondary"
+            onPress={onScan}
+            loading={busyAction === "scan-repo"}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label="Start chat"
+            icon={MessageSquare}
+            onPress={onStartChat}
+            style={{ flex: 1 }}
+          />
+        </View>
+      )}
+    </Card>
   );
 }
 

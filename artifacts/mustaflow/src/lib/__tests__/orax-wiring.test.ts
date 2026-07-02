@@ -109,7 +109,12 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("Search Chats");
     expect(oraxPage).toContain("New chat");
     expect(oraxPage).toContain("renderRepositoryConnectionPanel");
+    expect(oraxPage).toContain("renderRepositoryStatusPanel");
     expect(oraxPage).toContain("Connect GitHub repository");
+    expect(oraxPage).toContain("Workspace ready");
+    expect(oraxPage).toContain("Connected as");
+    expect(oraxPage).toContain("Connect token or scan public repo");
+    expect(oraxPage).toContain("GitHub access connected");
     expect(oraxPage).toContain("Connect a GitHub repository before starting an Orax chat.");
     expect(oraxPage).toContain("connectGithubRepository");
     expect(oraxPage).toContain("Public GitHub repositories can be scanned from the URL");
@@ -159,8 +164,13 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("Chats");
     expect(mobileOraxScreen).toContain("Search Chats");
     expect(mobileOraxScreen).toContain("Connect GitHub repository");
+    expect(mobileOraxScreen).toContain("RepositoryWorkspaceCard");
+    expect(mobileOraxScreen).toContain("Workspace ready");
+    expect(mobileOraxScreen).toContain("Connected as");
+    expect(mobileOraxScreen).toContain("Connect token or scan public repo");
     expect(mobileOraxScreen).toContain("Connect a GitHub repository before starting an Orax chat.");
     expect(mobileOraxScreen).toContain("Optional for private repositories");
+    expect(mobileOraxScreen).toContain("Optional GitHub token for private repos");
     expect(mobileOraxScreen).toContain('label={selectedRepo ? "Chat" : "Connect"}');
     expect(mobileOraxScreen).toContain("Promise.allSettled");
     expect(mobileOraxScreen).not.toContain("Could not load Orax task details");

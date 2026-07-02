@@ -1836,6 +1836,16 @@ export default function OraxPage() {
             </p>
           </div>
         </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
+          {["Connect repo", "Scan files", "Start chat"].map((step, index) => (
+            <div
+              key={step}
+              className="rounded-full border border-border bg-background px-2 py-1 font-medium"
+            >
+              {index + 1}. {step}
+            </div>
+          ))}
+        </div>
         <input
           value={repositoryUrl}
           onChange={(event) => setRepositoryUrl(event.target.value)}
@@ -1874,6 +1884,123 @@ export default function OraxPage() {
           Public GitHub repositories can be scanned from the URL. Private repositories need a token
           with read access; Orax keeps repository work separate from Ora chat.
         </p>
+      </section>
+    );
+  }
+
+  function renderRepositoryStatusPanel(compact = false) {
+    if (!selectedRepository) return null;
+    const connected = selectedRepository.connectionStatus === "read_only";
+    const scanned = latestScan?.status === "completed" || Boolean(selectedRepository.lastScanAt);
+    const nextAction = !connected
+      ? "Connect token or scan public repo"
+      : !scanned
+        ? "Scan repository"
+        : "Start chat";
+    return (
+      <section
+        className={cn(
+          "rounded-3xl border border-border bg-card p-4 shadow-sm",
+          compact ? "space-y-3" : "mx-auto max-w-xl space-y-4",
+        )}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">Workspace ready</div>
+            <div className="mt-1 truncate text-base font-semibold">
+              {selectedRepository.owner}/{selectedRepository.name}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {connected
+                ? selectedRepository.githubAccountName
+                  ? `Connected as ${selectedRepository.githubAccountName}`
+                  : "GitHub access connected"
+                : "Public scan available; add a token for private repository access."}
+            </p>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+              connected
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "border-border bg-muted text-muted-foreground",
+            )}
+          >
+            {connected ? "Connected" : "Metadata only"}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <Metric label="Branch" value={selectedRepository.defaultBranch || "main"} />
+          <Metric
+            label="Scan"
+            value={latestScan?.status ?? selectedRepository.scanStatus ?? "idle"}
+          />
+          <Metric label="Files" value={latestScan ? String(latestScan.fileCount) : "not scanned"} />
+          <Metric label="Next" value={nextAction} />
+        </div>
+        {!connected ? (
+          <div className="space-y-2">
+            <input
+              type="password"
+              value={githubToken}
+              onChange={(event) => setGithubToken(event.target.value)}
+              placeholder="Optional GitHub token for private repos"
+              className="h-10 w-full rounded-2xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => void _connectGithub()}
+                disabled={connectingGithub || !githubToken.trim()}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-foreground px-3 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {connectingGithub ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+                Connect
+              </button>
+              <button
+                type="button"
+                onClick={() => void scanRepository()}
+                disabled={scanningRepository}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {scanningRepository ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Scan
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => void scanRepository()}
+              disabled={scanningRepository}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {scanningRepository ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Scan
+            </button>
+            <button
+              type="button"
+              onClick={startNewThread}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-foreground px-3 text-sm font-semibold text-background"
+            >
+              <PenLine className="h-4 w-4" />
+              Start chat
+            </button>
+          </div>
+        )}
       </section>
     );
   }
@@ -1997,55 +2124,7 @@ export default function OraxPage() {
               renderRepositoryConnectionPanel(true)
             ) : (
               <div className="space-y-5 lg:space-y-2">
-                {selectedRepository.connectionStatus !== "read_only" ? (
-                  <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
-                    <div className="flex items-start gap-3">
-                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">GitHub access</div>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          Add a token for private repositories, or scan now if this repository is
-                          public.
-                        </p>
-                      </div>
-                    </div>
-                    <input
-                      type="password"
-                      value={githubToken}
-                      onChange={(event) => setGithubToken(event.target.value)}
-                      placeholder="Optional read token"
-                      className="mt-3 h-10 w-full rounded-2xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void _connectGithub()}
-                        disabled={connectingGithub || !githubToken.trim()}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-foreground px-3 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {connectingGithub ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <ShieldCheck className="h-4 w-4" />
-                        )}
-                        Connect
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void scanRepository()}
-                        disabled={scanningRepository}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {scanningRepository ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                        Scan
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
+                {renderRepositoryStatusPanel(true)}
                 {visibleTasks.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
                     No tasks yet. Start a chat to create an Orax thread.
@@ -2198,7 +2277,9 @@ export default function OraxPage() {
                 {renderRepositoryConnectionPanel(false)}
               </div>
             ) : !selectedTask ? (
-              <div className="h-full" aria-label="New Orax chat" />
+              <div className="flex h-full items-center justify-center py-10">
+                {renderRepositoryStatusPanel(false)}
+              </div>
             ) : visibleTaskMessages.length === 0 ? (
               <div className="h-full" aria-label="Empty Orax thread" />
             ) : (
