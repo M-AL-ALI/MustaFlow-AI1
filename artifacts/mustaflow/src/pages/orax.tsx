@@ -956,8 +956,7 @@ export default function OraxPage() {
       }
       const body = (await res.json()) as { scans: OraxScan[] };
       setScans(body.scans);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load repository scans");
+    } catch {
       setScans([]);
     } finally {
       setLoadingScans(false);
@@ -982,10 +981,8 @@ export default function OraxPage() {
       const body = (await res.json()) as { approvals: OraxApproval[] };
       if (activeTaskIdRef.current !== taskId) return;
       setApprovals(body.approvals);
-    } catch (err) {
+    } catch {
       if (activeTaskIdRef.current !== taskId) return;
-      setError(err instanceof Error ? err.message : "Could not load approvals");
-      setApprovals([]);
     } finally {
       if (activeTaskIdRef.current === taskId) {
         setLoadingApprovals(false);
@@ -998,15 +995,13 @@ export default function OraxPage() {
     try {
       const res = await authFetch(`/api/orax/tasks/${taskId}/artifacts`);
       if (!res.ok) {
-        throw new Error("Could not load draft artifacts");
+        throw new Error("Orax artifact refresh failed");
       }
       const body = (await res.json()) as { artifacts: OraxArtifact[] };
       if (activeTaskIdRef.current !== taskId) return;
       setArtifacts(body.artifacts);
-    } catch (err) {
+    } catch {
       if (activeTaskIdRef.current !== taskId) return;
-      setError(err instanceof Error ? err.message : "Could not load draft artifacts");
-      setArtifacts([]);
     } finally {
       if (activeTaskIdRef.current === taskId) {
         setLoadingArtifacts(false);

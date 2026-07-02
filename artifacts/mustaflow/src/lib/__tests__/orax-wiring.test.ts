@@ -114,6 +114,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("connectGithubRepository");
     expect(oraxPage).toContain("Public GitHub repositories can be scanned from the URL");
     expect(oraxPage).not.toContain("Could not load ORAX workspace");
+    expect(oraxPage).not.toContain("Could not load draft artifacts");
     expect(oraxPage).toContain('placeholder="Ask Orax"');
     expect(oraxPage).toContain("5.5");
     expect(oraxPage).toContain("Extra High");
@@ -161,6 +162,8 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("Connect a GitHub repository before starting an Orax chat.");
     expect(mobileOraxScreen).toContain("Optional for private repositories");
     expect(mobileOraxScreen).toContain('label={selectedRepo ? "Chat" : "Connect"}');
+    expect(mobileOraxScreen).toContain("Promise.allSettled");
+    expect(mobileOraxScreen).not.toContain("Could not load Orax task details");
     expect(mobileOraxScreen).not.toContain("Ask Orax what to work on.");
     expect(mobileOraxScreen).toContain("function OraxComposer");
     expect(mobileOraxScreen).toContain('placeholder="Ask Orax"');

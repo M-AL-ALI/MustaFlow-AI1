@@ -475,21 +475,27 @@ export default function OraxScreen() {
     }
     setDetailsLoading(true);
     try {
-      const [nextApprovals, nextArtifacts, nextMessages] = await Promise.all([
+      const [nextApprovals, nextArtifacts, nextMessages] = await Promise.allSettled([
         listTaskApprovals(taskId),
         listTaskArtifacts(taskId),
         listTaskMessages(taskId),
       ]);
       if (activeTaskIdRef.current !== taskId) return;
-      setApprovals(nextApprovals);
-      setArtifacts(nextArtifacts);
-      setMessages(nextMessages);
+      if (nextApprovals.status === "fulfilled") {
+        setApprovals(nextApprovals.value);
+      }
+      if (nextArtifacts.status === "fulfilled") {
+        setArtifacts(nextArtifacts.value);
+      }
+      if (nextMessages.status === "fulfilled") {
+        setMessages(nextMessages.value);
+      } else {
+        setError(messageFromError(nextMessages.reason, "Could not load Orax thread"));
+        setMessages([]);
+      }
     } catch (err) {
       if (activeTaskIdRef.current !== taskId) return;
-      setError(messageFromError(err, "Could not load Orax task details"));
-      setApprovals([]);
-      setArtifacts([]);
-      setMessages([]);
+      setError(messageFromError(err, "Could not load Orax thread"));
     } finally {
       setDetailsLoading(false);
     }
@@ -497,15 +503,21 @@ export default function OraxScreen() {
 
   const refreshTaskTimeline = useCallback(async (taskId: number) => {
     try {
-      const [nextApprovals, nextArtifacts, nextMessages] = await Promise.all([
+      const [nextApprovals, nextArtifacts, nextMessages] = await Promise.allSettled([
         listTaskApprovals(taskId),
         listTaskArtifacts(taskId),
         listTaskMessages(taskId),
       ]);
       if (activeTaskIdRef.current !== taskId) return;
-      setApprovals(nextApprovals);
-      setArtifacts(nextArtifacts);
-      setMessages((prev) => mergeOraxTaskMessages(prev, nextMessages));
+      if (nextApprovals.status === "fulfilled") {
+        setApprovals(nextApprovals.value);
+      }
+      if (nextArtifacts.status === "fulfilled") {
+        setArtifacts(nextArtifacts.value);
+      }
+      if (nextMessages.status === "fulfilled") {
+        setMessages((prev) => mergeOraxTaskMessages(prev, nextMessages.value));
+      }
     } catch {
       // Live sync is best-effort; manual refresh and action responses still load full state.
     }
@@ -937,6 +949,11 @@ export default function OraxScreen() {
         </View>
         <Pressable
           onPress={() => {
+            if (!selectedRepo) {
+              setThreadOpen(false);
+              setError(null);
+              return;
+            }
             setThreadOpen(true);
             setThreadDraft("/status");
           }}
