@@ -504,6 +504,21 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("isPlanModeTask(input.task, messages)");
   });
 
+  it("hides the plan/goal strip when an inline action or pending approval is already visible", () => {
+    expect(collapse(oraxPage)).toContain(
+      "const hasVisibleInlineAction = (latestAssistantSuggestions.length > 0 && !pendingSuggestionConfirmation) || pendingApprovals.length > 0;",
+    );
+    expect(collapse(oraxPage)).toContain(
+      "return activeThreadState && !hasVisibleInlineAction ?",
+    );
+    expect(collapse(mobileOraxScreen)).toContain(
+      "const hasVisibleInlineAction = latestAssistantSuggestion !== null || pendingThreadApprovals.length > 0;",
+    );
+    expect(collapse(mobileOraxScreen)).toContain(
+      "return activeThreadState && !hasVisibleInlineAction ?",
+    );
+  });
+
   it("shows compact active goal/plan strip above the composer on website and mobile", () => {
     expect(oraxPage).toContain("OraxActiveThreadStateStrip");
     expect(oraxPage).toContain("getOraxActiveThreadState");

@@ -1321,7 +1321,9 @@ export default function OraxScreen() {
                       selectedTask,
                       latestCheckpoint,
                     );
-                    return activeThreadState ? (
+                    const hasVisibleInlineAction =
+                      latestAssistantSuggestion !== null || pendingThreadApprovals.length > 0;
+                    return activeThreadState && !hasVisibleInlineAction ? (
                       <ActiveThreadStateStrip
                         state={activeThreadState}
                         continuing={busyAction === "continue-task"}

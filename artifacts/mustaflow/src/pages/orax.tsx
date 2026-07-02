@@ -2804,7 +2804,10 @@ export default function OraxPage() {
 
           {(() => {
             const activeThreadState = getOraxActiveThreadState(selectedTask, currentCheckpoint);
-            return activeThreadState ? (
+            const hasVisibleInlineAction =
+              (latestAssistantSuggestions.length > 0 && !pendingSuggestionConfirmation) ||
+              pendingApprovals.length > 0;
+            return activeThreadState && !hasVisibleInlineAction ? (
               <OraxActiveThreadStateStrip
                 state={activeThreadState}
                 continuing={continuingTask}
