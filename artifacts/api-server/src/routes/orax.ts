@@ -191,7 +191,8 @@ type OraxTaskActionSuggestion = {
     | "sandbox_run"
     | "controlled_checks"
     | "github_pr"
-    | "review_pending_approval";
+    | "review_pending_approval"
+    | "continue_task";
   title: string;
   description: string;
   buttonLabel?: string;
@@ -269,6 +270,7 @@ type OraxTaskRunnerResult = {
     | "request_check_approval"
     | "retry_failed_patch"
     | "await_pr_confirmation"
+    | "plan_ready"
     | "complete"
     | "blocked";
   message: string;
@@ -2791,6 +2793,18 @@ function buildOraxAuditTrail(input: {
   ].filter((item): item is { label: string; id: number; kind: string } => Boolean(item));
 }
 
+function isPlanModeTask(task: OraxTask): boolean {
+  if (task.kind === "plan") return true;
+  return Boolean(asRecord(task.result).activePlan);
+}
+
+function isOraxContinueImplementationTrigger(message: string): boolean {
+  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return /\b(continue|implement|start implementation|go ahead|do it|begin|proceed|make the changes|apply the plan|ship it|build it|let's go|lets go)\b/.test(
+    normalized,
+  );
+}
+
 async function continueOraxTaskRunner(input: {
   userId: string;
   task: OraxTask;
@@ -2951,6 +2965,32 @@ async function continueOraxTaskRunner(input: {
     (approval) => approval.action === "read_files" && approval.status === "completed",
   );
   if (completedReadApproval) {
+    if (isPlanModeTask(input.task)) {
+      const planReadySummaryAt = asRecord(input.task.result).planReadySummaryAt;
+      if (!planReadySummaryAt) {
+        return generateOraxRunnerPlanSummary({
+          userId: input.userId,
+          task: input.task,
+          session,
+          approval: completedReadApproval,
+          instructions: latestOraxUserMessage(messages) ?? input.task.prompt,
+        });
+      }
+      const latestMsg = latestOraxUserMessage(messages) ?? "";
+      if (!isOraxContinueImplementationTrigger(latestMsg)) {
+        const planSummaryArtifact = artifacts.find((a) => a.type === "plan_summary");
+        return persistOraxRunnerResult({
+          userId: input.userId,
+          task: input.task,
+          session,
+          status: "waiting",
+          action: "plan_ready",
+          message:
+            'Plan is ready. Send "Start implementation" or "continue" to begin making changes.',
+          artifactId: planSummaryArtifact?.id,
+        });
+      }
+    }
     return generateOraxRunnerDraftPatch({
       userId: input.userId,
       task: input.task,
@@ -3249,6 +3289,7 @@ function formatOraxExecutionStepLabel(action: OraxTaskRunnerResult["action"]): s
     request_check_approval: "Run checks",
     retry_failed_patch: "Fix failure",
     await_pr_confirmation: "Wait for PR confirmation",
+    plan_ready: "Plan ready",
     complete: "Complete",
     blocked: "Blocked",
   };
@@ -3372,6 +3413,189 @@ async function requestOraxRunnerFileReadApproval(input: {
     message: `File-read approval requested for ${paths.length} path${paths.length === 1 ? "" : "s"}.`,
     approvalId: approval.id,
     approval,
+  });
+}
+
+function buildOraxPlanSummaryPrompt(input: {
+  repositoryLabel: string;
+  taskPrompt: string;
+  files: Array<{ path: string; content: string; truncated?: boolean }>;
+}): string {
+  const fileBlocks = input.files
+    .slice(0, 8)
+    .map(
+      (file) =>
+        `--- ${file.path}${file.truncated ? " (truncated)" : ""} ---\n${file.content.slice(0, 3000)}`,
+    )
+    .join("\n\n");
+  return [
+    `You are Orax, an autonomous coding agent reviewing a repository before making changes.`,
+    ``,
+    `Repository: ${input.repositoryLabel}`,
+    `Task: ${input.taskPrompt}`,
+    ``,
+    `Inspected files:`,
+    fileBlocks,
+    ``,
+    `Produce a concise implementation plan:`,
+    `1. One-line summary of what you found`,
+    `2. Numbered implementation steps (maximum 6, one line each)`,
+    `3. Key files to change`,
+    ``,
+    `Rules: plain text only, no raw Markdown headings, no approval IDs or session names,`,
+    `do not mention Ora or AI Builder, keep the response under 350 words.`,
+  ].join("\n");
+}
+
+async function generateOraxRunnerPlanSummary(input: {
+  userId: string;
+  task: OraxTask;
+  session: OraxTaskArtifact;
+  approval: OraxTaskApproval;
+  instructions: string;
+}): Promise<OraxTaskRunnerResult> {
+  await persistOraxExecutionProgress({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    action: "plan_ready",
+    label: "Prepare plan",
+    message: "Preparing implementation plan from inspected files...",
+    approvalId: input.approval.id,
+  });
+
+  const repository = await loadOwnedRepository(input.userId, input.task.repositoryId);
+  if (!repository) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "Repository not found for plan summary generation.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const request = input.approval.request as { paths?: string[]; branch?: string };
+  const paths = normalizeOraxFileReadPaths(request.paths ?? []);
+  const branch = request.branch || repository.defaultBranch;
+  const token = repository.encryptedToken
+    ? encryptionService.decrypt(repository.encryptedToken)
+    : undefined;
+  const readResult = await readGithubRepositoryFiles({
+    owner: repository.owner,
+    repo: repository.name,
+    branch,
+    paths,
+    token,
+    maxFileBytes: ORAX_FILE_READ_LIMITS.maxFileBytes,
+    maxTotalBytes: ORAX_FILE_READ_LIMITS.maxTotalBytes,
+  });
+
+  if (!readResult.files.length) {
+    return persistOraxRunnerResult({
+      userId: input.userId,
+      task: input.task,
+      session: input.session,
+      status: "blocked",
+      action: "blocked",
+      message: "No approved files could be read for plan summary generation.",
+      approvalId: input.approval.id,
+    });
+  }
+
+  const planPrompt = buildOraxPlanSummaryPrompt({
+    repositoryLabel: `${repository.owner}/${repository.name}`,
+    taskPrompt: input.instructions,
+    files: readResult.files,
+  });
+
+  const { createChatCompletion, resolveStageProvider } = await import("../lib/ai-providers");
+  const { provider, model: routedModel } = resolveStageProvider("plan", "lite", "gpt-5-mini");
+  const planCompletion = await createChatCompletion({
+    provider,
+    model: routedModel,
+    messages: [{ role: "user", content: planPrompt }],
+    max_completion_tokens: 800,
+  });
+  const planContent =
+    planCompletion.choices[0]?.message?.content?.trim() ??
+    "Plan unavailable — please inspect files and continue.";
+
+  const now = new Date();
+  const [artifact] = await db
+    .insert(oraxTaskArtifactsTable)
+    .values({
+      userId: input.userId,
+      repositoryId: repository.id,
+      taskId: input.task.id,
+      approvalId: input.approval.id,
+      type: "plan_summary",
+      status: "completed",
+      title: `Implementation plan for ${input.task.title}`,
+      summary: input.instructions.slice(0, 120),
+      payload: {
+        planContent,
+        filesInspected: readResult.files.map((f) => f.path),
+        generatedAt: now.toISOString(),
+      },
+    })
+    .returning();
+
+  const planMessage = [
+    "Here's the implementation plan based on the inspected files:",
+    "",
+    planContent,
+  ].join("\n");
+
+  await db.insert(oraxTaskMessagesTable).values({
+    userId: input.userId,
+    repositoryId: repository.id,
+    taskId: input.task.id,
+    role: "assistant",
+    content: planMessage,
+    artifactId: artifact?.id ?? null,
+    metadata: {
+      source: "orax-task-thread",
+      mode: "plan_ready",
+      artifactId: artifact?.id ?? null,
+      actionSuggestions: [
+        {
+          type: "continue_task",
+          title: "Start implementation",
+          description: "Apply the plan and begin making changes.",
+          buttonLabel: "Start implementation",
+          requiresManualConfirmation: false,
+        },
+      ],
+    },
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await db
+    .update(oraxTasksTable)
+    .set({
+      result: {
+        ...asRecord(input.task.result),
+        planReadySummaryAt: now.toISOString(),
+        message: "Implementation plan ready. Continue to begin making changes.",
+      },
+      updatedAt: now,
+    })
+    .where(eq(oraxTasksTable.id, input.task.id));
+
+  return persistOraxRunnerResult({
+    userId: input.userId,
+    task: input.task,
+    session: input.session,
+    status: "waiting",
+    action: "plan_ready",
+    message: "Implementation plan ready. Continue to begin making changes.",
+    approvalId: input.approval.id,
+    artifactId: artifact?.id,
+    artifact,
   });
 }
 

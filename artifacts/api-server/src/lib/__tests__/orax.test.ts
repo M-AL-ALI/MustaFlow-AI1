@@ -582,3 +582,68 @@ describe("ORAX task conversation isolation", () => {
     expect(routeSource).not.toContain("deductCredits");
   });
 });
+
+describe("ORAX plan mode runner gate", () => {
+  const routeSource = readFileSync(
+    path.join(__dirname, "../../../routes/orax.ts"),
+    "utf8",
+  );
+
+  it("detects plan mode tasks by kind and result.activePlan", () => {
+    expect(routeSource).toContain("function isPlanModeTask(task: OraxTask): boolean");
+    expect(routeSource).toContain('task.kind === "plan"');
+    expect(routeSource).toContain("asRecord(task.result).activePlan");
+  });
+
+  it("detects continue/implement triggers from user messages", () => {
+    expect(routeSource).toContain(
+      "function isOraxContinueImplementationTrigger(message: string): boolean",
+    );
+    expect(routeSource).toContain('"continue"');
+    expect(routeSource).toContain('"implement"');
+    expect(routeSource).toContain('"start implementation"');
+    expect(routeSource).toContain('"go ahead"');
+  });
+
+  it("gates draft patch generation on plan summary when plan mode is active", () => {
+    expect(routeSource).toContain("isPlanModeTask(input.task)");
+    expect(routeSource).toContain("planReadySummaryAt");
+    expect(routeSource).toContain("generateOraxRunnerPlanSummary");
+    expect(routeSource).toContain("isOraxContinueImplementationTrigger(latestMsg)");
+    expect(routeSource).toContain('action: "plan_ready"');
+    expect(routeSource).toContain(
+      'Plan is ready. Send "Start implementation" or "continue" to begin making changes.',
+    );
+  });
+
+  it("generates a plan summary by re-reading approved files and calling AI", () => {
+    expect(routeSource).toContain("function buildOraxPlanSummaryPrompt(input: {");
+    expect(routeSource).toContain("async function generateOraxRunnerPlanSummary(input: {");
+    expect(routeSource).toContain("Preparing implementation plan from inspected files...");
+    expect(routeSource).toContain('type: "plan_summary"');
+    expect(routeSource).toContain("planContent");
+    expect(routeSource).toContain("filesInspected");
+    expect(routeSource).toContain("planReadySummaryAt");
+    expect(routeSource).toContain(
+      "Here's the implementation plan based on the inspected files:",
+    );
+  });
+
+  it("writes a plan_ready assistant message with a Start implementation action suggestion", () => {
+    expect(routeSource).toContain('mode: "plan_ready"');
+    expect(routeSource).toContain('"Start implementation"');
+    expect(routeSource).toContain('"Apply the plan and begin making changes."');
+    expect(routeSource).toContain('"continue_task"');
+    expect(routeSource).toContain("requiresManualConfirmation: false");
+  });
+
+  it("does not mention Ora, AI Builder, or bypass isolation boundaries", () => {
+    const planPromptFn = routeSource.slice(
+      routeSource.indexOf("function buildOraxPlanSummaryPrompt"),
+      routeSource.indexOf("async function generateOraxRunnerPlanSummary"),
+    );
+    expect(planPromptFn).toContain("do not mention Ora or AI Builder");
+    expect(planPromptFn).not.toContain("/public-ai/chat");
+    expect(planPromptFn).not.toContain("deductCredits");
+  });
+});

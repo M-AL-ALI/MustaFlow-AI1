@@ -478,6 +478,20 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("parseOraxUnifiedDiffFiles");
   });
 
+  it("wires plan mode runner gate and plan_ready action in the API route", () => {
+    expect(oraxApiRoute).toContain("isPlanModeTask");
+    expect(oraxApiRoute).toContain("isOraxContinueImplementationTrigger");
+    expect(oraxApiRoute).toContain("generateOraxRunnerPlanSummary");
+    expect(oraxApiRoute).toContain("buildOraxPlanSummaryPrompt");
+    expect(oraxApiRoute).toContain("planReadySummaryAt");
+    expect(oraxApiRoute).toContain('"plan_ready"');
+    expect(oraxApiRoute).toContain('"Start implementation"');
+    expect(oraxApiRoute).toContain('"continue_task"');
+    expect(oraxApiRoute).toContain('"plan_summary"');
+    expect(oraxApiRoute).not.toContain("/public-ai/chat");
+    expect(oraxApiRoute).not.toContain("deductCredits");
+  });
+
   it("shows compact active goal/plan strip above the composer on website and mobile", () => {
     expect(oraxPage).toContain("OraxActiveThreadStateStrip");
     expect(oraxPage).toContain("getOraxActiveThreadState");
