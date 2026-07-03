@@ -1660,4 +1660,48 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("continueProjectThread");
     expect(mobileOraxScreen).toContain("getProjectThreadContext");
   });
+
+  // ── Phase 2H: relay-client run_project_thread handler ───────────────────────
+
+  it("Phase 2H: relay-client handles run_project_thread action type", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain('action.type === "run_project_thread"');
+  });
+
+  it("Phase 2H: relay-client reads sourceLocalPath from payload", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("sourceLocalPath");
+    expect(relay).toContain("payload.sourceLocalPath");
+  });
+
+  it("Phase 2H: relay-client checks .orax/project.json existence and projectId binding", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain(".orax/project.json");
+    expect(relay).toContain("project.json");
+    expect(relay).toContain("projectId mismatch");
+  });
+
+  it("Phase 2H: relay-client posts running event before completing run_project_thread", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain('"run_project_thread"');
+    expect(relay).toContain('"running"');
+    expect(relay).toContain("localPathVerified: true");
+  });
+
+  it("Phase 2H: relay-client does not fall through to Unsupported for run_project_thread", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    // run_project_thread must appear BEFORE the Unsupported fallthrough
+    const runIdx = relay.indexOf('"run_project_thread"');
+    const unsupportedIdx = relay.indexOf("Unsupported action type");
+    expect(runIdx).toBeGreaterThan(-1);
+    expect(unsupportedIdx).toBeGreaterThan(-1);
+    expect(runIdx).toBeLessThan(unsupportedIdx);
+  });
+
+  it("Phase 2H: relay-client validates all required payload fields before proceeding", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("executionSourceId");
+    expect(relay).toContain("threadId");
+    expect(relay).toContain("missing required payload fields");
+  });
 });

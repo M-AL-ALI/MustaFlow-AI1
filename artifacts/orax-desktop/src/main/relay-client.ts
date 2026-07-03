@@ -1,12 +1,15 @@
 /**
- * Orax Desktop — Phase 2E/2F relay client.
+ * Orax Desktop — Phase 2E/2F/2H relay client.
  *
  * Polls the cloud relay for queued actions, executes safe Phase 2E actions
- * (ping_desktop, get_desktop_status, list_local_projects) and Phase 2F
+ * (ping_desktop, get_desktop_status, list_local_projects), Phase 2F
  * command actions (run_safe_command — gated by local permission-gate),
- * and posts results back.
+ * and Phase 2H project-thread actions (run_project_thread — verifies the
+ * local path and .orax/project.json binding before confirming context).
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import type { OraxApiClient } from "./api-client";
 import type { HostManager } from "./host-manager";
 import type { LocalProjectsManager } from "./local-projects";
@@ -145,6 +148,90 @@ export class RelayClient {
           stderr: cmdResult.stderr,
           durationMs: cmdResult.durationMs,
           timedOut: cmdResult.timedOut,
+        };
+        // Falls through to the common postActionEvent("completed") call below
+      } else if (action.type === "run_project_thread") {
+        const payload = action.payload as {
+          projectId?: unknown;
+          threadId?: unknown;
+          executionSourceId?: unknown;
+          sourceLocalPath?: unknown;
+          userMessage?: unknown;
+        };
+
+        const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+        const executionSourceId =
+          typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
+        const sourceLocalPath =
+          typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
+
+        if (!projectId || !threadId || !executionSourceId || !sourceLocalPath) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error:
+              "run_project_thread: missing required payload fields " +
+              "(projectId, threadId, executionSourceId, sourceLocalPath).",
+          });
+          return;
+        }
+
+        // Verify the local path exists on this machine
+        if (!fs.existsSync(sourceLocalPath)) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: `run_project_thread: sourceLocalPath does not exist: ${sourceLocalPath}`,
+          });
+          return;
+        }
+
+        // Read or create .orax/project.json; reject mismatched projectId
+        const oraxDir = path.join(sourceLocalPath, ".orax");
+        const projectJsonPath = path.join(oraxDir, "project.json");
+
+        if (fs.existsSync(projectJsonPath)) {
+          let stored: { projectId?: string } = {};
+          try {
+            stored = JSON.parse(fs.readFileSync(projectJsonPath, "utf8")) as {
+              projectId?: string;
+            };
+          } catch {
+            // Treat malformed JSON as an unbound project — will be overwritten below
+          }
+          if (stored.projectId && stored.projectId !== projectId) {
+            await this.api.postActionEvent(action.id, "failed", {
+              error:
+                `run_project_thread: .orax/project.json projectId mismatch ` +
+                `(stored="${stored.projectId}", requested="${projectId}"). ` +
+                `Remove .orax/project.json manually to rebind this directory.`,
+            });
+            return;
+          }
+          // If stored.projectId matches (or is absent), fall through and bind/confirm
+        }
+
+        // Signal that we are actively working on this thread
+        await this.api.postActionEvent(action.id, "running", {
+          projectId,
+          threadId,
+          executionSourceId,
+          sourceLocalPath,
+        });
+
+        // Bind the directory to this project (idempotent write)
+        if (!fs.existsSync(oraxDir)) {
+          fs.mkdirSync(oraxDir, { recursive: true });
+        }
+        fs.writeFileSync(
+          projectJsonPath,
+          JSON.stringify({ projectId, executionSourceId, boundAt: new Date().toISOString() }, null, 2),
+          "utf8",
+        );
+
+        result = {
+          projectId,
+          threadId,
+          executionSourceId,
+          localPathVerified: true,
+          message: "Project thread context verified on desktop.",
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {
