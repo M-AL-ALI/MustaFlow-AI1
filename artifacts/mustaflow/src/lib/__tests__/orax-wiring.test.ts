@@ -819,4 +819,148 @@ describe("ORAX product-surface wiring", () => {
     expect(hostManager).toContain("github: false");
     expect(hostManager).toContain("computer_use: false");
   });
+
+  // ── Phase 2D: Web/Mobile host discovery + real pairing UI ─────────────────
+
+  it("Phase 2D: mobile api.ts exports all required host and pairing methods", () => {
+    const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+    expect(mobileApi).toContain("export function listOraxHosts");
+    expect(mobileApi).toContain("export function getOraxHost");
+    expect(mobileApi).toContain("export function updateOraxHost");
+    expect(mobileApi).toContain("export function revokeOraxHost");
+    expect(mobileApi).toContain("export function createOraxPairingCode");
+    expect(mobileApi).toContain("export function cancelOraxPairingCode");
+    expect(mobileApi).toContain("export function redeemOraxPairingCode");
+  });
+
+  it("Phase 2D: mobile api.ts host methods call the correct backend endpoints", () => {
+    const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+    expect(mobileApi).toContain('"/api/orax/hosts"');
+    expect(mobileApi).toContain('"/api/orax/pairing-codes"');
+    expect(mobileApi).toContain('"/api/orax/pairing-codes/redeem"');
+    expect(mobileApi).toContain("/api/orax/hosts/${hostId}");
+    expect(mobileApi).toContain("/api/orax/pairing-codes/${encodeURIComponent(code)}");
+  });
+
+  it("Phase 2D: mobile types.ts exports OraxHostSummary, OraxPairingCode, RedeemPairingPayload", () => {
+    const mobileTypes = read("../../../../ora-mobile/lib/types.ts");
+    expect(mobileTypes).toContain("export interface OraxHostSummary");
+    expect(mobileTypes).toContain("export interface OraxPairingCode");
+    expect(mobileTypes).toContain("export interface RedeemPairingPayload");
+    // Essential fields on OraxHostSummary
+    expect(mobileTypes).toContain("deviceName");
+    expect(mobileTypes).toContain("lastSeenAt");
+    expect(mobileTypes).toContain("permissionMode");
+    expect(mobileTypes).toContain("mobileDeviceId");
+  });
+
+  it("Phase 2D: mobile DesktopConnectionCard uses real host list — not hardcoded offline state", () => {
+    const mobileOraxScreen = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    // Hardcoded placeholder must be gone
+    expect(mobileOraxScreen).not.toContain(
+      'const desktopHostState = "offline" as "offline" | "online"',
+    );
+    // Real host list state present
+    expect(mobileOraxScreen).toContain("listOraxHosts");
+    expect(mobileOraxScreen).toContain("oraxHosts");
+    expect(mobileOraxScreen).toContain("oraxHostsLoading");
+  });
+
+  it("Phase 2D: mobile DesktopConnectionCard accepts hosts, hostsLoading, onRefresh props", () => {
+    const mobileOraxScreen = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(mobileOraxScreen).toContain("hosts: OraxHostSummary[]");
+    expect(mobileOraxScreen).toContain("hostsLoading: boolean");
+    expect(mobileOraxScreen).toContain("onRefresh: () => void");
+  });
+
+  it("Phase 2D: mobile DesktopConnectionCard has manual pairing code input + redeem", () => {
+    const mobileOraxScreen = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(mobileOraxScreen).toContain("redeemOraxPairingCode");
+    expect(mobileOraxScreen).toContain("pairingCodeInput");
+    // TextInput used for code entry
+    expect(mobileOraxScreen).toContain("TextInput");
+    // Redeem button present
+    expect(mobileOraxScreen).toContain("Pair");
+  });
+
+  it("Phase 2D: mobile shows online/offline/not-connected states from real host data", () => {
+    const mobileOraxScreen = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(mobileOraxScreen).toContain("Not connected");
+    expect(mobileOraxScreen).toContain("Online");
+    expect(mobileOraxScreen).toContain("Offline");
+    expect(mobileOraxScreen).toContain("isDesktopHostOnline");
+  });
+
+  it("Phase 2D: website mode-select Orax card calls GET /api/orax/hosts", () => {
+    const modeSelect = read("../../pages/mode-select.tsx");
+    expect(modeSelect).toContain('authFetch("/api/orax/hosts")');
+    expect(modeSelect).toContain("oraxHosts");
+    expect(modeSelect).toContain("oraxHostsLoading");
+  });
+
+  it("Phase 2D: website mode-select Orax card routes dynamically — not always to /orax-product", () => {
+    const modeSelect = read("../../pages/mode-select.tsx");
+    // Must have conditional routing
+    expect(modeSelect).toContain('setLocation("/orax-product")');
+    expect(modeSelect).toContain('setLocation("/orax")');
+    expect(modeSelect).toContain('setLocation("/orax/devices")');
+    // Route logic checks host state
+    expect(modeSelect).toContain("isOraxHostOnline");
+    expect(modeSelect).toContain("activeHosts");
+  });
+
+  it("Phase 2D: website mode-select Orax card shows loading, online, offline status indicators", () => {
+    const modeSelect = read("../../pages/mode-select.tsx");
+    expect(modeSelect).toContain("oraxHostsLoading");
+    expect(modeSelect).toContain("OraxCard");
+    expect(modeSelect).toContain("Checking Orax Desktop");
+    expect(modeSelect).toContain("Online");
+    expect(modeSelect).toContain("Offline");
+  });
+
+  it("Phase 2D: website /orax/devices page exists with host list, revoke, permission mode, pairing", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    // Host list
+    expect(devicesPage).toContain("/api/orax/hosts");
+    expect(devicesPage).toContain("OraxHostSummary");
+    // Revoke
+    expect(devicesPage).toContain('method: "DELETE"');
+    expect(devicesPage).toContain("/api/orax/hosts/${revokeTarget.id}");
+    // Permission mode PATCH
+    expect(devicesPage).toContain('method: "PATCH"');
+    expect(devicesPage).toContain("permissionMode");
+    // Pairing code creation + cancel
+    expect(devicesPage).toContain('"/api/orax/pairing-codes"');
+    expect(devicesPage).toContain("/api/orax/pairing-codes/${encodeURIComponent(code)}");
+  });
+
+  it("Phase 2D: website /orax/devices page shows online/offline badge and pairing code UI", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    expect(devicesPage).toContain("isHostOnline");
+    expect(devicesPage).toContain("Online");
+    expect(devicesPage).toContain("Offline");
+    expect(devicesPage).toContain("PairingCodeDisplay");
+    expect(devicesPage).toContain("expiresAt");
+    expect(devicesPage).toContain("qrPayload");
+  });
+
+  it("Phase 2D: App.tsx registers /orax/devices route", () => {
+    const appTsx = read("../../App.tsx");
+    expect(appTsx).toContain('import("./pages/orax-devices")');
+    expect(appTsx).toContain('path="/orax/devices"');
+    expect(appTsx).toContain("OraxDevicesPage");
+  });
+
+  it("Phase 2D: Orax device management code has no Ora/public-ai/credits/project-chat references", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+    // The new host/pairing additions must not touch Ora surfaces
+    const hostSection = mobileApi.slice(mobileApi.indexOf("Orax Desktop host and pairing"));
+    expect(hostSection).not.toContain("/api/public-ai");
+    expect(hostSection).not.toContain("deductCredits");
+    expect(hostSection).not.toContain("handoffCta");
+    expect(hostSection).not.toContain("builder_handoff");
+    expect(devicesPage).not.toContain("/api/public-ai");
+    expect(devicesPage).not.toContain("password");
+  });
 });

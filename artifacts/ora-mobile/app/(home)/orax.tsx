@@ -57,12 +57,14 @@ import {
   decideApproval,
   generateDraftPatch,
   getOraxCapabilities,
+  listOraxHosts,
   listRepositories,
   listRepositoryScans,
   listTaskApprovals,
   listTaskArtifacts,
   listTaskMessages,
   listTasks,
+  redeemOraxPairingCode,
   requestCommandApproval,
   requestFileReadApproval,
   requestGithubPrApproval,
@@ -78,12 +80,14 @@ import type {
   OraxComposerMetadata,
   OraxComposerPermissionMode,
   OraxComposerReasoning,
+  OraxHostSummary,
   OraxRepository,
   OraxScan,
   OraxTask,
   OraxTaskActionSuggestion,
   OraxTaskKind,
   OraxTaskMessage,
+  RedeemPairingPayload,
 } from "@/lib/types";
 
 type Tab = "workspace" | "repos" | "approvals" | "artifacts" | "capabilities";
@@ -391,8 +395,32 @@ export default function OraxScreen() {
     useState<OraxComposerPermissionMode>("ask");
   const [composerInputMode, setComposerInputMode] = useState<"text" | "voice">("text");
   const [recordingVoice, setRecordingVoice] = useState(false);
-  // Placeholder: desktop pairing not yet implemented; always offline until the pairing protocol is built
-  const desktopHostState = "offline" as "offline" | "online";
+  const [oraxHosts, setOraxHosts] = useState<OraxHostSummary[]>([]);
+  const [oraxHostsLoading, setOraxHostsLoading] = useState(true);
+
+  const reloadHosts = useCallback(async () => {
+    setOraxHostsLoading(true);
+    try {
+      const data = await listOraxHosts();
+      setOraxHosts(data.hosts ?? []);
+    } catch {
+      // silent — card shows empty state
+    } finally {
+      setOraxHostsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadHosts();
+  }, [reloadHosts]);
+
+  const desktopHostState: "online" | "offline" | "not-connected" = oraxHostsLoading
+    ? "not-connected"
+    : oraxHosts.length === 0
+      ? "not-connected"
+      : oraxHosts.some(isDesktopHostOnline)
+        ? "online"
+        : "offline";
   const [transcribingVoice, setTranscribingVoice] = useState(false);
 
   const [approvalPaths, setApprovalPaths] = useState("");
@@ -1062,7 +1090,11 @@ export default function OraxScreen() {
 
             {!threadOpen ? (
               <>
-                <DesktopConnectionCard desktopHostState={desktopHostState} />
+                <DesktopConnectionCard
+                  hosts={oraxHosts}
+                  hostsLoading={oraxHostsLoading}
+                  onRefresh={reloadHosts}
+                />
 
                 <WorkspaceChips
                   repos={repos}
@@ -2090,13 +2122,50 @@ function OraxCommandCenter({
   );
 }
 
+function isDesktopHostOnline(host: OraxHostSummary): boolean {
+  if (!host.lastSeenAt) return false;
+  return Date.now() - new Date(host.lastSeenAt).getTime() < 90_000;
+}
+
 function DesktopConnectionCard({
-  desktopHostState,
+  hosts,
+  hostsLoading,
+  onRefresh,
 }: {
-  desktopHostState: "offline" | "online";
+  hosts: OraxHostSummary[];
+  hostsLoading: boolean;
+  onRefresh: () => void;
 }) {
   const c = useColors();
-  const isOnline = desktopHostState === "online";
+  const [pairingCodeInput, setPairingCodeInput] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+
+  const activeHosts = hosts.filter((h) => h.status === "active");
+  const onlineHost = activeHosts.find(isDesktopHostOnline) ?? null;
+  const primaryHost = onlineHost ?? activeHosts[0] ?? null;
+  const isOnline = !!onlineHost;
+
+  async function handleRedeem() {
+    const code = pairingCodeInput.trim().toUpperCase();
+    if (code.length < 6) return;
+    setRedeeming(true);
+    try {
+      const payload: RedeemPairingPayload = {
+        code,
+        mobileDeviceId: `${Platform.OS}-mobile`,
+        displayName: `${Platform.OS.charAt(0).toUpperCase() + Platform.OS.slice(1)} Device`,
+        platform: Platform.OS,
+      };
+      await redeemOraxPairingCode(payload);
+      setPairingCodeInput("");
+      onRefresh();
+    } catch {
+      Alert.alert("Pairing failed", "Could not pair with this code. Check the code and try again.");
+    } finally {
+      setRedeeming(false);
+    }
+  }
+
   return (
     <View
       style={{
@@ -2118,26 +2187,51 @@ function DesktopConnectionCard({
             flex: 1,
           }}
         >
-          Connect Orax Desktop
+          {primaryHost ? primaryHost.deviceName : "Orax Desktop"}
         </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: isOnline ? "#10b981" : "#94a3b8",
-            }}
-          />
-          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-            {isOnline ? "Connected" : "Offline"}
+        {hostsLoading ? (
+          <ActivityIndicator size="small" color={c.mutedForeground} />
+        ) : (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: isOnline ? "#10b981" : "#94a3b8",
+              }}
+            />
+            <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+              {activeHosts.length === 0 ? "Not connected" : isOnline ? "Online" : "Offline"}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {!hostsLoading && activeHosts.length === 0 && (
+        <View style={{ gap: 6 }}>
+          <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold", fontSize: 14 }}>
+            Connect Orax Desktop
+          </Text>
+          <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+            Install Orax Desktop on your computer. Once running, pair this device to control Orax
+            remotely and see your projects here.
           </Text>
         </View>
-      </View>
-      <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
-        Install Orax Desktop on your computer. Once running, pair this device to control Orax
-        remotely and see your projects here.
-      </Text>
+      )}
+
+      {!hostsLoading && activeHosts.length > 0 && !isOnline && (
+        <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+          This computer is not currently online. Open Orax Desktop on your computer to reconnect.
+        </Text>
+      )}
+
+      {!hostsLoading && isOnline && (
+        <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+          Your desktop is connected and ready.
+        </Text>
+      )}
+
       <Button
         label="Scan QR Code"
         icon={Scan}
@@ -2145,6 +2239,7 @@ function DesktopConnectionCard({
         disabled
         full
       />
+
       <View
         style={{
           borderWidth: 1,
@@ -2153,15 +2248,66 @@ function DesktopConnectionCard({
           paddingHorizontal: 14,
           paddingVertical: 10,
           backgroundColor: c.background,
+          gap: 8,
         }}
       >
-        <Text style={{ color: c.mutedForeground, fontSize: 12, marginBottom: 4 }}>
-          Manual pairing code
-        </Text>
-        <Text style={{ color: c.mutedForeground, fontSize: 14 }}>
-          Enter 6-digit code from Orax Desktop
-        </Text>
+        <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Manual pairing code</Text>
+        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+          <TextInput
+            style={{
+              flex: 1,
+              color: c.foreground,
+              fontSize: 18,
+              fontFamily: "Inter_600SemiBold",
+              letterSpacing: 4,
+              borderWidth: 1,
+              borderColor: c.border,
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              backgroundColor: c.card,
+            }}
+            value={pairingCodeInput}
+            onChangeText={(t) => setPairingCodeInput(t.toUpperCase().slice(0, 6))}
+            placeholder="ABC123"
+            placeholderTextColor={c.mutedForeground}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={6}
+            keyboardType="default"
+          />
+          <Pressable
+            onPress={() => void handleRedeem()}
+            disabled={pairingCodeInput.trim().length < 6 || redeeming}
+            style={({ pressed }) => ({
+              backgroundColor:
+                pairingCodeInput.trim().length >= 6 && !redeeming
+                  ? "#10b981"
+                  : c.muted,
+              borderRadius: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            {redeeming ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text
+                style={{
+                  color:
+                    pairingCodeInput.trim().length >= 6 ? "#fff" : c.mutedForeground,
+                  fontFamily: "Inter_600SemiBold",
+                  fontSize: 14,
+                }}
+              >
+                Pair
+              </Text>
+            )}
+          </Pressable>
+        </View>
       </View>
+
       <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
         Keep Orax Desktop open and on the same network as your phone to stay connected.
       </Text>

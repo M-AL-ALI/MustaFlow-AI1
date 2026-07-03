@@ -1,11 +1,25 @@
-import { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useUpdateMyPreferences, getGetMyPreferencesQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BUILDER_ENABLED } from "@/lib/builder-flag";
-import { Sparkles, MessageCircle, ArrowRight, Loader2, Lock, Code2 } from "lucide-react";
+import { Sparkles, MessageCircle, ArrowRight, Loader2, Lock, Code2, Wifi, WifiOff, Monitor } from "lucide-react";
+import { authFetch } from "@/lib/api-fetch";
+
+interface OraxHostBrief {
+  id: string;
+  deviceName: string;
+  status: string;
+  lastSeenAt: string | null;
+  platform: string;
+}
+
+function isOraxHostOnline(host: OraxHostBrief): boolean {
+  if (!host.lastSeenAt) return false;
+  return Date.now() - new Date(host.lastSeenAt).getTime() < 90_000;
+}
 
 export default function ModeSelectPage() {
   const [, setLocation] = useLocation();
@@ -13,6 +27,17 @@ export default function ModeSelectPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updatePreferences = useUpdateMyPreferences();
+
+  const [oraxHosts, setOraxHosts] = useState<OraxHostBrief[]>([]);
+  const [oraxHostsLoading, setOraxHostsLoading] = useState(true);
+
+  useEffect(() => {
+    authFetch("/api/orax/hosts")
+      .then((r) => (r.ok ? r.json() : Promise.resolve({ hosts: [] })))
+      .then((data: { hosts: OraxHostBrief[] }) => setOraxHosts(data.hosts ?? []))
+      .catch(() => {})
+      .finally(() => setOraxHostsLoading(false));
+  }, []);
 
   async function handleSelect(mode: "builder" | "ora") {
     if (selecting) return;
@@ -35,7 +60,14 @@ export default function ModeSelectPage() {
   function handleOraxSelect() {
     if (selecting) return;
     setSelecting("orax");
-    setLocation("/orax-product");
+    const activeHosts = oraxHosts.filter((h) => h.status === "active");
+    if (activeHosts.length === 0) {
+      setLocation("/orax-product");
+    } else if (activeHosts.some(isOraxHostOnline)) {
+      setLocation("/orax");
+    } else {
+      setLocation("/orax/devices");
+    }
   }
 
   return (
@@ -98,15 +130,10 @@ export default function ModeSelectPage() {
           />
 
           {/* ORAX */}
-          <ModeCard
-            mode="orax"
-            icon={Code2}
-            title="ORAX"
-            description="Your local coding and workflow agent. Edit files, run commands, debug, review diffs, and push to GitHub — controllable from desktop, web, or mobile."
-            accent="from-emerald-500/20 via-emerald-500/5 to-transparent"
-            borderHover="hover:border-emerald-500/60"
-            glowColor="shadow-emerald-500/10"
+          <OraxCard
             selecting={selecting}
+            oraxHosts={oraxHosts}
+            oraxHostsLoading={oraxHostsLoading}
             onSelect={handleOraxSelect}
           />
         </div>
@@ -126,6 +153,100 @@ interface ModeCardProps {
   selecting: "builder" | "ora" | "orax" | null;
   onSelect: () => void;
   comingSoon?: boolean;
+}
+
+interface OraxCardProps {
+  selecting: "builder" | "ora" | "orax" | null;
+  oraxHosts: OraxHostBrief[];
+  oraxHostsLoading: boolean;
+  onSelect: () => void;
+}
+
+function OraxCard({ selecting, oraxHosts, oraxHostsLoading, onSelect }: OraxCardProps) {
+  const isSelecting = selecting === "orax";
+  const activeHosts = oraxHosts.filter((h) => h.status === "active");
+  const onlineHost = activeHosts.find(isOraxHostOnline) ?? null;
+  const primaryHost = onlineHost ?? activeHosts[0] ?? null;
+
+  let statusBadge: React.ReactNode = null;
+  let statusLine: React.ReactNode = null;
+
+  if (oraxHostsLoading) {
+    statusLine = (
+      <span className="text-xs text-muted-foreground flex items-center gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Checking Orax Desktop&hellip;
+      </span>
+    );
+  } else if (primaryHost) {
+    const online = isOraxHostOnline(primaryHost);
+    statusBadge = online ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold px-2 py-0.5">
+        <Wifi className="h-3 w-3" />
+        Online
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted border border-border text-muted-foreground text-xs font-semibold px-2 py-0.5">
+        <WifiOff className="h-3 w-3" />
+        Offline
+      </span>
+    );
+    statusLine = (
+      <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+        <Monitor className="h-3 w-3" />
+        {primaryHost.deviceName}
+        {activeHosts.length > 1 && (
+          <span className="ml-1 text-muted-foreground/60">+{activeHosts.length - 1} more</span>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      title="ORAX"
+      onClick={onSelect}
+      disabled={selecting !== null}
+      className={`
+        group relative flex flex-col items-start gap-5 p-8 rounded-2xl border border-border
+        bg-card text-left cursor-pointer transition-all duration-200
+        hover:border-emerald-500/60
+        hover:-translate-y-1 hover:shadow-xl shadow-emerald-500/10
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+        disabled:cursor-not-allowed disabled:opacity-60
+        ${isSelecting ? "border-emerald-500/60 -translate-y-1 shadow-xl" : ""}
+      `}
+    >
+      <div
+        className={`absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/20 via-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none ${isSelecting ? "opacity-100" : ""}`}
+      />
+
+      <div className="relative z-10 flex flex-col gap-4 w-full">
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center justify-center h-12 w-12 rounded-xl border border-border bg-muted/60 group-hover:border-border/80 transition-colors">
+            <Code2 className="h-6 w-6 text-foreground" />
+          </div>
+          {isSelecting ? (
+            <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
+          ) : statusBadge ? (
+            statusBadge
+          ) : (
+            <ArrowRight className="h-5 w-5 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-200" />
+          )}
+        </div>
+
+        <div>
+          <h2 className="text-xl font-bold tracking-tight mb-2">ORAX</h2>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Your local coding and workflow agent. Edit files, run commands, debug, review diffs, and
+            push to GitHub — controllable from desktop, web, or mobile.
+          </p>
+        </div>
+
+        {statusLine && <div className="mt-1">{statusLine}</div>}
+      </div>
+    </button>
+  );
 }
 
 function ModeCard({

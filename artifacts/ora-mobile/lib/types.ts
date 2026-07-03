@@ -849,3 +849,33 @@ export interface SupportAttachment {
   size: number;
   dataBase64: string;
 }
+
+export interface OraxHostSummary {
+  id: string;
+  deviceName: string;
+  platform: string;
+  osVersion: string | null;
+  appVersion: string | null;
+  status: "active" | "revoked";
+  capabilities: Record<string, boolean>;
+  permissionMode: "ask" | "manual" | "auto";
+  lastSeenAt: string | null;
+  pairedAt: string | null;
+  revokedAt: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OraxPairingCode {
+  code: string;
+  qrPayload: string;
+  expiresAt: string;
+}
+
+export interface RedeemPairingPayload {
+  code: string;
+  mobileDeviceId: string;
+  displayName: string;
+  platform: string;
+}

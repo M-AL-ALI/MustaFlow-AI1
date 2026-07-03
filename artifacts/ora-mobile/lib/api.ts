@@ -32,6 +32,8 @@ import type {
   OraxDraftPatchResult,
   OraxGithubConnectResult,
   OraxReadFilesResult,
+  OraxHostSummary,
+  OraxPairingCode,
   OraxRepository,
   OraxScan,
   OraxTask,
@@ -40,6 +42,7 @@ import type {
   OraxTaskMessage,
   OraxTaskRunnerResult,
   PaymentMethodInfo,
+  RedeemPairingPayload,
   RealtimeDiagnostics,
   RealtimeHeartbeatResult,
   RealtimeSessionContext,
@@ -1486,4 +1489,48 @@ export function runApprovedCommands(approvalId: number): Promise<OraxApprovalWit
 
 export function createApprovedGithubPr(approvalId: number): Promise<OraxApprovalWithArtifact> {
   return createGithubPR(approvalId);
+}
+
+// ── Orax Desktop host and pairing ─────────────────────────────────────────────
+
+export function listOraxHosts(): Promise<{ hosts: OraxHostSummary[] }> {
+  return jsonRequest<{ hosts: OraxHostSummary[] }>("/api/orax/hosts");
+}
+
+export function getOraxHost(hostId: string): Promise<{ host: OraxHostSummary }> {
+  return jsonRequest<{ host: OraxHostSummary }>(`/api/orax/hosts/${hostId}`);
+}
+
+export function updateOraxHost(
+  hostId: string,
+  patch: { deviceName?: string; permissionMode?: string },
+): Promise<{ host: OraxHostSummary }> {
+  return jsonRequest<{ host: OraxHostSummary }>(`/api/orax/hosts/${hostId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function revokeOraxHost(hostId: string): Promise<void> {
+  return jsonRequest<void>(`/api/orax/hosts/${hostId}`, { method: "DELETE" });
+}
+
+export function createOraxPairingCode(hostId: string): Promise<OraxPairingCode> {
+  return jsonRequest<OraxPairingCode>("/api/orax/pairing-codes", {
+    method: "POST",
+    body: JSON.stringify({ hostId }),
+  });
+}
+
+export function cancelOraxPairingCode(code: string): Promise<void> {
+  return jsonRequest<void>(`/api/orax/pairing-codes/${encodeURIComponent(code)}`, {
+    method: "DELETE",
+  });
+}
+
+export function redeemOraxPairingCode(payload: RedeemPairingPayload): Promise<{ device: unknown }> {
+  return jsonRequest<{ device: unknown }>("/api/orax/pairing-codes/redeem", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
