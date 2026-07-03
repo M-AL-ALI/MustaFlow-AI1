@@ -20,8 +20,9 @@ import {
   oraxPairedDevicesTable,
   oraxDesktopActionsTable,
   oraxThreadMessagesTable,
-  oraxPendingApprovalsTable,
+  oraxDesktopPendingApprovalsTable,
   oraxAuditLogTable,
+  oraxUsageEventsTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { classifyOraxCommand } from "../lib/orax-command-safety";
@@ -817,6 +818,58 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       });
     }
 
+    // ── run_safe_command completion audit + usage logging ──────────────────
+    if ((type === "completed" || type === "failed") && action.type === "run_safe_command") {
+      const actionPayload = (action.payload ?? {}) as { command?: string; approvalId?: string };
+      const eventPayload = (payload ?? {}) as {
+        exitCode?: number | null;
+        durationMs?: number;
+        timedOut?: boolean;
+      };
+
+      void db
+        .insert(oraxAuditLogTable)
+        .values({
+          userId,
+          hostId: action.hostId,
+          ...(action.threadId ? { threadId: action.threadId } : {}),
+          action: type === "completed" ? "command_completed" : "command_failed",
+          command: actionPayload.command ?? null,
+          outcome: type === "completed" ? "success" : "failed",
+          metadata: {
+            exitCode: eventPayload.exitCode ?? null,
+            durationMs: eventPayload.durationMs ?? null,
+            timedOut: eventPayload.timedOut ?? false,
+            actionId,
+            approvalId: actionPayload.approvalId ?? null,
+          },
+        })
+        .catch((err: unknown) => {
+          logger.warn({ component: "orax-desktop", err, actionId }, "Failed to write command audit log");
+        });
+
+      void db
+        .insert(oraxUsageEventsTable)
+        .values({
+          userId,
+          hostId: action.hostId,
+          ...(action.threadId ? { threadId: action.threadId } : {}),
+          actionType: "command_execution",
+          status: type === "completed" ? "success" : "failed",
+          ...(typeof eventPayload.durationMs === "number"
+            ? { computeMs: eventPayload.durationMs }
+            : {}),
+          metadata: {
+            command: actionPayload.command ?? null,
+            exitCode: eventPayload.exitCode ?? null,
+            timedOut: eventPayload.timedOut ?? false,
+          },
+        })
+        .catch((err: unknown) => {
+          logger.warn({ component: "orax-desktop", err, actionId }, "Failed to write command usage event");
+        });
+    }
+
     logger.info(
       { component: "orax-desktop", actionId, type, newStatus },
       "Action event recorded",
@@ -886,14 +939,14 @@ router.post("/orax/hosts/:hostId/command-approvals", async (req, res) => {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     const [approval] = await db
-      .insert(oraxPendingApprovalsTable)
+      .insert(oraxDesktopPendingApprovalsTable)
       .values({
         userId,
         hostId,
-        threadId: threadId ?? null,
+        ...(threadId ? { threadId } : {}),
         description: reason,
         command: classification.normalizedCommand,
-        cwd: cwd ?? null,
+        ...(cwd ? { cwd } : {}),
         reason,
         riskLevel: classification.risk,
         expiresAt,
@@ -904,7 +957,7 @@ router.post("/orax/hosts/:hostId/command-approvals", async (req, res) => {
     await db.insert(oraxAuditLogTable).values({
       userId,
       hostId,
-      threadId: threadId ?? null,
+      ...(threadId ? { threadId } : {}),
       action: "command_approval_requested",
       command: classification.normalizedCommand,
       outcome: "pending",
@@ -956,11 +1009,11 @@ router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
   try {
     const [approval] = await db
       .select()
-      .from(oraxPendingApprovalsTable)
+      .from(oraxDesktopPendingApprovalsTable)
       .where(
         and(
-          eq(oraxPendingApprovalsTable.id, approvalId),
-          eq(oraxPendingApprovalsTable.userId, userId),
+          eq(oraxDesktopPendingApprovalsTable.id, approvalId),
+          eq(oraxDesktopPendingApprovalsTable.userId, userId),
         ),
       )
       .limit(1);
@@ -975,9 +1028,9 @@ router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
     }
     if (approval.expiresAt && approval.expiresAt < new Date()) {
       await db
-        .update(oraxPendingApprovalsTable)
+        .update(oraxDesktopPendingApprovalsTable)
         .set({ status: "expired", resolvedAt: new Date() })
-        .where(eq(oraxPendingApprovalsTable.id, approvalId));
+        .where(eq(oraxDesktopPendingApprovalsTable.id, approvalId));
       res.status(410).json({ error: "Approval has expired" });
       return;
     }
@@ -986,14 +1039,14 @@ router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
 
     if (decision === "denied") {
       await db
-        .update(oraxPendingApprovalsTable)
+        .update(oraxDesktopPendingApprovalsTable)
         .set({ status: "denied", resolvedAt: now, resolvedBy: userId })
-        .where(eq(oraxPendingApprovalsTable.id, approvalId));
+        .where(eq(oraxDesktopPendingApprovalsTable.id, approvalId));
 
       await db.insert(oraxAuditLogTable).values({
         userId,
         hostId: approval.hostId,
-        threadId: approval.threadId,
+        ...(approval.threadId ? { threadId: approval.threadId } : {}),
         action: "command_approval_denied",
         command: approval.command,
         outcome: "denied",
@@ -1017,9 +1070,9 @@ router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
 
     // decision === "approved" — update approval and queue run_safe_command action
     await db
-      .update(oraxPendingApprovalsTable)
+      .update(oraxDesktopPendingApprovalsTable)
       .set({ status: "approved", resolvedAt: now, resolvedBy: userId })
-      .where(eq(oraxPendingApprovalsTable.id, approvalId));
+      .where(eq(oraxDesktopPendingApprovalsTable.id, approvalId));
 
     const idempotencyKey = `${userId}:${approval.hostId}:run_safe_command:${approvalId}`;
     const [action] = await db
@@ -1027,7 +1080,7 @@ router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
       .values({
         userId,
         hostId: approval.hostId,
-        threadId: approval.threadId,
+        ...(approval.threadId ? { threadId: approval.threadId } : {}),
         type: "run_safe_command",
         status: "queued",
         payload: {
@@ -1043,7 +1096,7 @@ router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
     await db.insert(oraxAuditLogTable).values({
       userId,
       hostId: approval.hostId,
-      threadId: approval.threadId,
+      ...(approval.threadId ? { threadId: approval.threadId } : {}),
       action: "command_approval_approved",
       command: approval.command,
       outcome: "approved",
@@ -1086,11 +1139,11 @@ router.get("/orax/approvals/:approvalId", async (req, res) => {
   try {
     const [approval] = await db
       .select()
-      .from(oraxPendingApprovalsTable)
+      .from(oraxDesktopPendingApprovalsTable)
       .where(
         and(
-          eq(oraxPendingApprovalsTable.id, approvalId),
-          eq(oraxPendingApprovalsTable.userId, userId),
+          eq(oraxDesktopPendingApprovalsTable.id, approvalId),
+          eq(oraxDesktopPendingApprovalsTable.userId, userId),
         ),
       )
       .limit(1);

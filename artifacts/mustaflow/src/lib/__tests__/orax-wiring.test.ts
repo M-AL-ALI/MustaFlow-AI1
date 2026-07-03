@@ -1265,15 +1265,18 @@ describe("ORAX product-surface wiring", () => {
   it("Phase 2F backend: GET /orax/approvals/:approvalId route present and checks userId ownership", () => {
     const route = read("../../../../api-server/src/routes/orax-desktop.ts");
     expect(route).toContain("orax/approvals/:approvalId");
-    expect(route).toContain("oraxPendingApprovalsTable");
+    // Must use desktop-specific table name (not the generic alias)
+    expect(route).toContain("oraxDesktopPendingApprovalsTable");
     // userId ownership check
-    expect(route).toContain("eq(oraxPendingApprovalsTable.userId, userId)");
+    expect(route).toContain("eq(oraxDesktopPendingApprovalsTable.userId, userId)");
   });
 
   it("Phase 2F backend: command-approval tables imported and used in routes", () => {
     const route = read("../../../../api-server/src/routes/orax-desktop.ts");
-    expect(route).toContain("oraxPendingApprovalsTable");
+    // Must import the desktop-specific table export
+    expect(route).toContain("oraxDesktopPendingApprovalsTable");
     expect(route).toContain("oraxAuditLogTable");
+    expect(route).toContain("oraxUsageEventsTable");
     expect(route).toContain("classifyOraxCommand");
   });
 
@@ -1365,5 +1368,82 @@ describe("ORAX product-surface wiring", () => {
     for (const state of ["idle", "requesting", "pending", "executing", "done", "denied", "error"]) {
       expect(mobileOrax).toContain(`"${state}"`);
     }
+  });
+
+  // ── Phase 2F hardening assertions ───────────────────────────────────────────
+
+  it("Phase 2F hardening: route imports desktop-specific approval table export", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(route).toContain("oraxDesktopPendingApprovalsTable");
+    expect(route).not.toContain('oraxPendingApprovalsTable"');
+  });
+
+  it("Phase 2F hardening: DB schema includes userId/cwd/reason/riskLevel/expiresAt on approval table", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("oraxDesktopPendingApprovalsTable");
+    expect(schema).toContain('userId: text("user_id").notNull()');
+    expect(schema).toContain('cwd: text("cwd")');
+    expect(schema).toContain('reason: text("reason")');
+    expect(schema).toContain('riskLevel: text("risk_level")');
+    expect(schema).toContain('expiresAt: timestamp("expires_at"');
+  });
+
+  it("Phase 2F hardening: relay-client executeAction param type includes payload field", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("payload: Record<string, unknown>");
+    // The action param on executeAction must declare payload
+    const execIdx = relay.indexOf("executeAction");
+    const payloadIdx = relay.indexOf("payload: Record<string, unknown>");
+    expect(payloadIdx).toBeGreaterThan(-1);
+    expect(payloadIdx).toBeGreaterThan(execIdx);
+  });
+
+  it("Phase 2F hardening: command-executor does NOT use cmd.exe, powershell.exe, or spread process.env", () => {
+    const executor = read("../../../../orax-desktop/src/main/command-executor.ts");
+    expect(executor).not.toContain("cmd.exe");
+    expect(executor).not.toContain("powershell.exe");
+    expect(executor).not.toContain("shell: true");
+    expect(executor).not.toContain("...process.env");
+    expect(executor).not.toContain("exec(");
+  });
+
+  it("Phase 2F hardening: command-executor uses SAFE_ENV (no full process.env leak)", () => {
+    const executor = read("../../../../orax-desktop/src/main/command-executor.ts");
+    expect(executor).toContain("SAFE_ENV");
+    expect(executor).toContain("env: SAFE_ENV");
+  });
+
+  it("Phase 2F hardening: permission-gate includes shell-spawning interpreter blocklist matching backend", () => {
+    const gate = read("../../../../orax-desktop/src/main/permission-gate.ts");
+    const backend = read("../../../../api-server/src/lib/orax-command-safety.ts");
+    // Both must block powershell and bash
+    expect(gate).toContain("powershell");
+    expect(gate).toContain("bash");
+    expect(backend).toContain("powershell");
+    expect(backend).toContain("bash");
+    // Gate must also block git rebase
+    expect(gate).toContain("git\\s+rebase");
+  });
+
+  it("Phase 2F hardening: action event handler writes oraxAuditLogTable for run_safe_command", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    // audit log insert inside the run_safe_command completion block
+    expect(route).toContain('"command_completed"');
+    expect(route).toContain('"command_failed"');
+    const runSafeIdx = route.indexOf("run_safe_command");
+    const cmdCompletedIdx = route.lastIndexOf('"command_completed"');
+    expect(cmdCompletedIdx).toBeGreaterThan(runSafeIdx);
+    expect(route).toContain("oraxAuditLogTable");
+  });
+
+  it("Phase 2F hardening: action event handler writes oraxUsageEventsTable with command_execution actionType", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(route).toContain("oraxUsageEventsTable");
+    expect(route).toContain('"command_execution"');
+    const usageIdx = route.indexOf("oraxUsageEventsTable");
+    const cmdExecIdx = route.indexOf('"command_execution"');
+    expect(cmdExecIdx).toBeGreaterThan(-1);
+    // Both must be present in the same route file
+    expect(usageIdx).toBeGreaterThan(-1);
   });
 });

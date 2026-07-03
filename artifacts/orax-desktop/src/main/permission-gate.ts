@@ -42,11 +42,14 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /\bnpm\s+i\b/i,
   /\bpnpm\s+add\b/i,
   /\byarn\s+add\b/i,
+  // Shell spawning / interpreter bypass (mirrors backend classifier)
+  /\b(powershell|pwsh|cmd\.exe|bash|sh|zsh|fish|ksh|csh|tcsh|dash)\b/i,
   // Git write
   /\bgit\s+push\b/i,
   /\bgit\s+commit\b/i,
   /\bgit\s+reset\b/i,
   /\bgit\s+clean\b/i,
+  /\bgit\s+rebase\b/i,
   // System
   /\b(shutdown|reboot|restart|halt|poweroff)\b/i,
   // Encoding / obfuscation

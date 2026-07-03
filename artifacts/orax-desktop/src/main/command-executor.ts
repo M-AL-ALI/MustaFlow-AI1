@@ -1,20 +1,23 @@
 /**
  * Orax Desktop — Phase 2F command executor.
  *
- * Executes ONLY allowlisted safe commands using child_process.spawn.
- * Never uses child_process.exec, never passes shell: true, never accepts arbitrary input.
+ * Executes ONLY allowlisted safe commands.
+ * Never uses child_process.exec, never enables shell interpolation, never accepts arbitrary input.
  *
  * Security properties:
- * - spawn() with explicit args — no shell interpolation possible
+ * - pwd / echo / dir / Get-ChildItem implemented via Node fs APIs — no subprocess
+ * - version checks (node/npm/pnpm/git) use spawn() with explicit args, shell: false
+ * - Minimal safe env: only PATH/PATHEXT/SystemRoot passed to child processes
  * - 30s hard timeout, SIGTERM → SIGKILL
  * - 20 KB stdout cap, 20 KB stderr cap
  * - Secret redaction applied to all output
  */
 
 import { spawn } from "node:child_process";
+import { readdir } from "node:fs/promises";
 
-const TIMEOUT_MS = 30_000;
-const MAX_OUTPUT_BYTES = 20_480; // 20 KB
+export const TIMEOUT_MS = 30_000;
+export const MAX_OUTPUT_BYTES = 20_480; // 20 KB
 
 export interface CommandResult {
   exitCode: number | null;
@@ -24,68 +27,108 @@ export interface CommandResult {
   timedOut: boolean;
 }
 
-// ── Safe execution map ──────────────────────────────────────────────────────
-// Each entry maps an exact command string to [executable, args[]].
-// No shell, no interpolation, no dynamic construction from untrusted input.
+// ── Minimal safe environment for spawned processes ───────────────────────────
+// Never spread process.env into child processes — that leaks API keys, tokens,
+// and other secrets. Only include what is needed to locate executables.
 
-const WIN32 = process.platform === "win32";
+const SAFE_ENV: NodeJS.ProcessEnv =
+  process.platform === "win32"
+    ? {
+        Path: process.env.Path ?? process.env.PATH ?? "",
+        PATHEXT: process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD",
+        SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+      }
+    : {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+      };
 
-const SAFE_SPAWN_MAP: Map<string, [string, string[]]> = new Map([
+// ── Version commands: spawn with explicit args, no shell ────────────────────
+// These are the ONLY commands that use a subprocess. All others use Node APIs.
+
+const VERSION_SPAWN_MAP: Map<string, [string, string[]]> = new Map([
   ["node --version", ["node", ["--version"]]],
   ["npm --version", ["npm", ["--version"]]],
   ["pnpm --version", ["pnpm", ["--version"]]],
   ["git --version", ["git", ["--version"]]],
-  [
-    "pwd",
-    WIN32 ? ["cmd.exe", ["/c", "cd"]] : ["pwd", []],
-  ],
-  [
-    "dir /b",
-    WIN32 ? ["cmd.exe", ["/c", "dir", "/b"]] : ["ls", ["-1"]],
-  ],
-  [
-    "Get-ChildItem -Name",
-    WIN32
-      ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-ChildItem -Name"]]
-      : ["ls", ["-1"]],
-  ],
 ]);
 
-function resolveSpawnArgs(command: string): [string, string[]] | null {
-  const exact = SAFE_SPAWN_MAP.get(command);
-  if (exact) return exact;
+// ── Secret redaction ────────────────────────────────────────────────────────
 
-  // echo <printable ASCII text>
+export function redactSecrets(output: string): string {
+  return output
+    .replace(/\bsk-[A-Za-z0-9_-]{10,}/g, "[REDACTED_SK]")
+    .replace(/\bghp_[A-Za-z0-9_]{10,}/g, "[REDACTED_GHP]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{10,}/g, "[REDACTED_PAT]")
+    .replace(/Bearer\s+[A-Za-z0-9_.\\-]{10,}/g, "Bearer [REDACTED]")
+    .replace(/[A-Z][A-Z0-9_]{2,}_(?:API_)?KEY\s*=\s*\S+/g, "[REDACTED_KEY]");
+}
+
+// ── Node API implementations (no subprocess) ─────────────────────────────────
+// pwd, echo, dir /b, Get-ChildItem -Name are implemented here using Node fs
+// APIs so no Windows shell interpreter or native shell binary is ever spawned.
+
+async function nodeApiCommand(command: string, cwd?: string): Promise<CommandResult | null> {
+  const startMs = Date.now();
+  const effectiveCwd = cwd ?? process.cwd();
+
+  if (command === "pwd") {
+    return {
+      exitCode: 0,
+      stdout: redactSecrets(effectiveCwd),
+      stderr: "",
+      durationMs: Date.now() - startMs,
+      timedOut: false,
+    };
+  }
+
   const echoMatch = command.match(/^echo ([ -~]{1,200})$/);
   if (echoMatch) {
-    const text = echoMatch[1]!;
-    if (WIN32) {
-      return ["cmd.exe", ["/c", "echo", text]];
+    return {
+      exitCode: 0,
+      stdout: redactSecrets(echoMatch[1]!),
+      stderr: "",
+      durationMs: Date.now() - startMs,
+      timedOut: false,
+    };
+  }
+
+  if (command === "dir /b" || command === "Get-ChildItem -Name") {
+    try {
+      const entries = await readdir(effectiveCwd);
+      return {
+        exitCode: 0,
+        stdout: redactSecrets(entries.join("\n")),
+        stderr: "",
+        durationMs: Date.now() - startMs,
+        timedOut: false,
+      };
+    } catch (err) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: err instanceof Error ? err.message : "readdir failed",
+        durationMs: Date.now() - startMs,
+        timedOut: false,
+      };
     }
-    return ["/bin/echo", [text]];
   }
 
   return null;
 }
 
-// ── Secret redaction ────────────────────────────────────────────────────────
-
-function redactSecrets(output: string): string {
-  return output
-    .replace(/\bsk-[A-Za-z0-9_-]{10,}/g, "[REDACTED_SK]")
-    .replace(/\bghp_[A-Za-z0-9_]{10,}/g, "[REDACTED_GHP]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{10,}/g, "[REDACTED_PAT]")
-    .replace(/Bearer\s+[A-Za-z0-9_.\-]{10,}/g, "Bearer [REDACTED]")
-    .replace(/[A-Z][A-Z0-9_]{2,}_(?:API_)?KEY\s*=\s*\S+/g, "[REDACTED_KEY]");
-}
-
-// ── Main executor ───────────────────────────────────────────────────────────
+// ── Main executor ────────────────────────────────────────────────────────────
 
 export async function executeCommand(
   command: string,
   cwd?: string,
 ): Promise<CommandResult> {
-  const spawnArgs = resolveSpawnArgs(command.trim());
+  const trimmed = command.trim();
+
+  const nodeResult = await nodeApiCommand(trimmed, cwd);
+  if (nodeResult) return nodeResult;
+
+  const spawnArgs = VERSION_SPAWN_MAP.get(trimmed);
   if (!spawnArgs) {
     return {
       exitCode: null,
@@ -109,13 +152,12 @@ export async function executeCommand(
       cwd: cwd ?? process.cwd(),
       shell: false,
       windowsHide: true,
-      env: { ...process.env },
+      env: SAFE_ENV,
     });
 
     const timer = setTimeout(() => {
       timedOut = true;
       proc.kill("SIGTERM");
-      // Escalate to SIGKILL after 2s if still alive
       const force = setTimeout(() => proc.kill("SIGKILL"), 2_000);
       if (typeof force === "object" && force !== null) force.unref?.();
     }, TIMEOUT_MS);

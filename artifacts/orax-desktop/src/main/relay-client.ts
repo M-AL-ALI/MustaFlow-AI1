@@ -92,6 +92,8 @@ export class RelayClient {
     id: string;
     type: string;
     idempotencyKey: string;
+    payload: Record<string, unknown>;
+    status?: string;
   }): Promise<void> {
     try {
       await this.api.postActionEvent(action.id, "acknowledged", {});

@@ -215,15 +215,18 @@ export const oraxThreadMessagesTable = pgTable(
 // Phase 2F columns: userId, cwd, reason, riskLevel, expiresAt.
 // threadId is nullable — command approvals may exist outside a thread.
 
-export const oraxPendingApprovalsTable = pgTable(
+// Desktop-specific name: desktop command approvals are always account-scoped
+// (userId is required). SQL table name stays orax_pending_approvals for
+// migration compatibility.
+export const oraxDesktopPendingApprovalsTable = pgTable(
   "orax_pending_approvals",
   {
     id: text("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    threadId: text("thread_id"),
+    userId: text("user_id").notNull(),
     hostId: text("host_id").notNull(),
-    userId: text("user_id"),
+    threadId: text("thread_id"),
     description: text("description").notNull(),
     command: text("command"),
     filePath: text("file_path"),
@@ -244,6 +247,9 @@ export const oraxPendingApprovalsTable = pgTable(
     index("orax_pending_approvals_user_id_idx").on(t.userId),
   ],
 );
+
+// Backward-compat alias so any existing code referencing the old name still works.
+export const oraxPendingApprovalsTable = oraxDesktopPendingApprovalsTable;
 
 // ── orax_usage_events ──────────────────────────────────────────────────────────
 // Append-only usage event log. Written by the cloud on confirmation from the
@@ -320,8 +326,11 @@ export type OraxThread = typeof oraxThreadsTable.$inferSelect;
 export type InsertOraxThread = typeof oraxThreadsTable.$inferInsert;
 export type OraxThreadMessage = typeof oraxThreadMessagesTable.$inferSelect;
 export type InsertOraxThreadMessage = typeof oraxThreadMessagesTable.$inferInsert;
-export type OraxPendingApproval = typeof oraxPendingApprovalsTable.$inferSelect;
-export type InsertOraxPendingApproval = typeof oraxPendingApprovalsTable.$inferInsert;
+export type OraxDesktopPendingApproval = typeof oraxDesktopPendingApprovalsTable.$inferSelect;
+export type InsertOraxDesktopPendingApproval = typeof oraxDesktopPendingApprovalsTable.$inferInsert;
+// Backward-compat type aliases
+export type OraxPendingApproval = OraxDesktopPendingApproval;
+export type InsertOraxPendingApproval = InsertOraxDesktopPendingApproval;
 export type OraxUsageEvent = typeof oraxUsageEventsTable.$inferSelect;
 export type InsertOraxUsageEvent = typeof oraxUsageEventsTable.$inferInsert;
 export type OraxAuditLog = typeof oraxAuditLogTable.$inferSelect;

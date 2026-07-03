@@ -1,0 +1,149 @@
+Phase 2F hardening/fix task — controlled local execution is not done yet
+
+Do not start Phase 2G yet. Fix Phase 2F first. Do not touch Ora, public-ai chat, AI Builder, credits, or normal project chat. Only touch Orax / Orax Desktop files.
+
+Current verification failures:
+
+1. API server typecheck fails:
+pnpm --filter @workspace/api-server run typecheck
+
+Errors are in:
+artifacts/api-server/src/routes/orax-desktop.ts
+
+The route code is using oraxPendingApprovalsTable with Phase 2F fields:
+- userId
+- cwd
+- reason
+- riskLevel
+- expiresAt
+- nullable threadId
+
+But TypeScript still sees a table shape that does not fully match those fields. Fix the DB/table contract cleanly.
+
+Required fix:
+- Make the desktop approval table contract unambiguous.
+- Prefer renaming the desktop table export to avoid future confusion, for example:
+  - oraxDesktopPendingApprovalsTable
+  - OraxDesktopPendingApproval
+  - InsertOraxDesktopPendingApproval
+- Update all imports/usages in artifacts/api-server/src/routes/orax-desktop.ts.
+- Keep the SQL table name as orax_pending_approvals if migration compatibility requires it, but the TS export name should be desktop-specific.
+- Make userId required if all command approvals are account-scoped.
+- Make threadId nullable/optional correctly and do not pass threadId: null if Drizzle expects undefined.
+- Keep expiresAt, cwd, reason, and riskLevel available in the inferred select/insert types.
+- Rebuild/check DB declarations cleanly.
+
+2. Orax Desktop typecheck fails:
+pnpm --filter @workspace/orax-desktop run typecheck
+
+Error:
+artifacts/orax-desktop/src/main/relay-client.ts
+Property 'payload' does not exist on type '{ id: string; type: string; idempotencyKey: string; }'
+
+Required fix:
+- Update the executeAction action parameter type to include:
+  payload: Record<string, unknown>
+  status?: string
+- Or reuse the return type from api.getPendingActions so the relay client and API client cannot drift.
+
+3. Safety hardening required before calling Phase 2F complete.
+
+Current issue:
+artifacts/orax-desktop/src/main/command-executor.ts claims no shell interpreter usage, but it still spawns:
+- cmd.exe /c cd
+- cmd.exe /c dir /b
+- cmd.exe /c echo
+- powershell.exe -Command Get-ChildItem -Name
+
+Even with shell: false, this is still using shell/interpreter executables.
+
+Required fix:
+- Do not use cmd.exe or powershell.exe for simple safe commands.
+- Implement these with Node APIs instead:
+  - pwd -> return cwd/process.cwd() directly
+  - dir /b -> fs.readdir(cwd)
+  - Get-ChildItem -Name -> fs.readdir(cwd), same output shape
+  - echo <text> -> return the text directly
+- Keep only exact binary version checks as spawn calls:
+  - node --version
+  - npm --version
+  - pnpm --version
+  - git --version
+- Continue using spawn with shell: false for those exact version commands only.
+- Do not use exec anywhere.
+
+4. Desktop local permission gate must mirror backend classifier.
+
+Current issue:
+artifacts/api-server/src/lib/orax-command-safety.ts blocks shell-spawning interpreters:
+powershell, pwsh, cmd.exe, bash, sh, zsh, fish, ksh, csh, tcsh, dash
+
+But artifacts/orax-desktop/src/main/permission-gate.ts does not mirror that full blocklist.
+
+Required fix:
+- Add the same shell-spawning interpreter blocklist to the desktop permission gate.
+- Add any missing backend block patterns such as git rebase if present on backend.
+- Best option: extract shared allow/block constants into a shared Orax Desktop safety module so backend and desktop cannot drift.
+
+5. Do not pass full process.env into command execution.
+
+Current issue:
+command-executor.ts uses:
+env: { ...process.env }
+
+Required fix:
+- Use a minimal safe environment for spawned version commands.
+- Include only what is needed to find executables, for example PATH/Path, SystemRoot, ComSpec, PATHEXT on Windows.
+- Do not pass user secrets or full env to child processes.
+
+6. Add completion audit + usage logging.
+
+Current issue:
+The route writes audit rows for:
+- command_approval_requested
+- command_approval_approved
+- command_approval_denied
+
+But the action event handler does not appear to write:
+- command_completed / command_failed audit logs
+- orax_usage_events actionType="command_execution"
+
+Required fix:
+When POST /orax/relay/actions/:actionId/events receives completed or failed for action.type === "run_safe_command":
+- Insert an orax_audit_log row:
+  action: "command_completed" or "command_failed"
+  command from action.payload.command
+  outcome: "success" or "failed"
+  metadata includes exitCode, durationMs, timedOut, actionId, approvalId
+- Insert an orax_usage_events row:
+  actionType: "command_execution"
+  status: "success" or "failed"
+  computeMs/durationMs from payload.durationMs
+  hostId, userId, threadId
+  metadata includes command, exitCode, timedOut
+- Keep output redacted before storing or rendering.
+
+7. Strengthen wiring tests.
+
+Add wiring assertions for:
+- api-server route imports/uses the desktop-specific approval table export
+- pending approval table includes userId, cwd, reason, riskLevel, expiresAt
+- relay-client action type includes payload
+- command-executor does NOT contain cmd.exe, powershell.exe, shell: true, or exec(
+- command-executor does NOT spread process.env into child process env
+- permission-gate contains the same shell-spawning interpreter blocklist as backend
+- action event handler writes oraxAuditLogTable for run_safe_command completed/failed
+- action event handler writes oraxUsageEventsTable with actionType "command_execution"
+
+Verification commands that must pass before closing:
+
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Do not report Phase 2F complete until all of those are clean.
