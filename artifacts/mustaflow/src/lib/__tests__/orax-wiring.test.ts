@@ -657,4 +657,166 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxDesktopSchema).toContain("export type OraxUsageEvent");
     expect(oraxDesktopSchema).toContain("export type OraxAuditLog");
   });
+
+  it("Phase 2C: Orax Desktop app skeleton files exist", () => {
+    const mainEntry    = read("../../../../orax-desktop/src/main/index.ts");
+    const preload      = read("../../../../orax-desktop/src/preload/index.ts");
+    const rendererMain = read("../../../../orax-desktop/src/renderer/main.tsx");
+    const appTsx       = read("../../../../orax-desktop/src/renderer/App.tsx");
+    const sharedTypes  = read("../../../../orax-desktop/src/shared/types.ts");
+
+    // Main process entry point wires electron app lifecycle
+    expect(mainEntry).toContain(".whenReady()");
+    expect(mainEntry).toContain("BrowserWindow");
+    expect(mainEntry).toContain("registerIpcHandlers");
+    expect(mainEntry).toContain("createAuthAdapter");
+    expect(mainEntry).toContain("HostManager");
+    expect(mainEntry).toContain("PairingManager");
+
+    // Preload exposes contextBridge API (not raw Node APIs)
+    expect(preload).toContain("contextBridge.exposeInMainWorld");
+    expect(preload).toContain("ipcRenderer.invoke");
+    expect(preload).not.toContain("require(");
+
+    // Renderer bootstraps React
+    expect(rendererMain).toContain("createRoot");
+    expect(rendererMain).toContain("AppProvider");
+
+    // App shell routes correctly
+    expect(appTsx).toContain("SignInScreen");
+    expect(appTsx).toContain("SetupScreen");
+    expect(appTsx).toContain("HomeScreen");
+    expect(appTsx).toContain("Sidebar");
+
+    // Shared types carry permission modes
+    expect(sharedTypes).toContain("PERMISSION_MODES");
+    expect(sharedTypes).toContain('"read_only"');
+    expect(sharedTypes).toContain('"ask_everything"');
+    expect(sharedTypes).toContain('"ask_risky"');
+    expect(sharedTypes).toContain('"trusted_project"');
+    expect(sharedTypes).toContain('"full_access"');
+    expect(sharedTypes).toContain('"custom"');
+    expect(sharedTypes).toContain("PERMISSION_MODE_LABELS");
+  });
+
+  it("Phase 2C: Orax Desktop references all required backend endpoints", () => {
+    const apiClient  = read("../../../../orax-desktop/src/main/api-client.ts");
+    const ipcHandlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    const hostMgr    = read("../../../../orax-desktop/src/main/host-manager.ts");
+
+    // Host registration
+    expect(apiClient).toContain("/api/orax/hosts/register");
+    expect(hostMgr).toContain("register");
+
+    // Heartbeat (every 30 seconds, with backoff)
+    expect(apiClient).toContain("/api/orax/relay/heartbeat");
+    expect(hostMgr).toContain("HEARTBEAT_INTERVAL_MS");
+    expect(hostMgr).toContain("sendHeartbeat");
+
+    // Pairing code creation and cancellation
+    expect(apiClient).toContain("/api/orax/pairing-codes");
+    expect(apiClient).toContain("cancelPairingCode");
+
+    // PATCH for permission mode
+    expect(apiClient).toContain("/api/orax/hosts/");
+    expect(apiClient).toContain("permissionMode");
+    expect(ipcHandlers).toContain("host:updatePermissionMode");
+
+    // Pairing IPC channels registered
+    expect(ipcHandlers).toContain("pairing:create");
+    expect(ipcHandlers).toContain("pairing:cancel");
+
+    // Project folder management IPC channels
+    expect(ipcHandlers).toContain("project:addLocalFolder");
+    expect(ipcHandlers).toContain("project:listLocalFolders");
+    expect(ipcHandlers).toContain("project:removeLocalFolder");
+
+    // Folder picker uses Electron dialog (not web API)
+    expect(ipcHandlers).toContain("dialog.showOpenDialog");
+    expect(ipcHandlers).toContain("openDirectory");
+  });
+
+  it("Phase 2C: Orax Desktop renderer uses IPC, not direct Node.js fs APIs", () => {
+    const ipcLib    = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
+    const appCtx    = read("../../../../orax-desktop/src/renderer/context/AppContext.tsx");
+    const pairingPg = read("../../../../orax-desktop/src/renderer/pages/PairingScreen.tsx");
+    const projectsPg = read("../../../../orax-desktop/src/renderer/pages/ProjectsScreen.tsx");
+    const settingsPg = read("../../../../orax-desktop/src/renderer/pages/SettingsScreen.tsx");
+
+    // Renderer uses window.electronAPI (contextBridge), not Node built-ins
+    expect(ipcLib).toContain("window.electronAPI");
+    expect(ipcLib).not.toContain('require("');
+    expect(ipcLib).not.toContain("require('");
+    expect(ipcLib).not.toContain('from "node:fs"');
+    expect(ipcLib).not.toContain('from "node:path"');
+    expect(ipcLib).not.toContain('from "electron"');
+
+    // AppContext wires IPC calls, not fetch('/api/...')
+    expect(appCtx).toContain("auth.getSession");
+    expect(appCtx).toContain("host.getStatus");
+    expect(appCtx).not.toContain('fetch("/api/');
+    expect(appCtx).not.toContain("useOraChat");
+    expect(appCtx).not.toContain("/api/public-ai");
+    expect(appCtx).not.toContain("/api/credits");
+    expect(appCtx).not.toContain("/api/projects");
+
+    // Permission mode selector present
+    expect(settingsPg).toContain("PERMISSION_MODES");
+    expect(settingsPg).toContain("updatePermissionMode");
+
+    // Pairing screen shows code + countdown + cancel
+    expect(pairingPg).toContain("pairing.create");
+    expect(pairingPg).toContain("pairing.cancel");
+    expect(pairingPg).toContain("expiresAt");
+    expect(pairingPg).toContain("countdown");
+
+    // Projects screen uses IPC for folder picker
+    expect(projectsPg).toContain("project.addLocalFolder");
+    expect(projectsPg).toContain("project.removeLocalFolder");
+    expect(projectsPg).not.toContain('require("fs"');
+    expect(projectsPg).not.toContain('from "node:fs"');
+  });
+
+  it("Phase 2C: Orax Desktop has no Ora/AI-Builder/password boundary violations", () => {
+    const allDesktopFiles = [
+      read("../../../../orax-desktop/src/main/index.ts"),
+      read("../../../../orax-desktop/src/main/auth.ts"),
+      read("../../../../orax-desktop/src/main/api-client.ts"),
+      read("../../../../orax-desktop/src/main/host-manager.ts"),
+      read("../../../../orax-desktop/src/main/pairing-manager.ts"),
+      read("../../../../orax-desktop/src/main/ipc-handlers.ts"),
+      read("../../../../orax-desktop/src/preload/index.ts"),
+      read("../../../../orax-desktop/src/renderer/lib/ipc.ts"),
+      read("../../../../orax-desktop/src/renderer/context/AppContext.tsx"),
+      read("../../../../orax-desktop/src/renderer/App.tsx"),
+      read("../../../../orax-desktop/src/renderer/pages/SignInScreen.tsx"),
+      read("../../../../orax-desktop/src/renderer/pages/SettingsScreen.tsx"),
+    ].join("\n");
+
+    // No Ora or AI Builder route leakage
+    expect(allDesktopFiles).not.toContain("/api/public-ai");
+    expect(allDesktopFiles).not.toContain("/api/builder");
+    expect(allDesktopFiles).not.toContain("useOraChat");
+    expect(allDesktopFiles).not.toContain("handoffCta");
+    expect(allDesktopFiles).not.toContain("builder_handoff");
+    expect(allDesktopFiles).not.toContain("deductCredits");
+    expect(allDesktopFiles).not.toContain("/api/credits");
+
+    // Auth never collects passwords — no password input field
+    const signIn = read("../../../../orax-desktop/src/renderer/pages/SignInScreen.tsx");
+    expect(signIn).not.toContain('type="password"');
+    expect(signIn).not.toContain("<input");
+
+    const authModule = read("../../../../orax-desktop/src/main/auth.ts");
+    expect(authModule).not.toContain("password");
+    expect(authModule).not.toContain("passwd");
+
+    // Capabilities all disabled (Phase 2C is skeleton only)
+    const hostManager = read("../../../../orax-desktop/src/main/host-manager.ts");
+    expect(hostManager).toContain("shell: false");
+    expect(hostManager).toContain("filesystem: false");
+    expect(hostManager).toContain("git: false");
+    expect(hostManager).toContain("github: false");
+    expect(hostManager).toContain("computer_use: false");
+  });
 });
