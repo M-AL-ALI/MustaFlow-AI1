@@ -16,10 +16,12 @@ import {
   Menu,
   MessageSquare,
   Mic,
+  Monitor,
   MoreHorizontal,
   Play,
   Plus,
   RefreshCw,
+  Scan,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -389,6 +391,8 @@ export default function OraxScreen() {
     useState<OraxComposerPermissionMode>("ask");
   const [composerInputMode, setComposerInputMode] = useState<"text" | "voice">("text");
   const [recordingVoice, setRecordingVoice] = useState(false);
+  // Placeholder: desktop pairing not yet implemented; always offline until the pairing protocol is built
+  const desktopHostState = "offline" as "offline" | "online";
   const [transcribingVoice, setTranscribingVoice] = useState(false);
 
   const [approvalPaths, setApprovalPaths] = useState("");
@@ -1058,6 +1062,8 @@ export default function OraxScreen() {
 
             {!threadOpen ? (
               <>
+                <DesktopConnectionCard desktopHostState={desktopHostState} />
+
                 <WorkspaceChips
                   repos={repos}
                   selectedRepo={selectedRepo}
@@ -1143,8 +1149,8 @@ export default function OraxScreen() {
                           full
                         />
                         <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
-                          Public GitHub repositories can be scanned from the URL. Private
-                          repositories need a token with read access.
+                          Orax Desktop syncs connected repositories automatically. You can also add
+                          a repository URL manually.
                         </Text>
                       </Card>
                     ) : (
@@ -1865,10 +1871,10 @@ function OraxCommandCenter({
         <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: c.foreground, fontFamily: "Inter_700Bold", fontSize: 17 }}>
-              Orax Command Center
+              Workspace
             </Text>
             <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
-              Workspace, repos, and next moves
+              Projects and recent tasks
             </Text>
           </View>
           <Pressable
@@ -2080,6 +2086,85 @@ function OraxCommandCenter({
           </View>
         </ScrollView>
       </Card>
+    </View>
+  );
+}
+
+function DesktopConnectionCard({
+  desktopHostState,
+}: {
+  desktopHostState: "offline" | "online";
+}) {
+  const c = useColors();
+  const isOnline = desktopHostState === "online";
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 18,
+        backgroundColor: c.card,
+        padding: 16,
+        gap: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Monitor size={20} color={c.foreground} />
+        <Text
+          style={{
+            color: c.foreground,
+            fontFamily: "Inter_600SemiBold",
+            fontSize: 15,
+            flex: 1,
+          }}
+        >
+          Connect Orax Desktop
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: isOnline ? "#10b981" : "#94a3b8",
+            }}
+          />
+          <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+            {isOnline ? "Connected" : "Offline"}
+          </Text>
+        </View>
+      </View>
+      <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+        Install Orax Desktop on your computer. Once running, pair this device to control Orax
+        remotely and see your projects here.
+      </Text>
+      <Button
+        label="Scan QR Code"
+        icon={Scan}
+        onPress={() => {}}
+        disabled
+        full
+      />
+      <View
+        style={{
+          borderWidth: 1,
+          borderColor: c.border,
+          borderRadius: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          backgroundColor: c.background,
+        }}
+      >
+        <Text style={{ color: c.mutedForeground, fontSize: 12, marginBottom: 4 }}>
+          Manual pairing code
+        </Text>
+        <Text style={{ color: c.mutedForeground, fontSize: 14 }}>
+          Enter 6-digit code from Orax Desktop
+        </Text>
+      </View>
+      <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}>
+        Keep Orax Desktop open and on the same network as your phone to stay connected.
+      </Text>
     </View>
   );
 }

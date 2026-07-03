@@ -186,7 +186,12 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).toContain("workspaceMenuOpen");
     expect(mobileOraxScreen).toContain("WorkspaceChips");
     expect(mobileOraxScreen).toContain("OraxCommandCenter");
-    expect(mobileOraxScreen).toContain("Orax Command Center");
+    expect(mobileOraxScreen).not.toContain("Orax Command Center");
+    expect(mobileOraxScreen).toContain("DesktopConnectionCard");
+    expect(mobileOraxScreen).toContain("Connect Orax Desktop");
+    expect(mobileOraxScreen).toContain("Scan QR Code");
+    expect(mobileOraxScreen).toContain("desktopHostState");
+    expect(mobileOraxScreen).toContain("Manual pairing code");
     expect(mobileOraxScreen).toContain("primaryWorkspaceActionLabel");
     expect(mobileOraxScreen).toContain("Connect GitHub");
     expect(mobileOraxScreen).toContain("Scan files");
