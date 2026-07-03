@@ -35,7 +35,7 @@ export default function ModeSelectPage() {
   function handleOraxSelect() {
     if (selecting) return;
     setSelecting("orax");
-    setLocation("/orax");
+    setLocation("/orax-product");
   }
 
   return (
@@ -102,7 +102,7 @@ export default function ModeSelectPage() {
             mode="orax"
             icon={Code2}
             title="ORAX"
-            description="A coding-agent workspace for repositories, task plans, reviews, and safe approval-gated code work."
+            description="Your local coding and workflow agent. Edit files, run commands, debug, review diffs, and push to GitHub — controllable from desktop, web, or mobile."
             accent="from-emerald-500/20 via-emerald-500/5 to-transparent"
             borderHover="hover:border-emerald-500/60"
             glowColor="shadow-emerald-500/10"

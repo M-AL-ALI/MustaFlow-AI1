@@ -1,0 +1,872 @@
+MASTER TASK — Rebuild Orax as MustaFlow AI’s Codex-Style Desktop Coding Agent + Web/Mobile Remote Control
+
+Important:
+We are rebuilding Orax correctly.
+
+Orax must not be only a website/mobile chatbot. Orax must become MustaFlow AI’s Codex-style coding and workflow agent with a real local desktop host, PowerShell/terminal execution, file access, Git/GitHub workflow, web/mobile remote control, billing/usage tracking, and secure approval controls.
+
+Do not touch Ora.
+
+Ora must remain the main AI assistant experience. Orax is separate:
+- Ora = main AI assistant
+- Orax = coding/workflow agent
+- Orax Desktop = installed local coding agent/app
+- Orax Web = product/download page + remote control/management surface
+- Orax Mobile = remote control inside Ora mobile
+- MustaFlow Cloud = auth, billing, usage, host pairing, thread sync, relay, notifications, audit logs
+
+Orax can reuse shared MustaFlow infrastructure where safe:
+- auth/account
+- billing/usage
+- support/help
+- design tokens
+- backend shared utilities
+
+But Orax must not modify or couple itself to:
+- Ora chat runtime
+- public-ai chat routes
+- AI Builder
+- project chat
+- unrelated credits UI logic
+- unrelated billing internals
+- unrelated mobile screens
+
+Do not copy OpenAI branding or proprietary implementation. The goal is functional equivalence under MustaFlow AI architecture and branding.
+
+Official Orax Logo:
+Use the provided Orax logo as the official identity. It is the small terminal-style square icon with a `>_` prompt. Make it professional, clean, and consistent across:
+- Orax website card
+- Orax download page
+- Orax Desktop app icon
+- Orax Desktop sidebar
+- Orax Mobile entry point
+- loading states
+- empty states
+- connected host state
+
+High-Level Product Vision:
+Orax should behave like a real agentic AI software engineer.
+
+User gives a natural request:
+- “Fix the login bug.”
+- “Review this repository.”
+- “Improve this layout.”
+- “Run tests and fix failures.”
+- “Create a pull request.”
+
+Orax should:
+- understand the task
+- inspect project files
+- plan
+- edit files
+- run PowerShell/terminal commands
+- run tests/typechecks/builds
+- debug failures
+- retry fixes
+- summarize work
+- create GitHub branches/PRs after approval
+- let the user continue from desktop, web, or mobile
+
+Everything should happen inline in the chat thread, not through dashboard-style workflow panels.
+
+Core Architecture:
+Orax Desktop is the worker.
+Orax Web and Orax Mobile are remote-control surfaces.
+MustaFlow Cloud handles identity, relay, sync, billing, pairing, notifications, and audit logs.
+
+PHASE 0 — Audit and Clean Current Orax
+
+Before building the new architecture, clean the existing Orax.
+
+Do a read-only audit first:
+- list every Orax file
+- list every Ora file that mentions Orax
+- list every Orax file that mentions Ora/public-ai/project-chat/credits
+- list Orax database tables/migrations
+- list Orax tests
+- list Orax mobile/web API functions
+- list current fake workflow/dashboard UI areas
+
+Keep:
+- `/orax` route
+- Orax mobile route
+- `/api/orax` namespace
+- Orax docs
+- Orax logo/branding
+- useful Orax-only backend helpers
+- Orax-only DB tables until new schema is ready
+
+Remove or hide from normal user flow:
+- fake workflow dashboard panels
+- duplicate Continue strip
+- visible approval IDs
+- visible artifact IDs
+- checkpoint/status spam
+- old GitHub-only fake execution controls
+- complicated task control panels
+- stale plan/goal strip
+- anything that makes Orax feel like an admin dashboard
+
+Quarantine, do not delete yet:
+- old runner code
+- GitHub scan/read/draft/check/PR code
+- old Orax task tables
+- old tests that may help as reference
+
+The user-facing Orax after cleanup should be a clean shell:
+- Connect desktop
+- connected hosts
+- projects from host
+- thread area
+- composer
+- simple inline empty states
+
+No Ora behavior should change.
+
+PHASE 1 — Orax Website Product + Download Page
+
+After logging into MustaFlow AI website, the Orax card should open a professional Orax page.
+
+Page purpose:
+- introduce Orax
+- show official Orax logo
+- explain capabilities
+- explain that Orax requires desktop installation
+- provide Windows download
+- later support macOS/Linux
+- show account/billing/usage status if signed in
+
+Page sections:
+
+1. Hero:
+- Orax logo
+- “Orax by MustaFlow AI”
+- “Your local coding and workflow agent.”
+- button: “Download for Windows”
+- button/link: “How Orax works”
+
+2. Capabilities:
+- Understand full codebases
+- Edit local files
+- Run PowerShell and terminal commands
+- Run tests/typechecks/builds
+- Debug failures
+- Review diffs
+- Connect GitHub
+- Create branches and pull requests
+- Analyze screenshots/files/zips/logs
+- Continue work from phone
+
+3. How it works:
+- Install Orax Desktop
+- Sign in with MustaFlow account
+- Add local projects
+- Pair web/mobile
+- Ask Orax to build/fix/review
+- Approve sensitive actions
+- Push to GitHub
+
+4. Security:
+- user controls project folder access
+- commands require approval based on policy
+- secrets stay local
+- device can be revoked
+- audit logs available
+
+5. Billing/Usage:
+- show current plan
+- show Orax usage summary
+- link to Billing & Usage
+
+PHASE 2 — Orax Desktop App MVP
+
+Build Orax Desktop as the real local coding host.
+
+Windows first.
+
+Recommended stack:
+Use the safest stack that fits the repo. If the repo already uses React/TypeScript, evaluate Electron or Tauri and document the decision before implementation.
+
+Desktop first-launch flow:
+1. Open Orax Desktop.
+2. User signs in with the same MustaFlow AI account used on the website.
+3. User grants project folder access.
+4. Orax registers this computer as a host/device.
+5. Orax shows device online.
+6. User can start coding tasks.
+
+Authentication:
+- User must sign in with MustaFlow account.
+- Same user account must work across:
+  - MustaFlow website
+  - Orax Desktop
+  - Orax Web
+  - Orax Mobile
+- Do not show password after login.
+- Do not store raw password.
+- Store tokens securely:
+  - Windows Credential Manager
+  - macOS Keychain later
+  - Linux Secret Service later
+
+Desktop sidebar:
+- Orax logo
+- New chat / new task
+- Projects
+- Apps / Integrations
+- Threads / History
+- Review / Diffs
+- Settings
+- Usage & Billing
+- Help & Support
+- user profile block
+
+User profile block:
+- avatar/initials
+- display name
+- email/username
+- plan badge
+- online status
+- device name
+- account menu:
+  - Manage Account
+  - Usage & Billing
+  - Connected Devices
+  - Help & Support
+  - Sign out
+
+Do not show password.
+
+Projects:
+- Add local project folder
+- Remove project
+- Rename project
+- Open project
+- Show Git status
+- Show branch
+- Show recent threads
+- Configure setup scripts/actions later
+
+Apps / Integrations:
+- GitHub connection
+- GitHub CLI status
+- Git token support if needed
+- future integrations:
+  - Replit
+  - GitLab
+  - Bitbucket
+  - Linear
+  - Slack
+  - Notion
+  - MCP servers
+- Token storage must be secure.
+- Connection status must be clear.
+
+Settings:
+- account
+- default terminal: PowerShell first, WSL/Git Bash later
+- approval policy
+- sandbox/security mode
+- computer access mode
+- model/reasoning preference
+- connected devices
+- project folder permissions
+- notifications
+- privacy/security
+- logs
+- app updates
+
+Help & Support:
+- connect to MustaFlow help/support system
+- use same support backend as Ora if already available
+- do not use Ora chat runtime
+- support payload should include userId, hostId, app version, platform, logs if user approves
+
+Main app:
+- center chat thread
+- inline execution progress
+- composer
+- approvals
+- diffs
+- terminal output summaries
+- test/check results
+- final summaries
+- PR link
+
+Composer:
+- text
+- attach image/screenshot
+- attach code files
+- attach zip
+- attach logs/text/config files
+- microphone input
+- model/reasoning selector
+- permission mode indicator
+- send button
+
+PHASE 3 — Computer Access, Permissions, and Sandbox Modes
+
+Orax Desktop must support configurable local computer access.
+
+The goal is to let Orax use PowerShell, terminal commands, Git, Node.js, package managers, JSON/config files, build tools, and local project files like a real coding agent, while giving the user clear control over risk.
+
+Default mode:
+Use “Ask for Risky Actions” as the default.
+
+Access modes:
+
+1. Read Only
+- Can inspect approved project files.
+- Can explain code.
+- Cannot edit files.
+- Cannot run shell commands.
+- Cannot push to GitHub.
+
+2. Ask Before Everything
+- Requires approval before file reads, edits, commands, installs, Git actions, and PR creation.
+- Safest interactive mode.
+
+3. Ask for Risky Actions
+- Can automatically perform low-risk actions inside approved project folders.
+- Must ask before risky actions.
+- Low-risk examples:
+  - read normal source files
+  - list files
+  - inspect package.json
+  - git status
+  - git diff
+  - run configured safe checks like typecheck/test if user enabled them
+- Risky examples:
+  - edit files
+  - delete files
+  - install packages
+  - run unknown commands
+  - change env/config/secrets
+  - push to GitHub
+  - create PR
+  - deploy
+
+4. Trusted Project Mode
+- For selected projects only.
+- Can read/edit project files and run configured project commands.
+- Still asks for destructive/system-level actions.
+- Still asks before reading secrets or pushing/deploying.
+
+5. Full Access / Advanced Mode
+- User explicitly allows broader local command and file access.
+- Must show strong warning before enabling.
+- Not default.
+- Should still block or double-confirm destructive/system commands.
+- Should be reversible at any time.
+
+6. Custom Mode
+User can define:
+- allowed folders
+- blocked folders
+- allowed commands
+- blocked commands
+- commands that always require approval
+- whether file edits are automatic or approval-based
+- whether package installs require approval
+- whether Git commits/pushes require approval
+- whether `.env` and secret files can be read
+- whether network commands are allowed
+- whether browser/computer-use is allowed
+
+Permission categories:
+- Filesystem
+- Shell/PowerShell
+- Git
+- Package managers
+- Network
+- Browser/computer-use
+- Secrets
+- Deployment
+
+Security requirements:
+- Orax can only access approved project folders by default.
+- Commands run inside project working directory unless explicitly approved.
+- All commands have timeout.
+- All command output is scanned/redacted for secrets.
+- Destructive commands require approval or are blocked.
+- Reading `.env`, private keys, tokens, or credentials requires explicit approval.
+- Full access mode requires clear warning and confirmation.
+- Users can change permission mode anytime from Settings.
+- Users can set permissions globally or per project.
+- All approvals/actions are logged for audit.
+
+Desktop UI:
+Settings should include “Computer Access” or “Permissions” page with:
+- current mode
+- folder access list
+- command allowlist
+- command blocklist
+- Git permissions
+- package install permissions
+- secrets policy
+- browser/computer-use toggle
+- reset to safe defaults
+
+Inline approval examples:
+- “Allow Orax to read these files?”
+- “Allow Orax to edit these files?”
+- “Allow Orax to run `pnpm typecheck` in this project?”
+- “Allow Orax to install `lucide-react`?”
+- “Allow Orax to push branch `orax/fix-login` to GitHub?”
+- “Allow Orax to read `.env.local`? This may contain secrets.”
+
+Expected behavior:
+Orax should feel powerful like Codex, but controlled. Users can choose strict approvals, risky-action approvals, trusted project behavior, or advanced full access.
+
+PHASE 4 — Account Identity, Billing, Usage, and Device Sync
+
+This is critical.
+
+Users may buy a new desktop/laptop and install Orax again. When they sign in with the same MustaFlow account, they should recover their Orax cloud state.
+
+Account identity:
+- Every Orax session must link to MustaFlow userId.
+- Usage and billing track by userId and workspace/accountId.
+- Device/host ID identifies which computer performed the work.
+
+Device identity:
+Each Orax Desktop installation creates/registers:
+- hostId/deviceId
+- userId
+- deviceName
+- platform
+- appVersion
+- capabilities
+- lastSeenAt
+- online/offline status
+
+Device ID is not a password. It is an internal identifier for the specific computer/app install.
+
+Cloud sync:
+When user installs Orax on a new computer and signs in:
+- user profile loads
+- billing/usage loads
+- connected devices load
+- previous Orax threads load
+- project records load
+- GitHub/app integrations load if cloud-managed
+- local-only project paths may need reconnecting because file paths are machine-specific
+
+Important:
+Cloud can restore threads, metadata, settings, account, billing, device list, and integration records.
+Cloud cannot magically restore local files that only existed on the old computer unless they were committed/pushed/synced through GitHub or another remote.
+
+If a previous project path is unavailable on the new computer:
+Show:
+“This project was connected on another device. Clone from GitHub or reconnect the local folder to continue.”
+
+Billing/usage events:
+Every billable Orax action should report:
+- userId
+- workspaceId/accountId
+- hostId/deviceId
+- projectId
+- threadId
+- action type
+- model used
+- tokens/compute units
+- timestamp
+- status
+
+Trackable Orax usage:
+- model calls
+- screenshot/image analysis
+- file/repository analysis
+- long-running agent task
+- cloud relay usage if applicable
+- premium integrations if applicable
+
+Local-only audit events:
+- command started/completed
+- file edit requested/applied
+- approval accepted/denied
+- git status checked
+
+Credits:
+- Check credits before billable model work.
+- If insufficient:
+  “You need more credits to continue this Orax task.”
+- Link to Billing & Usage.
+- Keep Orax usage separate from Ora chat history, but account billing balance can be shared.
+
+PHASE 5 — MustaFlow Cloud Relay + Pairing
+
+Backend must support connected hosts.
+
+Add Orax host/device model:
+- id
+- userId
+- deviceName
+- platform
+- appVersion
+- status
+- lastSeenAt
+- capabilities:
+  - shell
+  - filesystem
+  - git
+  - github
+  - browser
+  - screenshot
+  - computer-use later
+- pairedAt
+- revokedAt
+
+Endpoints:
+- GET /api/orax/hosts
+- POST /api/orax/hosts/pair
+- POST /api/orax/hosts/:id/heartbeat
+- POST /api/orax/hosts/:id/revoke
+- GET /api/orax/hosts/:id/projects
+- GET /api/orax/hosts/:id/threads
+- POST /api/orax/hosts/:id/actions
+- POST /api/orax/threads/:id/messages
+
+Pairing:
+- Desktop signs in directly or displays pairing code
+- Web/mobile can connect to host
+- User approves connection
+- Cloud stores association
+- User can revoke device
+
+Relay:
+- host keeps secure outbound connection to MustaFlow Cloud
+- web/mobile send messages to cloud
+- cloud relays to host
+- host runs commands locally
+- host streams progress/events back
+- cloud stores thread state and audit logs
+
+Do not expose user machine directly to public internet.
+
+PHASE 6 — Orax Mobile Pairing and Remote Control
+
+Orax Mobile is a remote-control surface for Orax Desktop.
+
+First-time mobile flow:
+1. User opens Orax Mobile.
+2. If no host is paired, show “Connect Orax Desktop”.
+3. Explain that Orax Desktop must be installed and open on the user’s computer.
+4. User taps “Scan QR Code” or “Enter Pairing Code”.
+5. User scans the QR code shown in Orax Desktop.
+6. Mobile pairs with that desktop host.
+7. Mobile shows the host as connected.
+
+Pairing options:
+- QR code
+- manual pairing code
+- same MustaFlow account verification
+- optional device approval from desktop
+
+Connected host state:
+Mobile should show:
+- host name
+- platform
+- online/offline status
+- last seen time
+- active project
+- active thread
+- available capabilities
+
+Online requirement:
+For mobile to control local coding tasks, the desktop host must be:
+- powered on
+- awake
+- online
+- running Orax Desktop
+- signed in
+- paired
+- not revoked
+
+If desktop is offline:
+- mobile must show offline state
+- mobile can show previous history/results
+- mobile cannot run local commands
+- mobile cannot edit local files
+- mobile cannot continue local execution
+- mobile can notify user to reopen Orax Desktop
+
+Offline message:
+“Keep Orax Desktop open and your computer awake to continue local coding tasks from mobile.”
+
+Remote control actions from mobile:
+When host is online, mobile can:
+- start a new Orax thread
+- continue an existing thread
+- send follow-up instructions
+- approve file reads
+- approve file edits
+- approve command execution
+- approve Git/GitHub actions
+- attach screenshots
+- review progress
+- receive final summaries
+
+Security:
+- pairing must be account-bound
+- user can revoke paired devices
+- QR code must expire
+- pairing code must expire
+- mobile cannot access a host from another account
+- host can require desktop-side approval for first pairing
+
+Multiple devices:
+- A user can pair multiple phones/tablets to one desktop.
+- A user can pair one phone to multiple desktops.
+- Mobile should allow switching hosts.
+
+Host offline handling:
+If host goes offline during a task:
+- show “Host disconnected”
+- preserve thread state
+- resume automatically when host reconnects if safe
+- ask user before continuing risky actions after reconnect
+
+Expected behavior:
+Orax Mobile behaves like a remote controller for the desktop agent. It does not pretend to execute local coding work by itself.
+
+PHASE 7 — Orax Web Remote Control
+
+Orax Web should also act as a remote-control and management surface.
+
+It should show:
+- connected hosts
+- online/offline state
+- device name
+- platform
+- project list
+- thread list
+- current task
+- inline progress
+- approvals
+- final summary
+- PR links
+- download/setup if no host exists
+
+If host offline:
+- show offline state
+- allow viewing history
+- do not allow local execution
+- prompt user to reopen Orax Desktop
+
+PHASE 8 — Inline Agentic Coding Loop
+
+Everything happens inline in chat.
+
+Normal flow:
+1. user asks naturally
+2. Orax understands
+3. Orax selects context
+4. Orax reads files
+5. Orax plans
+6. Orax edits files
+7. Orax runs commands/checks
+8. Orax reads failures
+9. Orax fixes failures
+10. Orax summarizes
+11. Orax offers PR
+
+Good inline messages:
+- “Inspecting files”
+- “Reading package.json”
+- “Updating login page”
+- “Running typecheck”
+- “Fixing TypeScript error”
+- “Checks passed”
+- “Ready for review”
+- “Create pull request”
+
+Avoid:
+- dashboard workflow panels
+- duplicate continue buttons
+- artifact IDs
+- approval IDs
+- checkpoint dumps
+- long internal status reports
+- Phase 4B language
+
+Approvals:
+- “Allow Orax to read these files?”
+- “Allow Orax to edit these files?”
+- “Allow Orax to run pnpm typecheck?”
+- “Allow Orax to install this package?”
+- “Create pull request?”
+
+PHASE 9 — Local Execution
+
+Orax Desktop should use local execution.
+
+Windows:
+- PowerShell default
+- Git support
+- GitHub CLI support
+- Node/Python/.NET detection where relevant
+- WSL support later
+
+Capabilities:
+- read approved files
+- write approved files
+- run approved commands
+- inspect git diff
+- run tests
+- run typechecks
+- run builds
+- capture logs
+- summarize output
+- retry fixes
+
+Command safety:
+- approval required by policy
+- destructive commands blocked or require extra confirmation
+- secret redaction
+- command timeout
+- working directory bound to project
+- audit log
+
+PHASE 10 — GitHub / Replit Workflow
+
+Orax Desktop works locally and pushes to GitHub.
+
+Flow:
+1. user connects GitHub
+2. Orax edits local repo
+3. Orax runs checks locally
+4. Orax creates branch
+5. Orax commits
+6. Orax pushes to GitHub
+7. Orax creates PR
+8. Replit/cloud environments pull from GitHub
+
+GitHub integration:
+- GitHub CLI auth or token
+- repo detection
+- branch creation
+- commit
+- push
+- PR creation
+- PR link in chat
+- failure handling
+
+Replit is not the main Orax execution engine. GitHub is the bridge.
+
+PHASE 11 — Security
+
+Security requirements:
+- explicit project folder allowlist
+- user account auth
+- host/device registration
+- revoke device
+- secure token storage
+- command approval policy
+- edit approval policy
+- destructive command protection
+- secret redaction
+- no raw secrets in cloud logs
+- no raw password storage
+- audit logs
+- offline handling
+- safe defaults
+- QR/pairing codes expire
+- all remote actions are account-bound
+
+PHASE 12 — Tests
+
+Add tests for:
+- Ora boundary
+- Orax route isolation
+- host registration
+- device pairing
+- heartbeat
+- device revoke
+- host offline state
+- mobile pairing state
+- project list sync
+- thread sync
+- account/device restoration
+- billing usage events
+- permission modes
+- approval flow
+- command action request
+- command result event
+- no raw passwords in logs/state
+- no public-ai/Ora/project-chat/credits imports
+- no visible artifact/approval IDs in normal chat
+- web/mobile host state parity
+
+Verification:
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint -- --max-warnings 0
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/api-server exec vitest run src/lib/__tests__/orax.test.ts
+pnpm --filter @workspace/mustaflow exec vitest run src/lib/__tests__/orax-wiring.test.ts
+
+PHASE 13 — Manual Smoke Tests
+
+Desktop:
+- install Orax Desktop
+- sign in
+- choose computer access mode
+- add project
+- ask “Review this repository”
+- ask “Fix a small UI issue”
+- approve file read
+- approve command
+- run typecheck
+- see diff
+- push branch/PR
+
+Mobile:
+- open Orax Mobile
+- scan QR code from desktop
+- connect to same desktop
+- open same thread
+- approve command from phone
+- send follow-up
+- see desktop progress
+- receive final summary
+- turn desktop off and confirm mobile shows offline state
+
+New device:
+- install Orax on a new computer
+- sign in with same account
+- see previous threads/devices
+- reconnect or clone project
+- continue work
+
+Website:
+- Orax download page works
+- connected host appears online
+- project list appears
+- thread opens
+- approvals work
+- offline host message works
+
+Final target:
+Orax becomes MustaFlow AI’s Codex-equivalent coding product:
+- desktop local execution
+- configurable computer access
+- PowerShell/terminal/Git/files
+- web/mobile remote control
+- mobile QR pairing
+- cloud sync
+- account billing/usage
+- secure device pairing
+- inline agentic chat
+- GitHub PR workflow
+- Ora untouched
+
+Important implementation instruction:
+Do not build all phases in one pass.
+
+Start with:
+1. Phase 0 cleanup audit
+2. Phase 1 Orax website download/setup page
+3. Architecture/schema design for Phases 2-6
+
+Do not implement the full desktop agent until cleanup and architecture are reviewed.

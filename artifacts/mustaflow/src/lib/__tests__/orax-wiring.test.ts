@@ -25,7 +25,7 @@ describe("ORAX product-surface wiring", () => {
 
   it("exposes ORAX from mode select without saving it as the normal Ora preference", () => {
     expect(modeSelect).toContain('title="ORAX"');
-    expect(modeSelect).toContain('setLocation("/orax")');
+    expect(modeSelect).toContain('setLocation("/orax-product")');
     expect(modeSelect).not.toContain('preferredMode: "orax"');
   });
 
@@ -114,7 +114,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("renderWorkspaceChips");
     expect(oraxPage).toContain("data-orax-workspace-chips");
     expect(oraxPage).toContain("renderOraxCommandCenter");
-    expect(oraxPage).toContain("Orax Command Center");
+    expect(oraxPage).toContain("Workspace");
     expect(oraxPage).toContain("primaryWorkspaceActionLabel");
     expect(oraxPage).toContain("Connect GitHub");
     expect(oraxPage).toContain("Scan files");
@@ -129,7 +129,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxPage).toContain("GitHub access connected");
     expect(oraxPage).toContain("Connect a GitHub repository before starting an Orax chat.");
     expect(oraxPage).toContain("connectGithubRepository");
-    expect(oraxPage).toContain("Public GitHub repositories can be scanned from the URL");
+    expect(oraxPage).toContain("Get started with Orax Desktop");
     expect(oraxPage).not.toContain("Could not load ORAX workspace");
     expect(oraxPage).not.toContain("Could not load draft artifacts");
     expect(oraxPage).toContain('placeholder="Ask Orax"');

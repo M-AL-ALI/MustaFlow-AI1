@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Check,
   Code2,
+  Download,
   FileText,
   Folder,
   GitBranch,
@@ -1926,23 +1927,23 @@ export default function OraxPage() {
       <section
         className={cn(
           "rounded-3xl border border-border bg-card p-4 shadow-sm",
-          compact ? "space-y-3" : "mx-auto max-w-xl space-y-4",
+          compact ? "space-y-4" : "mx-auto max-w-xl space-y-5",
         )}
       >
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-muted">
-            <GitBranch className="h-5 w-5 text-foreground" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-foreground font-mono text-sm font-bold text-background">
+            &gt;_
           </div>
           <div className="min-w-0">
-            <div className="font-semibold">Connect GitHub repository</div>
+            <div className="font-semibold">Get started with Orax Desktop</div>
             <p className="mt-1 text-sm leading-5 text-muted-foreground">
-              Orax needs a repository before it can inspect files, run checks, or prepare code
-              changes.
+              Orax is a local coding agent. Install Orax Desktop on your computer to inspect files,
+              run commands, debug, and push code from anywhere.
             </p>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
-          {["Connect repo", "Scan files", "Start chat"].map((step, index) => (
+          {["Install Desktop", "Pair device", "Start coding"].map((step, index) => (
             <div
               key={step}
               className="rounded-full border border-border bg-background px-2 py-1 font-medium"
@@ -1950,6 +1951,23 @@ export default function OraxPage() {
               {index + 1}. {step}
             </div>
           ))}
+        </div>
+        <Link
+          href="/orax-product"
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90"
+        >
+          <Download className="h-4 w-4" />
+          Download Orax Desktop
+        </Link>
+        <div className="relative py-1">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center">
+            <span className="bg-card px-3 text-xs text-muted-foreground">
+              or connect a GitHub repository
+            </span>
+          </div>
         </div>
         <input
           value={repositoryUrl}
@@ -1976,7 +1994,7 @@ export default function OraxPage() {
           type="button"
           onClick={() => void addRepository()}
           disabled={submittingRepo || !repositoryUrl.trim()}
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-foreground px-4 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submittingRepo ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1985,10 +2003,6 @@ export default function OraxPage() {
           )}
           Connect repository
         </button>
-        <p className="text-xs leading-5 text-muted-foreground">
-          Public GitHub repositories can be scanned from the URL. Private repositories need a token
-          with read access; Orax keeps repository work separate from Ora chat.
-        </p>
       </section>
     );
   }
@@ -2203,8 +2217,8 @@ export default function OraxPage() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-base font-semibold">Orax Command Center</div>
-              <div className="text-xs text-muted-foreground">Workspace, repos, and next moves</div>
+              <div className="text-base font-semibold">Workspace</div>
+              <div className="text-xs text-muted-foreground">Projects and recent tasks</div>
             </div>
             <button
               type="button"
@@ -2590,7 +2604,7 @@ export default function OraxPage() {
                 {selectedTaskRepository
                   ? `${selectedTaskRepository.owner}/${selectedTaskRepository.name}`
                   : "Connect a repository to begin"}
-                {selectedTask ? ` - task #${selectedTask.id} - ${selectedTask.status}` : ""}
+                {selectedTask ? ` · ${selectedTask.status}` : ""}
               </p>
             </div>
           </div>
