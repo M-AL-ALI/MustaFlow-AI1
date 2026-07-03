@@ -1,0 +1,566 @@
+PHASE 2 DESIGN ONLY — Orax Desktop MVP Architecture
+
+Do not implement the desktop app yet.
+
+We need a detailed architecture/design document first because Orax Desktop will become the foundation for the real Codex-style behavior. The design choices here affect security, billing, local execution, mobile remote control, packaging, updates, GitHub, and future macOS/Linux support.
+
+Create:
+
+docs/orax-desktop-mvp-architecture.md
+
+Do not touch Ora.
+
+Ora must remain separate:
+- Do not modify Ora chat runtime.
+- Do not modify public-ai chat routes.
+- Do not modify AI Builder.
+- Do not modify project chat.
+- Do not modify unrelated credits/billing UI.
+- Do not modify unrelated mobile screens.
+
+Orax can reuse shared MustaFlow infrastructure only where appropriate:
+- auth/account
+- billing/usage
+- support/help
+- design system
+- backend utilities
+
+Main architectural direction:
+Orax Desktop is the worker.
+Orax Web and Orax Mobile are remote-control surfaces.
+MustaFlow Cloud is the relay/sync layer.
+
+Do not design Orax as a website-only or mobile-only chatbot.
+
+Primary transport recommendation:
+Use MustaFlow Cloud relay as the primary model.
+
+The desktop host should keep an outbound secure connection to MustaFlow Cloud.
+Web/mobile should talk to MustaFlow Cloud.
+MustaFlow Cloud should relay messages/events/actions between web/mobile and desktop.
+
+LAN-only should not be the main model.
+LAN discovery can be documented as a future optimization, but it should not be required for the MVP because users need mobile remote control even when they are away from the same local network.
+
+The design document must cover the following sections in detail:
+
+1. Product Architecture
+
+Explain the roles:
+
+- Orax Desktop:
+  - installed app/local host
+  - signs in with MustaFlow account
+  - registers device/host
+  - manages local project folders
+  - runs PowerShell/terminal commands
+  - reads/writes approved project files
+  - runs Git/GitHub workflows
+  - runs tests/typechecks/builds
+  - streams task events to cloud
+  - receives approvals/messages from web/mobile
+
+- Orax Web:
+  - product/download page
+  - host/device management
+  - remote control for connected desktop
+  - project/thread viewer
+  - approvals
+  - billing/usage links
+  - offline state
+
+- Orax Mobile:
+  - remote control inside Ora mobile
+  - QR/manual pairing
+  - host status
+  - project/thread viewer
+  - send prompts/follow-ups
+  - approve actions
+  - view progress/results
+  - offline state
+
+- MustaFlow Cloud:
+  - auth/account
+  - device registration
+  - secure relay
+  - thread sync
+  - audit logs
+  - billing/usage events
+  - notifications
+  - revoke/disconnect devices
+
+2. Desktop Runtime Choice
+
+Compare:
+- Electron
+- Tauri
+- plain Node daemon with separate UI later
+
+Discuss each option for:
+- Windows support
+- PowerShell/local command execution
+- file-system access
+- Git/GitHub CLI access
+- React/TypeScript UI reuse
+- auto-update
+- code signing
+- installer support
+- app size
+- development speed
+- security risks
+- future macOS/Linux support
+
+Recommendation:
+Likely Electron first unless the repo strongly favors Tauri.
+
+Reason:
+Electron is heavier, but it is the fastest path for:
+- React/TypeScript UI
+- Windows desktop app
+- Node filesystem APIs
+- PowerShell execution
+- Git/GitHub CLI integration
+- WebSocket/cloud relay client
+- packaging and auto-update path
+
+If the recommendation is different, explain why.
+
+3. Host / Device Schema
+
+Design the backend model for registered Orax Desktop hosts.
+
+Fields should include:
+- id / hostId
+- userId
+- workspaceId/accountId if applicable
+- deviceName
+- platform: windows/mac/linux
+- osVersion
+- appVersion
+- installId/deviceId
+- publicKey
+- status: online/offline/revoked
+- lastSeenAt
+- pairedAt
+- revokedAt
+- capabilities:
+  - shell
+  - filesystem
+  - git
+  - github
+  - browser
+  - screenshot
+  - computerUse later
+- permissionMode
+- trustedProjectIds
+- metadata
+
+Explain:
+- difference between userId and deviceId/hostId
+- how multiple devices under one user are handled
+- how a new laptop restores cloud state after sign-in
+- what happens when local project path is missing on new device
+
+4. Account Identity, Billing, and Usage
+
+Orax Desktop must sign in with the same MustaFlow AI account used on the website.
+
+Explain:
+- userId tracks billing and usage
+- hostId/deviceId tracks which computer performed the work
+- workspaceId/accountId tracks team/account if applicable
+
+Usage events should include:
+- userId
+- workspaceId/accountId
+- hostId/deviceId
+- projectId
+- threadId
+- action type
+- model used
+- token/compute units if applicable
+- timestamp
+- success/failure status
+
+Examples:
+- model call
+- screenshot/image analysis
+- file analysis
+- repository analysis
+- command execution event
+- approval event
+- cloud relay event
+- GitHub PR event
+
+Security:
+- never store or display raw password
+- use secure token/session flow
+- desktop tokens stored in OS credential store:
+  - Windows Credential Manager first
+  - macOS Keychain later
+  - Linux Secret Service later
+
+5. Pairing Protocol
+
+Design first-time pairing.
+
+Required flows:
+- Desktop sign-in
+- Desktop host registration
+- QR code pairing
+- manual pairing code fallback
+- mobile/web host selection
+- device revoke/disconnect
+
+QR/manual pairing requirements:
+- codes expire
+- account-bound
+- cannot pair host from another account
+- optional desktop-side approval for first pairing
+- supports multiple phones/tablets per desktop
+- supports one phone controlling multiple desktops
+- revocation path required
+
+Describe data flow:
+1. Desktop signs in.
+2. Desktop registers host.
+3. Desktop displays QR or pairing code.
+4. Mobile scans code.
+5. Cloud validates account/session/code.
+6. Host becomes paired.
+7. Mobile sees host online.
+
+6. Cloud Relay Protocol
+
+Design the main transport.
+
+Primary model:
+- Desktop opens outbound secure connection to MustaFlow Cloud.
+- Web/mobile communicate with MustaFlow Cloud.
+- Cloud relays events/actions to desktop.
+- Desktop streams results back through cloud.
+
+Do not expose desktop directly to public internet.
+
+Document:
+- WebSocket vs SSE vs polling recommendation
+- heartbeat interval
+- reconnect behavior
+- message ordering
+- event IDs
+- idempotency keys
+- retries
+- offline queue
+- action timeout
+- cancellation/stop action
+- backpressure for long logs
+- notification triggers
+
+Event types should include:
+- host_online
+- host_offline
+- project_list_updated
+- thread_message_created
+- action_requested
+- action_started
+- action_progress
+- action_approval_required
+- action_completed
+- action_failed
+- command_output_chunk
+- file_diff_ready
+- checks_started
+- checks_completed
+- pr_ready
+- pr_created
+
+7. Local Permission Model
+
+Design Orax Desktop computer access modes.
+
+Default:
+Ask for Risky Actions.
+
+Modes:
+1. Read Only
+2. Ask Before Everything
+3. Ask for Risky Actions
+4. Trusted Project Mode
+5. Full Access / Advanced Mode
+6. Custom Mode
+
+For each mode explain:
+- file read permissions
+- file edit permissions
+- shell command permissions
+- Git permissions
+- package install permissions
+- network permissions
+- secrets policy
+- deployment permissions
+
+Custom mode should allow:
+- allowed folders
+- blocked folders
+- allowed commands
+- blocked commands
+- commands requiring approval
+- package install approval rule
+- Git commit/push approval rule
+- .env/secret file policy
+- network command policy
+- browser/computer-use toggle
+
+Security requirements:
+- approved project folders only by default
+- commands run in project directory
+- command timeout
+- destructive commands blocked or double-confirmed
+- output redaction
+- .env/private keys/tokens require explicit approval
+- audit log for all sensitive actions
+- permission mode can be changed anytime
+
+8. Local Project Model
+
+Design how Orax Desktop manages local projects.
+
+Project fields:
+- projectId
+- hostId
+- userId
+- localPath
+- displayName
+- gitRemoteUrl
+- currentBranch
+- lastOpenedAt
+- permissionMode override
+- setup scripts/actions later
+- status
+
+Important:
+Cloud can sync project metadata and threads.
+Cloud cannot restore local files that only existed on another computer unless they are in GitHub/remote storage.
+
+If a user signs in on a new desktop:
+- show previous projects
+- if local path missing, show “Reconnect folder” or “Clone from GitHub”
+- do not pretend unavailable local files are present
+
+9. Thread and Session Sync
+
+Design how Orax threads sync between desktop/web/mobile.
+
+Thread should include:
+- threadId
+- userId
+- hostId
+- projectId
+- title
+- messages
+- current status
+- pending approvals
+- last event
+- createdAt/updatedAt
+
+Rules:
+- Desktop executes work.
+- Cloud stores thread transcript/events.
+- Web/mobile can continue thread if host online.
+- If host offline, web/mobile can view history but cannot execute local actions.
+- If host reconnects, thread can resume safely.
+
+10. Local Execution Model
+
+Design how desktop executes coding tasks.
+
+Orax Desktop should support:
+- PowerShell command execution first
+- Git commands
+- GitHub CLI commands
+- Node/npm/pnpm/yarn
+- Python
+- .NET where available
+- WSL later
+
+Execution safety:
+- commands use project working directory
+- command approval based on permission policy
+- timeout
+- cancellation
+- log streaming
+- secret redaction
+- exit code capture
+- stdout/stderr summarization
+- retry/fix loop
+
+11. GitHub / Replit Workflow
+
+Design the Git workflow.
+
+Flow:
+1. Orax edits local repo.
+2. Orax runs checks locally.
+3. Orax creates branch.
+4. Orax commits.
+5. Orax pushes to GitHub.
+6. Orax creates PR.
+7. Replit/cloud can pull from GitHub.
+
+Explain:
+- GitHub CLI vs token
+- branch naming
+- commit message generation
+- PR body generation
+- PR link in chat
+- failure handling
+- Replit is not the main execution engine
+- GitHub is the bridge
+
+12. Web and Mobile UX States
+
+Document UX states for both web and mobile:
+
+- no desktop installed
+- desktop not paired
+- desktop offline
+- desktop online
+- project missing
+- project connected
+- task running
+- approval needed
+- command running
+- checks running
+- PR ready
+- task complete
+
+Mobile first-time copy:
+“Connect Orax Desktop”
+“Install and open Orax Desktop on your computer, then scan the QR code to pair this phone.”
+
+Offline copy:
+“Keep Orax Desktop open and your computer awake to continue local coding tasks from mobile.”
+
+13. Security and Privacy
+
+Document:
+- raw password never stored/displayed
+- tokens stored securely
+- pairing code expiry
+- revocation
+- project folder allowlist
+- command approvals
+- secret redaction
+- no raw secrets in cloud logs
+- audit log
+- local-only secrets remain local
+- cloud stores metadata/events but not unnecessary local secrets
+- support logs require user approval if sensitive
+
+14. Notifications
+
+Design notification events:
+- Orax needs approval
+- task completed
+- task failed
+- host went offline
+- PR created
+- checks failed
+
+Mobile should receive notifications when relevant.
+
+15. Test Plan
+
+Add proposed tests for future implementation:
+
+Backend:
+- host registration
+- host heartbeat
+- host revoke
+- pairing code creation/expiry
+- account-bound pairing
+- host offline state
+- thread sync
+- action relay
+- usage event creation
+- audit log creation
+
+Desktop agent:
+- stores token securely
+- lists approved projects
+- denies unapproved folder access
+- runs approved command
+- blocks dangerous command
+- redacts secrets
+- streams command output
+- handles cancellation
+
+Web/mobile:
+- no-host state
+- QR pairing state
+- host online/offline state
+- approval UI
+- thread sync
+- offline history
+- no fake execution when host offline
+
+Boundary:
+- Ora untouched
+- no public-ai chat coupling
+- no AI Builder coupling
+- no project chat coupling
+- no unrelated credits/billing changes
+
+16. Phased Implementation Plan
+
+Document recommended implementation order:
+
+Phase 2A:
+- architecture doc only
+- schema proposal
+- endpoint proposal
+- desktop runtime decision
+
+Phase 2B:
+- backend host/device schema
+- pairing token model
+- heartbeat endpoint
+- host list endpoint
+
+Phase 2C:
+- desktop agent skeleton
+- sign-in/session storage
+- heartbeat
+- project folder list
+
+Phase 2D:
+- web/mobile host list + offline/online state
+- QR/manual pairing UI placeholders wired to backend
+
+Phase 2E:
+- action relay MVP
+- simple command execution with approval
+
+Phase 2F:
+- project file access + Git status
+- thread sync
+
+Do not jump directly to full coding agent.
+
+17. Deliverable
+
+Deliver:
+- docs/orax-desktop-mvp-architecture.md
+- any small test/wiring updates needed to assert the doc exists or references the architecture
+- no runtime behavior changes unless necessary
+- no Ora changes
+
+Verification:
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint -- --max-warnings 0
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/mustaflow exec vitest run src/lib/__tests__/orax-wiring.test.ts
+
+Expected result:
+A clear, reviewed architecture for Orax Desktop MVP before implementation starts.
