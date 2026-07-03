@@ -712,6 +712,7 @@ router.get("/orax/relay/pending-actions", async (req, res) => {
       .from(oraxDesktopActionsTable)
       .where(
         and(
+          eq(oraxDesktopActionsTable.userId, userId),
           eq(oraxDesktopActionsTable.hostId, hostId),
           eq(oraxDesktopActionsTable.status, "queued"),
         ),

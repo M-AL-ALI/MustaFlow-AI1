@@ -1090,6 +1090,13 @@ describe("ORAX product-surface wiring", () => {
     expect(router).toContain('status: "queued"');
   });
 
+  it("Phase 2E backend: pending-actions query is account-scoped by userId", () => {
+    const router = read(
+      "../../../../api-server/src/routes/orax-desktop.ts",
+    );
+    expect(router).toContain("eq(oraxDesktopActionsTable.userId, userId)");
+  });
+
   it("Phase 2E backend: action event endpoint updates result + completedAt on completed/failed", () => {
     const router = read(
       "../../../../api-server/src/routes/orax-desktop.ts",
