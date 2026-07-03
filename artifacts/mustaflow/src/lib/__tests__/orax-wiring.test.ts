@@ -548,4 +548,43 @@ describe("ORAX product-surface wiring", () => {
     expect(mobileOraxScreen).not.toContain("streamChatNative");
     expect(mobileOraxScreen).not.toContain("/api/credits");
   });
+
+  it("registers Orax Desktop Phase 2B endpoints: host CRUD, pairing codes, heartbeat", () => {
+    const oraxDesktopRoute = read("../../../../api-server/src/routes/orax-desktop.ts");
+
+    expect(oraxDesktopRoute).toContain('router.post("/orax/hosts/register"');
+    expect(oraxDesktopRoute).toContain('router.get("/orax/hosts"');
+    expect(oraxDesktopRoute).toContain('router.get("/orax/hosts/:hostId"');
+    expect(oraxDesktopRoute).toContain('router.patch("/orax/hosts/:hostId"');
+    expect(oraxDesktopRoute).toContain('router.delete("/orax/hosts/:hostId"');
+    expect(oraxDesktopRoute).toContain('router.post("/orax/pairing-codes"');
+    expect(oraxDesktopRoute).toContain('router.post("/orax/pairing-codes/redeem"');
+    expect(oraxDesktopRoute).toContain('router.delete("/orax/pairing-codes/:code"');
+    expect(oraxDesktopRoute).toContain('router.post("/orax/relay/heartbeat"');
+
+    expect(oraxDesktopRoute).toContain("installId");
+    expect(oraxDesktopRoute).toContain("deviceName");
+    expect(oraxDesktopRoute).toContain("permissionMode");
+    expect(oraxDesktopRoute).toContain("capabilities");
+
+    expect(oraxDesktopRoute).toContain("expiresAt");
+    expect(oraxDesktopRoute).toContain("redeemedAt");
+    expect(oraxDesktopRoute).toContain("qrPayload");
+    expect(oraxDesktopRoute).toContain("generatePairingCode");
+    expect(oraxDesktopRoute).toContain("randomBytes(3)");
+
+    expect(oraxDesktopRoute).toContain("last_seen_at");
+    expect(oraxDesktopRoute).toContain("serverTime");
+
+    expect(oraxDesktopRoute).toContain("oraxHostsTable");
+    expect(oraxDesktopRoute).toContain("oraxPairingCodesTable");
+    expect(oraxDesktopRoute).toContain("oraxPairedDevicesTable");
+
+    expect(oraxDesktopRoute).not.toContain("/public-ai/");
+    expect(oraxDesktopRoute).not.toContain("deductCredits");
+    expect(oraxDesktopRoute).not.toContain("builderCredits");
+
+    expect(routesIndex).toContain("oraxDesktopRouter");
+    expect(routesIndex).toContain("router.use(oraxDesktopRouter)");
+  });
 });

@@ -74,5 +74,6 @@ export * from "./generated-images";
 export * from "./help-articles";
 export * from "./support-tickets";
 export * from "./orax";
+export * from "./orax-desktop";
 export * from "./ora-spend-ledger";
 export * from "./ora-file-contexts";
