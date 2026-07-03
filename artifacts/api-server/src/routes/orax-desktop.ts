@@ -22,7 +22,6 @@ import {
   oraxThreadMessagesTable,
   oraxPendingApprovalsTable,
   oraxAuditLogTable,
-  oraxUsageEventsTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { classifyOraxCommand } from "../lib/orax-command-safety";
