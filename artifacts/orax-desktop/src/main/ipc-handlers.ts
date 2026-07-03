@@ -136,6 +136,74 @@ export function registerIpcHandlers(deps: Deps): void {
     return relayClient.getState();
   });
 
+  /**
+   * project:runProjectThread
+   *
+   * Called by the renderer when Orax Desktop picks up a run_project_thread
+   * action from the relay. Verifies that the local folder is bound to the
+   * correct cloud project by reading (or writing) .orax/project.json.
+   *
+   * If .orax/project.json already exists and contains a different projectId,
+   * the handler throws an error (mismatch) and execution is refused.
+   * On first bind the file is created with projectId + executionSourceId.
+   */
+  ipcMain.handle(
+    "project:runProjectThread",
+    async (
+      _event,
+      params: {
+        projectId: string;
+        threadId: string;
+        executionSourceId: string;
+        localPath: string;
+      },
+    ) => {
+      const { projectId, threadId, executionSourceId, localPath } = params;
+
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+
+      const projectJsonPath = path.join(localPath, ".orax", "project.json");
+
+      let storedProjectId: string | null = null;
+      try {
+        const raw = await fs.readFile(projectJsonPath, "utf-8");
+        const data = JSON.parse(raw) as { projectId?: string; executionSourceId?: string };
+        storedProjectId = data.projectId ?? null;
+      } catch {
+        // File does not exist — first bind; we will create it below.
+      }
+
+      if (storedProjectId && storedProjectId !== projectId) {
+        throw new Error(
+          `.orax/project.json mismatch: this folder is bound to project ${storedProjectId}, not ${projectId}. ` +
+            `Detach the folder from its current project before attaching it here.`,
+        );
+      }
+
+      if (!storedProjectId) {
+        const dir = path.join(localPath, ".orax");
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(
+          projectJsonPath,
+          JSON.stringify(
+            {
+              projectId,
+              executionSourceId,
+              threadId,
+              boundAt: new Date().toISOString(),
+            },
+            null,
+            2,
+          ),
+          "utf-8",
+        );
+      }
+
+      return { ok: true, projectId, executionSourceId };
+    },
+  );
+
   hostManager.setOnChange((state) => {
     if (!win.isDestroyed()) win.webContents.send("host:stateChanged", state);
     if (state.status === "online" && state.hostId) {

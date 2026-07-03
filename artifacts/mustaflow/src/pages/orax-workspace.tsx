@@ -16,6 +16,7 @@ import {
   Monitor,
   Plus,
   RefreshCw,
+  Send,
   Terminal,
   Trash2,
   X,
@@ -171,6 +172,68 @@ async function listHosts(): Promise<OraxHost[]> {
   return data.hosts ?? [];
 }
 
+type ThreadMessage = { id: string; role: string; content: string; createdAt: string };
+type ThreadExecCtx = {
+  canExecute: boolean;
+  mode: string;
+  blockReason: string | null;
+  host: { id: string; deviceName: string; status: string } | null;
+};
+
+async function getThreadMessages(projectId: string, threadId: string): Promise<ThreadMessage[]> {
+  const res = await authFetch(
+    `/api/orax/projects/${projectId}/threads/${threadId}/messages`,
+  );
+  if (!res.ok) return [];
+  const data = (await res.json()) as { messages: ThreadMessage[] };
+  return data.messages ?? [];
+}
+
+async function getThreadContext(projectId: string, threadId: string): Promise<ThreadExecCtx> {
+  const res = await authFetch(
+    `/api/orax/projects/${projectId}/threads/${threadId}/context`,
+  );
+  if (!res.ok)
+    return { canExecute: false, mode: "chat_only", blockReason: "Unable to load context", host: null };
+  const data = (await res.json()) as { context: ThreadExecCtx };
+  return data.context;
+}
+
+async function sendMessage(
+  projectId: string,
+  threadId: string,
+  content: string,
+): Promise<ThreadMessage | null> {
+  const res = await authFetch(
+    `/api/orax/projects/${projectId}/threads/${threadId}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, role: "user" }),
+    },
+  );
+  if (!res.ok) throw new Error("Failed to send message");
+  const data = (await res.json()) as { message: ThreadMessage };
+  return data.message ?? null;
+}
+
+async function continueThread(
+  projectId: string,
+  threadId: string,
+  opts: { userMessage?: string; executionSourceId?: string },
+): Promise<{ context: ThreadExecCtx; message: ThreadMessage | null }> {
+  const res = await authFetch(
+    `/api/orax/projects/${projectId}/threads/${threadId}/continue`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    },
+  );
+  if (!res.ok) throw new Error("Failed to continue thread");
+  return res.json() as Promise<{ context: ThreadExecCtx; message: ThreadMessage | null }>;
+}
+
 // ── Small helpers ──────────────────────────────────────────────────────────────
 
 function sourceIcon(type: OraxProjectSource["type"]) {
@@ -195,6 +258,212 @@ function sourceStatusBadge(status: OraxProjectSource["status"]) {
 
 function hostOnline(host: OraxHost) {
   return host.status === "online";
+}
+
+// ── ThreadDetail view ──────────────────────────────────────────────────────────
+
+function ThreadDetail({
+  projectId,
+  thread,
+  onBack,
+}: {
+  projectId: string;
+  thread: OraxThread;
+  onBack: () => void;
+}) {
+  const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  const [ctx, setCtx] = useState<ThreadExecCtx | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [msgs, execCtx] = await Promise.all([
+        getThreadMessages(projectId, thread.id),
+        getThreadContext(projectId, thread.id),
+      ]);
+      setMessages(msgs);
+      setCtx(execCtx);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load thread");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, thread.id]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  async function handleSend() {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setDraft("");
+    setError(null);
+    try {
+      const result = await continueThread(projectId, thread.id, { userMessage: text });
+      setCtx(result.context);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const isChatOnly = thread.mode === "chat_only" || ctx?.mode === "chat_only";
+  const hostOnlineStatus =
+    ctx?.host?.status === "online"
+      ? "online"
+      : ctx?.host
+        ? "offline"
+        : null;
+
+  return (
+    <div className="flex flex-col gap-4 max-w-2xl mx-auto py-6 px-4">
+      {/* Back + title */}
+      <div className="flex items-center gap-3">
+        <button className="btn btn-ghost p-1.5" onClick={onBack}>
+          <ArrowLeft size={15} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold truncate">{thread.title ?? "Untitled thread"}</h2>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span
+              className={cn(
+                "text-xs font-medium",
+                thread.status === "active"
+                  ? "text-green-500"
+                  : thread.status === "failed"
+                    ? "text-destructive"
+                    : "text-muted-foreground",
+              )}
+            >
+              {thread.status}
+            </span>
+            <span className="text-xs text-muted-foreground">·</span>
+            <span className="text-xs text-muted-foreground">{thread.mode}</span>
+          </div>
+        </div>
+        <button
+          className="btn btn-ghost p-1.5"
+          onClick={() => void reload()}
+          title="Refresh"
+        >
+          <RefreshCw size={13} />
+        </button>
+      </div>
+
+      {/* Execution context banner */}
+      {ctx && !ctx.canExecute && ctx.blockReason && (
+        <div
+          className={cn(
+            "flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm",
+            isChatOnly
+              ? "border-border bg-muted/20 text-muted-foreground"
+              : "border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400",
+          )}
+        >
+          <Monitor size={14} className="shrink-0 mt-0.5" />
+          <span>{ctx.blockReason}</span>
+        </div>
+      )}
+
+      {/* Host online indicator */}
+      {ctx?.canExecute && hostOnlineStatus === "online" && (
+        <div className="flex items-center gap-2 text-xs text-green-500">
+          <Monitor size={12} />
+          <span>{ctx.host?.deviceName ?? "Desktop"} online — ready to execute</span>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive flex items-center justify-between">
+          <span>{error}</span>
+          <button className="btn btn-ghost p-1" onClick={() => setError(null)}>
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex flex-col gap-2.5">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={18} className="animate-spin text-muted-foreground" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-12 text-center">
+            <MessageSquare size={20} className="text-muted-foreground/40" />
+            <p className="text-xs text-muted-foreground">
+              {isChatOnly
+                ? "Start a planning conversation below."
+                : "Send a message to start execution."}
+            </p>
+          </div>
+        ) : (
+          messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={cn(
+                "flex gap-2.5",
+                msg.role === "user" ? "justify-end" : "justify-start",
+              )}
+            >
+              <div
+                className={cn(
+                  "max-w-[80%] rounded-xl px-3.5 py-2 text-sm leading-relaxed",
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-card text-foreground",
+                )}
+              >
+                {msg.content}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Composer */}
+      <div className="flex items-end gap-2 border-t pt-4">
+        <textarea
+          className="input flex-1 resize-none text-sm min-h-[42px] max-h-36"
+          rows={2}
+          placeholder={
+            isChatOnly
+              ? "Plan your work... (attach a source to execute code)"
+              : ctx?.canExecute
+                ? "Describe what you want to run..."
+                : "Send a planning message..."
+          }
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void handleSend();
+            }
+          }}
+          disabled={sending}
+        />
+        <button
+          className="btn btn-primary p-2.5 shrink-0"
+          onClick={() => void handleSend()}
+          disabled={!draft.trim() || sending}
+          title="Send"
+        >
+          {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── ProjectList page ────────────────────────────────────────────────────────────
@@ -469,6 +738,9 @@ function ProjectDetail({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Thread detail navigation
+  const [selectedThread, setSelectedThread] = useState<OraxThread | null>(null);
+
   // New thread compose
   const [composing, setComposing] = useState(false);
   const [threadTitle, setThreadTitle] = useState("");
@@ -552,6 +824,16 @@ function ProjectDetail({
     } finally {
       setBusy(null);
     }
+  }
+
+  if (selectedThread) {
+    return (
+      <ThreadDetail
+        projectId={projectId}
+        thread={selectedThread}
+        onBack={() => setSelectedThread(null)}
+      />
+    );
   }
 
   if (loading) {
@@ -871,9 +1153,10 @@ function ProjectDetail({
         ) : (
           <div className="flex flex-col gap-1.5">
             {threads.map((thread) => (
-              <div
+              <button
                 key={thread.id}
-                className="flex items-center gap-2.5 rounded-lg border bg-card px-3.5 py-2.5"
+                className="group w-full text-left flex items-center gap-2.5 rounded-lg border bg-card px-3.5 py-2.5 hover:bg-muted/30 transition-colors"
+                onClick={() => setSelectedThread(thread)}
               >
                 <MessageSquare size={13} className="shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">
@@ -897,7 +1180,8 @@ function ProjectDetail({
                     <span className="text-xs text-muted-foreground">{thread.mode}</span>
                   </div>
                 </div>
-              </div>
+                <ChevronRight size={13} className="shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
+              </button>
             ))}
           </div>
         )}

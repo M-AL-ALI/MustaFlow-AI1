@@ -1561,4 +1561,103 @@ describe("ORAX product-surface wiring", () => {
     expect(workspacePage).not.toContain("builder");
     expect(workspacePage).not.toContain("BuilderGuard");
   });
+
+  // ── Phase 2H: Thread Execution Binding ──────────────────────────────────────
+
+  it("Phase 2H: orax-projects has thread messages, context, and continue endpoints", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain("/threads/:threadId/context");
+    expect(route).toContain("/threads/:threadId/messages");
+    expect(route).toContain("/threads/:threadId/continue");
+    expect(route).toContain("resolveProjectExecutionContext");
+  });
+
+  it("Phase 2H: resolveProjectExecutionContext queries oraxProjectSourcesTable and checks active status", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain("oraxProjectSourcesTable");
+    expect(route).toContain('s.status === "active"');
+    expect(route).toContain("oraxHostsTable");
+  });
+
+  it("Phase 2H: resolveProjectExecutionContext checks host online status and revokedAt", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain('host.status !== "online"');
+    expect(route).toContain("host.revokedAt");
+  });
+
+  it("Phase 2H: continue route refuses chat_only threads before checking source", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain('thread.mode === "chat_only"');
+    expect(route).toContain("chat-only planning mode");
+  });
+
+  it("Phase 2H: continue route queues run_project_thread action with projectId/threadId/executionSourceId", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain("run_project_thread");
+    expect(route).toContain("executionSourceId");
+    expect(route).toContain("oraxDesktopActionsTable");
+    expect(route).toContain("randomUUID");
+  });
+
+  it("Phase 2H: orax-projects.ts does not use process.cwd() or public-ai routes", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).not.toContain("process.cwd()");
+    expect(route).not.toContain("public-ai");
+    expect(route).not.toContain("handoff");
+  });
+
+  it("Phase 2H: orax-projects.ts has GET /messages endpoint returning oraxThreadMessagesTable rows", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain("router.get");
+    expect(route).toContain("/messages");
+    expect(route).toContain("oraxThreadMessagesTable");
+    expect(route).toContain(".orderBy");
+  });
+
+  it("Phase 2H: desktop runProjectThread IPC reads .orax/project.json and rejects projectId mismatch", () => {
+    const handlers = read("../../../../orax-desktop/src/main/ipc-handlers.ts");
+    expect(handlers).toContain("project:runProjectThread");
+    expect(handlers).toContain(".orax/project.json");
+    expect(handlers).toContain("mismatch");
+    expect(handlers).toContain("executionSourceId");
+    expect(handlers).toContain("projectId");
+  });
+
+  it("Phase 2H: desktop preload exposes runProjectThread to renderer", () => {
+    const preload = read("../../../../orax-desktop/src/preload/index.ts");
+    expect(preload).toContain("runProjectThread");
+    expect(preload).toContain("project:runProjectThread");
+    expect(preload).toContain("executionSourceId");
+  });
+
+  it("Phase 2H: website orax-workspace has sendMessage and continueThread API helpers", () => {
+    const workspacePage = read("../../pages/orax-workspace.tsx");
+    expect(workspacePage).toContain("sendMessage");
+    expect(workspacePage).toContain("continueThread");
+    expect(workspacePage).toContain("/messages");
+    expect(workspacePage).toContain("/continue");
+    expect(workspacePage).toContain("/context");
+  });
+
+  it("Phase 2H: website orax-workspace has ThreadDetail component with selectedThread state", () => {
+    const workspacePage = read("../../pages/orax-workspace.tsx");
+    expect(workspacePage).toContain("ThreadDetail");
+    expect(workspacePage).toContain("selectedThread");
+    expect(workspacePage).toContain("setSelectedThread");
+  });
+
+  it("Phase 2H: mobile api.ts has sendProjectThreadMessage, continueProjectThread, getProjectThreadContext", () => {
+    expect(mobileApi).toContain("sendProjectThreadMessage");
+    expect(mobileApi).toContain("continueProjectThread");
+    expect(mobileApi).toContain("getProjectThreadContext");
+    expect(mobileApi).toContain("/messages");
+    expect(mobileApi).toContain("/continue");
+    expect(mobileApi).toContain("/context");
+  });
+
+  it("Phase 2H: mobile OraxScreen imports continueProjectThread and sendProjectThreadMessage", () => {
+    expect(mobileOraxScreen).toContain("sendProjectThreadMessage");
+    expect(mobileOraxScreen).toContain("continueProjectThread");
+    expect(mobileOraxScreen).toContain("getProjectThreadContext");
+  });
 });

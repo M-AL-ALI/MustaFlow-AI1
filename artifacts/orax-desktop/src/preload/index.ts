@@ -33,6 +33,13 @@ const electronAPI = {
       ipcRenderer.invoke("project:createCloudProject", name),
     attachLocalFolderToProject: (projectId: string): Promise<{ source: unknown } | null> =>
       ipcRenderer.invoke("project:attachLocalFolderToProject", projectId),
+    runProjectThread: (params: {
+      projectId: string;
+      threadId: string;
+      executionSourceId: string;
+      localPath: string;
+    }): Promise<{ ok: boolean; projectId: string; executionSourceId: string }> =>
+      ipcRenderer.invoke("project:runProjectThread", params),
   },
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke("app:getVersion"),

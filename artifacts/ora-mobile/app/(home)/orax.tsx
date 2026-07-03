@@ -60,6 +60,9 @@ import {
   listOraxHosts,
   listOraxProjects,
   createOraxProject,
+  sendProjectThreadMessage,
+  continueProjectThread,
+  getProjectThreadContext,
   listRepositories,
   listRepositoryScans,
   listTaskApprovals,
@@ -406,6 +409,13 @@ export default function OraxScreen() {
   const [oraxHostsLoading, setOraxHostsLoading] = useState(true);
   const [oraxProjects, setOraxProjects] = useState<OraxCloudProject[]>([]);
   const [oraxProjectsLoading, setOraxProjectsLoading] = useState(true);
+  const [activeProjectThreadId, setActiveProjectThreadId] = useState<string | null>(null);
+  const [projectThreadCtx, setProjectThreadCtx] = useState<{
+    canExecute: boolean;
+    mode: string;
+    blockReason: string | null;
+    host: { deviceName: string } | null;
+  } | null>(null);
 
   const reloadHosts = useCallback(async () => {
     setOraxHostsLoading(true);
@@ -430,6 +440,37 @@ export default function OraxScreen() {
       setOraxProjectsLoading(false);
     }
   }, []);
+
+  const createProjectScopedThread = useCallback(
+    async (projectId: string, threadId: string, userMessage: string) => {
+      const ctx = await getProjectThreadContext(projectId, threadId);
+      setProjectThreadCtx({
+        canExecute: ctx.canExecute,
+        mode: ctx.mode,
+        blockReason: ctx.blockReason ?? null,
+        host: ctx.host ? { deviceName: ctx.host.deviceName ?? "Desktop" } : null,
+      });
+      setActiveProjectThreadId(threadId);
+      if (userMessage.trim()) {
+        const result = await continueProjectThread(projectId, threadId, {
+          userMessage: userMessage.trim(),
+        });
+        if (result.context) {
+          setProjectThreadCtx({
+            canExecute: result.context.canExecute,
+            mode: result.context.mode,
+            blockReason: result.context.blockReason ?? null,
+            host: result.context.host
+              ? { deviceName: result.context.host.deviceName ?? "Desktop" }
+              : null,
+          });
+        }
+      } else {
+        await sendProjectThreadMessage(projectId, threadId, { role: "user", content: "" });
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     void reloadHosts();

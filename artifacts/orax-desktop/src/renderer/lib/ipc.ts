@@ -29,6 +29,12 @@ export const project = {
   createCloudProject: (name: string) => api().project.createCloudProject(name),
   attachLocalFolderToProject: (projectId: string) =>
     api().project.attachLocalFolderToProject(projectId),
+  runProjectThread: (params: {
+    projectId: string;
+    threadId: string;
+    executionSourceId: string;
+    localPath: string;
+  }) => api().project.runProjectThread(params),
 };
 
 export const appInfo = {

@@ -1,11 +1,13 @@
 /**
- * Orax Project Workspace — Phase 2G routes.
+ * Orax Project Workspace — Phase 2G/2H routes.
  *
  * Cloud-first project workspace: create/manage Orax Projects, attach
- * execution sources (local folder, GitHub repo), and start threads inside
- * projects. Every query is userId-scoped; cross-account access returns 404.
+ * execution sources (local folder, GitHub repo), start threads inside
+ * projects, send messages, and continue threads by resolving the active
+ * execution source. Every query is userId-scoped; cross-account access
+ * returns 404.
  *
- * Routes:
+ * Routes (Phase 2G):
  *   GET    /api/orax/projects
  *   POST   /api/orax/projects
  *   GET    /api/orax/projects/:projectId
@@ -21,9 +23,15 @@
  *   PATCH  /api/orax/threads/:threadId
  *   POST   /api/orax/threads/:threadId/archive
  *
+ * Routes (Phase 2H — execution binding):
+ *   GET    /api/orax/projects/:projectId/threads/:threadId/context
+ *   POST   /api/orax/projects/:projectId/threads/:threadId/messages
+ *   POST   /api/orax/projects/:projectId/threads/:threadId/continue
+ *
  * All routes require Clerk auth (mounted after attachUser).
  */
 
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
@@ -33,6 +41,8 @@ import {
   oraxProjectSourcesTable,
   oraxThreadsTable,
   oraxThreadMessagesTable,
+  oraxHostsTable,
+  oraxDesktopActionsTable,
 } from "@workspace/db";
 
 const router = Router();
@@ -550,6 +560,408 @@ router.post("/orax/threads/:threadId/archive", async (req, res) => {
     .returning();
 
   res.json({ thread: updated });
+});
+
+// ── Phase 2H: Execution context resolution ────────────────────────────────────
+
+type SourceRow = {
+  id: string;
+  type: string;
+  displayName: string | null;
+  localPath: string | null;
+  repoUrl: string | null;
+  hostId: string | null;
+  status: string;
+};
+
+type ExecContext =
+  | { canExecute: false; mode: "chat_only"; source: null; host: null; blockReason: string }
+  | { canExecute: false; mode: "local" | "cloud"; source: SourceRow; host: { id: string; deviceName: string; status: string } | null; blockReason: string }
+  | { canExecute: true; mode: "local" | "cloud"; source: SourceRow; host: { id: string; deviceName: string; status: string } | null; blockReason: null };
+
+/**
+ * Resolves the active execution source for a project thread.
+ * Priority: defaultSourceId → first active source.
+ * For local_folder/worktree sources, also verifies the bound desktop host
+ * is online and not revoked. Returns a `canExecute` flag plus block reason.
+ */
+async function resolveProjectExecutionContext(
+  userId: string,
+  projectId: string,
+  defaultSourceId: string | null,
+): Promise<ExecContext> {
+  const sources = await db
+    .select()
+    .from(oraxProjectSourcesTable)
+    .where(
+      and(
+        eq(oraxProjectSourcesTable.projectId, projectId),
+        eq(oraxProjectSourcesTable.userId, userId),
+      ),
+    );
+
+  let source = defaultSourceId
+    ? sources.find((s) => s.id === defaultSourceId && s.status === "active")
+    : undefined;
+  if (!source) {
+    source = sources.find((s) => s.status === "active");
+  }
+
+  if (!source) {
+    return {
+      canExecute: false,
+      mode: "chat_only",
+      source: null,
+      host: null,
+      blockReason:
+        "No active execution source found. Attach a local folder on desktop or link a GitHub repository to run code in this project.",
+    };
+  }
+
+  const sourceOut: SourceRow = {
+    id: source.id,
+    type: source.type,
+    displayName: source.displayName,
+    localPath: source.localPath,
+    repoUrl: source.repoUrl,
+    hostId: source.hostId,
+    status: source.status,
+  };
+
+  if (source.type === "local_folder" || source.type === "worktree") {
+    if (!source.hostId) {
+      return {
+        canExecute: false,
+        mode: "local",
+        source: sourceOut,
+        host: null,
+        blockReason:
+          "This local folder is not bound to a desktop host. Open Orax Desktop and reconnect the folder.",
+      };
+    }
+
+    const [host] = await db
+      .select()
+      .from(oraxHostsTable)
+      .where(and(eq(oraxHostsTable.id, source.hostId), eq(oraxHostsTable.userId, userId)))
+      .limit(1);
+
+    if (!host) {
+      return {
+        canExecute: false,
+        mode: "local",
+        source: sourceOut,
+        host: null,
+        blockReason: "Desktop host not found. Re-pair your desktop to restore execution.",
+      };
+    }
+
+    if (host.revokedAt) {
+      return {
+        canExecute: false,
+        mode: "local",
+        source: sourceOut,
+        host: { id: host.id, deviceName: host.deviceName, status: "revoked" },
+        blockReason: "Desktop host has been revoked.",
+      };
+    }
+
+    if (host.status !== "online") {
+      return {
+        canExecute: false,
+        mode: "local",
+        source: sourceOut,
+        host: { id: host.id, deviceName: host.deviceName, status: host.status ?? "offline" },
+        blockReason: `Desktop offline — open Orax Desktop on ${host.deviceName} to run code.`,
+      };
+    }
+
+    return {
+      canExecute: true,
+      mode: "local",
+      source: sourceOut,
+      host: { id: host.id, deviceName: host.deviceName, status: host.status ?? "online" },
+      blockReason: null,
+    };
+  }
+
+  if (source.type === "github_repo" || source.type === "cloud_env") {
+    return {
+      canExecute: true,
+      mode: "cloud",
+      source: sourceOut,
+      host: null,
+      blockReason: null,
+    };
+  }
+
+  return {
+    canExecute: false,
+    mode: "chat_only",
+    source: null,
+    host: null,
+    blockReason: "Unsupported execution source type.",
+  };
+}
+
+// ── Phase 2H: GET /api/orax/projects/:projectId/threads/:threadId/messages ────
+
+/**
+ * Lists messages in a project thread in ascending chronological order.
+ * Returns up to 200 most recent messages (sufficient for all current UIs).
+ */
+router.get("/api/orax/projects/:projectId/threads/:threadId/messages", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params;
+
+  const project = await requireProject(userId, projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const thread = await requireThread(userId, threadId);
+  if (!thread || thread.projectId !== projectId) {
+    res.status(404).json({ error: "Thread not found" });
+    return;
+  }
+
+  const messages = await db
+    .select()
+    .from(oraxThreadMessagesTable)
+    .where(eq(oraxThreadMessagesTable.threadId, threadId))
+    .orderBy(oraxThreadMessagesTable.createdAt)
+    .limit(200);
+
+  res.json({ messages });
+});
+
+// ── Phase 2H: GET /api/orax/projects/:projectId/threads/:threadId/context ─────
+
+/**
+ * Returns execution readiness for a project thread. Used by web/mobile to
+ * show the correct source status and host online badge before the user sends
+ * a message. Does NOT modify any state.
+ */
+router.get("/api/orax/projects/:projectId/threads/:threadId/context", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params;
+
+  const project = await requireProject(userId, projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const thread = await requireThread(userId, threadId);
+  if (!thread || thread.projectId !== projectId) {
+    res.status(404).json({ error: "Thread not found" });
+    return;
+  }
+
+  const ctx = await resolveProjectExecutionContext(
+    userId,
+    projectId,
+    project.defaultExecutionSourceId ?? null,
+  );
+
+  res.json({ context: ctx, threadMode: thread.mode });
+});
+
+// ── Phase 2H: POST /api/orax/projects/:projectId/threads/:threadId/messages ──
+
+const sendMessageSchema = z.object({
+  content: z.string().trim().min(1).max(20_000),
+  role: z.enum(["user", "assistant", "system"]).default("user"),
+});
+
+/**
+ * Saves a message to a project thread. Returns the saved message row.
+ * The caller provides the role ("user" for human turns, "assistant" for agent).
+ * Touching the thread also bumps its updatedAt and marks it active.
+ */
+router.post("/api/orax/projects/:projectId/threads/:threadId/messages", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params;
+
+  const parsed = sendMessageSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid message", details: parsed.error.issues });
+    return;
+  }
+
+  const project = await requireProject(userId, projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const thread = await requireThread(userId, threadId);
+  if (!thread || thread.projectId !== projectId) {
+    res.status(404).json({ error: "Thread not found" });
+    return;
+  }
+
+  const { content, role } = parsed.data;
+  const now = new Date();
+
+  const [message] = await db
+    .insert(oraxThreadMessagesTable)
+    .values({ threadId, role, content, createdAt: now })
+    .returning();
+
+  await db
+    .update(oraxThreadsTable)
+    .set({ updatedAt: now, status: "active" })
+    .where(and(eq(oraxThreadsTable.id, threadId), eq(oraxThreadsTable.userId, userId)));
+
+  res.status(201).json({ message });
+});
+
+// ── Phase 2H: POST /api/orax/projects/:projectId/threads/:threadId/continue ──
+
+const continueThreadSchema = z.object({
+  userMessage: z.string().trim().min(1).max(20_000).optional(),
+  executionSourceId: z.string().max(80).optional(),
+});
+
+/**
+ * Continues a project thread using resolved project/source/host context.
+ *
+ * Steps:
+ *  1. Verify project + thread ownership.
+ *  2. Optionally save the user message.
+ *  3. If thread.mode === "chat_only" → save informational assistant message
+ *     and return without queuing execution.
+ *  4. Resolve active execution source (defaultExecutionSourceId → first active).
+ *  5. If source not found or host offline → save assistant message with
+ *     blockReason and return (no action created).
+ *  6. If source is local (has desktop host online) → queue a
+ *     run_project_thread desktop action with projectId/threadId/executionSourceId
+ *     in the payload, save "Queued for desktop" assistant message.
+ *  7. Cloud sources → return context (cloud execution is a future phase).
+ */
+router.post("/api/orax/projects/:projectId/threads/:threadId/continue", async (req, res) => {
+  const userId = req.userId!;
+  const { projectId, threadId } = req.params;
+
+  const parsed = continueThreadSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+    return;
+  }
+
+  const project = await requireProject(userId, projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const thread = await requireThread(userId, threadId);
+  if (!thread || thread.projectId !== projectId) {
+    res.status(404).json({ error: "Thread not found" });
+    return;
+  }
+
+  const { userMessage, executionSourceId } = parsed.data;
+  const now = new Date();
+
+  if (userMessage) {
+    await db
+      .insert(oraxThreadMessagesTable)
+      .values({ threadId, role: "user", content: userMessage, createdAt: now });
+  }
+
+  // Refuse execution when thread is in chat-only planning mode
+  if (thread.mode === "chat_only") {
+    const [assistantMsg] = await db
+      .insert(oraxThreadMessagesTable)
+      .values({
+        threadId,
+        role: "assistant",
+        content:
+          "This thread is in planning mode. Attach a local folder or GitHub repository to this project to enable code execution.",
+        createdAt: new Date(now.getTime() + 1),
+      })
+      .returning();
+
+    res.json({
+      context: {
+        canExecute: false,
+        mode: "chat_only",
+        source: null,
+        host: null,
+        blockReason: "Thread is in chat-only planning mode.",
+      },
+      action: null,
+      message: assistantMsg ?? null,
+    });
+    return;
+  }
+
+  const overrideSourceId = executionSourceId ?? project.defaultExecutionSourceId ?? null;
+  const ctx = await resolveProjectExecutionContext(userId, projectId, overrideSourceId);
+
+  if (!ctx.canExecute) {
+    const [assistantMsg] = await db
+      .insert(oraxThreadMessagesTable)
+      .values({
+        threadId,
+        role: "assistant",
+        content: ctx.blockReason,
+        createdAt: new Date(now.getTime() + 1),
+      })
+      .returning();
+
+    res.json({ context: ctx, action: null, message: assistantMsg ?? null });
+    return;
+  }
+
+  // Cloud sources — skip desktop action (handled in a future phase)
+  if (ctx.mode === "cloud") {
+    res.json({ context: ctx, action: null, message: null });
+    return;
+  }
+
+  // Local source with online host — queue desktop action
+  const hostId = ctx.host!.id;
+  const iKey = `project-thread:${projectId}:${threadId}:${randomUUID()}`;
+
+  const [action] = await db
+    .insert(oraxDesktopActionsTable)
+    .values({
+      userId,
+      hostId,
+      threadId,
+      type: "run_project_thread",
+      status: "queued",
+      payload: {
+        projectId,
+        threadId,
+        executionSourceId: ctx.source!.id,
+        sourceLocalPath: ctx.source!.localPath,
+        userMessage: userMessage ?? null,
+      },
+      idempotencyKey: iKey,
+    })
+    .returning();
+
+  const [assistantMsg] = await db
+    .insert(oraxThreadMessagesTable)
+    .values({
+      threadId,
+      role: "assistant",
+      content: `Queued for desktop execution on ${ctx.host!.deviceName}. Orax Desktop will pick this up shortly.`,
+      createdAt: new Date(now.getTime() + 1),
+    })
+    .returning();
+
+  await db
+    .update(oraxThreadsTable)
+    .set({ updatedAt: now, status: "active" })
+    .where(and(eq(oraxThreadsTable.id, threadId), eq(oraxThreadsTable.userId, userId)));
+
+  res.status(201).json({ context: ctx, action: action ?? null, message: assistantMsg ?? null });
 });
 
 export default router;

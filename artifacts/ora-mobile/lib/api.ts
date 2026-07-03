@@ -1639,3 +1639,49 @@ export function createOraxProjectThread(
     body: JSON.stringify(body),
   });
 }
+
+export function sendProjectThreadMessage(
+  projectId: string,
+  threadId: string,
+  content: string,
+): Promise<{ message: unknown }> {
+  return jsonRequest<{ message: unknown }>(
+    `/api/orax/projects/${projectId}/threads/${threadId}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({ content, role: "user" }),
+    },
+  );
+}
+
+export function continueProjectThread(
+  projectId: string,
+  threadId: string,
+  body: { userMessage?: string; executionSourceId?: string },
+): Promise<{
+  context: { canExecute: boolean; mode: string; blockReason: string | null; host: { deviceName: string } | null };
+  action: unknown;
+  message: { content: string; role: string; id: string } | null;
+}> {
+  return jsonRequest<{
+    context: { canExecute: boolean; mode: string; blockReason: string | null; host: { deviceName: string } | null };
+    action: unknown;
+    message: { content: string; role: string; id: string } | null;
+  }>(`/api/orax/projects/${projectId}/threads/${threadId}/continue`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getProjectThreadContext(
+  projectId: string,
+  threadId: string,
+): Promise<{
+  context: { canExecute: boolean; mode: string; blockReason: string | null; host: { deviceName: string } | null };
+  threadMode: string;
+}> {
+  return jsonRequest<{
+    context: { canExecute: boolean; mode: string; blockReason: string | null; host: { deviceName: string } | null };
+    threadMode: string;
+  }>(`/api/orax/projects/${projectId}/threads/${threadId}/context`);
+}
