@@ -35,6 +35,9 @@ ARG="${1:-}"
 git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
+# wave: remove tracked electron build output, add .gitignore update
+git rm -r --cached artifacts/orax-desktop/out/ 2>/dev/null || true
+git add .gitignore
 # --- per-wave files: add your changed paths above this script entry ---
 git add scripts/push-to-github.sh 2>/dev/null || true
 
