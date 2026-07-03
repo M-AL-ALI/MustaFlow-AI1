@@ -588,7 +588,9 @@ describe("ORAX plan mode runner gate", () => {
   const routeSource = readFileSync(path.join(__dirname, "../../routes/orax.ts"), "utf8");
 
   it("detects plan mode tasks by kind and result.activePlan", () => {
-    expect(routeSource).toContain("function isPlanModeTask(task: OraxTask): boolean");
+    expect(routeSource).toMatch(
+      /function isPlanModeTask\(\s*task: OraxTask,\s*messages\?: Array<\{ role: string; content: string \}>,\s*\): boolean/,
+    );
     expect(routeSource).toContain('task.kind === "plan"');
     expect(routeSource).toContain("asRecord(task.result).activePlan");
   });
@@ -601,7 +603,7 @@ describe("ORAX plan mode runner gate", () => {
   });
 
   it("gates draft patch generation on plan summary when plan mode is active", () => {
-    expect(routeSource).toContain("isPlanModeTask(input.task)");
+    expect(routeSource).toContain("isPlanModeTask(input.task, messages)");
     expect(routeSource).toContain("planReadySummaryAt");
     expect(routeSource).toContain("generateOraxRunnerPlanSummary");
     expect(routeSource).toContain("isOraxContinueImplementationTrigger(latestMsg)");
@@ -641,8 +643,8 @@ describe("ORAX plan mode runner gate", () => {
   });
 
   it("accepts optional messages param and calls isNlPlanModeMessage for NL plan detection", () => {
-    expect(routeSource).toContain(
-      "function isPlanModeTask(\n  task: OraxTask,\n  messages?: Array<{ role: string; content: string }>,\n): boolean",
+    expect(routeSource).toMatch(
+      /function isPlanModeTask\(\s*task: OraxTask,\s*messages\?: Array<\{ role: string; content: string \}>,\s*\): boolean/,
     );
     expect(routeSource).toContain("isNlPlanModeMessage(latestUserMsg)");
   });
@@ -672,7 +674,11 @@ describe("ORAX domain-aware file heuristics", () => {
       "db/schema.sql",
       "app/(home)/styles.ts",
     ];
-    const result = inferOraxDomainPaths("the bottom navigation layout is broken on mobile", files, []);
+    const result = inferOraxDomainPaths(
+      "the bottom navigation layout is broken on mobile",
+      files,
+      [],
+    );
     expect(result).toContain("app/(home)/settings.tsx");
     expect(result).toContain("components/NavBar.tsx");
     expect(result).toContain("app/(home)/styles.ts");
@@ -686,7 +692,11 @@ describe("ORAX domain-aware file heuristics", () => {
       "src/components/Button.tsx",
       "src/db/schema.ts",
     ];
-    const result = inferOraxDomainPaths("typecheck is failing with a type error in build", files, []);
+    const result = inferOraxDomainPaths(
+      "typecheck is failing with a type error in build",
+      files,
+      [],
+    );
     expect(result).toContain("package.json");
     expect(result).toContain("tsconfig.json");
     expect(result).toContain("vite.config.ts");

@@ -30,15 +30,22 @@ export function inferOraxDomainPaths(
   const isExplain =
     /\b(explain|understand|overview|how\s+.*work|what\s+.*do|describe|walk[\s-]?through|tour|guide|document)\b/.test(
       lower,
-    ) || /\b(review\s+(this\s+)?repo|repo.*review|repository.*overview|understand.*codebase)\b/.test(lower);
+    ) ||
+    /\b(review\s+(this\s+)?repo|repo.*review|repository.*overview|understand.*codebase)\b/.test(
+      lower,
+    );
   const isUi =
     /\b(button|color|font|spacing|css|style|theme|design|icon|visual|look|appear|render|ui\s+issue|layout\s+issue|responsive)\b/.test(
       lower,
     );
   const isApi =
-    /\b(api|endpoint|route|request|response|backend|server|handler|controller|rest|graphql|webhook)\b/.test(lower);
+    /\b(api|endpoint|route|request|response|backend|server|handler|controller|rest|graphql|webhook)\b/.test(
+      lower,
+    );
   const isDb =
-    /\b(database|schema|migration|table|column|query|orm|drizzle|prisma|postgres|sql)\b/.test(lower);
+    /\b(database|schema|migration|table|column|query|orm|drizzle|prisma|postgres|sql)\b/.test(
+      lower,
+    );
 
   const allPaths = Array.from(
     new Set([
@@ -64,6 +71,7 @@ export function inferOraxDomainPaths(
       if (/screen|tab|navigation|nav|stack/.test(f)) score += 10;
       if (/component|style|theme|layout/.test(f)) score += 8;
       if (/app\/(home|settings|tabs|screens|main)/.test(f)) score += 9;
+      if (/^app\/(?:\([^)]+\)\/)?[^/]+\.[tj]sx?$|\/screens?\//.test(f)) score += 9;
       if (/expo|react.native/.test(f)) score += 5;
     }
 
@@ -86,7 +94,11 @@ export function inferOraxDomainPaths(
       if (/package\.json$/.test(f)) score += 12;
       if (/schema|migration/.test(f)) score += 9;
       if (/db|database/.test(f)) score += 7;
-      if (/src\/(index|app|main|server)\.[tj]sx?$|routes\/index\.[tj]s$|app\/(index|layout)\.[tj]sx?$/.test(f))
+      if (
+        /src\/(index|app|main|server)\.[tj]sx?$|routes\/index\.[tj]s$|app\/(index|layout)\.[tj]sx?$/.test(
+          f,
+        )
+      )
         score += 10;
     }
 
@@ -114,7 +126,8 @@ export function inferOraxDomainPaths(
     .slice(0, DOMAIN_FILE_LIMIT);
 }
 
-const NL_PLAN_PHRASES: RegExp = /\b(plan\s+this\s+first|make\s+a\s+plan\s+first|think\s+before\s+implementing|think\s+before\s+you\s+implement|outline\s+the\s+approach|show\s+me\s+the\s+plan|plan\s+only|no\s+changes\s+yet|analyze\s+before\s+changing|review\s+first\s+then\s+plan|plan\s+first|create\s+a\s+plan\s+first|step\s+by\s+step\s+plan)\b/;
+const NL_PLAN_PHRASES: RegExp =
+  /\b(plan\s+this\s+first|make\s+a\s+plan\s+first|think\s+before\s+implementing|think\s+before\s+you\s+implement|outline\s+the\s+approach|show\s+me\s+the\s+plan|plan\s+only|no\s+changes\s+yet|analyze\s+before\s+changing|review\s+first\s+then\s+plan|plan\s+first|create\s+a\s+plan\s+first|step\s+by\s+step\s+plan)\b/;
 
 export function isNlPlanModeMessage(message: string): boolean {
   const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();

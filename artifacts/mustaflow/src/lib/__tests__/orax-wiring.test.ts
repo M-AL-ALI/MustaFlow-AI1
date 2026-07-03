@@ -497,7 +497,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxApiRoute).toContain("inferOraxDomainPaths");
     expect(oraxApiRoute).toContain("isNlPlanModeMessage");
     expect(oraxApiRoute).toContain("loadLatestOraxRepositoryScan");
-    expect(oraxApiRoute).toContain("buildOraxRunnerReadPaths(\n    input.task,\n    input.messages,");
+    expect(oraxApiRoute).toMatch(/buildOraxRunnerReadPaths\(\s*input\.task,\s*input\.messages,/);
     expect(oraxApiRoute).toContain("scan.sampleFiles");
     expect(oraxApiRoute).toContain("scan.topLevelEntries");
     expect(oraxApiRoute).toContain("isNlPlanModeMessage(latestUserMsg)");
