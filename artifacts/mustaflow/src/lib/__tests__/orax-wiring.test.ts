@@ -1704,4 +1704,11 @@ describe("ORAX product-surface wiring", () => {
     expect(relay).toContain("threadId");
     expect(relay).toContain("missing required payload fields");
   });
+
+  it("Phase 2H: electron-api.d.ts declares runProjectThread on window.electronAPI.project", () => {
+    const dts = read("../../../../orax-desktop/src/renderer/electron-api.d.ts");
+    expect(dts).toContain("runProjectThread");
+    expect(dts).toContain("executionSourceId");
+    expect(dts).toContain("localPath");
+  });
 });

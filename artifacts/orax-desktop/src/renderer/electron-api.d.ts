@@ -26,6 +26,12 @@ declare global {
         listCloudProjects(): Promise<{ projects: unknown[] }>;
         createCloudProject(name: string): Promise<{ project: unknown }>;
         attachLocalFolderToProject(projectId: string): Promise<{ source: unknown } | null>;
+        runProjectThread(params: {
+          projectId: string;
+          threadId: string;
+          executionSourceId: string;
+          localPath: string;
+        }): Promise<{ ok: boolean; projectId: string; executionSourceId: string }>;
       };
       app: {
         getVersion(): Promise<string>;
