@@ -65,6 +65,8 @@ import {
   listTaskMessages,
   listTasks,
   redeemOraxPairingCode,
+  createDesktopAction,
+  getDesktopActions,
   requestCommandApproval,
   requestFileReadApproval,
   requestGithubPrApproval,
@@ -2140,6 +2142,8 @@ function DesktopConnectionCard({
   const c = useColors();
   const [pairingCodeInput, setPairingCodeInput] = useState("");
   const [redeeming, setRedeeming] = useState(false);
+  const [testState, setTestState] = useState<"idle" | "pending" | "completed" | "failed">("idle");
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   const activeHosts = hosts.filter((h) => h.status !== "revoked");
   const onlineHost = activeHosts.find(isDesktopHostOnline) ?? null;
@@ -2228,9 +2232,78 @@ function DesktopConnectionCard({
       )}
 
       {!hostsLoading && isOnline && (
-        <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
-          Your desktop is connected and ready.
-        </Text>
+        <View style={{ gap: 10 }}>
+          <Text style={{ color: c.mutedForeground, fontSize: 14, lineHeight: 20 }}>
+            Your desktop is connected and ready.
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <Pressable
+              onPress={() => {
+                if (testState === "pending" || !onlineHost) return;
+                setTestState("pending");
+                setTestResult(null);
+                void (async () => {
+                  try {
+                    const { action } = await createDesktopAction(onlineHost.id, "ping_desktop");
+                    const actionId = action.id;
+                    for (let i = 0; i < 7; i++) {
+                      await new Promise<void>((r) => setTimeout(r, 2000));
+                      const { actions } = await getDesktopActions(onlineHost.id);
+                      const found = actions.find((a) => a.id === actionId);
+                      if (!found) break;
+                      if (found.status === "completed") {
+                        setTestState("completed");
+                        setTestResult("Desktop responded");
+                        return;
+                      }
+                      if (found.status === "failed") {
+                        setTestState("failed");
+                        setTestResult("Desktop reported an error");
+                        return;
+                      }
+                    }
+                    setTestState("failed");
+                    setTestResult("No response — is Orax Desktop running?");
+                  } catch {
+                    setTestState("failed");
+                    setTestResult("Could not send test ping");
+                  }
+                })();
+              }}
+              style={({ pressed }) => ({
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: c.border,
+                backgroundColor: pressed ? c.muted : "transparent",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                opacity: testState === "pending" ? 0.7 : 1,
+              })}
+            >
+              {testState === "pending" ? (
+                <RefreshCw
+                  size={14}
+                  color={c.mutedForeground}
+                  style={{ transform: [{ rotate: "45deg" }] }}
+                />
+              ) : null}
+              <Text style={{ color: c.foreground, fontSize: 14 }}>Test connection</Text>
+            </Pressable>
+            {testState !== "idle" && testState !== "pending" && testResult ? (
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: testState === "completed" ? "#10b981" : c.destructive,
+                }}
+              >
+                {testResult}
+              </Text>
+            ) : null}
+          </View>
+        </View>
       )}
 
       <Button

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AuthSession, HostState, PairingState, LocalProject, PermissionMode } from "../shared/types";
+import type { AuthSession, HostState, PairingState, LocalProject, PermissionMode, RelayState } from "../shared/types";
 
 type RemoveFn = () => void;
 
@@ -31,6 +31,9 @@ const electronAPI = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke("app:getVersion"),
   },
+  relay: {
+    getStatus: (): Promise<RelayState> => ipcRenderer.invoke("relay:getStatus"),
+  },
   on: {
     hostStateChanged: (cb: (state: HostState) => void): RemoveFn => {
       const handler = (_: Electron.IpcRendererEvent, state: HostState) => cb(state);
@@ -41,6 +44,11 @@ const electronAPI = {
       const handler = (_: Electron.IpcRendererEvent, state: PairingState) => cb(state);
       ipcRenderer.on("pairing:stateChanged", handler);
       return () => ipcRenderer.removeListener("pairing:stateChanged", handler);
+    },
+    relayStatusChanged: (cb: (state: RelayState) => void): RemoveFn => {
+      const handler = (_: Electron.IpcRendererEvent, state: RelayState) => cb(state);
+      ipcRenderer.on("relay:statusChanged", handler);
+      return () => ipcRenderer.removeListener("relay:statusChanged", handler);
     },
   },
 };

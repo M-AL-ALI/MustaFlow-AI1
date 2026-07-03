@@ -48,3 +48,11 @@ export interface LocalProject {
   localPath: string;
   addedAt: string;
 }
+
+export type RelayStatus = "idle" | "polling" | "error";
+
+export interface RelayState {
+  status: RelayStatus;
+  lastPollAt: string | null;
+  errorMsg: string | null;
+}

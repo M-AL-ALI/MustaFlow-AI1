@@ -6,6 +6,7 @@ import { OraxApiClient } from "./api-client";
 import { HostManager } from "./host-manager";
 import { PairingManager } from "./pairing-manager";
 import { LocalProjectsManager } from "./local-projects";
+import { RelayClient } from "./relay-client";
 import { registerIpcHandlers } from "./ipc-handlers";
 
 app.setName("Orax Desktop");
@@ -55,6 +56,7 @@ app
     const hostManager = new HostManager(apiClient, identity);
     const pairingManager = new PairingManager(apiClient);
     const localProjects = new LocalProjectsManager();
+    const relayClient = new RelayClient(apiClient, hostManager, localProjects);
 
     mainWindow = createWindow();
 
@@ -63,6 +65,7 @@ app
       hostManager,
       pairingManager,
       localProjects,
+      relayClient,
       win: mainWindow,
     });
 

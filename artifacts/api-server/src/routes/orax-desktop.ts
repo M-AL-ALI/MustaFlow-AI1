@@ -11,13 +11,15 @@
 
 import { Router } from "express";
 import { z } from "zod";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   db,
   oraxHostsTable,
   oraxPairingCodesTable,
   oraxPairedDevicesTable,
+  oraxDesktopActionsTable,
+  oraxThreadMessagesTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -557,6 +559,268 @@ router.post("/orax/relay/heartbeat", async (req, res) => {
   } catch (err) {
     logger.error({ component: "orax-desktop", err, hostId }, "Orax heartbeat failed");
     res.status(500).json({ error: "Heartbeat failed" });
+  }
+});
+
+// ── Phase 2E: action schemas ───────────────────────────────────────────────────
+
+const createActionSchema = z.object({
+  type: z.enum(["ping_desktop", "get_desktop_status", "list_local_projects"]),
+  threadId: z.string().min(1).max(80).optional(),
+  payload: z.record(z.unknown()).default({}),
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
+
+const postActionEventSchema = z.object({
+  type: z.enum(["acknowledged", "running", "progress", "completed", "failed"]),
+  payload: z.record(z.unknown()).default({}),
+});
+
+// ── Action creation (web/mobile → backend) ─────────────────────────────────────
+
+/**
+ * POST /orax/hosts/:hostId/actions
+ *
+ * Web/mobile dispatches a safe Phase 2E action to a desktop host.
+ * Supported types: ping_desktop, get_desktop_status, list_local_projects.
+ * The desktop picks it up on the next poll of /orax/relay/pending-actions.
+ */
+router.post("/orax/hosts/:hostId/actions", async (req, res) => {
+  const userId = req.userId!;
+  const hostId = req.params.hostId;
+
+  const parsed = createActionSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid action payload", details: parsed.error.issues });
+    return;
+  }
+
+  try {
+    const host = await loadOwnedHost(userId, hostId);
+    if (!host) {
+      res.status(404).json({ error: "Host not found" });
+      return;
+    }
+    if (host.revokedAt) {
+      res.status(403).json({ error: "Host has been revoked" });
+      return;
+    }
+
+    const { type, threadId, payload, idempotencyKey } = parsed.data;
+    const iKey = idempotencyKey ?? `${userId}:${hostId}:${type}:${randomUUID()}`;
+
+    const [action] = await db
+      .insert(oraxDesktopActionsTable)
+      .values({
+        userId,
+        hostId,
+        threadId: threadId ?? null,
+        type,
+        status: "queued",
+        payload,
+        idempotencyKey: iKey,
+      })
+      .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+      .returning();
+
+    if (!action) {
+      const [existing] = await db
+        .select()
+        .from(oraxDesktopActionsTable)
+        .where(eq(oraxDesktopActionsTable.idempotencyKey, iKey))
+        .limit(1);
+      res.json({ action: existing });
+      return;
+    }
+
+    logger.info({ component: "orax-desktop", hostId, actionId: action.id, type }, "Action queued");
+    res.status(201).json({ action });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, hostId }, "Failed to create action");
+    res.status(500).json({ error: "Failed to create action" });
+  }
+});
+
+// ── Action list (web/mobile reads results) ─────────────────────────────────────
+
+/**
+ * GET /orax/hosts/:hostId/actions
+ *
+ * Lists recent actions for a host. Web/mobile polls this to read results.
+ */
+router.get("/orax/hosts/:hostId/actions", async (req, res) => {
+  const userId = req.userId!;
+  const hostId = req.params.hostId;
+
+  try {
+    const host = await loadOwnedHost(userId, hostId);
+    if (!host) {
+      res.status(404).json({ error: "Host not found" });
+      return;
+    }
+
+    const actions = await db
+      .select()
+      .from(oraxDesktopActionsTable)
+      .where(
+        and(
+          eq(oraxDesktopActionsTable.userId, userId),
+          eq(oraxDesktopActionsTable.hostId, hostId),
+        ),
+      )
+      .orderBy(desc(oraxDesktopActionsTable.createdAt))
+      .limit(50);
+
+    res.json({ actions });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, hostId }, "Failed to list actions");
+    res.status(500).json({ error: "Failed to list actions" });
+  }
+});
+
+// ── Relay: desktop polls for pending actions ────────────────────────────────────
+
+/**
+ * GET /orax/relay/pending-actions
+ *
+ * Called by Orax Desktop every ~5 s to check for queued actions.
+ * Returns all queued actions for the given hostId and marks them as "sent".
+ * The desktop authenticates with the same Bearer token it uses for heartbeats.
+ */
+router.get("/orax/relay/pending-actions", async (req, res) => {
+  const userId = req.userId!;
+  const hostId = typeof req.query.hostId === "string" ? req.query.hostId : null;
+
+  if (!hostId) {
+    res.status(400).json({ error: "hostId query param required" });
+    return;
+  }
+
+  try {
+    const host = await loadOwnedHost(userId, hostId);
+    if (!host) {
+      res.status(404).json({ error: "Host not found" });
+      return;
+    }
+    if (host.revokedAt) {
+      res.status(403).json({ error: "Host has been revoked" });
+      return;
+    }
+
+    const queued = await db
+      .select()
+      .from(oraxDesktopActionsTable)
+      .where(
+        and(
+          eq(oraxDesktopActionsTable.hostId, hostId),
+          eq(oraxDesktopActionsTable.status, "queued"),
+        ),
+      )
+      .orderBy(oraxDesktopActionsTable.createdAt)
+      .limit(20);
+
+    if (queued.length > 0) {
+      await db
+        .update(oraxDesktopActionsTable)
+        .set({ status: "sent", updatedAt: new Date() })
+        .where(
+          inArray(
+            oraxDesktopActionsTable.id,
+            queued.map((a) => a.id),
+          ),
+        );
+    }
+
+    res.json({ actions: queued });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, hostId }, "Failed to fetch pending actions");
+    res.status(500).json({ error: "Failed to fetch pending actions" });
+  }
+});
+
+// ── Relay: desktop reports action event ────────────────────────────────────────
+
+/**
+ * POST /orax/relay/actions/:actionId/events
+ *
+ * Called by Orax Desktop to acknowledge, report progress, or complete/fail
+ * an action. Updates the action row and, if a threadId is set, appends a
+ * thread message for UI display.
+ */
+router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
+  const userId = req.userId!;
+  const actionId = req.params.actionId;
+
+  const parsed = postActionEventSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid event payload" });
+    return;
+  }
+
+  try {
+    const [action] = await db
+      .select()
+      .from(oraxDesktopActionsTable)
+      .where(
+        and(
+          eq(oraxDesktopActionsTable.id, actionId),
+          eq(oraxDesktopActionsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (!action) {
+      res.status(404).json({ error: "Action not found" });
+      return;
+    }
+
+    const { type, payload } = parsed.data;
+    const now = new Date();
+
+    const statusMap: Record<string, string> = {
+      acknowledged: "acknowledged",
+      running: "running",
+      progress: "running",
+      completed: "completed",
+      failed: "failed",
+    };
+
+    const newStatus = statusMap[type] ?? action.status;
+    const patch: Record<string, unknown> = { status: newStatus, updatedAt: now };
+
+    if (type === "acknowledged") patch.startedAt = now;
+    if (type === "completed" || type === "failed") {
+      patch.result = payload;
+      patch.completedAt = now;
+    }
+
+    await db
+      .update(oraxDesktopActionsTable)
+      .set(patch as Partial<typeof oraxDesktopActionsTable.$inferInsert>)
+      .where(eq(oraxDesktopActionsTable.id, actionId));
+
+    if (action.threadId && (type === "completed" || type === "failed")) {
+      const content =
+        type === "completed"
+          ? JSON.stringify(payload, null, 2)
+          : `Action failed: ${(payload as { error?: string }).error ?? "unknown error"}`;
+      await db.insert(oraxThreadMessagesTable).values({
+        threadId: action.threadId,
+        role: "system",
+        content,
+        eventType: `action_${type}`,
+        payload: { actionId, actionType: action.type, ...(payload as object) },
+      });
+    }
+
+    logger.info(
+      { component: "orax-desktop", actionId, type, newStatus },
+      "Action event recorded",
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, actionId }, "Failed to post action event");
+    res.status(500).json({ error: "Failed to post action event" });
   }
 });
 

@@ -1534,3 +1534,25 @@ export function redeemOraxPairingCode(payload: RedeemPairingPayload): Promise<{ 
     body: JSON.stringify(payload),
   });
 }
+
+export function createDesktopAction(
+  hostId: string,
+  type: "ping_desktop" | "get_desktop_status" | "list_local_projects",
+  payload?: Record<string, unknown>,
+): Promise<{ action: { id: string; status: string; type: string } }> {
+  return jsonRequest<{ action: { id: string; status: string; type: string } }>(
+    `/api/orax/hosts/${hostId}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ type, payload: payload ?? {} }),
+    },
+  );
+}
+
+export function getDesktopActions(hostId: string): Promise<{
+  actions: Array<{ id: string; status: string; type: string; result: unknown }>;
+}> {
+  return jsonRequest<{
+    actions: Array<{ id: string; status: string; type: string; result: unknown }>;
+  }>(`/api/orax/hosts/${hostId}/actions`);
+}

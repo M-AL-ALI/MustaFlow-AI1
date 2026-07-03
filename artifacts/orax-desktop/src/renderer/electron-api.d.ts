@@ -1,4 +1,4 @@
-import type { AuthSession, HostState, PairingState, LocalProject, PermissionMode } from "../shared/types";
+import type { AuthSession, HostState, PairingState, LocalProject, PermissionMode, RelayState } from "../shared/types";
 
 type RemoveFn = () => void;
 
@@ -27,9 +27,13 @@ declare global {
       app: {
         getVersion(): Promise<string>;
       };
+      relay: {
+        getStatus(): Promise<RelayState>;
+      };
       on: {
         hostStateChanged(cb: (state: HostState) => void): RemoveFn;
         pairingStateChanged(cb: (state: PairingState) => void): RemoveFn;
+        relayStatusChanged(cb: (state: RelayState) => void): RemoveFn;
       };
     };
   }

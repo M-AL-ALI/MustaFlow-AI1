@@ -1,9 +1,18 @@
-import { Monitor, Cpu, Shield } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Monitor, Cpu, Shield, Radio } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { PERMISSION_MODE_LABELS } from "../../shared/types";
+import type { RelayState } from "../../shared/types";
 
 export function HomeScreen() {
   const { hostState } = useApp();
+  const [relayState, setRelayState] = useState<RelayState | null>(null);
+
+  useEffect(() => {
+    void window.electronAPI.relay.getStatus().then(setRelayState);
+    const remove = window.electronAPI.on.relayStatusChanged(setRelayState);
+    return remove;
+  }, []);
 
   if (!hostState) return null;
 
@@ -79,13 +88,46 @@ export function HomeScreen() {
         </div>
       )}
 
-      <div className="card" style={{ background: "var(--accent-dim)", border: "1px solid var(--accent)" }}>
-        <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 600, marginBottom: 4 }}>
-          Phase 2C — Skeleton Only
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Radio size={13} color="var(--text-secondary)" />
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+            Relay
+          </div>
+          {relayState && (
+            <span
+              style={{
+                fontSize: 11,
+                padding: "1px 7px",
+                borderRadius: 8,
+                background:
+                  relayState.status === "polling"
+                    ? "rgba(16,185,129,0.12)"
+                    : relayState.status === "error"
+                      ? "rgba(239,68,68,0.12)"
+                      : "rgba(148,163,184,0.12)",
+                color:
+                  relayState.status === "polling"
+                    ? "#10b981"
+                    : relayState.status === "error"
+                      ? "#ef4444"
+                      : "var(--text-secondary)",
+              }}
+            >
+              {relayState.status === "polling"
+                ? "Active"
+                : relayState.status === "error"
+                  ? "Error"
+                  : "Idle"}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-          Capabilities are disabled. Shell, filesystem, git, and browser access will be
-          enabled in future phases after explicit permission setup.
+          {relayState?.status === "polling"
+            ? `Polling for actions${relayState.lastPollAt ? ` · last seen ${new Date(relayState.lastPollAt).toLocaleTimeString()}` : ""}`
+            : relayState?.status === "error"
+              ? `Poll error: ${relayState.errorMsg ?? "unknown"}`
+              : "Relay starts automatically when this desktop comes online."}
         </div>
       </div>
     </div>

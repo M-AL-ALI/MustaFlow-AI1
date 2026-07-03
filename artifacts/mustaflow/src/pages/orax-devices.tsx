@@ -185,6 +185,49 @@ function HostCard({
   onCancelPairingCode: (code: string) => void;
 }) {
   const online = isHostOnline(host);
+  const [testState, setTestState] = useState<"idle" | "pending" | "completed" | "failed">("idle");
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  async function handleTestConnection() {
+    setTestState("pending");
+    setTestResult(null);
+    try {
+      const res = await authFetch(`/api/orax/hosts/${host.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "ping_desktop" }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = (await res.json()) as { action: { id: string } };
+      const actionId = data.action.id;
+
+      for (let i = 0; i < 7; i++) {
+        await new Promise<void>((r) => setTimeout(r, 2000));
+        const r = await authFetch(`/api/orax/hosts/${host.id}/actions`);
+        if (!r.ok) break;
+        const d = (await r.json()) as {
+          actions: Array<{ id: string; status: string }>;
+        };
+        const found = d.actions.find((a) => a.id === actionId);
+        if (!found) break;
+        if (found.status === "completed") {
+          setTestState("completed");
+          setTestResult("Desktop responded");
+          return;
+        }
+        if (found.status === "failed") {
+          setTestState("failed");
+          setTestResult("Desktop reported an error");
+          return;
+        }
+      }
+      setTestState("failed");
+      setTestResult("No response — is Orax Desktop running?");
+    } catch {
+      setTestState("failed");
+      setTestResult("Could not send test ping");
+    }
+  }
 
   return (
     <div className="rounded-2xl border border-border bg-card p-5 flex flex-col gap-4">
@@ -268,28 +311,51 @@ function HostCard({
       </div>
 
       {online && (
-        <div className="border-t border-border pt-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">
-            Pair a device
-          </p>
-          {pairingCode ? (
-            <PairingCodeDisplay
-              pairingCode={pairingCode}
-              onCancel={() => onCancelPairingCode(pairingCode.code)}
-            />
-          ) : (
+        <div className="border-t border-border pt-3 flex flex-col gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               size="sm"
               variant="outline"
-              onClick={() => onCreatePairingCode(host)}
-              disabled={pairingLoading}
+              onClick={() => void handleTestConnection()}
+              disabled={testState === "pending"}
             >
-              {pairingLoading ? (
+              {testState === "pending" ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : null}
-              Create pairing code
+              Test connection
             </Button>
-          )}
+            {testState !== "idle" && testState !== "pending" && testResult && (
+              <span
+                className={`text-xs ${testState === "completed" ? "text-emerald-500" : "text-destructive"}`}
+              >
+                {testResult}
+              </span>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">
+              Pair a device
+            </p>
+            {pairingCode ? (
+              <PairingCodeDisplay
+                pairingCode={pairingCode}
+                onCancel={() => onCancelPairingCode(pairingCode.code)}
+              />
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onCreatePairingCode(host)}
+                disabled={pairingLoading}
+              >
+                {pairingLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Create pairing code
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </div>

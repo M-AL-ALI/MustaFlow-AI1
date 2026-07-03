@@ -1024,4 +1024,188 @@ describe("ORAX product-surface wiring", () => {
     expect(modeSelect).toContain('h.status !== "revoked"');
     expect(mobileOrax).toContain('h.status !== "revoked"');
   });
+
+  // ── Phase 2E: relay loop assertions ──────────────────────────────────────────
+
+  it("Phase 2E schema: oraxDesktopActionsTable exported from db schema", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("oraxDesktopActionsTable");
+    expect(schema).toContain("ORAX_PHASE2E_ACTION_TYPES");
+    expect(schema).toContain('"ping_desktop"');
+    expect(schema).toContain('"get_desktop_status"');
+    expect(schema).toContain('"list_local_projects"');
+    expect(schema).toContain("ORAX_DESKTOP_ACTION_STATUSES");
+    expect(schema).toContain('"queued"');
+    expect(schema).toContain('"completed"');
+    expect(schema).toContain("idempotencyKey");
+    expect(schema).toContain("OraxDesktopAction");
+  });
+
+  it("Phase 2E schema: relay message envelope types exported", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("ORAX_RELAY_MESSAGE_TYPES");
+    expect(schema).toContain("OraxRelayMessage");
+    expect(schema).toContain('"ping"');
+    expect(schema).toContain('"pong"');
+    expect(schema).toContain('"action_requested"');
+    expect(schema).toContain('"action_completed"');
+  });
+
+  it("Phase 2E startup migration: orax_desktop_actions CREATE TABLE registered", () => {
+    const migrations = read(
+      "../../../../api-server/src/lib/startup-migrations.ts",
+    );
+    expect(migrations).toContain("migrate-orax-desktop-actions");
+    expect(migrations).toContain("orax_desktop_actions");
+    expect(migrations).toContain("idempotency_key");
+    expect(migrations).toContain("TIMESTAMPTZ");
+  });
+
+  it("Phase 2E backend: all 4 relay routes present in orax-desktop router", () => {
+    const router = read(
+      "../../../../api-server/src/routes/orax-desktop.ts",
+    );
+    expect(router).toContain('router.post("/orax/hosts/:hostId/actions"');
+    expect(router).toContain('router.get("/orax/hosts/:hostId/actions"');
+    expect(router).toContain('router.get("/orax/relay/pending-actions"');
+    expect(router).toContain('router.post("/orax/relay/actions/:actionId/events"');
+  });
+
+  it("Phase 2E backend: action creation uses idempotency key + onConflictDoNothing", () => {
+    const router = read(
+      "../../../../api-server/src/routes/orax-desktop.ts",
+    );
+    expect(router).toContain("idempotencyKey");
+    expect(router).toContain("onConflictDoNothing");
+    expect(router).toContain("ping_desktop");
+    expect(router).toContain("get_desktop_status");
+    expect(router).toContain("list_local_projects");
+  });
+
+  it("Phase 2E backend: pending-actions poll marks actions as sent", () => {
+    const router = read(
+      "../../../../api-server/src/routes/orax-desktop.ts",
+    );
+    expect(router).toContain('"sent"');
+    expect(router).toContain('status: "queued"');
+  });
+
+  it("Phase 2E backend: action event endpoint updates result + completedAt on completed/failed", () => {
+    const router = read(
+      "../../../../api-server/src/routes/orax-desktop.ts",
+    );
+    expect(router).toContain("completedAt");
+    expect(router).toContain("patch.result = payload");
+    expect(router).toContain('"completed"');
+    expect(router).toContain('"failed"');
+  });
+
+  it("Phase 2E desktop: RelayClient exported from relay-client.ts", () => {
+    const relayClient = read(
+      "../../../../orax-desktop/src/main/relay-client.ts",
+    );
+    expect(relayClient).toContain("export class RelayClient");
+    expect(relayClient).toContain("getPendingActions");
+    expect(relayClient).toContain("postActionEvent");
+    expect(relayClient).toContain("ping_desktop");
+    expect(relayClient).toContain("get_desktop_status");
+    expect(relayClient).toContain("list_local_projects");
+    expect(relayClient).toContain("POLL_INTERVAL_MS");
+    expect(relayClient).toContain("BACKOFF_MAX_MS");
+    expect(relayClient).toContain("seenKeys");
+  });
+
+  it("Phase 2E desktop: RelayState + RelayStatus types in shared/types.ts", () => {
+    const types = read("../../../../orax-desktop/src/shared/types.ts");
+    expect(types).toContain("RelayState");
+    expect(types).toContain("RelayStatus");
+    expect(types).toContain('"idle"');
+    expect(types).toContain('"polling"');
+    expect(types).toContain('"error"');
+    expect(types).toContain("lastPollAt");
+    expect(types).toContain("errorMsg");
+  });
+
+  it("Phase 2E desktop: preload exposes relay.getStatus and on.relayStatusChanged", () => {
+    const preload = read("../../../../orax-desktop/src/preload/index.ts");
+    expect(preload).toContain("relay:");
+    expect(preload).toContain("relay:getStatus");
+    expect(preload).toContain("relay:statusChanged");
+    expect(preload).toContain("relayStatusChanged");
+    expect(preload).toContain("RelayState");
+  });
+
+  it("Phase 2E desktop: electron-api.d.ts declares relay.getStatus and relayStatusChanged", () => {
+    const apiD = read(
+      "../../../../orax-desktop/src/renderer/electron-api.d.ts",
+    );
+    expect(apiD).toContain("RelayState");
+    expect(apiD).toContain("relay:");
+    expect(apiD).toContain("getStatus(): Promise<RelayState>");
+    expect(apiD).toContain("relayStatusChanged");
+  });
+
+  it("Phase 2E desktop: index.ts instantiates RelayClient and passes to registerIpcHandlers", () => {
+    const mainIndex = read("../../../../orax-desktop/src/main/index.ts");
+    expect(mainIndex).toContain("RelayClient");
+    expect(mainIndex).toContain("relayClient");
+    expect(mainIndex).toContain("new RelayClient");
+  });
+
+  it("Phase 2E desktop: ipc-handlers wires relay:getStatus IPC and relayStatusChanged push", () => {
+    const ipcHandlers = read(
+      "../../../../orax-desktop/src/main/ipc-handlers.ts",
+    );
+    expect(ipcHandlers).toContain("relay:getStatus");
+    expect(ipcHandlers).toContain("relay:statusChanged");
+    expect(ipcHandlers).toContain("relayClient.getState()");
+    expect(ipcHandlers).toContain("relayClient.start()");
+    expect(ipcHandlers).toContain("relayClient.stop()");
+    expect(ipcHandlers).toContain("relayClient.setOnChange");
+  });
+
+  it("Phase 2E desktop: HomeScreen shows relay status card", () => {
+    const homeScreen = read(
+      "../../../../orax-desktop/src/renderer/pages/HomeScreen.tsx",
+    );
+    expect(homeScreen).toContain("relayState");
+    expect(homeScreen).toContain("relay.getStatus");
+    expect(homeScreen).toContain("relayStatusChanged");
+    expect(homeScreen).toContain('"polling"');
+    expect(homeScreen).toContain('"error"');
+  });
+
+  it("Phase 2E website: HostCard has Test connection button with polling loop", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    expect(devicesPage).toContain("Test connection");
+    expect(devicesPage).toContain("handleTestConnection");
+    expect(devicesPage).toContain("ping_desktop");
+    expect(devicesPage).toContain("testState");
+    expect(devicesPage).toContain("testResult");
+    expect(devicesPage).toContain('"completed"');
+    expect(devicesPage).toContain('"failed"');
+  });
+
+  it("Phase 2E mobile api: createDesktopAction and getDesktopActions exported", () => {
+    const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+    expect(mobileApi).toContain("createDesktopAction");
+    expect(mobileApi).toContain("getDesktopActions");
+    expect(mobileApi).toContain("/api/orax/hosts/");
+  });
+
+  it("Phase 2E mobile: createDesktopAction + getDesktopActions imported in orax.tsx", () => {
+    const mobileOrax = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(mobileOrax).toContain("createDesktopAction");
+    expect(mobileOrax).toContain("getDesktopActions");
+  });
+
+  it("Phase 2E relay: desktop api-client has getPendingActions + postActionEvent", () => {
+    const apiClient = read(
+      "../../../../orax-desktop/src/main/api-client.ts",
+    );
+    expect(apiClient).toContain("getPendingActions");
+    expect(apiClient).toContain("postActionEvent");
+    expect(apiClient).toContain("/api/orax/relay/pending-actions");
+    expect(apiClient).toContain("/api/orax/relay/actions/");
+  });
 });

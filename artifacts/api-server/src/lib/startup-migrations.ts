@@ -3906,6 +3906,48 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-orax-desktop-actions (Phase 2E relay action table) ───────────────
+  {
+    name: "migrate-orax-desktop-actions",
+    async run(client) {
+      await client.query("BEGIN");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS orax_desktop_actions (
+          id              TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id         TEXT NOT NULL,
+          host_id         TEXT NOT NULL,
+          thread_id       TEXT,
+          type            TEXT NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'queued',
+          payload         JSONB NOT NULL DEFAULT '{}',
+          result          JSONB,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          started_at      TIMESTAMPTZ,
+          completed_at    TIMESTAMPTZ
+        )
+      `);
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_desktop_actions_user_id_idx
+           ON orax_desktop_actions(user_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_desktop_actions_host_id_idx
+           ON orax_desktop_actions(host_id)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_desktop_actions_status_idx
+           ON orax_desktop_actions(host_id, status)`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS orax_desktop_actions_thread_id_idx
+           ON orax_desktop_actions(thread_id)`,
+      );
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

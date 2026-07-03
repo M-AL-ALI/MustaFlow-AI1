@@ -79,4 +79,36 @@ export class OraxApiClient {
   async cancelPairingCode(code: string): Promise<void> {
     await this.request("DELETE", `/api/orax/pairing-codes/${encodeURIComponent(code)}`);
   }
+
+  async getPendingActions(hostId: string): Promise<{
+    actions: Array<{
+      id: string;
+      type: string;
+      idempotencyKey: string;
+      payload: Record<string, unknown>;
+      status: string;
+    }>;
+  }> {
+    return this.request<{
+      actions: Array<{
+        id: string;
+        type: string;
+        idempotencyKey: string;
+        payload: Record<string, unknown>;
+        status: string;
+      }>;
+    }>("GET", `/api/orax/relay/pending-actions?hostId=${encodeURIComponent(hostId)}`);
+  }
+
+  async postActionEvent(
+    actionId: string,
+    type: "acknowledged" | "running" | "progress" | "completed" | "failed",
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/orax/relay/actions/${encodeURIComponent(actionId)}/events`,
+      { type, payload },
+    );
+  }
 }

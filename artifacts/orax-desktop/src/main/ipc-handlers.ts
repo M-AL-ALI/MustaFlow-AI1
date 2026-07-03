@@ -3,6 +3,7 @@ import type { AuthAdapter } from "./auth";
 import type { HostManager } from "./host-manager";
 import type { PairingManager } from "./pairing-manager";
 import type { LocalProjectsManager } from "./local-projects";
+import type { RelayClient } from "./relay-client";
 import type { PermissionMode } from "../shared/types";
 
 interface Deps {
@@ -10,11 +11,12 @@ interface Deps {
   hostManager: HostManager;
   pairingManager: PairingManager;
   localProjects: LocalProjectsManager;
+  relayClient: RelayClient;
   win: BrowserWindow;
 }
 
 export function registerIpcHandlers(deps: Deps): void {
-  const { auth, hostManager, pairingManager, localProjects, win } = deps;
+  const { auth, hostManager, pairingManager, localProjects, relayClient, win } = deps;
 
   ipcMain.handle("auth:getSession", async () => {
     const session = await auth.getSession();
@@ -80,11 +82,24 @@ export function registerIpcHandlers(deps: Deps): void {
     return [];
   });
 
+  ipcMain.handle("relay:getStatus", () => {
+    return relayClient.getState();
+  });
+
   hostManager.setOnChange((state) => {
     if (!win.isDestroyed()) win.webContents.send("host:stateChanged", state);
+    if (state.status === "online" && state.hostId) {
+      relayClient.start();
+    } else if (state.status === "offline" || state.status === "unregistered") {
+      relayClient.stop();
+    }
   });
 
   pairingManager.setOnChange((state) => {
     if (!win.isDestroyed()) win.webContents.send("pairing:stateChanged", state);
+  });
+
+  relayClient.setOnChange((state) => {
+    if (!win.isDestroyed()) win.webContents.send("relay:statusChanged", state);
   });
 }

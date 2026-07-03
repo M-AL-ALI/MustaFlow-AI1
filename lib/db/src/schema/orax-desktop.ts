@@ -318,3 +318,91 @@ export type OraxUsageEvent = typeof oraxUsageEventsTable.$inferSelect;
 export type InsertOraxUsageEvent = typeof oraxUsageEventsTable.$inferInsert;
 export type OraxAuditLog = typeof oraxAuditLogTable.$inferSelect;
 export type InsertOraxAuditLog = typeof oraxAuditLogTable.$inferInsert;
+
+// ── Phase 2E: relay message envelope ───────────────────────────────────────
+// Typed envelope for all messages passed through the Orax relay layer.
+// Used by both WS (future) and HTTP-polling (Phase 2E MVP) transports.
+
+export const ORAX_RELAY_MESSAGE_TYPES = [
+  "host_connected",
+  "host_disconnected",
+  "action_requested",
+  "action_acknowledged",
+  "action_progress",
+  "action_completed",
+  "action_failed",
+  "approval_requested",
+  "approval_resolved",
+  "ping",
+  "pong",
+] as const;
+export type OraxRelayMessageType = (typeof ORAX_RELAY_MESSAGE_TYPES)[number];
+
+export interface OraxRelayMessage {
+  id: string;
+  type: OraxRelayMessageType;
+  userId: string;
+  hostId: string;
+  threadId?: string;
+  actionId?: string;
+  sequenceNum: number;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+// ── Phase 2E safe action types (no shell / file / git) ─────────────────────
+
+export const ORAX_PHASE2E_ACTION_TYPES = [
+  "ping_desktop",
+  "get_desktop_status",
+  "list_local_projects",
+] as const;
+export type OraxPhase2EActionType = (typeof ORAX_PHASE2E_ACTION_TYPES)[number];
+
+export const ORAX_DESKTOP_ACTION_STATUSES = [
+  "queued",
+  "sent",
+  "acknowledged",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+export type OraxDesktopActionStatus = (typeof ORAX_DESKTOP_ACTION_STATUSES)[number];
+
+// ── orax_desktop_actions ────────────────────────────────────────────────────
+// One row per action dispatched from web/mobile to a desktop host.
+// Status lifecycle: queued → sent → acknowledged → running → completed/failed.
+// idempotency_key is caller-supplied or server-generated; unique constraint
+// allows safe retries without double-execution.
+
+export const oraxDesktopActionsTable = pgTable(
+  "orax_desktop_actions",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: text("user_id").notNull(),
+    hostId: text("host_id").notNull(),
+    threadId: text("thread_id"),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("queued"),
+    payload: jsonb("payload").notNull().default({}),
+    result: jsonb("result"),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("orax_desktop_actions_user_id_idx").on(t.userId),
+    index("orax_desktop_actions_host_id_idx").on(t.hostId),
+    index("orax_desktop_actions_status_idx").on(t.hostId, t.status),
+    index("orax_desktop_actions_thread_id_idx").on(t.threadId),
+  ],
+);
+
+export type OraxDesktopAction = typeof oraxDesktopActionsTable.$inferSelect;
+export type InsertOraxDesktopAction = typeof oraxDesktopActionsTable.$inferInsert;
