@@ -1,0 +1,176 @@
+Start Phase 2H — Orax Project Thread Execution Binding
+
+Phase 2G is verified and present. Do not redo Phase 2G.
+
+Goal
+
+Now connect the new Orax Project Workspace System to the actual agent execution flow.
+
+Phase 2G created cloud projects, project sources, project-scoped threads, desktop project UI, website workspace UI, and mobile project visibility. Phase 2H must make Orax actually use those project/source/thread records when the user sends a coding request.
+
+In simple terms:
+
+User chooses Orax Project → starts thread → Orax picks execution source/host → validates it → runs the agent against that project context → streams progress/results inline.
+
+Do not touch Ora, public-ai chat, AI Builder, credits, or normal project chat.
+
+Required Behavior
+
+1. Thread creation must be project-scoped
+- New Orax coding threads must be created under an oraxProjectsTable project.
+- Thread must store:
+  - projectId
+  - executionSourceId if selected
+  - hostId if local/desktop execution is needed
+  - mode: local | worktree | cloud | ssh | chat_only
+- If no execution source exists, thread starts as chat_only and can only plan/discuss. It must not run local commands.
+
+2. Execution source selection
+When the user sends a message from website/mobile/desktop:
+- Load the project.
+- Load available project sources.
+- Choose defaultExecutionSourceId when present.
+- Otherwise choose first active source.
+- If source is missing/disconnected/archived, do not execute.
+- Return a clear inline message:
+  “This project needs an active execution source. Reconnect folder on desktop or attach GitHub before I can run code.”
+
+3. Desktop host binding
+For local_folder sources:
+- Verify source.hostId belongs to the signed-in user.
+- Verify host is online.
+- Verify host is not revoked.
+- Verify source.status === active.
+- Queue execution action to that host.
+- Do not fall back to process.cwd() or any global working directory.
+
+4. Desktop local path binding
+For local_folder sources:
+- Desktop must resolve the source to a known local path.
+- Desktop must verify `.orax/project.json` matches the project/source identity.
+- If local path is missing, return source status missing.
+- If `.orax/project.json` is missing or mismatched, block execution and request reconnect.
+
+5. Chat-only mode
+If project has no active execution source:
+- User can still ask questions and plan.
+- Orax can explain, plan, summarize, and suggest setup.
+- Orax cannot run commands, edit files, inspect local files, or generate patches against a fake context.
+- UI should make this clear but not noisy.
+
+6. Runner integration
+Update existing Orax runner/continue flow so it accepts:
+- projectId
+- threadId
+- executionSourceId
+- hostId
+- mode
+
+The runner should:
+- Load project memory/settings.
+- Load project sources.
+- Resolve active source.
+- Include project memory in planning context.
+- Use project source metadata for file selection.
+- Queue desktop actions only for valid local/worktree modes.
+- Refuse execution for chat_only mode.
+
+7. Inline thread behavior
+Everything remains inline like Codex:
+- No dashboard panels for execution.
+- Progress appears inside thread.
+- Approvals appear inside thread.
+- Command output appears inside thread.
+- Errors/blockers appear inside thread.
+- Final summary appears inside thread.
+
+8. Website updates
+In `orax-workspace.tsx`:
+- “Start thread” must create project-scoped thread.
+- If no source: show chat-only planning state.
+- If source active: show ready-to-run state.
+- Show active source and host status near composer/thread, not as a heavy dashboard.
+- Link from thread to `/orax` or embed the thread runner if that is the chosen architecture.
+
+9. Mobile updates
+In mobile Orax:
+- User can select project.
+- User can see threads under project.
+- Starting a prompt creates project-scoped thread.
+- If desktop host offline, show “Desktop offline” and do not execute.
+- If source missing, show “Reconnect folder on desktop”.
+- Mobile can continue/approve active project threads.
+
+10. Desktop updates
+In Orax Desktop:
+- Selecting a cloud project should make it the active project context.
+- Attached local folder should be the active execution source.
+- New local execution action must include projectId/threadId/sourceId.
+- Desktop should reject action if source path is missing or `.orax/project.json` mismatches.
+
+Backend API work
+
+Add or update endpoints as needed:
+
+- POST /api/orax/projects/:projectId/threads/:threadId/messages
+  Sends a user message into a project thread.
+
+- POST /api/orax/projects/:projectId/threads/:threadId/continue
+  Continues a project thread using resolved project/source/host context.
+
+- GET /api/orax/projects/:projectId/threads/:threadId/context
+  Returns resolved project/source/host execution readiness.
+
+Or wire equivalent behavior into existing Orax task/thread endpoints, but keep it project-scoped.
+
+Security requirements
+
+- Every project/source/thread lookup must be userId scoped.
+- Never execute against a source from another user.
+- Never execute against revoked/offline host.
+- Never execute against missing/disconnected/archived source.
+- Never execute in chat_only mode.
+- Never fall back to repo root, process.cwd(), or global directory.
+- No Ora/public-ai imports or API routes in Orax execution path.
+
+Wiring tests required
+
+Add assertions for:
+- thread message/continue route accepts projectId/threadId.
+- runner loads oraxProjectsTable.
+- runner loads oraxProjectSourcesTable.
+- runner checks source.status === active.
+- runner checks mode !== chat_only before execution.
+- runner checks host ownership and status.
+- desktop action payload contains projectId/threadId/executionSourceId.
+- desktop rejects mismatched `.orax/project.json`.
+- website creates project-scoped threads.
+- mobile creates project-scoped threads.
+- no fallback to process.cwd() in project execution path.
+- no Ora/public-ai imports.
+
+Verification commands
+
+Run and report:
+
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Definition of Done
+
+Phase 2H is complete only when:
+- Project thread messages are saved under the selected Orax project.
+- Orax resolves the correct execution source before running.
+- Orax refuses execution without an active source.
+- Desktop actions include projectId/threadId/sourceId.
+- Desktop verifies `.orax/project.json`.
+- Website/mobile can start and continue project threads.
+- All work remains inline in the thread.
+- Ora remains untouched.
+- All verification commands pass.
