@@ -42,8 +42,6 @@ export class OraxApiClient {
       "X-Client": "orax-desktop",
     };
     if (token) {
-      headers["Authorization"] = `Bearer <redacted>`;
-      Object.defineProperty(headers, "Authorization", { value: `Bearer ${token}`, enumerable: false });
       headers["Authorization"] = `Bearer ${token}`;
     }
 

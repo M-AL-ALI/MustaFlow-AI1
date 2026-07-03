@@ -48,7 +48,8 @@ export function SignInScreen() {
       >
         <p style={{ fontSize: 13, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>
           Sign in with your MustaFlow account to register this computer as an Orax host.
-          Your browser will open to complete sign-in securely.
+          Clicking the button opens your browser — full device-flow sign-in will be active
+          in a future update.
         </p>
 
         {error && (

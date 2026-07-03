@@ -34,14 +34,23 @@ export class DevAuthAdapter implements AuthAdapter {
   }
 }
 
+// Phase 2C shell: device-flow callback polling and encrypted token storage are
+// not yet implemented.  getSession() intentionally returns null until Phase 2D
+// adds the callback listener and credential persistence.
 export class ProductionAuthAdapter implements AuthAdapter {
   async getSession(): Promise<AuthSession | null> {
+    // TODO (Phase 2D): read stored session token from credential-store and
+    // exchange/validate it; return null until that is implemented.
     return null;
   }
 
   async startSignIn(): Promise<void> {
+    // Opens the MustaFlow device-login page in the user's default browser.
+    // The app does NOT yet poll for the resulting token — that is deferred to
+    // Phase 2D, which will add a local callback listener and store the session.
     const { shell } = await import("electron");
-    const deviceFlowUrl = (process.env.ORAX_API_BASE_URL ?? "https://www.mustaflow.com") +
+    const deviceFlowUrl =
+      (process.env.ORAX_API_BASE_URL ?? "https://www.mustaflow.com") +
       "/orax/device-login";
     await shell.openExternal(deviceFlowUrl);
   }

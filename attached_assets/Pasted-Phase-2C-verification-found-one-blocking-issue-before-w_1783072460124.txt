@@ -1,0 +1,81 @@
+Phase 2C verification found one blocking issue before we can call it complete.
+
+Current commit verified:
+5937f8bd
+
+What is good:
+- artifacts/orax-desktop exists.
+- Orax Desktop typecheck passes.
+- api-server typecheck passes.
+- mustaflow typecheck passes.
+- mustaflow lint passes.
+- ora-mobile typecheck passes.
+- Orax wiring test passes: 19/19.
+- Ora/public-ai/credits boundary scan is clean.
+- No password input is present.
+- Renderer uses IPC/contextBridge, not direct Node fs APIs.
+- Capabilities are disabled for Phase 2C: shell/filesystem/git/github/computer_use are false.
+
+Blocking issue:
+`pnpm --filter @workspace/orax-desktop run build` fails.
+
+Failure:
+
+SyntaxError: The requested module 'vite' does not provide an export named 'splitVendorChunk'
+
+Cause:
+`electron-vite@2.3.0` is being used with `vite@7.3.3`.
+That electron-vite version imports `splitVendorChunk`, which Vite 7 no longer exports.
+
+Please fix the Orax Desktop build dependency mismatch.
+
+Acceptable fixes:
+1. Upgrade `electron-vite` to a version compatible with Vite 7, then update `pnpm-lock.yaml`.
+2. Or pin the Orax Desktop package to a Vite version compatible with `electron-vite@2.3.0`, and align `@vitejs/plugin-react` accordingly.
+
+Preferred:
+Use a Vite 7 compatible `electron-vite` version so the workspace stays aligned with the rest of the repo.
+
+After fixing, run:
+
+pnpm install --filter @workspace/orax-desktop
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Also clean up this suspicious API client header block:
+
+artifacts/orax-desktop/src/main/api-client.ts
+
+It currently does:
+
+headers["Authorization"] = `Bearer <redacted>`;
+Object.defineProperty(headers, "Authorization", { value: `Bearer ${token}`, enumerable: false });
+headers["Authorization"] = `Bearer ${token}`;
+
+That is confusing and defeats the attempted non-enumerable redaction. Please simplify it to set the real Authorization header once, and make sure logs never print request headers/tokens.
+
+Also review production auth wording:
+ProductionAuthAdapter currently opens `/orax/device-login`, but `getSession()` always returns null. That is acceptable only as a Phase 2C shell if clearly marked incomplete. Do not make the UI imply sign-in is fully working unless device-flow polling/callback storage is implemented.
+
+If Electron build scripts are blocked by pnpm after the dependency fix, handle that explicitly without disabling the workspace supply-chain protections globally.
+
+Do not touch:
+- Ora
+- public-ai
+- AI Builder
+- credits
+- project chat
+- existing Ora routes
+
+Done means:
+- Orax Desktop typecheck passes.
+- Orax Desktop build passes.
+- Existing 5 repo gates pass.
+- Wiring test remains 19/19.
+- No Ora boundary violations.
