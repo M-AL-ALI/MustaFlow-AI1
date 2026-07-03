@@ -25,6 +25,10 @@ export const project = {
   addLocalFolder: () => api().project.addLocalFolder(),
   listLocalFolders: () => api().project.listLocalFolders(),
   removeLocalFolder: (id: string) => api().project.removeLocalFolder(id),
+  listCloudProjects: () => api().project.listCloudProjects(),
+  createCloudProject: (name: string) => api().project.createCloudProject(name),
+  attachLocalFolderToProject: (projectId: string) =>
+    api().project.attachLocalFolderToProject(projectId),
 };
 
 export const appInfo = {

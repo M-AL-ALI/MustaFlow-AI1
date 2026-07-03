@@ -73,6 +73,56 @@ export function registerIpcHandlers(deps: Deps): void {
     localProjects.remove(id);
   });
 
+  ipcMain.handle("project:listCloudProjects", async () => {
+    const session = await auth.getSession();
+    if (!session) return { projects: [] };
+    const apiBase = process.env.VITE_API_BASE_URL ?? "https://mustaflow.app";
+    const res = await fetch(`${apiBase}/api/orax/projects`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    if (!res.ok) return { projects: [] };
+    return res.json() as Promise<{ projects: unknown[] }>;
+  });
+
+  ipcMain.handle("project:createCloudProject", async (_event, name: string) => {
+    const session = await auth.getSession();
+    if (!session) throw new Error("Not signed in");
+    const apiBase = process.env.VITE_API_BASE_URL ?? "https://mustaflow.app";
+    const res = await fetch(`${apiBase}/api/orax/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error(`Failed to create project: ${res.status}`);
+    return res.json() as Promise<{ project: unknown }>;
+  });
+
+  ipcMain.handle("project:attachLocalFolderToProject", async (_event, projectId: string) => {
+    const session = await auth.getSession();
+    if (!session) throw new Error("Not signed in");
+    const result = await dialog.showOpenDialog(win, {
+      properties: ["openDirectory"],
+      title: "Select folder to attach to project",
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const localPath = result.filePaths[0]!;
+    localProjects.add(localPath);
+    const apiBase = process.env.VITE_API_BASE_URL ?? "https://mustaflow.app";
+    const res = await fetch(`${apiBase}/api/orax/projects/${projectId}/sources/local-folder`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ localPath, displayName: localPath.split("/").pop() }),
+    });
+    if (!res.ok) throw new Error(`Failed to attach folder: ${res.status}`);
+    return res.json() as Promise<{ source: unknown }>;
+  });
+
   ipcMain.handle("app:getVersion", () => {
     const { app } = require("electron") as typeof import("electron");
     return app.getVersion();

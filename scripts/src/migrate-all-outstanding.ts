@@ -91,6 +91,7 @@ const MIGRATIONS = [
   "migrate-orax-approvals",
   "migrate-orax-artifacts",
   "migrate-orax-messages",
+  "migrate-orax-projects",
   "migrate-ora-memory-supersede",
   "migrate-ora-realtime-usage",
 ] as const;

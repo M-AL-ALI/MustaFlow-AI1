@@ -130,12 +130,33 @@ export const oraxPairedDevicesTable = pgTable(
   ],
 );
 
-// ── orax_projects ──────────────────────────────────────────────────────────────
-// Local project folders registered on a desktop host. Survives host reconnects.
+// ── orax_project_statuses / source_types / source_statuses / thread_modes ──────
+
+export const ORAX_PROJECT_STATUSES = ["active", "archived"] as const;
+export type OraxProjectStatus = (typeof ORAX_PROJECT_STATUSES)[number];
+
+export const ORAX_SOURCE_TYPES = [
+  "local_folder",
+  "github_repo",
+  "worktree",
+  "cloud_env",
+  "ssh_host",
+] as const;
+export type OraxSourceType = (typeof ORAX_SOURCE_TYPES)[number];
+
+export const ORAX_SOURCE_STATUSES = ["active", "missing", "disconnected", "archived"] as const;
+export type OraxSourceStatus = (typeof ORAX_SOURCE_STATUSES)[number];
+
+export const ORAX_THREAD_MODES = ["local", "worktree", "cloud", "ssh", "chat_only"] as const;
+export type OraxThreadMode = (typeof ORAX_THREAD_MODES)[number];
+
+// ── orax_desktop_local_folders ──────────────────────────────────────────────────
+// Desktop-local folder registrations (legacy per-host folder tracking).
+// Phase 2G introduces the cloud-first orax_projects workspace instead.
 // On a new device, local_path may be absent — the UI shows "Reconnect folder".
 
-export const oraxProjectsTable = pgTable(
-  "orax_projects",
+export const oraxDesktopLocalFoldersTable = pgTable(
+  "orax_desktop_local_folders",
   {
     id: text("id")
       .primaryKey()
@@ -154,14 +175,80 @@ export const oraxProjectsTable = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("orax_projects_host_id_idx").on(t.hostId),
+    index("orax_desktop_local_folders_host_id_idx").on(t.hostId),
+    index("orax_desktop_local_folders_user_id_idx").on(t.userId),
+  ],
+);
+
+// ── orax_projects ──────────────────────────────────────────────────────────────
+// Cloud workspace container. Owned by userId. Exists before any folder is
+// attached. Contains threads, sources, memory/settings, and project instructions.
+// Desktop attaches local folders as orax_project_sources; mobile mirrors the
+// same project list.
+
+export const oraxProjectsTable = pgTable(
+  "orax_projects",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    icon: text("icon"),
+    color: text("color"),
+    status: text("status").notNull().default("active"),
+    defaultExecutionSourceId: text("default_execution_source_id"),
+    memory: jsonb("memory").notNull().default({}),
+    settings: jsonb("settings").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
     index("orax_projects_user_id_idx").on(t.userId),
+    index("orax_projects_status_idx").on(t.userId, t.status),
+  ],
+);
+
+// ── orax_project_sources ───────────────────────────────────────────────────────
+// Execution sources attached to a cloud project. Types: local_folder,
+// github_repo, worktree, cloud_env (future), ssh_host (future).
+// status=missing means the local path is no longer accessible on any paired host.
+// Desktop creates/updates these when a folder is attached or reconnected.
+
+export const oraxProjectSourcesTable = pgTable(
+  "orax_project_sources",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    projectId: text("project_id").notNull(),
+    userId: text("user_id").notNull(),
+    hostId: text("host_id"),
+    type: text("type").notNull().default("local_folder"),
+    displayName: text("display_name").notNull(),
+    localPath: text("local_path"),
+    repoUrl: text("repo_url"),
+    branch: text("branch"),
+    worktreePath: text("worktree_path"),
+    status: text("status").notNull().default("active"),
+    metadata: jsonb("metadata").notNull().default({}),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("orax_project_sources_project_id_idx").on(t.projectId),
+    index("orax_project_sources_user_id_idx").on(t.userId),
+    index("orax_project_sources_host_id_idx").on(t.hostId),
+    index("orax_project_sources_status_idx").on(t.projectId, t.status),
   ],
 );
 
 // ── orax_threads ───────────────────────────────────────────────────────────────
-// Task/conversation threads. A thread belongs to a host (for desktop-executed
-// work) and optionally to a project. Cloud-only threads have hostId = null.
+// Task/conversation threads. A thread belongs to an orax_projects cloud
+// workspace and optionally targets a specific execution source + host.
+// mode=chat_only means no execution source is attached yet (planning only).
 
 export const oraxThreadsTable = pgTable(
   "orax_threads",
@@ -172,8 +259,10 @@ export const oraxThreadsTable = pgTable(
     userId: text("user_id").notNull(),
     hostId: text("host_id"),
     projectId: text("project_id"),
+    executionSourceId: text("execution_source_id"),
     title: text("title"),
     status: text("status").notNull().default("idle"),
+    mode: text("mode").notNull().default("chat_only"),
     lastEvent: jsonb("last_event"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -265,6 +354,7 @@ export const oraxUsageEventsTable = pgTable(
     hostId: text("host_id").notNull(),
     projectId: text("project_id"),
     threadId: text("thread_id"),
+    executionSourceId: text("execution_source_id"),
     actionType: text("action_type").notNull(),
     modelUsed: text("model_used"),
     inputTokens: integer("input_tokens"),
@@ -296,6 +386,7 @@ export const oraxAuditLogTable = pgTable(
     hostId: text("host_id").notNull(),
     projectId: text("project_id"),
     threadId: text("thread_id"),
+    executionSourceId: text("execution_source_id"),
     action: text("action").notNull(),
     command: text("command"),
     filePath: text("file_path"),
@@ -320,8 +411,12 @@ export type OraxPairingCode = typeof oraxPairingCodesTable.$inferSelect;
 export type InsertOraxPairingCode = typeof oraxPairingCodesTable.$inferInsert;
 export type OraxPairedDevice = typeof oraxPairedDevicesTable.$inferSelect;
 export type InsertOraxPairedDevice = typeof oraxPairedDevicesTable.$inferInsert;
+export type OraxDesktopLocalFolder = typeof oraxDesktopLocalFoldersTable.$inferSelect;
+export type InsertOraxDesktopLocalFolder = typeof oraxDesktopLocalFoldersTable.$inferInsert;
 export type OraxProject = typeof oraxProjectsTable.$inferSelect;
 export type InsertOraxProject = typeof oraxProjectsTable.$inferInsert;
+export type OraxProjectSource = typeof oraxProjectSourcesTable.$inferSelect;
+export type InsertOraxProjectSource = typeof oraxProjectSourcesTable.$inferInsert;
 export type OraxThread = typeof oraxThreadsTable.$inferSelect;
 export type InsertOraxThread = typeof oraxThreadsTable.$inferInsert;
 export type OraxThreadMessage = typeof oraxThreadMessagesTable.$inferSelect;

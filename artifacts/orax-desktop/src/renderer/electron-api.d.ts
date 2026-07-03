@@ -23,6 +23,9 @@ declare global {
         addLocalFolder(): Promise<LocalProject | null>;
         listLocalFolders(): Promise<LocalProject[]>;
         removeLocalFolder(id: string): Promise<void>;
+        listCloudProjects(): Promise<{ projects: unknown[] }>;
+        createCloudProject(name: string): Promise<{ project: unknown }>;
+        attachLocalFolderToProject(projectId: string): Promise<{ source: unknown } | null>;
       };
       app: {
         getVersion(): Promise<string>;

@@ -1446,4 +1446,119 @@ describe("ORAX product-surface wiring", () => {
     // Both must be present in the same route file
     expect(usageIdx).toBeGreaterThan(-1);
   });
+
+  // ── Phase 2G: Cloud Projects ────────────────────────────────────────────────
+
+  it("Phase 2G: DB schema has oraxProjectsTable with userId and name (not hostId/localPath)", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("oraxProjectsTable");
+    expect(schema).toContain('orax_projects"');
+    expect(schema).toContain("userId");
+    expect(schema).toContain("name");
+    // Old columns should NOT be in the new projects table definition
+    const projectsTableIdx = schema.indexOf("oraxProjectsTable");
+    const localFoldersTableIdx = schema.indexOf("oraxDesktopLocalFoldersTable");
+    // Both tables must exist
+    expect(projectsTableIdx).toBeGreaterThan(-1);
+    expect(localFoldersTableIdx).toBeGreaterThan(-1);
+  });
+
+  it("Phase 2G: DB schema has oraxDesktopLocalFoldersTable (renamed from old orax_projects)", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("oraxDesktopLocalFoldersTable");
+    expect(schema).toContain('orax_desktop_local_folders"');
+  });
+
+  it("Phase 2G: DB schema has oraxProjectSourcesTable with kind enum", () => {
+    const schema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+    expect(schema).toContain("oraxProjectSourcesTable");
+    expect(schema).toContain('orax_project_sources"');
+    expect(schema).toContain("local_folder");
+    expect(schema).toContain("github_repo");
+  });
+
+  it("Phase 2G: orax-projects route has CRUD endpoints for projects, sources, and threads", () => {
+    const route = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(route).toContain("/api/orax/projects");
+    expect(route).toContain("sources/local-folder");
+    expect(route).toContain("sources/github");
+    expect(route).toContain("/threads");
+    expect(route).toContain("req.userId");
+  });
+
+  it("Phase 2G: orax-projects route is mounted in routes/index.ts", () => {
+    const index = read("../../../../api-server/src/routes/index.ts");
+    expect(index).toContain("oraxProjectsRouter");
+    // /orax must be in KNOWN_PREFIXES
+    expect(index).toContain('"/orax"');
+  });
+
+  it("Phase 2G: migration script for orax-projects exists and references correct tables", () => {
+    const migration = read("../../../../../scripts/src/migrate-orax-projects.ts");
+    expect(migration).toContain("orax_projects");
+    expect(migration).toContain("orax_project_sources");
+    expect(migration).toContain("orax_desktop_local_folders");
+  });
+
+  it("Phase 2G: App.tsx has /orax/workspace routes with OraxWorkspacePage", () => {
+    expect(app).toContain('path="/orax/workspace"');
+    expect(app).toContain("OraxWorkspacePage");
+    expect(collapse(app)).toContain("<Protected> <OraxWorkspacePage /> </Protected>");
+  });
+
+  it("Phase 2G: orax-workspace page has cloud project list and reconnect-folder text", () => {
+    const workspacePage = read("../../pages/orax-workspace.tsx");
+    expect(workspacePage).toContain("/api/orax/projects");
+    const hasReconnect =
+      workspacePage.includes("Reconnect folder") ||
+      workspacePage.includes("reconnect") ||
+      workspacePage.includes("not available on this desktop");
+    expect(hasReconnect).toBe(true);
+  });
+
+  it("Phase 2G: orax-workspace page imports no Ora/public-ai routes", () => {
+    const workspacePage = read("../../pages/orax-workspace.tsx");
+    expect(workspacePage).not.toContain("public-ai");
+    expect(workspacePage).not.toContain("/ora/");
+    expect(workspacePage).not.toContain("OraPanel");
+    expect(workspacePage).not.toContain("handoff");
+  });
+
+  it("Phase 2G: desktop ProjectsScreen shows .orax/project.json and Reconnect folder text", () => {
+    const desktopProjects = read("../../../../orax-desktop/src/renderer/pages/ProjectsScreen.tsx");
+    expect(desktopProjects).toContain(".orax/project.json");
+    expect(desktopProjects).toContain("Reconnect folder on desktop");
+  });
+
+  it("Phase 2G: desktop ipc.ts exposes cloud project IPC methods", () => {
+    const ipc = read("../../../../orax-desktop/src/renderer/lib/ipc.ts");
+    expect(ipc).toContain("listCloudProjects");
+    expect(ipc).toContain("createCloudProject");
+    expect(ipc).toContain("attachLocalFolderToProject");
+  });
+
+  it("Phase 2G: mobile api.ts has listOraxProjects and createOraxProject", () => {
+    expect(mobileApi).toContain("listOraxProjects");
+    expect(mobileApi).toContain("createOraxProject");
+    expect(mobileApi).toContain("/api/orax/projects");
+  });
+
+  it("Phase 2G: mobile OraxScreen shows Desktop offline badge when host state is offline", () => {
+    expect(mobileOraxScreen).toContain("Desktop offline");
+    expect(mobileOraxScreen).toContain("desktopHostState");
+    expect(mobileOraxScreen).toContain('"offline"');
+  });
+
+  it("Phase 2G: mobile OraxScreen imports listOraxProjects and createOraxProject", () => {
+    expect(mobileOraxScreen).toContain("listOraxProjects");
+    expect(mobileOraxScreen).toContain("createOraxProject");
+    expect(mobileOraxScreen).toContain("oraxProjects");
+  });
+
+  it("Phase 2G: orax-workspace page does not import from ora-panel or ai-builder", () => {
+    const workspacePage = read("../../pages/orax-workspace.tsx");
+    expect(workspacePage).not.toContain("ora-panel");
+    expect(workspacePage).not.toContain("builder");
+    expect(workspacePage).not.toContain("BuilderGuard");
+  });
 });

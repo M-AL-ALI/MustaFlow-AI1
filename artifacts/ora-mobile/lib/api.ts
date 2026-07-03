@@ -1590,3 +1590,52 @@ export function getDesktopApproval(approvalId: string): Promise<{
     approval: { id: string; status: string; command: string | null; expiresAt: string | null };
   }>(`/api/orax/approvals/${approvalId}`);
 }
+
+// ── Orax Cloud Projects ─────────────────────────────────────────────────────
+
+export interface OraxCloudProject {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  sources: OraxProjectSource[];
+}
+
+export interface OraxProjectSource {
+  id: string;
+  projectId: string;
+  kind: "local_folder" | "github_repo";
+  localPath: string | null;
+  githubRepoUrl: string | null;
+  displayName: string | null;
+  createdAt: string;
+}
+
+export function listOraxProjects(): Promise<{ projects: OraxCloudProject[] }> {
+  return jsonRequest<{ projects: OraxCloudProject[] }>("/api/orax/projects");
+}
+
+export function createOraxProject(name: string, description?: string): Promise<{ project: OraxCloudProject }> {
+  return jsonRequest<{ project: OraxCloudProject }>("/api/orax/projects", {
+    method: "POST",
+    body: JSON.stringify({ name, description }),
+  });
+}
+
+export function getOraxProject(projectId: string): Promise<{ project: OraxCloudProject }> {
+  return jsonRequest<{ project: OraxCloudProject }>(`/api/orax/projects/${projectId}`);
+}
+
+export function listOraxProjectThreads(projectId: string): Promise<{ threads: unknown[] }> {
+  return jsonRequest<{ threads: unknown[] }>(`/api/orax/projects/${projectId}/threads`);
+}
+
+export function createOraxProjectThread(
+  projectId: string,
+  body: { prompt: string; executionSourceId?: string },
+): Promise<{ thread: unknown }> {
+  return jsonRequest<{ thread: unknown }>(`/api/orax/projects/${projectId}/threads`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}

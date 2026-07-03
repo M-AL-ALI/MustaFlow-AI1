@@ -122,6 +122,7 @@
     "migrate-orax-artifacts": "tsx ./src/migrate-orax-artifacts.ts",
     "migrate-orax-messages": "tsx ./src/migrate-orax-messages.ts",
     "migrate-orax-desktop": "tsx ./src/migrate-orax-desktop.ts",
+    "migrate-orax-projects": "tsx ./src/migrate-orax-projects.ts",
     "migrate-ora-memory-supersede": "tsx ./src/migrate-ora-memory-supersede.ts",
     "migrate-ora-spend-ledger": "tsx ./src/migrate-ora-spend-ledger.ts",
     "migrate-ora-realtime-usage": "tsx ./src/migrate-ora-realtime-usage.ts",

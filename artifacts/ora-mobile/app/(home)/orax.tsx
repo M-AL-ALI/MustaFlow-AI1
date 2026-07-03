@@ -58,6 +58,8 @@ import {
   generateDraftPatch,
   getOraxCapabilities,
   listOraxHosts,
+  listOraxProjects,
+  createOraxProject,
   listRepositories,
   listRepositoryScans,
   listTaskApprovals,
@@ -76,6 +78,7 @@ import {
   requestDesktopCommandApproval,
   resolveDesktopCommandApproval,
 } from "@/lib/api";
+import type { OraxCloudProject } from "@/lib/api";
 import type {
   OraxApproval,
   OraxArtifact,
@@ -401,6 +404,8 @@ export default function OraxScreen() {
   const [recordingVoice, setRecordingVoice] = useState(false);
   const [oraxHosts, setOraxHosts] = useState<OraxHostSummary[]>([]);
   const [oraxHostsLoading, setOraxHostsLoading] = useState(true);
+  const [oraxProjects, setOraxProjects] = useState<OraxCloudProject[]>([]);
+  const [oraxProjectsLoading, setOraxProjectsLoading] = useState(true);
 
   const reloadHosts = useCallback(async () => {
     setOraxHostsLoading(true);
@@ -414,9 +419,22 @@ export default function OraxScreen() {
     }
   }, []);
 
+  const reloadProjects = useCallback(async () => {
+    setOraxProjectsLoading(true);
+    try {
+      const data = await listOraxProjects();
+      setOraxProjects(data.projects ?? []);
+    } catch {
+      // silent — card shows empty state
+    } finally {
+      setOraxProjectsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void reloadHosts();
-  }, [reloadHosts]);
+    void reloadProjects();
+  }, [reloadHosts, reloadProjects]);
 
   const desktopHostState: "online" | "offline" | "not-connected" = oraxHostsLoading
     ? "not-connected"
@@ -1094,6 +1112,26 @@ export default function OraxScreen() {
 
             {!threadOpen ? (
               <>
+                {desktopHostState === "offline" && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      borderRadius: 8,
+                      backgroundColor: c.card,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                    }}
+                  >
+                    <Monitor size={14} color={c.mutedForeground} />
+                    <Text style={{ fontSize: 13, color: c.mutedForeground, fontFamily: "Inter_500Medium" }}>
+                      Desktop offline
+                    </Text>
+                  </View>
+                )}
                 <DesktopConnectionCard
                   hosts={oraxHosts}
                   hostsLoading={oraxHostsLoading}

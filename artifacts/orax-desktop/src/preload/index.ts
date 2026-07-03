@@ -27,6 +27,12 @@ const electronAPI = {
       ipcRenderer.invoke("project:listLocalFolders"),
     removeLocalFolder: (id: string): Promise<void> =>
       ipcRenderer.invoke("project:removeLocalFolder", id),
+    listCloudProjects: (): Promise<{ projects: unknown[] }> =>
+      ipcRenderer.invoke("project:listCloudProjects"),
+    createCloudProject: (name: string): Promise<{ project: unknown }> =>
+      ipcRenderer.invoke("project:createCloudProject", name),
+    attachLocalFolderToProject: (projectId: string): Promise<{ source: unknown } | null> =>
+      ipcRenderer.invoke("project:attachLocalFolderToProject", projectId),
   },
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke("app:getVersion"),

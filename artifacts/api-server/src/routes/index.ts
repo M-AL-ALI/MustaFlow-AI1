@@ -107,6 +107,7 @@ import developerModeRouter from "./developer-mode";
 import helpRouter from "./help";
 import oraxRouter from "./orax";
 import oraxDesktopRouter from "./orax-desktop";
+import oraxProjectsRouter from "./orax-projects";
 import { attachUser } from "../lib/auth";
 import {
   aiBuilderLimiter,
@@ -201,6 +202,7 @@ const KNOWN_PREFIXES = [
   "/billing",
   "/queue",
   "/eas",
+  "/orax",
   "/builds",
   "/analytics",
   "/suggestions",
@@ -361,6 +363,7 @@ router.use(oraAssetsRouter); // GET/DELETE /ora/assets (durable asset library)
 router.use(oraAccountConsistencyRouter); // GET /ora/account-consistency (cross-platform diagnostics)
 router.use(oraxRouter); // ORAX coding-agent foundation
 router.use(oraxDesktopRouter); // Orax Desktop host registration, pairing, heartbeat
+router.use(oraxProjectsRouter); // Orax Project Workspace — Phase 2G
 router.use(developerModeRouter); // GET /projects/:id/developer-mode/runtime-status
 
 // JSON 404 fallback for authenticated users hitting unmatched routes
