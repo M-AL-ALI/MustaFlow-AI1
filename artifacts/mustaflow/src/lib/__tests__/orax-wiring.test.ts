@@ -552,6 +552,7 @@ describe("ORAX product-surface wiring", () => {
   it("registers Orax Desktop Phase 2B endpoints: host CRUD, pairing codes, heartbeat", () => {
     const oraxDesktopRoute = read("../../../../api-server/src/routes/orax-desktop.ts");
 
+    // ── Routes ────────────────────────────────────────────────────────────────
     expect(oraxDesktopRoute).toContain('router.post("/orax/hosts/register"');
     expect(oraxDesktopRoute).toContain('router.get("/orax/hosts"');
     expect(oraxDesktopRoute).toContain('router.get("/orax/hosts/:hostId"');
@@ -562,6 +563,7 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxDesktopRoute).toContain('router.delete("/orax/pairing-codes/:code"');
     expect(oraxDesktopRoute).toContain('router.post("/orax/relay/heartbeat"');
 
+    // ── Schema fields ─────────────────────────────────────────────────────────
     expect(oraxDesktopRoute).toContain("installId");
     expect(oraxDesktopRoute).toContain("deviceName");
     expect(oraxDesktopRoute).toContain("permissionMode");
@@ -580,11 +582,79 @@ describe("ORAX product-surface wiring", () => {
     expect(oraxDesktopRoute).toContain("oraxPairingCodesTable");
     expect(oraxDesktopRoute).toContain("oraxPairedDevicesTable");
 
+    // ── Security guards ───────────────────────────────────────────────────────
+    // Cross-account pairing rejection: code.userId must match caller's userId.
+    expect(oraxDesktopRoute).toContain("pairingCode.userId !== userId");
+
+    // Expiry and already-redeemed checks on the redeem path.
+    expect(oraxDesktopRoute).toContain("pairingCode.expiresAt < now");
+    expect(oraxDesktopRoute).toContain("pairingCode.redeemedAt");
+
+    // Revoked host blocks pairing code creation.
+    expect(oraxDesktopRoute).toContain('"Cannot create pairing code for a revoked host"');
+
+    // Revoked host blocks heartbeat.
+    expect(oraxDesktopRoute).toContain('"Host has been revoked"');
+
+    // Revoked host blocks the redeem path (host lookup after code validation).
+    expect(oraxDesktopRoute).toContain('"Host not found or revoked"');
+
+    // Duplicate device prevention: re-pairing upserts via ON CONFLICT DO UPDATE,
+    // targeting the UNIQUE(host_id, mobile_device_id) index.
+    expect(oraxDesktopRoute).toContain("onConflictDoUpdate");
+    expect(oraxDesktopRoute).toContain("oraxPairedDevicesTable.hostId");
+    expect(oraxDesktopRoute).toContain("oraxPairedDevicesTable.mobileDeviceId");
+
+    // ── Ora / AI Builder isolation ─────────────────────────────────────────────
     expect(oraxDesktopRoute).not.toContain("/public-ai/");
     expect(oraxDesktopRoute).not.toContain("deductCredits");
     expect(oraxDesktopRoute).not.toContain("builderCredits");
+    expect(oraxDesktopRoute).not.toContain("useOraChat");
 
+    // ── Routes index wiring ───────────────────────────────────────────────────
     expect(routesIndex).toContain("oraxDesktopRouter");
     expect(routesIndex).toContain("router.use(oraxDesktopRouter)");
+  });
+
+  it("defines all 9 Phase 2B Orax Desktop schema tables", () => {
+    const oraxDesktopSchema = read("../../../../../lib/db/src/schema/orax-desktop.ts");
+
+    // Phase 2B.1 — host / pairing foundation
+    expect(oraxDesktopSchema).toContain("oraxHostsTable");
+    expect(oraxDesktopSchema).toContain("oraxPairingCodesTable");
+    expect(oraxDesktopSchema).toContain("oraxPairedDevicesTable");
+
+    // Phase 2B.2 — projects, threads, messages, approvals, usage, audit
+    expect(oraxDesktopSchema).toContain("oraxProjectsTable");
+    expect(oraxDesktopSchema).toContain("oraxThreadsTable");
+    expect(oraxDesktopSchema).toContain("oraxThreadMessagesTable");
+    expect(oraxDesktopSchema).toContain("oraxPendingApprovalsTable");
+    expect(oraxDesktopSchema).toContain("oraxUsageEventsTable");
+    expect(oraxDesktopSchema).toContain("oraxAuditLogTable");
+
+    // Unique constraint on paired devices — prevents duplicate pairing rows.
+    expect(oraxDesktopSchema).toContain("orax_paired_devices_host_mobile_uidx");
+    expect(oraxDesktopSchema).toContain("uniqueIndex");
+
+    // Key field presence
+    expect(oraxDesktopSchema).toContain("local_path");       // orax_projects
+    expect(oraxDesktopSchema).toContain("git_remote_url");   // orax_projects
+    expect(oraxDesktopSchema).toContain("thread_id");        // orax_thread_messages / approvals
+    expect(oraxDesktopSchema).toContain("action_type");      // orax_usage_events
+    expect(oraxDesktopSchema).toContain("compute_ms");       // orax_usage_events
+    expect(oraxDesktopSchema).toContain("error_msg");        // orax_audit_log
+
+    // Audit log is intentionally denormalized (no FK constraints).
+    // Confirmed by absence of REFERENCES keyword next to audit log table name.
+    expect(oraxDesktopSchema).toContain("orax_audit_log");
+
+    // All 9 inferred types exported
+    expect(oraxDesktopSchema).toContain("export type OraxHost");
+    expect(oraxDesktopSchema).toContain("export type OraxProject");
+    expect(oraxDesktopSchema).toContain("export type OraxThread");
+    expect(oraxDesktopSchema).toContain("export type OraxThreadMessage");
+    expect(oraxDesktopSchema).toContain("export type OraxPendingApproval");
+    expect(oraxDesktopSchema).toContain("export type OraxUsageEvent");
+    expect(oraxDesktopSchema).toContain("export type OraxAuditLog");
   });
 });

@@ -52,7 +52,7 @@ const patchHostSchema = z.object({
   permissionMode: z
     .enum(["read_only", "ask_everything", "ask_risky", "trusted_project", "full_access", "custom"])
     .optional(),
-  capabilities: z.record(z.boolean()).passthrough().optional(),
+  capabilities: z.record(z.boolean()).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 
@@ -260,7 +260,13 @@ router.patch("/orax/hosts/:hostId", async (req, res) => {
       return;
     }
 
-    const patch: Partial<typeof oraxHostsTable.$inferInsert> = { updatedAt: new Date() };
+    const patch: {
+      deviceName?: string;
+      permissionMode?: string;
+      capabilities?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      updatedAt: Date;
+    } = { updatedAt: new Date() };
     if (parsed.data.deviceName !== undefined) patch.deviceName = parsed.data.deviceName;
     if (parsed.data.permissionMode !== undefined) patch.permissionMode = parsed.data.permissionMode;
     if (parsed.data.capabilities !== undefined) patch.capabilities = parsed.data.capabilities;
@@ -449,7 +455,10 @@ router.post("/orax/pairing-codes/redeem", async (req, res) => {
         platform: platform ?? null,
         lastSeenAt: now,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [oraxPairedDevicesTable.hostId, oraxPairedDevicesTable.mobileDeviceId],
+        set: { lastSeenAt: now, revokedAt: null },
+      });
 
     logger.info(
       { component: "orax-desktop", hostId: pairingCode.hostId, mobileDeviceId },
