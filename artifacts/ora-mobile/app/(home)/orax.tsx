@@ -2123,6 +2123,7 @@ function OraxCommandCenter({
 }
 
 function isDesktopHostOnline(host: OraxHostSummary): boolean {
+  if (host.status === "online") return true;
   if (!host.lastSeenAt) return false;
   return Date.now() - new Date(host.lastSeenAt).getTime() < 90_000;
 }
@@ -2140,7 +2141,7 @@ function DesktopConnectionCard({
   const [pairingCodeInput, setPairingCodeInput] = useState("");
   const [redeeming, setRedeeming] = useState(false);
 
-  const activeHosts = hosts.filter((h) => h.status === "active");
+  const activeHosts = hosts.filter((h) => h.status !== "revoked");
   const onlineHost = activeHosts.find(isDesktopHostOnline) ?? null;
   const primaryHost = onlineHost ?? activeHosts[0] ?? null;
   const isOnline = !!onlineHost;

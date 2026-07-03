@@ -963,4 +963,65 @@ describe("ORAX product-surface wiring", () => {
     expect(devicesPage).not.toContain("/api/public-ai");
     expect(devicesPage).not.toContain("password");
   });
+
+  it("Phase 2D runtime contract: host status type must be online|offline|revoked, not active", () => {
+    const mobileTypes = read("../../../../ora-mobile/lib/types.ts");
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    const modeSelect = read("../../pages/mode-select.tsx");
+    const mobileOrax = read("../../../../ora-mobile/app/(home)/orax.tsx");
+
+    // Correct backend status values must be present
+    expect(mobileTypes).toContain('"online"');
+    expect(mobileTypes).toContain('"offline"');
+    expect(mobileTypes).toContain('"revoked"');
+    expect(devicesPage).toContain('"online"');
+    expect(devicesPage).toContain('"offline"');
+    expect(devicesPage).toContain('"revoked"');
+    expect(modeSelect).toContain('"online"');
+    expect(modeSelect).toContain('"offline"');
+    expect(modeSelect).toContain('"revoked"');
+
+    // "active" must NOT appear in OraxHostSummary or host filter logic
+    const oraxHostSection = mobileTypes.slice(mobileTypes.indexOf("OraxHostSummary"));
+    expect(oraxHostSection).not.toContain('status: "active"');
+    expect(devicesPage).not.toContain('status: "active"');
+    expect(modeSelect).not.toContain('status: "active"');
+    expect(mobileOrax).not.toContain('status === "active"');
+    expect(devicesPage).not.toContain('status === "active"');
+    expect(modeSelect).not.toContain('status === "active"');
+  });
+
+  it("Phase 2D runtime contract: permissionMode must use backend enum, not ask|manual|auto", () => {
+    const mobileTypes = read("../../../../ora-mobile/lib/types.ts");
+    const devicesPage = read("../../pages/orax-devices.tsx");
+
+    // Correct backend permission modes must be present
+    expect(mobileTypes).toContain('"read_only"');
+    expect(mobileTypes).toContain('"ask_everything"');
+    expect(mobileTypes).toContain('"ask_risky"');
+    expect(mobileTypes).toContain('"trusted_project"');
+    expect(mobileTypes).toContain('"full_access"');
+    expect(mobileTypes).toContain('"custom"');
+    expect(devicesPage).toContain('"read_only"');
+    expect(devicesPage).toContain('"ask_risky"');
+    expect(devicesPage).toContain('"full_access"');
+
+    // Wrong permission mode values must NOT appear in Orax host type definitions
+    expect(mobileTypes).not.toContain('permissionMode: "ask"');
+    expect(mobileTypes).not.toContain('permissionMode: "manual"');
+    expect(mobileTypes).not.toContain('permissionMode: "auto"');
+    expect(devicesPage).not.toContain('value="ask"');
+    expect(devicesPage).not.toContain('value="manual"');
+    expect(devicesPage).not.toContain('value="auto"');
+  });
+
+  it("Phase 2D runtime contract: active-host filters use !== revoked, not === active", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    const modeSelect = read("../../pages/mode-select.tsx");
+    const mobileOrax = read("../../../../ora-mobile/app/(home)/orax.tsx");
+
+    expect(devicesPage).toContain('h.status !== "revoked"');
+    expect(modeSelect).toContain('h.status !== "revoked"');
+    expect(mobileOrax).toContain('h.status !== "revoked"');
+  });
 });

@@ -11,12 +11,13 @@ import { authFetch } from "@/lib/api-fetch";
 interface OraxHostBrief {
   id: string;
   deviceName: string;
-  status: string;
+  status: "online" | "offline" | "revoked";
   lastSeenAt: string | null;
   platform: string;
 }
 
 function isOraxHostOnline(host: OraxHostBrief): boolean {
+  if (host.status === "online") return true;
   if (!host.lastSeenAt) return false;
   return Date.now() - new Date(host.lastSeenAt).getTime() < 90_000;
 }
@@ -60,7 +61,7 @@ export default function ModeSelectPage() {
   function handleOraxSelect() {
     if (selecting) return;
     setSelecting("orax");
-    const activeHosts = oraxHosts.filter((h) => h.status === "active");
+    const activeHosts = oraxHosts.filter((h) => h.status !== "revoked");
     if (activeHosts.length === 0) {
       setLocation("/orax-product");
     } else if (activeHosts.some(isOraxHostOnline)) {
@@ -164,7 +165,7 @@ interface OraxCardProps {
 
 function OraxCard({ selecting, oraxHosts, oraxHostsLoading, onSelect }: OraxCardProps) {
   const isSelecting = selecting === "orax";
-  const activeHosts = oraxHosts.filter((h) => h.status === "active");
+  const activeHosts = oraxHosts.filter((h) => h.status !== "revoked");
   const onlineHost = activeHosts.find(isOraxHostOnline) ?? null;
   const primaryHost = onlineHost ?? activeHosts[0] ?? null;
 

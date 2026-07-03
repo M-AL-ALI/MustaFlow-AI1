@@ -850,15 +850,23 @@ export interface SupportAttachment {
   dataBase64: string;
 }
 
+export type OraxHostPermissionMode =
+  | "read_only"
+  | "ask_everything"
+  | "ask_risky"
+  | "trusted_project"
+  | "full_access"
+  | "custom";
+
 export interface OraxHostSummary {
   id: string;
   deviceName: string;
   platform: string;
   osVersion: string | null;
   appVersion: string | null;
-  status: "active" | "revoked";
+  status: "online" | "offline" | "revoked";
   capabilities: Record<string, boolean>;
-  permissionMode: "ask" | "manual" | "auto";
+  permissionMode: OraxHostPermissionMode;
   lastSeenAt: string | null;
   pairedAt: string | null;
   revokedAt: string | null;

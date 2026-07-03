@@ -33,15 +33,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+type OraxHostPermissionMode =
+  | "read_only"
+  | "ask_everything"
+  | "ask_risky"
+  | "trusted_project"
+  | "full_access"
+  | "custom";
+
 interface OraxHostSummary {
   id: string;
   deviceName: string;
   platform: string;
   osVersion: string | null;
   appVersion: string | null;
-  status: "active" | "revoked";
+  status: "online" | "offline" | "revoked";
   capabilities: Record<string, boolean>;
-  permissionMode: "ask" | "manual" | "auto";
+  permissionMode: OraxHostPermissionMode;
   lastSeenAt: string | null;
   pairedAt: string | null;
   revokedAt: string | null;
@@ -172,7 +180,7 @@ function HostCard({
   pairingCode: ActivePairingCode | null;
   pairingLoading: boolean;
   onRevoke: (host: OraxHostSummary) => void;
-  onPermissionModeChange: (host: OraxHostSummary, mode: "ask" | "manual" | "auto") => void;
+  onPermissionModeChange: (host: OraxHostSummary, mode: OraxHostPermissionMode) => void;
   onCreatePairingCode: (host: OraxHostSummary) => void;
   onCancelPairingCode: (code: string) => void;
 }) {
@@ -230,16 +238,19 @@ function HostCard({
           <Select
             value={host.permissionMode}
             onValueChange={(v) =>
-              onPermissionModeChange(host, v as "ask" | "manual" | "auto")
+              onPermissionModeChange(host, v as OraxHostPermissionMode)
             }
           >
             <SelectTrigger className="h-8 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ask">Ask — confirm each action</SelectItem>
-              <SelectItem value="manual">Manual — approve file changes</SelectItem>
-              <SelectItem value="auto">Auto — run without confirmation</SelectItem>
+              <SelectItem value="read_only">Read only — no changes</SelectItem>
+              <SelectItem value="ask_everything">Ask everything — confirm each action</SelectItem>
+              <SelectItem value="ask_risky">Ask risky — confirm risky actions only</SelectItem>
+              <SelectItem value="trusted_project">Trusted project — minimal prompts</SelectItem>
+              <SelectItem value="full_access">Full access — run without confirmation</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -327,7 +338,7 @@ export default function OraxDevicesPage() {
 
   async function handlePermissionModeChange(
     host: OraxHostSummary,
-    mode: "ask" | "manual" | "auto",
+    mode: OraxHostPermissionMode,
   ) {
     try {
       const res = await authFetch(`/api/orax/hosts/${host.id}`, {
@@ -400,7 +411,7 @@ export default function OraxDevicesPage() {
     }
   }
 
-  const activeHosts = hosts.filter((h) => h.status === "active");
+  const activeHosts = hosts.filter((h) => h.status !== "revoked");
 
   return (
     <div className="min-h-screen bg-background">
