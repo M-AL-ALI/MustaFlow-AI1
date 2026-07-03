@@ -199,23 +199,6 @@ async function getThreadContext(projectId: string, threadId: string): Promise<Th
   return data.context;
 }
 
-async function sendMessage(
-  projectId: string,
-  threadId: string,
-  content: string,
-): Promise<ThreadMessage | null> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/messages`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, role: "user" }),
-    },
-  );
-  if (!res.ok) throw new Error("Failed to send message");
-  const data = (await res.json()) as { message: ThreadMessage };
-  return data.message ?? null;
-}
 
 async function continueThread(
   projectId: string,

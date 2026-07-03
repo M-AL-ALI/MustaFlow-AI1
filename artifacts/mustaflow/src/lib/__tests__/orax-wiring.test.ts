@@ -1630,9 +1630,9 @@ describe("ORAX product-surface wiring", () => {
     expect(preload).toContain("executionSourceId");
   });
 
-  it("Phase 2H: website orax-workspace has sendMessage and continueThread API helpers", () => {
+  it("Phase 2H: website orax-workspace has getThreadMessages and continueThread API helpers", () => {
     const workspacePage = read("../../pages/orax-workspace.tsx");
-    expect(workspacePage).toContain("sendMessage");
+    expect(workspacePage).toContain("getThreadMessages");
     expect(workspacePage).toContain("continueThread");
     expect(workspacePage).toContain("/messages");
     expect(workspacePage).toContain("/continue");
