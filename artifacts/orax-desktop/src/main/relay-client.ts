@@ -1,16 +1,18 @@
 /**
- * Orax Desktop — Phase 2E relay client.
+ * Orax Desktop — Phase 2E/2F relay client.
  *
  * Polls the cloud relay for queued actions, executes safe Phase 2E actions
- * (ping_desktop, get_desktop_status, list_local_projects), and posts results
- * back. Structured so it can be replaced by a persistent WebSocket relay in
- * a future phase without changing callers.
+ * (ping_desktop, get_desktop_status, list_local_projects) and Phase 2F
+ * command actions (run_safe_command — gated by local permission-gate),
+ * and posts results back.
  */
 
 import type { OraxApiClient } from "./api-client";
 import type { HostManager } from "./host-manager";
 import type { LocalProjectsManager } from "./local-projects";
 import type { RelayState } from "../shared/types";
+import { executeCommand } from "./command-executor";
+import { isCommandPermitted } from "./permission-gate";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -117,6 +119,32 @@ export class RelayClient {
             addedAt: p.addedAt,
           })),
         };
+      } else if (action.type === "run_safe_command") {
+        const payload = action.payload as { command?: string; cwd?: string };
+        const command = payload.command ?? "";
+        const cwd = payload.cwd;
+
+        // Re-validate locally — the backend already checked, but we add an
+        // independent guard so a compromised server cannot run arbitrary commands.
+        const gate = isCommandPermitted(command);
+        if (!gate.permitted) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: `Command blocked by local permission gate: ${gate.reason}`,
+          });
+          return;
+        }
+
+        await this.api.postActionEvent(action.id, "running", {});
+        const cmdResult = await executeCommand(command, cwd);
+
+        result = {
+          exitCode: cmdResult.exitCode,
+          stdout: cmdResult.stdout,
+          stderr: cmdResult.stderr,
+          durationMs: cmdResult.durationMs,
+          timedOut: cmdResult.timedOut,
+        };
+        // Falls through to the common postActionEvent("completed") call below
       } else {
         await this.api.postActionEvent(action.id, "failed", {
           error: `Unsupported action type: ${action.type}`,

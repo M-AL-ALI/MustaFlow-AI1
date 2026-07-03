@@ -1556,3 +1556,37 @@ export function getDesktopActions(hostId: string): Promise<{
     actions: Array<{ id: string; status: string; type: string; result: unknown }>;
   }>(`/api/orax/hosts/${hostId}/actions`);
 }
+
+export function requestDesktopCommandApproval(
+  hostId: string,
+  payload: { command: string; reason: string; cwd?: string; threadId?: string },
+): Promise<{ approval: { id: string; command: string; status: string; riskLevel: string } }> {
+  return jsonRequest<{ approval: { id: string; command: string; status: string; riskLevel: string } }>(
+    `/api/orax/hosts/${hostId}/command-approvals`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function resolveDesktopCommandApproval(
+  approvalId: string,
+  decision: "approved" | "denied",
+): Promise<{ approval: { id: string; status: string }; action?: { id: string } }> {
+  return jsonRequest<{ approval: { id: string; status: string }; action?: { id: string } }>(
+    `/api/orax/approvals/${approvalId}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    },
+  );
+}
+
+export function getDesktopApproval(approvalId: string): Promise<{
+  approval: { id: string; status: string; command: string | null; expiresAt: string | null };
+}> {
+  return jsonRequest<{
+    approval: { id: string; status: string; command: string | null; expiresAt: string | null };
+  }>(`/api/orax/approvals/${approvalId}`);
+}

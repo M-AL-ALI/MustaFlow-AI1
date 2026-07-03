@@ -167,6 +167,32 @@ function PairingCodeDisplay({
   );
 }
 
+const SAFE_COMMANDS = [
+  { label: "node --version", value: "node --version" },
+  { label: "npm --version", value: "npm --version" },
+  { label: "pnpm --version", value: "pnpm --version" },
+  { label: "git --version", value: "git --version" },
+  { label: "pwd", value: "pwd" },
+];
+
+type CmdApprovalState =
+  | "idle"
+  | "requesting"
+  | "pending"
+  | "approved"
+  | "denied"
+  | "executing"
+  | "done"
+  | "error";
+
+interface CmdResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut?: boolean;
+}
+
 function HostCard({
   host,
   pairingCode,
@@ -187,6 +213,103 @@ function HostCard({
   const online = isHostOnline(host);
   const [testState, setTestState] = useState<"idle" | "pending" | "completed" | "failed">("idle");
   const [testResult, setTestResult] = useState<string | null>(null);
+
+  const [selectedSafeCmd, setSelectedSafeCmd] = useState(SAFE_COMMANDS[0]!.value);
+  const [cmdApprovalState, setCmdApprovalState] = useState<CmdApprovalState>("idle");
+  const [cmdApproval, setCmdApproval] = useState<{ id: string; command: string } | null>(null);
+  const [cmdResult, setCmdResult] = useState<CmdResult | null>(null);
+  const [cmdError, setCmdError] = useState<string | null>(null);
+
+  async function handleRequestApproval() {
+    setCmdApprovalState("requesting");
+    setCmdApproval(null);
+    setCmdResult(null);
+    setCmdError(null);
+    try {
+      const res = await authFetch(`/api/orax/hosts/${host.id}/command-approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: selectedSafeCmd,
+          reason: "Safe command diagnostic from Orax Desktop settings",
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { reason?: string };
+        setCmdError(data.reason ?? `Request failed (${res.status})`);
+        setCmdApprovalState("error");
+        return;
+      }
+      const data = (await res.json()) as { approval: { id: string; command: string } };
+      setCmdApproval(data.approval);
+      setCmdApprovalState("pending");
+    } catch {
+      setCmdError("Network error — please try again");
+      setCmdApprovalState("error");
+    }
+  }
+
+  async function handleDecide(decision: "approved" | "denied") {
+    if (!cmdApproval) return;
+    try {
+      const res = await authFetch(`/api/orax/approvals/${cmdApproval.id}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (!res.ok) {
+        setCmdApprovalState("error");
+        setCmdError("Failed to submit decision");
+        return;
+      }
+      if (decision === "denied") {
+        setCmdApprovalState("denied");
+        return;
+      }
+      const data = (await res.json()) as { action?: { id: string } };
+      const actionId = data.action?.id ?? null;
+      setCmdApprovalState("executing");
+
+      if (!actionId) {
+        setCmdApprovalState("error");
+        setCmdError("No action was queued");
+        return;
+      }
+
+      for (let i = 0; i < 15; i++) {
+        await new Promise<void>((r) => setTimeout(r, 2000));
+        const r = await authFetch(`/api/orax/hosts/${host.id}/actions`);
+        if (!r.ok) break;
+        const d = (await r.json()) as {
+          actions: Array<{ id: string; status: string; result: unknown }>;
+        };
+        const found = d.actions.find((a) => a.id === actionId);
+        if (!found) break;
+        if (found.status === "completed") {
+          setCmdResult(found.result as CmdResult);
+          setCmdApprovalState("done");
+          return;
+        }
+        if (found.status === "failed") {
+          setCmdApprovalState("error");
+          setCmdError("Desktop reported an error running the command");
+          return;
+        }
+      }
+      setCmdApprovalState("error");
+      setCmdError("Timed out waiting for desktop — is Orax Desktop running?");
+    } catch {
+      setCmdApprovalState("error");
+      setCmdError("Network error");
+    }
+  }
+
+  function resetSafeCmd() {
+    setCmdApprovalState("idle");
+    setCmdApproval(null);
+    setCmdResult(null);
+    setCmdError(null);
+  }
 
   async function handleTestConnection() {
     setTestState("pending");
@@ -330,6 +453,120 @@ function HostCard({
               >
                 {testResult}
               </span>
+            )}
+          </div>
+
+          <div className="border border-border rounded-xl p-3 flex flex-col gap-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+              Safe command test
+            </p>
+
+            {cmdApprovalState === "idle" && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={selectedSafeCmd} onValueChange={setSelectedSafeCmd}>
+                  <SelectTrigger className="h-8 text-sm w-52">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SAFE_COMMANDS.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" variant="outline" onClick={() => void handleRequestApproval()}>
+                  Request approval
+                </Button>
+              </div>
+            )}
+
+            {cmdApprovalState === "requesting" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Creating approval request…
+              </div>
+            )}
+
+            {cmdApprovalState === "pending" && cmdApproval && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Run on your desktop:{" "}
+                  <code className="font-mono text-foreground">{cmdApproval.command}</code>
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    onClick={() => void handleDecide("approved")}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => void handleDecide("denied")}
+                  >
+                    Deny
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {cmdApprovalState === "executing" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Running on desktop…
+              </div>
+            )}
+
+            {cmdApprovalState === "done" && cmdResult && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    Exit code:{" "}
+                    <span className={cmdResult.exitCode === 0 ? "text-emerald-500 font-medium" : "text-destructive font-medium"}>
+                      {cmdResult.exitCode ?? "null"}
+                    </span>
+                    {cmdResult.durationMs ? ` · ${cmdResult.durationMs}ms` : ""}
+                  </p>
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={resetSafeCmd}
+                  >
+                    Reset
+                  </button>
+                </div>
+                {cmdResult.stdout && (
+                  <pre className="rounded bg-muted/50 p-2 text-xs font-mono text-foreground overflow-x-auto max-h-28 whitespace-pre-wrap break-all">
+                    {cmdResult.stdout}
+                  </pre>
+                )}
+                {cmdResult.stderr && (
+                  <pre className="rounded bg-destructive/10 p-2 text-xs font-mono text-destructive overflow-x-auto max-h-20 whitespace-pre-wrap break-all">
+                    {cmdResult.stderr}
+                  </pre>
+                )}
+              </div>
+            )}
+
+            {cmdApprovalState === "denied" && (
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-destructive">Command denied.</p>
+                <button className="text-xs text-muted-foreground hover:text-foreground" onClick={resetSafeCmd}>
+                  Try again
+                </button>
+              </div>
+            )}
+
+            {cmdApprovalState === "error" && (
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-destructive truncate">{cmdError ?? "An error occurred"}</p>
+                <button className="text-xs text-muted-foreground hover:text-foreground shrink-0" onClick={resetSafeCmd}>
+                  Reset
+                </button>
+              </div>
             )}
           </div>
 

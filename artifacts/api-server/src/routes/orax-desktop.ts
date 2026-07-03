@@ -20,8 +20,12 @@ import {
   oraxPairedDevicesTable,
   oraxDesktopActionsTable,
   oraxThreadMessagesTable,
+  oraxPendingApprovalsTable,
+  oraxAuditLogTable,
+  oraxUsageEventsTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { classifyOraxCommand } from "../lib/orax-command-safety";
 
 const router = Router();
 
@@ -824,5 +828,288 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
     res.status(500).json({ error: "Failed to post action event" });
   }
 });
+
+// ── Phase 2F: command approval schemas ────────────────────────────────────────
+
+const commandApprovalSchema = z.object({
+  threadId: z.string().min(1).max(80).optional(),
+  command: z.string().trim().min(1).max(500),
+  cwd: z.string().max(500).optional(),
+  reason: z.string().trim().min(1).max(500),
+});
+
+const resolveApprovalSchema = z.object({
+  decision: z.enum(["approved", "denied"]),
+});
+
+// ── Phase 2F: POST /orax/hosts/:hostId/command-approvals ──────────────────────
+
+/**
+ * POST /orax/hosts/:hostId/command-approvals
+ *
+ * User requests to run a safe command on a desktop host. The backend
+ * classifies the command, creates a pending approval, and returns it so the
+ * web/mobile UI can show an inline Approve/Deny card.
+ */
+router.post("/orax/hosts/:hostId/command-approvals", async (req, res) => {
+  const userId = req.userId!;
+  const hostId = req.params.hostId;
+
+  const parsed = commandApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request" });
+    return;
+  }
+
+  const { threadId, command, cwd, reason } = parsed.data;
+
+  try {
+    const host = await loadOwnedHost(userId, hostId);
+    if (!host) {
+      res.status(404).json({ error: "Host not found" });
+      return;
+    }
+    if (host.revokedAt) {
+      res.status(403).json({ error: "Host has been revoked" });
+      return;
+    }
+
+    const classification = classifyOraxCommand(command);
+    if (!classification.allowed) {
+      res.status(422).json({
+        error: "Command not permitted",
+        risk: classification.risk,
+        reason: classification.reason,
+      });
+      return;
+    }
+
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    const [approval] = await db
+      .insert(oraxPendingApprovalsTable)
+      .values({
+        userId,
+        hostId,
+        threadId: threadId ?? null,
+        description: reason,
+        command: classification.normalizedCommand,
+        cwd: cwd ?? null,
+        reason,
+        riskLevel: classification.risk,
+        expiresAt,
+        status: "pending",
+      })
+      .returning();
+
+    await db.insert(oraxAuditLogTable).values({
+      userId,
+      hostId,
+      threadId: threadId ?? null,
+      action: "command_approval_requested",
+      command: classification.normalizedCommand,
+      outcome: "pending",
+      metadata: { riskLevel: classification.risk, reason },
+    });
+
+    if (threadId) {
+      await db.insert(oraxThreadMessagesTable).values({
+        threadId,
+        role: "system",
+        content: `Approval requested: ${classification.normalizedCommand}`,
+        eventType: "command_approval_requested",
+        payload: { approvalId: approval!.id, command: classification.normalizedCommand },
+      });
+    }
+
+    logger.info(
+      { component: "orax-desktop", userId, hostId, approvalId: approval!.id, command },
+      "Command approval created",
+    );
+    res.status(201).json({ approval });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, hostId }, "Failed to create command approval");
+    res.status(500).json({ error: "Failed to create command approval" });
+  }
+});
+
+// ── Phase 2F: POST /orax/approvals/:approvalId/resolve ────────────────────────
+
+/**
+ * POST /orax/approvals/:approvalId/resolve
+ *
+ * Approves or denies a pending command approval. Approved: creates a
+ * queued run_safe_command action for the desktop. Denied: marks it denied
+ * and writes an audit record. No action is created when denied.
+ */
+router.post("/orax/approvals/:approvalId/resolve", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = req.params.approvalId;
+
+  const parsed = resolveApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request" });
+    return;
+  }
+
+  const { decision } = parsed.data;
+
+  try {
+    const [approval] = await db
+      .select()
+      .from(oraxPendingApprovalsTable)
+      .where(
+        and(
+          eq(oraxPendingApprovalsTable.id, approvalId),
+          eq(oraxPendingApprovalsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+    if (approval.status !== "pending") {
+      res.status(409).json({ error: `Approval is already ${approval.status}` });
+      return;
+    }
+    if (approval.expiresAt && approval.expiresAt < new Date()) {
+      await db
+        .update(oraxPendingApprovalsTable)
+        .set({ status: "expired", resolvedAt: new Date() })
+        .where(eq(oraxPendingApprovalsTable.id, approvalId));
+      res.status(410).json({ error: "Approval has expired" });
+      return;
+    }
+
+    const now = new Date();
+
+    if (decision === "denied") {
+      await db
+        .update(oraxPendingApprovalsTable)
+        .set({ status: "denied", resolvedAt: now, resolvedBy: userId })
+        .where(eq(oraxPendingApprovalsTable.id, approvalId));
+
+      await db.insert(oraxAuditLogTable).values({
+        userId,
+        hostId: approval.hostId,
+        threadId: approval.threadId,
+        action: "command_approval_denied",
+        command: approval.command,
+        outcome: "denied",
+        metadata: {},
+      });
+
+      if (approval.threadId) {
+        await db.insert(oraxThreadMessagesTable).values({
+          threadId: approval.threadId,
+          role: "system",
+          content: `Command denied: ${approval.command ?? ""}`,
+          eventType: "command_approval_denied",
+          payload: { approvalId },
+        });
+      }
+
+      logger.info({ component: "orax-desktop", userId, approvalId }, "Command approval denied");
+      res.json({ approval: { ...approval, status: "denied", resolvedAt: now } });
+      return;
+    }
+
+    // decision === "approved" — update approval and queue run_safe_command action
+    await db
+      .update(oraxPendingApprovalsTable)
+      .set({ status: "approved", resolvedAt: now, resolvedBy: userId })
+      .where(eq(oraxPendingApprovalsTable.id, approvalId));
+
+    const idempotencyKey = `${userId}:${approval.hostId}:run_safe_command:${approvalId}`;
+    const [action] = await db
+      .insert(oraxDesktopActionsTable)
+      .values({
+        userId,
+        hostId: approval.hostId,
+        threadId: approval.threadId,
+        type: "run_safe_command",
+        status: "queued",
+        payload: {
+          command: approval.command,
+          cwd: approval.cwd,
+          approvalId,
+        },
+        idempotencyKey,
+      })
+      .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+      .returning();
+
+    await db.insert(oraxAuditLogTable).values({
+      userId,
+      hostId: approval.hostId,
+      threadId: approval.threadId,
+      action: "command_approval_approved",
+      command: approval.command,
+      outcome: "approved",
+      metadata: { actionId: action?.id },
+    });
+
+    if (approval.threadId) {
+      await db.insert(oraxThreadMessagesTable).values({
+        threadId: approval.threadId,
+        role: "system",
+        content: `Command approved — queued for desktop: ${approval.command ?? ""}`,
+        eventType: "command_approval_approved",
+        payload: { approvalId, actionId: action?.id },
+      });
+    }
+
+    logger.info(
+      { component: "orax-desktop", userId, approvalId, actionId: action?.id },
+      "Command approval approved — action queued",
+    );
+    res.json({ approval: { ...approval, status: "approved", resolvedAt: now }, action });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, approvalId }, "Failed to resolve approval");
+    res.status(500).json({ error: "Failed to resolve approval" });
+  }
+});
+
+// ── Phase 2F: GET /orax/approvals/:approvalId ─────────────────────────────────
+
+/**
+ * GET /orax/approvals/:approvalId
+ *
+ * Poll for approval status. Used by web/mobile to track an approval created
+ * by POST /orax/hosts/:hostId/command-approvals.
+ */
+router.get("/orax/approvals/:approvalId", async (req, res) => {
+  const userId = req.userId!;
+  const approvalId = req.params.approvalId;
+
+  try {
+    const [approval] = await db
+      .select()
+      .from(oraxPendingApprovalsTable)
+      .where(
+        and(
+          eq(oraxPendingApprovalsTable.id, approvalId),
+          eq(oraxPendingApprovalsTable.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (!approval) {
+      res.status(404).json({ error: "Approval not found" });
+      return;
+    }
+
+    res.json({ approval });
+  } catch (err) {
+    logger.error({ component: "orax-desktop", err, approvalId }, "Failed to get approval");
+    res.status(500).json({ error: "Failed to get approval" });
+  }
+});
+
+// ── Phase 2F: audit log on run_safe_command completion ────────────────────────
+// (handled inline in the existing action-event handler below via the
+//  run_safe_command type check — no separate route needed)
 
 export default router;

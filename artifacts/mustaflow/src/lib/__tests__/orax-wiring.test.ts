@@ -1215,4 +1215,155 @@ describe("ORAX product-surface wiring", () => {
     expect(apiClient).toContain("/api/orax/relay/pending-actions");
     expect(apiClient).toContain("/api/orax/relay/actions/");
   });
+
+  // ── Phase 2F: safe command execution wiring ──────────────────────────────────
+
+  it("Phase 2F classifier: orax-command-safety.ts exports classifyOraxCommand with allowlist and blocklist", () => {
+    const safety = read("../../../../api-server/src/lib/orax-command-safety.ts");
+    expect(safety).toContain("classifyOraxCommand");
+    expect(safety).toContain("ALLOWED_EXACT");
+    expect(safety).toContain("BLOCK_RULES");
+    expect(safety).toContain("normalizedCommand");
+    expect(safety).toContain("allowed");
+    expect(safety).toContain("risk");
+    // Blocklist must refuse common dangerous patterns
+    expect(safety).toContain("rm|del");
+    expect(safety).toContain("powershell");
+    // Allowlist must include the five safe commands
+    expect(safety).toContain("node --version");
+    expect(safety).toContain("npm --version");
+    expect(safety).toContain("pnpm --version");
+    expect(safety).toContain("git --version");
+    expect(safety).toContain("pwd");
+  });
+
+  it("Phase 2F backend: POST command-approvals route uses classifyOraxCommand + sets expiresAt 10min", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(route).toContain("command-approvals");
+    expect(route).toContain("classifyOraxCommand");
+    expect(route).toContain("10 * 60 * 1000");
+    expect(route).toContain("expiresAt");
+    expect(route).toContain("riskLevel");
+    expect(route).toContain("normalizedCommand");
+  });
+
+  it("Phase 2F backend: resolve route approved branch creates run_safe_command action, denied skips it", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(route).toContain("approvals/:approvalId/resolve");
+    expect(route).toContain("run_safe_command");
+    expect(route).toContain('"denied"');
+    expect(route).toContain('"approved"');
+    // Denied branch must NOT create an action (no insert after the denied early-return)
+    const deniedIdx = route.indexOf('"command_approval_denied"');
+    const approvedIdx = route.indexOf('"command_approval_approved"');
+    expect(deniedIdx).toBeGreaterThan(-1);
+    expect(approvedIdx).toBeGreaterThan(-1);
+    // Approved branch comes after denied branch in source
+    expect(approvedIdx).toBeGreaterThan(deniedIdx);
+  });
+
+  it("Phase 2F backend: GET /orax/approvals/:approvalId route present and checks userId ownership", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(route).toContain("orax/approvals/:approvalId");
+    expect(route).toContain("oraxPendingApprovalsTable");
+    // userId ownership check
+    expect(route).toContain("eq(oraxPendingApprovalsTable.userId, userId)");
+  });
+
+  it("Phase 2F backend: command-approval tables imported and used in routes", () => {
+    const route = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(route).toContain("oraxPendingApprovalsTable");
+    expect(route).toContain("oraxAuditLogTable");
+    expect(route).toContain("classifyOraxCommand");
+  });
+
+  it("Phase 2F startup migration: migrate-orax-command-approvals registered in startup-migrations.ts", () => {
+    const migrations = read("../../../../api-server/src/lib/startup-migrations.ts");
+    expect(migrations).toContain("migrate-orax-command-approvals");
+  });
+
+  it("Phase 2F desktop executor: command-executor.ts has spawn/no exec, timeout, output cap, redactSecrets", () => {
+    const executor = read("../../../../orax-desktop/src/main/command-executor.ts");
+    expect(executor).toContain("spawn");
+    expect(executor).not.toContain("exec(");
+    expect(executor).toContain("shell: false");
+    expect(executor).toContain("TIMEOUT_MS");
+    expect(executor).toContain("MAX_OUTPUT_BYTES");
+    expect(executor).toContain("redactSecrets");
+    expect(executor).toContain("timedOut");
+    expect(executor).toContain("durationMs");
+  });
+
+  it("Phase 2F desktop permission-gate: isCommandPermitted blocks unsafe patterns", () => {
+    const gate = read("../../../../orax-desktop/src/main/permission-gate.ts");
+    expect(gate).toContain("isCommandPermitted");
+    expect(gate).toContain("permitted");
+    expect(gate).toContain("reason");
+    // Must include blocked patterns
+    expect(gate).toContain("BLOCKED_PATTERNS");
+  });
+
+  it("Phase 2F relay-client: run_safe_command case calls isCommandPermitted then executeCommand then completed", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("run_safe_command");
+    expect(relay).toContain("isCommandPermitted");
+    expect(relay).toContain("executeCommand");
+    expect(relay).toContain('"running"');
+    expect(relay).toContain('"completed"');
+    // denied path must NOT proceed to executeCommand
+    expect(relay).toContain("Command blocked by local permission gate");
+  });
+
+  it("Phase 2F web UI: Safe command section has command Select, Request approval, Approve/Deny, stdout/exitCode", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    expect(devicesPage).toContain("Safe command test");
+    expect(devicesPage).toContain("SAFE_COMMANDS");
+    expect(devicesPage).toContain("Request approval");
+    expect(devicesPage).toContain("Approve");
+    expect(devicesPage).toContain("Deny");
+    expect(devicesPage).toContain("handleRequestApproval");
+    expect(devicesPage).toContain("handleDecide");
+    expect(devicesPage).toContain("command-approvals");
+    expect(devicesPage).toContain("approvals/");
+    expect(devicesPage).toContain("exitCode");
+    expect(devicesPage).toContain("stdout");
+  });
+
+  it("Phase 2F web UI: approval state machine covers all required states", () => {
+    const devicesPage = read("../../pages/orax-devices.tsx");
+    for (const state of ["idle", "requesting", "pending", "executing", "done", "denied", "error"]) {
+      expect(devicesPage).toContain(`"${state}"`);
+    }
+  });
+
+  it("Phase 2F mobile api: requestDesktopCommandApproval + resolveDesktopCommandApproval + getDesktopApproval exported", () => {
+    const mobileApi = read("../../../../ora-mobile/lib/api.ts");
+    expect(mobileApi).toContain("requestDesktopCommandApproval");
+    expect(mobileApi).toContain("resolveDesktopCommandApproval");
+    expect(mobileApi).toContain("getDesktopApproval");
+    expect(mobileApi).toContain("/api/orax/hosts/");
+    expect(mobileApi).toContain("/api/orax/approvals/");
+    expect(mobileApi).toContain("command-approvals");
+    expect(mobileApi).toContain("resolve");
+  });
+
+  it("Phase 2F mobile: DiagnosticsSection component present with approve/deny flow", () => {
+    const mobileOrax = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(mobileOrax).toContain("DiagnosticsSection");
+    expect(mobileOrax).toContain("requestDesktopCommandApproval");
+    expect(mobileOrax).toContain("resolveDesktopCommandApproval");
+    expect(mobileOrax).toContain("DIAG_COMMANDS");
+    expect(mobileOrax).toContain("Request approval");
+    expect(mobileOrax).toContain("Approve");
+    expect(mobileOrax).toContain("Deny");
+    expect(mobileOrax).toContain("exitCode");
+    expect(mobileOrax).toContain("stdout");
+  });
+
+  it("Phase 2F mobile: DiagnosticsSection approval state machine covers required states", () => {
+    const mobileOrax = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    for (const state of ["idle", "requesting", "pending", "executing", "done", "denied", "error"]) {
+      expect(mobileOrax).toContain(`"${state}"`);
+    }
+  });
 });

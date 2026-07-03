@@ -22,7 +22,7 @@ export type OraxHostPermissionMode = (typeof ORAX_HOST_PERMISSION_MODES)[number]
 export const ORAX_THREAD_STATUSES = ["idle", "active", "paused", "completed", "failed"] as const;
 export type OraxThreadStatus = (typeof ORAX_THREAD_STATUSES)[number];
 
-export const ORAX_DESKTOP_APPROVAL_STATUSES = ["pending", "approved", "denied"] as const;
+export const ORAX_DESKTOP_APPROVAL_STATUSES = ["pending", "approved", "denied", "expired"] as const;
 export type OraxDesktopApprovalStatus = (typeof ORAX_DESKTOP_APPROVAL_STATUSES)[number];
 
 export const ORAX_USAGE_EVENT_STATUSES = ["success", "failure", "cancelled"] as const;
@@ -210,8 +210,10 @@ export const oraxThreadMessagesTable = pgTable(
 );
 
 // ── orax_pending_approvals ─────────────────────────────────────────────────────
-// Approval requests from the desktop. Resolved from web, mobile, or the desktop
-// UI itself. Resolution is relayed back to the desktop via the WebSocket relay.
+// Approval requests initiated by web/mobile (Phase 2F command approvals) or
+// the desktop (future phases). Resolved from web, mobile, or the desktop UI.
+// Phase 2F columns: userId, cwd, reason, riskLevel, expiresAt.
+// threadId is nullable — command approvals may exist outside a thread.
 
 export const oraxPendingApprovalsTable = pgTable(
   "orax_pending_approvals",
@@ -219,12 +221,17 @@ export const oraxPendingApprovalsTable = pgTable(
     id: text("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    threadId: text("thread_id").notNull(),
+    threadId: text("thread_id"),
     hostId: text("host_id").notNull(),
+    userId: text("user_id"),
     description: text("description").notNull(),
     command: text("command"),
     filePath: text("file_path"),
     diff: text("diff"),
+    cwd: text("cwd"),
+    reason: text("reason"),
+    riskLevel: text("risk_level").notNull().default("low"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     status: text("status").notNull().default("pending"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedBy: text("resolved_by"),
@@ -234,6 +241,7 @@ export const oraxPendingApprovalsTable = pgTable(
     index("orax_pending_approvals_thread_id_idx").on(t.threadId),
     index("orax_pending_approvals_host_id_idx").on(t.hostId),
     index("orax_pending_approvals_status_idx").on(t.hostId, t.status),
+    index("orax_pending_approvals_user_id_idx").on(t.userId),
   ],
 );
 

@@ -3948,6 +3948,46 @@ const MIGRATION_STEPS: MigrationStep[] = [
       await client.query("COMMIT");
     },
   },
+
+  // ── migrate-orax-command-approvals ──────────────────────────────────────────
+  {
+    name: "migrate-orax-command-approvals",
+    async run(client) {
+      await client.query("BEGIN");
+      // Check table existence before altering (table may not exist in some envs)
+      const { rows } = await client.query<{ exists: boolean }>(
+        `SELECT 1 AS exists FROM information_schema.tables
+         WHERE table_name = 'orax_pending_approvals'`,
+      );
+      if (rows.length > 0) {
+        // thread_id was NOT NULL in original CREATE TABLE; make nullable for Phase 2F
+        await client.query(
+          `ALTER TABLE orax_pending_approvals ALTER COLUMN thread_id DROP NOT NULL`,
+        );
+        // Phase 2F columns
+        await client.query(
+          `ALTER TABLE orax_pending_approvals ADD COLUMN IF NOT EXISTS user_id text`,
+        );
+        await client.query(
+          `ALTER TABLE orax_pending_approvals ADD COLUMN IF NOT EXISTS cwd text`,
+        );
+        await client.query(
+          `ALTER TABLE orax_pending_approvals ADD COLUMN IF NOT EXISTS reason text`,
+        );
+        await client.query(
+          `ALTER TABLE orax_pending_approvals ADD COLUMN IF NOT EXISTS risk_level text NOT NULL DEFAULT 'low'`,
+        );
+        await client.query(
+          `ALTER TABLE orax_pending_approvals ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`,
+        );
+        await client.query(
+          `CREATE INDEX IF NOT EXISTS orax_pending_approvals_user_id_idx
+             ON orax_pending_approvals(user_id)`,
+        );
+      }
+      await client.query("COMMIT");
+    },
+  },
 ];
 
 /**

@@ -73,6 +73,8 @@ import {
   requestSandboxApproval,
   scanRepository,
   transcribeAudio,
+  requestDesktopCommandApproval,
+  resolveDesktopCommandApproval,
 } from "@/lib/api";
 import type {
   OraxApproval,
@@ -2130,6 +2132,328 @@ function isDesktopHostOnline(host: OraxHostSummary): boolean {
   return Date.now() - new Date(host.lastSeenAt).getTime() < 90_000;
 }
 
+const DIAG_COMMANDS = [
+  "node --version",
+  "npm --version",
+  "pnpm --version",
+  "git --version",
+  "pwd",
+];
+
+type DiagApprovalState =
+  | "idle"
+  | "requesting"
+  | "pending"
+  | "approved"
+  | "denied"
+  | "executing"
+  | "done"
+  | "error";
+
+interface DiagCmdResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+}
+
+function DiagnosticsSection({
+  host,
+  colors: c,
+}: {
+  host: OraxHostSummary;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [selectedCmd, setSelectedCmd] = useState(DIAG_COMMANDS[0]!);
+  const [state, setState] = useState<DiagApprovalState>("idle");
+  const [approval, setApproval] = useState<{ id: string; command: string } | null>(null);
+  const [result, setResult] = useState<DiagCmdResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  function reset() {
+    setState("idle");
+    setApproval(null);
+    setResult(null);
+    setErrorMsg(null);
+  }
+
+  async function handleRequest() {
+    setState("requesting");
+    setApproval(null);
+    setResult(null);
+    setErrorMsg(null);
+    try {
+      const { approval: a } = await requestDesktopCommandApproval(host.id, {
+        command: selectedCmd,
+        reason: "Diagnostic check from Orax mobile",
+      });
+      setApproval(a);
+      setState("pending");
+    } catch {
+      setErrorMsg("Could not create approval request");
+      setState("error");
+    }
+  }
+
+  async function handleDecide(decision: "approved" | "denied") {
+    if (!approval) return;
+    try {
+      const data = await resolveDesktopCommandApproval(approval.id, decision);
+      if (decision === "denied") {
+        setState("denied");
+        return;
+      }
+      const aid = data.action?.id ?? null;
+      if (!aid) {
+        setErrorMsg("No action was queued");
+        setState("error");
+        return;
+      }
+      setState("executing");
+      for (let i = 0; i < 15; i++) {
+        await new Promise<void>((r) => setTimeout(r, 2000));
+        const { actions } = await getDesktopActions(host.id);
+        const found = actions.find((a) => a.id === aid);
+        if (!found) break;
+        if (found.status === "completed") {
+          setResult(found.result as DiagCmdResult);
+          setState("done");
+          return;
+        }
+        if (found.status === "failed") {
+          setErrorMsg("Desktop reported an error");
+          setState("error");
+          return;
+        }
+      }
+      setErrorMsg("Timed out — is Orax Desktop running?");
+      setState("error");
+    } catch {
+      setErrorMsg("Network error");
+      setState("error");
+    }
+  }
+
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 10,
+        overflow: "hidden",
+      }}
+    >
+      <Pressable
+        onPress={() => setExpanded((v) => !v)}
+        style={({ pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          backgroundColor: pressed ? c.muted : "transparent",
+        })}
+      >
+        <Text style={{ color: c.foreground, fontSize: 13, fontFamily: "Inter_600SemiBold" }}>
+          Diagnostics
+        </Text>
+        <ChevronDown
+          size={14}
+          color={c.mutedForeground}
+          style={expanded ? { transform: [{ rotate: "180deg" }] } : undefined}
+        />
+      </Pressable>
+
+      {expanded && (
+        <View
+          style={{
+            padding: 12,
+            borderTopWidth: 1,
+            borderTopColor: c.border,
+            gap: 10,
+          }}
+        >
+          {state === "idle" && (
+            <View style={{ gap: 8 }}>
+              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Safe command</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: "row", gap: 6 }}>
+                  {DIAG_COMMANDS.map((cmd) => (
+                    <Pressable
+                      key={cmd}
+                      onPress={() => setSelectedCmd(cmd)}
+                      style={({ pressed }) => ({
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        borderColor: selectedCmd === cmd ? c.foreground : c.border,
+                        backgroundColor: pressed
+                          ? c.muted
+                          : selectedCmd === cmd
+                          ? c.foreground + "15"
+                          : "transparent",
+                      })}
+                    >
+                      <Text
+                        style={{
+                          color: selectedCmd === cmd ? c.foreground : c.mutedForeground,
+                          fontSize: 12,
+                          fontFamily: "Inter_600SemiBold",
+                        }}
+                      >
+                        {cmd}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+              <Pressable
+                onPress={() => void handleRequest()}
+                style={({ pressed }) => ({
+                  alignSelf: "flex-start",
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: c.border,
+                  backgroundColor: pressed ? c.muted : "transparent",
+                })}
+              >
+                <Text style={{ color: c.foreground, fontSize: 13 }}>Request approval</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {state === "requesting" && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <ActivityIndicator size="small" color={c.mutedForeground} />
+              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Creating request…</Text>
+            </View>
+          )}
+
+          {state === "pending" && approval && (
+            <View style={{ gap: 8 }}>
+              <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                Run on your desktop:{" "}
+                <Text style={{ color: c.foreground, fontFamily: "Inter_600SemiBold" }}>
+                  {approval.command}
+                </Text>
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable
+                  onPress={() => void handleDecide("approved")}
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: pressed ? "#059669" : "#10b981",
+                  })}
+                >
+                  <Text style={{ color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" }}>
+                    Approve
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void handleDecide("denied")}
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: c.border,
+                    backgroundColor: pressed ? c.muted : "transparent",
+                  })}
+                >
+                  <Text style={{ color: c.destructive, fontSize: 13 }}>Deny</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {state === "executing" && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <ActivityIndicator size="small" color={c.mutedForeground} />
+              <Text style={{ color: c.mutedForeground, fontSize: 13 }}>Running on desktop…</Text>
+            </View>
+          )}
+
+          {state === "done" && result && (
+            <View style={{ gap: 6 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: c.mutedForeground, fontSize: 12 }}>
+                  Exit code:{" "}
+                  <Text
+                    style={{
+                      color: result.exitCode === 0 ? "#10b981" : c.destructive,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    {result.exitCode ?? "null"}
+                  </Text>
+                  {result.durationMs ? `  ·  ${result.durationMs}ms` : ""}
+                </Text>
+                <Pressable onPress={reset}>
+                  <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Reset</Text>
+                </Pressable>
+              </View>
+              {!!result.stdout && (
+                <ScrollView
+                  style={{
+                    maxHeight: 100,
+                    backgroundColor: c.muted,
+                    borderRadius: 6,
+                    padding: 8,
+                  }}
+                >
+                  <Text style={{ color: c.foreground, fontFamily: "Inter_400Regular", fontSize: 12 }}>
+                    {result.stdout}
+                  </Text>
+                </ScrollView>
+              )}
+              {!!result.stderr && (
+                <ScrollView
+                  style={{
+                    maxHeight: 80,
+                    backgroundColor: c.destructive + "18",
+                    borderRadius: 6,
+                    padding: 8,
+                  }}
+                >
+                  <Text style={{ color: c.destructive, fontFamily: "Inter_400Regular", fontSize: 12 }}>
+                    {result.stderr}
+                  </Text>
+                </ScrollView>
+              )}
+            </View>
+          )}
+
+          {state === "denied" && (
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ color: c.destructive, fontSize: 13 }}>Command denied.</Text>
+              <Pressable onPress={reset}>
+                <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Try again</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {state === "error" && (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+              <Text style={{ color: c.destructive, fontSize: 13, flex: 1 }}>
+                {errorMsg ?? "An error occurred"}
+              </Text>
+              <Pressable onPress={reset}>
+                <Text style={{ color: c.mutedForeground, fontSize: 12 }}>Reset</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
 function DesktopConnectionCard({
   hosts,
   hostsLoading,
@@ -2303,6 +2627,8 @@ function DesktopConnectionCard({
               </Text>
             ) : null}
           </View>
+
+          <DiagnosticsSection host={onlineHost} colors={c} />
         </View>
       )}
 
