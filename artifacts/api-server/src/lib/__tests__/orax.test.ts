@@ -584,10 +584,7 @@ describe("ORAX task conversation isolation", () => {
 });
 
 describe("ORAX plan mode runner gate", () => {
-  const routeSource = readFileSync(
-    path.join(__dirname, "../../../routes/orax.ts"),
-    "utf8",
-  );
+  const routeSource = readFileSync(path.join(__dirname, "../../routes/orax.ts"), "utf8");
 
   it("detects plan mode tasks by kind and result.activePlan", () => {
     expect(routeSource).toContain("function isPlanModeTask(task: OraxTask): boolean");
@@ -599,10 +596,7 @@ describe("ORAX plan mode runner gate", () => {
     expect(routeSource).toContain(
       "function isOraxContinueImplementationTrigger(message: string): boolean",
     );
-    expect(routeSource).toContain('"continue"');
-    expect(routeSource).toContain('"implement"');
-    expect(routeSource).toContain('"start implementation"');
-    expect(routeSource).toContain('"go ahead"');
+    expect(routeSource).toContain("continue|implement|start implementation|go ahead");
   });
 
   it("gates draft patch generation on plan summary when plan mode is active", () => {
@@ -624,9 +618,7 @@ describe("ORAX plan mode runner gate", () => {
     expect(routeSource).toContain("planContent");
     expect(routeSource).toContain("filesInspected");
     expect(routeSource).toContain("planReadySummaryAt");
-    expect(routeSource).toContain(
-      "Here's the implementation plan based on the inspected files:",
-    );
+    expect(routeSource).toContain("Here's the implementation plan based on the inspected files:");
   });
 
   it("writes a plan_ready assistant message with a Start implementation action suggestion", () => {
