@@ -1,0 +1,304 @@
+Phase 2D — Web/Mobile Host List + Real Pairing UI
+
+Context:
+Phase 2C is verified and closed at 34b52cb9.
+Orax Desktop now has:
+- Electron skeleton
+- host registration client
+- heartbeat client
+- pairing code create/cancel client
+- local project placeholder
+- permission mode selector
+- clean desktop build
+- generated output ignored
+
+Phase 2B backend has:
+- orax_hosts
+- orax_pairing_codes
+- orax_paired_devices
+- orax_projects
+- orax_threads
+- orax_thread_messages
+- orax_pending_approvals
+- orax_usage_events
+- orax_audit_log
+- host CRUD endpoints
+- pairing code endpoints
+- heartbeat endpoint
+
+Question:
+Is the Orax card on the website completed?
+
+Answer:
+No, not fully. The website Orax card is currently only a product/download entry point. It is not yet a real connected Orax workspace card like Codex because it does not show actual desktop host status, pairing state, connected computer, or online/offline remote control state.
+
+Phase 2D goal:
+Make the Orax website and mobile surfaces connect to the Orax Desktop backend for real. Users should be able to see their desktop hosts, know whether a desktop is online/offline, pair mobile/web with a desktop, revoke a desktop, and enter the correct connected workspace flow.
+
+Do not touch:
+- Ora
+- public-ai
+- AI Builder
+- credits
+- project chat
+- existing Ora routes
+
+Part A — Website Orax card / entry flow
+
+1. Update the Orax card on the MustaFlow website/dashboard.
+The Orax card should behave based on real host state:
+
+State 1: No Orax Desktop installed/registered
+- Show Orax logo.
+- Title: “Orax Desktop”
+- Status: “Not connected”
+- CTA: “Download Orax Desktop”
+- Secondary text: “Install Orax Desktop on your computer to start coding with Orax.”
+
+State 2: Desktop registered but offline
+- Show connected computer name.
+- Status: “Offline”
+- CTA: “Open setup”
+- Secondary CTA: “Download again”
+- Text: “This computer is not currently online. Open Orax Desktop on your computer to reconnect.”
+
+State 3: Desktop online
+- Show computer name.
+- Status: “Online”
+- CTA: “Open Orax”
+- Secondary CTA: “Manage devices”
+- Text: “Your desktop is connected and ready.”
+
+State 4: Multiple desktops
+- Show latest active desktop.
+- Add dropdown or device list.
+- Show all registered hosts with:
+  - deviceName
+  - platform
+  - status
+  - lastSeenAt
+  - permissionMode
+  - revoke/manage action
+
+2. The Orax card must call:
+GET /api/orax/hosts
+
+3. The Orax card must not be static anymore.
+It should not always just route to /orax-product.
+Instead:
+- If no host exists → route to /orax-product or download/setup page.
+- If host exists but offline → route to desktop setup/manage page.
+- If host online → route to Orax workspace connected to that host.
+
+4. Add loading and error states:
+- Loading: “Checking Orax Desktop…”
+- Error: “Could not load Orax Desktop status”
+- Empty: “Install Orax Desktop to get started”
+
+5. Keep the Orax product/download page.
+Do not remove it. It is still needed for first-time users.
+
+Part B — Website Orax device management page
+
+Create or update a web page for Orax Desktop devices.
+
+Suggested route:
+ /orax/devices
+or
+ /orax/setup
+
+The page should show:
+- Registered desktop hosts
+- Online/offline status
+- Device name
+- Platform
+- App version
+- Last seen
+- Permission mode
+- Revoke button
+- Pairing code section if host is online
+- Download Orax Desktop CTA if no hosts exist
+
+Use existing backend routes:
+GET /api/orax/hosts
+GET /api/orax/hosts/:hostId
+PATCH /api/orax/hosts/:hostId
+DELETE /api/orax/hosts/:hostId
+POST /api/orax/pairing-codes
+DELETE /api/orax/pairing-codes/:code
+
+Device revoke behavior:
+- Confirm before revoke.
+- Call DELETE /api/orax/hosts/:hostId.
+- Remove/reload host from list.
+- Do not delete user data.
+
+Permission mode behavior:
+- Allow changing permission mode from web.
+- Call PATCH /api/orax/hosts/:hostId.
+- Show current mode clearly.
+
+Part C — Pairing UI on website
+
+For each online host:
+- Add “Pair mobile device” button.
+- Call POST /api/orax/pairing-codes.
+- Show:
+  - 6-character code
+  - QR payload placeholder or actual QR if QR library already exists
+  - Expires in countdown
+  - Cancel button
+- Cancel calls DELETE /api/orax/pairing-codes/:code.
+
+Do not implement mobile camera scanning yet if it requires native permissions. If QR generation is simple, generate QR on web. If not, show QR payload placeholder and manual code.
+
+Part D — Mobile Orax real desktop connection
+
+Replace mobile placeholder desktop connection state with real API data.
+
+Current mobile has:
+- DesktopConnectionCard
+- desktopHostState placeholder
+- Scan QR Code placeholder
+- Manual pairing code placeholder
+
+Update it so:
+1. Mobile calls GET /api/orax/hosts.
+2. If no hosts:
+   - Show “Install Orax Desktop on your computer”
+   - CTA: “Open download instructions”
+3. If hosts exist:
+   - Show host list
+   - Show online/offline badge
+   - Show last seen
+   - Show selected host
+4. If online host exists:
+   - Show “Connected to [deviceName]”
+   - CTA: “Open Orax”
+5. If offline:
+   - Show “Desktop offline”
+   - Text: “Open Orax Desktop on your computer to reconnect.”
+
+Pairing on mobile:
+- Add manual pairing code input.
+- User enters 6-character code.
+- Call POST /api/orax/pairing-codes/redeem with:
+  - code
+  - mobileDeviceId
+  - displayName
+  - platform
+- On success, refresh hosts and show connected state.
+
+If QR scan is not implemented yet:
+- Button can say “Scan QR Code”
+- Show disabled or “Coming next”
+- Manual code must work first.
+
+Part E — Shared API client updates
+
+Add typed client methods where needed in web/mobile API layers:
+
+- listOraxHosts()
+- getOraxHost(hostId)
+- updateOraxHost(hostId, patch)
+- revokeOraxHost(hostId)
+- createOraxPairingCode(hostId)
+- cancelOraxPairingCode(code)
+- redeemOraxPairingCode(payload)
+
+Types needed:
+OraxHostSummary:
+- id
+- deviceName
+- platform
+- osVersion
+- appVersion
+- status
+- capabilities
+- permissionMode
+- lastSeenAt
+- pairedAt
+- revokedAt
+- metadata
+- createdAt
+- updatedAt
+
+PairingCode:
+- code
+- qrPayload
+- expiresAt
+
+Part F — Orax workspace routing behavior
+
+When the user opens Orax from website/mobile:
+- If no desktop host exists, show setup/download state.
+- If desktop host exists but offline, show offline state.
+- If desktop host is online, open Orax workspace connected to that host.
+
+Important:
+Do not yet implement remote command execution in this phase.
+Do not yet implement PowerShell/terminal relay in this phase.
+That is Phase 2E.
+
+This phase is only:
+- Host discovery
+- Host status
+- Pairing UI
+- Device management
+- Correct routing into connected Orax workspace
+
+Part G — Tests / wiring guards
+
+Add tests for:
+
+Website:
+- Orax card calls /api/orax/hosts or typed list host client.
+- Orax card has states:
+  - Download Orax Desktop
+  - Checking Orax Desktop
+  - Online
+  - Offline
+  - Manage devices
+- No static-only /orax-product behavior when hosts exist.
+- Device page includes revoke, permission mode, pairing code creation.
+
+Mobile:
+- DesktopConnectionCard no longer uses only hardcoded desktopHostState.
+- Mobile calls host list endpoint.
+- Manual pairing code redeem exists.
+- Offline/online host copy exists.
+- Scan QR Code placeholder remains allowed if QR scanner is deferred.
+
+Security:
+- No Ora/public-ai/credits/project-chat references in Orax desktop connection code.
+- No password input.
+- Pairing redeem is account-bound.
+- Revoke is host-owned.
+
+Part H — Verification commands
+
+Run and report:
+
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Also confirm:
+- Running orax-desktop build does not dirty git.
+- artifacts/orax-desktop/out remains ignored.
+- No Ora files were modified unless absolutely unrelated formatting occurred, which should be avoided.
+
+Done looks like:
+- Website Orax card is dynamic and reflects actual desktop connection state.
+- Website has Orax devices/setup page.
+- Mobile Orax shows real desktop host state from backend.
+- Manual mobile pairing code works through backend redeem endpoint.
+- Online/offline desktop state is visible.
+- User can revoke/manage devices.
+- No command execution yet.
+- All checks pass.
