@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from "@/lib/auth-state-context";
+import { MobileAppBanner } from "@/components/mobile-app-banner";
 
 // Ora-only plan tier (mirrors the server's ORA_TIERS_META / OpenAPI OraTierMeta).
 // Contains ONLY Ora features — never AI Builder credits, concurrent builds,
@@ -189,6 +190,7 @@ export default function PricingPage() {
 
   return (
     <div className="pb-24">
+      <MobileAppBanner />
       <PageMeta
         title="Pricing"
         description="Simple, transparent pricing for every stage of building. Start free and scale up with MustaFlow AI — no credit card required."
