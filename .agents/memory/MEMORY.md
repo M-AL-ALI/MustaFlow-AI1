@@ -154,3 +154,5 @@
 - [formatOraxExecutionStepLabel exhaustive map](orax-action-label-map.md) — formatOraxExecutionStepLabel uses a Record<OraxTaskRunnerResult["action"], string>; every new action added to the union MUST get an entry or typecheck fails TS2741.
 - [Orax Desktop Phase 2B schema](orax-desktop-phase2b-schema.md) — uniqueIndex on paired_devices (host+mobile); ORAX_APPROVAL_STATUSES conflicts with orax.ts → prefix desktop variant; Drizzle $inferInsert infers {} | null on patch objects — use explicit types.
 - [Wiring test safety-comment substring trap](wiring-test-safety-comment-trap.md) — a file that documents what it avoids (e.g. "No exec/spawn/shell:true") will itself contain the forbidden substring; write "shell execution" or "shell: true" (with space) instead.
+
+- [Stale lib declarations break artifact typecheck](stale-lib-decls-ora-contracts.md) — "no exported member X" from @workspace/* in a leaf artifact typecheck usually = unbuilt lib .d.ts; run typecheck:libs first.

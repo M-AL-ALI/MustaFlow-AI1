@@ -86,6 +86,7 @@ import {
   OraSuggestions,
 } from "@/components/ora/MessageExtras";
 import { OraAtom } from "@/components/ora/OraAtom";
+import { ImagePreviewModal } from "@/components/ora/ImagePreviewModal";
 import { OraThinkingRow } from "@/components/ora/OraThinkingRow";
 import { OraMenuLogo } from "@/components/ora/OraMenuLogo";
 import { OraThemeToggle } from "@/components/ora/OraThemeToggle";
@@ -426,6 +427,12 @@ export default function OraChatScreen() {
   const documentRefsRef = useRef<string[]>([]);
   const router = useRouter();
   const [actionsMessage, setActionsMessage] = useState<OraMessage | null>(null);
+  // Source (remote URL / data URI / local file URI) of the image shown in the
+  // full-screen preview modal; null = closed. Opened by tapping a generated
+  // image or an uploaded image thumbnail. Stable setter so the memoized bubble
+  // callback below never goes stale.
+  const [previewImageSource, setPreviewImageSource] = useState<string | null>(null);
+  const openImagePreview = useCallback((src: string) => setPreviewImageSource(src), []);
 
   const [voiceLang, setVoiceLang] = useState("en");
   // Per-session Ora reply language — matches website LANGUAGES (auto/en/ar/es/fr).
@@ -886,6 +893,10 @@ export default function OraChatScreen() {
                 isImage: attch.kind === "image",
                 isDataset: attch.kind === "dataset",
               },
+              // Client-only: lets the bubble show a tappable thumbnail preview.
+              ...(attch.kind === "image" && attch.localUri
+                ? { attachmentLocalUri: attch.localUri }
+                : {}),
             }
           : {}),
       };
@@ -1630,6 +1641,9 @@ export default function OraChatScreen() {
           kind,
           filename: res.filename ?? file.name,
           fileType: res.fileType,
+          // Keep the picked image's local URI so the sent bubble can render a
+          // tappable thumbnail + full-screen preview without re-downloading.
+          ...(kind === "image" ? { localUri: file.uri } : {}),
         });
       } catch (err) {
         setAttachment(null);
@@ -2565,6 +2579,7 @@ export default function OraChatScreen() {
                 setEditingImageId(id);
                 setEditInstruction("");
               }}
+              onImagePreview={openImagePreview}
             />
           )}
         />
@@ -3210,6 +3225,11 @@ export default function OraChatScreen() {
           void handleExportPdf(m);
         }}
       />
+
+      <ImagePreviewModal
+        source={previewImageSource}
+        onClose={() => setPreviewImageSource(null)}
+      />
     </View>
   );
 }
@@ -3345,6 +3365,7 @@ function MessageBubbleBase({
   onSaveMemory,
   onLongPress,
   onEditImage,
+  onImagePreview,
 }: {
   message: OraMessage;
   accentColor: string;
@@ -3354,6 +3375,7 @@ function MessageBubbleBase({
   onSaveMemory?: (message: OraMessage) => Promise<void>;
   onLongPress: () => void;
   onEditImage?: (imageId: number) => void;
+  onImagePreview?: (source: string) => void;
 }) {
   const c = useColors();
   const isUser = message.role === "user";
@@ -3422,7 +3444,23 @@ function MessageBubbleBase({
             maxWidth: "85%",
           }}
         >
-          <OraAttachmentChip attachment={message.attachment} />
+          {message.attachment?.isImage && message.attachmentLocalUri ? (
+            <Pressable
+              onPress={() => onImagePreview?.(message.attachmentLocalUri!)}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="Open image preview"
+              style={{ marginBottom: message.content ? 8 : 0 }}
+            >
+              <Image
+                source={{ uri: message.attachmentLocalUri }}
+                style={{ width: 200, height: 200, borderRadius: 12 }}
+                contentFit="cover"
+                transition={120}
+              />
+            </Pressable>
+          ) : (
+            <OraAttachmentChip attachment={message.attachment} />
+          )}
           {!!message.content && (
             <Text
               style={{
@@ -3465,16 +3503,22 @@ function MessageBubbleBase({
 
               {message.imageUrl && (
                 <View style={{ marginTop: 10 }}>
-                  <Image
-                    source={{ uri: message.imageUrl }}
-                    style={{
-                      width: "100%",
-                      aspectRatio: 1,
-                      borderRadius: 12,
-                    }}
-                    contentFit="cover"
-                    transition={200}
-                  />
+                  <Pressable
+                    onPress={() => onImagePreview?.(message.imageUrl!)}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel="Open image preview"
+                  >
+                    <Image
+                      source={{ uri: message.imageUrl }}
+                      style={{
+                        width: "100%",
+                        aspectRatio: 1,
+                        borderRadius: 12,
+                      }}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                  </Pressable>
                   {/* Save button — top-right */}
                   <Pressable
                     onPress={handleSaveImage}
