@@ -29,7 +29,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { LEGAL_SECTIONS } from "@/components/LegalPrivacyModal";
+import { LEGAL_SECTIONS } from "@workspace/ora-contracts";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button, Card, Pill, TextField } from "@/components/ui";
 import { type ThemeOverride, useTheme } from "@/context/ThemeContext";
