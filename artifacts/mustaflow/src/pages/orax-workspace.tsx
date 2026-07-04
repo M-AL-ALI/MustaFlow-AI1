@@ -219,7 +219,11 @@ type ThreadPayload = {
     draftGeneratedAt: string;
   };
   appliedPatch?: {
-    changedFiles: Array<{ relativePath: string; operation: string; checkpointBackupPath: string | null }>;
+    changedFiles: Array<{
+      relativePath: string;
+      operation: string;
+      checkpointBackupPath: string | null;
+    }>;
     checkpointPath?: string;
     durationMs?: number;
   };
@@ -243,38 +247,31 @@ type ThreadExecCtx = {
 };
 
 async function getThreadMessages(projectId: string, threadId: string): Promise<ThreadMessage[]> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/messages`,
-  );
+  const res = await authFetch(`/api/orax/projects/${projectId}/threads/${threadId}/messages`);
   if (!res.ok) return [];
   const data = (await res.json()) as { messages: ThreadMessage[] };
   return data.messages ?? [];
 }
 
 async function getThreadContext(projectId: string, threadId: string): Promise<ThreadExecCtx> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/context`,
-  );
+  const res = await authFetch(`/api/orax/projects/${projectId}/threads/${threadId}/context`);
   if (!res.ok)
-    return { canExecute: false, mode: "chat_only", blockReason: "Unable to load context", host: null };
+    return {
+      canExecute: false,
+      mode: "chat_only",
+      blockReason: "Unable to load context",
+      host: null,
+    };
   const data = (await res.json()) as { context: ThreadExecCtx };
   return data.context;
 }
 
-
-async function applyPatch(
-  projectId: string,
-  threadId: string,
-  messageId: string,
-): Promise<void> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/apply-patch`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messageId }),
-    },
-  );
+async function applyPatch(projectId: string, threadId: string, messageId: string): Promise<void> {
+  const res = await authFetch(`/api/orax/projects/${projectId}/threads/${threadId}/apply-patch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId }),
+  });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "Failed to queue patch apply");
@@ -297,14 +294,11 @@ async function continueThread(
   threadId: string,
   opts: { userMessage?: string; executionSourceId?: string },
 ): Promise<{ context: ThreadExecCtx; message: ThreadMessage | null }> {
-  const res = await authFetch(
-    `/api/orax/projects/${projectId}/threads/${threadId}/continue`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(opts),
-    },
-  );
+  const res = await authFetch(`/api/orax/projects/${projectId}/threads/${threadId}/continue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
   if (!res.ok) throw new Error("Failed to continue thread");
   return res.json() as Promise<{ context: ThreadExecCtx; message: ThreadMessage | null }>;
 }
@@ -326,8 +320,7 @@ function sourceStatusBadge(status: OraxProjectSource["status"]) {
     return <span className="text-xs text-amber-500 font-medium">Reconnect folder on desktop</span>;
   if (status === "disconnected")
     return <span className="text-xs text-muted-foreground font-medium">Disconnected</span>;
-  if (status === "archived")
-    return <span className="text-xs text-muted-foreground">Archived</span>;
+  if (status === "archived") return <span className="text-xs text-muted-foreground">Archived</span>;
   return null;
 }
 
@@ -394,12 +387,7 @@ function ThreadDetail({
   }
 
   const isChatOnly = thread.mode === "chat_only" || ctx?.mode === "chat_only";
-  const hostOnlineStatus =
-    ctx?.host?.status === "online"
-      ? "online"
-      : ctx?.host
-        ? "offline"
-        : null;
+  const hostOnlineStatus = ctx?.host?.status === "online" ? "online" : ctx?.host ? "offline" : null;
 
   return (
     <div className="flex flex-col gap-4 max-w-2xl mx-auto py-6 px-4">
@@ -427,11 +415,7 @@ function ThreadDetail({
             <span className="text-xs text-muted-foreground">{thread.mode}</span>
           </div>
         </div>
-        <button
-          className="btn btn-ghost p-1.5"
-          onClick={() => void reload()}
-          title="Refresh"
-        >
+        <button className="btn btn-ghost p-1.5" onClick={() => void reload()} title="Refresh">
           <RefreshCw size={13} />
         </button>
       </div>
@@ -488,51 +472,47 @@ function ThreadDetail({
           messages.map((msg) => {
             const msgText = msg.content;
             return (
-            <div
-              key={msg.id}
-              className={cn(
-                "flex gap-2.5",
-                msg.role === "user" ? "justify-end" : "justify-start",
-              )}
-            >
               <div
+                key={msg.id}
                 className={cn(
-                  "max-w-[80%] rounded-xl px-3.5 py-2 text-sm leading-relaxed",
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border bg-card text-foreground",
+                  "flex gap-2.5",
+                  msg.role === "user" ? "justify-end" : "justify-start",
                 )}
               >
-                <pre className="whitespace-pre-wrap font-sans">{msgText}</pre>
-                {msg.eventType === "project_context_inspected" &&
-                  msg.payload?.projectInspection && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
-                      {msg.payload.projectInspection.packageManager && (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-                          <Terminal size={10} />
-                          {msg.payload.projectInspection.packageManager}
-                        </span>
-                      )}
-                      {(msg.payload.projectInspection.frameworkHints ?? []).map(
-                        (h) => (
+                <div
+                  className={cn(
+                    "max-w-[80%] rounded-xl px-3.5 py-2 text-sm leading-relaxed",
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border bg-card text-foreground",
+                  )}
+                >
+                  <pre className="whitespace-pre-wrap font-sans">{msgText}</pre>
+                  {msg.eventType === "project_context_inspected" &&
+                    msg.payload?.projectInspection && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
+                        {msg.payload.projectInspection.packageManager && (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                            <Terminal size={10} />
+                            {msg.payload.projectInspection.packageManager}
+                          </span>
+                        )}
+                        {(msg.payload.projectInspection.frameworkHints ?? []).map((h) => (
                           <span
                             key={h}
                             className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
                           >
                             {h}
                           </span>
-                        ),
-                      )}
-                      {msg.payload.projectInspection.hasGit &&
-                        msg.payload.projectInspection.gitBranch && (
-                          <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
-                            <GitBranch size={10} />
-                            {msg.payload.projectInspection.gitBranch}
-                          </span>
-                        )}
-                      {(msg.payload.projectInspection.scripts ?? [])
-                        .slice(0, 4)
-                        .map((s) => (
+                        ))}
+                        {msg.payload.projectInspection.hasGit &&
+                          msg.payload.projectInspection.gitBranch && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                              <GitBranch size={10} />
+                              {msg.payload.projectInspection.gitBranch}
+                            </span>
+                          )}
+                        {(msg.payload.projectInspection.scripts ?? []).slice(0, 4).map((s) => (
                           <span
                             key={s.name}
                             className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-mono text-muted-foreground"
@@ -540,28 +520,25 @@ function ThreadDetail({
                             {s.name}
                           </span>
                         ))}
-                    </div>
-                  )}
-                {msg.eventType === "project_files_read" &&
-                  msg.payload?.fileReadSummary &&
-                  msg.payload.fileReadSummary.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
-                      {msg.payload.fileReadSummary.map((f) => (
-                        <span
-                          key={f.relativePath}
-                          className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-mono text-muted-foreground"
-                        >
-                          <Code2 size={10} />
-                          {f.relativePath}
-                          {f.truncated && (
-                            <span className="text-muted-foreground/60">…</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                {msg.eventType === "project_patch_drafted" &&
-                  msg.payload?.draftPatch && (
+                      </div>
+                    )}
+                  {msg.eventType === "project_files_read" &&
+                    msg.payload?.fileReadSummary &&
+                    msg.payload.fileReadSummary.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
+                        {msg.payload.fileReadSummary.map((f) => (
+                          <span
+                            key={f.relativePath}
+                            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-mono text-muted-foreground"
+                          >
+                            <Code2 size={10} />
+                            {f.relativePath}
+                            {f.truncated && <span className="text-muted-foreground/60">…</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  {msg.eventType === "project_patch_drafted" && msg.payload?.draftPatch && (
                     <div className="mt-2.5 flex flex-col gap-2 border-t border-border/40 pt-2.5">
                       {/* Changed file chips */}
                       {(msg.payload.draftPatch.changedFiles ?? []).length > 0 && (
@@ -588,9 +565,11 @@ function ThreadDetail({
                         </div>
                       )}
                       {/* Diff preview — unified diff if AI-enriched, else hunkPreview fallback */}
-                      {(msg.payload.draftPatch.changedFiles[0]?.unifiedDiffPreview ??
+                      {(
+                        msg.payload.draftPatch.changedFiles[0]?.unifiedDiffPreview ??
                         msg.payload.draftPatch.changedFiles[0]?.hunkPreview?.join("\n") ??
-                        "").length > 0 && (
+                        ""
+                      ).length > 0 && (
                         <pre className="max-h-36 overflow-y-auto rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[10px] font-mono leading-relaxed text-foreground/70 whitespace-pre-wrap">
                           {msg.payload.draftPatch.changedFiles[0]!.unifiedDiffPreview ??
                             msg.payload.draftPatch.changedFiles[0]!.hunkPreview.join("\n")}
@@ -634,7 +613,9 @@ function ThreadDetail({
                             void applyPatch(projectId, thread.id, msg.id)
                               .then(() => void reload())
                               .catch((err: unknown) =>
-                                console.error("applyPatch failed:", err),
+                                setError(
+                                  err instanceof Error ? err.message : "Failed to apply patch",
+                                ),
                               )
                               .finally(() => setApplyingPatch(null));
                           }}
@@ -654,15 +635,26 @@ function ThreadDetail({
                       )}
                     </div>
                   )}
-                {/* Phase 2L: patch applied success */}
-                {msg.eventType === "project_patch_applied" && (
-                  <div className="mt-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-xs">
-                    <div className="flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400">
-                      <CheckCircle size={11} />
-                      Patch applied
+                  {/* Phase 2L: patch applied success */}
+                  {msg.eventType === "project_patch_applied" && (
+                    <div className="mt-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400">
+                        <CheckCircle size={11} />
+                        Patch applied
+                      </div>
+                      <div className="mt-1 text-muted-foreground whitespace-pre-line">
+                        {msg.content}
+                      </div>
                     </div>
-                    <div className="mt-1 text-muted-foreground whitespace-pre-line">
-                      {msg.content}
+                  )}
+                  {/* Phase 2L: patch apply failed */}
+                  {msg.eventType === "project_patch_failed" && (
+                    <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400">
+                        <AlertTriangle size={11} />
+                        Patch failed
+                      </div>
+                      <div className="mt-1 text-muted-foreground">{msg.content}</div>
                     </div>
                   </div>
                 )}
@@ -749,7 +741,6 @@ function ThreadDetail({
                   </div>
                 )}
               </div>
-            </div>
             );
           })
         )}
@@ -792,11 +783,7 @@ function ThreadDetail({
 
 // ── ProjectList page ────────────────────────────────────────────────────────────
 
-function ProjectList({
-  onSelect,
-}: {
-  onSelect: (p: OraxProject) => void;
-}) {
+function ProjectList({ onSelect }: { onSelect: (p: OraxProject) => void }) {
   const [projects, setProjects] = useState<OraxProject[]>([]);
   const [hosts, setHosts] = useState<OraxHost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -875,11 +862,7 @@ function ProjectList({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            className="btn btn-ghost p-1.5"
-            onClick={() => void reload()}
-            title="Refresh"
-          >
+          <button className="btn btn-ghost p-1.5" onClick={() => void reload()} title="Refresh">
             <RefreshCw size={14} />
           </button>
           <button
@@ -965,7 +948,11 @@ function ProjectList({
               onClick={() => void handleCreate()}
               disabled={!newName.trim() || busy === "create"}
             >
-              {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+              {busy === "create" ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Check size={13} />
+              )}
               Create project
             </button>
           </div>
@@ -1047,13 +1034,7 @@ function ProjectList({
 
 // ── ProjectDetail page ─────────────────────────────────────────────────────────
 
-function ProjectDetail({
-  projectId,
-  onBack,
-}: {
-  projectId: string;
-  onBack: () => void;
-}) {
+function ProjectDetail({ projectId, onBack }: { projectId: string; onBack: () => void }) {
   const [project, setProject] = useState<OraxProject | null>(null);
   const [sources, setSources] = useState<OraxProjectSource[]>([]);
   const [threads, setThreads] = useState<OraxThread[]>([]);
@@ -1200,11 +1181,7 @@ function ProjectDetail({
             <p className="text-xs text-muted-foreground">{project.description}</p>
           )}
         </div>
-        <button
-          className="btn btn-ghost p-1.5"
-          onClick={() => void reload()}
-          title="Refresh"
-        >
+        <button className="btn btn-ghost p-1.5" onClick={() => void reload()} title="Refresh">
           <RefreshCw size={13} />
         </button>
       </div>
@@ -1223,16 +1200,16 @@ function ProjectDetail({
       <div
         className={cn(
           "flex items-center gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm",
-          anyHostOnline
-            ? "border-green-500/30 bg-green-500/5"
-            : "border-border bg-muted/20",
+          anyHostOnline ? "border-green-500/30 bg-green-500/5" : "border-border bg-muted/20",
         )}
       >
         <Monitor
           size={14}
           className={cn("shrink-0", anyHostOnline ? "text-green-500" : "text-muted-foreground")}
         />
-        <span className={anyHostOnline ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}>
+        <span
+          className={anyHostOnline ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}
+        >
           {anyHostOnline
             ? `${onlineHosts[0]!.deviceName} online`
             : "Desktop offline — attach a folder on your desktop to run code"}
@@ -1312,10 +1289,7 @@ function ProjectDetail({
               onChange={(e) => setGithubBranch(e.target.value)}
             />
             <div className="flex justify-end gap-2">
-              <button
-                className="btn btn-ghost text-sm"
-                onClick={() => setAddingGithub(false)}
-              >
+              <button className="btn btn-ghost text-sm" onClick={() => setAddingGithub(false)}>
                 Cancel
               </button>
               <button
@@ -1355,7 +1329,9 @@ function ProjectDetail({
                   <div className="flex items-center gap-2 mt-0.5">
                     {sourceStatusBadge(src.status)}
                     {src.localPath && (
-                      <span className="text-xs text-muted-foreground truncate">{src.localPath}</span>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {src.localPath}
+                      </span>
                     )}
                     {src.repoUrl && !src.localPath && (
                       <a
@@ -1504,7 +1480,10 @@ function ProjectDetail({
                     <span className="text-xs text-muted-foreground">{thread.mode}</span>
                   </div>
                 </div>
-                <ChevronRight size={13} className="shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
+                <ChevronRight
+                  size={13}
+                  className="shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors"
+                />
               </button>
             ))}
           </div>
@@ -1561,11 +1540,8 @@ export default function OraxWorkspacePage() {
       </header>
 
       {/* Body */}
-      {selectedProject ?? projectIdFromUrl ? (
-        <ProjectDetail
-          projectId={(selectedProject?.id ?? projectIdFromUrl)!}
-          onBack={handleBack}
-        />
+      {(selectedProject ?? projectIdFromUrl) ? (
+        <ProjectDetail projectId={(selectedProject?.id ?? projectIdFromUrl)!} onBack={handleBack} />
       ) : (
         <ProjectList onSelect={handleSelectProject} />
       )}
