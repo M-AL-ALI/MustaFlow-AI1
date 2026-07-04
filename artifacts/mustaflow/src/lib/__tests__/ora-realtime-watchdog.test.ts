@@ -36,10 +36,7 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const WEB = readFileSync(
-  path.resolve(__dirname, "../../hooks/use-ora-realtime-voice.ts"),
-  "utf8",
-);
+const WEB = readFileSync(path.resolve(__dirname, "../../hooks/use-ora-realtime-voice.ts"), "utf8");
 const MOBILE = readFileSync(
   path.resolve(__dirname, "../../../../../artifacts/ora-mobile/hooks/useOraRealtimeVoiceNative.ts"),
   "utf8",
@@ -52,7 +49,6 @@ const hooks: [string, string][] = [
 
 describe("Talk-to-Ora realtime watchdog reliability", () => {
   describe.each(hooks)("%s hook", (_label, src) => {
-
     // ── SPEAKING_WATCHDOG_MS ─────────────────────────────────────────────────
 
     it("declares SPEAKING_WATCHDOG_MS >= 30 000 ms", () => {
@@ -77,7 +73,8 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
     it("sends response.cancel inside the thinking watchdog callback", () => {
       // Both watchdog sites (speech_stopped and response.created) must cancel
       // the stuck generation so stale model events don't bleed into the next turn.
-      const cancelCount = (src.match(/sendEvent\(\s*\{\s*type:\s*["']response\.cancel["']/g) || []).length;
+      const cancelCount = (src.match(/sendEvent\(\s*\{\s*type:\s*["']response\.cancel["']/g) || [])
+        .length;
       // At minimum: 2× thinking watchdog + 1× speaking watchdog = 3
       expect(cancelCount).toBeGreaterThanOrEqual(3);
     });
@@ -91,7 +88,7 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
     // ── Thinking watchdog escalates to handleConnectionDrop after 2 fires ────
 
     it("calls handleConnectionDrop when consecutive watchdog fires >= 2", () => {
-      expect(src).toContain("handleConnectionDrop(\"consecutive_thinking_watchdog\")");
+      expect(src).toContain('handleConnectionDrop("consecutive_thinking_watchdog")');
     });
 
     // ── Speaking watchdog is armed on output_audio_buffer.started ───────────
@@ -103,7 +100,7 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // appears (the callback body), which is unique to the speaking watchdog.
       expect(src).toContain("speaking_watchdog_timeout");
       expect(src).toContain("SPEAKING_WATCHDOG_MS");
-      expect(src).toContain("handleConnectionDrop(\"consecutive_speaking_watchdog\")");
+      expect(src).toContain('handleConnectionDrop("consecutive_speaking_watchdog")');
     });
 
     // ── Speaking watchdog is cancelled on output_audio_buffer.stopped ────────
@@ -125,14 +122,9 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // When response.done is dropped, the debounce is the only path that exits
       // "speaking". Without this refresh, the focus window goes stale and the
       // next user utterance is rejected by the focus filter → looks stuck in thinking.
-      const debounceCallbackStart = src.indexOf(
-        "outputStopDebounceRef.current = setTimeout",
-      );
+      const debounceCallbackStart = src.indexOf("outputStopDebounceRef.current = setTimeout");
       expect(debounceCallbackStart).toBeGreaterThan(-1);
-      const debounceCallbackEnd = src.indexOf(
-        "OUTPUT_STOP_DEBOUNCE_MS);",
-        debounceCallbackStart,
-      );
+      const debounceCallbackEnd = src.indexOf("OUTPUT_STOP_DEBOUNCE_MS);", debounceCallbackStart);
       const debounceBody = src.slice(debounceCallbackStart, debounceCallbackEnd);
       expect(debounceBody).toContain("lastAcceptedUserTurnAtRef.current = Date.now()");
     });
@@ -186,9 +178,19 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
     it("includes handleConnectionDrop in handleServerEvent useCallback deps", () => {
       // The speaking/thinking watchdog callbacks inside handleServerEvent call
       // handleConnectionDrop, so it must be in the deps array.
-      expect(src).toContain(
-        "confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer, bargeInRequiresDirection, sendEvent, handleConnectionDrop",
-      );
+      const handleIdx = src.indexOf("const handleServerEvent = useCallback");
+      expect(handleIdx).toBeGreaterThan(-1);
+      const depsIdx = src.indexOf("[", handleIdx);
+      expect(depsIdx).toBeGreaterThan(-1);
+      const depsEndIdx = src.indexOf("],", depsIdx);
+      expect(depsEndIdx).toBeGreaterThan(depsIdx);
+      const deps = src.slice(depsIdx, depsEndIdx);
+      expect(deps).toContain("confirmBargeIn");
+      expect(deps).toContain("cancelPendingBargeIn");
+      expect(deps).toContain("clearBargeInTimer");
+      expect(deps).toContain("bargeInRequiresDirection");
+      expect(deps).toContain("sendEvent");
+      expect(deps).toContain("handleConnectionDrop");
     });
   });
 

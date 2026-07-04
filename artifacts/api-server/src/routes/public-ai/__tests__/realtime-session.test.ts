@@ -1193,7 +1193,7 @@ describe("Talk to Ora realtime — focus scorer web/mobile parity", () => {
       readOraMobile("hooks/useOraRealtimeVoiceNative.ts"),
     ]) {
       expect(src).toContain("const FOCUS_COLD_START_WINDOW_MS = 12_000;");
-      expect(src).toContain("const FOCUS_FOLLOWUP_WINDOW_MS = 12_000;");
+      expect(src).toContain("const FOCUS_FOLLOWUP_WINDOW_MS = 6_000;");
       expect(src).toContain("acceptedTurnCount: number");
       expect(src).toContain("export function scoreTranscriptFocus(");
       expect(src).toContain("export function isAddressedOrDirected(");
