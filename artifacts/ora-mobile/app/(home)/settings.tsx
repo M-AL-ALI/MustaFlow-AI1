@@ -1913,6 +1913,53 @@ export default function SettingsScreen() {
                         value={sd.fallbackCalled ? "yes" : "no"}
                         warn={sd.fallbackCalled}
                       />
+                      {(sd.serverTtftMs != null ||
+                        sd.serverTotalMs != null ||
+                        sd.serverProvider != null ||
+                        sd.serverRouteTier != null ||
+                        sd.serverFastLane != null) && (
+                        <>
+                          <Text
+                            style={{
+                              color: c.mutedForeground,
+                              fontSize: 11,
+                              fontFamily: "Inter_600SemiBold",
+                              letterSpacing: 0.5,
+                              textTransform: "uppercase",
+                              marginTop: 8,
+                              marginBottom: 2,
+                            }}
+                          >
+                            Last response (server)
+                          </Text>
+                          {sd.serverTtftMs != null && (
+                            <InfoRow
+                              label="Server TTFT"
+                              value={`${sd.serverTtftMs}ms`}
+                              warn={sd.serverTtftMs > 3000}
+                            />
+                          )}
+                          {sd.serverTotalMs != null && (
+                            <InfoRow
+                              label="Server total"
+                              value={`${sd.serverTotalMs}ms`}
+                              warn={sd.serverTotalMs > 8000}
+                            />
+                          )}
+                          {sd.serverProvider != null && (
+                            <InfoRow label="Provider" value={sd.serverProvider} />
+                          )}
+                          {sd.serverRouteTier != null && (
+                            <InfoRow label="Route tier" value={sd.serverRouteTier} />
+                          )}
+                          {sd.serverFastLane != null && (
+                            <InfoRow
+                              label="Fast lane"
+                              value={sd.serverFastLane ? "yes" : "no"}
+                            />
+                          )}
+                        </>
+                      )}
                       <Text style={{ color: c.mutedForeground, fontSize: 10, marginTop: 2 }}>
                         Captured {new Date(sd.capturedAt).toLocaleTimeString()}
                       </Text>

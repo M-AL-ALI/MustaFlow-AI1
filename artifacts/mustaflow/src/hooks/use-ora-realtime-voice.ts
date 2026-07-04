@@ -207,9 +207,10 @@ const RECONNECT_DELAY_MS = 2000;
 const DIAG_RING_SIZE = 20;
 // If the state remains "thinking" for this long without Ora starting to speak
 // or response.done arriving, assume the event was lost and recover to
-// "listening". 15 s sits comfortably above real model latency while preventing
-// an indefinite stuck state caused by a dropped data-channel message.
-const THINKING_WATCHDOG_MS = 15_000;
+// "listening". 8 s gives the model 4× its typical latency headroom while
+// recovering the session in half the time of the old 15 s, which is especially
+// important on mobile where momentary network blips are common.
+const THINKING_WATCHDOG_MS = 8_000;
 
 // ─── Transcript validity filter (mirrored in the mobile hook) ────────────────
 // Pure + surface-agnostic. Keep BYTE-FOR-BYTE identical to the copy in
@@ -329,7 +330,11 @@ export type FocusMode = "normal" | "focused";
 // window only; outside it, speech must be addressed/directed so a nearby side
 // conversation no longer makes Ora speak or interrupt.
 const FOCUS_COLD_START_WINDOW_MS = 12_000;
-const FOCUS_FOLLOWUP_WINDOW_MS = 4_000;
+// 12 s matches the cold-start window, giving the same consistent experience
+// throughout the whole conversation. The old 4 s left only 1–3 s of effective
+// speaking time once transcription latency (1–3 s) was subtracted, causing
+// natural conversational pauses to silently fail the focus filter on every turn.
+const FOCUS_FOLLOWUP_WINDOW_MS = 12_000;
 
 // Wake / address tokens that re-open focus after silence or background chatter.
 // Latin "ora" plus common ASR variants and non-Latin transliterations, so the
@@ -1581,7 +1586,7 @@ export function useOraRealtimeVoice(
             setState("thinking");
             // Re-arm the watchdog: response.created can arrive after speech_stopped
             // (overlapping turns), so reset the deadline to give the model a fresh
-            // 15 s from this point.
+            // window from this point.
             if (thinkingWatchdogRef.current) clearTimeout(thinkingWatchdogRef.current);
             thinkingWatchdogRef.current = setTimeout(() => {
               thinkingWatchdogRef.current = null;
@@ -1708,6 +1713,13 @@ export function useOraRealtimeVoice(
             outputStopDebounceRef.current = setTimeout(() => {
               outputStopDebounceRef.current = null;
               if (activeRef.current && !assistantSpeakingRef.current) {
+                // Clear the active-response flag before flipping to "listening".
+                // Without this, if the user starts speaking in the ~200 ms gap
+                // between this debounce fire and the arrival of response.done,
+                // speech_started sees assistantResponseActiveRef=true and arms a
+                // barge-in timer — treating the user's normal follow-up as an
+                // interruption and potentially sending a spurious response.cancel.
+                assistantResponseActiveRef.current = false;
                 setState("listening");
               }
             }, OUTPUT_STOP_DEBOUNCE_MS);
