@@ -37,14 +37,6 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
-  artifacts/api-server/src/lib/public-ai/web-search.ts \
-  artifacts/api-server/src/routes/public-ai/chat.ts \
-  artifacts/api-server/src/routes/public-ai/__tests__/search-routing.test.ts \
-  artifacts/api-server/src/routes/public-ai/__tests__/search-fallback.test.ts \
-  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
-  artifacts/mustaflow/src/components/ora-panel.tsx \
-  artifacts/ora-mobile/lib/types.ts \
-  "artifacts/ora-mobile/app/(home)/index.tsx" \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

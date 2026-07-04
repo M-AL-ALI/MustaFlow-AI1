@@ -1,0 +1,53 @@
+New issue from TestFlight/mobile QA: in Deep mode the user saw a red banner saying “Web search failed. Please try again.” Also Deep Thinking sometimes takes 10+ seconds before responding. Instant mode is now fast enough, so do not touch Instant streaming or the word-by-word cadence.
+
+Please investigate Deep mode specifically on both website and mobile, but start with mobile because the screenshot is from mobile. The screenshot proves this was routed into the web-search branch, not just normal Deep Thinking. We need to separate “Deep Thinking” from “Live Web Search” more carefully.
+
+Fix requirements:
+
+1. Diagnose the failing request from logs
+Find the production/mobile request that produced “Web search failed.” Confirm:
+- mode = deep
+- selected tool/branch = search or deep_thinking
+- routeTier/model/provider
+- search provider error/timeout/status
+- server timing buckets: authMs, quotaMs, contextMs, searchMs, modelMs, ttftMs, totalMs
+- whether mobile used /api/public-ai/chat/stream or fell back to /api/public-ai/chat
+
+2. Do not route every Deep prompt to web search
+Deep Thinking should mean stronger reasoning, not automatic live search. Only use web search when the prompt is actually current/live/volatile, such as latest/current/today/price/news/weather/company status/version/law/regulation/sports/recent events, or when the user explicitly says search/browse/look up. Normal deep questions, planning, coding, analysis, writing, app architecture, uploaded-file analysis, and reasoning should stay in the Deep model path without web search.
+
+3. Add graceful web-search fallback
+If web search fails or times out:
+- Do not leave the user with only “Web search failed.”
+- If the question can be answered from model knowledge, return a streamed answer with a short note like: “I couldn’t verify live web results right now, so I’ll answer from general knowledge.”
+- If the user explicitly asked for a current fact that requires live verification, show a friendly retry state, but still keep the chat usable.
+- Add one retry/backoff for transient search failures, but cap it so Deep mode does not hang for 10+ seconds.
+- The retry button should re-run the same message cleanly.
+
+4. Deep mode performance target
+Deep mode can be slower than Instant, but it should not feel frozen. Target:
+- first visible text/token p50 under 2 seconds, p95 under 4 seconds
+- normal Deep answers should start streaming quickly
+- complete short Deep answer ideally under 6–8 seconds
+- only truly complex research/file-heavy tasks should take longer
+If Deep currently waits for search, classifier, or full model completion before streaming, fix that without changing the word-by-word streaming renderer.
+
+5. Use tiered Deep behavior
+Core/Deep Wave can be smarter, but not always slow:
+- Core Deep: strong reasoning, moderate context, fast enough
+- Deep Wave: strongest reasoning and more context, but still streamed early
+- Heavy multi-source research should only happen when the query needs research, not every Deep prompt
+
+6. Mobile/web parity
+Whatever backend fix is made must apply to both website and mobile because both should use the same Ora backend routes. Also verify mobile does not silently fall back to non-streaming for Deep mode.
+
+7. Diagnostics and tests
+Add or update tests for:
+- Deep mode normal reasoning does NOT trigger search
+- Deep mode with “latest/current/today/right now” DOES trigger search
+- search failure falls back gracefully when possible
+- search failure does not block streaming forever
+- mobile displays a useful retry/fallback state, not a dead red banner only
+- website and mobile route through the same behavior
+
+Please do not touch Instant mode or the existing word-by-word streaming cadence. This task is only Deep Thinking routing, search-failure handling, and Deep response latency.
