@@ -36,7 +36,9 @@ git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
-git add scripts/push-to-github.sh 2>/dev/null || true
+git add \
+  "artifacts/ora-mobile/app/(home)/orax.tsx" \
+  scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
 if [ "$STAGED" -gt 0 ]; then

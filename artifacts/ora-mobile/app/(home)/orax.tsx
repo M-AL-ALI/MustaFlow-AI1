@@ -443,7 +443,8 @@ export default function OraxScreen() {
 
   const createProjectScopedThread = useCallback(
     async (projectId: string, threadId: string, userMessage: string) => {
-      const ctx = await getProjectThreadContext(projectId, threadId);
+      const ctxResult = await getProjectThreadContext(projectId, threadId);
+      const ctx = ctxResult.context;
       setProjectThreadCtx({
         canExecute: ctx.canExecute,
         mode: ctx.mode,
@@ -465,8 +466,6 @@ export default function OraxScreen() {
               : null,
           });
         }
-      } else {
-        await sendProjectThreadMessage(projectId, threadId, { role: "user", content: "" });
       }
     },
     [],
