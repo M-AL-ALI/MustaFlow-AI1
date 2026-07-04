@@ -1083,16 +1083,28 @@ router.post("/public-ai/chat", async (req, res) => {
     t5: 0, // after context builders awaited
   };
 
-  // Fire the intent classifier immediately — it only needs the message text,
-  // not the auth result. Running it in parallel with resolveAuthedOraUser turns
-  // what was a sequential (auth → classify) into parallel max(auth, classify).
+  // Detect fast-lane BEFORE firing the classifier — once we know this is a
+  // short, simple prompt with no special-intent signals we skip the AI
+  // classifier call entirely (saves the full 500 ms timeout on every fast-lane
+  // turn). Previously the classifier was fired unconditionally and only the
+  // *await* was skipped; now the call itself is omitted so there is zero
+  // background CPU/network cost for these high-volume simple turns.
+  const isInstantFastLane =
+    mode === "instant" &&
+    message.length <= 120 &&
+    documentRefs.length === 0 &&
+    !looksLikeImageGenerationIntent(message) &&
+    !looksLikeWebSearchIntent(message) &&
+    !looksLikeFileGenIntent(message);
+
+  // Only fire the intent classifier when fast-lane is NOT active.
   // routeOraMessage accepts a pre-computed `classifier` result and skips its
   // own internal AI call when we supply one.
-  const classifierPromise = classifyIntent(message);
+  const classifierPromise = isInstantFastLane ? null : classifyIntent(message);
   // Attach a no-op catch so any unexpected rejection from classifyIntent does
   // not become an unhandled rejection when an early-return path exits before
   // `await classifierPromise` is reached.
-  void classifierPromise.catch(() => undefined);
+  if (classifierPromise) void classifierPromise.catch(() => undefined);
 
   // Resolve the signed-in user (if any). Authenticated users draw on their
   // monthly credit balance and are exempt from the anonymous visitor cap.
@@ -1159,23 +1171,12 @@ router.post("/public-ai/chat", async (req, res) => {
 
   const referenceAnalysisTurn = isPastedReferenceAnalysisRequest(message);
 
-  // Instant fast-lane: short, simple prompts with no special-intent signals
-  // skip the classifier await entirely. In production the classifier consistently
-  // takes 2–4 s and always hits the 500 ms deadline — spending 500 ms for zero
-  // routing benefit. Skipping it saves the full timeout from quotaMs; the
-  // classifier keeps running in the background and logs its result for analysis.
-  const isInstantFastLane =
-    mode === "instant" &&
-    message.length <= 120 &&
-    documentRefs.length === 0 &&
-    !looksLikeImageGenerationIntent(message) &&
-    !looksLikeWebSearchIntent(message) &&
-    !looksLikeFileGenIntent(message);
-
+  // isInstantFastLane was computed before auth (above) so classifier was either
+  // skipped entirely (fast-lane) or already fired in parallel with auth.
   const classifierTimeoutMs = mode === "instant" ? 500 : 2_000;
   const classifierResult = isInstantFastLane
-    ? CLASSIFIER_FALLBACK // skip ~500 ms wait; classifier resolved async for logging only
-    : await withTimeout(classifierPromise, classifierTimeoutMs, CLASSIFIER_FALLBACK);
+    ? CLASSIFIER_FALLBACK // fast-lane: classifier call was skipped entirely
+    : await withTimeout(classifierPromise!, classifierTimeoutMs, CLASSIFIER_FALLBACK);
 
   // Route the message through the Ora orchestrator. Ora is a STANDALONE
   // assistant: build/"make me an app" requests are answered as normal
@@ -1601,16 +1602,22 @@ router.post("/public-ai/chat", async (req, res) => {
     confidence: classifierResult.confidence,
     hasDocumentContext: carriedDocs.trim().length > 0,
   });
-  const maxTokens = expertiseProfile.maxTokens;
+  // Fast-lane: cap at 75 tokens so short prompts finish quickly end-to-end.
+  // The 75-token ceiling complements the already-existing "concise" depth
+  // guidance and forces the model to be brief rather than pad the response.
+  const maxTokens = isInstantFastLane
+    ? Math.min(expertiseProfile.maxTokens, 75)
+    : expertiseProfile.maxTokens;
   const isMultilingual =
     isNonEnglishLanguage(language) ||
     ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
 
   // Chat history is opt-out: when the user turns off "reference chat history"
   // in their memory settings, each message is treated as a fresh conversation.
+  // Fast-lane limits to the last 3 turns (6 messages) to minimise prompt size.
   const historyMessages: Array<{ role: "user" | "assistant"; content: string }> =
     referenceChatHistory
-      ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
+      ? messages.slice(isInstantFastLane ? -6 : -20).map((m) => ({ role: m.role, content: m.content }))
       : [];
 
   // Await the context builders that were started in parallel after auth.
@@ -2029,16 +2036,25 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     return;
   }
 
-  // Fire the intent classifier immediately after message validation — it only
-  // needs the message text, not the auth result. Running it in parallel with
-  // resolveAuthedOraUser turns what was a sequential (auth → classify) into a
-  // parallel max(auth, classify). routeOraMessage accepts a pre-computed
-  // `classifier` result so it skips its own internal AI call when we supply one.
-  const classifierPromise = classifyIntent(message);
+  // Detect fast-lane BEFORE firing the classifier — once we know this is a
+  // short, simple prompt we skip the AI classifier call entirely (saves the
+  // full 500 ms timeout per fast-lane turn, no background kick-off).
+  const isInstantFastLane =
+    mode === "instant" &&
+    message.length <= 120 &&
+    documentRefs.length === 0 &&
+    !looksLikeImageGenerationIntent(message) &&
+    !looksLikeWebSearchIntent(message) &&
+    !looksLikeFileGenIntent(message);
+
+  // Only fire the intent classifier when fast-lane is NOT active.
+  // routeOraMessage accepts a pre-computed `classifier` result so it skips its
+  // own internal AI call when we supply one.
+  const classifierPromise = isInstantFastLane ? null : classifyIntent(message);
   // Attach a no-op catch so any unexpected rejection from classifyIntent does
   // not become an unhandled rejection when an early-return path (429, spend cap)
   // exits before `await classifierPromise` is reached.
-  void classifierPromise.catch(() => undefined);
+  if (classifierPromise) void classifierPromise.catch(() => undefined);
 
   const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
   const authed = await resolveAuthedOraUser(req);
@@ -2097,23 +2113,12 @@ router.post("/public-ai/chat/stream", async (req, res) => {
   }
   timing.t3 = Date.now(); // spend-cap check complete
 
-  // Instant fast-lane: short, simple prompts with no special-intent signals
-  // skip the classifier await entirely. In production the classifier consistently
-  // takes 2–4 s and always hits the 500 ms deadline — spending 500 ms for zero
-  // routing benefit. Skipping saves the full classifier timeout from quotaMs;
-  // the classifier keeps running in the background and logs for analysis.
-  const isInstantFastLane =
-    mode === "instant" &&
-    message.length <= 120 &&
-    documentRefs.length === 0 &&
-    !looksLikeImageGenerationIntent(message) &&
-    !looksLikeWebSearchIntent(message) &&
-    !looksLikeFileGenIntent(message);
-
+  // isInstantFastLane was computed before auth (above) so classifier was either
+  // skipped entirely (fast-lane) or already fired in parallel with auth.
   const classifierTimeoutMsStream = mode === "instant" ? 500 : 2_000;
   const classifierResult = isInstantFastLane
-    ? CLASSIFIER_FALLBACK // skip ~500 ms wait; classifier resolved async for logging only
-    : await withTimeout(classifierPromise, classifierTimeoutMsStream, CLASSIFIER_FALLBACK);
+    ? CLASSIFIER_FALLBACK // fast-lane: classifier call was skipped entirely
+    : await withTimeout(classifierPromise!, classifierTimeoutMsStream, CLASSIFIER_FALLBACK);
 
   if (authed && session.msgCount >= effectiveMsgLimit) {
     const usage = await oraUsageResponse(authed, session.msgCount);
@@ -2236,14 +2241,18 @@ router.post("/public-ai/chat/stream", async (req, res) => {
     confidence: classifierResult.confidence,
     hasDocumentContext: carriedDocs.trim().length > 0,
   });
-  const maxTokens = expertiseProfile.maxTokens;
+  // Fast-lane: cap at 75 tokens so short prompts finish quickly end-to-end.
+  const maxTokens = isInstantFastLane
+    ? Math.min(expertiseProfile.maxTokens, 75)
+    : expertiseProfile.maxTokens;
   const isMultilingual =
     isNonEnglishLanguage(language) ||
     ((!language || language === "auto") && isNonEnglishLanguage(languageHint));
 
+  // Fast-lane limits to the last 3 turns (6 messages) to minimise prompt size.
   const historyMessages: Array<{ role: "user" | "assistant"; content: string }> =
     referenceChatHistory
-      ? messages.slice(-20).map((m) => ({ role: m.role, content: m.content }))
+      ? messages.slice(isInstantFastLane ? -6 : -20).map((m) => ({ role: m.role, content: m.content }))
       : [];
 
   // Await the context builders that were started in parallel with auth (above).
@@ -2649,6 +2658,15 @@ router.post("/public-ai/chat/stream", async (req, res) => {
         : {}),
       ...(usage.windowHours != null ? { windowHours: Number(usage.windowHours) } : {}),
       isRealStreaming: !streamMetrics.usedSimulatedChunks,
+      // Server-measured timing for client-side diagnostics (privacy-safe:
+      // no user content, no user identifiers, only routing/timing metadata).
+      serverDiag: {
+        ttftMs: timing.tFirstToken >= 0 ? timing.tFirstToken - timing.t0 : null,
+        totalMs: timing.t7 - timing.t0,
+        provider: streamProvider,
+        routeTier,
+        fastLane: isInstantFastLane,
+      },
     },
   });
   res.end();
