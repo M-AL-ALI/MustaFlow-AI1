@@ -248,8 +248,52 @@ async function downloadAssetById(
 }
 
 /**
- * Save an inline chat image (data: URI or remote URL) to the photo library.
- * On web, the image is opened in a new tab instead.
+ * Materialize an inline chat image (data: URI, a local file:// URI, or a remote
+ * URL) into a real file in the cache directory and return its local URI. Remote
+ * API-served URLs get the Clerk bearer token so the owner-scoped image route
+ * authorizes the download. Shared by save and share so both operate on a real
+ * on-disk file regardless of the source shape.
+ */
+async function materializeImageToCache(
+  imageUrl: string,
+  suggestedName = "ora-image",
+): Promise<{ uri: string; mimeType?: string }> {
+  const dataMatch = imageUrl.match(/^data:(.*?);base64,(.*)$/s);
+  if (dataMatch) {
+    const mime = dataMatch[1] || "image/png";
+    const base64 = dataMatch[2];
+    const ext = (mime.split("/")[1] || "png").split("+")[0];
+    const fileUri = cacheUri(`${suggestedName}.${ext}`);
+    await FileSystem.writeAsStringAsync(fileUri, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { uri: fileUri, mimeType: mime };
+  }
+
+  // Already a local file (e.g. an uploaded image the user just picked) — no
+  // download needed, hand back the URI as-is.
+  if (imageUrl.startsWith("file://")) {
+    return { uri: imageUrl };
+  }
+
+  const ext = imageUrl.split("?")[0].split(".").pop() || "png";
+  const target = cacheUri(`${suggestedName}.${ext}`);
+  const token = await getAuthToken();
+  const result = await FileSystem.downloadAsync(imageUrl, target, {
+    headers:
+      token && imageUrl.startsWith(API_BASE) ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (result.status >= 400) {
+    throw new FileSaveError(`Could not download image (HTTP ${result.status}).`);
+  }
+  return { uri: result.uri };
+}
+
+/**
+ * Save an inline chat image (data: URI, local file:// URI, or remote URL) to
+ * the photo library. Photo-library permission is requested lazily inside
+ * saveImageToLibrary — only when this runs. On web, the image is opened in a
+ * new tab instead.
  */
 export async function saveImageFromUrl(
   imageUrl: string,
@@ -260,30 +304,34 @@ export async function saveImageFromUrl(
     return "opened";
   }
 
-  let fileUri: string;
-  const dataMatch = imageUrl.match(/^data:(.*?);base64,(.*)$/s);
-  if (dataMatch) {
-    const mime = dataMatch[1] || "image/png";
-    const base64 = dataMatch[2];
-    const ext = (mime.split("/")[1] || "png").split("+")[0];
-    fileUri = cacheUri(`${suggestedName}.${ext}`);
-    await FileSystem.writeAsStringAsync(fileUri, base64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-  } else {
-    const ext = imageUrl.split("?")[0].split(".").pop() || "png";
-    const target = cacheUri(`${suggestedName}.${ext}`);
-    const token = await getAuthToken();
-    const result = await FileSystem.downloadAsync(imageUrl, target, {
-      headers:
-        token && imageUrl.startsWith(API_BASE) ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-    if (result.status >= 400) {
-      throw new FileSaveError(`Could not download image (HTTP ${result.status}).`);
-    }
-    fileUri = result.uri;
+  const { uri } = await materializeImageToCache(imageUrl, suggestedName);
+  await saveImageToLibrary(uri);
+  return "image-saved";
+}
+
+/**
+ * Share an inline chat image (data: URI, local file:// URI, or remote URL) via
+ * the native share sheet. Auth-gated / remote images are downloaded to a temp
+ * file first so the share sheet receives a real file, not a URL that would
+ * require the recipient to authenticate. On web, the image is opened in a new
+ * tab instead.
+ */
+export async function shareImageFromUrl(
+  imageUrl: string,
+  suggestedName = "ora-image",
+): Promise<SaveOutcome> {
+  if (Platform.OS === "web") {
+    await Linking.openURL(imageUrl);
+    return "opened";
   }
 
-  await saveImageToLibrary(fileUri);
-  return "image-saved";
+  const { uri, mimeType } = await materializeImageToCache(imageUrl, suggestedName);
+  const uti =
+    mimeType === "image/png"
+      ? "public.png"
+      : mimeType === "image/jpeg" || mimeType === "image/jpg"
+        ? "public.jpeg"
+        : undefined;
+  await shareFile(uri, mimeType, uti);
+  return "shared";
 }

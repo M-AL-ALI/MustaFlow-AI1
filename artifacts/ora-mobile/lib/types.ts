@@ -62,6 +62,13 @@ export interface OraMessage extends OraMessageData {
    * completion in the SSE envelope. Useful for developer monitoring.
    */
   viaFallback?: boolean;
+  /**
+   * Local device URI of an uploaded image attachment (client-only, mirrors
+   * Attachment.localUri). Lets the user bubble render a tappable thumbnail that
+   * opens the full-screen preview. Ephemeral — not persisted, so it is absent
+   * after a conversation reload.
+   */
+  attachmentLocalUri?: string;
 }
 
 /**
@@ -294,6 +301,13 @@ export interface Attachment {
   kind: AttachmentKind;
   filename: string;
   fileType: string;
+  /**
+   * Local device URI of the picked file (image attachments only). Kept so the
+   * user bubble can render a tappable thumbnail and open the full-screen preview
+   * without re-downloading. Device-local and ephemeral — not persisted, so it is
+   * absent after a conversation reload.
+   */
+  localUri?: string;
 }
 
 export interface AnalysisResponse {
