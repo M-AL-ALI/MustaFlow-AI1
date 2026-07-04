@@ -1999,4 +1999,28 @@ describe("ORAX product-surface wiring", () => {
     expect(src).not.toContain("project-file-selector");
     expect(src).not.toContain("project-file-reader");
   });
+
+  // ── Phase 2J hardening: symlink traversal guard ───────────────────────────
+
+  it("Phase 2J-H: project-file-selector skips symlinks using isSymbolicLink", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-selector.ts");
+    expect(src).toContain("isSymbolicLink");
+  });
+
+  it("Phase 2J-H: project-file-selector skips symlinks before recursing into directories", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-selector.ts");
+    const symLinkIdx = src.indexOf("isSymbolicLink");
+    const dirIdx = src.indexOf("isDirectory");
+    expect(symLinkIdx).toBeGreaterThan(-1);
+    expect(dirIdx).toBeGreaterThan(-1);
+    expect(symLinkIdx).toBeLessThan(dirIdx);
+  });
+
+  it("Phase 2J-H: project-file-selector still has no exec, spawn, shell:true, or process.cwd", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-selector.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
 });

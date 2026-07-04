@@ -205,6 +205,10 @@ function walkForCandidates(
     if (candidates.length >= MAX_CANDIDATE_FILES) break;
     const name = entry.name;
 
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+
     if (entry.isDirectory()) {
       if (BLOCKED_DIRS.has(name)) continue;
       walkForCandidates(path.join(dir, name), rootPath, depth + 1, candidates);
