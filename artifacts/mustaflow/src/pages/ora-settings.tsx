@@ -45,10 +45,7 @@ import {
   VOICE_PRESET_LABELS,
 } from "@/hooks/use-ora-realtime-voice";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
-import {
-  getLastOraStreamDiagnostics,
-  type OraStreamDiagnostics,
-} from "@/hooks/use-ora-chat";
+import { getLastOraStreamDiagnostics, type OraStreamDiagnostics } from "@/hooks/use-ora-chat";
 import {
   getReferenceSavedMemories,
   setReferenceSavedMemories,
@@ -462,20 +459,32 @@ function ChatDiagnosticsSection() {
               {diag.serverFastLane == null ? "—" : diag.serverFastLane ? "yes" : "no"}
             </DiagRow>
             <DiagRow label="Tap to first token">
-              <span className={cn(diag.tapToFirstTokenMs != null && diag.tapToFirstTokenMs > 3000 && "text-amber-500")}>
+              <span
+                className={cn(
+                  diag.tapToFirstTokenMs != null &&
+                    diag.tapToFirstTokenMs > 3000 &&
+                    "text-amber-500",
+                )}
+              >
                 {fmtMs(diag.tapToFirstTokenMs)}
               </span>
             </DiagRow>
             <DiagRow label="First sentence">{fmtMs(diag.firstSentenceMs)}</DiagRow>
             <DiagRow label="Complete">
-              <span className={cn(diag.completeMs != null && diag.completeMs > 8000 && "text-amber-500")}>
+              <span
+                className={cn(
+                  diag.completeMs != null && diag.completeMs > 8000 && "text-amber-500",
+                )}
+              >
                 {fmtMs(diag.completeMs)}
               </span>
             </DiagRow>
             <DiagRow label="Tokens">{diag.tokenCount}</DiagRow>
             <DiagRow label="Server TTFT">{fmtMs(diag.serverTtftMs)}</DiagRow>
             <DiagRow label="Server total">{fmtMs(diag.serverTotalMs)}</DiagRow>
-            <DiagRow label="Delivery">{diag.viaFallback ? "fallback (non-streaming)" : "streamed"}</DiagRow>
+            <DiagRow label="Delivery">
+              {diag.viaFallback ? "fallback (non-streaming)" : "streamed"}
+            </DiagRow>
           </>
         )}
       </div>
@@ -1534,198 +1543,201 @@ function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
 
   return (
     <div id="ora-section-plan">
-    <SectionCard
-      icon={Gauge}
-      title="Plan & usage limits"
-      description="Ora uses plan-based rolling-window message and image limits that refill together."
-    >
-      {!isSignedIn ? (
-        <p className="text-sm text-muted-foreground">Sign in to see your Ora plan and usage.</p>
-      ) : loading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading plan usage
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="rounded-lg border border-border/60 px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Current plan</p>
-            <p className="mt-1 text-lg font-bold text-foreground">{planLabel(usage?.tier)}</p>
-            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-              {renewalLabel(usage?.tier ?? subscription?.tier, subscription)}
-            </p>
+      <SectionCard
+        icon={Gauge}
+        title="Plan & usage limits"
+        description="Ora uses plan-based rolling-window message and image limits that refill together."
+      >
+        {!isSignedIn ? (
+          <p className="text-sm text-muted-foreground">Sign in to see your Ora plan and usage.</p>
+        ) : loading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading plan usage
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+        ) : (
+          <div className="space-y-3">
             <div className="rounded-lg border border-border/60 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <MessageSquare className="h-4 w-4 text-primary" />
-                Messages
-              </div>
-              <p className="mt-2 text-2xl font-bold">
-                {remaining(usage?.msgCount, usage?.msgLimit)}
-              </p>
-              <p className="text-xs text-muted-foreground">left of {usage?.msgLimit ?? 0}</p>
-            </div>
-            <div className="rounded-lg border border-border/60 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <ImageIcon className="h-4 w-4 text-primary" />
-                Images
-              </div>
-              <p className="mt-2 text-2xl font-bold">
-                {remaining(usage?.imageCount, usage?.imageLimit)}
-              </p>
-              <p className="text-xs text-muted-foreground">left of {usage?.imageLimit ?? 0}</p>
-            </div>
-          </div>
-          {(() => {
-            const countdown = formatWindowCountdown(usage?.resetsAt);
-            return (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Current plan</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{planLabel(usage?.tier)}</p>
+              <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                {countdown
-                  ? `Messages and images refill together in ${countdown}`
-                  : "Full allowance available — your window starts on your next message"}
+                {renewalLabel(usage?.tier ?? subscription?.tier, subscription)}
               </p>
-            );
-          })()}
-          <div className="flex flex-wrap gap-2 pt-1">
-            {canUpgradeToCore && (
-              <button
-                type="button"
-                onClick={() => void startOraCheckout("core")}
-                disabled={planAction !== null}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-              >
-                {planAction === "core" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Crown className="h-3.5 w-3.5" />
-                )}
-                Upgrade to Core Pack
-              </button>
-            )}
-            {canUpgradeToWave && (
-              <button
-                type="button"
-                onClick={() => void startOraCheckout("wave")}
-                disabled={planAction !== null}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-              >
-                {planAction === "wave" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Crown className="h-3.5 w-3.5" />
-                )}
-                Upgrade to Deep Wave
-              </button>
-            )}
-            {isPaid && (
-              <button
-                type="button"
-                onClick={() => void openOraBillingPortal()}
-                disabled={planAction !== null}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {planAction === "portal" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ExternalLink className="h-3.5 w-3.5" />
-                )}
-                Manage Ora plan
-              </button>
-            )}
-          </div>
-          <div id="ora-section-payment-method" className="rounded-lg border border-border/60 px-4 py-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <CreditCard className="h-4 w-4 text-primary" />
-              Payment method
             </div>
-            {paymentMethod?.hasPaymentMethod ? (
-              <div className="mt-3 space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-foreground">
-                    {formatCardBrand(paymentMethod.brand)} •••• {paymentMethod.last4}
-                  </span>
-                  {paymentMethod.expMonth && paymentMethod.expYear && (
-                    <span className="text-xs text-muted-foreground">
-                      Expires {String(paymentMethod.expMonth).padStart(2, "0")}/
-                      {paymentMethod.expYear}
-                    </span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-border/60 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                  Messages
+                </div>
+                <p className="mt-2 text-2xl font-bold">
+                  {remaining(usage?.msgCount, usage?.msgLimit)}
+                </p>
+                <p className="text-xs text-muted-foreground">left of {usage?.msgLimit ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-border/60 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <ImageIcon className="h-4 w-4 text-primary" />
+                  Images
+                </div>
+                <p className="mt-2 text-2xl font-bold">
+                  {remaining(usage?.imageCount, usage?.imageLimit)}
+                </p>
+                <p className="text-xs text-muted-foreground">left of {usage?.imageLimit ?? 0}</p>
+              </div>
+            </div>
+            {(() => {
+              const countdown = formatWindowCountdown(usage?.resetsAt);
+              return (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                  {countdown
+                    ? `Messages and images refill together in ${countdown}`
+                    : "Full allowance available — your window starts on your next message"}
+                </p>
+              );
+            })()}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {canUpgradeToCore && (
+                <button
+                  type="button"
+                  onClick={() => void startOraCheckout("core")}
+                  disabled={planAction !== null}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {planAction === "core" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Crown className="h-3.5 w-3.5" />
                   )}
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-xs font-medium",
-                      paymentMethod.status === "expired"
-                        ? "bg-destructive/15 text-destructive"
-                        : "bg-emerald-500/15 text-emerald-500",
-                    )}
-                  >
-                    {paymentMethod.status === "expired" ? "Expired" : "Active"}
-                  </span>
-                </div>
-                {paymentMethod.status === "expired" && (
-                  <p className="flex items-center gap-1.5 text-xs text-destructive">
-                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-                    This card has expired. Update it to keep your plan active.
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void openOraBillingPortal()}
-                    disabled={planAction !== null}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-                  >
-                    {planAction === "portal" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <CreditCard className="h-3.5 w-3.5" />
-                    )}
-                    Change payment method
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void openOraBillingPortal()}
-                    disabled={planAction !== null}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-                  >
+                  Upgrade to Core Pack
+                </button>
+              )}
+              {canUpgradeToWave && (
+                <button
+                  type="button"
+                  onClick={() => void startOraCheckout("wave")}
+                  disabled={planAction !== null}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {planAction === "wave" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Crown className="h-3.5 w-3.5" />
+                  )}
+                  Upgrade to Deep Wave
+                </button>
+              )}
+              {isPaid && (
+                <button
+                  type="button"
+                  onClick={() => void openOraBillingPortal()}
+                  disabled={planAction !== null}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {planAction === "portal" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
                     <ExternalLink className="h-3.5 w-3.5" />
-                    Manage billing
-                  </button>
-                </div>
+                  )}
+                  Manage Ora plan
+                </button>
+              )}
+            </div>
+            <div
+              id="ora-section-payment-method"
+              className="rounded-lg border border-border/60 px-4 py-3"
+            >
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <CreditCard className="h-4 w-4 text-primary" />
+                Payment method
               </div>
-            ) : (
-              <div className="mt-3 space-y-3">
-                {isPaid ? (
-                  <p className="flex items-center gap-1.5 text-xs text-destructive">
-                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-                    Payment method required to keep your plan active.
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No payment method on file.</p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void addPaymentMethod()}
-                    disabled={planAction !== null}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-                  >
-                    {planAction === "addpm" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Plus className="h-3.5 w-3.5" />
+              {paymentMethod?.hasPaymentMethod ? (
+                <div className="mt-3 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-foreground">
+                      {formatCardBrand(paymentMethod.brand)} •••• {paymentMethod.last4}
+                    </span>
+                    {paymentMethod.expMonth && paymentMethod.expYear && (
+                      <span className="text-xs text-muted-foreground">
+                        Expires {String(paymentMethod.expMonth).padStart(2, "0")}/
+                        {paymentMethod.expYear}
+                      </span>
                     )}
-                    Add payment method
-                  </button>
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-xs font-medium",
+                        paymentMethod.status === "expired"
+                          ? "bg-destructive/15 text-destructive"
+                          : "bg-emerald-500/15 text-emerald-500",
+                      )}
+                    >
+                      {paymentMethod.status === "expired" ? "Expired" : "Active"}
+                    </span>
+                  </div>
+                  {paymentMethod.status === "expired" && (
+                    <p className="flex items-center gap-1.5 text-xs text-destructive">
+                      <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                      This card has expired. Update it to keep your plan active.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void openOraBillingPortal()}
+                      disabled={planAction !== null}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                    >
+                      {planAction === "portal" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CreditCard className="h-3.5 w-3.5" />
+                      )}
+                      Change payment method
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openOraBillingPortal()}
+                      disabled={planAction !== null}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Manage billing
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {isPaid ? (
+                    <p className="flex items-center gap-1.5 text-xs text-destructive">
+                      <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                      Payment method required to keep your plan active.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No payment method on file.</p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void addPaymentMethod()}
+                      disabled={planAction !== null}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                    >
+                      {planAction === "addpm" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="h-3.5 w-3.5" />
+                      )}
+                      Add payment method
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </SectionCard>
+        )}
+      </SectionCard>
     </div>
   );
 }
