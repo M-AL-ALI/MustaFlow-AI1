@@ -1,5 +1,5 @@
 /**
- * Orax Desktop — Phase 2E/2F/2H/2J/2K relay client.
+ * Orax Desktop — Phase 2E/2F/2H/2J/2K/2L/2M relay client.
  *
  * Polls the cloud relay for queued actions, executes safe Phase 2E actions
  * (ping_desktop, get_desktop_status, list_local_projects), Phase 2F
@@ -9,9 +9,11 @@
  * Phase 2J file-read planning (selectRelevantProjectFiles +
  * readSelectedProjectFiles → deterministic suggestedPlan), Phase 2K
  * patch proposal loop (draft_project_patch — deterministic patch drafter,
- * no shell commands, no file writes), and Phase 2L approval-gated apply
+ * no shell commands, no file writes), Phase 2L approval-gated apply
  * (apply_project_patch — validates paths, creates checkpoint, writes files
- * only after backend approval; no shell commands, no exec/spawn).
+ * only after backend approval; no shell commands, no exec/spawn), and
+ * Phase 2M post-apply verification (verify_project_patch — runs allowlisted
+ * typecheck/lint/test scripts, no shell:true, no exec, no secrets).
  */
 
 import fs from "node:fs";
@@ -32,6 +34,7 @@ import { readSelectedProjectFiles } from "./project-file-reader";
 import type { FileReadEntry } from "./project-file-reader";
 import { draftProjectPatch } from "./project-patch-drafter";
 import { applyProjectPatch, type ApplyFilePatch } from "./project-patch-applier";
+import { verifyProjectPatch } from "./project-patch-verifier";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -613,6 +616,55 @@ export class RelayClient {
           checkpointPath: applyResult.checkpointPath,
           warnings: applyResult.warnings,
           durationMs: applyResult.durationMs,
+        };
+        // Falls through to the common postActionEvent("completed") call below
+      } else if (action.type === "verify_project_patch") {
+        // Phase 2M: post-apply verification — no shell, no exec, no secrets
+        const payload = action.payload as {
+          projectId?: unknown;
+          threadId?: unknown;
+          executionSourceId?: unknown;
+          sourceLocalPath?: unknown;
+        };
+
+        const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+        const executionSourceId =
+          typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
+        const sourceLocalPath =
+          typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
+
+        if (!projectId || !threadId || !sourceLocalPath) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error:
+              "verify_project_patch: missing required payload fields " +
+              "(projectId, threadId, sourceLocalPath).",
+          });
+          return;
+        }
+
+        if (!fs.existsSync(sourceLocalPath)) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: "verify_project_patch: sourceLocalPath does not exist",
+          });
+          return;
+        }
+
+        await this.api.postActionEvent(action.id, "running", {
+          projectId,
+          threadId,
+          executionSourceId,
+        });
+
+        const verifyResult = await verifyProjectPatch({ localPath: sourceLocalPath });
+
+        result = {
+          projectId,
+          threadId,
+          executionSourceId,
+          checks: verifyResult.checks,
+          totalDurationMs: verifyResult.totalDurationMs,
+          allPassed: verifyResult.allPassed,
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {

@@ -35,6 +35,16 @@ ARG="${1:-}"
 git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
+# --- Phase 2M: post-apply verification + fix loop ---
+git add \
+  artifacts/orax-desktop/src/main/relay-client.ts \
+  artifacts/orax-desktop/src/main/project-patch-verifier.ts \
+  artifacts/api-server/src/routes/orax-desktop.ts \
+  artifacts/api-server/src/routes/orax-projects.ts \
+  artifacts/mustaflow/src/pages/orax-workspace.tsx \
+  "artifacts/ora-mobile/app/(home)/orax.tsx" \
+  artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts \
+  2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add scripts/push-to-github.sh 2>/dev/null || true
 

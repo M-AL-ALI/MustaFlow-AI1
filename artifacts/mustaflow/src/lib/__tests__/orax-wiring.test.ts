@@ -2345,4 +2345,111 @@ describe("ORAX product-surface wiring", () => {
     const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
     expect(src).toContain("ProjectPatchFailedCard");
   });
+
+  // ── Phase 2M: post-apply verification + fix loop ──────────────────────────
+
+  it("Phase 2M: project-patch-verifier has no exec or shell:true", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-verifier.ts");
+    expect(src).toContain("verifyProjectPatch");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  it("Phase 2M: project-patch-verifier returns VerifyCheck array and allPassed", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-verifier.ts");
+    expect(src).toContain("VerifyCheck");
+    expect(src).toContain("allPassed");
+    expect(src).toContain("checks");
+  });
+
+  it("Phase 2M: relay-client handles verify_project_patch action type", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("verify_project_patch");
+    expect(src).toContain("verifyProjectPatch");
+  });
+
+  it("Phase 2M: relay-client verify_project_patch has no exec or shell invocations", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    const verifyIdx = src.indexOf('"verify_project_patch"');
+    const verifySection = src.slice(verifyIdx, verifyIdx + 3000);
+    expect(verifySection).not.toContain("shell: true");
+    expect(verifySection).not.toContain("exec(");
+  });
+
+  it("Phase 2M: backend declares isVerifyPatch and writes verified/failed events", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("isVerifyPatch");
+    expect(src).toContain("project_patch_verified");
+    expect(src).toContain("project_patch_verification_failed");
+  });
+
+  it("Phase 2M: backend queues verify_project_patch after apply completed", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("verify_project_patch");
+    expect(src).toContain('type: "verify_project_patch"');
+  });
+
+  it("Phase 2M: orax-projects has prepare-fix endpoint", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("prepare-fix");
+    expect(src).toContain("draft_project_patch");
+    expect(src).toContain("project_patch_fix_queued");
+  });
+
+  it("Phase 2M: orax-workspace defines VerifyCheck type with allPassed", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("VerifyCheck");
+    expect(src).toContain("allPassed");
+    expect(src).toContain("checks?");
+  });
+
+  it("Phase 2M: orax-workspace renders project_patch_verified messages", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_patch_verified");
+    expect(src).toContain("Verification passed");
+  });
+
+  it("Phase 2M: orax-workspace renders project_patch_verification_failed messages", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_patch_verification_failed");
+    expect(src).toContain("Verification failed");
+  });
+
+  it("Phase 2M: orax-workspace has Prepare fix button that calls prepareFix", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("prepareFix");
+    expect(src).toContain("Prepare fix");
+    expect(src).toContain("preparingFix");
+  });
+
+  it("Phase 2M: mobile has ProjectPatchVerifiedCard component", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPatchVerifiedCard");
+    expect(src).toContain("project_patch_verified");
+  });
+
+  it("Phase 2M: mobile has ProjectPatchVerificationFailedCard component", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPatchVerificationFailedCard");
+    expect(src).toContain("project_patch_verification_failed");
+  });
+
+  it("Phase 2M: mobile OraxProjectThreadMessage payload has checks field", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("checks?:");
+    expect(src).toContain("allPassed?:");
+  });
+
+  it("Phase 2M: no public-ai or Ora Builder usage in verify/fix code paths", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/main/project-patch-verifier.ts"),
+      read("../../../../api-server/src/routes/orax-desktop.ts"),
+      read("../../../../api-server/src/routes/orax-projects.ts"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("handoffCta");
+    }
+  });
 });

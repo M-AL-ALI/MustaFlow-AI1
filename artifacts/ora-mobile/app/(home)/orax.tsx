@@ -163,6 +163,16 @@ type OraxProjectThreadMessage = {
       checkpointPath?: string;
       durationMs?: number;
     };
+    checks?: Array<{
+      name: string;
+      command: string;
+      status: "passed" | "failed" | "skipped";
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      durationMs: number;
+    }>;
+    allPassed?: boolean;
     fileReadSummary?: Array<{ relativePath: string; truncated: boolean; reason: string }>;
     [key: string]: unknown;
   } | null;
@@ -3797,6 +3807,84 @@ function ProjectPatchFailedCard({ msg }: { msg: OraxProjectThreadMessage }) {
       <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
         {msg.content}
       </Text>
+    </View>
+  );
+}
+
+// Phase 2M: compact card for project_patch_verified thread messages
+function ProjectPatchVerifiedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  const checks = msg.payload?.checks ?? [];
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#22c55e55",
+        borderRadius: 12,
+        padding: 12,
+        backgroundColor: "#22c55e08",
+      }}
+    >
+      <Text style={{ color: "#22c55e", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        Verification passed
+      </Text>
+      {checks.length > 0 ? (
+        <View style={{ marginTop: 8, gap: 4 }}>
+          {checks.map((c2) => (
+            <Text
+              key={c2.name}
+              style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18 }}
+            >
+              {`\u2713 ${c2.name} (${c2.durationMs}ms)`}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+          {msg.content}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+// Phase 2M: compact card for project_patch_verification_failed thread messages
+function ProjectPatchVerificationFailedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  const checks = msg.payload?.checks ?? [];
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#f59e0b55",
+        borderRadius: 12,
+        padding: 12,
+        backgroundColor: "#f59e0b08",
+      }}
+    >
+      <Text style={{ color: "#f59e0b", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        Verification failed
+      </Text>
+      {checks.length > 0 ? (
+        <View style={{ marginTop: 8, gap: 4 }}>
+          {checks.map((c2) => (
+            <Text
+              key={c2.name}
+              style={{
+                color: c2.status === "failed" ? "#ef4444" : c.mutedForeground,
+                fontSize: 12,
+                lineHeight: 18,
+              }}
+            >
+              {`${c2.status === "passed" ? "\u2713" : c2.status === "skipped" ? "\u2013" : "\u2717"} ${c2.name} (${c2.durationMs}ms)`}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+          {msg.content}
+        </Text>
+      )}
     </View>
   );
 }

@@ -926,6 +926,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       const isProjectThread = action.type === "run_project_thread";
       const isDraftPatch = action.type === "draft_project_patch";
       const isApplyPatch = action.type === "apply_project_patch";
+      const isVerifyPatch = action.type === "verify_project_patch";
 
       let content: string;
       let eventType: string;
@@ -1113,6 +1114,59 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         content = `Could not apply the patch: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
         eventType = "project_patch_failed";
         role = "assistant";
+      } else if (isVerifyPatch && type === "completed") {
+        // Phase 2M: verification results — write verified or verification_failed message
+        const vp = (payload ?? {}) as {
+          checks?: Array<{
+            name: string;
+            command: string;
+            status: "passed" | "failed" | "skipped";
+            stdout: string;
+            stderr: string;
+            exitCode: number | null;
+            durationMs: number;
+          }>;
+          allPassed?: boolean;
+          totalDurationMs?: number;
+        };
+        const checks = vp.checks ?? [];
+        const allPassed =
+          typeof vp.allPassed === "boolean"
+            ? vp.allPassed
+            : checks.every((c) => c.status !== "failed");
+
+        if (checks.length === 0) {
+          content = "Verification complete — no check scripts found in this project.";
+          eventType = "project_patch_verified";
+          role = "assistant";
+        } else if (allPassed) {
+          const summary = checks
+            .map((c) => `- ${c.name}: ${c.status} (${c.durationMs}ms)`)
+            .join("\n");
+          content = `Verification passed — all checks succeeded.\n\n${summary}`;
+          eventType = "project_patch_verified";
+          role = "assistant";
+        } else {
+          const failed = checks.filter((c) => c.status === "failed");
+          const summary = checks
+            .map((c) => `- ${c.name}: ${c.status} (${c.durationMs}ms)`)
+            .join("\n");
+          const errDetail = failed
+            .slice(0, 2)
+            .map((c) => `${c.name}:\n${(c.stderr || c.stdout).slice(0, 500)}`)
+            .join("\n\n");
+          content =
+            `Verification failed — ${failed.length} check${failed.length === 1 ? "" : "s"} did not pass.\n\n` +
+            summary +
+            (errDetail ? `\n\nDetails:\n${errDetail}` : "");
+          eventType = "project_patch_verification_failed";
+          role = "assistant";
+        }
+      } else if (isVerifyPatch && type === "failed") {
+        const errMsg = (payload as { error?: string }).error ?? "unknown error";
+        content = `Could not run verification checks: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
+        eventType = "project_patch_verification_failed";
+        role = "assistant";
       } else {
         content =
           type === "completed"
@@ -1130,6 +1184,41 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
           eventType,
           payload: { actionId, actionType: action.type, ...(payload as object) },
         });
+      }
+
+      // Phase 2M: after a successful patch apply, queue verify_project_patch
+      if (isApplyPatch && type === "completed" && action.threadId) {
+        const applyPl = (action.payload ?? {}) as {
+          sourceLocalPath?: string;
+          projectId?: string;
+          executionSourceId?: string;
+        };
+        if (applyPl.sourceLocalPath && applyPl.projectId) {
+          const verifyIKey = `verify-patch:${action.threadId}:${actionId}`;
+          void db
+            .insert(oraxDesktopActionsTable)
+            .values({
+              userId,
+              hostId: action.hostId,
+              threadId: action.threadId,
+              type: "verify_project_patch",
+              status: "queued",
+              payload: {
+                projectId: applyPl.projectId,
+                threadId: action.threadId,
+                executionSourceId: applyPl.executionSourceId ?? null,
+                sourceLocalPath: applyPl.sourceLocalPath,
+              },
+              idempotencyKey: verifyIKey,
+            })
+            .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+            .catch((qErr: unknown) => {
+              logger.warn(
+                { component: "orax-desktop", err: qErr, actionId },
+                "Failed to queue verify_project_patch",
+              );
+            });
+        }
       }
 
       // Phase 2K: after a successful file-read, queue draft_project_patch
