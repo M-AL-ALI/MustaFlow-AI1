@@ -3889,6 +3889,103 @@ function ProjectPatchVerificationFailedCard({ msg }: { msg: OraxProjectThreadMes
   );
 }
 
+// Phase 2N: compact card for project_fix_drafted thread messages
+function ProjectFixDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  const draft = msg.payload?.draftPatch;
+  if (!draft) {
+    return (
+      <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+        <Text style={{ color: c.foreground, fontSize: 13 }}>{msg.content}</Text>
+      </View>
+    );
+  }
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#3b82f655",
+        borderRadius: 12,
+        padding: 12,
+        gap: 8,
+        backgroundColor: "#3b82f608",
+      }}
+    >
+      <Text
+        style={{
+          color: "#3b82f6",
+          fontSize: 13,
+          lineHeight: 18,
+          fontFamily: "Inter_500Medium",
+        }}
+      >
+        Auto-fix proposal
+      </Text>
+      <Text
+        style={{
+          color: c.foreground,
+          fontSize: 13,
+          lineHeight: 18,
+          fontFamily: "Inter_500Medium",
+        }}
+      >
+        {draft.summary}
+      </Text>
+      {/* Changed file chips */}
+      {draft.changedFiles.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {draft.changedFiles.map((f) => (
+            <View
+              key={f.relativePath}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: 6,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                gap: 4,
+                backgroundColor: c.muted,
+              }}
+            >
+              <Text
+                style={{ color: c.mutedForeground, fontSize: 10, fontFamily: "SpaceMono_400Regular" }}
+                numberOfLines={1}
+              >
+                {f.relativePath}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 9,
+                  fontFamily: "Inter_600SemiBold",
+                  color: "#3b82f6",
+                  textTransform: "uppercase",
+                }}
+              >
+                {f.operation}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {/* Risks */}
+      {draft.risks.length > 0 &&
+        draft.risks.slice(0, 2).map((r, i) => (
+          <Text
+            key={i}
+            style={{ color: "#f59e0b", fontSize: 11, lineHeight: 16 }}
+          >
+            {"\u26A0\uFE0F"} {r}
+          </Text>
+        ))}
+      <Text style={{ color: c.mutedForeground, fontSize: 10 }}>
+        Review and approve via Orax Desktop
+      </Text>
+    </View>
+  );
+}
+
 function isOraxVisibleThreadMessage(message: OraxTaskMessage): boolean {
   if (message.role === "user" || message.role === "assistant") return true;
   const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";

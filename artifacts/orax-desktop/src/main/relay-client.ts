@@ -35,6 +35,7 @@ import type { FileReadEntry } from "./project-file-reader";
 import { draftProjectPatch } from "./project-patch-drafter";
 import { applyProjectPatch, type ApplyFilePatch } from "./project-patch-applier";
 import { verifyProjectPatch } from "./project-patch-verifier";
+import { draftProjectFix, type FailedCheck } from "./project-fix-drafter";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -665,6 +666,92 @@ export class RelayClient {
           checks: verifyResult.checks,
           totalDurationMs: verifyResult.totalDurationMs,
           allPassed: verifyResult.allPassed,
+        };
+        // Falls through to the common postActionEvent("completed") call below
+      } else if (action.type === "draft_project_fix") {
+        // Phase 2N: auto-fix from verification failure
+        const payload = action.payload as {
+          projectId?: unknown;
+          threadId?: unknown;
+          executionSourceId?: unknown;
+          sourceLocalPath?: unknown;
+          failedChecks?: unknown;
+          changedFiles?: unknown;
+          originalUserMessage?: unknown;
+          previousPatchSummary?: unknown;
+        };
+
+        const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+        const executionSourceId =
+          typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
+        const sourceLocalPath =
+          typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
+
+        if (!projectId || !threadId || !sourceLocalPath) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error:
+              "draft_project_fix: missing required payload fields " +
+              "(projectId, threadId, sourceLocalPath).",
+          });
+          return;
+        }
+
+        if (!fs.existsSync(sourceLocalPath)) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: "draft_project_fix: sourceLocalPath does not exist",
+          });
+          return;
+        }
+
+        const failedChecks = Array.isArray(payload.failedChecks)
+          ? (payload.failedChecks as FailedCheck[])
+          : [];
+        const changedFiles = Array.isArray(payload.changedFiles)
+          ? (payload.changedFiles as Array<{ relativePath: string; operation: string }>)
+          : [];
+        const originalUserMessage =
+          typeof payload.originalUserMessage === "string" ? payload.originalUserMessage : "";
+        const previousPatchSummary =
+          typeof payload.previousPatchSummary === "string" ? payload.previousPatchSummary : "";
+
+        await this.api.postActionEvent(action.id, "running", {
+          projectId,
+          threadId,
+          executionSourceId,
+        });
+
+        // Re-read changedFiles to get current on-disk content as file entries
+        const selectedFiles: SelectedProjectFile[] = changedFiles.map((f) => ({
+          relativePath: f.relativePath,
+          reason: "previously patched file",
+          score: 1,
+          category: "unknown" as const,
+        }));
+        const readResult = await readSelectedProjectFiles({
+          localPath: sourceLocalPath,
+          files: selectedFiles,
+        });
+        const fileReadEntries = readResult.files;
+
+        const fixResult = await draftProjectFix({
+          localPath: sourceLocalPath,
+          failedChecks,
+          changedFiles,
+          fileReadEntries,
+          previousPatchSummary,
+          originalUserMessage,
+        });
+
+        result = {
+          projectId,
+          threadId,
+          executionSourceId,
+          draftPatch: fixResult.draftPatch,
+          filePreviews: fixResult.filePreviews,
+          failedChecks: failedChecks.slice(0, 3),
+          originalUserMessage,
+          warnings: fixResult.warnings,
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {

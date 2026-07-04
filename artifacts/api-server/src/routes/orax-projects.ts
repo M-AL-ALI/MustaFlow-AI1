@@ -34,7 +34,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   db,
   oraxProjectsTable,
@@ -1026,8 +1026,13 @@ router.post(
         return;
       }
 
-      if (msg.eventType !== "project_patch_drafted") {
-        res.status(422).json({ error: "Message is not a project_patch_drafted event" });
+      if (
+        msg.eventType !== "project_patch_drafted" &&
+        msg.eventType !== "project_fix_drafted"
+      ) {
+        res
+          .status(422)
+          .json({ error: "Message is not a project_patch_drafted or project_fix_drafted event" });
         return;
       }
 
@@ -1243,7 +1248,50 @@ router.post(
         return;
       }
 
-      // Queue draft_project_patch to prepare a fix
+      // Phase 2N: check whether the most recent thread message is a verification failure.
+      // If so, queue draft_project_fix (auto-fix loop) with the failed check output.
+      // Otherwise fall back to draft_project_patch (re-draft from scratch).
+      const [latestVerifyFailMsg] = await db
+        .select()
+        .from(oraxThreadMessagesTable)
+        .where(
+          and(
+            eq(oraxThreadMessagesTable.threadId, threadId),
+            eq(oraxThreadMessagesTable.eventType, "project_patch_verification_failed"),
+          ),
+        )
+        .orderBy(desc(oraxThreadMessagesTable.createdAt))
+        .limit(1);
+
+      const failedChecks = latestVerifyFailMsg
+        ? ((latestVerifyFailMsg.payload as { checks?: unknown })?.checks ?? [])
+        : null;
+
+      // Find the most recent drafted patch for changedFiles + summary context
+      const [latestDraftMsg] = await db
+        .select()
+        .from(oraxThreadMessagesTable)
+        .where(
+          and(
+            eq(oraxThreadMessagesTable.threadId, threadId),
+            inArray(oraxThreadMessagesTable.eventType, [
+              "project_patch_drafted",
+              "project_fix_drafted",
+            ]),
+          ),
+        )
+        .orderBy(desc(oraxThreadMessagesTable.createdAt))
+        .limit(1);
+
+      const latestDraftPayload = (latestDraftMsg?.payload ?? {}) as {
+        draftPatch?: { summary?: string; changedFiles?: Array<{ relativePath: string; operation: string }> };
+      };
+      const changedFiles = latestDraftPayload.draftPatch?.changedFiles ?? [];
+      const previousPatchSummary = latestDraftPayload.draftPatch?.summary ?? "";
+
+      const useAutoFix = failedChecks !== null && Array.isArray(failedChecks) && changedFiles.length > 0;
+      const actionType = useAutoFix ? "draft_project_fix" : "draft_project_patch";
+
       const iKey = `prepare-fix:${threadId}:${Date.now()}`;
       const [action] = await db
         .insert(oraxDesktopActionsTable)
@@ -1251,16 +1299,28 @@ router.post(
           userId,
           hostId: recentAction.hostId,
           threadId,
-          type: "draft_project_patch",
+          type: actionType,
           status: "queued",
-          payload: {
-            projectId,
-            threadId,
-            executionSourceId: actionPayload.executionSourceId ?? null,
-            sourceLocalPath,
-            userMessage,
-            preparingFix: true,
-          },
+          payload: useAutoFix
+            ? {
+                projectId,
+                threadId,
+                executionSourceId: actionPayload.executionSourceId ?? null,
+                sourceLocalPath,
+                userMessage,
+                originalUserMessage: userMessage,
+                previousPatchSummary,
+                failedChecks,
+                changedFiles,
+              }
+            : {
+                projectId,
+                threadId,
+                executionSourceId: actionPayload.executionSourceId ?? null,
+                sourceLocalPath,
+                userMessage,
+                preparingFix: true,
+              },
           idempotencyKey: iKey,
         })
         .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
@@ -1271,14 +1331,16 @@ router.post(
         .values({
           threadId,
           role: "system",
-          content: `Preparing fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
+          content: useAutoFix
+            ? `Preparing auto-fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`
+            : `Preparing fix proposal on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
           eventType: "project_patch_fix_queued",
           payload: { actionId: action?.id ?? null, hostId: recentAction.hostId },
         })
         .returning();
 
       logger.info(
-        { component: "orax-projects", userId, projectId, threadId, actionId: action?.id },
+        { component: "orax-projects", userId, projectId, threadId, actionId: action?.id, actionType },
         "prepare-fix queued draft_project_patch",
       );
 

@@ -927,6 +927,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       const isDraftPatch = action.type === "draft_project_patch";
       const isApplyPatch = action.type === "apply_project_patch";
       const isVerifyPatch = action.type === "verify_project_patch";
+      const isFixDraft = action.type === "draft_project_fix";
 
       let content: string;
       let eventType: string;
@@ -1166,6 +1167,130 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         const errMsg = (payload as { error?: string }).error ?? "unknown error";
         content = `Could not run verification checks: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
         eventType = "project_patch_verification_failed";
+        role = "assistant";
+      } else if (isFixDraft && type === "completed") {
+        // Phase 2N: fix patch draft completed — write project_fix_drafted message
+        const fp = (payload ?? {}) as {
+          draftPatch?: {
+            summary: string;
+            changedFiles: Array<{
+              relativePath: string;
+              operation: string;
+              intentDescription: string;
+              hunkPreview: string[];
+              originalHash?: string;
+              oldContentPreview?: string;
+            }>;
+            risks: string[];
+            verificationPlan: string[];
+            draftGeneratedAt: string;
+          };
+          filePreviews?: Array<{
+            relativePath: string;
+            contentPreview: string;
+            originalHash: string;
+          }>;
+          originalUserMessage?: string;
+          failedChecks?: Array<{
+            name: string;
+            stdout: string;
+            stderr: string;
+            exitCode: number | null;
+            status: string;
+          }>;
+          warnings?: string[];
+        };
+
+        let fixEnrichedDraft = fp.draftPatch;
+
+        if (fixEnrichedDraft && Array.isArray(fp.filePreviews) && fp.filePreviews.length > 0) {
+          const failedOutput = (fp.failedChecks ?? [])
+            .filter((c) => c.status === "failed")
+            .slice(0, 2)
+            .map((c) => `${c.name}:\n${(c.stderr || c.stdout).slice(0, 400)}`)
+            .join("\n\n");
+          const augmentedMsg =
+            (fp.originalUserMessage ?? "Fix verification failure") +
+            (failedOutput ? `\n\nVerification failed with:\n${failedOutput}` : "");
+
+          try {
+            const aiFixPatches = await generateAiPatches(augmentedMsg, fp.filePreviews);
+            if (aiFixPatches && aiFixPatches.length > 0) {
+              const byPath = new Map(aiFixPatches.map((p) => [p.relativePath, p]));
+              fixEnrichedDraft = {
+                ...fixEnrichedDraft,
+                changedFiles: fixEnrichedDraft.changedFiles.map((cf) => {
+                  const ai = byPath.get(cf.relativePath);
+                  if (!ai) return cf;
+                  const prevPreview =
+                    fp.filePreviews!.find((fp2) => fp2.relativePath === cf.relativePath)
+                      ?.contentPreview ?? null;
+                  const unifiedDiffPreview =
+                    prevPreview && ai.newContent
+                      ? computeUnifiedDiffPreview(cf.relativePath, prevPreview, ai.newContent)
+                      : undefined;
+                  return {
+                    ...cf,
+                    newContent: ai.newContent,
+                    unifiedDiffPreview,
+                    reason: ai.reason,
+                  };
+                }),
+              };
+            }
+          } catch (aiFixErr) {
+            logger.warn(
+              { component: "orax-desktop", err: aiFixErr, actionId },
+              "AI fix patch generation failed — using skeleton draft",
+            );
+          }
+        }
+
+        const fixActionOrigPl = (action.payload ?? {}) as { sourceLocalPath?: string };
+        const fixSourceLocalPath = fixActionOrigPl.sourceLocalPath ?? null;
+
+        const fixDraft = fixEnrichedDraft;
+        if (fixDraft?.summary) {
+          const fileNames = (fixDraft.changedFiles ?? []).map((f) => f.relativePath).join(", ");
+          const aiEnriched = (fixDraft.changedFiles ?? []).some(
+            (f) => (f as { newContent?: string }).newContent,
+          );
+          const risksSection =
+            (fixDraft.risks ?? []).length > 0
+              ? `\n\nRisks:\n${fixDraft.risks.map((r) => `- ${r}`).join("\n")}`
+              : "";
+          const verifySection =
+            (fixDraft.verificationPlan ?? []).length > 0
+              ? `\n\nVerification:\n${fixDraft.verificationPlan.map((v) => `- ${v}`).join("\n")}`
+              : "";
+          const aiNote = aiEnriched ? " Real code changes are ready to apply." : "";
+          content = `${fixDraft.summary}${aiNote}${fileNames ? `\n\nFiles: ${fileNames}` : ""}${risksSection}${verifySection}`;
+        } else {
+          content = "Fix draft is ready. Review the proposed changes before applying.";
+        }
+        eventType = "project_fix_drafted";
+        role = "assistant";
+
+        const fixExtraPayload = {
+          actionId,
+          actionType: action.type,
+          draftPatch: fixEnrichedDraft,
+          sourceLocalPath: fixSourceLocalPath,
+          ...(fp.originalUserMessage ? { userMessage: fp.originalUserMessage } : {}),
+        };
+
+        await db.insert(oraxThreadMessagesTable).values({
+          threadId: action.threadId,
+          role,
+          content,
+          eventType,
+          payload: fixExtraPayload,
+        });
+        skipSharedInsert = true;
+      } else if (isFixDraft && type === "failed") {
+        const errMsg = (payload as { error?: string }).error ?? "unknown error";
+        content = `Could not draft a fix: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
+        eventType = "project_fix_draft_failed";
         role = "assistant";
       } else {
         content =

@@ -22,6 +22,7 @@ import {
   Send,
   Terminal,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import { authFetch } from "@/lib/api-fetch";
@@ -726,6 +727,56 @@ function ThreadDetail({
                           <RefreshCw size={10} />
                         )}
                         {preparingFix ? "Queuing…" : "Prepare fix"}
+                      </button>
+                    </div>
+                  )}
+                  {/* Phase 2N: fix drafted — show inline fix proposal with Apply fix button */}
+                  {msg.eventType === "project_fix_drafted" && msg.payload?.draftPatch && (
+                    <div className="mt-2 rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-blue-600 dark:text-blue-400 mb-1.5">
+                        <Wrench size={11} />
+                        Auto-fix proposal
+                      </div>
+                      {/* File chips */}
+                      {(msg.payload.draftPatch.changedFiles ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-1.5">
+                          {(msg.payload.draftPatch.changedFiles).map((f) => (
+                            <span
+                              key={f.relativePath}
+                              className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
+                            >
+                              {f.relativePath}
+                              <span className="text-[8px] font-semibold uppercase text-blue-500">
+                                {f.operation}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {/* Risks */}
+                      {(msg.payload.draftPatch.risks ?? []).slice(0, 2).map((r, i) => (
+                        <div key={i} className="text-amber-600 dark:text-amber-400 mb-0.5">
+                          ⚠ {r}
+                        </div>
+                      ))}
+                      {/* Apply fix button */}
+                      <button
+                        className="mt-2 btn btn-secondary text-xs py-1 px-2.5 h-auto"
+                        disabled={applyingPatch === msg.id}
+                        onClick={() => {
+                          void applyPatch(projectId, thread.id, msg.id)
+                            .then(() => void reload())
+                            .catch((err: unknown) =>
+                              setError(err instanceof Error ? err.message : "Apply fix failed"),
+                            );
+                        }}
+                      >
+                        {applyingPatch === msg.id ? (
+                          <Loader2 size={10} className="animate-spin" />
+                        ) : (
+                          <Wrench size={10} />
+                        )}
+                        {applyingPatch === msg.id ? "Applying…" : "Apply fix"}
                       </button>
                     </div>
                   )}

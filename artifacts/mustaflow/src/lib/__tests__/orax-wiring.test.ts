@@ -2452,4 +2452,85 @@ describe("ORAX product-surface wiring", () => {
       expect(src).not.toContain("handoffCta");
     }
   });
+
+  // ── Phase 2N: Auto-Fix From Verification Failure ──────────────────────────
+
+  it("Phase 2N: project-fix-drafter.ts exists and has no exec or shell:true", () => {
+    const src = read("../../../../orax-desktop/src/main/project-fix-drafter.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("execSync(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("shell:true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  it("Phase 2N: project-fix-drafter.ts exports draftProjectFix and FailedCheck with validatePatchPath", () => {
+    const src = read("../../../../orax-desktop/src/main/project-fix-drafter.ts");
+    expect(src).toContain("draftProjectFix");
+    expect(src).toContain("FailedCheck");
+    expect(src).toContain("validatePatchPath");
+    expect(src).toContain("BLOCKED_DIRS");
+  });
+
+  it("Phase 2N: relay-client.ts handles draft_project_fix action type", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("draft_project_fix");
+    expect(src).toContain("draftProjectFix");
+    expect(src).toContain("project-fix-drafter");
+  });
+
+  it("Phase 2N: relay-client.ts draft_project_fix section has no exec or shell invocations", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    // Only check the fix section — run_safe_command legitimately uses shell
+    const fixSection = src.slice(src.indexOf('"draft_project_fix"'));
+    expect(fixSection).not.toContain("execSync(");
+    expect(fixSection).not.toContain("spawnSync(");
+    expect(fixSection).not.toContain("shell: true");
+    expect(fixSection).not.toContain("shell:true");
+  });
+
+  it("Phase 2N: orax-desktop.ts declares isFixDraft and writes project_fix_drafted event", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("isFixDraft");
+    expect(src).toContain("draft_project_fix");
+    expect(src).toContain("project_fix_drafted");
+  });
+
+  it("Phase 2N: orax-projects.ts prepare-fix queues draft_project_fix with failedChecks payload", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("draft_project_fix");
+    expect(src).toContain("failedChecks");
+    expect(src).toContain("draft_project_patch");
+  });
+
+  it("Phase 2N: orax-workspace.tsx renders project_fix_drafted with Apply fix button", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_fix_drafted");
+    expect(src).toContain("Apply fix");
+    expect(src).toContain("Auto-fix proposal");
+  });
+
+  it("Phase 2N: orax-projects.ts apply-patch also accepts project_fix_drafted event type", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("project_fix_drafted");
+    expect(src).toContain("project_patch_drafted");
+  });
+
+  it("Phase 2N: mobile has ProjectFixDraftedCard component for project_fix_drafted", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectFixDraftedCard");
+    expect(src).toContain("project_fix_drafted");
+  });
+
+  it("Phase 2N: no public-ai or Ora Builder usage in fix-drafter code paths", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/main/project-fix-drafter.ts"),
+      read("../../../../orax-desktop/src/main/relay-client.ts"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("handoffCta");
+    }
+  });
 });
