@@ -48,64 +48,67 @@ fire the reconnect immediately when connectivity returns.
 ## Automated Test Results (2026-07-04)
 
 ### Web hook — `use-ora-realtime-voice.ts`
+
 File: `artifacts/mustaflow/src/hooks/__tests__/ora-realtime-reconnect.test.ts`
 Run: `pnpm --filter @workspace/mustaflow exec vitest run src/hooks/__tests__/ora-realtime-reconnect.test.ts`
 
-| # | Test | Status |
-|---|------|--------|
-| 1 | starts successfully → 'listening', networkQuality 'good' | PASS |
-| 2 | ICE drop → networkQuality 'reconnecting', no fallbackReason | PASS |
-| 3 | fires exactly ONE mint for auto-reconnect after RECONNECT_DELAY_MS | PASS |
-| 4 | auto-reconnect mint error → networkQuality 'legacy', onFallback called | PASS |
-| 5 | second drop goes straight to legacy (no third reconnect attempt) | PASS |
-| 6 | no extra mint calls after second drop | PASS |
-| 7 | connectionState 'failed' → same as ICE failure | PASS |
-| 8 | data-channel 'close' → auto-reconnect fires | PASS |
-| 9 | data-channel 'error' → auto-reconnect fires | PASS |
-| 10 | window.online cancels pending timer, fires reconnect immediately | PASS |
-| 11 | retry() clears fallbackReason and starts a fresh session | PASS |
-| 12 | retry() resets the reconnect budget (future drop auto-reconnects once more) | PASS |
+| #   | Test                                                                        | Status |
+| --- | --------------------------------------------------------------------------- | ------ |
+| 1   | starts successfully → 'listening', networkQuality 'good'                    | PASS   |
+| 2   | ICE drop → networkQuality 'reconnecting', no fallbackReason                 | PASS   |
+| 3   | fires exactly ONE mint for auto-reconnect after RECONNECT_DELAY_MS          | PASS   |
+| 4   | auto-reconnect mint error → networkQuality 'legacy', onFallback called      | PASS   |
+| 5   | second drop goes straight to legacy (no third reconnect attempt)            | PASS   |
+| 6   | no extra mint calls after second drop                                       | PASS   |
+| 7   | connectionState 'failed' → same as ICE failure                              | PASS   |
+| 8   | data-channel 'close' → auto-reconnect fires                                 | PASS   |
+| 9   | data-channel 'error' → auto-reconnect fires                                 | PASS   |
+| 10  | window.online cancels pending timer, fires reconnect immediately            | PASS   |
+| 11  | retry() clears fallbackReason and starts a fresh session                    | PASS   |
+| 12  | retry() resets the reconnect budget (future drop auto-reconnects once more) | PASS   |
 
 **12/12 PASS**
 
 ### Mobile hook — `useOraRealtimeVoiceNative.ts`
+
 File: `artifacts/ora-mobile/hooks/__tests__/ora-mobile-reconnect.test.ts`
 Run: `pnpm --filter @workspace/ora-mobile exec vitest run --config vitest.config.hooks.ts`
 
-| # | Test | Status |
-|---|------|--------|
-| 1 | starts successfully → 'listening', networkQuality 'good' | PASS |
-| 2 | ICE drop → networkQuality 'reconnecting', no fallbackReason | PASS |
-| 3 | fires exactly ONE mint for auto-reconnect after RECONNECT_DELAY_MS | PASS |
-| 4 | auto-reconnect mint error → networkQuality 'legacy', onFallback called | PASS |
-| 5 | second drop goes straight to legacy | PASS |
-| 6 | connectionState 'failed' → same as ICE failure | PASS |
-| 7 | data-channel 'close' → auto-reconnect fires | PASS |
-| 8 | data-channel 'error' → auto-reconnect fires | PASS |
-| 9 | NetInfo event cancels pending timer, fires reconnect immediately | PASS |
-| 10 | NetInfo event does NOT fire reconnect a second time (one-shot latch) | PASS |
+| #   | Test                                                                   | Status |
+| --- | ---------------------------------------------------------------------- | ------ |
+| 1   | starts successfully → 'listening', networkQuality 'good'               | PASS   |
+| 2   | ICE drop → networkQuality 'reconnecting', no fallbackReason            | PASS   |
+| 3   | fires exactly ONE mint for auto-reconnect after RECONNECT_DELAY_MS     | PASS   |
+| 4   | auto-reconnect mint error → networkQuality 'legacy', onFallback called | PASS   |
+| 5   | second drop goes straight to legacy                                    | PASS   |
+| 6   | connectionState 'failed' → same as ICE failure                         | PASS   |
+| 7   | data-channel 'close' → auto-reconnect fires                            | PASS   |
+| 8   | data-channel 'error' → auto-reconnect fires                            | PASS   |
+| 9   | NetInfo event cancels pending timer, fires reconnect immediately       | PASS   |
+| 10  | NetInfo event does NOT fire reconnect a second time (one-shot latch)   | PASS   |
 
 **10/10 PASS**
 
 ### UI wiring assertions — `ora-panel.tsx`
+
 File: `artifacts/mustaflow/src/pages/__tests__/ora-realtime-reconnect-ui.test.ts`
 
-| # | Assertion | Status |
-|---|-----------|--------|
-| 1 | quality-dot gated on reconnecting while voiceConvActive | PASS |
-| 2 | 'reconnecting' → pulsing amber dot, label "Reconnecting live voice…" | PASS |
-| 3 | 'good' → green dot, no pulse | PASS |
-| 4 | 'legacy' → grey dot "Using basic voice mode" | PASS |
-| 5 | qualityDot.label rendered as aria-label for accessibility | PASS |
-| 6 | fallbackNotice visible only when voiceTransport = 'fallback' and not dismissed | PASS |
-| 7 | default fallback string when fallbackReason is null | PASS |
-| 8 | Retry button shown exactly when networkQuality = 'legacy' | PASS |
-| 9 | fallbackNotice (carrying fallbackReason) passed to OraVoiceModeButton | PASS |
-| 10 | networkQuality exposed from hook return value | PASS |
-| 11 | fallbackReason exposed from hook return value | PASS |
-| 12 | retry() exposed for UI rebuild action | PASS |
-| 13 | 'reconnecting' string present in hook | PASS |
-| 14 | 'legacy' string present in hook | PASS |
+| #   | Assertion                                                                      | Status |
+| --- | ------------------------------------------------------------------------------ | ------ |
+| 1   | quality-dot gated on reconnecting while voiceConvActive                        | PASS   |
+| 2   | 'reconnecting' → pulsing amber dot, label "Reconnecting live voice…"           | PASS   |
+| 3   | 'good' → green dot, no pulse                                                   | PASS   |
+| 4   | 'legacy' → grey dot "Using basic voice mode"                                   | PASS   |
+| 5   | qualityDot.label rendered as aria-label for accessibility                      | PASS   |
+| 6   | fallbackNotice visible only when voiceTransport = 'fallback' and not dismissed | PASS   |
+| 7   | default fallback string when fallbackReason is null                            | PASS   |
+| 8   | Retry button shown exactly when networkQuality = 'legacy'                      | PASS   |
+| 9   | fallbackNotice (carrying fallbackReason) passed to OraVoiceModeButton          | PASS   |
+| 10  | networkQuality exposed from hook return value                                  | PASS   |
+| 11  | fallbackReason exposed from hook return value                                  | PASS   |
+| 12  | retry() exposed for UI rebuild action                                          | PASS   |
+| 13  | 'reconnecting' string present in hook                                          | PASS   |
+| 14  | 'legacy' string present in hook                                                | PASS   |
 
 **14/14 PASS**
 
@@ -113,12 +116,12 @@ File: `artifacts/mustaflow/src/pages/__tests__/ora-realtime-reconnect-ui.test.ts
 
 ## UI States — What the User Sees
 
-| networkQuality | Quality dot | Fallback notice | Retry button |
-|---------------|-------------|-----------------|--------------|
-| `good` | Green, static | Hidden | Hidden |
-| `degraded` | Amber, pulsing | Hidden | Hidden |
-| `reconnecting` | Amber, pulsing | Hidden | Hidden |
-| `legacy` | Grey, static | Visible (fallbackReason or default text) | Visible |
+| networkQuality | Quality dot    | Fallback notice                          | Retry button |
+| -------------- | -------------- | ---------------------------------------- | ------------ |
+| `good`         | Green, static  | Hidden                                   | Hidden       |
+| `degraded`     | Amber, pulsing | Hidden                                   | Hidden       |
+| `reconnecting` | Amber, pulsing | Hidden                                   | Hidden       |
+| `legacy`       | Grey, static   | Visible (fallbackReason or default text) | Visible      |
 
 The quality dot is hidden when voiceTransport is `"fallback"` AND networkQuality
 is NOT `"reconnecting"` (i.e., the session is fully in legacy mode and stable).
@@ -159,9 +162,9 @@ is NOT `"reconnecting"` (i.e., the session is fully in legacy mode and stable).
   - Expected: NetInfo fires → reconnect attempt fires immediately on restore.
   - Expected: reconnect succeeds → back to listening state.
 - [ ] **Connection chip ("Connection issues?")**: After a failed reconnect (or
-  repeated audio stops), confirm chip appears giving the user an option to retry.
+      repeated audio stops), confirm chip appears giving the user an option to retry.
 - [ ] **Quality dot colors**: Verify the mobile quality dot shows amber while
-  reconnecting and grey once in legacy fallback.
+      reconnecting and grey once in legacy fallback.
 
 ### Acceptance Criteria
 
@@ -179,21 +182,21 @@ Do NOT pre-fill this table. Each row must record an actual observed result and a
 link to evidence (screenshot, console log, or screen recording). An unfilled row
 means that scenario is NOT certified.
 
-| Scenario | Platform | Date | Tester | Result (PASS/FAIL) | Evidence link |
-|----------|----------|------|--------|--------------------|---------------|
-| Basic flow (green dot on start) | Web | | | | |
-| Simulated drop → reconnect → recover | Web | | | | |
-| Retry after legacy rebuilds session | Web | | | | |
-| Double drop → no double reconnect | Web | | | | |
-| window.online cancels timer, reconnects early | Web | | | | |
-| Basic flow (connection indicator) | iOS | | | | |
-| Airplane-mode drop → NetInfo reconnect | iOS | | | | |
-| Connection chip appears after failed reconnect | iOS | | | | |
-| Quality dot colors (amber→grey) | iOS | | | | |
-| Basic flow (connection indicator) | Android | | | | |
-| Airplane-mode drop → NetInfo reconnect | Android | | | | |
-| Connection chip appears after failed reconnect | Android | | | | |
-| Quality dot colors (amber→grey) | Android | | | | |
+| Scenario                                       | Platform | Date | Tester | Result (PASS/FAIL) | Evidence link |
+| ---------------------------------------------- | -------- | ---- | ------ | ------------------ | ------------- |
+| Basic flow (green dot on start)                | Web      |      |        |                    |               |
+| Simulated drop → reconnect → recover           | Web      |      |        |                    |               |
+| Retry after legacy rebuilds session            | Web      |      |        |                    |               |
+| Double drop → no double reconnect              | Web      |      |        |                    |               |
+| window.online cancels timer, reconnects early  | Web      |      |        |                    |               |
+| Basic flow (connection indicator)              | iOS      |      |        |                    |               |
+| Airplane-mode drop → NetInfo reconnect         | iOS      |      |        |                    |               |
+| Connection chip appears after failed reconnect | iOS      |      |        |                    |               |
+| Quality dot colors (amber→grey)                | iOS      |      |        |                    |               |
+| Basic flow (connection indicator)              | Android  |      |        |                    |               |
+| Airplane-mode drop → NetInfo reconnect         | Android  |      |        |                    |               |
+| Connection chip appears after failed reconnect | Android  |      |        |                    |               |
+| Quality dot colors (amber→grey)                | Android  |      |        |                    |               |
 
 **Certification rule:** Talk-to-Ora poor-network behavior is production-certified
 only when every row above is PASS with attached evidence. Until then the release
@@ -210,8 +213,8 @@ the Vite/ESM jsdom test environment (require throws ReferenceError in ESM scope)
 Two exported test-seam functions bypass the guarded require:
 
 ```typescript
-_setWebRTCModuleForTest(mod)   // inject fake module, set loadAttempted=true
-_resetWebRTCCacheForTest()     // reset loadAttempted=false, cachedModule=null
+_setWebRTCModuleForTest(mod); // inject fake module, set loadAttempted=true
+_resetWebRTCCacheForTest(); // reset loadAttempted=false, cachedModule=null
 ```
 
 These are clearly marked `TEST-SEAM ONLY` in source and are never called in
