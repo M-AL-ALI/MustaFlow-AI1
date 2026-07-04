@@ -1,0 +1,55 @@
+If the issue is still there, then Replit’s task is not complete, even if the code is merged. They measured/optimized first token, but your users are complaining about the whole Instant-mode feeling: Ora should begin fast and continue fast every time Instant is selected.
+Tell Replit this:
+“Users still report Ora Instant mode is slow after the TTFT work, so the issue is not resolved. Do not close this as complete. We need to optimize the full Instant response experience across authenticated website Ora, landing-page Ask Ora bubble, and Ora Mobile. Do not change the word-by-word streaming animation/cadence. The problem is that Instant mode still feels like 3–5 seconds before users get useful output. We need metrics beyond first token: tapToFirstTokenMs, tapToFirstSentenceMs, tapToCompleteShortAnswerMs, total tokens, tokens/sec, fallback path, model/provider, surface, and mode. For Instant mode, measure p50/p95 on real production traffic, not only one test request.
+Required behavior: when the user selects Instant mode, Ora must use the fastest possible path every time unless the request explicitly requires research, files, image/video generation, or Deep reasoning. For simple prompts like ‘hi’, ‘what is 2+2’, ‘summarize this in one sentence’, ‘write a quick reply’, or normal Q&A, Ora should not run expensive classifiers, deep context, web search, large memory/history loading, or slow model routing before answering. It should use a dedicated Instant Fast Path.
+Please implement/verify these items:
+Define Instant-mode SLA
+Target first visible word: preferably under 500–800ms, hard target under 1s on healthy network.
+Target first useful sentence: under 1.5s for simple prompts.
+Target complete short answer: under 2s for simple prompts.
+If any request exceeds this, logs must identify the slow bucket.
+
+Add full-response diagnostics, not just TTFT
+Client and server must log shared request ID, surface, mode, transport, fallback status, model/provider, route tier, first token time, first sentence time, completion time, token count, and tokens/sec.
+Add surface values: web-authenticated, web-landing, mobile.
+Mobile Settings diagnostics should show whether it used streaming or fallback and the full timing.
+
+Stop non-streaming fallback for normal Instant chat
+Find why /api/public-ai/chat is still being hit.
+Normal Instant chat must use /api/public-ai/chat/stream first on website and mobile.
+/chat should only be true fallback or specialist route.
+If mobile falls back, show/log exact reason.
+
+Dedicated Instant Fast Path
+For Instant simple prompts: bypass classifier entirely, not just timeout it.
+Do not start slow classifier calls in the background if they waste provider capacity.
+Use deterministic gates for: no attachments, no image/file/video request, no research/current-events request, no Deep mode.
+Use the fastest reliable model/provider for this path.
+Keep answers concise by default: direct answer first, short explanation only if needed.
+Do not load full memory/history if it blocks response. Use cached/light context only.
+
+Model/provider benchmark
+Current model TTFT is still too slow if server TTFT is 1.0–1.7s.
+Benchmark all available fast models through the real /chat/stream path.
+Pick the fastest stable model for Instant mode.
+Keep higher-quality/slower models for Deep, research, files, image/video, complex analysis.
+
+Prewarm everything
+Prewarm /api/public-ai/session on website landing bubble, authenticated Ora, and mobile.
+Prewarm auth/session after app launch/sign-in.
+Keep provider connections warm if possible.
+Avoid cold-start and first-send penalty.
+
+Do not break quality routes
+Deep mode can stay slower and higher quality.
+Research/search can stay slower.
+File/image/video analysis can stay slower.
+This task is only Instant normal chat speed.
+
+Acceptance tests
+Test 20+ simple Instant prompts on all three surfaces.
+Report p50 and p95 for first token, first sentence, full short answer.
+Must verify website /ora, landing Ask Ora bubble, and Ora Mobile TestFlight.
+Do not mark complete until the actual user-facing mobile and website behavior feels fast, not just server logs.
+
+The previous work focused too much on first token. Now the requirement is: Instant mode must feel instant for the whole short response, consistently across website and mobile. If achieving under 1s complete response is impossible with the current provider, switch Instant mode to a faster provider/model or return a concise first answer immediately and continue optional detail after.”
