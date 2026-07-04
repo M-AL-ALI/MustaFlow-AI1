@@ -768,6 +768,22 @@ export function isRealtimeVoiceNativeAvailable(): boolean {
   return loadWebRTC() != null;
 }
 
+/**
+ * TEST-SEAM ONLY — never call in production code.
+ * Bypasses the guarded require() so unit tests can inject a fake WebRTC module
+ * without depending on Metro's CJS require or a native build.
+ */
+export function _setWebRTCModuleForTest(mod: WebRTCModuleType | null): void {
+  cachedModule = mod;
+  loadAttempted = true;
+}
+
+/** TEST-SEAM ONLY — resets loadWebRTC() cache between tests. */
+export function _resetWebRTCCacheForTest(): void {
+  cachedModule = null;
+  loadAttempted = false;
+}
+
 // Minimal structural types for the react-native-webrtc objects we touch. The
 // package ships its own types, but the event payloads are loosely typed; these
 // narrow interfaces keep the hook strict without leaking `any`.
@@ -2198,6 +2214,7 @@ export function useOraRealtimeVoiceNative(
     [
       isSupported,
       fullTeardown,
+      handleConnectionDrop,
       handleServerEvent,
       clearDurationTimer,
       sendEvent,

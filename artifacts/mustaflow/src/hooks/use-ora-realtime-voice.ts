@@ -2148,6 +2148,7 @@ export function useOraRealtimeVoice(
     [
       isSupported,
       fullTeardown,
+      handleConnectionDrop,
       handleServerEvent,
       clearDurationTimer,
       sendEvent,
