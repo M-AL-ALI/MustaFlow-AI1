@@ -1794,32 +1794,13 @@ export default function OraChatScreen() {
     router.push("/memory");
   }, [router]);
 
-  const toggleTalkMode = useCallback(() => {
-    const next = !talkMode;
-    setTalkMode(next);
-    talkModeRef.current = next;
-    if (!next) {
-      cancelTalkRestart();
-      // Exiting Talk mode: stop a realtime session if one is running OR still
-      // connecting, so a mid-connect start() can't open the mic after exit.
-      stopRealtimeSession();
-      // Stop any TTS that is playing.
-      if (speakingId) {
-        try {
-          playerRef.current?.remove();
-        } catch {
-          /* ignore */
-        }
-        playerRef.current = null;
-        setSpeakingId(null);
-      }
-      // If the legacy mic is active, stop it (user is leaving voice mode).
-      if (recording) void stopRecordingRef.current();
-      return;
-    }
-
-    // Entering Talk mode. Clear any stale fallback warning and stop legacy audio
-    // that could fight the realtime AVAudioSession.
+  // Open (or re-open) a realtime live-voice session and wire the screen-level
+  // realtimeActive state to the result. Extracted from toggleTalkMode so the
+  // Retry button (shown after a poor-network legacy fallback) can rebuild the
+  // session with the exact same connect + fallback handling.
+  const beginRealtimeSession = useCallback(() => {
+    // Clear any stale fallback warning and stop legacy audio that could fight the
+    // realtime AVAudioSession.
     setVoiceError(null);
     setTalkModeMuted(false);
     talkModeMutedRef.current = false;
@@ -1911,16 +1892,44 @@ export default function OraChatScreen() {
       if (recordingRef.current) void stopRecordingRef.current();
       scheduleTalkRestart(300);
     }
-  }, [
-    cancelTalkRestart,
-    conversationId,
-    language,
-    recording,
-    scheduleTalkRestart,
-    speakingId,
-    stopRealtimeSession,
-    talkMode,
-  ]);
+  }, [conversationId, language, scheduleTalkRestart, speakingId]);
+
+  const toggleTalkMode = useCallback(() => {
+    const next = !talkMode;
+    setTalkMode(next);
+    talkModeRef.current = next;
+    if (!next) {
+      cancelTalkRestart();
+      // Exiting Talk mode: stop a realtime session if one is running OR still
+      // connecting, so a mid-connect start() can't open the mic after exit.
+      stopRealtimeSession();
+      // Stop any TTS that is playing.
+      if (speakingId) {
+        try {
+          playerRef.current?.remove();
+        } catch {
+          /* ignore */
+        }
+        playerRef.current = null;
+        setSpeakingId(null);
+      }
+      // If the legacy mic is active, stop it (user is leaving voice mode).
+      if (recording) void stopRecordingRef.current();
+      return;
+    }
+    // Entering Talk mode: open the realtime session.
+    beginRealtimeSession();
+  }, [beginRealtimeSession, cancelTalkRestart, recording, speakingId, stopRealtimeSession, talkMode]);
+
+  // Retry live voice after a poor-network legacy fallback: re-open the realtime
+  // session from scratch (start() resets the single-attempt reconnect budget).
+  const retryRealtimeVoice = useCallback(() => {
+    if (!talkModeRef.current) {
+      setTalkMode(true);
+      talkModeRef.current = true;
+    }
+    beginRealtimeSession();
+  }, [beginRealtimeSession]);
 
   const interruptTalkMode = useCallback(() => {
     try {
@@ -2705,6 +2714,25 @@ export default function OraChatScreen() {
               >
                 {voiceError}
               </Text>
+              {realtimeVoice.networkQuality === "legacy" && realtimeVoice.isSupported && (
+                <Pressable
+                  onPress={retryRealtimeVoice}
+                  hitSlop={6}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: tierAccent + "59",
+                    borderRadius: 10,
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                  }}
+                >
+                  <Text
+                    style={{ color: tierAccent, fontSize: 12, fontFamily: "Inter_600SemiBold" }}
+                  >
+                    Retry
+                  </Text>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => setVoiceError(null)}
                 accessibilityLabel="Dismiss voice error"
@@ -2782,12 +2810,100 @@ export default function OraChatScreen() {
                     {talkStatusSubtitle}
                   </Text>
                 </View>
+                {realtimeOn &&
+                  (realtimeVoice.networkQuality === "reconnecting" ? (
+                    <ActivityIndicator size="small" color="#f0a742" />
+                  ) : (
+                    <View
+                      accessibilityLabel={`Connection quality: ${realtimeVoice.networkQuality}`}
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor:
+                          realtimeVoice.networkQuality === "good"
+                            ? "#3fb950"
+                            : realtimeVoice.networkQuality === "degraded"
+                              ? "#f0a742"
+                              : c.mutedForeground,
+                      }}
+                    />
+                  ))}
                 {talkListening ? (
                   <OraLiveDot color={VOICE_LISTEN_RED} size={8} />
                 ) : talkConnecting || talkThinking ? (
                   <ActivityIndicator size="small" color={tierAccent} />
                 ) : null}
               </View>
+
+              {/* Connection-issue chip — repeated audio drops on a live session */}
+              {realtimeOn && realtimeVoice.connectionIssue && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    borderWidth: 1,
+                    borderColor: "#f0a742" + "59",
+                    backgroundColor: "#f0a742" + "14",
+                    borderRadius: 12,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                  }}
+                >
+                  <Text
+                    style={{
+                      flex: 1,
+                      color: c.foreground,
+                      fontSize: 12,
+                      fontFamily: "Inter_600SemiBold",
+                    }}
+                  >
+                    Connection issues?
+                  </Text>
+                  <Pressable
+                    onPress={retryRealtimeVoice}
+                    hitSlop={6}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: tierAccent + "59",
+                      borderRadius: 10,
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                    }}
+                  >
+                    <Text
+                      style={{ color: tierAccent, fontSize: 12, fontFamily: "Inter_600SemiBold" }}
+                    >
+                      Call back
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      realtimeVoiceRef.current?.stop();
+                      scheduleTalkRestart(300);
+                    }}
+                    hitSlop={6}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      borderRadius: 10,
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: c.mutedForeground,
+                        fontSize: 12,
+                        fontFamily: "Inter_600SemiBold",
+                      }}
+                    >
+                      Switch to basic
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
 
               {/* Legacy mic waveform — only the fallback loop records via expo-audio */}
               {recording && (

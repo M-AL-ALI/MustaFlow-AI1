@@ -43,6 +43,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NativeModules } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 import { setAudioModeAsync } from "expo-audio";
 import {
   createRealtimeSession,
@@ -68,6 +69,14 @@ export type RealtimeVoiceState =
   | "unsupported"
   | "permission_denied"
   | "ended";
+
+/**
+ * Coarse connection-health signal derived from the diagnostics ring buffer.
+ * "good" = stable; "degraded" = transient trouble (repeated audio stops or an
+ * ICE `disconnected`); "reconnecting" = the single automatic recovery attempt is
+ * in flight; "legacy" = realtime was abandoned for the basic voice loop.
+ */
+export type NetworkQuality = "good" | "degraded" | "reconnecting" | "legacy";
 
 export interface RealtimeStartContext extends RealtimeSessionContext {
   /**
@@ -115,10 +124,28 @@ export interface UseOraRealtimeVoiceNativeReturn {
    */
   start: (
     ctx: RealtimeStartContext,
+    opts?: { isReconnect?: boolean },
   ) => Promise<{ started: boolean; reason: string | null; overLimit?: boolean }>;
   stop: () => void;
   interrupt: () => void;
   toggleMute: () => void;
+  /**
+   * Coarse connection-health signal for the UI quality dot. Derived from the
+   * diagnostics ring buffer; never sent to any server.
+   */
+  networkQuality: NetworkQuality;
+  /**
+   * True after >= 2 `output_audio_buffer.stopped` events within 30 s without a
+   * matching `started` — used to surface the "Connection issues?" chip. Clears
+   * when quality recovers.
+   */
+  connectionIssue: boolean;
+  /**
+   * Manually restart a fresh realtime session after a fallback (the Retry
+   * button). Resets the single-attempt reconnect guard and re-mints from
+   * scratch using the last start context.
+   */
+  retry: () => void;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -158,6 +185,20 @@ const OUTPUT_STOP_DEBOUNCE_MS = 600;
 // "listening". 15 s sits comfortably above real model latency while preventing
 // an indefinite stuck state caused by a dropped data-channel message.
 const THINKING_WATCHDOG_MS = 15_000;
+
+// ─── Poor-network resilience tuning (mirrored in the website hook) ───────────
+// On the first connection drop the app waits this long before the single
+// automatic reconnect attempt, giving a flaky link a moment to settle. A NetInfo
+// reachability-restored event cancels the wait and fires the reconnect at once.
+const RECONNECT_DELAY_MS = 2_000;
+// Sliding window + threshold for the "Connection issues?" instability chip: this
+// many `output_audio_buffer.stopped` events (without a matching `started`) inside
+// the window flags a degraded connection.
+const AUDIO_STOP_WINDOW_MS = 30_000;
+const AUDIO_STOP_THRESHOLD = 2;
+// The diagnostics ring buffer keeps only the most recent events; it is used only
+// to derive UI state and optional debug logs and is NEVER sent to any server.
+const DIAG_RING_SIZE = 20;
 
 // ─── Transcript validity filter (mirrored in the website hook) ───────────────
 // Pure + surface-agnostic. Keep BYTE-FOR-BYTE identical to the copy in
@@ -746,6 +787,7 @@ interface DataChannelLike {
 }
 interface PeerConnectionLike {
   iceConnectionState: string;
+  connectionState?: string;
   addTrack: (track: RTCTrackLike, stream: MediaStreamLike) => void;
   createDataChannel: (label: string) => DataChannelLike;
   createOffer: (options?: Record<string, unknown>) => Promise<{ sdp?: string; type: string }>;
@@ -772,6 +814,8 @@ export function useOraRealtimeVoiceNative(
   const [interimAssistantTranscript, setInterimAssistantTranscript] = useState("");
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [overLimit, setOverLimit] = useState<RealtimeOverLimit | null>(null);
+  const [networkQuality, setNetworkQuality] = useState<NetworkQuality>("good");
+  const [connectionIssue, setConnectionIssue] = useState(false);
 
   const onUserRef = useRef(options.onUserTranscript);
   onUserRef.current = options.onUserTranscript;
@@ -795,13 +839,37 @@ export function useOraRealtimeVoiceNative(
   const userTextRef = useRef("");
   const assistantTextRef = useRef("");
   const activeRef = useRef(false);
-  // Monotonically increasing session generation. Incremented by teardown() (and
+  // Monotonically increasing session generation. Incremented by fullTeardown() (and
   // captured by each start()) so an in-flight start() can tell whether a rapid
   // stop -> restart has superseded it. activeRef alone is ambiguous: a new start
   // sets it true again, which would let a stale async start() falsely treat
   // itself as current and clobber the shared stream/pc/dc refs.
   const startGenerationRef = useRef(0);
   const mutedRef = useRef(false);
+
+  // ── Poor-network resilience (diagnostics + single-retry reconnect) ──────────
+  // diagRef: bounded ring buffer of the most recent lifecycle events. Used only
+  // to derive UI state / debug logs; NEVER sent to any server.
+  const diagRef = useRef<{ at: number; event: string; detail?: Record<string, unknown> }[]>([]);
+  // reconnectAttemptedRef: guards the "only ONE automatic reconnect" rule — once
+  // true, the next drop goes straight to legacy fallback. Reset on a fresh
+  // (non-reconnect) start() and on a manual retry().
+  const reconnectAttemptedRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // reconnectConsumedRef: one-shot latch so the backoff timer and a NetInfo
+  // reachability-restored event can never both fire the same reconnect.
+  const reconnectConsumedRef = useRef(false);
+  // pendingReconnectFireRef: set while waiting out RECONNECT_DELAY_MS so a
+  // NetInfo reachability-restored event can trigger the reconnect immediately.
+  const pendingReconnectFireRef = useRef<(() => void) | null>(null);
+  // lastCtxRef: the most recent start context, replayed when reconnecting/retrying.
+  const lastCtxRef = useRef<RealtimeStartContext | null>(null);
+  // audioStopTimestampsRef: timestamps of recent unmatched output_audio stops,
+  // pruned to AUDIO_STOP_WINDOW_MS, feeding the instability chip.
+  const audioStopTimestampsRef = useRef<number[]>([]);
+  // networkQualityRef: mirrors the networkQuality state for synchronous reads in
+  // event handlers (which run outside React's render).
+  const networkQualityRef = useRef<NetworkQuality>("good");
 
   // ── Barge-in confirmation + transcript-quality guards (mirror of the web hook) ─
   // assistantResponseActiveRef: Ora has a response in flight (response.created ->
@@ -847,7 +915,7 @@ export function useOraRealtimeVoiceNative(
   // Best-effort end beacon: tell the server the live-voice session ended so it
   // finalizes the charge now instead of waiting for stale-session expiry. The
   // server clock is authoritative and stale expiry is the safety net if this
-  // never lands, so this never blocks teardown and never throws. Reports only the
+  // never lands, so this never blocks fullTeardown and never throws. Reports only the
   // session id + client-measured elapsed seconds — never audio/transcript.
   const finalizeSession = useCallback(() => {
     const id = realtimeSessionIdRef.current;
@@ -863,7 +931,7 @@ export function useOraRealtimeVoiceNative(
         /* best-effort — stale-session expiry finalizes if this never lands */
       });
     } catch {
-      /* never let teardown throw */
+      /* never let fullTeardown throw */
     }
   }, []);
 
@@ -875,13 +943,57 @@ export function useOraRealtimeVoiceNative(
     pendingBargeInRef.current = false;
   }, []);
 
-  const teardown = useCallback(() => {
+  // ── Diagnostics ring buffer + derived connection-quality helpers ────────────
+  // recordDiag appends to a bounded in-memory ring (last DIAG_RING_SIZE events).
+  // It is used ONLY to derive UI state and optional debug logs — never sent to a
+  // server. Kept privacy-safe: callers pass counts/reasons, never audio/transcript.
+  const recordDiag = useCallback((event: string, detail?: Record<string, unknown>) => {
+    const buf = diagRef.current;
+    buf.push({ at: Date.now(), event, detail });
+    if (buf.length > DIAG_RING_SIZE) buf.splice(0, buf.length - DIAG_RING_SIZE);
+  }, []);
+
+  const applyNetworkQuality = useCallback((q: NetworkQuality) => {
+    networkQualityRef.current = q;
+    setNetworkQuality(q);
+  }, []);
+
+  // Repeated audio stops without a matching restart inside the sliding window mean
+  // the media path is faltering: raise the instability chip + degrade the dot.
+  const noteAudioStop = useCallback(() => {
+    const now = Date.now();
+    const recent = audioStopTimestampsRef.current.filter((t) => now - t < AUDIO_STOP_WINDOW_MS);
+    recent.push(now);
+    audioStopTimestampsRef.current = recent;
+    if (recent.length >= AUDIO_STOP_THRESHOLD) {
+      setConnectionIssue(true);
+      if (networkQualityRef.current === "good") applyNetworkQuality("degraded");
+    }
+  }, [applyNetworkQuality]);
+
+  // Audio is flowing again (a clean start or response.done): clear the instability
+  // signal. Never overrides an in-flight reconnect/legacy state.
+  const noteAudioProgress = useCallback(() => {
+    audioStopTimestampsRef.current = [];
+    setConnectionIssue(false);
+    if (networkQualityRef.current === "degraded") applyNetworkQuality("good");
+  }, [applyNetworkQuality]);
+
+  const fullTeardown = useCallback(() => {
     activeRef.current = false;
     // Invalidate any in-flight start(): its captured generation no longer matches.
     startGenerationRef.current += 1;
     clearDurationTimer();
     clearHeartbeatTimer();
     clearBargeInTimer();
+    // Cancel any pending backoff reconnect so a stale timer can never resurrect a
+    // superseded session. Instability tracking resets with the connection.
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    pendingReconnectFireRef.current = null;
+    audioStopTimestampsRef.current = [];
     finalizeSession();
     if (outputStopDebounceRef.current) {
       clearTimeout(outputStopDebounceRef.current);
@@ -937,16 +1049,97 @@ export function useOraRealtimeVoiceNative(
     remoteTrackRef.current = null;
   }, [clearDurationTimer, clearHeartbeatTimer, clearBargeInTimer, finalizeSession]);
 
+  // start() is defined below but the reconnect helpers need to call it, so it is
+  // reached through a ref to break the declaration cycle.
+  const startRef = useRef<UseOraRealtimeVoiceNativeReturn["start"] | null>(null);
+
+  // Give up on realtime and hand control to the legacy transcribe -> chat -> tts
+  // loop. The dot goes grey ("legacy"); the caller shows the Retry button.
+  const enterLegacyFallback = useCallback(
+    (reason: string) => {
+      recordDiag("legacy_fallback", { reason });
+      fullTeardown();
+      setState("idle");
+      setFallbackReason(reason);
+      setConnectionIssue(false);
+      applyNetworkQuality("legacy");
+      onFallbackRef.current?.(reason);
+    },
+    [fullTeardown, recordDiag, applyNetworkQuality],
+  );
+
+  // The single automatic recovery attempt: fully tear down the dropped session,
+  // wait out the backoff (cancellable by NetInfo), then re-mint + rebuild from
+  // scratch. Only ONE attempt — a second drop routes straight to legacy.
+  const scheduleReconnect = useCallback(
+    (reason: string) => {
+      const ctx = lastCtxRef.current;
+      if (!ctx) {
+        enterLegacyFallback(reason);
+        return;
+      }
+      reconnectAttemptedRef.current = true;
+      reconnectConsumedRef.current = false;
+      recordDiag("reconnect_scheduled", { reason, delay_ms: RECONNECT_DELAY_MS });
+      // fullTeardown clears the old pc/dc/mic + fires the /end beacon for the old
+      // token, so the reconnect mints a genuinely fresh session.
+      fullTeardown();
+      applyNetworkQuality("reconnecting");
+      setState("connecting");
+
+      const fire = () => {
+        if (reconnectConsumedRef.current) return;
+        reconnectConsumedRef.current = true;
+        pendingReconnectFireRef.current = null;
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        recordDiag("reconnect_firing");
+        void startRef.current?.(ctx, { isReconnect: true }).then((result) => {
+          if (result?.started) {
+            recordDiag("reconnect_succeeded");
+            applyNetworkQuality("good");
+          } else if (!result?.overLimit) {
+            // A genuine reconnect failure (not an out-of-minutes stop) drops to
+            // legacy. overLimit already surfaced its own graceful state.
+            enterLegacyFallback(reason);
+          }
+        });
+      };
+
+      pendingReconnectFireRef.current = fire;
+      reconnectTimerRef.current = setTimeout(fire, RECONNECT_DELAY_MS);
+    },
+    [enterLegacyFallback, fullTeardown, recordDiag, applyNetworkQuality],
+  );
+
+  // A mid-call connection drop (ICE failed/disconnected, data-channel close/error,
+  // or an unrecoverable connection-state change). First drop -> one auto-reconnect;
+  // any subsequent drop -> legacy fallback.
+  const handleConnectionDrop = useCallback(
+    (reason: string) => {
+      if (!activeRef.current) return;
+      recordDiag("connection_drop", { reason, reconnect_attempted: reconnectAttemptedRef.current });
+      if (reconnectAttemptedRef.current) {
+        enterLegacyFallback(reason);
+      } else {
+        scheduleReconnect(reason);
+      }
+    },
+    [enterLegacyFallback, scheduleReconnect, recordDiag],
+  );
+
   const stop = useCallback(() => {
     if (!activeRef.current && state === "idle") return;
-    teardown();
+    fullTeardown();
     setInterimUserTranscript("");
     setInterimAssistantTranscript("");
     setRemainingSeconds(null);
     userTextRef.current = "";
     assistantTextRef.current = "";
     setState((s) => (s === "error" || s === "unsupported" ? s : "ended"));
-  }, [teardown, state]);
+  }, [fullTeardown, state]);
 
   // Beat the per-plan live-voice budget on a cadence: charge the elapsed seconds
   // for this session and re-sync the displayed countdown to the server budget
@@ -1008,7 +1201,7 @@ export function useOraRealtimeVoiceNative(
       // Metering outage — fall back to the legacy loop (text + TTS is metered by
       // Ora chat quotas, not the realtime budget) instead of stranding the user.
       const reason = "Live voice is temporarily unavailable. Using basic voice mode.";
-      teardown();
+      fullTeardown();
       setInterimUserTranscript("");
       setInterimAssistantTranscript("");
       setRemainingSeconds(null);
@@ -1020,7 +1213,7 @@ export function useOraRealtimeVoiceNative(
 
     // Budget exhausted — end gracefully with the reset time. Do NOT fall back
     // (that would bypass the per-plan voice cap).
-    teardown();
+    fullTeardown();
     setInterimUserTranscript("");
     setInterimAssistantTranscript("");
     setRemainingSeconds(0);
@@ -1031,7 +1224,7 @@ export function useOraRealtimeVoiceNative(
       upgradeAvailable: false,
     });
     setState("ended");
-  }, [teardown]);
+  }, [fullTeardown]);
 
   const sendEvent = useCallback((event: Record<string, unknown>) => {
     const dc = dcRef.current;
@@ -1226,10 +1419,10 @@ export function useOraRealtimeVoiceNative(
           userTextRef.current = "";
           setInterimUserTranscript("");
           // Gate finalized-transcript persistence on activeRef: a final event can
-          // still arrive on the data channel AFTER stop()/teardown() (e.g. the user
+          // still arrive on the data channel AFTER stop()/fullTeardown() (e.g. the user
           // switched conversation), and persisting it then would append to the new
-          // thread's messages — the wrong-thread bug. teardown() sets activeRef
-          // false, so a post-teardown event is dropped here.
+          // thread's messages — the wrong-thread bug. fullTeardown() sets activeRef
+          // false, so a post-fullTeardown event is dropped here.
           if (!activeRef.current) break;
           const trimmed = (finalText || "").trim();
           const focusMode = focusModeRef.current;
@@ -1324,6 +1517,7 @@ export function useOraRealtimeVoiceNative(
           assistantResponseActiveRef.current = true;
           assistantTextRef.current = "";
           setInterimAssistantTranscript("");
+          recordDiag("response.created", { focus_mode: focusModeRef.current });
           logVoiceDiag("response_created", {
             focus_mode: focusModeRef.current,
             response_create_sent_to_response_created_ms: deltaMs(t.responseCreateSentAt, createdAt),
@@ -1378,7 +1572,7 @@ export function useOraRealtimeVoiceNative(
             (typeof evt.text === "string" && evt.text) ||
             assistantTextRef.current;
           // See the user-transcript case: gate on activeRef so a late event after
-          // teardown can't append Ora's reply to a newly-switched conversation.
+          // fullTeardown can't append Ora's reply to a newly-switched conversation.
           const trimmed = (finalText || "").trim();
           if (activeRef.current && trimmed) {
             // Remember Ora's words so an immediate echoed user transcript can be
@@ -1418,6 +1612,10 @@ export function useOraRealtimeVoiceNative(
           } else {
             logVoiceDiag("output_audio_restarted", { output_cycles: t.outputCycles });
           }
+          recordDiag("output_audio_buffer.started", { output_cycles: t.outputCycles });
+          // Audio is flowing: the media path is healthy again, so clear any
+          // lingering instability signal.
+          noteAudioProgress();
           if (activeRef.current) setState("speaking");
           break;
         }
@@ -1439,6 +1637,13 @@ export function useOraRealtimeVoiceNative(
             output_cycles: t.outputCycles,
             output_started_to_output_stopped_ms: deltaMs(t.outputStartedAt, now),
           });
+          recordDiag("output_audio_buffer.stopped", { type, clientInitiated });
+          // A genuine (non-client-initiated) stop of a real `stopped` event feeds
+          // the instability window. Our own barge-in clears are intentional and
+          // never count as trouble.
+          if (type === "output_audio_buffer.stopped" && !clientInitiated) {
+            noteAudioStop();
+          }
           // A client-initiated clear (our own confirmed barge-in) is an intentional
           // hard stop — flip to "listening" now. Otherwise the realtime API can emit
           // a transient `stopped` mid-reply that is immediately followed by another
@@ -1488,6 +1693,10 @@ export function useOraRealtimeVoiceNative(
             output_stopped_to_response_done_ms: deltaMs(t.outputStoppedAt, doneAt),
             speech_stopped_to_response_done_ms: deltaMs(t.speechStoppedAt, doneAt),
           });
+          recordDiag("response.done", { output_cycles: t.outputCycles });
+          // A clean reply finished: the turn completed normally, so clear any
+          // instability signal accrued during the reply.
+          noteAudioProgress();
           if (assistantTextRef.current.trim()) {
             const trimmed = assistantTextRef.current.trim();
             if (activeRef.current) {
@@ -1509,6 +1718,7 @@ export function useOraRealtimeVoiceNative(
               (evt.error as { message?: string }).message) ||
             "";
           logVoiceDiag("model_error", { message: message || "unknown" });
+          recordDiag("response.error", { message: message || "unknown" });
           // If a model error arrives while we are mid-response (thinking or
           // speaking), response.done may never follow. Clear the active-response
           // flags and recover to "listening" so the user is never stranded. The
@@ -1539,7 +1749,22 @@ export function useOraRealtimeVoiceNative(
   const start = useCallback(
     async (
       ctx: RealtimeStartContext,
+      opts?: { isReconnect?: boolean },
     ): Promise<{ started: boolean; reason: string | null; overLimit?: boolean }> => {
+      const isReconnect = opts?.isReconnect === true;
+      // Remember the last context so an auto-reconnect or the Retry button can
+      // rebuild the session without the caller re-supplying it.
+      lastCtxRef.current = ctx;
+      // A fresh, user-initiated start resets the single-attempt reconnect budget
+      // and clears any prior instability/quality state. A reconnect keeps the
+      // budget consumed so a second drop routes straight to legacy.
+      if (!isReconnect) {
+        reconnectAttemptedRef.current = false;
+        reconnectConsumedRef.current = false;
+        setConnectionIssue(false);
+        applyNetworkQuality("good");
+        audioStopTimestampsRef.current = [];
+      }
       const mod = loadWebRTC();
       if (!isSupported || !mod) {
         const reason = "Live voice isn't available on this app version. Using basic voice mode.";
@@ -1547,7 +1772,7 @@ export function useOraRealtimeVoiceNative(
         setFallbackReason(reason);
         return { started: false, reason };
       }
-      if (activeRef.current) teardown();
+      if (activeRef.current) fullTeardown();
 
       setError(null);
       setFallbackReason(null);
@@ -1577,13 +1802,13 @@ export function useOraRealtimeVoiceNative(
       setOverLimit(null);
       setState("connecting");
       activeRef.current = true;
-      // Capture this start()'s generation. teardown() (stop / context switch /
+      // Capture this start()'s generation. fullTeardown() (stop / context switch /
       // background / duration cap / ICE drop / unmount) increments the shared
       // counter, so isCurrent() goes false the instant this attempt is superseded.
       const myGen = ++startGenerationRef.current;
       const isCurrent = () => startGenerationRef.current === myGen;
       // Release ONLY this attempt's own resources. A superseded start must never
-      // call the shared teardown() or null the shared refs: a newer session may
+      // call the shared fullTeardown() or null the shared refs: a newer session may
       // already own them. Track stop / pc close are idempotent.
       const releaseLocal = (s: MediaStreamLike | null, p: PeerConnectionLike | null) => {
         if (p) {
@@ -1621,7 +1846,7 @@ export function useOraRealtimeVoiceNative(
           voicePreset: ctx.voicePreset,
         });
       } catch (err) {
-        // Superseded/cancelled while minting: a newer start()/teardown() took
+        // Superseded/cancelled while minting: a newer start()/fullTeardown() took
         // over. Nothing is allocated yet, so bail quietly without touching shared
         // state (which a newer session may now own).
         if (!isCurrent()) return { started: false, reason: null };
@@ -1679,7 +1904,7 @@ export function useOraRealtimeVoiceNative(
 
       // The user may have left Talk mode / switched context / backgrounded during
       // the mint round-trip. Nothing is allocated yet, so bail quietly (no
-      // teardown — a newer session may own the shared state; no fallback warning).
+      // fullTeardown — a newer session may own the shared state; no fallback warning).
       if (!isCurrent()) return { started: false, reason: null };
 
       if (!mint.value) {
@@ -1767,14 +1992,19 @@ export function useOraRealtimeVoiceNative(
 
         activePc.addEventListener("iceconnectionstatechange", () => {
           const st = activePc.iceConnectionState;
-          // Only the current generation may flip to the legacy fallback. A stale
-          // connection's ICE change must never tear down a newer session.
+          // Only the current generation may react. A stale connection's ICE change
+          // must never tear down or reconnect a newer session.
           if ((st === "failed" || st === "disconnected") && isCurrent() && activeRef.current) {
-            const reason = "Live voice connection dropped. Using basic voice mode.";
-            teardown();
-            setState("idle");
-            setFallbackReason(reason);
-            onFallbackRef.current?.(reason);
+            recordDiag("ice_state", { state: st });
+            handleConnectionDrop("Live voice connection dropped.");
+          }
+        });
+
+        activePc.addEventListener("connectionstatechange", () => {
+          const st = activePc.connectionState;
+          if ((st === "failed" || st === "disconnected") && isCurrent() && activeRef.current) {
+            recordDiag("pc_state", { state: st });
+            handleConnectionDrop("Live voice connection lost.");
           }
         });
 
@@ -1818,7 +2048,18 @@ export function useOraRealtimeVoiceNative(
               });
             }
           }
+          recordDiag("datachannel.open");
           if (activeRef.current) setState("listening");
+        });
+        dc.addEventListener("close", () => {
+          if (!isCurrent() || !activeRef.current) return;
+          recordDiag("datachannel.close");
+          handleConnectionDrop("Live voice channel closed.");
+        });
+        dc.addEventListener("error", () => {
+          if (!isCurrent() || !activeRef.current) return;
+          recordDiag("datachannel.error");
+          handleConnectionDrop("Live voice channel error.");
         });
 
         // 4) Create the offer + exchange SDP with OpenAI directly.
@@ -1865,7 +2106,7 @@ export function useOraRealtimeVoiceNative(
             releaseLocal(stream, activePc);
             return { started: false, reason: null };
           }
-          teardown();
+          fullTeardown();
           setState("idle");
           const reason = "Live voice failed to connect. Using basic voice mode.";
           setFallbackReason(reason);
@@ -1914,7 +2155,7 @@ export function useOraRealtimeVoiceNative(
               }
               if (nextVal <= 0) {
                 clearDurationTimer();
-                teardown();
+                fullTeardown();
                 setInterimUserTranscript("");
                 setInterimAssistantTranscript("");
                 setState("ended");
@@ -1947,7 +2188,7 @@ export function useOraRealtimeVoiceNative(
           releaseLocal(stream, pc);
           return { started: false, reason: null };
         }
-        teardown();
+        fullTeardown();
         setState("idle");
         const reason = "Live voice failed to start. Using basic voice mode.";
         setFallbackReason(reason);
@@ -1956,7 +2197,7 @@ export function useOraRealtimeVoiceNative(
     },
     [
       isSupported,
-      teardown,
+      fullTeardown,
       handleServerEvent,
       clearDurationTimer,
       sendEvent,
@@ -1965,12 +2206,51 @@ export function useOraRealtimeVoiceNative(
     ],
   );
 
+  // Expose start() to the reconnect helpers (declared above start) through the ref.
+  useEffect(() => {
+    startRef.current = start;
+  }, [start]);
+
+  // Manual recovery from the legacy-fallback state: reset the single-attempt
+  // reconnect budget and rebuild the realtime session from the last context.
+  const retry = useCallback(() => {
+    const ctx = lastCtxRef.current;
+    if (!ctx) return;
+    recordDiag("manual_retry");
+    reconnectAttemptedRef.current = false;
+    reconnectConsumedRef.current = false;
+    setConnectionIssue(false);
+    void start(ctx);
+  }, [start, recordDiag]);
+
+  // NetInfo-triggered fast reconnect: when connectivity returns while a reconnect
+  // is pending its backoff timer, fire it immediately instead of waiting out the
+  // full delay. The one-shot guard inside fire() keeps this to a single attempt.
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((netState) => {
+      const online = netState.isConnected === true && netState.isInternetReachable !== false;
+      if (!online) return;
+      const fire = pendingReconnectFireRef.current;
+      if (fire) {
+        recordDiag("netinfo_reconnect_trigger");
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        fire();
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [recordDiag]);
+
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
-      teardown();
+      fullTeardown();
     };
-  }, [teardown]);
+  }, [fullTeardown]);
 
   return {
     state,
@@ -1982,9 +2262,12 @@ export function useOraRealtimeVoiceNative(
     interimAssistantTranscript,
     remainingSeconds,
     overLimit,
+    networkQuality,
+    connectionIssue,
     start,
     stop,
     interrupt,
     toggleMute,
+    retry,
   };
 }
