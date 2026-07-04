@@ -382,6 +382,8 @@ export function buildOraImageGenerationProfile(input: {
     planGuidance(planTier, "generation"),
     kindGuidance(kind, planTier),
     "Preserve the user's requested subject, mood, colors, brands, and constraints exactly.",
+    "Render exactly what the user asked for: do not omit, replace, or substitute the stated subject with something easier to draw, and do not drop any explicitly requested element.",
+    "Avoid artifacts: no extra, missing, or distorted limbs, hands, fingers, or faces; no duplicated, merged, or malformed subjects; no unrelated or nonsensical background objects.",
     "If text is requested, keep it minimal and legible; otherwise do not add random text, captions, signatures, UI labels, or watermarks.",
   ].join(" ");
 

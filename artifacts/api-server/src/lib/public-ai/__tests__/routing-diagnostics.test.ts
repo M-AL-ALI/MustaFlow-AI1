@@ -163,6 +163,49 @@ describe("Ora routing diagnostics", () => {
     expect(documentMemory.providerOrder).toEqual(["gemini", "anthropic", "deepseek", "openai"]);
   });
 
+  it("wins image generation over file generation and continuations on ambiguous visual requests", async () => {
+    // Visual request with a bare "word" token must generate an image, not a file.
+    const logoWithText = await buildOraRoutingDiagnostic({
+      message: "create a logo with the word bakery",
+      subscriptionTier: "core",
+    });
+    expect(logoWithText.tool).toBe("image_generation");
+    expect(logoWithText.quotaKind).toBe("image");
+
+    // Explicit downloadable format still routes to a file even with a visual noun.
+    const posterPdf = await buildOraRoutingDiagnostic({
+      surface: "file_generation",
+      message: "make a poster PDF",
+      fileFormat: "pdf",
+      subscriptionTier: "core",
+    });
+    expect(posterPdf.tool).toBe("file_generation");
+
+    // A "go ahead" reply after a hallucinated image delivery generates the image.
+    const continuation = await buildOraRoutingDiagnostic({
+      message: "go ahead and generate it",
+      subscriptionTier: "core",
+      recentMessages: [
+        { role: "user", content: "I asked for an image of the 2026 world cup" },
+        {
+          role: "assistant",
+          content:
+            "Here is a vivid, detailed image of the 2026 FIFA World Cup — featuring the golden trophy and a packed stadium.",
+        },
+      ],
+    });
+    expect(continuation.tool).toBe("image_generation");
+    expect(continuation.quotaKind).toBe("image");
+
+    // A definitional question about the feature stays conversational.
+    const definitional = await buildOraRoutingDiagnostic({
+      message: "what is image generation?",
+      subscriptionTier: "core",
+      classifier: premiumClassifier,
+    });
+    expect(definitional.tool).toBe("answer");
+  });
+
   it("diagnoses image edit as live, image-metered, and OpenAI image-model backed", async () => {
     const imageEdit = await buildOraRoutingDiagnostic({
       surface: "image_edit",

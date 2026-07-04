@@ -238,6 +238,113 @@ describe("Ora real-user behavior QA", () => {
     expect(videoSearch.searchProfile?.videoLimit).toBeGreaterThan(0);
   });
 
+  it("generates an image instead of only describing one after a hallucinated delivery", async () => {
+    // Reported bug: Ora describes an image ("Here is a vivid image of…") without
+    // attaching one, then a "go ahead and generate it" reply falls through to
+    // another description. It must route to image_generation on the follow-up.
+    const history = [
+      { role: "user" as const, content: "I asked for an image for the world cup of 2026" },
+      {
+        role: "assistant" as const,
+        content:
+          "Here is a vivid, detailed image of the 2026 FIFA World Cup — featuring the golden trophy, national flags, and a packed stadium under bright lights.",
+      },
+    ];
+
+    for (const reply of ["go ahead and generate it", "yes please", "do it"]) {
+      const decision = await routeOraMessage({
+        message: reply,
+        mode: "instant",
+        recentMessages: history,
+      });
+      expect(decision.tool, reply).toBe("image_generation");
+    }
+
+    // The REAL post-generation reply must NOT re-trigger a spurious (double-
+    // charged) regeneration, even for bare affirmations that are plausible
+    // responses to "Tap Edit to refine it" ("yes", "go ahead"). This is the exact
+    // string persisted by the chat route after a successful generation.
+    const realDelivery = [
+      { role: "user" as const, content: "make a logo for my bakery" },
+      {
+        role: "assistant" as const,
+        content: "Here's the image you asked for. Tap Edit to refine it with an instruction.",
+      },
+    ];
+    for (const reply of ["yes", "yes please", "go ahead", "thanks, that looks great"]) {
+      const afterRealDelivery = await routeOraMessage({
+        message: reply,
+        mode: "instant",
+        recentMessages: realDelivery,
+      });
+      expect(afterRealDelivery.tool, reply).not.toBe("image_generation");
+    }
+  });
+
+  it("generates an image rather than a file for visual requests with ambiguous tokens", async () => {
+    // Reported bug: "creates a file instead of an image". The bare "word" token
+    // in "with the word bakery" must not hijack routing into a Word doc.
+    const logoWithText = await routeOraMessage({
+      message: "create a logo with the word bakery",
+      mode: "instant",
+    });
+    expect(logoWithText.tool).toBe("image_generation");
+
+    // The idiom "just say the word" in an image offer must not be read as a file
+    // offer when the user replies "yes".
+    const idiomOffer = await routeOraMessage({
+      message: "yes go ahead",
+      mode: "instant",
+      recentMessages: [
+        { role: "user", content: "I want a mascot" },
+        {
+          role: "assistant",
+          content: "I can generate a logo for your bakery if you'd like — just say the word.",
+        },
+      ],
+    });
+    expect(idiomOffer.tool).toBe("image_generation");
+
+    for (const message of [
+      "render a photorealistic product shot of a sneaker",
+      "generate a professional headshot of a woman",
+      "make a poster for my cafe",
+    ]) {
+      const decision = await routeOraMessage({ message, mode: "instant" });
+      expect(decision.tool, message).toBe("image_generation");
+    }
+  });
+
+  it("routes to a downloadable file only when an explicit document format is named", async () => {
+    // Must-not-regress: an explicit format still means a file even next to a
+    // visual noun.
+    for (const message of [
+      "make a poster PDF",
+      "create a flyer as a PDF",
+      "turn this into a PowerPoint deck",
+    ]) {
+      const decision = await routeOraMessage({ message, mode: "instant" });
+      expect(decision.tool, message).toBe("file_generation");
+    }
+  });
+
+  it("answers definitional questions about image generation instead of generating", async () => {
+    // Reported bug: a question ABOUT the feature was treated as a generation
+    // request. It must be conversational.
+    for (const message of [
+      "what is image generation?",
+      "how does image generation work?",
+      "explain image generation to me",
+    ]) {
+      const decision = await routeOraMessage({
+        message,
+        mode: "instant",
+        classifier: premiumClassifier,
+      });
+      expect(decision.tool, message).toBe("answer");
+    }
+  });
+
   it("keeps response-style instructions aligned with the usability fixes", () => {
     expect(ORA_SYSTEM_PROMPT).toContain("Replit is the hosted development/runtime workspace");
     expect(ORA_SYSTEM_PROMPT).toContain("Codex is OpenAI's coding agent");

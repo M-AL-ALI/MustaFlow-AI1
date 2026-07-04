@@ -145,7 +145,7 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   // Verb + optional filler + optional adjectives + singular or plural visual noun.
   // The adjective slot allows up to 3 extra words (e.g. "a clean", "a modern bold") but
   // excludes prepositions (of/from/about) so "create a table of images" does NOT match.
-  /\b(generate|create|make|draw|render|produce|design|show\s+me|visualize)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|backgrounds?|cartoons?|stickers?|renders?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
+  /\b(generate|create|make|draw|render|produce|design|show\s+me|visualize)\s+(?:(?:me|us|my|you|a|an|some|few|the)\s+)*(?:(?!of\b|from\b|about\b)\w+\s+){0,3}(?:images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|backgrounds?|cartoons?|stickers?|renders?|product\s+shots?|head\s?shots?|studio\s+shots?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
   // Visual noun + preposition (describing what's in it)
   /\b(images?|photos?|pictures?|illustrations?|artworks?|graphic)\s+(of|showing|depicting|featuring|with)\b/i,
   // Image generation feature references
@@ -162,7 +162,7 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   /(?<!\bhow\s(?:to|do\si|can\si|should\si|would\si)\s)\b(draw|sketch|paint|illustrate)\s+(?:me\s+|us\s+|for\s+me\s+)?(?:a|an|the|some|my)\s+(?!(?:conclusion|conclusions|distinction|distinctions|comparison|comparisons|parallel|parallels|line|lines|blank|attention|point|points|example|examples|case|cases|map|maps|plan|plans|concept|concepts|idea|ideas|scenario|scenarios)\b)\w+/i,
   // Request/desire framing + a visual noun ("give me a banner", "I need a
   // logo", "I'd like an illustration of a forest").
-  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|cartoons?|stickers?|renders?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
+  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|cartoons?|stickers?|renders?|product\s+shots?|head\s?shots?|studio\s+shots?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
   // Bare brandable visual noun + preposition, no leading verb ("a logo for my
   // bakery", "an icon for the button"). Anchored to the start of the message so
   // mid-sentence statements ("I used a logo for my app") do NOT match.
@@ -205,12 +205,58 @@ const ORA_IMAGE_GENERATION_BLOCKLIST: RegExp[] = [
   // "scene from [book/movie/text]" → narrative reference, not image gen when purely descriptive
   // Only block when it's a clearly textual context (e.g. "describe a scene from the book")
   /\b(?:describe|explain|summarize|discuss)\s+(?:a|the)\s+scene\b/i,
+  // Definitional / how-to questions ABOUT image generation are NOT requests to
+  // generate an image ("what is image generation?", "how does image generation
+  // work?"). Without this, the "image generation/studio/ai" feature pattern
+  // treats the question itself as a generation request.
+  /\b(?:what(?:'?s| is| are)?|how\s+(?:do(?:es)?|to|can|would|should|might)|why|explain|define|tell\s+me\s+about|describe|difference\s+between)\b[^.?!]{0,40}\bimage\s+(?:generation|generator|studio|ai)\b/i,
 ];
 
 export function isImageGenerationRequest(message: string): boolean {
   if (isImageSearchRequest(message)) return false;
   if (ORA_IMAGE_GENERATION_BLOCKLIST.some((p) => p.test(message))) return false;
   return ORA_IMAGE_PATTERNS.some((p) => p.test(message));
+}
+
+export type OraVisualIntent = "generate_image" | "find_image" | "generate_file" | "none";
+
+// Downloadable document formats that, when explicitly named, mean the user
+// wants a FILE even if the request also mentions a visual noun ("make a poster
+// PDF"). Intentionally EXCLUDES bare "word", "doc", "report", "document",
+// "slides", and "presentation": those are either too ambiguous next to an image
+// request ("a logo with the word bakery") or are already handled by
+// detectFileRequest when there is no competing visual intent.
+const EXPLICIT_DOWNLOADABLE_FORMAT =
+  /\b(pdf|docx|xlsx|xls|csv|pptx|powerpoint|power\s?point|excel|spreadsheet|word\s+doc(?:ument)?|slide\s?deck|pitch\s?deck|slide\s?show|slideshow|comma[\s-]separated)\b/i;
+
+function hasExplicitDownloadableFormat(message: string): boolean {
+  return EXPLICIT_DOWNLOADABLE_FORMAT.test(message);
+}
+
+/**
+ * Deterministically resolve a FRESH (non-continuation) message to a visual
+ * intent. Priority, highest first:
+ *   1. find_image     — retrieval of real sources ("find the official logo").
+ *   2. generate_image — a visual-generation request WITHOUT an explicit
+ *                       downloadable document format. Image intent WINS over
+ *                       file intent here, so "make a poster" generates art
+ *                       instead of a PDF, and "a logo with the word bakery" is
+ *                       not hijacked into a Word doc by the bare "word" token.
+ *   3. generate_file  — any remaining file request (explicit format, or a
+ *                       document with no visual noun such as "create a report").
+ *   4. none           — not a visual or file request.
+ *
+ * This is the single source of truth for the image-vs-file decision. Both the
+ * website and the mobile app hit the same /public-ai/chat router, so fixing it
+ * here fixes both surfaces.
+ */
+export function resolveOraVisualIntent(message: string): OraVisualIntent {
+  if (isImageSearchRequest(message)) return "find_image";
+  if (isImageGenerationRequest(message) && !hasExplicitDownloadableFormat(message)) {
+    return "generate_image";
+  }
+  if (detectFileRequest(message)) return "generate_file";
+  return "none";
 }
 
 // ── Web-search intent detection ─────────────────────────────────────────────
@@ -454,20 +500,57 @@ const ASSISTANT_FILE_OFFER_PATTERN =
 const ASSISTANT_IMAGE_OFFER_PATTERN =
   /\b(i\s+can|i'?ll|i\s+will|i\s+could|let\s+me|shall\s+i|would\s+you\s+like\s+me\s+to|want\s+me\s+to|do\s+you\s+want\s+me\s+to|happy\s+to)\b[^.?!]*\b(generate|create|make|design|produce|render|draw|sketch|paint|illustrate)\b[^.?!]*\b(images?|pictures?|photos?|illustrations?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|artworks?)\b/i;
 
+// A hallucinated DELIVERY or description of an image in the assistant's last
+// turn — Ora CLAIMED or described an image it never actually attached ("Here is
+// a vivid, detailed image of the 2026 World Cup…", "A dramatic illustration of
+// …"). This is the core reported failure (describe-instead-of-generate), so a
+// follow-up "go ahead and generate it" must still count as an image
+// continuation. This pattern is intentionally broad and DOES also match the real
+// post-generation reply ("Here's the image you asked for. Tap Edit…") via
+// "image … for"; detectImageContinuation therefore additionally requires a
+// described subject to be extractable (see the deliverySubject guard there), and
+// the real reply has none ("for." ends the sentence) so it cannot re-trigger a
+// spurious, double-charged re-generation.
+const ASSISTANT_IMAGE_DELIVERY_PATTERN =
+  /(?:\b(?:here(?:'?s| is)|here\s+are|below\s+is|this\s+is|i(?:'?ve| have)\s+(?:created|generated|made|designed|drawn|produced|rendered))\b[^.?!]{0,60}|^\s*(?:a|an)\s+[^.?!]{0,60})\b(?:images?|pictures?|photos?|illustrations?|graphics?|visuals?|logos?|banners?|posters?|flyers?|thumbnails?|artworks?|portraits?|renders?|scenes?|designs?)\b[^.?!]{0,20}\b(?:of|showing|depicting|featuring|for|with)\b/im;
+
 // Pulls the descriptive clause out of an image offer ("…generate a logo for your
 // bakery" → "a logo for your bakery") so a short continuation reply can become a
 // concrete generation prompt. Returns null when no clause is found.
 const IMAGE_OFFER_DESCRIPTION =
   /\b(?:generate|create|make|design|produce|render|draw|sketch|paint|illustrate)\s+(?:you\s+|us\s+|me\s+|for\s+you\s+|for\s+us\s+)?((?:a|an|the|some)\s+(?:image|picture|photo|illustration|graphic|visual|logo|banner|icon|thumbnail|avatar|mockup|poster|flyer|badge|painting|portrait|sketch|wallpaper|artwork)[^.?!\n—]*)/i;
 
+// Pulls the described SUBJECT out of a hallucinated delivery ("here is an image
+// of the 2026 World Cup" → "image of the 2026 World Cup") so a "go ahead"
+// continuation after a describe-instead-of-generate turn still produces the
+// right image. Stops at the first em-dash / sentence break so trailing prose is
+// dropped.
+const IMAGE_DELIVERY_DESCRIPTION =
+  /\b(images?|pictures?|photos?|illustrations?|graphics?|visuals?|logos?|banners?|posters?|flyers?|thumbnails?|artworks?|portraits?|renders?|scenes?|designs?)\b[^.?!\n—]{0,20}\b(of|showing|depicting|featuring|for|with)\s+([^.?!\n—]{3,})/i;
+
 function extractImageOfferDescription(content: string): string | null {
   const m = content.match(IMAGE_OFFER_DESCRIPTION);
-  if (!m) return null;
-  const desc = m[1]
-    .trim()
-    .replace(/\s+(for\s+you|right|ok(?:ay)?)\s*$/i, "")
-    .trim();
-  return desc.length >= 3 ? desc : null;
+  if (m) {
+    const desc = m[1]
+      .trim()
+      .replace(/\s+(for\s+you|right|ok(?:ay)?)\s*$/i, "")
+      .trim();
+    if (desc.length >= 3) return desc;
+  }
+  // Fallback: reconstruct a concrete prompt from a hallucinated delivery so the
+  // continuation regenerates the described subject rather than the literal
+  // affirmation.
+  const d = content.match(IMAGE_DELIVERY_DESCRIPTION);
+  if (d) {
+    const noun = d[1].toLowerCase();
+    const connector = d[2].toLowerCase();
+    const subject = d[3]
+      .trim()
+      .replace(/\s+(for\s+you|right|ok(?:ay)?)\s*$/i, "")
+      .trim();
+    if (subject.length >= 3) return `${noun} ${connector} ${subject}`;
+  }
+  return null;
 }
 
 /**
@@ -493,6 +576,11 @@ function detectFileContinuation(
   for (let i = recentMessages.length - 1; i >= 0; i--) {
     const m = recentMessages[i];
     if (m.role !== "assistant") continue;
+    // An explicit IMAGE offer ("I can generate a logo … just say the word") must
+    // NOT be read as a file offer just because the idiom "say the word" contains
+    // "word" (a bare file-format token) or the prose mentions a format. Defer to
+    // the image continuation path so "yes" generates the image, not a Word doc.
+    if (ASSISTANT_IMAGE_OFFER_PATTERN.test(m.content)) return null;
     if (!ASSISTANT_FILE_OFFER_PATTERN.test(m.content)) return null;
     return detectFileRequest(m.content);
   }
@@ -546,21 +634,38 @@ function detectImageContinuation(
     }
   }
   if (offerIdx === -1) return null;
-  if (!ASSISTANT_IMAGE_OFFER_PATTERN.test(recentMessages[offerIdx].content)) return null;
+  // Accept either an explicit OFFER ("I can generate an image…") or a
+  // hallucinated DELIVERY/description ("Here is a vivid image of…"). The reported
+  // failure is Ora describing an image it never generated, so a "go ahead and
+  // generate it" reply must still resolve to generation in both cases.
+  const assistantContext = recentMessages[offerIdx].content;
+  const isOffer = ASSISTANT_IMAGE_OFFER_PATTERN.test(assistantContext);
+  const isDelivery = ASSISTANT_IMAGE_DELIVERY_PATTERN.test(assistantContext);
+  if (!isOffer && !isDelivery) return null;
+
+  // Pre-compute the subject clause. For a DELIVERY-only match this is the guard
+  // that keeps the REAL post-generation reply from re-triggering a charge: the
+  // real reply ("Here's the image you asked for. Tap Edit…") DOES match the
+  // broad delivery pattern via "image … for", but it has no described subject
+  // ("for." ends the sentence), so extraction returns null and we bail. A
+  // genuine hallucinated delivery ("…image of the 2026 World Cup featuring…")
+  // extracts a subject and is still handled.
+  const deliverySubject = extractImageOfferDescription(assistantContext);
+  if (!isOffer && !deliverySubject) return null;
 
   // Prefer the user's own image request ONLY when it is the turn that
   // immediately prompted this offer — a tight locality window. Walking all the
   // way back would let a STALE, unrelated image request earlier in the chat
   // override the offer's actual subject and generate the wrong image. So we
   // inspect just the nearest preceding user turn; if it isn't an image request
-  // we fall back to the offer's own descriptive clause.
+  // we fall back to the offer's/delivery's own descriptive clause.
   for (let j = offerIdx - 1; j >= 0; j--) {
     const m = recentMessages[j];
     if (m.role !== "user") continue;
     if (isImageGenerationRequest(m.content)) return m.content.trim();
     break;
   }
-  return extractImageOfferDescription(recentMessages[offerIdx].content);
+  return deliverySubject;
 }
 
 /**
@@ -684,21 +789,7 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
     };
   }
 
-  // 1. File generation fast-path (no classifier needed).
-  const fileFormat = detectFileRequest(message);
-  if (fileFormat) {
-    return {
-      tool: "file_generation",
-      reason: `Detected a request for a ${fileFormat.toUpperCase()} file.`,
-      fileFormat,
-      // File requests don't need the classifier; report neutral defaults.
-      intent: "premium",
-      confidence: "high",
-      topic: "general",
-    };
-  }
-
-  // 1b. File generation continuation. A short "yes / go ahead / still waiting"
+  // 1. File generation continuation. A short "yes / go ahead / still waiting"
   //     reply to a turn where the assistant offered a specific file must
   //     actually generate it — otherwise it falls through to a conversational
   //     answer and the model only *claims* it delivered a file that never
@@ -717,30 +808,7 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
     }
   }
 
-  // 2. Image/logo retrieval fast-path. These need live sources, not generated art.
-  const imageSearchRequest = isImageSearchRequest(message);
-  if (imageSearchRequest) {
-    return {
-      tool: "search",
-      reason: "Detected a request to find real image/logo sources.",
-      intent: "premium",
-      confidence: "high",
-      topic: "general",
-    };
-  }
-
-  // 2b. Image generation fast-path.
-  if (isImageGenerationRequest(message)) {
-    return {
-      tool: "image_generation",
-      reason: "Detected an image generation request.",
-      intent: "premium",
-      confidence: "high",
-      topic: "general",
-    };
-  }
-
-  // 2c. Image generation continuation. A short "yes / go ahead and do it" reply
+  // 2. Image generation continuation. A short "yes / go ahead and do it" reply
   //     to a turn where the assistant OFFERED to generate an image must actually
   //     generate it (with a prompt resolved from prior context) instead of
   //     falling through to a conversational answer that only claims it — or
@@ -773,6 +841,46 @@ export async function routeOraMessage(input: OraRouteInput): Promise<OraRouteDec
         tool: "image_generation",
         reason: "User provided image details in response to a clarifying question.",
         imagePrompt: clarificationPrompt,
+        intent: "premium",
+        confidence: "high",
+        topic: "general",
+      };
+    }
+  }
+
+  // 2e. Fresh visual intent (single source of truth for image-vs-file). Image
+  //     generation wins over file generation for visual requests UNLESS the user
+  //     explicitly named a downloadable document format (PDF/DOCX/XLSX/CSV/PPTX).
+  //     Real-source asks ("find the official Nike logo") route to search instead
+  //     of generation. Placed AFTER the continuation checks (so a short "go
+  //     ahead" still resolves to the offered image) and BEFORE web-search (so
+  //     "make a poster" is not hijacked into a live search).
+  const visualIntent = resolveOraVisualIntent(message);
+  if (visualIntent === "find_image") {
+    return {
+      tool: "search",
+      reason: "Detected a request to find real image/logo sources.",
+      intent: "premium",
+      confidence: "high",
+      topic: "general",
+    };
+  }
+  if (visualIntent === "generate_image") {
+    return {
+      tool: "image_generation",
+      reason: "Detected an image generation request.",
+      intent: "premium",
+      confidence: "high",
+      topic: "general",
+    };
+  }
+  if (visualIntent === "generate_file") {
+    const visualFileFormat = detectFileRequest(message);
+    if (visualFileFormat) {
+      return {
+        tool: "file_generation",
+        reason: `Detected a request for a ${visualFileFormat.toUpperCase()} file.`,
+        fileFormat: visualFileFormat,
         intent: "premium",
         confidence: "high",
         topic: "general",
