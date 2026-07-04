@@ -1,8 +1,23 @@
 # Ora Talk-to-Ora — Realtime Voice Reconnect QA
 
 Date: 2026-07-04
-Status: Automated coverage complete; manual device validation pending per
-follow-up tasks.
+
+Status:
+
+- **Engineering: COMPLETE.** The reconnect/fallback state machine is fully
+  implemented and covered by 36 passing automated tests (web hook, mobile hook,
+  and UI wiring). See the results tables below.
+- **Physical-device validation: QA-TEAM-REQUIRED (not automated-agent scope).**
+  Real airplane-mode / weak-network behavior on a live browser + physical iOS
+  and Android devices can only be exercised by a human operator and is tracked
+  as follow-up manual QA (#1504, #1505). The checklist below is an instruction
+  set for that human QA pass — it is **not** unfinished agent work.
+
+> **Release gate:** Do NOT claim Talk-to-Ora poor-network behavior is
+> "production-certified" until the QA team fills the [Manual Results Table](#manual-results-table)
+> with concrete pass/fail outcomes and attaches evidence (screenshots, logs, or
+> video) from real devices/browsers. Automated tests prove the code paths; only
+> the manual pass certifies real-world network recovery.
 
 ---
 
@@ -112,8 +127,13 @@ is NOT `"reconnecting"` (i.e., the session is fully in legacy mode and stable).
 
 ## Manual QA Checklist — Real Network Drop Scenarios
 
-The following steps cannot be automated (require real device + network control).
-They should be run on each significant change to the live-voice stack.
+> **QA-team required manual validation — NOT automated-agent work.**
+> The following steps require a real device/browser plus live network control
+> (airplane mode, DevTools offline, weak-network throttling). An automated agent
+> cannot perform them and must not mark them passed. They are the release gate
+> owned by the QA team and tracked as follow-up tasks #1504 / #1505. Run them on
+> each significant change to the live-voice stack and record outcomes in the
+> [Manual Results Table](#manual-results-table).
 
 ### Web (Desktop Browser)
 
@@ -149,6 +169,35 @@ They should be run on each significant change to the live-voice stack.
 - After Retry, the reconnect budget is fully reset (one more auto-reconnect available).
 - Fallback notice includes the real failure reason when available.
 - UI never shows a stale "Reconnecting…" state after the session has settled.
+
+---
+
+## Manual Results Table
+
+**Empty until a human QA operator runs the checklist on real devices/browsers.**
+Do NOT pre-fill this table. Each row must record an actual observed result and a
+link to evidence (screenshot, console log, or screen recording). An unfilled row
+means that scenario is NOT certified.
+
+| Scenario | Platform | Date | Tester | Result (PASS/FAIL) | Evidence link |
+|----------|----------|------|--------|--------------------|---------------|
+| Basic flow (green dot on start) | Web | | | | |
+| Simulated drop → reconnect → recover | Web | | | | |
+| Retry after legacy rebuilds session | Web | | | | |
+| Double drop → no double reconnect | Web | | | | |
+| window.online cancels timer, reconnects early | Web | | | | |
+| Basic flow (connection indicator) | iOS | | | | |
+| Airplane-mode drop → NetInfo reconnect | iOS | | | | |
+| Connection chip appears after failed reconnect | iOS | | | | |
+| Quality dot colors (amber→grey) | iOS | | | | |
+| Basic flow (connection indicator) | Android | | | | |
+| Airplane-mode drop → NetInfo reconnect | Android | | | | |
+| Connection chip appears after failed reconnect | Android | | | | |
+| Quality dot colors (amber→grey) | Android | | | | |
+
+**Certification rule:** Talk-to-Ora poor-network behavior is production-certified
+only when every row above is PASS with attached evidence. Until then the release
+gate remains open and this feature is engineering-complete but QA-blocked.
 
 ---
 
