@@ -44,6 +44,7 @@ import {
   oraxHostsTable,
   oraxDesktopActionsTable,
 } from "@workspace/db";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -963,5 +964,182 @@ router.post("/api/orax/projects/:projectId/threads/:threadId/continue", async (r
 
   res.status(201).json({ context: ctx, action: action ?? null, message: assistantMsg ?? null });
 });
+
+// ── Phase 2L: POST /api/orax/projects/:projectId/threads/:threadId/apply-patch ─
+
+const applyPatchBodySchema = z.object({
+  messageId: z.string().min(1).max(80),
+});
+
+/**
+ * Queues an apply_project_patch desktop action from a project_patch_drafted message.
+ *
+ * Steps:
+ *  1. Verify project + thread ownership.
+ *  2. Look up the `project_patch_drafted` message by id.
+ *  3. Extract enriched draftPatch (with newContent) + sourceLocalPath from payload.
+ *  4. Verify at least one file has newContent (AI-enriched patch required).
+ *  5. Find the most recent desktop action for this thread to get hostId.
+ *  6. Queue apply_project_patch action to that host.
+ *  7. Write project_patch_apply_queued system message.
+ */
+router.post(
+  "/api/orax/projects/:projectId/threads/:threadId/apply-patch",
+  async (req, res) => {
+    const userId = req.userId!;
+    const { projectId, threadId } = req.params;
+
+    const parsed = applyPatchBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+      return;
+    }
+    const { messageId } = parsed.data;
+
+    try {
+      const project = await requireProject(projectId, userId);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+
+      const thread = await requireThread(threadId, userId);
+      if (!thread || thread.projectId !== projectId) {
+        res.status(404).json({ error: "Thread not found" });
+        return;
+      }
+
+      // Look up the project_patch_drafted message
+      const [msg] = await db
+        .select()
+        .from(oraxThreadMessagesTable)
+        .where(
+          and(
+            eq(oraxThreadMessagesTable.id, messageId),
+            eq(oraxThreadMessagesTable.threadId, threadId),
+          ),
+        )
+        .limit(1);
+
+      if (!msg) {
+        res.status(404).json({ error: "Message not found" });
+        return;
+      }
+
+      if (msg.eventType !== "project_patch_drafted") {
+        res.status(422).json({ error: "Message is not a project_patch_drafted event" });
+        return;
+      }
+
+      const msgPayload = (msg.payload ?? {}) as {
+        draftPatch?: {
+          changedFiles?: Array<{
+            relativePath: string;
+            operation: string;
+            newContent?: string;
+            originalHash?: string;
+          }>;
+        };
+        sourceLocalPath?: string | null;
+      };
+
+      const changedFiles = msgPayload.draftPatch?.changedFiles ?? [];
+      const enrichedFiles = changedFiles.filter((f) => f.newContent);
+      if (enrichedFiles.length === 0) {
+        res.status(422).json({
+          error:
+            "Patch has no AI-generated file content. Wait for patch generation to complete or re-trigger the thread.",
+        });
+        return;
+      }
+
+      const sourceLocalPath = msgPayload.sourceLocalPath ?? null;
+
+      // Find the host from the most recent desktop action for this thread
+      const [recentAction] = await db
+        .select()
+        .from(oraxDesktopActionsTable)
+        .where(
+          and(
+            eq(oraxDesktopActionsTable.threadId, threadId),
+            eq(oraxDesktopActionsTable.userId, userId),
+          ),
+        )
+        .orderBy(desc(oraxDesktopActionsTable.createdAt))
+        .limit(1);
+
+      if (!recentAction?.hostId) {
+        res.status(422).json({
+          error: "No desktop host found for this thread. Re-run the thread to bind a host.",
+        });
+        return;
+      }
+
+      // Check host exists and belongs to user
+      const [host] = await db
+        .select()
+        .from(oraxHostsTable)
+        .where(
+          and(eq(oraxHostsTable.id, recentAction.hostId), eq(oraxHostsTable.userId, userId)),
+        )
+        .limit(1);
+
+      if (!host) {
+        res.status(404).json({ error: "Host not found" });
+        return;
+      }
+
+      const iKey = `apply-patch:${threadId}:${messageId}`;
+      const now = new Date();
+
+      const [action] = await db
+        .insert(oraxDesktopActionsTable)
+        .values({
+          userId,
+          hostId: recentAction.hostId,
+          threadId,
+          type: "apply_project_patch",
+          status: "queued",
+          payload: {
+            projectId,
+            threadId,
+            messageId,
+            sourceLocalPath,
+            patches: enrichedFiles.map((f) => ({
+              relativePath: f.relativePath,
+              operation: f.operation,
+              newContent: f.newContent!,
+              originalHash: f.originalHash ?? null,
+            })),
+          },
+          idempotencyKey: iKey,
+        })
+        .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+        .returning();
+
+      const [sysmsg] = await db
+        .insert(oraxThreadMessagesTable)
+        .values({
+          threadId,
+          role: "system",
+          content: `Patch apply queued — ${enrichedFiles.length} file${enrichedFiles.length === 1 ? "" : "s"} on ${host.deviceName}. Orax Desktop will pick this up shortly.`,
+          eventType: "project_patch_apply_queued",
+          createdAt: new Date(now.getTime() + 1),
+          payload: { actionId: action?.id, hostId: recentAction.hostId, messageId },
+        })
+        .returning();
+
+      logger.info(
+        { component: "orax-projects", userId, projectId, threadId, actionId: action?.id },
+        "apply_project_patch queued",
+      );
+
+      res.status(201).json({ action: action ?? null, message: sysmsg ?? null });
+    } catch (err) {
+      logger.error({ component: "orax-projects", err, projectId, threadId }, "apply-patch failed");
+      res.status(500).json({ error: "Failed to queue patch apply" });
+    }
+  },
+);
 
 export default router;

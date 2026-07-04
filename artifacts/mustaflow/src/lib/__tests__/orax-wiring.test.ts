@@ -2199,4 +2199,150 @@ describe("ORAX product-surface wiring", () => {
     expect(src).not.toContain("/public-ai/chat");
     expect(src).not.toContain("project-patch-drafter");
   });
+
+  // ── Phase 2L: project-patch-applier safety ────────────────────────────────
+
+  it("Phase 2L: project-patch-applier has no exec, spawn, shell:true, or process.cwd", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-applier.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  it("Phase 2L: project-patch-applier checkpoints originals before writing", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-applier.ts");
+    expect(src).toContain("checkpoint");
+    expect(src).toContain("sha256FileContent");
+  });
+
+  it("Phase 2L: project-patch-applier validates paths (BLOCKED_DIRS, symlink guard)", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-applier.ts");
+    expect(src).toContain("BLOCKED_DIRS");
+    expect(src).toContain("validateApplyPath");
+    expect(src).toContain("symlink");
+  });
+
+  it("Phase 2L: project-patch-applier has drift guard via originalHash", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-applier.ts");
+    expect(src).toContain("originalHash");
+    expect(src).toContain("drift");
+  });
+
+  // ── Phase 2L: relay-client apply_project_patch handler ───────────────────
+
+  it("Phase 2L: relay-client handles apply_project_patch action type", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("apply_project_patch");
+    expect(src).toContain("applyProjectPatch");
+  });
+
+  it("Phase 2L: relay-client apply_project_patch result has changedFiles and checkpointPath", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("changedFiles");
+    expect(src).toContain("checkpointPath");
+  });
+
+  it("Phase 2L: relay-client apply_project_patch has no exec, spawn, or shell:true", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    const applyIdx = src.indexOf("apply_project_patch");
+    const applySection = src.slice(applyIdx, applyIdx + 2000);
+    expect(applySection).not.toContain("exec(");
+    expect(applySection).not.toContain("spawn(");
+    expect(applySection).not.toContain("shell: true");
+  });
+
+  // ── Phase 2L: backend isApplyPatch handler ────────────────────────────────
+
+  it("Phase 2L: backend declares isApplyPatch and handles apply completed/failed events", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("isApplyPatch");
+    expect(src).toContain("project_patch_applied");
+    expect(src).toContain("project_patch_failed");
+  });
+
+  it("Phase 2L: backend isDraftPatch handler calls AI patch generation", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("generateAiPatches");
+    expect(src).toContain("computeUnifiedDiffPreview");
+  });
+
+  it("Phase 2L: backend isDraftPatch handler stores enriched draftPatch with skipSharedInsert", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("enrichedDraft");
+    expect(src).toContain("sourceLocalPath");
+    expect(src).toContain("skipSharedInsert");
+  });
+
+  it("Phase 2L: backend AI patch generator has no exec, spawn, shell:true, or process.cwd", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    const genIdx = src.indexOf("generateAiPatches");
+    const genSection = src.slice(genIdx, genIdx + 3000);
+    expect(genSection).not.toContain("exec(");
+    expect(genSection).not.toContain("spawn(");
+    expect(genSection).not.toContain("shell: true");
+    expect(genSection).not.toContain("process.cwd()");
+  });
+
+  // ── Phase 2L: apply-patch endpoint ───────────────────────────────────────
+
+  it("Phase 2L: orax-projects has apply-patch endpoint", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("apply-patch");
+    expect(src).toContain("apply_project_patch");
+  });
+
+  it("Phase 2L: apply-patch endpoint reads enriched patch from message and writes queued message", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("project_patch_drafted");
+    expect(src).toContain("project_patch_apply_queued");
+  });
+
+  it("Phase 2L: apply-patch endpoint rejects when no AI-enriched files are present", () => {
+    const src = read("../../../../api-server/src/routes/orax-projects.ts");
+    expect(src).toContain("enrichedFiles");
+    expect(src).toContain("newContent");
+  });
+
+  // ── Phase 2L: website renderers ───────────────────────────────────────────
+
+  it("Phase 2L: orax-workspace renders project_patch_applied messages", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_patch_applied");
+  });
+
+  it("Phase 2L: orax-workspace renders project_patch_failed messages", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_patch_failed");
+  });
+
+  it("Phase 2L: orax-workspace has Apply Patch button for enriched drafted patches", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("applyPatch");
+    expect(src).toContain("Apply patch");
+  });
+
+  it("Phase 2L: DraftFilePatch type includes newContent and unifiedDiffPreview", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("newContent?");
+    expect(src).toContain("unifiedDiffPreview?");
+  });
+
+  // ── Phase 2L: mobile parity ───────────────────────────────────────────────
+
+  it("Phase 2L: mobile OraxProjectThreadMessage type has appliedPatch payload field", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("appliedPatch?:");
+  });
+
+  it("Phase 2L: mobile has ProjectPatchAppliedCard component", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPatchAppliedCard");
+    expect(src).toContain("appliedPatch");
+  });
+
+  it("Phase 2L: mobile has ProjectPatchFailedCard component", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPatchFailedCard");
+  });
 });

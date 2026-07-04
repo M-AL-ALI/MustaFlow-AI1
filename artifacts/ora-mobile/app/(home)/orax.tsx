@@ -150,10 +150,18 @@ type OraxProjectThreadMessage = {
         operation: "update" | "create";
         intentDescription: string;
         hunkPreview: string[];
+        newContent?: string;
+        unifiedDiffPreview?: string;
+        reason?: string;
       }>;
       risks: string[];
       verificationPlan: string[];
       draftGeneratedAt: string;
+    };
+    appliedPatch?: {
+      changedFiles: Array<{ relativePath: string; operation: string }>;
+      checkpointPath?: string;
+      durationMs?: number;
     };
     fileReadSummary?: Array<{ relativePath: string; truncated: boolean; reason: string }>;
     [key: string]: unknown;
@@ -3728,6 +3736,66 @@ function ProjectPatchDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
         ))}
       <Text style={{ color: c.mutedForeground, fontSize: 10 }}>
         Review and approve via Orax Desktop
+      </Text>
+    </View>
+  );
+}
+
+// Phase 2L: compact card for project_patch_applied thread messages
+function ProjectPatchAppliedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  const ap = msg.payload?.appliedPatch;
+  const changed = ap?.changedFiles ?? [];
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#22c55e55",
+        borderRadius: 12,
+        padding: 12,
+        gap: 6,
+        backgroundColor: "#22c55e08",
+      }}
+    >
+      <Text style={{ color: "#22c55e", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        Patch applied — {changed.length} file{changed.length === 1 ? "" : "s"} written
+      </Text>
+      {changed.slice(0, 5).map((f) => (
+        <Text
+          key={f.relativePath}
+          style={{ color: c.mutedForeground, fontSize: 11, fontFamily: "SpaceMono_400Regular" }}
+          numberOfLines={1}
+        >
+          {f.operation === "create" ? "+" : "~"} {f.relativePath}
+        </Text>
+      ))}
+      {ap?.checkpointPath && (
+        <Text style={{ color: c.mutedForeground, fontSize: 10 }}>
+          Originals backed up in .orax/checkpoints
+        </Text>
+      )}
+    </View>
+  );
+}
+
+// Phase 2L: compact card for project_patch_failed thread messages
+function ProjectPatchFailedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#ef444455",
+        borderRadius: 12,
+        padding: 12,
+        backgroundColor: "#ef444408",
+      }}
+    >
+      <Text style={{ color: "#ef4444", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        Patch failed
+      </Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+        {msg.content}
       </Text>
     </View>
   );

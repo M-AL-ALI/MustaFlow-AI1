@@ -7,9 +7,11 @@
  * Phase 2H project-thread actions (run_project_thread — verifies the
  * local path and .orax/project.json binding before confirming context),
  * Phase 2J file-read planning (selectRelevantProjectFiles +
- * readSelectedProjectFiles → deterministic suggestedPlan), and Phase 2K
+ * readSelectedProjectFiles → deterministic suggestedPlan), Phase 2K
  * patch proposal loop (draft_project_patch — deterministic patch drafter,
- * no shell commands, no file writes).
+ * no shell commands, no file writes), and Phase 2L approval-gated apply
+ * (apply_project_patch — validates paths, creates checkpoint, writes files
+ * only after backend approval; no shell commands, no exec/spawn).
  */
 
 import fs from "node:fs";
@@ -29,6 +31,7 @@ import {
 import { readSelectedProjectFiles } from "./project-file-reader";
 import type { FileReadEntry } from "./project-file-reader";
 import { draftProjectPatch } from "./project-patch-drafter";
+import { applyProjectPatch, type ApplyFilePatch } from "./project-patch-applier";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -514,8 +517,102 @@ export class RelayClient {
           projectId,
           threadId,
           executionSourceId,
+          userMessage,
           draftPatch: draftResult.draftPatch,
+          filePreviews: draftResult.filePreviews, // Phase 2L: capped content for backend AI
           warnings: [...patchWarnings, ...draftResult.warnings],
+        };
+        // Falls through to the common postActionEvent("completed") call below
+      } else if (action.type === "apply_project_patch") {
+        // Phase 2L: approval-gated apply — validates paths, creates checkpoint, writes files
+        const payload = action.payload as {
+          projectId?: unknown;
+          threadId?: unknown;
+          executionSourceId?: unknown;
+          sourceLocalPath?: unknown;
+          patches?: unknown;
+        };
+
+        const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+        const executionSourceId =
+          typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
+        const sourceLocalPath =
+          typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
+        const rawPatches = Array.isArray(payload.patches) ? (payload.patches as unknown[]) : [];
+
+        if (!projectId || !threadId || !executionSourceId || !sourceLocalPath) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error:
+              "apply_project_patch: missing required payload fields " +
+              "(projectId, threadId, executionSourceId, sourceLocalPath).",
+          });
+          return;
+        }
+
+        if (!fs.existsSync(sourceLocalPath)) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: "apply_project_patch: sourceLocalPath does not exist",
+          });
+          return;
+        }
+
+        // Verify .orax/project.json binding
+        const oraxProjPath = path.join(sourceLocalPath, ".orax", "project.json");
+        if (fs.existsSync(oraxProjPath)) {
+          let stored: { projectId?: string } = {};
+          try {
+            stored = JSON.parse(fs.readFileSync(oraxProjPath, "utf8")) as { projectId?: string };
+          } catch {
+            // Treat malformed JSON as unbound — continue
+          }
+          if (stored.projectId && stored.projectId !== projectId) {
+            await this.api.postActionEvent(action.id, "failed", {
+              error:
+                `apply_project_patch: .orax/project.json projectId mismatch ` +
+                `(stored="${stored.projectId}", requested="${projectId}"). ` +
+                `Remove .orax/project.json to rebind this directory.`,
+            });
+            return;
+          }
+        }
+
+        // Validate and coerce patches
+        const patches: ApplyFilePatch[] = rawPatches.filter(
+          (p): p is ApplyFilePatch =>
+            typeof (p as Record<string, unknown>).relativePath === "string" &&
+            typeof (p as Record<string, unknown>).newContent === "string" &&
+            ((p as Record<string, unknown>).operation === "update" ||
+              (p as Record<string, unknown>).operation === "create"),
+        );
+
+        if (patches.length === 0) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: "apply_project_patch: no valid patches in payload.",
+          });
+          return;
+        }
+
+        await this.api.postActionEvent(action.id, "running", {
+          projectId,
+          threadId,
+          executionSourceId,
+        });
+
+        const applyResult = await applyProjectPatch({
+          localPath: sourceLocalPath,
+          threadId,
+          patches,
+        });
+
+        result = {
+          projectId,
+          threadId,
+          executionSourceId,
+          changedFiles: applyResult.changedFiles,
+          checkpointPath: applyResult.checkpointPath,
+          warnings: applyResult.warnings,
+          durationMs: applyResult.durationMs,
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {

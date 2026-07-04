@@ -180,6 +180,11 @@ type DraftFilePatch = {
   operation: "update" | "create";
   intentDescription: string;
   hunkPreview: string[];
+  // Phase 2L: AI-enriched fields
+  newContent?: string;
+  unifiedDiffPreview?: string;
+  reason?: string;
+  originalHash?: string;
 };
 
 type ThreadPayload = {
@@ -195,12 +200,18 @@ type ThreadPayload = {
   fileReadSummary?: { relativePath: string; truncated: boolean; reason: string }[];
   suggestedPlan?: string;
   warnings?: string[];
+  sourceLocalPath?: string | null;
   draftPatch?: {
     summary: string;
     changedFiles: DraftFilePatch[];
     risks: string[];
     verificationPlan: string[];
     draftGeneratedAt: string;
+  };
+  appliedPatch?: {
+    changedFiles: Array<{ relativePath: string; operation: string; checkpointBackupPath: string | null }>;
+    checkpointPath?: string;
+    durationMs?: number;
   };
 };
 type ThreadMessage = {
@@ -237,6 +248,25 @@ async function getThreadContext(projectId: string, threadId: string): Promise<Th
   return data.context;
 }
 
+
+async function applyPatch(
+  projectId: string,
+  threadId: string,
+  messageId: string,
+): Promise<void> {
+  const res = await authFetch(
+    `/api/orax/projects/${projectId}/threads/${threadId}/apply-patch`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId }),
+    },
+  );
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? "Failed to queue patch apply");
+  }
+}
 
 async function continueThread(
   projectId: string,
@@ -298,6 +328,7 @@ function ThreadDetail({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [applyingPatch, setApplyingPatch] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -531,10 +562,13 @@ function ThreadDetail({
                           ))}
                         </div>
                       )}
-                      {/* Diff preview (first file) */}
-                      {(msg.payload.draftPatch.changedFiles[0]?.hunkPreview ?? []).length > 0 && (
+                      {/* Diff preview — unified diff if AI-enriched, else hunkPreview fallback */}
+                      {(msg.payload.draftPatch.changedFiles[0]?.unifiedDiffPreview ??
+                        msg.payload.draftPatch.changedFiles[0]?.hunkPreview?.join("\n") ??
+                        "").length > 0 && (
                         <pre className="max-h-36 overflow-y-auto rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[10px] font-mono leading-relaxed text-foreground/70 whitespace-pre-wrap">
-                          {msg.payload.draftPatch.changedFiles[0]!.hunkPreview.join("\n")}
+                          {msg.payload.draftPatch.changedFiles[0]!.unifiedDiffPreview ??
+                            msg.payload.draftPatch.changedFiles[0]!.hunkPreview.join("\n")}
                         </pre>
                       )}
                       {/* Risks */}
@@ -565,13 +599,58 @@ function ThreadDetail({
                           ))}
                         </div>
                       )}
-                      {/* Review patch label */}
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 pt-0.5">
-                        <Check size={10} />
-                        <span>Review patch — apply via Orax Desktop after approval</span>
-                      </div>
+                      {/* Apply Patch button (Phase 2L — only if AI-enriched with newContent) */}
+                      {(msg.payload.draftPatch.changedFiles ?? []).some((f) => f.newContent) ? (
+                        <button
+                          className="btn btn-primary self-start text-xs py-1 px-3 mt-0.5 flex items-center gap-1.5"
+                          disabled={applyingPatch === msg.id}
+                          onClick={() => {
+                            setApplyingPatch(msg.id);
+                            void applyPatch(projectId, thread.id, msg.id)
+                              .then(() => void reload())
+                              .catch((err: unknown) =>
+                                console.error("applyPatch failed:", err),
+                              )
+                              .finally(() => setApplyingPatch(null));
+                          }}
+                        >
+                          {applyingPatch === msg.id ? (
+                            <Loader2 size={10} className="animate-spin" />
+                          ) : (
+                            <Check size={10} />
+                          )}
+                          {applyingPatch === msg.id ? "Applying…" : "Apply patch"}
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 pt-0.5">
+                          <Check size={10} />
+                          <span>Review patch — apply via Orax Desktop after approval</span>
+                        </div>
+                      )}
                     </div>
                   )}
+                {/* Phase 2L: patch applied success */}
+                {msg.eventType === "project_patch_applied" && (
+                  <div className="mt-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-xs">
+                    <div className="flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400">
+                      <CheckCircle size={11} />
+                      Patch applied
+                    </div>
+                    <div className="mt-1 text-muted-foreground whitespace-pre-line">
+                      {msg.content}
+                    </div>
+                  </div>
+                )}
+                {/* Phase 2L: patch apply failed */}
+                {msg.eventType === "project_patch_failed" && (
+                  <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs">
+                    <div className="flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400">
+                      <AlertTriangle size={11} />
+                      Patch failed
+                    </div>
+                    <div className="mt-1 text-muted-foreground">{msg.content}</div>
+                  </div>
+                )}
               </div>
             </div>
             );

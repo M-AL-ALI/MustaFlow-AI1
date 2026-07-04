@@ -26,8 +26,126 @@ import {
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { classifyOraxCommand } from "../lib/orax-command-safety";
+import { createChatCompletion } from "../lib/ai-providers";
 
 const router = Router();
+
+// ── Phase 2L: AI patch generation helpers ─────────────────────────────────────
+
+/**
+ * Compute a simple unified diff preview (pure TS — no shell, no exec).
+ * Shows first 25 changed lines with 2 lines of context.
+ */
+function computeUnifiedDiffPreview(
+  relPath: string,
+  oldContent: string,
+  newContent: string,
+): string {
+  const oldLines = oldContent.split("\n");
+  const newLines = newContent.split("\n");
+  const MAX = 30;
+
+  const out: string[] = [`--- a/${relPath}`, `+++ b/${relPath}`];
+  out.push(`@@ -1,${Math.min(oldLines.length, MAX)} +1,${Math.min(newLines.length, MAX)} @@`);
+
+  let i = 0;
+  let j = 0;
+  let emitted = 0;
+  while ((i < oldLines.length || j < newLines.length) && emitted < MAX) {
+    const ol = oldLines[i];
+    const nl = newLines[j];
+    if (i < oldLines.length && j < newLines.length && ol === nl) {
+      out.push(` ${ol ?? ""}`);
+      i++;
+      j++;
+    } else {
+      if (i < oldLines.length) {
+        out.push(`-${ol ?? ""}`);
+        i++;
+        emitted++;
+      }
+      if (j < newLines.length) {
+        out.push(`+${nl ?? ""}`);
+        j++;
+        emitted++;
+      }
+    }
+  }
+  if (i < oldLines.length || j < newLines.length) {
+    out.push("... (truncated)");
+  }
+  return out.join("\n");
+}
+
+/**
+ * Call AI to generate real proposed file changes from file content + user message.
+ * Returns null on parse failure so caller can fall back to skeleton draft.
+ */
+async function generateAiPatches(
+  userMessage: string,
+  filePreviews: Array<{ relativePath: string; contentPreview: string; originalHash: string }>,
+): Promise<Array<{ relativePath: string; newContent: string; reason: string }> | null> {
+  if (!userMessage.trim() || filePreviews.length === 0) return null;
+
+  const fileContext = filePreviews
+    .map((f) => `=== ${f.relativePath} ===\n${f.contentPreview}`)
+    .join("\n\n");
+
+  try {
+    const response = await createChatCompletion({
+      model: "gpt-4.1-mini",
+      provider: "openai",
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are a precise code editor assistant.",
+            "Given a user request and file contents, return ONLY a JSON array of proposed file changes.",
+            'Each element must be: { "relativePath": string, "newContent": string, "reason": string }',
+            "Include the COMPLETE new file content, not a diff.",
+            "Only include files that need changes.",
+            "relativePath must exactly match one of the provided file paths.",
+            "Respond with valid JSON only — no prose, no markdown code fences.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: `Request: ${userMessage.slice(0, 2000)}\n\nFiles:\n${fileContext.slice(0, 40_000)}`,
+        },
+      ],
+    });
+
+    const raw = (response.choices[0]?.message?.content ?? "").trim();
+    // Strip optional ```json ... ``` fences
+    const json = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      return null;
+    }
+
+    const arr: unknown[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as Record<string, unknown>)?.changes)
+        ? ((parsed as Record<string, unknown>).changes as unknown[])
+        : null!;
+
+    if (!Array.isArray(arr)) return null;
+
+    const valid = arr.filter(
+      (item): item is { relativePath: string; newContent: string; reason: string } =>
+        typeof (item as Record<string, unknown>)?.relativePath === "string" &&
+        typeof (item as Record<string, unknown>)?.newContent === "string" &&
+        typeof (item as Record<string, unknown>)?.reason === "string",
+    );
+
+    return valid.length > 0 ? valid : null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Validation schemas ─────────────────────────────────────────────────────────
 
@@ -807,10 +925,12 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
     if (action.threadId && (type === "completed" || type === "failed")) {
       const isProjectThread = action.type === "run_project_thread";
       const isDraftPatch = action.type === "draft_project_patch";
+      const isApplyPatch = action.type === "apply_project_patch";
 
       let content: string;
       let eventType: string;
       let role: string;
+      let skipSharedInsert = false;
 
       if (isProjectThread && type === "completed") {
         const p = (payload ?? {}) as {
@@ -849,7 +969,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         eventType = "project_run_failed";
         role = "assistant";
       } else if (isDraftPatch && type === "completed") {
-        // Phase 2K: patch draft completed — write project_patch_drafted assistant message
+        // Phase 2L: call AI to generate real patches, then write project_patch_drafted
         const dp = (payload ?? {}) as {
           draftPatch?: {
             summary: string;
@@ -858,18 +978,69 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
               operation: string;
               intentDescription: string;
               hunkPreview: string[];
+              originalHash?: string;
+              oldContentPreview?: string;
             }>;
             risks: string[];
             verificationPlan: string[];
             draftGeneratedAt: string;
           };
+          filePreviews?: Array<{ relativePath: string; contentPreview: string; originalHash: string }>;
+          userMessage?: string;
           warnings?: string[];
         };
-        const draft = dp.draftPatch;
+
+        // Phase 2L: enrich with AI-generated real code changes
+        let enrichedDraft = dp.draftPatch;
+        if (
+          enrichedDraft &&
+          Array.isArray(dp.filePreviews) &&
+          dp.filePreviews.length > 0 &&
+          dp.userMessage
+        ) {
+          try {
+            const aiPatches = await generateAiPatches(dp.userMessage, dp.filePreviews);
+            if (aiPatches && aiPatches.length > 0) {
+              const byPath = new Map(aiPatches.map((p) => [p.relativePath, p]));
+              enrichedDraft = {
+                ...enrichedDraft,
+                changedFiles: enrichedDraft.changedFiles.map((cf) => {
+                  const ai = byPath.get(cf.relativePath);
+                  if (!ai) return cf;
+                  const oldPreview =
+                    dp.filePreviews!.find((fp) => fp.relativePath === cf.relativePath)
+                      ?.contentPreview ?? null;
+                  const unifiedDiffPreview =
+                    oldPreview && ai.newContent
+                      ? computeUnifiedDiffPreview(cf.relativePath, oldPreview, ai.newContent)
+                      : undefined;
+                  return {
+                    ...cf,
+                    newContent: ai.newContent,
+                    unifiedDiffPreview,
+                    reason: ai.reason,
+                  };
+                }),
+              };
+            }
+          } catch (aiErr) {
+            logger.warn(
+              { component: "orax-desktop", err: aiErr, actionId },
+              "AI patch generation failed — using skeleton draft",
+            );
+          }
+        }
+
+        // Preserve sourceLocalPath from action.payload for the apply step
+        const actionOrigPl = (action.payload ?? {}) as { sourceLocalPath?: string };
+        const sourceLocalPathForApply = actionOrigPl.sourceLocalPath ?? null;
+
+        const draft = enrichedDraft;
         if (draft?.summary) {
-          const fileNames = (draft.changedFiles ?? [])
-            .map((f) => f.relativePath)
-            .join(", ");
+          const fileNames = (draft.changedFiles ?? []).map((f) => f.relativePath).join(", ");
+          const aiEnriched = (draft.changedFiles ?? []).some(
+            (f) => (f as { newContent?: string }).newContent,
+          );
           const risksSection =
             (draft.risks ?? []).length > 0
               ? `\n\nRisks:\n${draft.risks.map((r) => `- ${r}`).join("\n")}`
@@ -878,16 +1049,69 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
             (draft.verificationPlan ?? []).length > 0
               ? `\n\nVerification:\n${draft.verificationPlan.map((v) => `- ${v}`).join("\n")}`
               : "";
-          content = `${draft.summary}${fileNames ? `\n\nFiles: ${fileNames}` : ""}${risksSection}${verifySection}`;
+          const aiNote = aiEnriched ? " Real code changes are ready to apply." : "";
+          content = `${draft.summary}${aiNote}${fileNames ? `\n\nFiles: ${fileNames}` : ""}${risksSection}${verifySection}`;
         } else {
           content = "Patch draft is ready. Review the proposed changes before approving.";
         }
         eventType = "project_patch_drafted";
         role = "assistant";
+
+        // For isDraftPatch we build a richer message payload — handled below via extraPayload
+        const extraPayload = {
+          actionId,
+          actionType: action.type,
+          draftPatch: enrichedDraft, // enriched version with newContent/unifiedDiffPreview
+          sourceLocalPath: sourceLocalPathForApply,
+          ...(dp.userMessage ? { userMessage: dp.userMessage } : {}),
+        };
+
+        await db.insert(oraxThreadMessagesTable).values({
+          threadId: action.threadId,
+          role,
+          content,
+          eventType,
+          payload: extraPayload,
+        });
+
+        // isDraftPatch custom insert done above — skip the shared insert
+        skipSharedInsert = true;
       } else if (isDraftPatch && type === "failed") {
         const errMsg = (payload as { error?: string }).error ?? "unknown error";
         content = `Could not draft a patch: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
         eventType = "project_patch_draft_failed";
+        role = "assistant";
+      } else if (isApplyPatch && type === "completed") {
+        // Phase 2L: patch apply completed — write project_patch_applied message
+        const ap = (payload ?? {}) as {
+          changedFiles?: Array<{
+            relativePath: string;
+            operation: string;
+            checkpointBackupPath: string | null;
+          }>;
+          checkpointPath?: string;
+          warnings?: string[];
+          durationMs?: number;
+        };
+        const changed = ap.changedFiles ?? [];
+        const fileList = changed.map((f) => `- ${f.relativePath} (${f.operation})`).join("\n");
+        const warnNote =
+          (ap.warnings ?? []).length > 0
+            ? `\n\nWarnings:\n${ap.warnings!.slice(0, 3).map((w) => `- ${w}`).join("\n")}`
+            : "";
+        const checkpointNote = ap.checkpointPath
+          ? `\n\nOriginals backed up in .orax/checkpoints.`
+          : "";
+        content =
+          changed.length > 0
+            ? `Patch applied successfully — ${changed.length} file${changed.length === 1 ? "" : "s"} written:\n\n${fileList}${checkpointNote}${warnNote}`
+            : "Patch applied — no files were changed.";
+        eventType = "project_patch_applied";
+        role = "assistant";
+      } else if (isApplyPatch && type === "failed") {
+        const errMsg = (payload as { error?: string }).error ?? "unknown error";
+        content = `Could not apply the patch: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
+        eventType = "project_patch_failed";
         role = "assistant";
       } else {
         content =
@@ -898,13 +1122,15 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         role = "system";
       }
 
-      await db.insert(oraxThreadMessagesTable).values({
-        threadId: action.threadId,
-        role,
-        content,
-        eventType,
-        payload: { actionId, actionType: action.type, ...(payload as object) },
-      });
+      if (!skipSharedInsert) {
+        await db.insert(oraxThreadMessagesTable).values({
+          threadId: action.threadId,
+          role,
+          content,
+          eventType,
+          payload: { actionId, actionType: action.type, ...(payload as object) },
+        });
+      }
 
       // Phase 2K: after a successful file-read, queue draft_project_patch
       if (isProjectThread && type === "completed") {

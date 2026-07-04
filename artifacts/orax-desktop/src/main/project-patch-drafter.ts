@@ -1,12 +1,18 @@
 /**
- * Phase 2K — Safe local project patch drafter.
+ * Phase 2K/2L — Safe local project patch drafter.
  *
  * Produces a reviewable draft patch proposal from selected/read file context.
  * No files are written. No shell commands. No working-directory assumptions.
  * All paths are validated under the project root before inclusion.
+ *
+ * Phase 2L additions:
+ * - originalHash (SHA-256 of current file content) in each DraftFilePatch
+ * - oldContentPreview passthrough for backend AI diff generation
+ * - filePreviews in result (capped, for backend AI patch generation)
  */
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import type { SelectedProjectFile } from "./project-file-selector";
 import type { FileReadEntry } from "./project-file-reader";
 
@@ -17,6 +23,16 @@ export interface DraftFilePatch {
   operation: "update" | "create";
   intentDescription: string;
   hunkPreview: string[];
+  /** Phase 2L: SHA-256 of the file at draft time — used to detect drift before apply */
+  originalHash?: string;
+  /** Phase 2L: first ~2 KB of the current file content for backend AI diffing */
+  oldContentPreview?: string;
+  /** Phase 2L: set by backend AI after patch generation */
+  newContent?: string;
+  /** Phase 2L: unified diff preview, set by backend AI */
+  unifiedDiffPreview?: string;
+  /** Phase 2L: reason for the change, set by backend AI */
+  reason?: string;
 }
 
 export interface DraftProjectPatch {
@@ -27,8 +43,17 @@ export interface DraftProjectPatch {
   draftGeneratedAt: string;
 }
 
+/** Phase 2L: capped file content preview for backend AI call */
+export interface FilePatchPreview {
+  relativePath: string;
+  contentPreview: string;
+  originalHash: string;
+}
+
 export interface ProjectPatchDraftResult {
   draftPatch: DraftProjectPatch;
+  /** Phase 2L: safe capped file content for backend AI patch generation */
+  filePreviews: FilePatchPreview[];
   warnings: string[];
 }
 
@@ -63,6 +88,8 @@ const BLOCKED_FILE_PATTERNS: RegExp[] = [
 ];
 
 const MAX_CHANGED_FILES = 5;
+/** Phase 2L: max total content bytes sent to backend for AI patch generation */
+const MAX_TOTAL_PREVIEW_BYTES = 50_000;
 
 // ── Path validation ───────────────────────────────────────────────────────────
 
@@ -112,6 +139,12 @@ function validatePatchPath(rootPath: string, relPath: string): { ok: boolean; re
   return { ok: true };
 }
 
+// ── SHA-256 hash helper (Phase 2L) ────────────────────────────────────────────
+
+function sha256OfContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
 // ── Deterministic hunk generator ──────────────────────────────────────────────
 
 function buildHunkPreview(
@@ -138,19 +171,16 @@ function buildHunkPreview(
   const lines: string[] = [header, targetHeader];
 
   if (fileContentPreview) {
-    // Find a representative snippet (first 4 non-empty lines)
     const contentLines = fileContentPreview
       .split("\n")
       .filter((l) => l.trim().length > 0)
       .slice(0, 4);
-    const contextStart = contentLines[0] ? contentLines[0].slice(0, 80) : "...";
     const lineNo = Math.max(1, fileContentPreview.split("\n").indexOf(contentLines[0] ?? "") + 1);
     lines.push(`@@ -${lineNo},4 +${lineNo},5 @@ [draft]`);
     for (const cl of contentLines) {
       lines.push(` ${cl.slice(0, 100)}`);
     }
     lines.push(`+ // TODO: ${intentDescription} — (exact edit pending AI review)`);
-    void contextStart;
   } else {
     lines.push(hunkLine, `+ // TODO: ${intentDescription} — (exact edit pending AI review)`);
   }
@@ -168,7 +198,6 @@ function deriveIntent(
   const msg = userMessage.toLowerCase();
   const lower = relPath.toLowerCase();
 
-  // Create intent signals
   if (/create|add new|new file|scaffold|generate/.test(msg) && !/update|fix|patch/.test(msg)) {
     const ext = lower.endsWith(".ts") || lower.endsWith(".tsx") ? "TypeScript" : "file";
     return {
@@ -177,7 +206,6 @@ function deriveIntent(
     };
   }
 
-  // Category-specific intents for updates
   const categoryIntents: Record<string, string> = {
     auth: "Update authentication logic to address the reported issue",
     routing: "Update route definition or navigation guard",
@@ -219,8 +247,9 @@ function buildRisks(userMessage: string, changedFiles: DraftFilePatch[]): string
 
 function buildVerificationPlan(userMessage: string, changedFiles: DraftFilePatch[]): string[] {
   const plan: string[] = [];
-  const hasTests = changedFiles.some((f) => f.relativePath.includes("test") || f.relativePath.includes("spec"));
-  const hasConfig = changedFiles.some((f) => f.relativePath.endsWith("config.ts") || f.relativePath.endsWith("config.js"));
+  const hasConfig = changedFiles.some(
+    (f) => f.relativePath.endsWith("config.ts") || f.relativePath.endsWith("config.js"),
+  );
 
   if (hasConfig) {
     plan.push("Run the project typecheck to verify config changes compile cleanly.");
@@ -228,10 +257,7 @@ function buildVerificationPlan(userMessage: string, changedFiles: DraftFilePatch
     plan.push("Run the project typecheck (e.g. pnpm typecheck) after applying.");
   }
 
-  if (!hasTests) {
-    plan.push("Run existing tests to confirm no regressions were introduced.");
-  }
-
+  plan.push("Run existing tests to confirm no regressions were introduced.");
   plan.push("Smoke-test the affected feature in the browser or with a manual request.");
   void userMessage;
   return plan;
@@ -281,6 +307,7 @@ export async function draftProjectPatch(params: {
         verificationPlan: [],
         draftGeneratedAt: new Date().toISOString(),
       },
+      filePreviews: [],
       warnings,
     };
   }
@@ -290,7 +317,23 @@ export async function draftProjectPatch(params: {
   for (const { file, contentPreview } of safeCandidates) {
     const { operation, intentDescription } = deriveIntent(userMessage, file.relativePath, file.category);
     const hunkPreview = buildHunkPreview(file.relativePath, operation, intentDescription, contentPreview);
-    changedFiles.push({ relativePath: file.relativePath, operation, intentDescription, hunkPreview });
+
+    // Phase 2L: compute originalHash for drift detection + send oldContentPreview
+    let originalHash: string | undefined;
+    let oldContentPreview: string | undefined;
+    if (contentPreview) {
+      originalHash = sha256OfContent(contentPreview);
+      oldContentPreview = contentPreview.slice(0, 2_000); // first 2 KB for backend AI context
+    }
+
+    changedFiles.push({
+      relativePath: file.relativePath,
+      operation,
+      intentDescription,
+      hunkPreview,
+      originalHash,
+      oldContentPreview,
+    });
   }
 
   // Build summary
@@ -305,6 +348,25 @@ export async function draftProjectPatch(params: {
 
   void suggestedPlan;
 
+  // Phase 2L: build capped filePreviews for backend AI patch generation
+  let totalBytes = 0;
+  const filePreviews: FilePatchPreview[] = [];
+  for (const entry of fileReadEntries) {
+    if (totalBytes >= MAX_TOTAL_PREVIEW_BYTES) break;
+    // Validate the path again before including content
+    const check = validatePatchPath(localPath, entry.relativePath);
+    if (!check.ok) continue;
+
+    const remaining = MAX_TOTAL_PREVIEW_BYTES - totalBytes;
+    const preview = entry.contentPreview.slice(0, remaining);
+    totalBytes += preview.length;
+    filePreviews.push({
+      relativePath: entry.relativePath,
+      contentPreview: preview,
+      originalHash: sha256OfContent(entry.contentPreview),
+    });
+  }
+
   return {
     draftPatch: {
       summary,
@@ -313,6 +375,7 @@ export async function draftProjectPatch(params: {
       verificationPlan,
       draftGeneratedAt: new Date().toISOString(),
     },
+    filePreviews,
     warnings,
   };
 }
