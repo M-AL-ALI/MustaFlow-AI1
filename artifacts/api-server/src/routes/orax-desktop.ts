@@ -814,12 +814,33 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
       if (isProjectThread && type === "completed") {
         const p = (payload ?? {}) as {
           projectInspection?: { summaryText?: string; error?: string };
+          fileReadSummary?: Array<{ relativePath: string; truncated: boolean; reason: string }>;
+          suggestedPlan?: string;
+          warnings?: string[];
+          selectedFiles?: Array<{ relativePath: string; category: string; reason: string; score: number }>;
         };
-        content =
-          p.projectInspection?.summaryText ??
-          "Orax connected to the desktop project and verified the local workspace.";
-        eventType = "project_context_inspected";
-        role = "assistant";
+
+        const hasFileReads = Array.isArray(p.fileReadSummary) && p.fileReadSummary.length > 0;
+
+        if (hasFileReads) {
+          const fileList = p.fileReadSummary!
+            .map((f) => `- ${f.relativePath}${f.truncated ? " (truncated)" : ""}`)
+            .join("\n");
+          const planSection = p.suggestedPlan ? `\n\n${p.suggestedPlan}` : "";
+          const warnSection =
+            Array.isArray(p.warnings) && p.warnings.length > 0
+              ? `\n\nNote: ${p.warnings.slice(0, 3).join("; ")}`
+              : "";
+          content = `I inspected the following files:\n\n${fileList}${planSection}${warnSection}`;
+          eventType = "project_files_read";
+          role = "assistant";
+        } else {
+          content =
+            p.projectInspection?.summaryText ??
+            "Orax connected to the desktop project and verified the local workspace.";
+          eventType = "project_context_inspected";
+          role = "assistant";
+        }
       } else if (isProjectThread && type === "failed") {
         const errMsg = (payload as { error?: string }).error ?? "unknown error";
         const safeErr = errMsg.replace(/\/[^\s]*/g, "[path]");

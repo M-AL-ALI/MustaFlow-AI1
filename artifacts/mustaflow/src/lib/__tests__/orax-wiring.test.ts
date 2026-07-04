@@ -1820,4 +1820,183 @@ describe("ORAX product-surface wiring", () => {
     expect(src).not.toContain("/public-ai/chat");
     expect(src).not.toContain("sendChat");
   });
+
+  // ── Phase 2J: new desktop files ───────────────────────────────────────────
+
+  it("Phase 2J: project-file-selector.ts exists", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-selector.ts");
+    expect(src.length).toBeGreaterThan(100);
+  });
+
+  it("Phase 2J: project-file-reader.ts exists", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src.length).toBeGreaterThan(100);
+  });
+
+  it("Phase 2J: selector exports selectRelevantProjectFiles", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-selector.ts");
+    expect(src).toContain("export async function selectRelevantProjectFiles");
+  });
+
+  it("Phase 2J: reader exports readSelectedProjectFiles", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).toContain("export async function readSelectedProjectFiles");
+  });
+
+  it("Phase 2J: reader blocks .env, .pem, .key, id_rsa, secrets, credentials, token", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).toContain(".env");
+    expect(src).toContain(".pem");
+    expect(src).toContain(".key");
+    expect(src).toContain("id_rsa");
+    expect(src).toContain("secrets");
+    expect(src).toContain("credentials");
+    expect(src).toContain("token");
+  });
+
+  it("Phase 2J: reader blocks node_modules, .git, dist, build, out", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).toContain("node_modules");
+    expect(src).toContain(".git");
+    expect(src).toContain("dist");
+    expect(src).toContain("build");
+    expect(src).toContain("out");
+  });
+
+  it("Phase 2J: reader enforces MAX_FILE_SIZE and MAX_TOTAL_PREVIEW limits", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).toContain("MAX_FILE_SIZE");
+    expect(src).toContain("MAX_TOTAL_PREVIEW");
+    expect(src).toContain("MAX_CONTENT_PREVIEW");
+  });
+
+  it("Phase 2J: reader rejects .. and absolute paths", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).toContain("..");
+    expect(src).toContain("isAbsolute");
+    expect(src).toContain("not allowed");
+  });
+
+  it("Phase 2J: reader verifies resolved path starts with sourceLocalPath", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).toContain("startsWith");
+    expect(src).toContain("outside project root");
+  });
+
+  it("Phase 2J: reader uses only Node fs APIs — no exec, spawn, shell, or process.cwd()", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-reader.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  it("Phase 2J: selector uses only Node fs APIs — no exec, spawn, shell, or process.cwd()", () => {
+    const src = read("../../../../orax-desktop/src/main/project-file-selector.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  // ── Phase 2J: relay ───────────────────────────────────────────────────────
+
+  it("Phase 2J: relay-client imports selectRelevantProjectFiles and readSelectedProjectFiles", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("selectRelevantProjectFiles");
+    expect(relay).toContain("readSelectedProjectFiles");
+    expect(relay).toContain("project-file-selector");
+    expect(relay).toContain("project-file-reader");
+  });
+
+  it("Phase 2J: relay-client calls both after inspectLocalProject in run_project_thread", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("selectRelevantProjectFiles");
+    expect(relay).toContain("readSelectedProjectFiles");
+    expect(relay).toContain("inspectLocalProject");
+    expect(relay).toContain("suggestedPlan");
+  });
+
+  it("Phase 2J: relay-client includes selectedFiles, fileReadSummary, suggestedPlan in payload", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("selectedFiles");
+    expect(relay).toContain("fileReadSummary");
+    expect(relay).toContain("suggestedPlan");
+  });
+
+  it("Phase 2J: relay-client skips file reads when userMessage is empty", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("userMessage.trim().length > 0");
+  });
+
+  it("Phase 2J: relay-client uses buildSuggestedPlan for deterministic plan (no AI call)", () => {
+    const relay = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(relay).toContain("buildSuggestedPlan");
+    expect(relay).not.toContain("callAI");
+    expect(relay).not.toContain("createChatCompletion");
+  });
+
+  // ── Phase 2J: backend ─────────────────────────────────────────────────────
+
+  it("Phase 2J: backend handles project_files_read event type", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("project_files_read");
+    expect(src).toContain("fileReadSummary");
+    expect(src).toContain("hasFileReads");
+  });
+
+  it("Phase 2J: backend writes assistant message for project_files_read", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain(`eventType = "project_files_read"`);
+    expect(src).toContain(`role = "assistant"`);
+  });
+
+  it("Phase 2J: backend builds project_files_read content from fileList template not JSON.stringify", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("I inspected the following files");
+    expect(src).toContain("project_files_read");
+    expect(src).toContain("fileList");
+  });
+
+  it("Phase 2J: backend uses relative paths (fileList) not absolute paths in content", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("relativePath");
+    expect(src).toContain("fileList");
+  });
+
+  // ── Phase 2J: website UI ──────────────────────────────────────────────────
+
+  it("Phase 2J: orax-workspace renders project_files_read messages", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_files_read");
+    expect(src).toContain("fileReadSummary");
+  });
+
+  it("Phase 2J: orax-workspace shows file chips with relative paths", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("relativePath");
+    expect(src).toContain("f.relativePath");
+  });
+
+  it("Phase 2J: orax-workspace shows truncated marker for large files", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("truncated");
+  });
+
+  it("Phase 2J: orax-workspace payload type includes fileReadSummary and selectedFiles", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("fileReadSummary");
+    expect(src).toContain("selectedFiles");
+    expect(src).toContain("ThreadPayload");
+  });
+
+  // ── Phase 2J: mobile isolation ────────────────────────────────────────────
+
+  it("Phase 2J: mobile orax.tsx remains free of Ora/public-ai coupling", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).not.toContain("useOraChat");
+    expect(src).not.toContain("/public-ai/chat");
+    expect(src).not.toContain("project-file-selector");
+    expect(src).not.toContain("project-file-reader");
+  });
 });

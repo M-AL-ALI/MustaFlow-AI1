@@ -172,7 +172,7 @@ async function listHosts(): Promise<OraxHost[]> {
   return data.hosts ?? [];
 }
 
-type ProjectInspectionPayload = {
+type ThreadPayload = {
   projectInspection?: {
     frameworkHints?: string[];
     packageManager?: string | null;
@@ -181,6 +181,10 @@ type ProjectInspectionPayload = {
     hasGit?: boolean;
     warnings?: { message: string }[];
   };
+  selectedFiles?: { relativePath: string; category: string; reason: string; score: number }[];
+  fileReadSummary?: { relativePath: string; truncated: boolean; reason: string }[];
+  suggestedPlan?: string;
+  warnings?: string[];
 };
 type ThreadMessage = {
   id: string;
@@ -188,7 +192,7 @@ type ThreadMessage = {
   content: string;
   createdAt: string;
   eventType?: string | null;
-  payload?: ProjectInspectionPayload | null;
+  payload?: ThreadPayload | null;
 };
 type ThreadExecCtx = {
   canExecute: boolean;
@@ -463,6 +467,24 @@ function ThreadDetail({
                             {s.name}
                           </span>
                         ))}
+                    </div>
+                  )}
+                {msg.eventType === "project_files_read" &&
+                  msg.payload?.fileReadSummary &&
+                  msg.payload.fileReadSummary.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-border/40 pt-2.5">
+                      {msg.payload.fileReadSummary.map((f) => (
+                        <span
+                          key={f.relativePath}
+                          className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-mono text-muted-foreground"
+                        >
+                          <Code2 size={10} />
+                          {f.relativePath}
+                          {f.truncated && (
+                            <span className="text-muted-foreground/60">…</span>
+                          )}
+                        </span>
+                      ))}
                     </div>
                   )}
               </div>

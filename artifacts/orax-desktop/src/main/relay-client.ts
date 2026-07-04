@@ -1,11 +1,13 @@
 /**
- * Orax Desktop — Phase 2E/2F/2H relay client.
+ * Orax Desktop — Phase 2E/2F/2H/2J relay client.
  *
  * Polls the cloud relay for queued actions, executes safe Phase 2E actions
  * (ping_desktop, get_desktop_status, list_local_projects), Phase 2F
  * command actions (run_safe_command — gated by local permission-gate),
- * and Phase 2H project-thread actions (run_project_thread — verifies the
- * local path and .orax/project.json binding before confirming context).
+ * Phase 2H project-thread actions (run_project_thread — verifies the
+ * local path and .orax/project.json binding before confirming context),
+ * and Phase 2J file-read planning (selectRelevantProjectFiles +
+ * readSelectedProjectFiles → deterministic suggestedPlan).
  */
 
 import fs from "node:fs";
@@ -17,9 +19,76 @@ import type { RelayState } from "../shared/types";
 import { executeCommand } from "./command-executor";
 import { isCommandPermitted } from "./permission-gate";
 import { inspectLocalProject } from "./project-inspector";
+import type { ProjectInspectionResult } from "./project-inspector";
+import {
+  selectRelevantProjectFiles,
+  type SelectedProjectFile,
+} from "./project-file-selector";
+import { readSelectedProjectFiles } from "./project-file-reader";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
+
+// ── Deterministic plan builder (no AI call) ──────────────────────────────────
+
+function buildSuggestedPlan(
+  userMessage: string,
+  readFiles: string[],
+  inspection: ProjectInspectionResult,
+): string {
+  const msg = userMessage.toLowerCase();
+  const pkgMgr = (inspection.packageManager as string) ?? "your package manager";
+  const fileList = readFiles.map((f) => `- ${f}`).join("\n");
+
+  let steps: string[];
+  if (/auth|login|sign.?in|session|credential|token/.test(msg)) {
+    steps = [
+      "Trace how login state is created and passed through the app.",
+      "Check the route guard or middleware protecting auth routes.",
+      "Identify the failing condition or missing state update.",
+      `Run the relevant typecheck or test command via ${pkgMgr}.`,
+      "I can prepare the first patch next.",
+    ];
+  } else if (/api|route|endpoint|request|fetch|http/.test(msg)) {
+    steps = [
+      "Review the route definitions and handler logic.",
+      "Check request validation and error handling paths.",
+      "Trace the data flow from client to server.",
+      "I can prepare the first patch next.",
+    ];
+  } else if (/ui|screen|page|component|layout|style|css/.test(msg)) {
+    steps = [
+      "Review the component structure and state management.",
+      "Check for missing props, broken layout, or style conflicts.",
+      "Identify the smallest change that fixes the issue.",
+      "I can prepare the first patch next.",
+    ];
+  } else if (/build|typecheck|type error|lint|compile/.test(msg)) {
+    steps = [
+      "Review the type errors or build configuration.",
+      "Check tsconfig, package versions, and import paths.",
+      `Run typecheck via ${pkgMgr} to confirm the error scope.`,
+      "I can prepare the first patch next.",
+    ];
+  } else if (/test|spec|vitest|jest|coverage/.test(msg)) {
+    steps = [
+      "Review the failing test and the code under test.",
+      "Check the test setup and mock configuration.",
+      "Identify the assertion gap or state mismatch.",
+      "I can prepare the first patch next.",
+    ];
+  } else {
+    steps = [
+      "Review the relevant files for the requested change.",
+      "Trace the data flow and identify the touch points.",
+      "Prepare the smallest targeted change.",
+      "I can prepare the first patch next.",
+    ];
+  }
+
+  const stepsText = steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
+  return `I inspected:\n${fileList}\n\nPlan:\n${stepsText}`;
+}
 
 export class RelayClient {
   private state: RelayState = { status: "idle", lastPollAt: null, errorMsg: null };
@@ -227,15 +296,72 @@ export class RelayClient {
           "utf8",
         );
 
+        const userMessage =
+          typeof payload.userMessage === "string" ? payload.userMessage : "";
+
         // Inspect the local project safely — no shell, no secrets
-        let projectInspection: Record<string, unknown> | null = null;
+        let projectInspection: ProjectInspectionResult | { error: string } | null = null;
         try {
-          const inspection = await inspectLocalProject(sourceLocalPath);
-          projectInspection = inspection as unknown as Record<string, unknown>;
+          projectInspection = await inspectLocalProject(sourceLocalPath);
         } catch (inspErr) {
           const msg =
             inspErr instanceof Error ? inspErr.message : "Inspection failed";
           projectInspection = { error: msg };
+        }
+
+        // Phase 2J: select and read relevant files (only if inspection succeeded)
+        let selectedFiles: SelectedProjectFile[] = [];
+        let fileReadSummary: Array<{
+          relativePath: string;
+          bytesRead: number;
+          truncated: boolean;
+          reason: string;
+        }> = [];
+        let suggestedPlan: string | undefined;
+        const fileWarnings: string[] = [];
+
+        const inspectionOk =
+          projectInspection !== null && !("error" in projectInspection);
+
+        if (inspectionOk && userMessage.trim().length > 0) {
+          try {
+            const selection = await selectRelevantProjectFiles({
+              localPath: sourceLocalPath,
+              userMessage,
+              inspection: projectInspection as ProjectInspectionResult,
+            });
+            selectedFiles = selection.files;
+            for (const w of selection.warnings) fileWarnings.push(w.message);
+
+            if (selection.files.length > 0) {
+              const readResult = await readSelectedProjectFiles({
+                localPath: sourceLocalPath,
+                files: selection.files,
+              });
+              fileReadSummary = readResult.files.map((f) => ({
+                relativePath: f.relativePath,
+                bytesRead: f.bytesRead,
+                truncated: f.truncated,
+                reason: f.reason,
+              }));
+              for (const w of readResult.warnings) fileWarnings.push(w.message);
+              for (const s of readResult.skipped) {
+                fileWarnings.push(`Skipped ${s.relativePath}: ${s.reason}`);
+              }
+
+              if (readResult.files.length > 0) {
+                suggestedPlan = buildSuggestedPlan(
+                  userMessage,
+                  readResult.files.map((f) => f.relativePath),
+                  projectInspection as ProjectInspectionResult,
+                );
+              }
+            }
+          } catch (selErr) {
+            fileWarnings.push(
+              selErr instanceof Error ? selErr.message : "File selection failed",
+            );
+          }
         }
 
         result = {
@@ -244,6 +370,15 @@ export class RelayClient {
           executionSourceId,
           localPathVerified: true,
           projectInspection,
+          selectedFiles: selectedFiles.map((f) => ({
+            relativePath: f.relativePath,
+            category: f.category,
+            reason: f.reason,
+            score: f.score,
+          })),
+          fileReadSummary,
+          ...(suggestedPlan !== undefined ? { suggestedPlan } : {}),
+          ...(fileWarnings.length > 0 ? { warnings: fileWarnings } : {}),
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {
