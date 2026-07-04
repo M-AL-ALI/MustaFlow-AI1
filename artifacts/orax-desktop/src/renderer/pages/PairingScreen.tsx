@@ -105,7 +105,7 @@ export function PairingScreen() {
                 {pairingState.qrPayload}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-                QR code rendering will be added in Phase 2D.
+                Scan this QR payload with your phone or enter the code manually on mobile or the website.
               </div>
             </div>
           )}
@@ -144,7 +144,8 @@ export function PairingScreen() {
       )}
 
       <div className="card" style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
-        Pairing codes expire after 10 minutes. The mobile scan flow is added in Phase 2D.
+        Pairing codes expire after 10 minutes. They are account-bound and single-use.
+        Revoke trusted devices at any time from the website or desktop app.
       </div>
     </div>
   );

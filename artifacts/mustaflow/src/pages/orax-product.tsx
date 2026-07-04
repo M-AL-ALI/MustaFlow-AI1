@@ -135,8 +135,8 @@ export default function OraxProductPage() {
               Orax by MustaFlow AI
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
-              Your local coding and workflow agent. Inspect files, run commands, debug failures, and
-              push code — from desktop, web, or mobile.
+              Your local coding and workflow agent. The desktop app runs local work; web and mobile
+              are remote control surfaces so you can approve and monitor from anywhere.
             </p>
           </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -242,7 +242,7 @@ export default function OraxProductPage() {
               type="button"
               className="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-full bg-foreground px-8 text-sm font-semibold text-background opacity-50"
               disabled
-              title="Desktop app coming soon"
+              title="Desktop installer coming soon"
             >
               <Download className="h-4 w-4" />
               Download for Windows
@@ -256,7 +256,7 @@ export default function OraxProductPage() {
             </Link>
           </div>
           <p className="text-xs text-muted-foreground">
-            The Orax Desktop app is in development. Use the web workspace to connect repositories and manage tasks in the meantime.
+            Desktop installer coming soon. Use the web workspace to connect repositories and manage tasks in the meantime.
           </p>
         </section>
       </main>

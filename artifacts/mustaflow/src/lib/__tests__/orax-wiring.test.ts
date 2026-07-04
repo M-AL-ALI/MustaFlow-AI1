@@ -914,8 +914,8 @@ describe("ORAX product-surface wiring", () => {
     expect(modeSelect).toContain("oraxHostsLoading");
     expect(modeSelect).toContain("OraxCard");
     expect(modeSelect).toContain("Checking Orax Desktop");
-    expect(modeSelect).toContain("Online");
-    expect(modeSelect).toContain("Offline");
+    expect(modeSelect).toContain("Desktop online");
+    expect(modeSelect).toContain("Desktop offline");
   });
 
   it("Phase 2D: website /orax/devices page exists with host list, revoke, permission mode, pairing", () => {
@@ -2527,6 +2527,85 @@ describe("ORAX product-surface wiring", () => {
     for (const src of [
       read("../../../../orax-desktop/src/main/project-fix-drafter.ts"),
       read("../../../../orax-desktop/src/main/relay-client.ts"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+      expect(src).not.toContain("handoffCta");
+    }
+  });
+
+  // ── Phase 3A: MVP Installer + Real Pairing Flow ───────────────────────────
+
+  it("Phase 3A: desktop SignInScreen has no password field and opens browser", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/SignInScreen.tsx");
+    expect(src).toContain("Sign in with MustaFlow");
+    expect(src).toContain("No password is entered here");
+    expect(src).not.toContain('type="password"');
+  });
+
+  it("Phase 3A: desktop SetupScreen has Welcome to Orax and approval copy", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/SetupScreen.tsx");
+    expect(src).toContain("Welcome to Orax");
+    expect(src).toContain("after your approval");
+    expect(src).toContain("Register This Computer");
+  });
+
+  it("Phase 3A: desktop PairingScreen generates pairing code with no Phase 2D placeholder", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/PairingScreen.tsx");
+    expect(src).toContain("Generate Pairing Code");
+    expect(src).toContain("qrPayload");
+    expect(src).not.toContain("Phase 2D");
+  });
+
+  it("Phase 3A: desktop SettingsScreen has all permission mode labels and mode keys", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/SettingsScreen.tsx");
+    expect(src).toContain("PERMISSION_MODE_LABELS");
+    expect(src).toContain("read_only");
+    expect(src).toContain("full_access");
+    expect(src).toContain("ask_risky");
+    expect(src).toContain("Permission Mode");
+  });
+
+  it("Phase 3A: orax-product has coming-soon state and remote-control copy", () => {
+    const src = read("../../pages/orax-product.tsx");
+    expect(src).toContain("Desktop installer coming soon");
+    expect(src).toContain("remote control");
+  });
+
+  it("Phase 3A: mode-select Orax card has Desktop online/offline/Setup required badges", () => {
+    const src = read("../../pages/mode-select.tsx");
+    expect(src).toContain("Desktop online");
+    expect(src).toContain("Desktop offline");
+    expect(src).toContain("Setup required");
+  });
+
+  it("Phase 3A: orax-devices page has test connection, last seen, and revoke", () => {
+    const src = read("../../pages/orax-devices.tsx");
+    expect(src).toContain("Test connection");
+    expect(src).toContain("lastSeenAt");
+    expect(src).toContain("Revoke");
+  });
+
+  it("Phase 3A: mobile has pairing code redemption UI", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("redeemOraxPairingCode");
+    expect(src).toContain("pairing");
+  });
+
+  it("Phase 3A: desktop ProjectsScreen lists cloud projects and local folder binding", () => {
+    const src = read("../../../../orax-desktop/src/renderer/pages/ProjectsScreen.tsx");
+    expect(src).toContain("Cloud Projects");
+    expect(src).toContain("Add Folder");
+    expect(src).toContain(".orax/project.json");
+    expect(src).toContain("Reconnect folder on desktop");
+  });
+
+  it("Phase 3A: no Ora/public-ai in Orax product and device pages", () => {
+    for (const src of [
+      read("../../pages/orax-product.tsx"),
+      read("../../pages/orax-devices.tsx"),
+      read("../../../../orax-desktop/src/renderer/pages/SignInScreen.tsx"),
+      read("../../../../orax-desktop/src/renderer/pages/SetupScreen.tsx"),
     ]) {
       expect(src).not.toContain("/api/public-ai/");
       expect(src).not.toContain("oraChat");

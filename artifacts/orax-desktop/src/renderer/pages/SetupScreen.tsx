@@ -32,14 +32,14 @@ export function SetupScreen() {
         padding: 32,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <ServerCog size={24} color="#fff" />
+      <div style={{ textAlign: "center", marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <ServerCog size={24} color="#fff" />
+          </div>
         </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 20, color: "var(--text-primary)" }}>Set Up This Computer</div>
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Register as an Orax host</div>
-        </div>
+        <div style={{ fontWeight: 700, fontSize: 22, color: "var(--text-primary)" }}>Welcome to Orax</div>
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>Register this computer to get started</div>
       </div>
 
       <div className="card" style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -53,8 +53,8 @@ export function SetupScreen() {
         )}
 
         <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-          Registering this computer lets you pair it with your phone or browser to receive
-          and approve actions remotely. You control what Orax can do through permission modes.
+          Orax Desktop lets MustaFlow AI work with projects on this computer after your approval.
+          Pair your phone or browser to control Orax remotely — you decide what it can do.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

@@ -184,12 +184,12 @@ function OraxCard({ selecting, oraxHosts, oraxHostsLoading, onSelect }: OraxCard
     statusBadge = online ? (
       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold px-2 py-0.5">
         <Wifi className="h-3 w-3" />
-        Online
+        Desktop online
       </span>
     ) : (
       <span className="inline-flex items-center gap-1 rounded-full bg-muted border border-border text-muted-foreground text-xs font-semibold px-2 py-0.5">
         <WifiOff className="h-3 w-3" />
-        Offline
+        Desktop offline
       </span>
     );
     statusLine = (
@@ -199,6 +199,12 @@ function OraxCard({ selecting, oraxHosts, oraxHostsLoading, onSelect }: OraxCard
         {activeHosts.length > 1 && (
           <span className="ml-1 text-muted-foreground/60">+{activeHosts.length - 1} more</span>
         )}
+      </span>
+    );
+  } else {
+    statusBadge = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted border border-border text-muted-foreground text-xs font-semibold px-2 py-0.5">
+        Setup required
       </span>
     );
   }
