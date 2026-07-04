@@ -1,3 +1,4 @@
+import { LEGAL_SECTIONS } from "@workspace/ora-contracts";
 import { authFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
@@ -1256,6 +1257,22 @@ function PrivacyTab() {
             <ExternalLink className="h-3.5 w-3.5" />
             Request a Data Processing Agreement (DPA)
           </a>
+        </div>
+      </div>
+
+      {/* Legal & Privacy disclosure */}
+      <div className="border border-border rounded-xl bg-card p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-base font-semibold">Legal &amp; Privacy</h2>
+        </div>
+        <div className="space-y-3">
+          {LEGAL_SECTIONS.map(({ heading, body }) => (
+            <div key={heading}>
+              <p className="text-sm font-medium mb-0.5">{heading}</p>
+              <p className="text-sm text-muted-foreground">{body}</p>
+            </div>
+          ))}
         </div>
       </div>
 
