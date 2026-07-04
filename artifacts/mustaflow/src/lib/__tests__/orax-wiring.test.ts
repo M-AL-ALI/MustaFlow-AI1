@@ -2682,4 +2682,67 @@ describe("ORAX product-surface wiring", () => {
     expect(src).not.toContain("oraChat");
     expect(src).not.toContain("handoffCta");
   });
+
+  // ── Phase 3C: Real GitHub PR Creation + GitHub Connection Quality ─────────────
+
+  it("Phase 3C: project-git-workflow.ts detects GitHub remote and creates real PRs via API", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).toContain("parseGitHubRemote");
+    expect(src).toContain("createGitHubPr");
+    expect(src).toContain("api.github.com");
+    expect(src).toContain("redactToken");
+  });
+
+  it("Phase 3C: project-git-workflow.ts exports PrBlockerType and returns blockerType", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).toContain("PrBlockerType");
+    expect(src).toContain("no_github_remote");
+    expect(src).toContain("push_failed");
+    expect(src).toContain("blockerType");
+    expect(src).toContain("blockerReason");
+  });
+
+  it("Phase 3C: project-git-workflow.ts does not log tokens or use exec", () => {
+    const src = read("../../../../orax-desktop/src/main/project-git-workflow.ts");
+    expect(src).not.toContain("console.log");
+    expect(src).not.toContain("exec(");
+  });
+
+  it("Phase 3C: relay-client.ts passes blockerType, blockerReason, prNumber through result", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("blockerType");
+    expect(src).toContain("blockerReason");
+    expect(src).toContain("prNumber");
+  });
+
+  it("Phase 3C: orax-desktop.ts routes isHardBlocked to project_pr_blocked", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("project_pr_blocked");
+    expect(src).toContain("isHardBlocked");
+    expect(src).toContain("no_github_remote");
+  });
+
+  it("Phase 3C: orax-workspace.tsx renders project_pr_blocked with device settings link", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_pr_blocked");
+    expect(src).toContain("GitHub connection required");
+    expect(src).toContain("/orax/devices");
+  });
+
+  it("Phase 3C: mobile has ProjectPrBlockedCard for project_pr_blocked", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPrBlockedCard");
+    expect(src).toContain("project_pr_blocked");
+    expect(src).toContain("GitHub connection required");
+  });
+
+  it("Phase 3C: no Ora/public-ai contamination in Phase 3C files", () => {
+    for (const src of [
+      read("../../../../orax-desktop/src/main/project-git-workflow.ts"),
+      read("../../../../orax-desktop/src/main/relay-client.ts"),
+    ]) {
+      expect(src).not.toContain("/api/public-ai/");
+      expect(src).not.toContain("oraChat");
+    }
+  });
 });

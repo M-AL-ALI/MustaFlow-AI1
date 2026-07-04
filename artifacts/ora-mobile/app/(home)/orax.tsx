@@ -4067,6 +4067,32 @@ function ProjectPrFailedCard({ msg }: { msg: OraxProjectThreadMessage }) {
   );
 }
 
+// Phase 3C: compact card for project_pr_blocked thread messages
+function ProjectPrBlockedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#f59e0b55",
+        borderRadius: 12,
+        padding: 12,
+        backgroundColor: "#f59e0b08",
+      }}
+    >
+      <Text style={{ color: "#f59e0b", fontSize: 13, fontFamily: "Inter_500Medium" }}>
+        GitHub connection required
+      </Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+        {msg.content}
+      </Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 11, marginTop: 6 }}>
+        Open device settings in the Orax app to connect GitHub.
+      </Text>
+    </View>
+  );
+}
+
 function isOraxVisibleThreadMessage(message: OraxTaskMessage): boolean {
   if (message.role === "user" || message.role === "assistant") return true;
   const event = typeof message.metadata?.event === "string" ? message.metadata.event : "";

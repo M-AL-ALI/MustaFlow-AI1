@@ -1294,24 +1294,51 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         eventType = "project_fix_draft_failed";
         role = "assistant";
       } else if (isPrepPr && type === "completed") {
-        // Phase 3B: PR branch + commit completed — write project_pr_ready message
+        // Phase 3B/3C: PR branch + commit completed — may be ready, blocked, or partial
         const pp = (payload ?? {}) as {
           branchName?: string;
+          baseBranch?: string | null;
           commitSha?: string;
           changedFiles?: string[];
+          repoOwner?: string | null;
+          repoName?: string | null;
           prUrl?: string | null;
+          prNumber?: number | null;
+          blockerType?: string | null;
+          blockerReason?: string | null;
           warnings?: string[];
           durationMs?: number;
         };
+
         const branchName = pp.branchName ?? "orax/patch";
         const commitSha = pp.commitSha ?? "";
         const prUrl = pp.prUrl ?? null;
+        const prNumber = pp.prNumber ?? null;
+        const blockerType = pp.blockerType ?? null;
+        const blockerReason = pp.blockerReason ?? null;
         const shortSha = commitSha.slice(0, 8);
-        content = prUrl
-          ? `Branch \`${branchName}\` pushed. Commit: ${shortSha}. Pull request ready.`
-          : `Branch \`${branchName}\` committed (${shortSha}). No remote push — open a PR manually.`;
-        eventType = "project_pr_ready";
-        role = "assistant";
+
+        // Hard blockers: no GitHub remote, no git repo, or push failed
+        const isHardBlocked =
+          blockerType === "no_github_remote" ||
+          blockerType === "no_git_repo" ||
+          blockerType === "push_failed";
+
+        if (isHardBlocked) {
+          content =
+            blockerReason ??
+            "GitHub connection required to create a pull request. Check device settings.";
+          eventType = "project_pr_blocked";
+          role = "assistant";
+        } else {
+          const prLabel =
+            prNumber != null ? `, PR #${prNumber} created` : " pushed";
+          content = prUrl
+            ? `Branch \`${branchName}\`${prLabel}. ${blockerType === "api_create_failed" ? "PR creation failed — open manually." : "Pull request ready."}`
+            : `Branch \`${branchName}\` committed (${shortSha}). No remote push — open a PR manually.`;
+          eventType = "project_pr_ready";
+          role = "assistant";
+        }
 
         await db.insert(oraxThreadMessagesTable).values({
           threadId: action.threadId,
@@ -1322,9 +1349,15 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
             actionId,
             actionType: action.type,
             branchName,
+            baseBranch: pp.baseBranch ?? null,
             commitSha,
             changedFiles: pp.changedFiles ?? [],
+            repoOwner: pp.repoOwner ?? null,
+            repoName: pp.repoName ?? null,
             prUrl,
+            prNumber,
+            blockerType,
+            blockerReason,
             warnings: pp.warnings ?? [],
             durationMs: pp.durationMs ?? 0,
           },

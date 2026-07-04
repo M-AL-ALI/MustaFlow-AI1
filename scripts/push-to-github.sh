@@ -46,6 +46,7 @@ git add \
   artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts \
   "attached_assets/Pasted-Start-Phase-3A-Orax-Desktop-MVP-Installer-Real-Pairing-_1783142074686.txt" \
   "attached_assets/Pasted-Start-Phase-3B-Git-Branch-Commit-and-Pull-Request-Flow-_1783145367118.txt" \
+  "attached_assets/Pasted-Start-Phase-3C-Real-GitHub-PR-Creation-GitHub-Connectio_1783185593507.txt" \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
