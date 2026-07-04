@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
+import { getAuth } from "@clerk/express";
 import { createHash } from "crypto";
 import {
   createSession,
@@ -17,9 +18,16 @@ import { logger } from "../../lib/logger";
 
 const router = Router();
 
-/** Skip the session-creation rate limiter for E2E benchmark runs. */
+/** Skip the session-creation rate limiter for E2E benchmark runs or authenticated users. */
 function sessionRateLimiter(req: Request, res: Response, next: NextFunction): void {
   if (isE2ETestAuthEnabled() && req.headers["x-e2e-test-user"]) {
+    next();
+    return;
+  }
+  // Authenticated users are metered by per-user rolling-window quotas in the
+  // database — not the anonymous IP session-creation count. Skip the 10/day IP
+  // cap so signed-in users (e.g. Core Pack) are never blocked by it.
+  if (getAuth(req).userId) {
     next();
     return;
   }

@@ -199,6 +199,12 @@ function initSteps(): DiagStep[] {
   const base = API_BASE;
   const steps: DiagStep[] = [
     {
+      id: "realtime",
+      label: "Realtime voice transport",
+      url: `${base}/api/public-ai/realtime/diagnostics`,
+      status: "pending",
+    },
+    {
       id: "transport",
       label: "Transport check",
       url: `${base}/api/public-ai/session`,
@@ -206,7 +212,7 @@ function initSteps(): DiagStep[] {
     },
     {
       id: "session",
-      label: "POST /api/public-ai/session",
+      label: "Ora session (GET/POST)",
       url: `${base}/api/public-ai/session`,
       status: "pending",
     },
@@ -1026,6 +1032,36 @@ export default function SettingsScreen() {
 
     const jsonHeaders: HeadersInit = { "Content-Type": "application/json", ...authHeaders };
 
+    // ── Realtime voice transport ───────────────────────────────────────────
+    updateStep("realtime", { status: "running" });
+    const rtNative = isRealtimeVoiceNativeAvailable();
+    try {
+      const rtDiagResult = await getRealtimeDiagnostics();
+      const serverOk =
+        rtDiagResult.enabled && rtDiagResult.configured && !rtDiagResult.killSwitch;
+      let rtDetail: string;
+      if (!rtNative) {
+        rtDetail = "WebRTC module not in this build — Talk to Ora uses basic voice mode";
+      } else if (rtDiagResult.killSwitch) {
+        rtDetail = "WebRTC available • live voice temporarily off";
+      } else if (!rtDiagResult.configured) {
+        rtDetail = "WebRTC available • server not configured";
+      } else if (!rtDiagResult.enabled) {
+        rtDetail = "WebRTC available • server disabled";
+      } else {
+        const maxMin = Math.round((rtDiagResult.maxDurationSeconds ?? 0) / 60);
+        rtDetail = `WebRTC ready • ${rtDiagResult.tier ?? "unknown"} plan • max ${maxMin}m`;
+      }
+      updateStep("realtime", { status: rtNative && serverOk ? "ok" : "fail", detail: rtDetail });
+    } catch {
+      updateStep("realtime", {
+        status: rtNative ? "ok" : "fail",
+        detail: rtNative
+          ? "WebRTC module available (server config unavailable)"
+          : "WebRTC module not in this build — Talk to Ora uses basic voice mode",
+      });
+    }
+
     updateStep("transport", { status: "running" });
     try {
       const r = await fetchWithTimeout(
@@ -1053,11 +1089,20 @@ export default function SettingsScreen() {
 
     updateStep("session", { status: "running" });
     try {
-      const r = await fetchWithTimeout(
+      // GET first: reads the existing session without consuming a rate-limit slot.
+      // Only fall back to POST if there is no active session cookie yet (401).
+      let r = await fetchWithTimeout(
         `${API_BASE}/api/public-ai/session`,
-        { method: "POST", headers: jsonHeaders },
-        12000,
+        { method: "GET", headers: authHeaders },
+        8000,
       );
+      if (r.status === 401) {
+        r = await fetchWithTimeout(
+          `${API_BASE}/api/public-ai/session`,
+          { method: "POST", headers: jsonHeaders },
+          12000,
+        );
+      }
       let body = "";
       try {
         body = (await r.text()).slice(0, 400);
