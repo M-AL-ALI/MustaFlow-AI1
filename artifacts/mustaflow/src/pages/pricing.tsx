@@ -1,6 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useEffect, useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import { PageMeta } from "@/components/page-meta";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Zap, ArrowRight, Star } from "lucide-react";
@@ -97,9 +97,13 @@ const ORA_PLAN_LIMITS = [
 export default function PricingPage() {
   const { isSignedIn } = useAuthState();
   const [, navigate] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
   const [oraTiers, setOraTiers] = useState<OraTierMeta[]>(ORA_PLAN_FALLBACK);
+  const [highlightTier, setHighlightTier] = useState<string | null>(null);
+  const tierParam = new URLSearchParams(searchString).get("tier");
+  const scrolledRef = useRef(false);
 
   // Server (ORA_TIERS_META) is the single source of truth. Fall back to the
   // hardcoded Ora-only tiers until the public endpoint resolves.
@@ -120,13 +124,29 @@ export default function PricingPage() {
     };
   }, []);
 
+  // After plan data loads, highlight and scroll the tier card requested via ?tier=
+  useEffect(() => {
+    if (!tierParam || scrolledRef.current) return;
+    const tier = tierParam.toLowerCase();
+    if (tier !== "core" && tier !== "wave") return;
+    scrolledRef.current = true;
+    setHighlightTier(tier);
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(`plan-card-${tier}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [tierParam, oraTiers]);
+
   const freeTier = oraTiers.find((t) => t.id === "free") ?? ORA_PLAN_FALLBACK[0]!;
   const coreTier = oraTiers.find((t) => t.id === "core") ?? ORA_PLAN_FALLBACK[1]!;
   const waveTier = oraTiers.find((t) => t.id === "wave") ?? ORA_PLAN_FALLBACK[2]!;
 
   async function handleSubscribe(tier: "core" | "wave") {
     if (!isSignedIn) {
-      navigate("/sign-up?redirect=/pricing");
+      const params = new URLSearchParams(searchString);
+      params.set("tier", tier);
+      navigate(`/sign-up?redirect=${encodeURIComponent(`/pricing?${params.toString()}`)}`);
       return;
     }
 
@@ -137,7 +157,7 @@ export default function PricingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tier,
-          successUrl: `${window.location.origin}/ora/settings?subscribed=1`,
+          successUrl: `${window.location.origin}/ora/settings?section=plan&subscribed=1`,
           cancelUrl: `${window.location.origin}/pricing`,
         }),
       });
@@ -221,7 +241,14 @@ export default function PricingPage() {
           </div>
 
           {/* Core Pack */}
-          <div className="relative rounded-2xl border-2 border-primary bg-primary/5 p-7 flex flex-col gap-5 shadow-lg">
+          <div
+            id="plan-card-core"
+            className={`relative rounded-2xl border-2 p-7 flex flex-col gap-5 shadow-lg transition-all duration-500 ${
+              highlightTier === "core"
+                ? "border-primary bg-primary/10 ring-2 ring-primary/40"
+                : "border-primary bg-primary/5"
+            }`}
+          >
             <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide px-3 py-0.5 rounded-full bg-primary text-primary-foreground whitespace-nowrap">
               <Star className="h-3 w-3" />
               Most popular
@@ -267,7 +294,14 @@ export default function PricingPage() {
           </div>
 
           {/* Deep Wave */}
-          <div className="relative rounded-2xl border border-border bg-card p-7 flex flex-col gap-5">
+          <div
+            id="plan-card-wave"
+            className={`relative rounded-2xl border p-7 flex flex-col gap-5 transition-all duration-500 ${
+              highlightTier === "wave"
+                ? "border-primary bg-primary/10 ring-2 ring-primary/40"
+                : "border-border bg-card"
+            }`}
+          >
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                 Deep Wave
