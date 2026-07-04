@@ -287,6 +287,15 @@ function OraBubblePortal({ chat }: OraBubbleProps) {
   }, [isSignedIn]);
 
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    function handleOraOpen() {
+      setOpen(true);
+    }
+    window.addEventListener("ora:open", handleOraOpen);
+    return () => window.removeEventListener("ora:open", handleOraOpen);
+  }, []);
+
   const [input, setInput] = useState("");
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showVoicePicker, setShowVoicePicker] = useState(false);
