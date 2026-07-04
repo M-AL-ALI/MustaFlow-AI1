@@ -1,0 +1,95 @@
+Phase 2H still has one mobile typecheck blocker.
+
+Failing command:
+
+pnpm --filter @workspace/ora-mobile run typecheck
+
+Errors:
+
+artifacts/ora-mobile/app/(home)/orax.tsx around line 448:
+- Property 'canExecute' does not exist
+- Property 'mode' does not exist
+- Property 'blockReason' does not exist
+- Property 'host' does not exist
+
+Root cause:
+getProjectThreadContext(projectId, threadId) returns:
+
+{
+  context: {
+    canExecute,
+    mode,
+    blockReason,
+    host
+  },
+  threadMode
+}
+
+But app/(home)/orax.tsx treats the whole response as if it were the context directly.
+
+Current wrong pattern:
+
+const ctx = await getProjectThreadContext(projectId, threadId);
+
+setProjectThreadCtx({
+  canExecute: ctx.canExecute,
+  mode: ctx.mode,
+  blockReason: ctx.blockReason ?? null,
+  host: ctx.host ? { deviceName: ctx.host.deviceName ?? "Desktop" } : null,
+});
+
+Required fix:
+
+const ctxResult = await getProjectThreadContext(projectId, threadId);
+const ctx = ctxResult.context;
+
+setProjectThreadCtx({
+  canExecute: ctx.canExecute,
+  mode: ctx.mode,
+  blockReason: ctx.blockReason ?? null,
+  host: ctx.host ? { deviceName: ctx.host.deviceName ?? "Desktop" } : null,
+});
+
+Second mobile error:
+
+app/(home)/orax.tsx line ~469:
+sendProjectThreadMessage(projectId, threadId, { role: "user", content: "" })
+
+But api.ts defines:
+
+sendProjectThreadMessage(projectId: string, threadId: string, content: string)
+
+Required fix:
+
+Either call:
+
+await sendProjectThreadMessage(projectId, threadId, "");
+
+or better, do not send an empty message at all. If userMessage is empty, just set the active thread/context and return.
+
+Recommended fix:
+
+Replace the else block with no-op:
+
+} else {
+  return;
+}
+
+or remove the else block entirely.
+
+After fixing, run:
+
+pnpm --filter @workspace/ora-mobile run typecheck
+
+Then rerun the full gate:
+
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Do not move to Phase 2I until mobile typecheck is clean.
