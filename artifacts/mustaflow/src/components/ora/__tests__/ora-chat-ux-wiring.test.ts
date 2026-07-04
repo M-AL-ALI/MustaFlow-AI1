@@ -29,17 +29,17 @@ describe("Ora chat UX response wiring", () => {
   });
 
   it("maps backend response payloads onto assistant messages", () => {
-    expect(hookSource).toMatch(/suggestions:\s*data\.suggestions\s*\?\?\s*\[\]/);
-    expect(hookSource).toContain("...(data.imageUrl ? { imageUrl: data.imageUrl } : {})");
-    expect(hookSource).toContain("...(data.imageId != null ? { imageId: data.imageId } : {})");
+    expect(hookSource).toMatch(/suggestions:\s*d\.suggestions\s*\?\?\s*\[\]/);
+    expect(hookSource).toContain("...(d.imageUrl ? { imageUrl: d.imageUrl } : {})");
+    expect(hookSource).toContain("...(d.imageId != null ? { imageId: d.imageId } : {})");
     expect(hookSource).toMatch(
-      /data\.memoriesUsed\s*&&\s*data\.memoriesUsed\.length\s*>\s*0[\s\S]*memoriesUsed:\s*data\.memoriesUsed/,
+      /d\.memoriesUsed\s*&&\s*d\.memoriesUsed\.length\s*>\s*0[\s\S]*memoriesUsed:\s*d\.memoriesUsed/,
     );
     expect(hookSource).toMatch(
-      /data\.memorySaveCandidate[\s\S]*memorySaveCandidate:\s*data\.memorySaveCandidate[\s\S]*memorySaveCandidateConfidence/,
+      /d\.memorySaveCandidate[\s\S]*memorySaveCandidate:\s*d\.memorySaveCandidate[\s\S]*memorySaveCandidateConfidence/,
     );
     expect(hookSource).toMatch(
-      /data\.fileName\s*&&\s*data\.fileData\s*&&\s*data\.mimeType[\s\S]*generatedFile:[\s\S]*fileName:\s*data\.fileName[\s\S]*fileData:\s*data\.fileData[\s\S]*mimeType:\s*data\.mimeType/,
+      /d\.fileName\s*&&\s*d\.fileData\s*&&\s*d\.mimeType[\s\S]*generatedFile:[\s\S]*fileName:\s*d\.fileName[\s\S]*fileData:\s*d\.fileData[\s\S]*mimeType:\s*d\.mimeType/,
     );
   });
 

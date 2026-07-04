@@ -37,16 +37,7 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
-  artifacts/orax-desktop/src/main/project-git-workflow.ts \
-  artifacts/orax-desktop/src/main/relay-client.ts \
-  artifacts/api-server/src/routes/orax-projects.ts \
-  artifacts/api-server/src/routes/orax-desktop.ts \
-  artifacts/mustaflow/src/pages/orax-workspace.tsx \
-  "artifacts/ora-mobile/app/(home)/orax.tsx" \
-  artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts \
-  "attached_assets/Pasted-Start-Phase-3A-Orax-Desktop-MVP-Installer-Real-Pairing-_1783142074686.txt" \
-  "attached_assets/Pasted-Start-Phase-3B-Git-Branch-Commit-and-Pull-Request-Flow-_1783145367118.txt" \
-  "attached_assets/Pasted-Start-Phase-3C-Real-GitHub-PR-Creation-GitHub-Connectio_1783185593507.txt" \
+  artifacts/mustaflow/src/components/ora/__tests__/ora-chat-ux-wiring.test.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
