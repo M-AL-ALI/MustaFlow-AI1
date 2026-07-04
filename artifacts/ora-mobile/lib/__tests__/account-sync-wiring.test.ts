@@ -18,7 +18,8 @@ describe("Mobile Settings — Account sync wiring", () => {
 
   it("renders an Account sync section that runs the check", () => {
     expect(settings).toContain("getAccountConsistency");
-    // Account sync moved into the About sub-view menu — accessed via label, not a standalone title prop
+    // Account sync lives inside the About sub-view menu — id + label, not a standalone title prop
+    expect(settings).toContain('id: "account-sync"');
     expect(settings).toContain('label: "Account sync"');
     expect(settings).toContain("Check account sync");
   });
