@@ -441,6 +441,12 @@ export interface OraVoiceConvPanelProps {
    */
   fallbackNotice?: string | null;
   onDismissFallbackNotice?: () => void;
+  /**
+   * When the realtime call has fallen back to the legacy loop, show a Retry
+   * action in the fallback notice so the user can rebuild the live session.
+   */
+  showRetry?: boolean;
+  onRetry?: () => void;
 }
 
 export function OraVoiceConvPanel({
@@ -467,6 +473,8 @@ export function OraVoiceConvPanel({
   overLimit = null,
   fallbackNotice = null,
   onDismissFallbackNotice,
+  showRetry = false,
+  onRetry,
 }: OraVoiceConvPanelProps) {
   useEffect(injectKeyframes, []);
 
@@ -543,6 +551,15 @@ export function OraVoiceConvPanel({
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
           <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           <span className="flex-1 leading-snug">{fallbackNotice}</span>
+          {showRetry && onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="shrink-0 rounded-md border border-amber-500/40 px-2 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/15 dark:text-amber-400 transition-colors"
+            >
+              Retry
+            </button>
+          )}
           {onDismissFallbackNotice && (
             <button
               type="button"

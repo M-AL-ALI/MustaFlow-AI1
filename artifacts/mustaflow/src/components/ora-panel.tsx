@@ -568,6 +568,19 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
   realtimeRef.current = realtime;
 
   const realtimeActive = voiceConvActive && voiceTransport === "realtime";
+  // Connection-quality dot for the live-voice button. Only meaningful while a
+  // realtime call is active (or reconnecting); mirrors the mobile status dot.
+  const networkQuality = realtime.networkQuality;
+  const showQualityDot =
+    realtimeActive || (voiceConvActive && networkQuality === "reconnecting");
+  const qualityDot =
+    networkQuality === "good"
+      ? { color: "#3fb950", label: "Live voice connection is stable", pulse: false }
+      : networkQuality === "degraded"
+        ? { color: "#f0a742", label: "Live voice connection is unstable", pulse: true }
+        : networkQuality === "reconnecting"
+          ? { color: "#f0a742", label: "Reconnecting live voice…", pulse: true }
+          : { color: "#8b949e", label: "Using basic voice mode", pulse: false };
   const fallbackNotice =
     voiceConvActive && voiceTransport === "fallback" && !fallbackNoticeDismissed
       ? (realtime.fallbackReason ??
@@ -1099,6 +1112,23 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Live-voice connection-quality dot (mirrors mobile status dot) */}
+          {showQualityDot && (
+            <span
+              className="flex items-center"
+              title={qualityDot.label}
+              aria-label={qualityDot.label}
+            >
+              <span
+                className={cn(
+                  "inline-block h-1.5 w-1.5 rounded-full",
+                  qualityDot.pulse && "animate-pulse",
+                )}
+                style={{ backgroundColor: qualityDot.color }}
+              />
+            </span>
+          )}
+
           {/* Voice Conversation Mode — Talk with Ora (premium orb in header) */}
           {(realtime.isSupported || voice.isSupported || whisperConv.isSupported) && (
             <OraVoiceModeButton
@@ -1906,6 +1936,8 @@ export function OraPanel({ chat, layout = "card" }: OraPanelProps) {
                     overLimit={realtime.overLimit}
                     fallbackNotice={fallbackNotice}
                     onDismissFallbackNotice={handleDismissFallbackNotice}
+                    showRetry={realtime.networkQuality === "legacy"}
+                    onRetry={handleEnterVoiceConvMode}
                     voiceState={
                       voice.voiceState === "unsupported" && whisperConv.isSupported
                         ? "idle"
