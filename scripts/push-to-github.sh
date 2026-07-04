@@ -35,19 +35,6 @@ ARG="${1:-}"
 git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
-# --- Phase 2L: Real Patch Generation + Approval-Gated Apply ---
-git rm --cached --ignore-unmatch "attached_assets/Pasted-Start-Phase-2K-Orax-Draft-Patch-Proposal-Loop-Goal-Move_1783129303417.txt" 2>/dev/null || true
-git add \
-  artifacts/orax-desktop/src/main/project-patch-applier.ts \
-  artifacts/orax-desktop/src/main/project-patch-drafter.ts \
-  artifacts/orax-desktop/src/main/relay-client.ts \
-  artifacts/api-server/src/routes/orax-desktop.ts \
-  artifacts/api-server/src/routes/orax-projects.ts \
-  artifacts/mustaflow/src/pages/orax-workspace.tsx \
-  artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts \
-  artifacts/ora-mobile/app/\(home\)/orax.tsx \
-  .local/.commit_message \
-  2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add scripts/push-to-github.sh 2>/dev/null || true
 
