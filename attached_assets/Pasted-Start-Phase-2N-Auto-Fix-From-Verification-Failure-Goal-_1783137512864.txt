@@ -1,0 +1,139 @@
+Start Phase 2N — Auto-Fix From Verification Failure
+
+Goal:
+When Orax applies a patch and verification fails, it should use the failed check output to prepare the next fix proposal automatically, like Codex.
+
+Current state:
+Phase 2M is verified. Orax can:
+- apply an approved patch
+- run post-apply verification
+- show passed/failed verification inline
+- show “Prepare fix” when verification fails
+
+Next gap:
+“Prepare fix” should become a real loop:
+verification failure → inspect failure output → select/read relevant files again if needed → draft fix patch → show inline patch proposal → approval-gated apply.
+
+Do not touch:
+Ora, public-ai chat, AI Builder, credits, normal Ora project chat.
+
+Implementation:
+
+1. Add new desktop action type:
+`draft_project_fix`
+
+Payload:
+- projectId
+- threadId
+- executionSourceId
+- sourceLocalPath
+- failedChecks[]
+- originalUserMessage
+- previousPatchSummary
+- changedFiles[]
+
+2. Backend “Prepare fix” endpoint
+Update:
+`artifacts/api-server/src/routes/orax-projects.ts`
+
+When user clicks Prepare fix:
+- find the latest `project_patch_verification_failed` message
+- extract failed check output from payload
+- find latest patch-drafted/applied context
+- queue `draft_project_fix`
+- write inline system message: “I’m preparing a fix from the failed checks.”
+- no raw IDs in normal thread
+
+3. Desktop relay handler
+Update:
+`artifacts/orax-desktop/src/main/relay-client.ts`
+
+Add handler for `draft_project_fix`:
+- validate `.orax/project.json`
+- verify source path exists
+- use failed check output to select/read relevant files
+- reuse Phase 2J reader safety rules
+- call fix drafter
+- post completed/failed event
+
+4. New fix drafter
+Create:
+`artifacts/orax-desktop/src/main/project-fix-drafter.ts`
+
+Responsibilities:
+- Input: failedChecks, selected file previews, previous patch context
+- Output: structured patch proposal using same shape as Phase 2L:
+  - changedFiles[]
+  - newContent
+  - unifiedDiffPreview
+  - reason
+  - risks[]
+  - verificationPlan[]
+- No file writes
+- No shell
+- No exec/spawn/shell:true/process.cwd
+- same blocked files/dirs/path validation as patch drafter
+
+5. Backend event handling
+Update:
+`artifacts/api-server/src/routes/orax-desktop.ts`
+
+When `draft_project_fix` completes:
+- write assistant message:
+  `eventType: "project_fix_drafted"`
+- content should be human-readable
+- payload should contain structured fix patch
+- website/mobile should render it like patch draft
+- apply flow should reuse existing apply-patch endpoint if possible, or accept latest `project_fix_drafted` message as an apply source
+
+6. Website UI
+Update:
+`artifacts/mustaflow/src/pages/orax-workspace.tsx`
+
+Render:
+- `project_fix_drafted`
+- file chips
+- diff preview
+- risks
+- verification plan
+- “Apply fix” button
+- keep it inline inside the thread
+
+7. Mobile UI
+Update:
+`artifacts/ora-mobile/app/(home)/orax.tsx`
+
+Render:
+- compact `project_fix_drafted` card
+- changed files
+- risks/verification summary
+- keep parity with website
+
+8. Tests / wiring guards
+Update:
+`artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts`
+
+Assertions:
+- `draft_project_fix` exists in backend and desktop relay
+- `project-fix-drafter.ts` exists
+- no exec/spawn/shell:true/process.cwd in fix drafter
+- fix drafter uses blocked file/path validation
+- backend writes `project_fix_drafted`
+- website renders `project_fix_drafted`
+- mobile renders `project_fix_drafted`
+- apply flow supports fix draft source
+- no Ora/public-ai route contamination
+
+Verification:
+Run:
+pnpm run typecheck:libs
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/orax-desktop run typecheck
+pnpm --filter @workspace/orax-desktop run build
+pnpm --filter @workspace/mustaflow run lint
+pnpm --filter @workspace/mustaflow run typecheck
+pnpm --filter @workspace/ora-mobile run typecheck
+pnpm --filter @workspace/mustaflow run test -- src/lib/__tests__/orax-wiring.test.ts
+
+Expected:
+All clean. Push to GitHub after verification.
