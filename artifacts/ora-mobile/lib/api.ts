@@ -413,6 +413,17 @@ export interface StreamChatDiagnostics {
   fallbackCalled: boolean;
   /** Unix ms when this record was captured. */
   capturedAt: number;
+  // ── Server-reported timing (populated from the SSE done payload) ──────────
+  /** Server-measured TTFT in ms (t0 to first token). */
+  serverTtftMs?: number | null;
+  /** Server-measured total request time in ms (t0 to stream end). */
+  serverTotalMs?: number | null;
+  /** Provider that served the response (e.g. "gemini", "openai"). */
+  serverProvider?: string | null;
+  /** Route tier chosen by the server (fast / premium / deep). */
+  serverRouteTier?: string | null;
+  /** True when the server took the fast-lane path (classifier skipped). */
+  serverFastLane?: boolean | null;
 }
 
 let _lastStreamDiag: StreamChatDiagnostics | null = null;
@@ -666,6 +677,15 @@ export async function streamChatNative(
         } else if (type === "done") {
           donePayload = (parsed as { payload: StreamDonePayload }).payload;
           diag.doneArrived = true;
+          // Capture server-side timing from the done payload so settings can
+          // show provider, route tier, and server-measured latency.
+          if (donePayload?.serverDiag) {
+            diag.serverTtftMs = donePayload.serverDiag.ttftMs;
+            diag.serverTotalMs = donePayload.serverDiag.totalMs;
+            diag.serverProvider = donePayload.serverDiag.provider;
+            diag.serverRouteTier = donePayload.serverDiag.routeTier;
+            diag.serverFastLane = donePayload.serverDiag.fastLane;
+          }
         } else if (type === "error") {
           const code = (parsed as { code?: string }).code;
           const fallbackToken = (parsed as { fallbackToken?: string }).fallbackToken;

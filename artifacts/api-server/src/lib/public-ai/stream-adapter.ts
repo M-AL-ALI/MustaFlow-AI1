@@ -51,6 +51,14 @@ export interface OraStreamDonePayload {
    * log the difference between real and fallback streaming.
    */
   isRealStreaming: boolean;
+  /** Server-measured timing/routing metadata for client diagnostics (privacy-safe). */
+  serverDiag?: {
+    ttftMs: number | null;
+    totalMs: number;
+    provider: string;
+    routeTier: string;
+    fastLane: boolean;
+  } | null;
 }
 
 /**

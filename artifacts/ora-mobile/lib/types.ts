@@ -94,6 +94,14 @@ export interface StreamDonePayload {
   windowHours?: number;
   isRealStreaming?: boolean;
   streamingFallback?: boolean;
+  /** Server-measured timing/routing metadata — privacy-safe, no user content. */
+  serverDiag?: {
+    ttftMs: number | null;
+    totalMs: number;
+    provider: string;
+    routeTier: string;
+    fastLane: boolean;
+  } | null;
 }
 
 export interface OraSession {
