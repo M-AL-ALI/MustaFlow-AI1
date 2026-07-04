@@ -37,8 +37,7 @@ rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
-  artifacts/api-server/src/lib/public-ai/orchestrator.ts \
-  artifacts/api-server/src/lib/public-ai/__tests__/routing-diagnostics.test.ts \
+  .agents/memory/ora-image-intent-routing.md \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
