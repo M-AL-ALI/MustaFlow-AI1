@@ -25,39 +25,57 @@ describe("Ora Mobile — plan/billing parity", () => {
   });
 
   it("renders BigUsageCard for message and image quotas (website-parity plan display)", () => {
-    // New design uses BigUsageCard components to show remaining messages / images
     expect(settings).toContain("function BigUsageCard(");
-    // BigUsageCard is rendered for both quota types (label prop may be on a separate line)
     expect(settings).toContain('label="Messages"');
     expect(settings).toContain('label="Images"');
-    // Renewal date comes from subscription via renewalLabel helper
     expect(settings).toContain("function renewalLabel(");
     expect(settings).toContain("renewalLabel(subscription");
-    // Payment method info is fetched and displayed (read-only, no checkout)
     expect(settings).toContain("getPaymentMethod");
     expect(settings).toContain("paymentMethod.hasPaymentMethod");
     expect(settings).toContain("paymentMethod.last4");
   });
 
   it("uses Ora-only usage copy (messages/images) and routes billing to website via WebBrowser", () => {
-    // Shows remaining message and image counts
     expect(settings).toContain('"Messages"');
     expect(settings).toContain('"Images"');
-    // Plan/payment management opens the website in a browser — no inline checkout
     expect(settings).toContain("WebBrowser");
     expect(settings).toContain("openBrowserAsync");
+    // WEBSITE_SETTINGS_URL is still used for account (email/password) buttons
     expect(settings).toContain("WEBSITE_SETTINGS_URL");
-    // No Builder-specific wording in any plan copy
     for (const re of BUILDER_WORDS) {
       expect(settings).not.toMatch(re);
     }
   });
 
-  it("contains no Stripe checkout / portal / hyphenated payment-method wiring (billing is website-only)", () => {
+  it("defines all 5 deep-link URL constants for specific billing destinations", () => {
+    expect(settings).toContain("ORA_PRICING_CORE_URL");
+    expect(settings).toContain("ORA_PRICING_WAVE_URL");
+    expect(settings).toContain("ORA_PLAN_MANAGE_URL");
+    expect(settings).toContain("ORA_PAYMENT_METHOD_URL");
+    expect(settings).toContain("ORA_BILLING_URL");
+  });
+
+  it("deep-link constants point to the correct website paths with source=mobile", () => {
+    expect(settings).toContain("/pricing?tier=core&source=mobile");
+    expect(settings).toContain("/pricing?tier=wave&source=mobile");
+    expect(settings).toContain("/ora/settings?section=plan&source=mobile");
+    expect(settings).toContain("/ora/settings?section=payment-method&source=mobile");
+    expect(settings).toContain("/ora/settings?section=billing&source=mobile");
+  });
+
+  it("each billing button uses the correct deep-link constant (not generic WEBSITE_SETTINGS_URL)", () => {
+    expect(settings).toContain("openBrowserAsync(ORA_PRICING_CORE_URL)");
+    expect(settings).toContain("openBrowserAsync(ORA_PRICING_WAVE_URL)");
+    expect(settings).toContain("openBrowserAsync(ORA_PLAN_MANAGE_URL)");
+    expect(settings).toContain("openBrowserAsync(ORA_PAYMENT_METHOD_URL)");
+    expect(settings).toContain("openBrowserAsync(ORA_BILLING_URL)");
+  });
+
+  it("contains no Stripe checkout / portal / inline billing wiring (billing is website-only)", () => {
     expect(settings).not.toMatch(/checkout/i);
-    // camelCase paymentMethod is fine; hyphenated payment-method means a URL or import string
-    expect(settings).not.toContain("payment-method");
     expect(settings).not.toContain("/portal");
     expect(settings).not.toMatch(/stripe/i);
+    // No direct API call for payment-method setup (that's website-only)
+    expect(settings).not.toContain("/api/billing/payment-method");
   });
 });

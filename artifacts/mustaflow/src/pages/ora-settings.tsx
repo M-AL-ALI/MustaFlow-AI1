@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   ArrowLeft,
   Settings as SettingsIcon,
@@ -1282,7 +1282,7 @@ function renewalLabel(tier: string | undefined, subscription: BillingSubscriptio
   return `Renews on ${formatted}`;
 }
 
-function PlanLimitsSection() {
+function PlanLimitsSection({ targetSection }: { targetSection?: string }) {
   const { isSignedIn } = useClerkUser();
   const { toast } = useToast();
   const [usage, setUsage] = useState<OraPlanUsage | null>(null);
@@ -1290,6 +1290,7 @@ function PlanLimitsSection() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [planAction, setPlanAction] = useState<"core" | "wave" | "portal" | "addpm" | null>(null);
+  const scrolledRef = useRef(false);
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -1335,6 +1336,24 @@ function PlanLimitsSection() {
     };
   }, [isSignedIn]);
 
+  // Scroll to the targeted sub-section once data is loaded
+  useEffect(() => {
+    if (loading || scrolledRef.current || !targetSection) return;
+    const sectionIdMap: Record<string, string> = {
+      plan: "ora-section-plan",
+      "payment-method": "ora-section-payment-method",
+      billing: "ora-section-payment-method",
+    };
+    const id = sectionIdMap[targetSection];
+    if (!id) return;
+    scrolledRef.current = true;
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [loading, targetSection]);
+
   async function startOraCheckout(tier: "core" | "wave") {
     setPlanAction(tier);
     try {
@@ -1343,7 +1362,7 @@ function PlanLimitsSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tier,
-          successUrl: `${window.location.origin}/ora/settings?subscribed=1`,
+          successUrl: `${window.location.origin}/ora/settings?section=plan&subscribed=1`,
           cancelUrl: `${window.location.origin}/ora/settings`,
         }),
       });
@@ -1445,6 +1464,7 @@ function PlanLimitsSection() {
   const canUpgradeToWave = tier !== "wave";
 
   return (
+    <div id="ora-section-plan">
     <SectionCard
       icon={Gauge}
       title="Plan & usage limits"
@@ -1547,7 +1567,7 @@ function PlanLimitsSection() {
               </button>
             )}
           </div>
-          <div className="rounded-lg border border-border/60 px-4 py-3">
+          <div id="ora-section-payment-method" className="rounded-lg border border-border/60 px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <CreditCard className="h-4 w-4 text-primary" />
               Payment method
@@ -1637,12 +1657,15 @@ function PlanLimitsSection() {
         </div>
       )}
     </SectionCard>
+    </div>
   );
 }
 
 function OraSettingsInner() {
   const { newConversation } = useOraConversations();
   const [, navigate] = useLocation();
+  const searchString = useSearch();
+  const targetSection = new URLSearchParams(searchString).get("section") ?? undefined;
 
   return (
     <div className="min-h-[100dvh] bg-background flex flex-col">
@@ -1687,7 +1710,7 @@ function OraSettingsInner() {
           <FocusModeSection />
           <AccountSyncSection />
           <MemorySection />
-          <PlanLimitsSection />
+          <PlanLimitsSection targetSection={targetSection} />
         </div>
       </main>
     </div>

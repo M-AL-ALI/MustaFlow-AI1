@@ -83,7 +83,9 @@ describe("billing and pricing plan card wiring", () => {
 
     // Paid plans still route through subscription checkout.
     expect(pricing).toContain("/api/billing/subscription/checkout");
-    expect(pricing).toContain("successUrl: `${window.location.origin}/ora/settings?subscribed=1`");
+    expect(pricing).toContain(
+      "successUrl: `${window.location.origin}/ora/settings?section=plan&subscribed=1`",
+    );
   });
 
   it("keeps Ora Settings wired to checkout, portal, and payment method setup", () => {

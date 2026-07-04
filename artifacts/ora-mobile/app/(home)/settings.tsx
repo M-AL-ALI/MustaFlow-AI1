@@ -86,6 +86,12 @@ const APP_VERSION_LABEL = APP_BUILD
 const STREAMING_ENABLED = process.env.EXPO_PUBLIC_ORA_STREAMING_ENABLED !== "false";
 const WEBSITE_SETTINGS_URL = `https://${DOMAIN}/settings`;
 
+const ORA_PRICING_CORE_URL = `https://${DOMAIN}/pricing?tier=core&source=mobile`;
+const ORA_PRICING_WAVE_URL = `https://${DOMAIN}/pricing?tier=wave&source=mobile`;
+const ORA_PLAN_MANAGE_URL = `https://${DOMAIN}/ora/settings?section=plan&source=mobile`;
+const ORA_PAYMENT_METHOD_URL = `https://${DOMAIN}/ora/settings?section=payment-method&source=mobile`;
+const ORA_BILLING_URL = `https://${DOMAIN}/ora/settings?section=billing&source=mobile`;
+
 const VOICE_LANGS: { code: string; label: string }[] = [
   { code: "en", label: "English" },
   { code: "es", label: "Español" },
@@ -1622,7 +1628,7 @@ export default function SettingsScreen() {
                   {!isPaid && (
                     <Button
                       label="Upgrade to Core Pack"
-                      onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                      onPress={() => void WebBrowser.openBrowserAsync(ORA_PRICING_CORE_URL)}
                       full
                     />
                   )}
@@ -1630,7 +1636,7 @@ export default function SettingsScreen() {
                     <Button
                       label="Upgrade to Deep Wave"
                       variant="secondary"
-                      onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                      onPress={() => void WebBrowser.openBrowserAsync(ORA_PRICING_WAVE_URL)}
                       full
                     />
                   )}
@@ -1638,7 +1644,7 @@ export default function SettingsScreen() {
                     <Button
                       label="Manage Ora plan"
                       variant="secondary"
-                      onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                      onPress={() => void WebBrowser.openBrowserAsync(ORA_PLAN_MANAGE_URL)}
                       full
                     />
                   )}
@@ -1704,13 +1710,13 @@ export default function SettingsScreen() {
                             <Button
                               label="Change payment method"
                               variant="secondary"
-                              onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                              onPress={() => void WebBrowser.openBrowserAsync(ORA_PAYMENT_METHOD_URL)}
                               full
                             />
                             <Button
                               label="Manage billing"
                               variant="ghost"
-                              onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                              onPress={() => void WebBrowser.openBrowserAsync(ORA_BILLING_URL)}
                               full
                             />
                           </View>
@@ -1722,7 +1728,7 @@ export default function SettingsScreen() {
                           </Text>
                           <Button
                             label="Add payment method"
-                            onPress={() => void WebBrowser.openBrowserAsync(WEBSITE_SETTINGS_URL)}
+                            onPress={() => void WebBrowser.openBrowserAsync(ORA_PAYMENT_METHOD_URL)}
                             full
                           />
                         </>
