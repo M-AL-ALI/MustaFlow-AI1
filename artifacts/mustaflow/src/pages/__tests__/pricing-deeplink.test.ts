@@ -77,3 +77,51 @@ describe("pricing and ora-settings deep-link wiring", () => {
     );
   });
 });
+
+describe("source=mobile banner wiring", () => {
+  const BANNER_SRC = join(__dirname, "../../components/mobile-app-banner.tsx");
+
+  function readBanner(): string {
+    return readFileSync(BANNER_SRC, "utf-8");
+  }
+
+  it("MobileAppBanner reads source param from URL and gates on source === mobile", () => {
+    const banner = readBanner();
+    expect(banner).toContain("useSearch");
+    expect(banner).toContain('get("source")');
+    expect(banner).toContain('"mobile"');
+  });
+
+  it("MobileAppBanner is dismissible via local state", () => {
+    const banner = readBanner();
+    expect(banner).toContain("dismissed");
+    expect(banner).toContain("setDismissed");
+  });
+
+  it("MobileAppBanner shows the correct copy", () => {
+    const banner = readBanner();
+    expect(banner).toContain("Opened from the Ora app");
+    expect(banner).toContain("tap Done when finished");
+  });
+
+  it("pricing page imports and renders MobileAppBanner", () => {
+    const pricing = readPage("pricing.tsx");
+    expect(pricing).toContain("MobileAppBanner");
+    expect(pricing).toContain("mobile-app-banner");
+    expect(pricing).toContain("<MobileAppBanner");
+  });
+
+  it("ora-settings page imports and renders MobileAppBanner", () => {
+    const settings = readPage("ora-settings.tsx");
+    expect(settings).toContain("MobileAppBanner");
+    expect(settings).toContain("mobile-app-banner");
+    expect(settings).toContain("<MobileAppBanner");
+  });
+
+  it("MobileAppBanner returns null when source param is absent", () => {
+    const banner = readBanner();
+    // Guards: source !== "mobile" || dismissed → early return null
+    expect(banner).toContain("source !== \"mobile\"");
+    expect(banner).toContain("return null");
+  });
+});

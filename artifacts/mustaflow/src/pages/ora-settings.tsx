@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
+import { MobileAppBanner } from "@/components/mobile-app-banner";
 import {
   ArrowLeft,
   Settings as SettingsIcon,
@@ -1669,6 +1670,7 @@ function OraSettingsInner() {
 
   return (
     <div className="min-h-[100dvh] bg-background flex flex-col">
+      <MobileAppBanner />
       <OraSidebar
         onNewConversation={() => {
           newConversation();
