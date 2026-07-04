@@ -186,6 +186,13 @@ const OUTPUT_STOP_DEBOUNCE_MS = 600;
 // recovering the session in half the time of the old 15 s, which is especially
 // important on mobile where momentary network blips are common.
 const THINKING_WATCHDOG_MS = 8_000;
+// If the state remains "speaking" (audio started but response.done AND
+// output_audio_buffer.stopped both fail to arrive — a degraded-WebRTC pattern
+// seen after many consecutive turns), recover after this long. Set generously
+// so normal long replies finish naturally, but not so long that the session
+// appears frozen. The thinking watchdog covers the pre-audio gap; this covers
+// the audio-playing gap.
+const SPEAKING_WATCHDOG_MS = 40_000;
 
 // ─── Poor-network resilience tuning (mirrored in the website hook) ───────────
 // On the first connection drop the app waits this long before the single
@@ -918,6 +925,15 @@ export function useOraRealtimeVoiceNative(
   const outputStopDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Watchdog: clears a stuck "thinking" state if response.done never arrives.
   const thinkingWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Watchdog: clears a stuck "speaking" state if response.done AND
+  // output_audio_buffer.stopped both fail to arrive (degraded WebRTC after many
+  // consecutive turns). Armed on output_audio_buffer.started; cancelled by
+  // response.done, the output-stop debounce, or fullTeardown.
+  const speakingWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Counts consecutive turns that ended via watchdog (not a clean response.done).
+  // Two consecutive watchdog fires escalate to the auto-reconnect path so the
+  // user is not left stuck in a silently degraded session.
+  const consecutiveWatchdogFiresRef = useRef(0);
 
   const clearDurationTimer = useCallback(() => {
     if (durationTimerRef.current) {
@@ -1024,6 +1040,11 @@ export function useOraRealtimeVoiceNative(
       clearTimeout(thinkingWatchdogRef.current);
       thinkingWatchdogRef.current = null;
     }
+    if (speakingWatchdogRef.current) {
+      clearTimeout(speakingWatchdogRef.current);
+      speakingWatchdogRef.current = null;
+    }
+    consecutiveWatchdogFiresRef.current = 0;
     assistantResponseActiveRef.current = false;
     assistantSpeakingRef.current = false;
     sdpAbortRef.current?.abort();
@@ -1408,13 +1429,24 @@ export function useOraRealtimeVoiceNative(
             setState("thinking");
             // Start the watchdog. If response.done never arrives (lost data-channel
             // message or model error) we recover to "listening" automatically.
+            // We also send response.cancel so the model stops any in-flight
+            // generation — otherwise stale events (response.created, audio deltas)
+            // from the stuck turn arrive after recovery and re-set
+            // assistantResponseActiveRef, confusing the next user turn.
             if (thinkingWatchdogRef.current) clearTimeout(thinkingWatchdogRef.current);
             thinkingWatchdogRef.current = setTimeout(() => {
               thinkingWatchdogRef.current = null;
               if (activeRef.current) {
                 logVoiceDiag("thinking_watchdog_timeout");
                 assistantResponseActiveRef.current = false;
-                setState("listening");
+                sendEvent({ type: "response.cancel" });
+                const fires = (consecutiveWatchdogFiresRef.current += 1);
+                if (fires >= 2) {
+                  consecutiveWatchdogFiresRef.current = 0;
+                  handleConnectionDrop("consecutive_thinking_watchdog");
+                } else {
+                  setState("listening");
+                }
               }
             }, THINKING_WATCHDOG_MS);
           }
@@ -1552,14 +1584,22 @@ export function useOraRealtimeVoiceNative(
             setState("thinking");
             // Re-arm the watchdog: response.created can arrive after speech_stopped
             // (overlapping turns), so reset the deadline to give the model a fresh
-            // window from this point.
+            // window from this point. Send response.cancel on timeout so stale
+            // events from the stuck generation don't bleed into the next turn.
             if (thinkingWatchdogRef.current) clearTimeout(thinkingWatchdogRef.current);
             thinkingWatchdogRef.current = setTimeout(() => {
               thinkingWatchdogRef.current = null;
               if (activeRef.current) {
                 logVoiceDiag("thinking_watchdog_timeout");
                 assistantResponseActiveRef.current = false;
-                setState("listening");
+                sendEvent({ type: "response.cancel" });
+                const fires = (consecutiveWatchdogFiresRef.current += 1);
+                if (fires >= 2) {
+                  consecutiveWatchdogFiresRef.current = 0;
+                  handleConnectionDrop("consecutive_thinking_watchdog");
+                } else {
+                  setState("listening");
+                }
               }
             }, THINKING_WATCHDOG_MS);
           }
@@ -1617,11 +1657,31 @@ export function useOraRealtimeVoiceNative(
             outputStopDebounceRef.current = null;
           }
           // Audio arrived: the model is clearly making progress, so the thinking
-          // watchdog is no longer needed.
+          // watchdog is no longer needed. Arm a speaking watchdog instead: if
+          // response.done and output_audio_buffer.stopped both fail to arrive
+          // (degraded WebRTC after many consecutive turns), the speaking watchdog
+          // fires and recovers the session rather than leaving it stuck in "speaking".
           if (thinkingWatchdogRef.current) {
             clearTimeout(thinkingWatchdogRef.current);
             thinkingWatchdogRef.current = null;
           }
+          if (speakingWatchdogRef.current) clearTimeout(speakingWatchdogRef.current);
+          speakingWatchdogRef.current = setTimeout(() => {
+            speakingWatchdogRef.current = null;
+            if (activeRef.current) {
+              logVoiceDiag("speaking_watchdog_timeout");
+              assistantResponseActiveRef.current = false;
+              assistantSpeakingRef.current = false;
+              sendEvent({ type: "response.cancel" });
+              const fires = (consecutiveWatchdogFiresRef.current += 1);
+              if (fires >= 2) {
+                consecutiveWatchdogFiresRef.current = 0;
+                handleConnectionDrop("consecutive_speaking_watchdog");
+              } else {
+                setState("listening");
+              }
+            }
+          }, SPEAKING_WATCHDOG_MS);
           assistantSpeakingRef.current = true;
           lastAssistantAudioAtRef.current = now;
           if (remoteTrackRef.current) remoteTrackRef.current.enabled = !mutedRef.current;
@@ -1680,6 +1740,13 @@ export function useOraRealtimeVoiceNative(
             if (outputStopDebounceRef.current) clearTimeout(outputStopDebounceRef.current);
             outputStopDebounceRef.current = setTimeout(() => {
               outputStopDebounceRef.current = null;
+              // Audio has stopped: the speaking watchdog is no longer needed.
+              // Cancel it so there is no double-recovery (this debounce handles
+              // the "speaking" exit; the speaking watchdog would be redundant).
+              if (speakingWatchdogRef.current) {
+                clearTimeout(speakingWatchdogRef.current);
+                speakingWatchdogRef.current = null;
+              }
               if (activeRef.current && !assistantSpeakingRef.current) {
                 // Clear the active-response flag before flipping to "listening".
                 // Without this, if the user starts speaking in the ~200 ms gap
@@ -1688,6 +1755,14 @@ export function useOraRealtimeVoiceNative(
                 // barge-in timer — treating the user's normal follow-up as an
                 // interruption and potentially sending a spurious response.cancel.
                 assistantResponseActiveRef.current = false;
+                // Refresh the focus window. When response.done is dropped (rare
+                // but real with degraded WebRTC after many turns), this debounce
+                // is the only path that exits "speaking". Without the refresh,
+                // lastAcceptedUserTurnAtRef goes stale → the next user utterance
+                // fails the focus filter in "focused" mode → the UI looks stuck
+                // in "thinking" (response.create was never sent for the rejected
+                // turn — no model error, no audio, just silence).
+                lastAcceptedUserTurnAtRef.current = Date.now();
                 setState("listening");
               }
             }, OUTPUT_STOP_DEBOUNCE_MS);
@@ -1701,8 +1776,8 @@ export function useOraRealtimeVoiceNative(
           assistantResponseActiveRef.current = false;
           assistantSpeakingRef.current = false;
           clearBargeInTimer();
-          // response.done is the authoritative end of the reply: cancel any pending
-          // stop debounce and flip to "listening" without flicker.
+          // response.done is the authoritative end of the reply: cancel all pending
+          // timers and flip to "listening" without flicker.
           if (outputStopDebounceRef.current) {
             clearTimeout(outputStopDebounceRef.current);
             outputStopDebounceRef.current = null;
@@ -1711,6 +1786,14 @@ export function useOraRealtimeVoiceNative(
             clearTimeout(thinkingWatchdogRef.current);
             thinkingWatchdogRef.current = null;
           }
+          if (speakingWatchdogRef.current) {
+            clearTimeout(speakingWatchdogRef.current);
+            speakingWatchdogRef.current = null;
+          }
+          // A clean response.done means this turn completed without watchdog
+          // intervention: reset the consecutive-failure counter so two isolated
+          // blips are not misread as a degraded session requiring reconnect.
+          consecutiveWatchdogFiresRef.current = 0;
           // Refresh the focus window so the user can follow up naturally right
           // after Ora finishes speaking — casual replies like "that's great" or
           // "continue" pass the focus filter within FOCUS_FOLLOWUP_WINDOW_MS of
@@ -1758,6 +1841,10 @@ export function useOraRealtimeVoiceNative(
               clearTimeout(thinkingWatchdogRef.current);
               thinkingWatchdogRef.current = null;
             }
+            if (speakingWatchdogRef.current) {
+              clearTimeout(speakingWatchdogRef.current);
+              speakingWatchdogRef.current = null;
+            }
             if (outputStopDebounceRef.current) {
               clearTimeout(outputStopDebounceRef.current);
               outputStopDebounceRef.current = null;
@@ -1770,7 +1857,7 @@ export function useOraRealtimeVoiceNative(
           break;
       }
     },
-    [confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer, bargeInRequiresDirection, sendEvent],
+    [confirmBargeIn, cancelPendingBargeIn, clearBargeInTimer, bargeInRequiresDirection, sendEvent, handleConnectionDrop],
   );
 
   // ── Start ────────────────────────────────────────────────────────────────
