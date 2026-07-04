@@ -47,10 +47,7 @@ function readHook(surface: "web" | "mobile"): string {
   if (surface === "web") {
     return readFileSync(join(MUSTAFLOW_SRC, "hooks", "use-ora-realtime-voice.ts"), "utf-8");
   }
-  return readFileSync(
-    join(ORA_MOBILE_DIR, "hooks", "useOraRealtimeVoiceNative.ts"),
-    "utf-8",
-  );
+  return readFileSync(join(ORA_MOBILE_DIR, "hooks", "useOraRealtimeVoiceNative.ts"), "utf-8");
 }
 
 // ─── Mock authFetch ───────────────────────────────────────────────────────────
@@ -251,7 +248,10 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
       return okResponse();
     });
 
-    vi.stubGlobal("fetch", vi.fn(async () => sdpResponse()));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => sdpResponse()),
+    );
   });
 
   afterEach(() => {
@@ -267,9 +267,7 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
    * Returns { ok, dc } where dc is the FakeDataChannel for sending events.
    */
   async function connectHook(
-    hook: ReturnType<
-      typeof renderHook<ReturnType<typeof useOraRealtimeVoice>, unknown>
-    >,
+    hook: ReturnType<typeof renderHook<ReturnType<typeof useOraRealtimeVoice>, unknown>>,
     ctx: RealtimeStartContext = FOCUSED_CTX,
   ): Promise<{ ok: boolean; dc: FakeDataChannel | null }> {
     let started = false;
@@ -297,9 +295,7 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
     const onUserTranscript = vi.fn();
     const onAssistantTranscript = vi.fn();
 
-    const hook = renderHook(() =>
-      useOraRealtimeVoice({ onUserTranscript, onAssistantTranscript }),
-    );
+    const hook = renderHook(() => useOraRealtimeVoice({ onUserTranscript, onAssistantTranscript }));
     const { ok, dc } = await connectHook(hook, FOCUSED_CTX);
     expect(ok).toBe(true);
     expect(dc).not.toBeNull();
@@ -343,9 +339,7 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
     const onUserTranscript = vi.fn();
     const onAssistantTranscript = vi.fn();
 
-    const hook = renderHook(() =>
-      useOraRealtimeVoice({ onUserTranscript, onAssistantTranscript }),
-    );
+    const hook = renderHook(() => useOraRealtimeVoice({ onUserTranscript, onAssistantTranscript }));
     const { ok, dc } = await connectHook(hook, NORMAL_CTX);
     expect(ok).toBe(true);
     expect(dc).not.toBeNull();
@@ -398,10 +392,9 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
         `follow_${i}`,
         onUserTranscript,
       );
-      expect(
-        accepted,
-        `follow-up ${i + 1} should be accepted (within 12 s of response.done)`,
-      ).toBe(true);
+      expect(accepted, `follow-up ${i + 1} should be accepted (within 12 s of response.done)`).toBe(
+        true,
+      );
 
       // Advance past the follow-up window so the next response.done becomes
       // the new baseline.
@@ -481,13 +474,8 @@ describe("useOraRealtimeVoice — multi-turn conversation reliability", () => {
     // response.done never arrives — advance past the watchdog threshold.
     await advanceMs(8_100);
 
-    // The watchdog should have recovered the session to "listening".
-    expect(hook.result.current.state).toBe("listening");
-
-    // After recovery the session must still be usable: a new user turn is accepted.
-    const onUserTranscript = vi.fn();
-    // Wire up the transcript callback via a new render (same hook, just re-reading
-    // the returned callback by calling it via a fresh mock). We can check state:
+    // The watchdog should have recovered the session to "listening", and the
+    // session must remain usable (still in "listening") after recovery.
     expect(hook.result.current.state).toBe("listening");
   });
 
@@ -613,7 +601,9 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
     const speechBlock = src.slice(speechStart, speechEnd);
 
     // The gate must check assistantResponseActiveRef OR assistantSpeakingRef.
-    expect(speechBlock).toContain("assistantResponseActiveRef.current || assistantSpeakingRef.current");
+    expect(speechBlock).toContain(
+      "assistantResponseActiveRef.current || assistantSpeakingRef.current",
+    );
     // The barge-in pending flag is only set inside that if-branch.
     expect(speechBlock).toContain("pendingBargeInRef.current = true");
     // response.cancel must NOT appear in the speech_started handler directly.
@@ -632,10 +622,7 @@ describe("useOraRealtimeVoiceNative — multi-turn state machine parity (source-
     ] as const) {
       const doneStart = src.indexOf('case "response.done"');
       const nextCase = src.indexOf("\n        case ", doneStart + 1);
-      const doneBlock = src.slice(
-        doneStart,
-        nextCase > doneStart ? nextCase : doneStart + 2000,
-      );
+      const doneBlock = src.slice(doneStart, nextCase > doneStart ? nextCase : doneStart + 2000);
 
       expect(doneBlock, `${label} response.done must clear assistantResponseActiveRef`).toContain(
         "assistantResponseActiveRef.current = false",
