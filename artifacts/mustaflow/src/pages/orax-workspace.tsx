@@ -656,90 +656,80 @@ function ThreadDetail({
                       </div>
                       <div className="mt-1 text-muted-foreground">{msg.content}</div>
                     </div>
-                  </div>
-                )}
-                {/* Phase 2L: patch apply failed */}
-                {msg.eventType === "project_patch_failed" && (
-                  <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs">
-                    <div className="flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400">
-                      <AlertTriangle size={11} />
-                      Patch failed
-                    </div>
-                    <div className="mt-1 text-muted-foreground">{msg.content}</div>
-                  </div>
-                )}
-                {/* Phase 2M: verification passed */}
-                {msg.eventType === "project_patch_verified" && (
-                  <div className="mt-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-xs">
-                    <div className="flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400">
-                      <CheckCircle size={11} />
-                      Verification passed
-                    </div>
-                    {(msg.payload?.checks ?? []).length > 0 && (
-                      <div className="mt-1.5 flex flex-col gap-1">
-                        {(msg.payload!.checks!).map((c) => (
-                          <div key={c.name} className="flex items-center gap-1.5 text-muted-foreground">
-                            <Check size={9} className="shrink-0 text-green-500" />
-                            <span className="font-mono">{c.name}</span>
-                            <span className="text-muted-foreground/50">({c.durationMs}ms)</span>
-                          </div>
-                        ))}
+                  )}
+                  {/* Phase 2M: verification passed */}
+                  {msg.eventType === "project_patch_verified" && (
+                    <div className="mt-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400">
+                        <CheckCircle size={11} />
+                        Verification passed
                       </div>
-                    )}
-                    {(msg.payload?.checks ?? []).length === 0 && (
-                      <div className="mt-1 text-muted-foreground">{msg.content}</div>
-                    )}
-                  </div>
-                )}
-                {/* Phase 2M: verification failed */}
-                {msg.eventType === "project_patch_verification_failed" && (
-                  <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-                    <div className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
-                      <AlertTriangle size={11} />
-                      Verification failed
-                    </div>
-                    {(msg.payload?.checks ?? []).length > 0 && (
-                      <div className="mt-1.5 flex flex-col gap-1">
-                        {(msg.payload!.checks!).map((c) => (
-                          <div key={c.name} className="flex items-center gap-1.5 text-muted-foreground">
-                            {c.status === "passed" ? (
+                      {(msg.payload?.checks ?? []).length > 0 && (
+                        <div className="mt-1.5 flex flex-col gap-1">
+                          {(msg.payload!.checks!).map((c) => (
+                            <div key={c.name} className="flex items-center gap-1.5 text-muted-foreground">
                               <Check size={9} className="shrink-0 text-green-500" />
-                            ) : c.status === "skipped" ? (
-                              <span className="shrink-0 w-2 h-2 rounded-full bg-muted-foreground/40 inline-block" />
-                            ) : (
-                              <AlertTriangle size={9} className="shrink-0 text-red-500" />
-                            )}
-                            <span className="font-mono">{c.name}</span>
-                            <span className="text-muted-foreground/50">({c.durationMs}ms)</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {(msg.payload?.checks ?? []).length === 0 && (
-                      <div className="mt-1 text-muted-foreground">{msg.content}</div>
-                    )}
-                    <button
-                      className="mt-2 btn btn-secondary text-xs py-1 px-2.5 h-auto"
-                      disabled={preparingFix}
-                      onClick={() => {
-                        setPreparingFix(true);
-                        prepareFix(projectId, thread.id)
-                          .then(() => void reload())
-                          .catch((err: unknown) =>
-                            console.error("prepareFix failed:", err),
-                          )
-                          .finally(() => setPreparingFix(false));
-                      }}
-                    >
-                      {preparingFix ? (
-                        <Loader2 size={10} className="animate-spin" />
-                      ) : (
-                        <RefreshCw size={10} />
+                              <span className="font-mono">{c.name}</span>
+                              <span className="text-muted-foreground/50">({c.durationMs}ms)</span>
+                            </div>
+                          ))}
+                        </div>
                       )}
-                      {preparingFix ? "Queuing…" : "Prepare fix"}
-                    </button>
-                  </div>
-                )}
+                      {(msg.payload?.checks ?? []).length === 0 && (
+                        <div className="mt-1 text-muted-foreground">{msg.content}</div>
+                      )}
+                    </div>
+                  )}
+                  {/* Phase 2M: verification failed */}
+                  {msg.eventType === "project_patch_verification_failed" && (
+                    <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+                        <AlertTriangle size={11} />
+                        Verification failed
+                      </div>
+                      {(msg.payload?.checks ?? []).length > 0 && (
+                        <div className="mt-1.5 flex flex-col gap-1">
+                          {(msg.payload!.checks!).map((c) => (
+                            <div key={c.name} className="flex items-center gap-1.5 text-muted-foreground">
+                              {c.status === "passed" ? (
+                                <Check size={9} className="shrink-0 text-green-500" />
+                              ) : c.status === "skipped" ? (
+                                <span className="shrink-0 w-2 h-2 rounded-full bg-muted-foreground/40 inline-block" />
+                              ) : (
+                                <AlertTriangle size={9} className="shrink-0 text-red-500" />
+                              )}
+                              <span className="font-mono">{c.name}</span>
+                              <span className="text-muted-foreground/50">({c.durationMs}ms)</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(msg.payload?.checks ?? []).length === 0 && (
+                        <div className="mt-1 text-muted-foreground">{msg.content}</div>
+                      )}
+                      <button
+                        className="mt-2 btn btn-secondary text-xs py-1 px-2.5 h-auto"
+                        disabled={preparingFix}
+                        onClick={() => {
+                          setPreparingFix(true);
+                          prepareFix(projectId, thread.id)
+                            .then(() => void reload())
+                            .catch((err: unknown) =>
+                              setError(err instanceof Error ? err.message : "Prepare fix failed"),
+                            )
+                            .finally(() => setPreparingFix(false));
+                        }}
+                      >
+                        {preparingFix ? (
+                          <Loader2 size={10} className="animate-spin" />
+                        ) : (
+                          <RefreshCw size={10} />
+                        )}
+                        {preparingFix ? "Queuing…" : "Prepare fix"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })
