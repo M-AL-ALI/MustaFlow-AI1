@@ -36,6 +36,12 @@ git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
+git add artifacts/orax-desktop/src/main/project-patch-drafter.ts 2>/dev/null || true
+git add artifacts/orax-desktop/src/main/relay-client.ts 2>/dev/null || true
+git add artifacts/api-server/src/routes/orax-desktop.ts 2>/dev/null || true
+git add artifacts/mustaflow/src/pages/orax-workspace.tsx 2>/dev/null || true
+git add artifacts/ora-mobile/app/\(home\)/orax.tsx 2>/dev/null || true
+git add artifacts/mustaflow/src/lib/__tests__/orax-wiring.test.ts 2>/dev/null || true
 git add scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

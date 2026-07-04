@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
+  CheckCircle,
   ChevronRight,
   Code2,
   ExternalLink,
+  FileCode,
   Folder,
   FolderOpen,
   FolderX,
@@ -172,6 +175,13 @@ async function listHosts(): Promise<OraxHost[]> {
   return data.hosts ?? [];
 }
 
+type DraftFilePatch = {
+  relativePath: string;
+  operation: "update" | "create";
+  intentDescription: string;
+  hunkPreview: string[];
+};
+
 type ThreadPayload = {
   projectInspection?: {
     frameworkHints?: string[];
@@ -185,6 +195,13 @@ type ThreadPayload = {
   fileReadSummary?: { relativePath: string; truncated: boolean; reason: string }[];
   suggestedPlan?: string;
   warnings?: string[];
+  draftPatch?: {
+    summary: string;
+    changedFiles: DraftFilePatch[];
+    risks: string[];
+    verificationPlan: string[];
+    draftGeneratedAt: string;
+  };
 };
 type ThreadMessage = {
   id: string;
@@ -485,6 +502,74 @@ function ThreadDetail({
                           )}
                         </span>
                       ))}
+                    </div>
+                  )}
+                {msg.eventType === "project_patch_drafted" &&
+                  msg.payload?.draftPatch && (
+                    <div className="mt-2.5 flex flex-col gap-2 border-t border-border/40 pt-2.5">
+                      {/* Changed file chips */}
+                      {(msg.payload.draftPatch.changedFiles ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.payload.draftPatch.changedFiles.map((f) => (
+                            <span
+                              key={f.relativePath}
+                              className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs font-mono text-muted-foreground"
+                            >
+                              <FileCode size={10} />
+                              {f.relativePath}
+                              <span
+                                className={cn(
+                                  "ml-0.5 rounded px-1 text-[9px] font-semibold uppercase",
+                                  f.operation === "create"
+                                    ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                                    : "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+                                )}
+                              >
+                                {f.operation}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {/* Diff preview (first file) */}
+                      {(msg.payload.draftPatch.changedFiles[0]?.hunkPreview ?? []).length > 0 && (
+                        <pre className="max-h-36 overflow-y-auto rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[10px] font-mono leading-relaxed text-foreground/70 whitespace-pre-wrap">
+                          {msg.payload.draftPatch.changedFiles[0]!.hunkPreview.join("\n")}
+                        </pre>
+                      )}
+                      {/* Risks */}
+                      {(msg.payload.draftPatch.risks ?? []).length > 0 && (
+                        <div className="flex flex-col gap-1">
+                          {msg.payload.draftPatch.risks.map((r, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+                            >
+                              <AlertTriangle size={10} className="shrink-0 mt-0.5" />
+                              <span>{r}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Verification plan */}
+                      {(msg.payload.draftPatch.verificationPlan ?? []).length > 0 && (
+                        <div className="flex flex-col gap-1">
+                          {msg.payload.draftPatch.verificationPlan.map((v, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-1.5 text-xs text-muted-foreground"
+                            >
+                              <CheckCircle size={10} className="shrink-0 mt-0.5 text-green-500" />
+                              <span>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Review patch label */}
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 pt-0.5">
+                        <Check size={10} />
+                        <span>Review patch — apply via Orax Desktop after approval</span>
+                      </div>
                     </div>
                   )}
               </div>

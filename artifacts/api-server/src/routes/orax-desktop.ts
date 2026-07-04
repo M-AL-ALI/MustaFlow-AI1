@@ -806,6 +806,7 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
 
     if (action.threadId && (type === "completed" || type === "failed")) {
       const isProjectThread = action.type === "run_project_thread";
+      const isDraftPatch = action.type === "draft_project_patch";
 
       let content: string;
       let eventType: string;
@@ -847,6 +848,47 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         content = `I could not inspect the desktop project: ${safeErr}`;
         eventType = "project_run_failed";
         role = "assistant";
+      } else if (isDraftPatch && type === "completed") {
+        // Phase 2K: patch draft completed — write project_patch_drafted assistant message
+        const dp = (payload ?? {}) as {
+          draftPatch?: {
+            summary: string;
+            changedFiles: Array<{
+              relativePath: string;
+              operation: string;
+              intentDescription: string;
+              hunkPreview: string[];
+            }>;
+            risks: string[];
+            verificationPlan: string[];
+            draftGeneratedAt: string;
+          };
+          warnings?: string[];
+        };
+        const draft = dp.draftPatch;
+        if (draft?.summary) {
+          const fileNames = (draft.changedFiles ?? [])
+            .map((f) => f.relativePath)
+            .join(", ");
+          const risksSection =
+            (draft.risks ?? []).length > 0
+              ? `\n\nRisks:\n${draft.risks.map((r) => `- ${r}`).join("\n")}`
+              : "";
+          const verifySection =
+            (draft.verificationPlan ?? []).length > 0
+              ? `\n\nVerification:\n${draft.verificationPlan.map((v) => `- ${v}`).join("\n")}`
+              : "";
+          content = `${draft.summary}${fileNames ? `\n\nFiles: ${fileNames}` : ""}${risksSection}${verifySection}`;
+        } else {
+          content = "Patch draft is ready. Review the proposed changes before approving.";
+        }
+        eventType = "project_patch_drafted";
+        role = "assistant";
+      } else if (isDraftPatch && type === "failed") {
+        const errMsg = (payload as { error?: string }).error ?? "unknown error";
+        content = `Could not draft a patch: ${errMsg.replace(/\/[^\s]*/g, "[path]")}`;
+        eventType = "project_patch_draft_failed";
+        role = "assistant";
       } else {
         content =
           type === "completed"
@@ -863,6 +905,53 @@ router.post("/orax/relay/actions/:actionId/events", async (req, res) => {
         eventType,
         payload: { actionId, actionType: action.type, ...(payload as object) },
       });
+
+      // Phase 2K: after a successful file-read, queue draft_project_patch
+      if (isProjectThread && type === "completed") {
+        const rfPayload = (payload ?? {}) as {
+          fileReadSummary?: unknown[];
+          projectId?: string;
+          executionSourceId?: string;
+          selectedFiles?: unknown[];
+        };
+        const srcPayload = (action.payload ?? {}) as {
+          sourceLocalPath?: string;
+          userMessage?: string;
+        };
+        if (
+          Array.isArray(rfPayload.fileReadSummary) &&
+          rfPayload.fileReadSummary.length > 0 &&
+          rfPayload.projectId &&
+          srcPayload.sourceLocalPath
+        ) {
+          const draftIKey = `draft-patch:${action.threadId}:${actionId}`;
+          void db
+            .insert(oraxDesktopActionsTable)
+            .values({
+              userId,
+              hostId: action.hostId,
+              threadId: action.threadId,
+              type: "draft_project_patch",
+              status: "queued",
+              payload: {
+                projectId: rfPayload.projectId,
+                threadId: action.threadId,
+                executionSourceId: rfPayload.executionSourceId,
+                sourceLocalPath: srcPayload.sourceLocalPath,
+                userMessage: srcPayload.userMessage ?? "",
+                selectedFiles: rfPayload.selectedFiles ?? [],
+              },
+              idempotencyKey: draftIKey,
+            })
+            .onConflictDoNothing({ target: oraxDesktopActionsTable.idempotencyKey })
+            .catch((qErr: unknown) => {
+              logger.warn(
+                { component: "orax-desktop", err: qErr, actionId },
+                "Failed to queue draft_project_patch",
+              );
+            });
+        }
+      }
     }
 
     // ── run_safe_command completion audit + usage logging ──────────────────

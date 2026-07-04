@@ -135,6 +135,31 @@ type OraxFileDiff = {
   truncated: boolean;
 };
 
+// Phase 2K: project thread message type (desktop relay integration)
+type OraxProjectThreadMessage = {
+  id: string;
+  role: string;
+  content: string;
+  eventType?: string | null;
+  createdAt: string;
+  payload?: {
+    draftPatch?: {
+      summary: string;
+      changedFiles: Array<{
+        relativePath: string;
+        operation: "update" | "create";
+        intentDescription: string;
+        hunkPreview: string[];
+      }>;
+      risks: string[];
+      verificationPlan: string[];
+      draftGeneratedAt: string;
+    };
+    fileReadSummary?: Array<{ relativePath: string; truncated: boolean; reason: string }>;
+    [key: string]: unknown;
+  } | null;
+};
+
 type OraxRunnerActivity = {
   label: string;
   status: "running" | "completed" | "waiting" | "failed" | "blocked";
@@ -416,6 +441,9 @@ export default function OraxScreen() {
     blockReason: string | null;
     host: { deviceName: string } | null;
   } | null>(null);
+  const [projectThreadMessages, setProjectThreadMessages] = useState<
+    OraxProjectThreadMessage[]
+  >([]);
 
   const reloadHosts = useCallback(async () => {
     setOraxHostsLoading(true);
@@ -3580,6 +3608,129 @@ function getMessageComposerAttachments(message: OraxTaskMessage): OraxComposerAt
     | { attachments?: OraxComposerAttachment[] }
     | undefined;
   return Array.isArray(composer?.attachments) ? composer.attachments : [];
+}
+
+// Phase 2K: compact card for project_patch_drafted thread messages
+function ProjectPatchDraftedCard({ msg }: { msg: OraxProjectThreadMessage }) {
+  const c = useColors();
+  const draft = msg.payload?.draftPatch;
+  if (!draft) {
+    return (
+      <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+        <Text style={{ color: c.foreground, fontSize: 13 }}>{msg.content}</Text>
+      </View>
+    );
+  }
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: 12,
+        padding: 12,
+        gap: 8,
+        backgroundColor: c.card,
+      }}
+    >
+      <Text
+        style={{
+          color: c.foreground,
+          fontSize: 13,
+          lineHeight: 18,
+          fontFamily: "Inter_500Medium",
+        }}
+      >
+        {draft.summary}
+      </Text>
+      {/* Changed file chips */}
+      {draft.changedFiles.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {draft.changedFiles.map((f) => (
+            <View
+              key={f.relativePath}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                borderWidth: 1,
+                borderColor: c.border,
+                borderRadius: 6,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                gap: 4,
+                backgroundColor: c.muted,
+              }}
+            >
+              <Text
+                style={{ color: c.mutedForeground, fontSize: 10, fontFamily: "SpaceMono_400Regular" }}
+                numberOfLines={1}
+              >
+                {f.relativePath}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 9,
+                  fontFamily: "Inter_600SemiBold",
+                  color: f.operation === "create" ? "#22c55e" : "#3b82f6",
+                  textTransform: "uppercase",
+                }}
+              >
+                {f.operation}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {/* Diff preview for first file */}
+      {(draft.changedFiles[0]?.hunkPreview ?? []).length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 6,
+            backgroundColor: c.muted,
+            maxHeight: 100,
+          }}
+        >
+          <Text
+            style={{
+              color: c.mutedForeground,
+              fontSize: 10,
+              fontFamily: "SpaceMono_400Regular",
+              padding: 8,
+              lineHeight: 16,
+            }}
+          >
+            {draft.changedFiles[0]!.hunkPreview.join("\n")}
+          </Text>
+        </ScrollView>
+      )}
+      {/* Risks */}
+      {draft.risks.length > 0 &&
+        draft.risks.slice(0, 2).map((r, i) => (
+          <Text
+            key={i}
+            style={{ color: "#f59e0b", fontSize: 11, lineHeight: 16 }}
+          >
+            {"\u26A0\uFE0F"} {r}
+          </Text>
+        ))}
+      {/* Verification plan */}
+      {draft.verificationPlan.length > 0 &&
+        draft.verificationPlan.slice(0, 2).map((v, i) => (
+          <Text
+            key={i}
+            style={{ color: c.mutedForeground, fontSize: 11, lineHeight: 16 }}
+          >
+            {"\u2714\uFE0F"} {v}
+          </Text>
+        ))}
+      <Text style={{ color: c.mutedForeground, fontSize: 10 }}>
+        Review and approve via Orax Desktop
+      </Text>
+    </View>
+  );
 }
 
 function isOraxVisibleThreadMessage(message: OraxTaskMessage): boolean {

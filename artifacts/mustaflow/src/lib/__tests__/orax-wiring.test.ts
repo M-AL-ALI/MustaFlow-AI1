@@ -2023,4 +2023,180 @@ describe("ORAX product-surface wiring", () => {
     expect(src).not.toContain("shell: true");
     expect(src).not.toContain("process.cwd()");
   });
+
+  // ── Phase 2K: project-patch-drafter ──────────────────────────────────────
+
+  it("Phase 2K: project-patch-drafter.ts exists and exports draftProjectPatch", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).toContain("draftProjectPatch");
+    expect(src).toContain("DraftProjectPatch");
+    expect(src).toContain("DraftFilePatch");
+  });
+
+  it("Phase 2K: project-patch-drafter has no exec, spawn, shell:true, or process.cwd", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  it("Phase 2K: project-patch-drafter has no file writes (writeFile, writeFileSync, appendFile)", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).not.toContain("writeFile(");
+    expect(src).not.toContain("writeFileSync(");
+    expect(src).not.toContain("appendFile(");
+  });
+
+  it("Phase 2K: project-patch-drafter rejects absolute paths and path traversal", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).toContain("isAbsolute");
+    expect(src).toContain("absolute path rejected");
+    expect(src).toContain("..");
+    expect(src).toContain("path traversal rejected");
+  });
+
+  it("Phase 2K: project-patch-drafter blocks secret files and dirs", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).toContain("BLOCKED_FILE_PATTERNS");
+    expect(src).toContain("BLOCKED_DIRS");
+    expect(src).toContain("blocked secret file");
+  });
+
+  it("Phase 2K: project-patch-drafter produces summary, changedFiles, risks, verificationPlan", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).toContain("summary");
+    expect(src).toContain("changedFiles");
+    expect(src).toContain("risks");
+    expect(src).toContain("verificationPlan");
+    expect(src).toContain("hunkPreview");
+  });
+
+  it("Phase 2K: project-patch-drafter validates symlinks via realpathSync", () => {
+    const src = read("../../../../orax-desktop/src/main/project-patch-drafter.ts");
+    expect(src).toContain("realpathSync");
+    expect(src).toContain("symlink escapes project root");
+  });
+
+  // ── Phase 2K: relay-client ────────────────────────────────────────────────
+
+  it("Phase 2K: relay-client imports draftProjectPatch from project-patch-drafter", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("draftProjectPatch");
+    expect(src).toContain("project-patch-drafter");
+  });
+
+  it("Phase 2K: relay-client handles draft_project_patch action type", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).toContain("draft_project_patch");
+    expect(src).toContain("draftProjectPatch(");
+  });
+
+  it("Phase 2K: relay-client draft_project_patch verifies .orax/project.json binding", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    const draftIdx = src.indexOf("draft_project_patch");
+    const bindingIdx = src.indexOf("oraxProjectPath", draftIdx);
+    expect(draftIdx).toBeGreaterThan(-1);
+    expect(bindingIdx).toBeGreaterThan(draftIdx);
+  });
+
+  it("Phase 2K: relay-client draft_project_patch has no exec, spawn, shell:true, or process.cwd", () => {
+    const src = read("../../../../orax-desktop/src/main/relay-client.ts");
+    expect(src).not.toContain("exec(");
+    expect(src).not.toContain("spawn(");
+    expect(src).not.toContain("shell: true");
+    expect(src).not.toContain("process.cwd()");
+  });
+
+  // ── Phase 2K: backend event handler ──────────────────────────────────────
+
+  it("Phase 2K: backend queues draft_project_patch after run_project_thread file reads", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("draft_project_patch");
+    expect(src).toContain("fileReadSummary");
+    expect(src).toContain("draftIKey");
+  });
+
+  it("Phase 2K: backend handles draft_project_patch completed event and writes project_patch_drafted", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    expect(src).toContain("isDraftPatch");
+    expect(src).toContain(`eventType = "project_patch_drafted"`);
+    expect(src).toContain("project_patch_draft_failed");
+  });
+
+  it("Phase 2K: backend queues draft_project_patch using onConflictDoNothing (idempotent)", () => {
+    const src = read("../../../../api-server/src/routes/orax-desktop.ts");
+    const draftIdx = src.indexOf("draft_project_patch");
+    const idxKey = src.indexOf("idempotencyKey", draftIdx);
+    const noConflict = src.indexOf("onConflictDoNothing", draftIdx);
+    expect(idxKey).toBeGreaterThan(draftIdx);
+    expect(noConflict).toBeGreaterThan(draftIdx);
+  });
+
+  // ── Phase 2K: website UI ──────────────────────────────────────────────────
+
+  it("Phase 2K: orax-workspace renders project_patch_drafted messages", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("project_patch_drafted");
+    expect(src).toContain("draftPatch");
+  });
+
+  it("Phase 2K: orax-workspace shows changed file chips with operation badges", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("changedFiles");
+    expect(src).toContain("f.operation");
+    expect(src).toContain("FileCode");
+  });
+
+  it("Phase 2K: orax-workspace shows hunk preview, risks, and verification plan", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("hunkPreview");
+    expect(src).toContain("risks");
+    expect(src).toContain("verificationPlan");
+    expect(src).toContain("AlertTriangle");
+    expect(src).toContain("CheckCircle");
+  });
+
+  it("Phase 2K: orax-workspace ThreadPayload type includes draftPatch", () => {
+    const src = read("../../pages/orax-workspace.tsx");
+    expect(src).toContain("DraftFilePatch");
+    expect(src).toContain("draftPatch?:");
+    expect(src).toContain("draftGeneratedAt");
+  });
+
+  // ── Phase 2K: mobile parity ───────────────────────────────────────────────
+
+  it("Phase 2K: mobile defines OraxProjectThreadMessage type with draftPatch", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("OraxProjectThreadMessage");
+    expect(src).toContain("project_patch_drafted");
+  });
+
+  it("Phase 2K: mobile has ProjectPatchDraftedCard component", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("ProjectPatchDraftedCard");
+    expect(src).toContain("draft.summary");
+    expect(src).toContain("draft.changedFiles");
+  });
+
+  it("Phase 2K: mobile shows file chips, diff preview, risks, and verification plan for patch", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("hunkPreview");
+    expect(src).toContain("draft.risks");
+    expect(src).toContain("draft.verificationPlan");
+    expect(src).toContain("f.relativePath");
+  });
+
+  it("Phase 2K: mobile has projectThreadMessages state for project thread messages", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).toContain("projectThreadMessages");
+    expect(src).toContain("OraxProjectThreadMessage");
+  });
+
+  it("Phase 2K: mobile is still free of Ora/public-ai coupling after Phase 2K", () => {
+    const src = read("../../../../ora-mobile/app/(home)/orax.tsx");
+    expect(src).not.toContain("useOraChat");
+    expect(src).not.toContain("/public-ai/chat");
+    expect(src).not.toContain("project-patch-drafter");
+  });
 });

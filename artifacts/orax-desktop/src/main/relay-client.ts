@@ -1,13 +1,15 @@
 /**
- * Orax Desktop — Phase 2E/2F/2H/2J relay client.
+ * Orax Desktop — Phase 2E/2F/2H/2J/2K relay client.
  *
  * Polls the cloud relay for queued actions, executes safe Phase 2E actions
  * (ping_desktop, get_desktop_status, list_local_projects), Phase 2F
  * command actions (run_safe_command — gated by local permission-gate),
  * Phase 2H project-thread actions (run_project_thread — verifies the
  * local path and .orax/project.json binding before confirming context),
- * and Phase 2J file-read planning (selectRelevantProjectFiles +
- * readSelectedProjectFiles → deterministic suggestedPlan).
+ * Phase 2J file-read planning (selectRelevantProjectFiles +
+ * readSelectedProjectFiles → deterministic suggestedPlan), and Phase 2K
+ * patch proposal loop (draft_project_patch — deterministic patch drafter,
+ * no shell commands, no file writes).
  */
 
 import fs from "node:fs";
@@ -25,6 +27,8 @@ import {
   type SelectedProjectFile,
 } from "./project-file-selector";
 import { readSelectedProjectFiles } from "./project-file-reader";
+import type { FileReadEntry } from "./project-file-reader";
+import { draftProjectPatch } from "./project-patch-drafter";
 
 const POLL_INTERVAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -379,6 +383,139 @@ export class RelayClient {
           fileReadSummary,
           ...(suggestedPlan !== undefined ? { suggestedPlan } : {}),
           ...(fileWarnings.length > 0 ? { warnings: fileWarnings } : {}),
+        };
+        // Falls through to the common postActionEvent("completed") call below
+      } else if (action.type === "draft_project_patch") {
+        // Phase 2K: deterministic patch proposal — no shell, no file writes
+        const payload = action.payload as {
+          projectId?: unknown;
+          threadId?: unknown;
+          executionSourceId?: unknown;
+          sourceLocalPath?: unknown;
+          userMessage?: unknown;
+          selectedFiles?: unknown;
+        };
+
+        const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+        const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+        const executionSourceId =
+          typeof payload.executionSourceId === "string" ? payload.executionSourceId : null;
+        const sourceLocalPath =
+          typeof payload.sourceLocalPath === "string" ? payload.sourceLocalPath : null;
+        const userMessage =
+          typeof payload.userMessage === "string" ? payload.userMessage : "";
+        const rawSelectedFiles = Array.isArray(payload.selectedFiles)
+          ? (payload.selectedFiles as unknown[])
+          : [];
+
+        if (!projectId || !threadId || !executionSourceId || !sourceLocalPath) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error:
+              "draft_project_patch: missing required payload fields " +
+              "(projectId, threadId, executionSourceId, sourceLocalPath).",
+          });
+          return;
+        }
+
+        if (!fs.existsSync(sourceLocalPath)) {
+          await this.api.postActionEvent(action.id, "failed", {
+            error: `draft_project_patch: sourceLocalPath does not exist: ${sourceLocalPath}`,
+          });
+          return;
+        }
+
+        // Verify .orax/project.json binding
+        const oraxProjectPath = path.join(sourceLocalPath, ".orax", "project.json");
+        if (fs.existsSync(oraxProjectPath)) {
+          let stored: { projectId?: string } = {};
+          try {
+            stored = JSON.parse(fs.readFileSync(oraxProjectPath, "utf8")) as {
+              projectId?: string;
+            };
+          } catch {
+            // Treat malformed JSON as unbound — continue
+          }
+          if (stored.projectId && stored.projectId !== projectId) {
+            await this.api.postActionEvent(action.id, "failed", {
+              error:
+                `draft_project_patch: .orax/project.json projectId mismatch ` +
+                `(stored="${stored.projectId}", requested="${projectId}"). ` +
+                `Remove .orax/project.json manually to rebind this directory.`,
+            });
+            return;
+          }
+        }
+
+        await this.api.postActionEvent(action.id, "running", {
+          projectId,
+          threadId,
+          executionSourceId,
+        });
+
+        // Use selectedFiles from payload if available, else re-run selector
+        let selectedFiles: SelectedProjectFile[] = rawSelectedFiles.filter(
+          (f): f is SelectedProjectFile =>
+            typeof (f as Record<string, unknown>).relativePath === "string" &&
+            typeof (f as Record<string, unknown>).category === "string",
+        );
+
+        const patchWarnings: string[] = [];
+
+        if (selectedFiles.length === 0 && userMessage.trim().length > 0) {
+          try {
+            let inspection: ProjectInspectionResult | { error: string } | null = null;
+            try {
+              inspection = await inspectLocalProject(sourceLocalPath);
+            } catch {
+              inspection = null;
+            }
+            if (inspection && !("error" in inspection)) {
+              const selection = await selectRelevantProjectFiles({
+                localPath: sourceLocalPath,
+                userMessage,
+                inspection: inspection as ProjectInspectionResult,
+              });
+              selectedFiles = selection.files;
+              for (const w of selection.warnings) patchWarnings.push(w.message);
+            }
+          } catch (selErr) {
+            patchWarnings.push(
+              selErr instanceof Error ? selErr.message : "File selection failed",
+            );
+          }
+        }
+
+        // Read file contents for the patch drafter
+        let fileReadEntries: FileReadEntry[] = [];
+        if (selectedFiles.length > 0) {
+          try {
+            const readResult = await readSelectedProjectFiles({
+              localPath: sourceLocalPath,
+              files: selectedFiles,
+            });
+            fileReadEntries = readResult.files;
+            for (const w of readResult.warnings) patchWarnings.push(w.message);
+          } catch (readErr) {
+            patchWarnings.push(
+              readErr instanceof Error ? readErr.message : "File read for patch failed",
+            );
+          }
+        }
+
+        const draftResult = await draftProjectPatch({
+          localPath: sourceLocalPath,
+          userMessage,
+          selectedFiles,
+          fileReadEntries,
+          suggestedPlan: undefined,
+        });
+
+        result = {
+          projectId,
+          threadId,
+          executionSourceId,
+          draftPatch: draftResult.draftPatch,
+          warnings: [...patchWarnings, ...draftResult.warnings],
         };
         // Falls through to the common postActionEvent("completed") call below
       } else {
