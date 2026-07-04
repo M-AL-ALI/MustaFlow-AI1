@@ -161,8 +161,11 @@ export const ORA_IMAGE_PATTERNS: RegExp[] = [
   // "how do i draw a dog") which wants a tutorial, not an image.
   /(?<!\bhow\s(?:to|do\si|can\si|should\si|would\si)\s)\b(draw|sketch|paint|illustrate)\s+(?:me\s+|us\s+|for\s+me\s+)?(?:a|an|the|some|my)\s+(?!(?:conclusion|conclusions|distinction|distinctions|comparison|comparisons|parallel|parallels|line|lines|blank|attention|point|points|example|examples|case|cases|map|maps|plan|plans|concept|concepts|idea|ideas|scenario|scenarios)\b)\w+/i,
   // Request/desire framing + a visual noun ("give me a banner", "I need a
-  // logo", "I'd like an illustration of a forest").
-  /\b(?:i\s+(?:need|want|would\s+like)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|cartoons?|stickers?|renders?|product\s+shots?|head\s?shots?|studio\s+shots?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
+  // logo", "I'd like an illustration of a forest", "I asked for an image for the
+  // World Cup"). "asked for"/"requested" cover the reported past-tense complaint
+  // framing ("I asked for image for world cup of 2026") where the user is
+  // re-stating an unfulfilled image request.
+  /\b(?:i\s+(?:need|want|would\s+like|asked\s+for|requested)|i'?d\s+like|give\s+me|can\s+i\s+(?:get|have)|could\s+you\s+(?:give|make)\s+me)\b[^.?!]{0,40}\b(images?|photos?|pictures?|illustrations?|artworks?|graphics?|visuals?|logos?|banners?|icons?|thumbnails?|avatars?|mockups?|posters?|flyers?|badges?|paintings?|portraits?|sketches?|wallpapers?|infographics?|diagrams?|social\s+posts?|story\s+graphics?|interior\s+designs?|room\s+designs?|decor(?:ation)?\s+concepts?|redesign\s+concepts?|room\s+makeovers?|mood\s+boards?|furniture\s+layouts?|color\s+palettes?|colour\s+palettes?|scenes?|landscapes?|cityscapes?|cartoons?|stickers?|renders?|product\s+shots?|head\s?shots?|studio\s+shots?|characters?|memes?|concept\s+arts?|digital\s+arts?)\b/i,
   // Bare brandable visual noun + preposition, no leading verb ("a logo for my
   // bakery", "an icon for the button"). Anchored to the start of the message so
   // mid-sentence statements ("I used a logo for my app") do NOT match.

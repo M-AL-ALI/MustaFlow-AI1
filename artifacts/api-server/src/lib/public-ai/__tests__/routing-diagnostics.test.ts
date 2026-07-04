@@ -206,6 +206,41 @@ describe("Ora routing diagnostics", () => {
     expect(definitional.tool).toBe("answer");
   });
 
+  it("routes past-tense 'asked for/requested … image' complaint framing to image generation", async () => {
+    // The reported failure phrasing: the user re-states an unfulfilled image
+    // request as a fresh turn (no prior assistant offer). It must generate an
+    // image rather than fall through to conversational chat.
+    const askedFor = await buildOraRoutingDiagnostic({
+      message: "I asked for image for world cup of 2026",
+      subscriptionTier: "core",
+      classifier: premiumClassifier,
+    });
+    expect(askedFor.tool).toBe("image_generation");
+    expect(askedFor.quotaKind).toBe("image");
+
+    const requested = await buildOraRoutingDiagnostic({
+      message: "I requested an image for the world cup",
+      subscriptionTier: "core",
+      classifier: premiumClassifier,
+    });
+    expect(requested.tool).toBe("image_generation");
+
+    // Guard: "asked for/requested" WITHOUT a visual noun must stay conversational.
+    const askedForHelp = await buildOraRoutingDiagnostic({
+      message: "I asked for help understanding my invoice",
+      subscriptionTier: "core",
+      classifier: premiumClassifier,
+    });
+    expect(askedForHelp.tool).toBe("answer");
+
+    const requestedRefund = await buildOraRoutingDiagnostic({
+      message: "I requested a refund yesterday",
+      subscriptionTier: "core",
+      classifier: premiumClassifier,
+    });
+    expect(requestedRefund.tool).toBe("answer");
+  });
+
   it("diagnoses image edit as live, image-metered, and OpenAI image-model backed", async () => {
     const imageEdit = await buildOraRoutingDiagnostic({
       surface: "image_edit",
