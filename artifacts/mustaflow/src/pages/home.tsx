@@ -42,6 +42,8 @@ import {
   Image as ImageIcon,
   SlidersHorizontal,
   Brain,
+  Languages,
+  BarChart2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import {
@@ -62,6 +64,7 @@ import { TechnologyEcosystemBanner } from "@/components/technology-ecosystem-ban
 import { useAuthState } from "@/lib/auth-state-context";
 import { OraBubble } from "@/components/ora-bubble";
 import { useOraChat } from "@/hooks/use-ora-chat";
+import { OraChatMockup } from "@/components/ora-chat-mockup";
 
 const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "real-estate": Building2,
@@ -72,43 +75,86 @@ const PERSONA_ICONS: Record<string, React.ComponentType<{ className?: string }>>
   nonprofit: Heart,
 };
 
-// Ora promo highlights — shown to signed-out visitors on the landing page.
-const ORA_FEATURES: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  description: string;
-}[] = [
+// Bento grid feature cards for the Ora section
+const ORA_BENTO_FEATURES = [
   {
-    icon: Bot,
+    icon: Zap,
     title: "Free, no sign-in",
-    description: "Start chatting instantly. Ora is a free AI assistant — no account needed.",
+    description: "Start chatting instantly. No account, no credit card, no limits.",
+    accent: "teal" as const,
+    wide: false,
   },
   {
     icon: Globe,
     title: "Live web search",
-    description: "Get up-to-date answers grounded in real sources, with citations you can follow.",
+    description: "Up-to-date answers grounded in real sources, with citations you can follow.",
+    accent: "blue" as const,
+    wide: true,
+    chips: ["News", "Research", "Prices"],
   },
   {
     icon: ImageIcon,
     title: "Images in & out",
-    description: "Generate original images from a prompt, or upload one and ask Ora to analyze it.",
+    description: "Generate images from a prompt, or upload one for Ora to analyze.",
+    accent: "purple" as const,
+    wide: false,
   },
   {
     icon: FileText,
     title: "Document export",
-    description: "Turn answers into ready-to-share PDF, DOCX, XLSX, and PPTX files.",
+    description: "Turn any answer into a ready-to-share file.",
+    accent: "amber" as const,
+    wide: true,
+    chips: ["PDF", "DOCX", "PPTX"],
   },
   {
     icon: Mic,
     title: "Voice conversation",
-    description: "Talk to Ora hands-free and hear replies spoken back in a natural voice.",
+    description: "Talk hands-free and hear replies spoken back in a natural voice.",
+    accent: "green" as const,
+    wide: false,
   },
   {
     icon: Brain,
     title: "Memory across chats",
-    description: "Ora remembers what matters so each conversation picks up where you left off.",
+    description: "Ora remembers what matters so every conversation builds on the last.",
+    accent: "rose" as const,
+    wide: false,
   },
-];
+  {
+    icon: Lightbulb,
+    title: "Deep thinking",
+    description: "Step-by-step reasoning for complex questions that need more than a quick answer.",
+    accent: "indigo" as const,
+    wide: false,
+  },
+  {
+    icon: BarChart2,
+    title: "File & data analysis",
+    description: "Upload spreadsheets or documents and ask Ora to crunch the numbers.",
+    accent: "orange" as const,
+    wide: false,
+  },
+  {
+    icon: Languages,
+    title: "Multilingual replies",
+    description: "Ask in any language. Ora detects and responds in the same tongue.",
+    accent: "cyan" as const,
+    wide: false,
+  },
+] as const;
+
+const ORA_ACCENT: Record<string, { bg: string; border: string; text: string }> = {
+  teal:   { bg: "bg-teal-500/10",   border: "border-teal-500/20",   text: "text-teal-500" },
+  blue:   { bg: "bg-primary/10",    border: "border-primary/20",    text: "text-primary" },
+  purple: { bg: "bg-purple-500/10", border: "border-purple-500/20", text: "text-purple-500" },
+  amber:  { bg: "bg-amber-500/10",  border: "border-amber-500/20",  text: "text-amber-500" },
+  green:  { bg: "bg-green-500/10",  border: "border-green-500/20",  text: "text-green-500" },
+  rose:   { bg: "bg-rose-500/10",   border: "border-rose-500/20",   text: "text-rose-500" },
+  indigo: { bg: "bg-indigo-500/10", border: "border-indigo-500/20", text: "text-indigo-500" },
+  orange: { bg: "bg-orange-500/10", border: "border-orange-500/20", text: "text-orange-500" },
+  cyan:   { bg: "bg-cyan-500/10",   border: "border-cyan-500/20",   text: "text-cyan-500" },
+};
 
 // Capability chips — speak to ideas, not stacks. Each pre-fills the prompt input.
 const CAPABILITY_CHIPS = [
@@ -565,52 +611,187 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Meet Ora — public AI assistant promo */}
+          {/* Meet Ora — premium section */}
           {!isSignedIn && (
-            <div className="mt-14 mb-2 max-w-5xl mx-auto">
-              <div className="text-center mb-10">
-                <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-4">
-                  <Sparkles className="h-3 w-3" />
-                  Meet Ora
-                </div>
-                <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-3">
-                  Your free <span className="gradient-text">AI assistant</span>
-                </h2>
-                <p className="text-muted-foreground max-w-2xl mx-auto">
-                  Ora answers questions, researches the web, makes images, writes documents, and
-                  remembers your conversations — no account required. Ask anything before you build.
-                </p>
+            <section className="relative mt-20 mb-2 border-t border-b border-border/40 py-20 -mx-4 px-4 sm:-mx-8 sm:px-8 lg:-mx-16 lg:px-16 overflow-hidden">
+              {/* Radial glow orb */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 flex items-center justify-center"
+              >
+                <div className="h-[600px] w-[800px] rounded-full bg-primary/5 blur-3xl dark:bg-primary/8" />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {ORA_FEATURES.map((feature) => (
-                  <div
-                    key={feature.title}
-                    className="relative rounded-2xl border border-border bg-card p-6"
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 mb-4">
-                      <feature.icon className="h-5 w-5 text-primary" />
-                    </div>
-                    <h3 className="font-semibold text-sm text-foreground mb-1.5">
-                      {feature.title}
-                    </h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      {feature.description}
-                    </p>
+              <div className="relative max-w-5xl mx-auto">
+                {/* Section header */}
+                <div className="text-center mb-12">
+                  <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3.5 py-1.5 mb-5">
+                    <Sparkles className="h-3 w-3" />
+                    Meet Ora
+                    <span className="flex items-center gap-1 ml-0.5 text-green-500">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Live
+                    </span>
                   </div>
-                ))}
-              </div>
+                  <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-4">
+                    <span className="gradient-text">Ora</span> — your AI assistant, always on
+                  </h2>
+                  <p className="text-muted-foreground max-w-2xl mx-auto text-base leading-relaxed">
+                    Ask anything, research the web, generate images, export documents, and talk hands-free. No account. No limits.
+                  </p>
+                </div>
 
-              <div className="mt-8 flex justify-center">
-                <div className="inline-flex items-center gap-2.5 rounded-full border border-primary/30 bg-primary/5 px-5 py-2.5 text-sm font-medium text-foreground">
-                  <MessageSquare className="h-4 w-4 text-primary" />
-                  Ask Ora anything — tap the
-                  <span className="text-primary font-semibold">Ask Ora</span>
-                  button in the corner
-                  <ArrowRight className="h-4 w-4 text-primary" />
+                {/* Two-column: mockup + highlights */}
+                <div className="grid grid-cols-1 lg:grid-cols-[55%_45%] gap-8 mb-12 items-center">
+                  {/* Chat mockup */}
+                  <OraChatMockup />
+
+                  {/* Right-column highlight rows */}
+                  <div className="space-y-5">
+                    {[
+                      {
+                        icon: Globe,
+                        accent: "blue" as const,
+                        title: "Live web search",
+                        desc: "Real-time answers grounded in current sources, with citations you can follow.",
+                      },
+                      {
+                        icon: Mic,
+                        accent: "green" as const,
+                        title: "Voice conversation",
+                        desc: "Talk hands-free and hear Ora's replies spoken back in a natural voice.",
+                      },
+                      {
+                        icon: Brain,
+                        accent: "rose" as const,
+                        title: "Memory across chats",
+                        desc: "Ora remembers what matters so every conversation builds on the last.",
+                      },
+                      {
+                        icon: Lightbulb,
+                        accent: "indigo" as const,
+                        title: "Deep thinking",
+                        desc: "Step-by-step reasoning for questions that need more than a quick answer.",
+                      },
+                    ].map(({ icon: Icon, accent, title, desc }) => {
+                      const a = ORA_ACCENT[accent];
+                      return (
+                        <div key={title} className="flex items-start gap-4">
+                          <div
+                            className={cn(
+                              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+                              a.bg,
+                              a.border,
+                            )}
+                          >
+                            <Icon className={cn("h-5 w-5", a.text)} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm text-foreground leading-snug mb-0.5">
+                              {title}
+                            </p>
+                            <p className="text-xs text-muted-foreground leading-relaxed">{desc}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Bento feature grid */}
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
+                  {ORA_BENTO_FEATURES.map((feature) => {
+                    const a = ORA_ACCENT[feature.accent];
+                    const chips = "chips" in feature ? feature.chips : undefined;
+                    return (
+                      <div
+                        key={feature.title}
+                        className={cn(
+                          "rounded-2xl border border-border bg-card hover:bg-muted/50 transition-colors p-5",
+                          feature.wide && "col-span-2",
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-xl border mb-3",
+                            a.bg,
+                            a.border,
+                          )}
+                        >
+                          <feature.icon className={cn("h-4 w-4", a.text)} />
+                        </div>
+                        <h3 className="font-semibold text-sm text-foreground mb-1">
+                          {feature.title}
+                        </h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {feature.description}
+                        </p>
+                        {chips && (
+                          <div className="flex gap-1.5 mt-3 flex-wrap">
+                            {chips.map((chip) => (
+                              <span
+                                key={chip}
+                                className={cn(
+                                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                                  a.bg,
+                                  a.border,
+                                  a.text,
+                                )}
+                              >
+                                {chip}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Capabilities pill strip */}
+                <div className="flex flex-wrap justify-center gap-2 mb-10">
+                  {[
+                    "Web search",
+                    "Image gen",
+                    "Voice chat",
+                    "Memory",
+                    "Deep thinking",
+                    "File analysis",
+                    "PDF · DOCX · PPTX",
+                    "Multilingual",
+                    "No sign-in",
+                  ].map((pill) => (
+                    <span
+                      key={pill}
+                      className="rounded-full border border-border bg-muted/50 text-muted-foreground text-xs px-3 py-1"
+                    >
+                      {pill}
+                    </span>
+                  ))}
+                </div>
+
+                {/* CTA block */}
+                <div className="flex flex-col items-center gap-3">
+                  <Button
+                    size="lg"
+                    className="gap-2 px-7 text-base font-semibold"
+                    onClick={() => window.dispatchEvent(new CustomEvent("ora:open"))}
+                  >
+                    Try Ora free — no account needed
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    {["No credit card", "Instant access", "Free forever"].map((t, i) => (
+                      <span key={t} className="flex items-center gap-1.5">
+                        {i > 0 && <span className="h-1 w-1 rounded-full bg-border" />}
+                        <CheckCircle2 className="h-3 w-3 text-primary/60" />
+                        {t}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
+            </section>
           )}
 
           {/* Social proof */}
