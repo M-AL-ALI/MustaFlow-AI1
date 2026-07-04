@@ -112,10 +112,6 @@ describe("Talk-to-Ora realtime watchdog reliability", () => {
       // The debounce callback is the only other path that exits "speaking" when
       // response.done is lost. It must cancel the speaking watchdog to prevent
       // a double-recovery.
-      const debounceBlock = src.slice(
-        src.indexOf("OUTPUT_STOP_DEBOUNCE_MS);"),
-      );
-      // Find the debounce setTimeout callback body
       const cancelIdx = src.indexOf(
         "speakingWatchdogRef.current = null;",
         src.indexOf("outputStopDebounceRef.current = setTimeout"),
