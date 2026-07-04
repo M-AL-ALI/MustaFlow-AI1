@@ -1,19 +1,55 @@
 import { useState } from "react";
-import { ImageIcon, Play, ExternalLink } from "lucide-react";
+import { ImageIcon, Play, ExternalLink, Download, Link2, Check } from "lucide-react";
 import type { OraImage, OraVideo } from "@/hooks/use-ora-chat";
 import { isSafeHttpUrl, sourceHostname } from "@/components/ora/ora-source-cards";
+import { authFetch } from "@/lib/api-fetch";
+
+/**
+ * Download an image to the user's device. Tries to fetch the bytes into a Blob
+ * so the browser saves the file directly (works even cross-origin when the host
+ * allows it, and attaches auth for same-origin API images). If the fetch is
+ * blocked (CORS on a hot-linked search result), falls back to opening the image
+ * in a new tab so the user can save it manually.
+ */
+async function downloadImage(url: string, filename: string) {
+  try {
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 
 /**
  * Renders real web images found during a live search as a compact gallery.
  * Each thumbnail links to the page it was found on (when known) so the user can
  * verify context. Broken/unreachable images are hidden on load error so a stale
- * or hot-linked URL never leaves an empty box.
+ * or hot-linked URL never leaves an empty box. Each card exposes hover controls
+ * to download the image or copy its link.
  */
 export function OraImageGallery({ images }: { images: OraImage[] }) {
   const safe = images.filter((i) => isSafeHttpUrl(i.url));
   const [broken, setBroken] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState<string | null>(null);
   const visible = safe.filter((i) => !broken[i.url]);
   if (safe.length === 0) return null;
+
+  const copyLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(url);
+      setTimeout(() => setCopied((c) => (c === url ? null : c)), 1500);
+    } catch {
+      /* clipboard unavailable — silently ignore */
+    }
+  };
 
   return (
     <div className="mt-2.5" data-testid="ora-image-gallery" hidden={visible.length === 0}>
@@ -26,26 +62,51 @@ export function OraImageGallery({ images }: { images: OraImage[] }) {
           if (broken[img.url]) return null;
           const linkTarget = img.source && isSafeHttpUrl(img.source) ? img.source : img.url;
           return (
-            <a
+            <div
               key={i}
-              href={linkTarget}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={img.title ?? sourceHostname(linkTarget)}
               className="group relative block aspect-video overflow-hidden rounded-lg border border-border/60 bg-muted/30 hover:border-border transition-all"
             >
-              <img
-                src={img.url}
-                alt={img.title ?? "Web image result"}
-                loading="lazy"
-                referrerPolicy="no-referrer"
-                onError={() => setBroken((b) => ({ ...b, [img.url]: true }))}
-                className="h-full w-full object-cover transition-transform group-hover:scale-105"
-              />
-              <span className="absolute bottom-0 right-0 m-1 rounded bg-background/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                <ExternalLink className="h-3 w-3 text-foreground/70" />
-              </span>
-            </a>
+              <a
+                href={linkTarget}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={img.title ?? sourceHostname(linkTarget)}
+                className="block h-full w-full"
+              >
+                <img
+                  src={img.url}
+                  alt={img.title ?? "Web image result"}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  onError={() => setBroken((b) => ({ ...b, [img.url]: true }))}
+                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                />
+              </a>
+              <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  type="button"
+                  title="Download image"
+                  aria-label="Download image"
+                  onClick={() => void downloadImage(img.url, `ora-image-${i + 1}.jpg`)}
+                  className="rounded bg-background/85 p-1 text-foreground/70 hover:text-foreground hover:bg-background transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  title="Copy link"
+                  aria-label="Copy link"
+                  onClick={() => void copyLink(img.url)}
+                  className="rounded bg-background/85 p-1 text-foreground/70 hover:text-foreground hover:bg-background transition-colors"
+                >
+                  {copied === img.url ? (
+                    <Check className="h-3.5 w-3.5 text-green-500" />
+                  ) : (
+                    <Link2 className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
