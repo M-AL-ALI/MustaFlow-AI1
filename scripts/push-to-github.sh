@@ -35,8 +35,15 @@ ARG="${1:-}"
 git merge --abort 2>/dev/null || true
 rm -f .git/index.lock .git/refs/heads/main.lock \
   .git/refs/remotes/github/main.lock .git/refs/remotes/github/main_tmp.lock 2>/dev/null || true
+# Restore any tracked files removed from the working tree outside of this wave's
+# intended changes (e.g. tracked attached_assets/*) so path-scoped deletions
+# never sneak into the wave commit. Untracked files are unaffected.
+git checkout -- attached_assets/ 2>/dev/null || true
 # --- per-wave files: add your changed paths above this script entry ---
 git add \
+  artifacts/mustaflow/src/hooks/use-ora-chat.ts \
+  artifacts/mustaflow/src/pages/ora-settings.tsx \
+  artifacts/mustaflow/src/hooks/__tests__/ora-stream-diagnostics.test.ts \
   scripts/push-to-github.sh 2>/dev/null || true
 
 STAGED=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')

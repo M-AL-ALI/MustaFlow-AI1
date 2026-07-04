@@ -577,6 +577,88 @@ interface StreamDonePayload {
   resetsAt?: string | null;
   windowHours?: number;
   isRealStreaming?: boolean;
+  // Server-reported timing (mirrors backend OraStreamDonePayload.serverDiag).
+  serverDiag?: {
+    ttftMs?: number | null;
+    totalMs?: number | null;
+    provider?: string | null;
+    routeTier?: string | null;
+    fastLane?: boolean | null;
+  };
+}
+
+// ── Per-response developer diagnostics ─────────────────────────────────────
+// Mirrors the mobile StreamChatDiagnostics shape (artifacts/ora-mobile/lib/api.ts)
+// so website, landing-page bubble, and mobile all surface the same signals.
+export interface OraStreamDiagnostics {
+  /** "instant" | "deep" | "unknown" — the mode sent to the backend. */
+  mode: string;
+  /** ms from send to the first streamed token (client-measured). */
+  tapToFirstTokenMs: number | null;
+  /** ms from send to the first sentence-ending token (client-measured). */
+  firstSentenceMs: number | null;
+  /** ms from send to stream completion (client-measured). */
+  completeMs: number | null;
+  /** Number of streamed token events received. */
+  tokenCount: number;
+  /** True when the reply came via the non-streaming /chat fallback. */
+  viaFallback: boolean;
+  /** Server-measured TTFT in ms (t0 to first token). */
+  serverTtftMs: number | null;
+  /** Server-measured total request time in ms. */
+  serverTotalMs: number | null;
+  /** Provider that served the response (e.g. "gemini", "openai"). */
+  serverProvider: string | null;
+  /** Route tier chosen by the server (fast / premium / deep). */
+  serverRouteTier: string | null;
+  /** True when the server took the fast-lane path (classifier skipped). */
+  serverFastLane: boolean | null;
+  /** Unix ms when this record was captured. */
+  capturedAt: number;
+}
+
+/**
+ * Pure mapper that assembles an {@link OraStreamDiagnostics} record from the
+ * client-measured timings and the server-reported `serverDiag` block. Exported
+ * for direct unit testing (SSE consumption is hard to test end-to-end).
+ */
+export function mapOraStreamDiagnostics(input: {
+  mode?: unknown;
+  tapToFirstTokenMs: number | null;
+  firstSentenceMs: number | null;
+  completeMs: number | null;
+  tokenCount: number;
+  viaFallback: boolean;
+  serverDiag?: StreamDonePayload["serverDiag"];
+  capturedAt?: number;
+}): OraStreamDiagnostics {
+  const sd = input.serverDiag;
+  return {
+    mode: typeof input.mode === "string" ? input.mode : "unknown",
+    tapToFirstTokenMs: input.tapToFirstTokenMs,
+    firstSentenceMs: input.firstSentenceMs,
+    completeMs: input.completeMs,
+    tokenCount: input.tokenCount,
+    viaFallback: input.viaFallback,
+    serverTtftMs: sd?.ttftMs ?? null,
+    serverTotalMs: sd?.totalMs ?? null,
+    serverProvider: sd?.provider ?? null,
+    serverRouteTier: sd?.routeTier ?? null,
+    serverFastLane: sd?.fastLane ?? null,
+    capturedAt: input.capturedAt ?? Date.now(),
+  };
+}
+
+let _lastOraStreamDiag: OraStreamDiagnostics | null = null;
+
+/** Returns diagnostics from the most recent Ora chat turn, or null. */
+export function getLastOraStreamDiagnostics(): OraStreamDiagnostics | null {
+  return _lastOraStreamDiag;
+}
+
+/** Overwrites the last-turn diagnostics record (used by the chat hook). */
+export function setLastOraStreamDiagnostics(diag: OraStreamDiagnostics | null): void {
+  _lastOraStreamDiag = diag;
 }
 
 /**
@@ -644,6 +726,11 @@ async function consumeOraStream(
   let firstTokenReceived = false;
   // Accumulate tokens so we can attach partialContent to a mid-stream error.
   let accumulated = "";
+  // Client-measured diagnostics (mirrors mobile StreamChatDiagnostics timing).
+  const callStart = Date.now();
+  let tokenCount = 0;
+  let firstTokenMs: number | null = null;
+  let firstSentenceMs: number | null = null;
 
   while (true) {
     const { value, done } = await reader.read();
@@ -686,7 +773,12 @@ async function consumeOraStream(
       } else if (eventType === "token") {
         const text = (parsed as { text: string }).text;
         firstTokenReceived = true;
+        tokenCount += 1;
+        if (firstTokenMs === null) firstTokenMs = Date.now() - callStart;
         accumulated += text;
+        if (firstSentenceMs === null && /[.!?]/.test(accumulated)) {
+          firstSentenceMs = Date.now() - callStart;
+        }
         onToken(text);
         // Yield to the browser paint loop so each token renders visibly before
         // the next one is processed. flushSync commits the DOM change but does
@@ -720,6 +812,17 @@ async function consumeOraStream(
   if (!donePayload) {
     throw new Error("Stream ended without a done event");
   }
+  setLastOraStreamDiagnostics(
+    mapOraStreamDiagnostics({
+      mode: body.mode,
+      tapToFirstTokenMs: firstTokenMs,
+      firstSentenceMs,
+      completeMs: Date.now() - callStart,
+      tokenCount,
+      viaFallback: false,
+      serverDiag: donePayload.serverDiag,
+    }),
+  );
   return donePayload;
 }
 
@@ -1645,6 +1748,16 @@ export function useOraChat(): UseOraChatReturn {
               ...body,
               ...(se.streamFallbackToken ? { streamFallbackToken: se.streamFallbackToken } : {}),
             });
+            setLastOraStreamDiagnostics(
+              mapOraStreamDiagnostics({
+                mode: body.mode,
+                tapToFirstTokenMs: null,
+                firstSentenceMs: null,
+                completeMs: null,
+                tokenCount: 0,
+                viaFallback: true,
+              }),
+            );
           }
 
           streamAbortRef.current = null;
@@ -1653,6 +1766,11 @@ export function useOraChat(): UseOraChatReturn {
           // Covers both the /chat fallback path and SSE providers that wrap a
           // single non-streaming completion into the SSE envelope.
           const viaFallback = !usedStreaming || !isRealStreamingPayload;
+
+          // Reflect the resolved fallback status on the last-turn diagnostics
+          // (consumeOraStream cannot know isRealStreaming until the done event).
+          const lastDiag = getLastOraStreamDiagnostics();
+          if (lastDiag) setLastOraStreamDiagnostics({ ...lastDiag, viaFallback });
 
           // Persist the rolling summary and advance the "already summarized"
           // pointer by exactly what we processed this turn (overflowEnd), so a

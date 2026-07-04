@@ -26,6 +26,7 @@ import {
   AudioLines,
   Focus,
   RefreshCw,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OraSidebar } from "@/components/layout/ora-sidebar";
@@ -44,6 +45,10 @@ import {
   VOICE_PRESET_LABELS,
 } from "@/hooks/use-ora-realtime-voice";
 import { applyTheme, getStoredTheme, type AppearanceMode } from "@/lib/theme";
+import {
+  getLastOraStreamDiagnostics,
+  type OraStreamDiagnostics,
+} from "@/hooks/use-ora-chat";
 import {
   getReferenceSavedMemories,
   setReferenceSavedMemories,
@@ -412,6 +417,69 @@ function DiagRow({ label, children }: { label: string; children: React.ReactNode
       <span className="text-sm font-medium text-foreground">{label}</span>
       <span className="flex items-center gap-1.5 text-sm text-muted-foreground">{children}</span>
     </div>
+  );
+}
+
+// Per-response chat diagnostics — website parity with the mobile Diagnostics
+// view. Reads the last-turn record captured by useOraChat. Values reflect the
+// most recent Ora reply on this device; open this after sending a message.
+function ChatDiagnosticsSection() {
+  const [diag, setDiag] = useState<OraStreamDiagnostics | null>(() =>
+    getLastOraStreamDiagnostics(),
+  );
+
+  const refresh = () => setDiag(getLastOraStreamDiagnostics());
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const fmtMs = (v: number | null): string => (v == null ? "—" : `${v}ms`);
+
+  return (
+    <SectionCard
+      icon={Activity}
+      title="Chat diagnostics"
+      description="Timing and routing for your most recent Ora reply on this device. Send a message, then refresh to see the latest."
+    >
+      <div className="space-y-2">
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </Button>
+        </div>
+        {!diag ? (
+          <p className="text-sm text-muted-foreground">
+            No response captured yet. Send a message to Ora, then refresh.
+          </p>
+        ) : (
+          <>
+            <DiagRow label="Mode">{diag.mode}</DiagRow>
+            <DiagRow label="Route tier">{diag.serverRouteTier ?? "—"}</DiagRow>
+            <DiagRow label="Provider">{diag.serverProvider ?? "—"}</DiagRow>
+            <DiagRow label="Fast lane">
+              {diag.serverFastLane == null ? "—" : diag.serverFastLane ? "yes" : "no"}
+            </DiagRow>
+            <DiagRow label="Tap to first token">
+              <span className={cn(diag.tapToFirstTokenMs != null && diag.tapToFirstTokenMs > 3000 && "text-amber-500")}>
+                {fmtMs(diag.tapToFirstTokenMs)}
+              </span>
+            </DiagRow>
+            <DiagRow label="First sentence">{fmtMs(diag.firstSentenceMs)}</DiagRow>
+            <DiagRow label="Complete">
+              <span className={cn(diag.completeMs != null && diag.completeMs > 8000 && "text-amber-500")}>
+                {fmtMs(diag.completeMs)}
+              </span>
+            </DiagRow>
+            <DiagRow label="Tokens">{diag.tokenCount}</DiagRow>
+            <DiagRow label="Server TTFT">{fmtMs(diag.serverTtftMs)}</DiagRow>
+            <DiagRow label="Server total">{fmtMs(diag.serverTotalMs)}</DiagRow>
+            <DiagRow label="Delivery">{diag.viaFallback ? "fallback (non-streaming)" : "streamed"}</DiagRow>
+          </>
+        )}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -1710,6 +1778,7 @@ function OraSettingsInner() {
           <VoiceLanguageSection />
           <LiveVoiceSection />
           <FocusModeSection />
+          <ChatDiagnosticsSection />
           <AccountSyncSection />
           <MemorySection />
           <PlanLimitsSection targetSection={targetSection} />
